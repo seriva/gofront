@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { CodeGen } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
-import { reachableStdlibDecls } from "../lower/reachability.js";
+import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import {
@@ -68,11 +68,25 @@ function stdlibTopLevelNames(programs) {
 // `refs` holds the `file:line:col` of identifiers the first type-check
 // resolved to package scope; type names are resolved by name (GoFront types
 // are package-flat) except where a type parameter shadows them.
-export function mangleStdlibAst(programs, ctx) {
+// With `lazy`, function and method bodies are left alone: they are mangled
+// by `mangleBody` once a lazily checked body is first reached.
+export function mangleStdlibAst(programs, ctx, { lazy = false } = {}) {
 	for (const p of programs) {
 		for (const d of p.decls ?? []) mangleDeclNames(d, ctx);
-		mangleRefs(p.decls, p._filename, new Set(), ctx);
+		for (const d of p.decls ?? []) {
+			const deferred =
+				lazy && (d.kind === "FuncDecl" || d.kind === "MethodDecl");
+			const body = d.body;
+			if (deferred) d.body = null;
+			mangleRefs(d, p._filename, new Set(), ctx);
+			if (deferred) d.body = body;
+		}
 	}
+}
+
+function mangleBody(decl, file, ctx) {
+	const tparams = new Set((decl.typeParams ?? []).map((t) => t.name));
+	mangleRefs(decl.body, file, tparams, ctx);
 }
 
 function mangleDeclNames(d, { suffix, values }) {
@@ -152,11 +166,16 @@ function checkStdlibPrograms(programs, pkgName, options, overlay, deps) {
 	checker.target = "both";
 	checker.pkgName = pkgName;
 	checker.isStdlib = true;
+	checker.lazyBodies = true;
 	if (overlay) {
 		for (const [name, t] of Object.entries(overlay.members)) {
 			checker.globals.define(name, t);
 			if (t.kind === "interface" || t.kind === "named" || t.kind === "struct") {
 				checker.types.set(name, t);
+			} else if (checker.types.has(`${overlay.name}.${name}`)) {
+				// An emitter type (`strings.Builder`) is declared apart from the
+				// namespace member that names it.
+				checker.types.set(name, checker.types.get(`${overlay.name}.${name}`));
 			}
 		}
 	}
@@ -176,13 +195,17 @@ function checkStdlibPrograms(programs, pkgName, options, overlay, deps) {
 // Errors in stdlib source are compiler bugs; the importer reports them at its
 // import (see reportStdlibLoadError), so only the message text is kept, never
 // a location inside stdlib/.
-function throwStdlibErrors(errors) {
-	if (errors.length === 0) return;
+function stdlibErrorText(errors) {
 	const detail = (e) =>
 		e.message
 			.split("\n")[0]
 			.replace(/^Type error(?: in \S+)?(?: at line \d+:\d+)?:\s*/, "");
-	throw new Error([...new Set(errors.map(detail))].join("; "));
+	return [...new Set(errors.map(detail))].join("; ");
+}
+
+function throwStdlibErrors(errors) {
+	if (errors.length === 0) return;
+	throw new Error(stdlibErrorText(errors));
 }
 
 // Pass 1: type-check the package as written and record which identifiers
@@ -197,7 +220,48 @@ function probeStdlibPackage(_importPath, dir, options, overlay, deps) {
 	const probe = checkStdlibPrograms(programs, pkgName, options, overlay, deps);
 	probe._pkgRefs = new Set();
 	throwStdlibErrors(probe.checkAll(programs));
-	return { pkgName, values, types, refs: probe._pkgRefs };
+	return {
+		pkgName,
+		values,
+		types,
+		refs: probe._pkgRefs,
+		probe,
+		probePrograms: programs,
+	};
+}
+
+// Function and method bodies are checked when first reached (see
+// `StdlibReach`), in both passes: the probe records which identifiers in the
+// body name package scope, the body is mangled with them, and the mangled
+// body is checked.  `decl._ensure()` does all three once and returns the
+// error text, or null.
+function installLazyBodies(info, programs, checker, overlay) {
+	const { probe, probePrograms } = info;
+	const ctx = { ...info, overlay };
+	programs.forEach((p, pi) => {
+		p.decls.forEach((decl, di) => {
+			if (decl.kind !== "FuncDecl" && decl.kind !== "MethodDecl") return;
+			const probeDecl = probePrograms[pi].decls[di];
+			let result;
+			decl._ensure = () => {
+				if (result !== undefined) return result;
+				result = null; // a body that reaches itself is in progress
+				const before = [probe.errors.length, checker.errors.length];
+				probe.checkBody(probeDecl);
+				if (probe.errors.length === before[0]) {
+					mangleBody(decl, p._filename, ctx);
+					checker.checkBody(decl);
+					lowerStdlibRefs(decl);
+				}
+				const errors = [
+					...probe.errors.slice(before[0]),
+					...checker.errors.slice(before[1]),
+				];
+				if (errors.length > 0) result = stdlibErrorText(errors);
+				return result;
+			};
+		});
+	});
 }
 
 // Exported members as seen by importers (original name -> type) and the
@@ -268,7 +332,7 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 
 	// Pass 2: mangle a fresh parse and check it again.
 	const programs = parseStdlibFiles(dir, deps);
-	mangleStdlibAst(programs, { ...info, overlay });
+	mangleStdlibAst(programs, { ...info, overlay }, { lazy: true });
 	const checker = checkStdlibPrograms(
 		programs,
 		info.pkgName,
@@ -278,13 +342,26 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 	);
 	throwStdlibErrors(checker.checkAll(programs));
 	lowerStdlibRefs(programs);
+	installLazyBodies(info, programs, checker, overlay);
+
+	// A user reference to a member checks the bodies it reaches, so a type
+	// error in the standard library surfaces at the call.  Failures from other
+	// packages' bodies surface when the output is assembled.
+	const reach = new StdlibReach(programs);
+	const namespace = stdlibNamespace(checker, info, overlay);
+	namespace._path = importPath;
+	namespace._reach = (name) => {
+		const seen = reach.failures.length;
+		reach.add([{ kind: "Ident", name }]);
+		return reach.failures[seen] ?? null;
+	};
 
 	const pkg = {
 		importPath,
 		checker,
 		pkgName: info.pkgName,
 		overlay,
-		namespace: stdlibNamespace(checker, info, overlay),
+		namespace,
 		exportedTypes: stdlibExportedTypes(checker, info),
 		deps: programs
 			.flatMap((p) => p.imports.flatMap((imp) => imp.imports))
@@ -311,16 +388,22 @@ function stdlibMarker(importPath) {
 	return `/*__GOFRONT_STDLIB:${importPath}*/`;
 }
 
-function stdlibJs(pkg, reached) {
+function stdlibJs(pkg, reached, natives) {
 	const programs = pkg.unit.programs.map((p) => ({
 		...p,
 		decls: p.decls.filter((d) => reached.has(d)),
 	}));
 	if (programs.every((p) => p.decls.length === 0)) return "";
-	return new CodeGen(pkg.checker, new Map(), new Set(), {
+	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: "both",
 		strict: true,
+		natives,
 	}).generateAll(programs, { isTest: false });
+	// The runtime's own io.EOF producers (os.Stdin) return
+	// `__io_eof`: make it the Go package's value so `err == io.EOF` holds.
+	return pkg.importPath === "io" && js.includes("let EOF$$io")
+		? `${js}\nvar __io_eof = EOF$$io;`
+		: js;
 }
 
 // The API a wasm package exposes to JS through the facade: exported func and
@@ -362,7 +445,11 @@ function spliceStdlibJs(merged, options) {
 		}
 		if (spliced.has(path)) continue;
 		spliced.add(path);
-		const js = stdlibJs(options.stdlibCache.get(path), reached);
+		const js = stdlibJs(
+			options.stdlibCache.get(path),
+			reached,
+			options.natives,
+		);
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
 		for (const m of merged.mappings)
@@ -433,7 +520,20 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		);
 		return;
 	}
-	checker.globals.define(name, { ...pkg.namespace, name });
+	const ns = { ...pkg.namespace, name };
+	// Emitter members come from this checker's own namespace: some resolve
+	// types of the Go source against its type table when first used.
+	const own = pkg.overlay ? checker.globals.lookup(name)?.members : null;
+	if (own)
+		ns.members = {
+			...ns.members,
+			...Object.fromEntries(
+				Object.keys(pkg.overlay.members)
+					.filter((k) => k in own)
+					.map((k) => [k, own[k]]),
+			),
+		};
+	checker.globals.define(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
@@ -487,6 +587,34 @@ export function checkJsonCodecs(programs, checker, preambles, options, deps) {
 	return [ast];
 }
 
+// Built-in packages whose emitter members return `time.Time` and
+// `time.Duration` (`t.Deadline()`, `b.Elapsed()`): the Go source of `time` is
+// part of the build, and its types are known, when one of them is imported.
+const IMPLIES_TIME = new Set(["testing", "context"]);
+
+function importImpliedTime(
+	p,
+	spec,
+	checker,
+	preambles,
+	bundledDirs,
+	options,
+	deps,
+) {
+	if (!IMPLIES_TIME.has(spec.path)) return;
+	const dir = resolveStdlibSource("time", options.stdlibRoot);
+	if (!dir) return;
+	try {
+		const pkg = loadStdlibPackage("time", dir, options, deps);
+		emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
+		for (const [k, t] of pkg.exportedTypes)
+			if (k.includes(".")) checker.types.set(k, t);
+	} catch (e) {
+		const msg = "internal stdlib error in time; please report";
+		errAtImport(checker, p, spec, msg, e.message);
+	}
+}
+
 export function importStdlibPackages(
 	programs,
 	checker,
@@ -499,7 +627,18 @@ export function importStdlibPackages(
 		for (const spec of p.imports.flatMap((imp) => imp.imports)) {
 			if (spec.path.startsWith("js:") || isLocalPath(spec.path)) continue;
 			const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
-			if (!dir) continue;
+			if (!dir) {
+				importImpliedTime(
+					p,
+					spec,
+					checker,
+					preambles,
+					bundledDirs,
+					options,
+					deps,
+				);
+				continue;
+			}
 			let pkg;
 			try {
 				pkg = loadStdlibPackage(spec.path, dir, options, deps);

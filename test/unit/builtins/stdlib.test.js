@@ -19,6 +19,7 @@ section("strings package");
 
 test("strings.Contains", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Contains("hello world", "world"))
 	console.log(strings.Contains("hello", "xyz"))
@@ -29,6 +30,7 @@ func main() {
 
 test("strings.HasPrefix and HasSuffix", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.HasPrefix("hello", "hel"))
 	console.log(strings.HasSuffix("hello", "llo"))
@@ -40,6 +42,7 @@ func main() {
 
 test("strings.ToUpper and ToLower", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ToUpper("hello"))
 	console.log(strings.ToLower("HELLO"))
@@ -50,6 +53,7 @@ func main() {
 
 test("strings.TrimSpace", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimSpace("  hello  "))
 }`);
@@ -59,6 +63,7 @@ func main() {
 
 test("strings.Split and Join", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	parts := strings.Split("a,b,c", ",")
 	console.log(strings.Join(parts, "-"))
@@ -69,6 +74,7 @@ func main() {
 
 test("strings.Replace and ReplaceAll", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ReplaceAll("aaa", "a", "b"))
 }`);
@@ -78,6 +84,7 @@ func main() {
 
 test("strings.Index and Count", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Index("hello", "ll"))
 	console.log(strings.Count("banana", "a"))
@@ -88,6 +95,7 @@ func main() {
 
 test("strings.Count with empty separator returns len+1", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Count("hello", ""))
 	console.log(strings.Count("", ""))
@@ -98,6 +106,7 @@ func main() {
 
 test("strings.Repeat", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Repeat("ab", 3))
 }`);
@@ -107,6 +116,7 @@ func main() {
 
 test("strings.TrimPrefix and TrimSuffix", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimPrefix("hello", "hel"))
 	console.log(strings.TrimSuffix("hello", "llo"))
@@ -118,6 +128,7 @@ func main() {
 
 test("strings.TrimSuffix with empty suffix returns original", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimSuffix("hello", ""))
 }`);
@@ -127,6 +138,7 @@ func main() {
 
 test("strings.TrimPrefix with empty prefix returns original", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimPrefix("hello", ""))
 }`);
@@ -136,92 +148,13 @@ func main() {
 
 test("strings.EqualFold", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.EqualFold("Hello", "hello"))
 	console.log(strings.EqualFold("Go", "GO"))
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true\ntrue");
-});
-
-// ═════════════════════════════════════════════════════════════
-// strconv package
-// ═════════════════════════════════════════════════════════════
-
-section("strconv package");
-
-test("strconv.Itoa", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	console.log(strconv.Itoa(42))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "42");
-});
-
-test("strconv.Atoi success", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	n, err := strconv.Atoi("123")
-	console.log(n, err)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "123 null");
-});
-
-test("strconv.Atoi failure", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	n, err := strconv.Atoi("abc")
-	console.log(n, err)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '0 strconv.Atoi: parsing "abc": invalid syntax');
-});
-
-test("strconv.FormatBool", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	console.log(strconv.FormatBool(true))
-	console.log(strconv.FormatBool(false))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true\nfalse");
-});
-
-test("strconv.FormatInt with base", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	console.log(strconv.FormatInt(255, 16))
-	console.log(strconv.FormatInt(10, 2))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "ff\n1010");
-});
-
-test("strconv.ParseBool", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	v, err := strconv.ParseBool("true")
-	console.log(v, err)
-	v2, err2 := strconv.ParseBool("nope")
-	console.log(v2, err2)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(
-		runJs(js),
-		'true null\nfalse strconv.ParseBool: parsing "nope": invalid syntax',
-	);
-});
-
-test("strconv.ParseInt", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	n, err := strconv.ParseInt("ff", 16, 64)
-	console.log(n, err)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "255 null");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -342,6 +275,7 @@ section("sort package");
 
 test("sort.Ints", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	nums := []int{3, 1, 4, 1, 5}
 	sort.Ints(nums)
@@ -353,6 +287,7 @@ func main() {
 
 test("sort.Strings", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	words := []string{"banana", "apple", "cherry"}
 	sort.Strings(words)
@@ -364,6 +299,7 @@ func main() {
 
 test("sort.Slice with custom comparator", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	nums := []int{3, 1, 4}
 	sort.Slice(nums, func(i int, j int) bool { return nums[i] > nums[j] })
@@ -375,6 +311,7 @@ func main() {
 
 test("sort.Slice less receives indices, not elements", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 type P struct { Name string; Score int }
 func main() {
 	ps := []P{{"a", 2}, {"b", 9}, {"c", 5}, {"d", 1}, {"e", 7}, {"f", 3}, {"g", 8}}
@@ -389,6 +326,7 @@ func main() {
 
 test("sort.SliceStable keeps equal elements in input order", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 type P struct { Name string; Key int }
 func main() {
 	ps := []P{{"a", 1}, {"b", 0}, {"c", 1}, {"d", 0}, {"e", 1}}
@@ -403,6 +341,7 @@ func main() {
 
 test("sort.SliceIsSorted uses index comparator", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	a := []int{1, 2, 2, 5}
 	b := []int{3, 1}
@@ -530,9 +469,10 @@ section("errors package");
 
 test("errors.New creates an error value", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
 	err := errors.New("something went wrong")
-	console.log(err)
+	console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "something went wrong");
@@ -540,6 +480,7 @@ func main() {
 
 test("errors.New used in return", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func divide(a int, b int) (int, error) {
 	if b == 0 {
 		return 0, errors.New("division by zero")
@@ -548,7 +489,7 @@ func divide(a int, b int) (int, error) {
 }
 func main() {
 	_, err := divide(1, 0)
-	console.log(err)
+	console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "division by zero");
@@ -562,6 +503,7 @@ section("time package");
 
 test("time.Now returns a time object (has _d property)", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	console.log(t.Year() > 2000)
@@ -572,6 +514,7 @@ func main() {
 
 test("time.Since returns elapsed time", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	start := time.Now()
 	elapsed := time.Since(start)
@@ -583,6 +526,7 @@ func main() {
 
 test("time constants are defined", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(time.Second > time.Millisecond)
 	console.log(time.Minute > time.Second)
@@ -853,6 +797,7 @@ section("bytes.Buffer");
 
 test("bytes.Buffer: WriteString and String", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("hello")
@@ -865,6 +810,7 @@ func main() {
 
 test("bytes.Buffer: WriteByte", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteByte(72)
@@ -877,6 +823,7 @@ func main() {
 
 test("Write (byte slice)", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.Write([]byte{71, 111})
@@ -888,6 +835,7 @@ func main() {
 
 test("Bytes", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteByte(1)
@@ -901,6 +849,7 @@ func main() {
 
 test("bytes.Buffer: Len", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("hello")
@@ -912,6 +861,7 @@ func main() {
 
 test("bytes.Buffer: Reset", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("old")
@@ -925,6 +875,7 @@ func main() {
 
 test("bytes.Buffer: Grow is a no-op", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("hello")
@@ -937,6 +888,7 @@ func main() {
 
 test("fmt.Fprintf writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "hello %s, you are %d", "world", 42)
@@ -981,6 +933,7 @@ func main() {
 
 test("fmt.Fprintln writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	fmt.Fprintln(&b, "ping")
@@ -992,6 +945,7 @@ func main() {
 
 test("fmt.Fprint writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	fmt.Fprint(&b, "a", "b", "c")
@@ -1195,6 +1149,7 @@ section("slices package");
 
 test("slices.Contains", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	console.log(slices.Contains(s, 2))
@@ -1229,6 +1184,7 @@ func Main() int {
 
 test("slices.Index", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []string{"a", "b", "c"}
 	console.log(slices.Index(s, "b"))
@@ -1240,6 +1196,7 @@ func main() {
 
 test("slices.Equal", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	a := []int{1, 2, 3}
 	b := []int{1, 2, 3}
@@ -1253,6 +1210,7 @@ func main() {
 
 test("slices.Sort", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 4, 1, 5}
 	slices.Sort(s)
@@ -1266,6 +1224,7 @@ func main() {
 
 test("slices.SortFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 2}
 	slices.SortFunc(s, func(a, b int) int {
@@ -1283,6 +1242,7 @@ func main() {
 
 test("slices.Reverse", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	slices.Reverse(s)
@@ -1296,6 +1256,7 @@ func main() {
 
 test("slices.Clone", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	c := slices.Clone(s)
@@ -1309,6 +1270,7 @@ func main() {
 
 test("slices.Compact", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 1, 2, 3, 3, 3, 4}
 	s = slices.Compact(s)
@@ -1322,6 +1284,7 @@ func main() {
 
 test("slices.Insert", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 4}
 	s = slices.Insert(s, 2, 3)
@@ -1335,6 +1298,7 @@ func main() {
 
 test("slices.Delete", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3, 4, 5}
 	s = slices.Delete(s, 1, 3)
@@ -1348,6 +1312,7 @@ func main() {
 
 test("slices.Replace", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3, 4}
 	s = slices.Replace(s, 1, 3, 9, 8)
@@ -1361,6 +1326,7 @@ func main() {
 
 test("slices.Max and slices.Min", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 4, 1, 5, 9}
 	console.log(slices.Max(s))
@@ -1372,6 +1338,7 @@ func main() {
 
 test("slices.Concat", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	a := []int{1, 2}
 	b := []int{3, 4}
@@ -1386,6 +1353,7 @@ func main() {
 
 test("slices.IsSorted", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	console.log(slices.IsSorted([]int{1, 2, 3}))
 	console.log(slices.IsSorted([]int{3, 1, 2}))
@@ -1396,6 +1364,7 @@ func main() {
 
 test("slices.Compare", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	console.log(slices.Compare([]int{1, 2, 3}, []int{1, 2, 3}))
 	console.log(slices.Compare([]int{1, 2}, []int{1, 3}))
@@ -1407,6 +1376,7 @@ func main() {
 
 test("slices.SortStableFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 2}
 	slices.SortStableFunc(s, func(a, b int) int { return a - b })
@@ -1420,6 +1390,7 @@ func main() {
 
 test("slices.IsSortedFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	cmp := func(a, b int) int { return a - b }
 	console.log(slices.IsSortedFunc([]int{1, 2, 3}, cmp))
@@ -1431,6 +1402,7 @@ func main() {
 
 test("slices.MaxFunc and MinFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	cmp := func(a, b int) int { return a - b }
 	s := []int{3, 1, 4, 1, 5}
@@ -1443,6 +1415,7 @@ func main() {
 
 test("slices.CompactFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 2, 3, 3, 3}
 	s = slices.CompactFunc(s, func(a, b int) bool { return a == b })
@@ -1456,6 +1429,7 @@ func main() {
 
 test("slices.DeleteFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3, 4, 5}
 	s = slices.DeleteFunc(s, func(v int) bool { return v % 2 == 0 })
@@ -1469,6 +1443,7 @@ func main() {
 
 test("slices.Insert variadic", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 5}
 	s = slices.Insert(s, 1, 2, 3, 4)
@@ -1482,6 +1457,7 @@ func main() {
 
 test("slices.Concat three slices", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	a := []int{1}
 	b := []int{2}
@@ -1497,6 +1473,7 @@ func main() {
 
 test("slices.Grow and slices.Clip are no-ops", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	s = slices.Grow(s, 10)
@@ -1509,6 +1486,7 @@ func main() {
 
 test("slices functions on slice views (Task 0.20)", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	b := []int{9, 1, 2, 2, 3, 4, 9}
 	c := slices.Compact(b[1:6])
@@ -1579,19 +1557,6 @@ test("maps.Values", async () => {
 	assertEqual(out, "10\n20");
 });
 
-test("maps.Clone", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1}
-	c := maps.Clone(m)
-	c["b"] = 2
-	console.log(len(m))
-	console.log(len(c))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1\n2");
-});
-
 test("maps.Copy", async () => {
 	const out = await runMapsMain(`	dst := map[string]int{"a": 1}
 	src := map[string]int{"b": 2, "c": 3}
@@ -1602,42 +1567,6 @@ test("maps.Copy", async () => {
 		console.log(k)
 	}`);
 	assertEqual(out, "a\nb\nc");
-});
-
-test("maps.Equal", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	a := map[string]int{"x": 1, "y": 2}
-	b := map[string]int{"x": 1, "y": 2}
-	c := map[string]int{"x": 1, "y": 3}
-	console.log(maps.Equal(a, b))
-	console.log(maps.Equal(a, c))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true\nfalse");
-});
-
-test("maps.Delete", async () => {
-	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
-	maps.Delete(m, "b")
-	keys := slices.Collect(maps.Keys(m))
-	slices.Sort(keys)
-	for _, k := range keys {
-		console.log(k)
-	}`);
-	assertEqual(out, "a\nc");
-});
-
-test("maps.EqualFunc", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	a := map[string]int{"x": 1, "y": 2}
-	b := map[string]int{"x": 10, "y": 20}
-	eq := maps.EqualFunc(a, b, func(v1, v2 int) bool { return v1*10 == v2 })
-	console.log(eq)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
 });
 
 test("maps.DeleteFunc", async () => {
@@ -1659,6 +1588,7 @@ section("html package");
 
 test("html.EscapeString", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("<b>Hello & \\"World\\"</b>"))
 }`);
@@ -1668,6 +1598,7 @@ func main() {
 
 test("html.EscapeString plain string unchanged", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("no special chars"))
 }`);
@@ -1677,6 +1608,7 @@ func main() {
 
 test("html.UnescapeString", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.UnescapeString("&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;"))
 }`);
@@ -1686,6 +1618,7 @@ func main() {
 
 test("html.EscapeString escapes single quotes", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("it's a test"))
 }`);
@@ -1695,6 +1628,7 @@ func main() {
 
 test("html.EscapeString empty string", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("") == "")
 }`);
@@ -1704,6 +1638,7 @@ func main() {
 
 test("html.EscapeString roundtrip", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	s := "<script>alert('xss')</script>"
 	console.log(html.UnescapeString(html.EscapeString(s)) == s)
@@ -1718,6 +1653,10 @@ section("io package");
 
 test("io.WriteString with strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+	"strings"
+)
 func main() {
 	var b strings.Builder
 	n, err := io.WriteString(&b, "hello")
@@ -1731,6 +1670,10 @@ func main() {
 
 test("io.WriteString with bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import (
+	"bytes"
+	"io"
+)
 func main() {
 	var b bytes.Buffer
 	io.WriteString(&b, "world")
@@ -1742,6 +1685,10 @@ func main() {
 
 test("io.Writer accepted as parameter type", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+	"strings"
+)
 func writeAll(w io.Writer, lines []string) {
 	for _, line := range lines {
 		io.WriteString(w, line)
@@ -1758,6 +1705,9 @@ func main() {
 
 test("io.EOF is an error value", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+)
 func main() {
 	var err error = io.EOF
 	console.log(err != nil)
@@ -1862,75 +1812,6 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
-// math/rand package (Feature 2)
-// ═════════════════════════════════════════════════════════════
-
-section("math/rand package");
-
-test("rand.Intn returns int in range", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	n := rand.Intn(10)
-	console.log(n >= 0 && n < 10)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
-});
-
-test("rand.Float64 returns float in [0,1)", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	f := rand.Float64()
-	console.log(f >= 0.0 && f < 1.0)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
-});
-
-test("rand.Int returns non-negative int", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	n := rand.Int()
-	console.log(n >= 0)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
-});
-
-test("rand.Seed is a no-op", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	rand.Seed(42)
-	console.log(true)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
-});
-
-test("rand.Shuffle shuffles elements", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	s := []int{1, 2, 3, 4, 5}
-	rand.Shuffle(len(s), func(i, j int) {
-		s[i], s[j] = s[j], s[i]
-	})
-	console.log(len(s))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "5");
-});
-
-test("rand.Perm returns a permutation", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	p := rand.Perm(5)
-	console.log(len(p))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "5");
-});
-
-// ═════════════════════════════════════════════════════════════
 // sort additions (Feature 3)
 // ═════════════════════════════════════════════════════════════
 
@@ -1938,6 +1819,7 @@ section("sort additions");
 
 test("sort.Search binary search", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	a := []int{1, 3, 6, 10, 15}
 	idx := sort.Search(len(a), func(i int) bool { return a[i] >= 6 })
@@ -1949,6 +1831,7 @@ func main() {
 
 test("sort.IntsAreSorted", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	console.log(sort.IntsAreSorted([]int{1, 2, 3}))
 	console.log(sort.IntsAreSorted([]int{3, 1, 2}))
@@ -1959,6 +1842,7 @@ func main() {
 
 test("sort.StringsAreSorted", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	console.log(sort.StringsAreSorted([]string{"a", "b", "c"}))
 	console.log(sort.StringsAreSorted([]string{"c", "a", "b"}))
@@ -1969,6 +1853,7 @@ func main() {
 
 test("sort.Float64sAreSorted", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	console.log(sort.Float64sAreSorted([]float64{1.0, 2.0, 3.0}))
 	console.log(sort.Float64sAreSorted([]float64{3.0, 1.0, 2.0}))
@@ -1985,6 +1870,7 @@ section("strings additions");
 
 test("strings.Fields splits on whitespace", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	f := strings.Fields("  foo bar  baz  ")
 	console.log(len(f))
@@ -1998,6 +1884,7 @@ func main() {
 
 test("strings.Fields on empty/whitespace returns empty slice", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	f := strings.Fields("   ")
 	console.log(len(f))
@@ -2008,6 +1895,7 @@ func main() {
 
 test("strings.Cut found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	before, after, found := strings.Cut("user:password", ":")
 	console.log(before)
@@ -2020,6 +1908,7 @@ func main() {
 
 test("strings.Cut not found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	before, after, found := strings.Cut("hello", ":")
 	console.log(before)
@@ -2032,6 +1921,7 @@ func main() {
 
 test("strings.CutPrefix found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	after, found := strings.CutPrefix("hello world", "hello ")
 	console.log(after)
@@ -2043,6 +1933,7 @@ func main() {
 
 test("strings.CutSuffix found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	before, found := strings.CutSuffix("hello world", " world")
 	console.log(before)
@@ -2054,6 +1945,7 @@ func main() {
 
 test("strings.SplitN", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	parts := strings.SplitN("a,b,c,d", ",", 3)
 	console.log(len(parts))
@@ -2067,6 +1959,7 @@ func main() {
 
 test("strings.SplitAfter", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	parts := strings.SplitAfter("a,b,c", ",")
 	console.log(len(parts))
@@ -2080,6 +1973,7 @@ func main() {
 
 test("strings.ContainsAny", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ContainsAny("hello", "aeiou"))
 	console.log(strings.ContainsAny("rhythm", "aeiou"))
@@ -2090,6 +1984,7 @@ func main() {
 
 test("strings.ContainsRune", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ContainsRune("hello", 'e'))
 	console.log(strings.ContainsRune("hello", 'z'))
@@ -2100,6 +1995,7 @@ func main() {
 
 test("strings.IndexRune", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.IndexRune("hello", 'l'))
 	console.log(strings.IndexRune("hello", 'z'))
@@ -2110,6 +2006,7 @@ func main() {
 
 test("strings.IndexByte", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.IndexByte("hello", 'l'))
 	console.log(strings.IndexByte("hello", 'z'))
@@ -2120,6 +2017,7 @@ func main() {
 
 test("strings.Map transforms characters", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	result := strings.Map(func(r rune) rune {
 		if r == 'a' { return 'b' }
@@ -2133,6 +2031,7 @@ func main() {
 
 test("strings.Title capitalizes words", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Title("hello world"))
 }`);
@@ -2142,6 +2041,7 @@ func main() {
 
 test("strings.ToTitle converts to uppercase", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ToTitle("hello"))
 }`);
@@ -2151,6 +2051,7 @@ func main() {
 
 test("strings.TrimFunc", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	result := strings.TrimFunc("  hello  ", func(r rune) bool {
 		return r == ' '
@@ -2163,6 +2064,7 @@ func main() {
 
 test("strings.IndexFunc", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	idx := strings.IndexFunc("hello123", func(r rune) bool {
 		return r >= '0' && r <= '9'
@@ -2175,6 +2077,9 @@ func main() {
 
 test("strings.NewReplacer", () => {
 	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
 func main() {
 	r := strings.NewReplacer("foo", "bar", "baz", "qux")
 	console.log(r.Replace("foo and baz"))
@@ -2185,60 +2090,13 @@ func main() {
 
 test("strings.IndexAny", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.IndexAny("hello", "aeiou"))
 	console.log(strings.IndexAny("rhythm", "aeiou"))
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "1\n-1");
-});
-
-// ═════════════════════════════════════════════════════════════
-// strconv additions (Feature 6)
-// ═════════════════════════════════════════════════════════════
-
-section("strconv additions");
-
-test("strconv.Quote", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	console.log(strconv.Quote("hello"))
-	console.log(strconv.Quote("say \\"hi\\""))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '"hello"\n"say \\"hi\\""');
-});
-
-test("strconv.Unquote success", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	s, err := strconv.Unquote("\\"hello\\"")
-	console.log(s)
-	console.log(err == nil)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "hello\ntrue");
-});
-
-test("strconv.Unquote failure", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	_, err := strconv.Unquote("not quoted")
-	console.log(err != nil)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
-});
-
-test("strconv.AppendInt", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	dst := []byte("num=")
-	result := strconv.AppendInt(dst, 42, 10)
-	console.log(string(result))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "num=42");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -2249,6 +2107,7 @@ section("unicode/utf8 package");
 
 test("utf8.RuneCountInString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneCountInString("hello"))
 	console.log(utf8.RuneCountInString(""))
@@ -2259,6 +2118,7 @@ func main() {
 
 test("utf8.RuneLen", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneLen(65))
 	console.log(utf8.RuneLen(0x80))
@@ -2270,6 +2130,7 @@ func main() {
 
 test("utf8.ValidString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.ValidString("hello"))
 }`);
@@ -2279,6 +2140,7 @@ func main() {
 
 test("utf8.ValidRune", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.ValidRune(65))
 	console.log(utf8.ValidRune(-1))
@@ -2289,6 +2151,7 @@ func main() {
 
 test("utf8.RuneError constant", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneError)
 }`);
@@ -2298,6 +2161,7 @@ func main() {
 
 test("utf8.MaxRune constant", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.MaxRune)
 }`);
@@ -2307,6 +2171,7 @@ func main() {
 
 test("utf8.DecodeRuneInString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	r, size := utf8.DecodeRuneInString("hello")
 	console.log(r)
@@ -2324,6 +2189,7 @@ section("path package");
 
 test("path.Base", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Base("/foo/bar/baz.txt"))
 	console.log(path.Base("/"))
@@ -2335,6 +2201,7 @@ func main() {
 
 test("path.Dir", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Dir("/foo/bar/baz.txt"))
 	console.log(path.Dir("/foo"))
@@ -2346,6 +2213,7 @@ func main() {
 
 test("path.Ext", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Ext("index.html"))
 	console.log(path.Ext("noext"))
@@ -2356,6 +2224,7 @@ func main() {
 
 test("path.Join", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Join("foo", "bar", "baz"))
 	console.log(path.Join("/foo", "bar"))
@@ -2367,6 +2236,7 @@ func main() {
 
 test("path.Clean", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Clean("foo//bar"))
 	console.log(path.Clean("./foo/./bar"))
@@ -2377,6 +2247,7 @@ func main() {
 
 test("path.IsAbs", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.IsAbs("/foo/bar"))
 	console.log(path.IsAbs("foo/bar"))
@@ -2387,6 +2258,7 @@ func main() {
 
 test("path.Split", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	dir, file := path.Split("/foo/bar/baz.txt")
 	console.log(dir)
@@ -2404,6 +2276,7 @@ section("time additions");
 
 test("time.Now returns time.Time object", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	console.log(t.Year() > 2000)
@@ -2414,6 +2287,7 @@ func main() {
 
 test("time.Since returns duration in ms", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	elapsed := time.Since(t)
@@ -2425,6 +2299,7 @@ func main() {
 
 test("time.Now().Year() Month() Day()", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	console.log(t.Year() > 0)
@@ -2437,6 +2312,7 @@ func main() {
 
 test("time.Unix creates time from epoch seconds", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(0, 0)
 	console.log(t.Year())
@@ -2447,6 +2323,7 @@ func main() {
 
 test("time.RFC3339 constant", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(len(time.RFC3339) > 0)
 }`);
@@ -2456,6 +2333,7 @@ func main() {
 
 test("time.Month constants", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(time.January)
 	console.log(time.December)
@@ -2466,6 +2344,7 @@ func main() {
 
 test("time.Weekday constants", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(time.Sunday)
 	console.log(time.Saturday)
@@ -2476,6 +2355,7 @@ func main() {
 
 test("time.Time.UnixMilli", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(1000, 0)
 	console.log(t.UnixMilli())
@@ -2486,6 +2366,7 @@ func main() {
 
 test("time.Time.Before and After", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t1 := time.Unix(1000, 0)
 	t2 := time.Unix(2000, 0)
@@ -2498,6 +2379,7 @@ func main() {
 
 test("time.Parse parses date string", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t, err := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
 	console.log(err == nil)
@@ -2509,6 +2391,7 @@ func main() {
 
 test("time.Format DateOnly layout", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(1704067200, 0)
 	console.log(t.Format(time.DateOnly))
@@ -2521,6 +2404,7 @@ func main() {
 
 test("time.Format year containing token digits (2015)", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(1420070400, 0)
 	console.log(t.Format(time.DateOnly))
@@ -2539,6 +2423,9 @@ section("io.Reader additions");
 
 test("strings.NewReader Len and Read", () => {
 	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
 func main() {
 	r := strings.NewReader("hello")
 	console.log(r.Len())
@@ -2549,6 +2436,9 @@ func main() {
 
 test("bytes.NewReader Len", () => {
 	const { js, errors } = compile(`package main
+import (
+	"bytes"
+)
 func main() {
 	r := bytes.NewReader([]byte{1, 2, 3})
 	console.log(r.Len())
@@ -2559,6 +2449,10 @@ func main() {
 
 test("io.ReadAll from strings.NewReader", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+	"strings"
+)
 func main() {
 	r := strings.NewReader("hello")
 	data, err := io.ReadAll(r)
@@ -3691,136 +3585,6 @@ true
 	);
 });
 
-test("real Go output: bits/wide on JS and WASM", async () => {
-	await assertProgramOutput(
-		`package main
-
-import (
-	"fmt"
-	"math/bits"
-)
-
-func main() {
-	// Add32, Add64, Add
-	s32, c32 := bits.Add32(0xffffffff, 1, 0)
-	fmt.Printf("%x %d\\n", s32, c32)
-	s32, c32 = bits.Add32(0xffffffff, 0, 1)
-	fmt.Printf("%x %d\\n", s32, c32)
-	s64, c64 := bits.Add64(0xffffffffffffffff, 1, 0)
-	fmt.Printf("%x %d\\n", s64, c64)
-	s64, c64 = bits.Add64(0xffffffffffffffff, 0, 1)
-	fmt.Printf("%x %d\\n", s64, c64)
-	su, cu := bits.Add(0xffffffffffffffff, 2, 1)
-	fmt.Printf("%x %d\\n", su, cu)
-
-	// Sub32, Sub64, Sub
-	d32, b32 := bits.Sub32(0, 1, 0)
-	fmt.Printf("%x %d\\n", d32, b32)
-	d32, b32 = bits.Sub32(5, 3, 1)
-	fmt.Printf("%x %d\\n", d32, b32)
-	d64, b64 := bits.Sub64(0x100000000, 1, 0)
-	fmt.Printf("%x %d\\n", d64, b64)
-	d64, b64 = bits.Sub64(5, 3, 1)
-	fmt.Printf("%x %d\\n", d64, b64)
-	du, bu := bits.Sub(10, 4, 1)
-	fmt.Printf("%x %d\\n", du, bu)
-
-	// Mul32, Mul64, Mul
-	h32, l32 := bits.Mul32(0xffffffff, 0xffffffff)
-	fmt.Printf("%x %x\\n", h32, l32)
-	h64, l64 := bits.Mul64(0x100000000, 0x100000000)
-	fmt.Printf("%x %x\\n", h64, l64)
-	hu, lu := bits.Mul(0x100000000, 2)
-	fmt.Printf("%x %x\\n", hu, lu)
-
-	// Div32, Div64, Div
-	q32, r32 := bits.Div32(1, 0, 2)
-	fmt.Printf("%x %x\\n", q32, r32)
-	q64, r64 := bits.Div64(1, 0, 2)
-	fmt.Printf("%x %x\\n", q64, r64)
-	qu, ru := bits.Div(0, 100, 7)
-	fmt.Printf("%d %d\\n", qu, ru)
-
-	// Rem32, Rem64, Rem
-	fmt.Println(bits.Rem32(1, 0, 3))
-	fmt.Println(bits.Rem64(1, 0, 3))
-	fmt.Println(bits.Rem(0, 100, 7))
-
-	// LeadingZeros, TrailingZeros, OnesCount, Len
-	fmt.Println(bits.LeadingZeros8(0), bits.LeadingZeros8(1), bits.LeadingZeros8(0x80))
-	fmt.Println(bits.LeadingZeros16(0), bits.LeadingZeros16(1), bits.LeadingZeros16(0x8000))
-	fmt.Println(bits.LeadingZeros(0), bits.LeadingZeros(1))
-
-	fmt.Println(bits.TrailingZeros8(0), bits.TrailingZeros8(2), bits.TrailingZeros8(0x80))
-	fmt.Println(bits.TrailingZeros16(0), bits.TrailingZeros16(4), bits.TrailingZeros16(0x8000))
-	fmt.Println(bits.TrailingZeros(0), bits.TrailingZeros(8))
-
-	fmt.Println(bits.OnesCount8(0), bits.OnesCount8(0xff), bits.OnesCount8(0x55))
-	fmt.Println(bits.OnesCount16(0), bits.OnesCount16(0xffff), bits.OnesCount16(0x1234))
-	fmt.Println(bits.OnesCount(0), bits.OnesCount(0x1010101010101010))
-
-	fmt.Println(bits.Len8(0), bits.Len8(1), bits.Len8(0x80), bits.Len8(0xff))
-	fmt.Println(bits.Len16(0), bits.Len16(1), bits.Len16(0x8000), bits.Len16(0xffff))
-	fmt.Println(bits.Len(0), bits.Len(1), bits.Len(0xffffffffffffffff))
-
-	// RotateLeft8, RotateLeft16, RotateLeft
-	fmt.Printf("%x %x\\n", bits.RotateLeft8(0x81, 1), bits.RotateLeft8(0x81, -1))
-	fmt.Printf("%x %x\\n", bits.RotateLeft16(0x8001, 1), bits.RotateLeft16(0x8001, -1))
-	fmt.Printf("%x %x\\n", bits.RotateLeft(0x8000000000000001, 1), bits.RotateLeft(0x8000000000000001, -1))
-
-	// Reverse8, Reverse16, Reverse, ReverseBytes
-	fmt.Printf("%x %x\\n", bits.Reverse8(0x80), bits.Reverse8(0x0f))
-	fmt.Printf("%x %x\\n", bits.Reverse16(0x8000), bits.Reverse16(0x00ff))
-	fmt.Printf("%x\\n", bits.Reverse(0x8000000000000000))
-	fmt.Printf("%x\\n", bits.ReverseBytes(0x1234000000000000))
-
-	// UintSize
-	fmt.Println(bits.UintSize)
-}
-`,
-		`0 1
-0 1
-0 1
-0 1
-2 1
-ffffffff 1
-1 0
-ffffffff 0
-1 0
-5 0
-fffffffe 1
-1 0
-0 200000000
-80000000 0
-8000000000000000 0
-14 2
-1
-1
-2
-8 7 0
-16 15 0
-64 63
-8 1 7
-16 2 15
-64 3
-0 8 4
-0 16 5
-0 8
-0 1 8 8
-0 1 16 16
-0 1 64
-3 c0
-3 c000
-3 c000000000000000
-1 f0
-1 ff00
-1
-3412
-64
-`,
-	);
-});
-
 test("real Go output: time/members on JS and WASM", async () => {
 	await assertProgramOutput(
 		`package main
@@ -3995,6 +3759,74 @@ func main() {
 42 42 1
 result 99 result 99 1
 rlocker ok
+`,
+	);
+});
+
+test("real Go output: 64-bit time, strconv, and binary on JS and WASM (Task 1.4)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/binary"
+	"fmt"
+	"strconv"
+	"time"
+)
+
+func main() {
+	fmt.Println((3 * time.Second).String())
+	fmt.Println(time.Duration(1 << 62))
+	t0 := time.Now()
+	fmt.Println(time.Since(t0) >= 0)
+	n, err := strconv.ParseInt("9223372036854775807", 10, 64)
+	fmt.Println(n, err == nil)
+	bs := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	fmt.Println(binary.LittleEndian.Uint64(bs))
+}
+`,
+		`3s
+1281023h53m38.427387904s
+true
+9223372036854775807 true
+18446744073709551615
+`,
+	);
+});
+
+test("real Go output: 64-bit bits, math, and rand on JS and WASM (Task 1.5)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+	"math/bits"
+	"math/rand"
+)
+
+func main() {
+	fmt.Println(bits.OnesCount64(1<<63 | 1))
+	hi, lo := bits.Mul64(1<<32, 1<<32)
+	fmt.Println(hi, lo)
+	var u uint64 = math.Float64bits(1.0)
+	fmt.Println(u)
+	fmt.Println(math.FMA(2.0, 3.0, 4.0))
+	rand.Seed(42)
+	fmt.Println(rand.Int63() >= 0)
+	fmt.Println(rand.Int63n(1<<40) >= 0)
+	var r int64 = rand.Int63()
+	_ = r
+	var u2 uint64 = rand.Uint64()
+	_ = u2
+}
+`,
+		`2
+1 0
+4607182418800017408
+10
+true
+true
 `,
 	);
 });

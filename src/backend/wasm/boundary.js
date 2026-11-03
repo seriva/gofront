@@ -35,17 +35,7 @@
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
-import {
-	HELPER_BASE64,
-	HELPER_DURATION,
-	HELPER_ERROR,
-	HELPER_HEX,
-	HELPER_PATH_CLEAN,
-	HELPER_SHA256,
-	HELPER_SPRINT,
-	HELPER_SPRINTF,
-	HELPER_STRCONV,
-} from "../js/runtime.js";
+import { HELPER_ERROR, HELPER_SPRINT, HELPER_SPRINTF } from "../js/runtime.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -115,13 +105,6 @@ function classifyType(goType, mod) {
 
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
 		if (goType.name === "error") return { k: "error", wType: "anyref" };
-		if (goType.name === "time.Duration" || goType.name === "Duration")
-			return { k: "i64", unsigned: false, wType: "i64" };
-		if (goType.name === "time.Time" || goType.name === "Time") {
-			const info = mod.getStructType("time.Time");
-			if (info)
-				return { k: "time", name: "time.Time", info, wType: toRef(info) };
-		}
 		const info = mod.getStructType(goType.name);
 		if (info) return structDesc(info, false);
 		const resolved = mod.checker?.types?.get(goType.name);
@@ -213,7 +196,12 @@ function classifyBasic(n) {
 	if (I32_INTS.has(n))
 		return { k: "i32", unsigned: UNSIGNED.has(n), wType: "i32" };
 	if (I64_INTS.has(n))
-		return { k: "i64", unsigned: UNSIGNED.has(n), wType: "i64" };
+		return {
+			k: "i64",
+			unsigned: UNSIGNED.has(n),
+			is64: n === "int64" || n === "uint64",
+			wType: "i64",
+		};
 	const d = BASIC_DESCS[n];
 	return d ? { ...d } : { k: "unsupported", what: `type '${n}'` };
 }
@@ -229,12 +217,6 @@ function classifyNamed(t, mod) {
 		return classifySimd(t.underlying ?? t, mod, t.name);
 	}
 	if (t.name === "error") return { k: "error", wType: "anyref" };
-	if (t.name === "time.Duration")
-		return { k: "i64", unsigned: false, wType: "i64" };
-	if (t.name === "time.Time") {
-		const info = mod.getStructType("time.Time");
-		if (info) return { k: "time", name: "time.Time", info, wType: toRef(info) };
-	}
 	const info = mod.getStructType(t.name);
 	if (info) return structDesc(info, false);
 	if (t.underlying) return classifyType(t.underlying, mod);
@@ -294,10 +276,9 @@ function classifyPointer(t, mod) {
 	if (base.k === "unsupported") return base;
 	if (base.k === "struct" && !base.ptr) return { ...base, ptr: true };
 	if (base.k === "anon_struct" && !base.ptr) return { ...base, ptr: true };
-	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
 	const boxInfo = mod.getBoxType(t.base);
 	const ptrInfo = mod.getPtrType ? mod.getPtrType(t.base) : null;
-	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
+	const key = `${base.k}${base.unsigned ? "_u" : ""}${base.is64 ? "_64" : ""}_${boxInfo.typeIndex}`;
 	return {
 		k: "ptr_box",
 		base,
@@ -379,7 +360,11 @@ function classifySlice(t, mod) {
 		// so they get separate helper keys.
 		key:
 			wTypeKey(sliceInfo.elemWType) +
-			(elem.k === "f32x4" || elem.k === "mask4" ? `_${elem.k}` : ""),
+			(elem.k === "f32x4" || elem.k === "mask4"
+				? `_${elem.k}`
+				: elem.is64
+					? "_i64"
+					: ""),
 		wType: { kind: "ref", nullable: true, typeIndex: sliceInfo.typeIndex },
 	};
 }
@@ -399,7 +384,7 @@ function classifyArray(t, mod) {
 		elem,
 		size: arraySize(t),
 		arrInfo,
-		key: wTypeKey(arrInfo.elemWType),
+		key: wTypeKey(arrInfo.elemWType) + (elem.is64 ? "_i64" : ""),
 		wType: { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex },
 	};
 }
@@ -755,9 +740,6 @@ function visitNeed(desc, needs, errors, mod) {
 			needs.simd = desc.arr;
 			visitNeed(desc.arr, needs, errors, mod);
 			return;
-		case "time":
-			needs.time = true;
-			return;
 		case "slice":
 		case "array": {
 			const map = desc.k === "slice" ? needs.slices : needs.arrays;
@@ -834,7 +816,6 @@ function collectNeeds(meta) {
 		funcs: new Map(), // key -> desc
 		ifaces: new Map(), // interface name -> desc
 		error: false,
-		time: false,
 		simd: null, // array desc carrying vectors across the boundary
 		shared: false, // any shared buffer on the surface
 	};
@@ -862,11 +843,20 @@ export function scanBoundaryImports(mod, meta) {
 	const needs = collectNeeds(meta);
 	meta._needs = needs;
 	for (const [key, desc] of needs.funcs) {
+		const paramDescs = desc.params ?? [];
+		const returnDescs = desc.returns ?? [];
 		mod.getOrAddFuncImport(
 			"env",
 			`__invoke$${key}`,
-			["externref", ...desc.closureInfo.paramWTypes.map(extType)],
-			desc.closureInfo.returnWTypes.map(extType),
+			[
+				"externref",
+				...desc.closureInfo.paramWTypes.map((w, i) =>
+					extType(w, paramDescs[i]?.is64),
+				),
+			],
+			desc.closureInfo.returnWTypes.map((w, i) =>
+				extType(w, returnDescs[i]?.is64),
+			),
 		);
 	}
 }
@@ -884,19 +874,21 @@ function isGcRef(wType) {
 // the converting helpers are registered first thing in addBoundaryHelpers.
 const v128Conv = { from: null, to: null };
 
-function extType(wType) {
+function extType(wType, is64 = false) {
 	if (wType === "v128") return "externref";
-	if (wType === "i64") return "f64";
+	if (wType === "i64") return is64 ? "i64" : "f64";
 	if (isGcRef(wType)) return "externref";
 	return wType;
 }
-function needsConv(wTypes) {
-	return wTypes.some((w) => w === "i64" || w === "v128" || isGcRef(w));
+function needsConv(wTypes, descs = []) {
+	return wTypes.some(
+		(w, i) => (w === "i64" && !descs[i]?.is64) || w === "v128" || isGcRef(w),
+	);
 }
 // Instructions converting the value on the stack from its boundary form.
-function fromExt(wType) {
+function fromExt(wType, is64 = false) {
 	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.from }];
-	if (wType === "i64") return [{ op: "i64.trunc_sat_f64_s" }];
+	if (wType === "i64") return is64 ? [] : [{ op: "i64.trunc_sat_f64_s" }];
 	if (wType === "anyref") return [{ op: "any.convert_extern" }];
 	if (isGcRef(wType)) {
 		const out = [{ op: "any.convert_extern" }];
@@ -907,22 +899,25 @@ function fromExt(wType) {
 	return [];
 }
 // Instructions converting the value on the stack to its boundary form.
-function toExt(wType) {
+function toExt(wType, is64 = false) {
 	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.to }];
-	if (wType === "i64") return [{ op: "f64.convert_i64_s" }];
+	if (wType === "i64") return is64 ? [] : [{ op: "f64.convert_i64_s" }];
 	if (isGcRef(wType)) return [{ op: "extern.convert_any" }];
 	return [];
 }
 // Rewrites the values on top of the stack (types `wTypes`) with `conv`,
 // spilling through locals starting at `localBase` when more than one.
-function convertResults(wTypes, conv, localBase) {
-	if (wTypes.length === 0 || !needsConv(wTypes)) return [];
-	if (wTypes.length === 1) return conv(wTypes[0]);
+function convertResults(wTypes, conv, localBase, descs = []) {
+	if (wTypes.length === 0 || !needsConv(wTypes, descs)) return [];
+	if (wTypes.length === 1) return conv(wTypes[0], descs[0]?.is64);
 	const out = [];
 	for (let i = wTypes.length - 1; i >= 0; i--)
 		out.push({ op: "local.set", index: localBase + i });
 	for (let i = 0; i < wTypes.length; i++)
-		out.push({ op: "local.get", index: localBase + i }, ...conv(wTypes[i]));
+		out.push(
+			{ op: "local.get", index: localBase + i },
+			...conv(wTypes[i], descs[i]?.is64),
+		);
 	return out;
 }
 
@@ -1022,19 +1017,19 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 	}
 	// Parameter `i` converted from its boundary form.
-	const getIn = (i, wType) => [get(i), ...fromExt(wType)];
+	const getIn = (i, wType, is64 = false) => [get(i), ...fromExt(wType, is64)];
 	const EXT = "externref";
 
-	for (const [name, { info }] of needs.structs) {
+	for (const [name, { info, fields }] of needs.structs) {
 		const ref = toRef(info);
 		const ti = info.typeIndex;
 		const fieldWTypes = info.fields.map((f) => f.wType);
 		addFunc(
 			`__new_${name}`,
-			fieldWTypes.map(extType),
+			fieldWTypes.map((w, i) => extType(w, fields[i]?.desc?.is64)),
 			[EXT],
 			[
-				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
+				...fieldWTypes.flatMap((w, i) => getIn(i, w, fields[i]?.desc?.is64)),
 				{ op: "struct.new", typeIndex: ti },
 				...toExt(ref),
 			],
@@ -1064,23 +1059,24 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 		for (let i = 0; i < info.fields.length; i++) {
 			const f = info.fields[i];
+			const is64 = Boolean(fields[i]?.desc?.is64);
 			addFunc(
 				`__get_${name}_${f.name}`,
 				[EXT],
-				[extType(f.wType)],
+				[extType(f.wType, is64)],
 				[
 					...getIn(0, ref),
 					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
-					...toExt(f.wType),
+					...toExt(f.wType, is64),
 				],
 			);
 			addFunc(
 				`__set_${name}_${f.name}`,
-				[EXT, extType(f.wType)],
+				[EXT, extType(f.wType, is64)],
 				[],
 				[
 					...getIn(0, ref),
-					...getIn(1, f.wType),
+					...getIn(1, f.wType, is64),
 					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
 				],
 			);
@@ -1106,25 +1102,26 @@ export function addBoundaryHelpers(mod, meta) {
 			["i32"],
 			[...getIn(0, ref), { op: "array.len" }],
 		);
+		const is64 = Boolean(desc.elem?.is64);
 		addFunc(
 			`__array_get_${key}`,
 			[EXT, "i32"],
-			[extType(arrInfo.elemWType)],
+			[extType(arrInfo.elemWType, is64)],
 			[
 				...getIn(0, ref),
 				get(1),
 				{ op: "array.get", typeIndex: arrInfo.typeIndex },
-				...toExt(arrInfo.elemWType),
+				...toExt(arrInfo.elemWType, is64),
 			],
 		);
 		addFunc(
 			`__array_set_${key}`,
-			[EXT, "i32", extType(arrInfo.elemWType)],
+			[EXT, "i32", extType(arrInfo.elemWType, is64)],
 			[],
 			[
 				...getIn(0, ref),
 				get(1),
-				...getIn(2, arrInfo.elemWType),
+				...getIn(2, arrInfo.elemWType, is64),
 				{ op: "array.set", typeIndex: arrInfo.typeIndex },
 			],
 		);
@@ -1135,6 +1132,7 @@ export function addBoundaryHelpers(mod, meta) {
 		const ref = desc.wType;
 		const arrTI = sliceInfo.arrInfo.typeIndex;
 		const sTI = sliceInfo.typeIndex;
+		const is64 = Boolean(desc.elem?.is64);
 		const elemAddr = [
 			...getIn(0, ref),
 			{ op: "struct.get", typeIndex: sTI, fieldIndex: 0 },
@@ -1166,11 +1164,11 @@ export function addBoundaryHelpers(mod, meta) {
 		addFunc(
 			`__slice_get_${key}`,
 			[EXT, "i32"],
-			[extType(sliceInfo.elemWType)],
+			[extType(sliceInfo.elemWType, is64)],
 			[
 				...elemAddr,
 				{ op: "array.get", typeIndex: arrTI },
-				...toExt(sliceInfo.elemWType),
+				...toExt(sliceInfo.elemWType, is64),
 			],
 		);
 		addFunc(
@@ -1191,11 +1189,11 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 		addFunc(
 			`__slice_set_${key}`,
-			[EXT, "i32", extType(sliceInfo.elemWType)],
+			[EXT, "i32", extType(sliceInfo.elemWType, is64)],
 			[],
 			[
 				...elemAddr,
-				...getIn(2, sliceInfo.elemWType),
+				...getIn(2, sliceInfo.elemWType, is64),
 				{ op: "array.set", typeIndex: arrTI },
 			],
 		);
@@ -1205,6 +1203,8 @@ export function addBoundaryHelpers(mod, meta) {
 		const ci = desc.closureInfo;
 		const invokeIdx = mod.importCache.get(`env.__invoke$${key}`);
 		const nParams = ci.paramWTypes.length;
+		const paramDescs = desc.params ?? [];
+		const returnDescs = desc.returns ?? [];
 		// Thunk: wasm closure body calling the JS callback (boundary forms out, back in).
 		const thunkIdx = addFunc(
 			`__jsthunk$${key}`,
@@ -1213,12 +1213,17 @@ export function addBoundaryHelpers(mod, meta) {
 			[
 				get(0),
 				{ op: "extern.convert_any" },
-				...ci.paramWTypes.flatMap((w, i) => [get(i + 1), ...toExt(w)]),
+				...ci.paramWTypes.flatMap((w, i) => [
+					get(i + 1),
+					...toExt(w, paramDescs[i]?.is64),
+				]),
 				{ op: "call", funcIndex: invokeIdx },
-				...convertResults(ci.returnWTypes, fromExt, nParams + 1),
+				...convertResults(ci.returnWTypes, fromExt, nParams + 1, returnDescs),
 			],
 			false,
-			ci.returnWTypes.length > 1 ? ci.returnWTypes.map(extType) : [],
+			ci.returnWTypes.length > 1
+				? ci.returnWTypes.map((w, i) => extType(w, returnDescs[i]?.is64))
+				: [],
 		);
 		mod.addRefFuncElement(thunkIdx);
 		addFunc(
@@ -1236,16 +1241,18 @@ export function addBoundaryHelpers(mod, meta) {
 		// JS calling a wasm closure (boundary forms in, results out).
 		addFunc(
 			`__call_fn$${key}`,
-			[EXT, ...ci.paramWTypes.map(extType)],
-			ci.returnWTypes.map(extType),
+			[EXT, ...ci.paramWTypes.map((w, i) => extType(w, paramDescs[i]?.is64))],
+			ci.returnWTypes.map((w, i) => extType(w, returnDescs[i]?.is64)),
 			[
 				...getIn(0, desc.wType),
 				{ op: "struct.get", typeIndex: ci.typeIndex, fieldIndex: 1 },
-				...ci.paramWTypes.flatMap((w, i) => getIn(i + 1, w)),
+				...ci.paramWTypes.flatMap((w, i) =>
+					getIn(i + 1, w, paramDescs[i]?.is64),
+				),
 				...getIn(0, desc.wType),
 				{ op: "struct.get", typeIndex: ci.typeIndex, fieldIndex: 0 },
 				{ op: "call_ref", typeIndex: ci.funcTypeIndex },
-				...convertResults(ci.returnWTypes, toExt, nParams + 1),
+				...convertResults(ci.returnWTypes, toExt, nParams + 1, returnDescs),
 			],
 			true,
 			ci.returnWTypes.length > 1 ? ci.returnWTypes : [],
@@ -1263,17 +1270,20 @@ export function addBoundaryHelpers(mod, meta) {
 		if (sig?.form !== "func") return;
 		const paramW = sig.params;
 		const resultW = sig.results;
-		if (!needsConv(paramW) && !needsConv(resultW)) return;
+		const paramDescs = entry.params ?? [];
+		const resultDescs = entry.returns ?? [];
+		if (!needsConv(paramW, paramDescs) && !needsConv(resultW, resultDescs))
+			return;
 		// Exported names become JS identifiers: no dot of a qualified type.
 		entry.callName = `__x_${entry.exportName}`.replaceAll(".", "_");
 		addFunc(
 			entry.callName,
-			paramW.map(extType),
-			resultW.map(extType),
+			paramW.map((w, i) => extType(w, paramDescs[i]?.is64)),
+			resultW.map((w, i) => extType(w, resultDescs[i]?.is64)),
 			[
-				...paramW.flatMap((w, i) => getIn(i, w)),
+				...paramW.flatMap((w, i) => getIn(i, w, paramDescs[i]?.is64)),
 				{ op: "call", funcIndex: fnIdx },
-				...convertResults(resultW, toExt, paramW.length),
+				...convertResults(resultW, toExt, paramW.length, resultDescs),
 			],
 			true,
 			resultW.length > 1 ? resultW : [],
@@ -1318,16 +1328,16 @@ export function addBoundaryHelpers(mod, meta) {
 	}
 
 	for (const [name, desc] of needs.anonStructs) {
-		const { info } = desc;
+		const { info, fields } = desc;
 		const ref = desc.wType;
 		const ti = info.typeIndex;
 		const fieldWTypes = info.fields.map((f) => f.wType);
 		addFunc(
 			`__new_${name}`,
-			fieldWTypes.map(extType),
+			fieldWTypes.map((w, i) => extType(w, fields[i]?.desc?.is64)),
 			[EXT],
 			[
-				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
+				...fieldWTypes.flatMap((w, i) => getIn(i, w, fields[i]?.desc?.is64)),
 				{ op: "struct.new", typeIndex: ti },
 				...toExt(ref),
 			],
@@ -1344,23 +1354,24 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 		for (let i = 0; i < info.fields.length; i++) {
 			const f = info.fields[i];
+			const is64 = Boolean(fields[i]?.desc?.is64);
 			addFunc(
 				`__get_${name}_${f.name}`,
 				[EXT],
-				[extType(f.wType)],
+				[extType(f.wType, is64)],
 				[
 					...getIn(0, ref),
 					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
-					...toExt(f.wType),
+					...toExt(f.wType, is64),
 				],
 			);
 			addFunc(
 				`__set_${name}_${f.name}`,
-				[EXT, extType(f.wType)],
+				[EXT, extType(f.wType, is64)],
 				[],
 				[
 					...getIn(0, ref),
-					...getIn(1, f.wType),
+					...getIn(1, f.wType, is64),
 					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
 				],
 			);
@@ -1368,15 +1379,20 @@ export function addBoundaryHelpers(mod, meta) {
 	}
 
 	for (const [key, desc] of needs.boxes) {
-		const { boxInfo } = desc;
+		const { boxInfo, base } = desc;
 		const ref = desc.wType;
 		const ti = boxInfo.typeIndex;
 		const w = boxInfo.wType;
+		const is64 = Boolean(base?.is64);
 		addFunc(
 			`__box_new_${key}`,
-			[extType(w)],
+			[extType(w, is64)],
 			[EXT],
-			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
+			[
+				...getIn(0, w, is64),
+				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
+			],
 		);
 		const cast = {
 			op: "ref.cast",
@@ -1386,29 +1402,29 @@ export function addBoundaryHelpers(mod, meta) {
 		addFunc(
 			`__box_get_${key}`,
 			[EXT],
-			[extType(w)],
+			[extType(w, is64)],
 			[
 				...getIn(0, ref),
 				cast,
 				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
-				...toExt(w),
+				...toExt(w, is64),
 			],
 		);
 		addFunc(
 			`__box_set_${key}`,
-			[EXT, extType(w)],
+			[EXT, extType(w, is64)],
 			[],
 			[
 				...getIn(0, ref),
 				cast,
-				...getIn(1, w),
+				...getIn(1, w, is64),
 				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
 			],
 		);
 	}
 
 	for (const [key, desc] of needs.maps) {
-		const { mapInfo, keySliceDesc, valSliceDesc } = desc;
+		const { mapInfo, keySliceDesc, valSliceDesc, keyDesc, valDesc } = desc;
 		const makeIdx = mod.resolveFuncIndex(mapInfo.makeFuncName);
 		addFunc(
 			`__map_new_${key}`,
@@ -1419,12 +1435,16 @@ export function addBoundaryHelpers(mod, meta) {
 		const setIdx = mod.resolveFuncIndex(mapInfo.setFuncName);
 		addFunc(
 			`__map_set_${key}`,
-			[EXT, extType(mapInfo.keyWType), extType(mapInfo.valWType)],
+			[
+				EXT,
+				extType(mapInfo.keyWType, keyDesc?.is64),
+				extType(mapInfo.valWType, valDesc?.is64),
+			],
 			[],
 			[
 				...getIn(0, desc.wType),
-				...getIn(1, mapInfo.keyWType),
-				...getIn(2, mapInfo.valWType),
+				...getIn(1, mapInfo.keyWType, keyDesc?.is64),
+				...getIn(2, mapInfo.valWType, valDesc?.is64),
 				{ op: "call", funcIndex: setIdx },
 			],
 		);
@@ -1483,80 +1503,27 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 	}
 
-	if (needs.time) {
-		const timeInfo = mod.getStructType("time.Time");
-		if (timeInfo) {
-			const timeWType = toRef(timeInfo);
-			addFunc(
-				"__time_make",
-				["f64", "i32"],
-				[EXT],
-				[
-					get(0),
-					{ op: "i64.trunc_sat_f64_s" },
-					{ op: "i64.const", value: 1000000n },
-					{ op: "i64.mul" },
-					get(1),
-					{ op: "ref.null", heapType: "any" },
-					{ op: "struct.new", typeIndex: timeInfo.typeIndex },
-					...toExt(timeWType),
-				],
-			);
-			addFunc(
-				"__time_unix_milli",
-				[EXT],
-				["f64"],
-				[
-					get(0),
-					{ op: "ref.is_null" },
-					{ op: "if", blockType: "f64" },
-					{ op: "f64.const", value: 0 },
-					{ op: "else" },
-					...getIn(0, timeWType),
-					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 0 },
-					{ op: "i64.const", value: 1000000n },
-					{ op: "i64.div_s" },
-					{ op: "f64.convert_i64_s" },
-					{ op: "end" },
-				],
-			);
-			addFunc(
-				"__time_offset",
-				[EXT],
-				["i32"],
-				[
-					get(0),
-					{ op: "ref.is_null" },
-					{ op: "if", blockType: "i32" },
-					{ op: "i32.const", value: 0 },
-					{ op: "else" },
-					...getIn(0, timeWType),
-					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 1 },
-					{ op: "end" },
-				],
-			);
-		}
-	}
-
 	for (const c of meta.consts ?? []) {
 		if (!c.dynamic) continue;
 		const g = mod.resolveGlobal(c.name);
 		if (!g) continue;
+		const is64 = Boolean(c.desc?.is64);
 		addFunc(
 			`__const_${c.name}`,
 			[],
-			[extType(c.desc.wType)],
-			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType)],
+			[extType(c.desc.wType, is64)],
+			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType, is64)],
 		);
 	}
 	for (const v of meta.vars ?? []) {
 		const g = v.shared ? null : mod.resolveGlobal(v.name);
 		if (!g) continue;
+		const is64 = Boolean(v.desc?.is64);
 		addFunc(
 			`__var_${v.name}`,
 			[],
-			[extType(v.desc.wType)],
-			[{ op: "global.get", index: g.index }, ...toExt(v.desc.wType)],
+			[extType(v.desc.wType, is64)],
+			[{ op: "global.get", index: g.index }, ...toExt(v.desc.wType, is64)],
 		);
 	}
 }
@@ -1625,6 +1592,13 @@ function addIfaceHelpers(desc, mod, addFunc, addTrampoline) {
 
 const P = "__gfw_"; // facade helper prefix
 
+// Pieces of the strings host imports (written for use inside the templates
+// below, where a backslash escape must be doubled).
+const GO_SPACE =
+	"[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]";
+const BAD_RUNE = "r < 0 || r > 0x10FFFF || (r >= 0xD800 && r <= 0xDFFF)";
+const SURROGATE = "(v >= 0xD800 && v <= 0xDFFF)";
+
 // JS expression converting JS value `v` into the wasm representation.
 function inExpr(desc, v) {
 	switch (desc.k) {
@@ -1633,7 +1607,7 @@ function inExpr(desc, v) {
 		case "i32":
 			return `(${v} | 0)`;
 		case "i64":
-			return `${P}i64in(${v})`;
+			return desc.is64 ? `BigInt(${v})` : `${P}i64in(${v})`;
 		case "f32":
 		case "f64":
 			return `(+${v})`;
@@ -1647,8 +1621,6 @@ function inExpr(desc, v) {
 			return `${P}f32x4in(${v})`;
 		case "mask4":
 			return `${P}mask4in(${v})`;
-		case "time":
-			return desc.ptr ? `${P}timein_ptr(${v})` : `${P}timein(${v})`;
 		case "map":
 			return `${P}mapin_${desc.key}(${v})`;
 		case "ptr_box":
@@ -1686,6 +1658,10 @@ function outExpr(desc, v) {
 		case "i32":
 			return desc.unsigned ? `(${v} >>> 0)` : v;
 		case "i64":
+			if (desc.is64)
+				return desc.unsigned
+					? `BigInt.asUintN(64, ${v})`
+					: `BigInt.asIntN(64, ${v})`;
 			return desc.unsigned ? `${P}u64out(${v})` : `${P}i64out(${v})`;
 		case "string":
 			return `(${v} ?? "")`;
@@ -1695,8 +1671,6 @@ function outExpr(desc, v) {
 			return `${P}f32x4out(${v})`;
 		case "mask4":
 			return `${P}mask4out(${v})`;
-		case "time":
-			return desc.ptr ? `${P}timeout_ptr(${v})` : `${P}timeout(${v})`;
 		case "map":
 			return `${P}mapout_${desc.key}(${v})`;
 		case "ptr_box":
@@ -1729,10 +1703,11 @@ function zeroExpr(desc) {
 		case "bool":
 			return "false";
 		case "i32":
-		case "i64":
 		case "f32":
 		case "f64":
 			return "0";
+		case "i64":
+			return desc.is64 ? "0n" : "0";
 		case "string":
 			return '""';
 		case "f32x4":
@@ -1740,7 +1715,6 @@ function zeroExpr(desc) {
 		case "mask4":
 			return "[false, false, false, false]";
 		case "error":
-		case "time":
 		case "map":
 		case "ptr_box":
 			return "null";
@@ -1913,23 +1887,71 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			}
 			return h;
 		},
-		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
-		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
-		"str_to_valid_utf8": (s, repl) => (s ? s.replace(/(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])+/g, repl ?? "") : (s ?? "")),
-		"str_trim_space": (s) => (s ? s.trim() : ""),
-		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
-		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),
-		"str_has_suffix": (s, suf) => (s && suf !== undefined ? (s.endsWith(suf) ? 1 : 0) : 0),
-		"str_index": (s, sub) => (s ? s.indexOf(sub) : -1),
-		"str_last_index": (s, sub) => (s ? s.lastIndexOf(sub) : -1),
-		"str_repeat": (s, n) => (s && n > 0 ? s.repeat(Number(n)) : ""),
-		"str_replace_all": (s, o, n) => (s ? s.replaceAll(o, n) : ""),
-		"str_equal_fold": (a, b) => ((a ?? "").toLowerCase() === (b ?? "").toLowerCase() ? 1 : 0),
-		"str_count": (s, sep) => {
-			if (!s) return sep === "" ? 1 : 0;
-			if (sep === "") return s.length + 1;
-			return s.split(sep).length - 1;
+		"str_to_upper": (s) => ${P}mapCase(s ?? "", "toUpperCase"),
+		"str_to_lower": (s) => ${P}mapCase(s ?? "", "toLowerCase"),
+		"str_trim_space": (s) => {
+			s = s ?? "";
+			const sp = /${GO_SPACE}/;
+			let i = 0, j = s.length;
+			while (i < j && sp.test(s[i])) i++;
+			while (j > i && sp.test(s[j - 1])) j--;
+			return s.slice(i, j);
 		},
+		"str_contains": (s, sub) => ((s ?? "").includes(sub ?? "") ? 1 : 0),
+		"str_has_prefix": (s, pre) => ((s ?? "").startsWith(pre ?? "") ? 1 : 0),
+		"str_has_suffix": (s, suf) => ((s ?? "").endsWith(suf ?? "") ? 1 : 0),
+		"strconv_shortest": (f) => f.toExponential(),
+		"strconv_parse_decimal": (s) => Number((s ?? "").replaceAll("_", "")),
+		"str_index": (s, sub) => (s ?? "").indexOf(sub ?? ""),
+		"str_last_index": (s, sub) => (s ?? "").lastIndexOf(sub ?? ""),
+		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
+		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
+		"str_index_rune": (s, r) => (${BAD_RUNE} ? -1 : (s ?? "").indexOf(String.fromCodePoint(r))),
+		"str_contains_rune": (s, r) => (!(${BAD_RUNE}) && (s ?? "").includes(String.fromCodePoint(r)) ? 1 : 0),
+		"str_index_any": (s, cs) => {
+			s = s ?? "";
+			let m = -1;
+			for (const c of (cs ?? "")) {
+				const v = c.codePointAt(0);
+				if (${SURROGATE}) continue;
+				const i = s.indexOf(c);
+				if (i >= 0 && (m < 0 || i < m)) m = i;
+			}
+			return m;
+		},
+		"str_last_index_any": (s, cs) => {
+			s = s ?? "";
+			let m = -1;
+			for (const c of (cs ?? "")) {
+				const v = c.codePointAt(0);
+				if (${SURROGATE}) continue;
+				const i = s.lastIndexOf(c);
+				if (i > m) m = i;
+			}
+			return m;
+		},
+		"str_contains_any": (s, cs) => {
+			s = s ?? "";
+			for (const c of (cs ?? "")) {
+				const v = c.codePointAt(0);
+				if (!${SURROGATE} && s.includes(c)) return 1;
+			}
+			return 0;
+		},
+		"str_count": (s, t) => {
+			s = s ?? ""; t = t ?? "";
+			if (t === "") return [...s].length + 1;
+			let n = 0;
+			for (let i = s.indexOf(t); i !== -1; i = s.indexOf(t, i + t.length)) n++;
+			return n;
+		},
+		"str_replace": (s, o, w, n) => ${P}replace(s ?? "", o ?? "", w ?? "", n),
+		"str_replace_all": (s, o, w) => ${P}replace(s ?? "", o ?? "", w ?? "", -1),
+		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
+		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
+		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
+		"str_trim_prefix": (s, p) => ((s ?? "").startsWith(p ?? "") ? (s ?? "").slice((p ?? "").length) : (s ?? "")),
+		"str_trim_suffix": (s, p) => ((s ?? "").endsWith(p ?? "") ? (s ?? "").slice(0, (s ?? "").length - (p ?? "").length) : (s ?? "")),
 		"str_from_i64": (n) => String(n),
 		"str_from_i32": (n) => String(n),
 		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
@@ -2036,6 +2058,55 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
 	// Exports are needed by imports that call back into the module (t.Run).
 	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
+}
+// strings.ToUpper/ToLower: letter by letter through the first code point of
+// the host's mapping, as unicode.ToUpper/ToLower do; ASCII text maps whole.
+function ${P}mapCase(s, method) {
+	if (/^[\\x00-\\x7f]*$/.test(s)) return s[method]();
+	return Array.from(s, (c) => String.fromCodePoint(c[method]().codePointAt(0))).join("");
+}
+// Code-point-aware Trim/TrimLeft/TrimRight of strings.
+function ${P}trim(s, cutset, left, right) {
+	if (s === "" || cutset === "") return s;
+	const set = new Set(cutset);
+	let i = 0, j = s.length;
+	if (left) while (i < j) {
+		const c = s.codePointAt(i);
+		if (!set.has(String.fromCodePoint(c))) break;
+		i += c > 0xFFFF ? 2 : 1;
+	}
+	if (right) while (j > i) {
+		let k = j - 1;
+		const lo = s.charCodeAt(k);
+		if (lo >= 0xDC00 && lo <= 0xDFFF && k > i) {
+			const hi = s.charCodeAt(k - 1);
+			if (hi >= 0xD800 && hi <= 0xDBFF) k--;
+		}
+		if (!set.has(s.slice(k, j))) break;
+		j = k;
+	}
+	return s.slice(i, j);
+}
+// strings.Replace: an empty old string matches before every code point and at
+// the end; the replacement is literal.
+function ${P}replace(s, o, w, n) {
+	if (o === w || n === 0) return s;
+	if (o !== "") {
+		if (n < 0) return s.replaceAll(o, () => w);
+		let r = "", i = 0;
+		for (let k = n; k > 0; k--) {
+			const j = s.indexOf(o, i);
+			if (j < 0) break;
+			r += s.slice(i, j) + w;
+			i = j + o.length;
+		}
+		return r + s.slice(i);
+	}
+	const cs = [...s];
+	const m = n < 0 || n > cs.length + 1 ? cs.length + 1 : n;
+	let r = "";
+	for (let k = 0; k < m; k++) r += (k > 0 ? cs[k - 1] : "") + w;
+	return r + cs.slice(m - 1).join("");
 }`;
 
 // JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
@@ -2043,12 +2114,6 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
 ${HELPER_SPRINT}
-${HELPER_STRCONV}
-${HELPER_PATH_CLEAN}
-${HELPER_DURATION}
-${HELPER_SHA256}
-${HELPER_HEX}
-${HELPER_BASE64}
 function ${P}stdlib_fmt(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
@@ -2176,240 +2241,7 @@ function ${P}stdlib_fmt(stringTable, io) {
 	};
 }
 function ${P}stdlib_str(stringTable, io) {
-	let parts = [];
-	let cutBefore = "", cutAfter = "";
-	let replacerTarget = "", replacerPairs = [];
-	let strconvErr = null, strconvErrKind = 0;
-	let decodeSize = 0;
 	return {
-		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
-		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
-		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
-		"str_trim_prefix": (s, p) => (s && p && s.startsWith(p) ? s.slice(p.length) : (s ?? "")),
-		"str_trim_suffix": (s, p) => (s && p && s.endsWith(p) ? s.slice(0, s.length - p.length) : (s ?? "")),
-		"str_cut": (s, sep) => {
-			const i = (s ?? "").indexOf(sep ?? "");
-			if (i < 0) { cutBefore = s ?? ""; cutAfter = ""; return 0; }
-			cutBefore = (s ?? "").slice(0, i);
-			cutAfter = (s ?? "").slice(i + (sep ?? "").length);
-			return 1;
-		},
-		"str_cut_before": () => cutBefore,
-		"str_cut_after": () => cutAfter,
-		"str_cut_prefix": (s, p) => {
-			s = s ?? ""; p = p ?? "";
-			if (s.startsWith(p)) { cutAfter = s.slice(p.length); return 1; }
-			cutAfter = s; return 0;
-		},
-		"str_cut_suffix": (s, suf) => {
-			s = s ?? ""; suf = suf ?? "";
-			if (s.endsWith(suf)) { cutBefore = s.slice(0, s.length - suf.length); return 1; }
-			cutBefore = s; return 0;
-		},
-		"str_replace": (s, o, n, cnt) => {
-			s = s ?? ""; o = o ?? ""; n = n ?? "";
-			if (cnt < 0) return s.replaceAll(o, n);
-			let out = "", from = 0;
-			for (let k = 0; k < cnt; k++) {
-				const at = s.indexOf(o, from);
-				if (at < 0) break;
-				out += s.slice(from, at) + n;
-				from = at + o.length;
-				if (o === "") { if (from >= s.length) break; out += s[from]; from++; }
-			}
-			return out + s.slice(from);
-		},
-		"str_contains_rune": (s, r) => ((s ?? "").includes(String.fromCodePoint(r)) ? 1 : 0),
-		"str_contains_any": (s, cs) => { for (const c of (cs ?? "")) if ((s ?? "").includes(c)) return 1; return 0; },
-		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
-		"str_index_rune": (s, r) => (s ?? "").indexOf(String.fromCodePoint(r)),
-		"str_index_any": (s, cs) => { s = s ?? ""; let best = -1; for (const c of (cs ?? "")) { const i = s.indexOf(c); if (i >= 0 && (best < 0 || i < best)) best = i; } return best; },
-		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
-		"str_last_index_any": (s, cs) => {
-			s = s ?? ""; let best = -1;
-			for (const c of (cs ?? "")) {
-				const i = s.lastIndexOf(c);
-				if (i > best) best = i;
-			}
-			return best;
-		},
-		"str_title": (s) => (s ?? "").replace(/(^|[^\\p{L}\\p{N}_'])(\\p{Ll})/gu, (m, a, b) => a + b.toUpperCase()),
-		"str_split": (s, sep) => { parts = (s ?? "").split(sep ?? ""); return parts.length; },
-		"str_split_n": (s, sep, n) => {
-			s = s ?? ""; sep = sep ?? "";
-			if (n === 0) return -1;
-			if (n < 0) { parts = sep === "" ? [...s] : s.split(sep); return parts.length; }
-			if (sep === "") {
-				const chars = [...s];
-				if (chars.length <= n) { parts = chars; return parts.length; }
-				const r = chars.slice(0, n - 1);
-				r.push(chars.slice(n - 1).join(""));
-				parts = r;
-				return parts.length;
-			}
-			const r = [];
-			let cur = s;
-			for (let i = 1; i < n && cur.length; i++) {
-				const j = cur.indexOf(sep);
-				if (j < 0) break;
-				r.push(cur.slice(0, j));
-				cur = cur.slice(j + sep.length);
-			}
-			r.push(cur);
-			parts = r;
-			return parts.length;
-		},
-		"str_split_after": (s, sep) => {
-			s = s ?? ""; sep = sep ?? "";
-			if (sep === "") { parts = [...s]; return parts.length; }
-			const r = [];
-			let cur = s;
-			while (true) {
-				const j = cur.indexOf(sep);
-				if (j < 0) { r.push(cur); break; }
-				r.push(cur.slice(0, j + sep.length));
-				cur = cur.slice(j + sep.length);
-			}
-			parts = r;
-			return parts.length;
-		},
-		"str_split_after_n": (s, sep, n) => {
-			s = s ?? ""; sep = sep ?? "";
-			if (n === 0) return -1;
-			if (sep === "") {
-				const chars = [...s];
-				if (n < 0 || chars.length <= n) parts = chars;
-				else {
-					const r = chars.slice(0, n - 1);
-					r.push(chars.slice(n - 1).join(""));
-					parts = r;
-				}
-				return parts.length;
-			}
-			const r = [];
-			let cur = s;
-			for (let i = 1; (n < 0 || i < n) && cur.length; i++) {
-				const j = cur.indexOf(sep);
-				if (j < 0) break;
-				r.push(cur.slice(0, j + sep.length));
-				cur = cur.slice(j + sep.length);
-			}
-			r.push(cur);
-			parts = r;
-			return parts.length;
-		},
-		"str_fields": (s) => { parts = (s ?? "").split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter((p) => p !== ""); return parts.length; },
-		"str_part": (i) => parts[i] ?? "",
-		"str_replacer_init": (s) => {
-			replacerTarget = s ?? "";
-			replacerPairs = [];
-		},
-		"str_replacer_add": (o, n) => {
-			replacerPairs.push([o ?? "", n ?? ""]);
-		},
-		"str_replacer_run": () => {
-			let s = replacerTarget;
-			if (!replacerPairs.length || s === "") return s;
-			let out = "";
-			let i = 0;
-			while (i < s.length) {
-				let matched = false;
-				for (let k = 0; k < replacerPairs.length; k++) {
-					const [oldStr, newStr] = replacerPairs[k];
-					if (oldStr.length > 0 && s.startsWith(oldStr, i)) {
-						out += newStr;
-						i += oldStr.length;
-						matched = true;
-						break;
-					}
-				}
-				if (!matched) {
-					out += s[i];
-					i++;
-				}
-			}
-			return out;
-		},
-		"strconv_atoi": (s) => {
-			const r = __strconv_atoi(s ?? "");
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_parse_int": (s, base, bits) => {
-			const r = __strconv_parse_int(s ?? "", base, bits);
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_parse_float": (s) => {
-			const r = __strconv_parse_float(s ?? "");
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_parse_bool": (s) => {
-			const r = __strconv_parse_bool(s ?? "");
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0] ? 1 : 0;
-		},
-		"strconv_err": () => strconvErr,
-		"strconv_err_kind": () => strconvErrKind,
-		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
-		"strconv_format_int": (n, base) => n.toString(base),
-		"strconv_format_uint": (n, base) => BigInt.asUintN(64, BigInt(n)).toString(base),
-		"strconv_parse_uint": (s, base, bits) => {
-			const r = __strconv_parse_uint(s ?? "", base, bits);
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_quote": (s) => JSON.stringify(s ?? ""),
-		"strconv_unquote": (s) => {
-			s = s ?? "";
-			if (s.startsWith("\`") && s.endsWith("\`") && s.length >= 2) {
-				if (s.slice(1, -1).includes("\`")) {
-					strconvErr = "invalid syntax";
-					strconvErrKind = 1;
-					return "";
-				}
-				strconvErr = null;
-				strconvErrKind = 0;
-				return s.slice(1, -1);
-			}
-			try {
-				const v = JSON.parse(s);
-				if (typeof v !== "string") {
-					strconvErr = "invalid syntax";
-					strconvErrKind = 1;
-					return "";
-				}
-				strconvErr = null;
-				strconvErrKind = 0;
-				return v;
-			} catch (e) {
-				strconvErr = "invalid syntax";
-				strconvErrKind = 1;
-				return "";
-			}
-		},
-		"utf8_rune_count": (s) => { let n = 0; for (const _ of (s ?? "")) n++; return n; },
-		"utf8_rune_len": (r) => (r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? -1 : r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
-		"utf8_valid_string": (s) => (s ?? "").isWellFormed ? ((s ?? "").isWellFormed() ? 1 : 0) : (/[\\uD800-\\uDFFF]/.test((s ?? "").replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, "")) ? 0 : 1),
-		"utf8_decode_rune": (s, last) => {
-			s = s ?? "";
-			if (s.length === 0) { decodeSize = 0; return 0xfffd; }
-			let cp;
-			if (last) { const tail = s.codePointAt(s.length - 1); cp = (tail >= 0xdc00 && tail <= 0xdfff && s.length >= 2) ? s.codePointAt(s.length - 2) : tail; }
-			else cp = s.codePointAt(0);
-			if (cp >= 0xd800 && cp <= 0xdfff) { decodeSize = 1; return 0xfffd; }
-			// Size is in UTF-16 code units, matching the JS backend (strings are JS strings).
-			decodeSize = cp > 0xffff ? 2 : 1;
-			return cp;
-		},
-		"utf8_decode_size": () => decodeSize,
-		"utf8_full_rune": (s) => { s = s ?? ""; if (s.length === 0) return 0; const c = s.charCodeAt(0); return (c >= 0xd800 && c <= 0xdbff && s.length < 2) ? 0 : 1; },
 		// unicode
 		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
 		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
@@ -2425,66 +2257,10 @@ function ${P}stdlib_str(stringTable, io) {
 	};
 }
 function ${P}stdlib_sys(stringTable, io) {
-	let splitDir = "", splitFile = "";
-	let joinParts = [];
-	let matchHasErr = 0;
 	let trimStart = 0, trimEnd = 0;
-	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
 	let rawPos = 0;
-	let hexErr = null;
-	let base64Err = null;
-	let customBase64Encodings = [];
-	let bitsRem32 = 0;
-	let bitsRem64 = 0n;
 	return {
-		// html
-		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
-		"html_unescape": (s) => (s ?? "").replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, (m) => {
-			switch (m) {
-				case "&quot;": case "&#34;": return '"';
-				case "&apos;": case "&#39;": return "'";
-				case "&gt;": return ">";
-				case "&lt;": return "<";
-				case "&amp;": return "&";
-				default: {
-					if (m.startsWith("&#")) {
-						const raw = m.slice(2, -1);
-						const cp = (raw.startsWith("x") || raw.startsWith("X")) ? parseInt(raw.slice(1), 16) : parseInt(raw, 10);
-						return (cp >= 0 && cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) ? String.fromCodePoint(cp) : "\\uFFFD";
-					}
-					return m;
-				}
-			}
-		}),
-		// path
-		"path_base": (p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; },
-		"path_dir": (p) => { const s = p ?? ""; const i = s.lastIndexOf("/"); if (i < 0) return "."; const res = s.slice(0, i); return res === "" ? "/" : __pathClean(res); },
-		"path_ext": (p) => { const s = p ?? ""; const b = s.slice(s.lastIndexOf("/") + 1); const i = b.lastIndexOf("."); return i <= 0 ? "" : b.slice(i); },
-		"path_is_abs": (p) => (p ?? "").startsWith("/") ? 1 : 0,
-		"path_clean": (p) => __pathClean(p ?? ""),
-		"path_split": (p) => {
-			const s = p ?? "";
-			const i = s.lastIndexOf("/");
-			if (i < 0) { splitDir = ""; splitFile = s; }
-			else { splitDir = s.slice(0, i + 1); splitFile = s.slice(i + 1); }
-		},
-		"path_split_dir": () => splitDir,
-		"path_split_file": () => splitFile,
-		"path_join_init": () => { joinParts = []; },
-		"path_join_push": (s) => { if (s) joinParts.push(s); },
-		"path_join_run": () => {
-			if (joinParts.length === 0) return "";
-			const res = __pathClean(joinParts.join("/"));
-			joinParts = [];
-			return res;
-		},
-		"path_match": (pat, name) => {
-			const r = __pathMatch(pat ?? "", name ?? "");
-			matchHasErr = r[1] ? 1 : 0;
-			return r[0] ? 1 : 0;
-		},
-		"path_match_has_err": () => matchHasErr,
 		// bytes trim
 		"bytes_trim": (s, cutset, left, right) => {
 			const cs = new Set(Array.from(cutset ?? ""));
@@ -2500,111 +2276,7 @@ function ${P}stdlib_sys(stringTable, io) {
 		"bytes_trim_end": () => trimEnd,
 		// time
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
-		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
-		"time_duration_string": (d) => __durationString(d),
-		"time_parse_duration": (s) => {
-			const res = __timeParseDuration(s);
-			if (res[1]) {
-				timeParseDurationErr = res[1].message || String(res[1]);
-				return 0n;
-			}
-			timeParseDurationErr = null;
-			return BigInt(res[0]);
-		},
-		"time_parse_duration_err": () => timeParseDurationErr,
-		"time_month_string": (m) => __monthString(m),
-		"time_weekday_string": (w) => __weekdayString(w),
-		"time_parse": (layout, val) => {
-			try {
-				let s = String(val ?? "");
-				if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-					s = s.slice(1, -1);
-				}
-				const d = new Date(s);
-				if (isNaN(d.getTime())) throw 0;
-				let subNs = 0;
-				const m = /\\.([0-9]{1,9})/.exec(s);
-				if (m) {
-					subNs = Number(m[1].padEnd(9, "0")) % 1000000;
-				}
-				timeParseErr = null;
-				if (s.endsWith("Z") || s.endsWith("z")) {
-					timeParseOffset = 0;
-				} else {
-					const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(s);
-					if (tzMatch) {
-						const sign = tzMatch[1] === "+" ? 1 : -1;
-						timeParseOffset = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
-					} else {
-						timeParseOffset = -d.getTimezoneOffset() * 60;
-					}
-				}
-				timeParseSubNs = subNs;
-				return d.getTime();
-			} catch {
-				timeParseErr = "parsing time: cannot parse";
-				timeParseOffset = 0;
-				timeParseSubNs = 0;
-				return 0;
-			}
-		},
-		"time_parse_err": () => timeParseErr,
-		"time_parse_offset": () => timeParseOffset,
-		"time_parse_sub_ns": () => timeParseSubNs,
-		"time_format": (y, m, d, hr, min, sec, wd, ms, offsetSec, layout) => {
-			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
-				if (t.startsWith(".")) {
-					const isZeroPad = t.includes("0");
-					const maxLen = t.length - 1;
-					let frac = pad(ms % 1000000000, 9);
-					if (maxLen <= 9) frac = frac.slice(0, maxLen);
-					else frac = frac.padEnd(maxLen, "0");
-					if (!isZeroPad) {
-						frac = frac.replace(/0+$/, "");
-						return frac.length > 0 ? "." + frac : "";
-					}
-					return "." + frac;
-				}
-				switch (t) {
-					case "2006": return String(y);
-					case "06":   return String(y).slice(-2);
-					case "Monday": return DAYS[wd];
-					case "Mon":    return DAYS[wd].slice(0, 3);
-					case "January": return MONTHS[m - 1];
-					case "Jan":     return MONTHS[m - 1].slice(0, 3);
-					case "01": return pad(m);
-					case "1":  return String(m);
-					case "02": return pad(d);
-					case "2":  return String(d);
-					case "15": return pad(hr);
-					case "PM": return hr < 12 ? "AM" : "PM";
-					case "pm": return hr < 12 ? "am" : "pm";
-					case "03": return pad(hr % 12 || 12);
-					case "3":  return String(hr % 12 || 12);
-					case "04": return pad(min);
-					case "4":  return String(min);
-					case "05": return pad(sec);
-					case "5":  return String(sec);
-					case "Z07:00": {
-						const o = Math.floor(offsetSec / 60);
-						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
-					}
-					case "-07:00": {
-						const o = Math.floor(offsetSec / 60);
-						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
-					}
-					case "-0700": {
-						const o = Math.floor(offsetSec / 60);
-						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
-					}
-					case "MST": return offsetSec === 0 ? "UTC" : "LOCAL";
-					default: return t;
-				}
-			});
-		},
+		"time_timezone_offset": (ms) => (-new Date(ms).getTimezoneOffset() * 60) | 0,
 		"raw_bytes_init": (len) => {
 			rawBytes = new Uint8Array(len);
 			rawPos = 0;
@@ -2628,72 +2300,6 @@ function ${P}stdlib_sys(stringTable, io) {
 			}
 			return len;
 		},
-		"crypto_sha256_sum": () => {
-			const d = __sha256.Sum256(rawBytes);
-			rawBytes = new Uint8Array(d);
-			return 32;
-		},
-		"hex_encode_to_string": () => {
-			return __hex_encode_to_string(rawBytes);
-		},
-		"hex_decode_string": (s) => {
-			const [res, err] = __hex_decode_string(s ?? "");
-			hexErr = err ? (err.message ?? String(err)) : null;
-			rawBytes = new Uint8Array(res);
-			return rawBytes.length;
-		},
-		"hex_get_err": () => hexErr,
-		"base64_new_encoding": (alphabet) => {
-			const id = customBase64Encodings.length + 4;
-			customBase64Encodings.push(__base64_make(alphabet ?? "", "="));
-			return id;
-		},
-		"base64_encode_to_string": (mode) => {
-			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
-			return (enc ?? __base64_std).EncodeToString(rawBytes);
-		},
-		"base64_decode_string": (mode, s) => {
-			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
-			const [res, err] = (enc ?? __base64_std).DecodeString(s ?? "");
-			base64Err = err ? (err.message ?? String(err)) : null;
-			rawBytes = new Uint8Array(res);
-			return rawBytes.length;
-		},
-		"base64_get_err": () => base64Err,
-		"bits_div32": (hi, lo, y) => {
-			const yu = y >>> 0;
-			if (yu === 0) throw new Error("runtime error: integer divide by zero");
-			const hiu = hi >>> 0;
-			if (hiu >= yu) throw new Error("runtime error: integer overflow");
-			const z = (BigInt(hiu) << 32n) | BigInt(lo >>> 0);
-			const yB = BigInt(yu);
-			bitsRem32 = Number(z % yB);
-			return Number(z / yB);
-		},
-		"bits_div32_rem": () => bitsRem32,
-		"bits_rem32": (hi, lo, y) => {
-			const yu = y >>> 0;
-			if (yu === 0) throw new Error("runtime error: integer divide by zero");
-			const z = (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
-			return Number(z % BigInt(yu));
-		},
-		"bits_div64": (hi, lo, y) => {
-			const yB = BigInt.asUintN(64, BigInt(y));
-			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
-			const hiB = BigInt.asUintN(64, BigInt(hi));
-			if (hiB >= yB) throw new Error("runtime error: integer overflow");
-			const loB = BigInt.asUintN(64, BigInt(lo));
-			const z = (hiB << 64n) | loB;
-			bitsRem64 = z % yB;
-			return z / yB;
-		},
-		"bits_div64_rem": () => bitsRem64,
-		"bits_rem64": (hi, lo, y) => {
-			const yB = BigInt.asUintN(64, BigInt(y));
-			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
-			const z = ((BigInt.asUintN(64, BigInt(hi)) % yB) << 64n) | BigInt.asUintN(64, BigInt(lo));
-			return z % yB;
-		},
 	};
 }
 function ${P}stdlib(stringTable, io) {
@@ -2703,14 +2309,6 @@ function ${P}stdlib(stringTable, io) {
 		${P}stdlib_str(stringTable, io),
 		${P}stdlib_sys(stringTable, io),
 	);
-}
-function ${P}trim(s, cutset, left, right) {
-	const cs = new Set(Array.from(cutset));
-	const chars = Array.from(s);
-	let a = 0, b = chars.length;
-	if (left) while (a < b && cs.has(chars[a])) a++;
-	if (right) while (b > a && cs.has(chars[b - 1])) b--;
-	return chars.slice(a, b).join("");
 }`;
 
 // Runtime loader emitted at the top of the facade.
@@ -3093,28 +2691,6 @@ function ${P}errin(e) {
 }`);
 	}
 
-	if (needs.time) {
-		out.push(`function ${P}timeout(r) {
-	if (r == null) return null;
-	const ms = __w.__time_unix_milli ? __w.__time_unix_milli(r) : 0;
-	const off = __w.__time_offset ? __w.__time_offset(r) : 0;
-	return { _d: new Date(ms), _offset: off };
-}
-function ${P}timeout_ptr(r) {
-	return ${P}timeout(r);
-}
-function ${P}timein(v) {
-	if (v == null) return null;
-	const d = v._d ? v._d : (v instanceof Date ? v : new Date(v));
-	const ms = d.getTime();
-	const off = typeof v?._offset === "number" ? v._offset : -d.getTimezoneOffset() * 60;
-	return __w.__time_make ? __w.__time_make(ms, off) : null;
-}
-function ${P}timein_ptr(v) {
-	return ${P}timein(v);
-}`);
-	}
-
 	if (needs.shared) {
 		// Zero-copy TypedArray views over the exported memory.  Memory never
 		// grows after the start function (allocation is startup-only), but the
@@ -3214,8 +2790,26 @@ function genBothStruct(out, name, fields) {
 		const got = `__w.__get_${name}_${f.name}(this.__ref)`;
 		return `"${f.name}": { "enumerable": true, "get"() { return ${viewExpr(f.desc, got)}; }, "set"(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); } }`;
 	});
+	// The one conversion `time.Time` has beyond the ordinary struct rules: JS
+	// code may pass a Date (or an object holding one in `_d`), and a Time
+	// handed to JS also reads as a Date through `_d`.
+	const isTime = name === "Time$$time";
+	if (isTime)
+		out.push(`function ${P}time_in(o) {
+	const d = o instanceof Date ? o : o?._d instanceof Date ? o._d : null;
+	if (d === null) return o;
+	const ms = d.getTime();
+	const off = typeof o._offset === "number" ? o._offset : -d.getTimezoneOffset() * 60;
+	const sec = Math.floor(ms / 1000);
+	return new Time$$time(BigInt(sec) + 62135596800n, (ms - sec * 1000) * 1000000, new Location$$time("", off, 0));
+}
+function ${P}time_out(t) {
+	Object.defineProperty(t, "_d", { configurable: true, get() { return new Date(Number(this.sec - 62135596800n) * 1000 + Math.floor(this.nsec / 1000000)); } });
+	Object.defineProperty(t, "_offset", { configurable: true, get() { return this.loc ? this.loc.offset : 0; } });
+	return t;
+}`);
 	out.push(`function ${P}to_${name}(o, isValue, m) {
-	if (o == null) return isValue ? __w.__zero_${name}() : null;
+${isTime ? `\to = ${P}time_in(o);\n` : ""}	if (o == null) return isValue ? __w.__zero_${name}() : null;
 	if (m) { const hit = m.get(o); if (hit) return hit; }
 	const r = __w.__new_${name}(${toArgs.join(", ")});
 	if (m) m.set(o, r);
@@ -3223,7 +2817,7 @@ function genBothStruct(out, name, fields) {
 }
 function ${P}from_${name}(r) {
 	if (r == null) return null;
-	return new ${name}(${fromArgs.join(", ")});
+	return ${isTime ? `${P}time_out(new ${name}(${fromArgs.join(", ")}))` : `new ${name}(${fromArgs.join(", ")})`};
 }
 // Live views share one prototype and are cached per wasm object so hot paths
 // (\`h.Pos.X = 1\` in a frame loop) do not allocate a wrapper per access.  The

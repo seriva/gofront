@@ -63,7 +63,7 @@ const MATH_EXTRA = {
 	Nextafter32: ([x, y]) =>
 		`((x, y) => { if (Number.isNaN(x) || Number.isNaN(y)) return NaN; if (x === y) return x; if (x === 0) { const s = 1.401298464324817e-45; return y > 0 ? s : -s; } const buf = new ArrayBuffer(4); const f32 = new Float32Array(buf); const i32 = new Int32Array(buf); f32[0] = x; let b = i32[0]; if ((x > 0 && y > x) || (x < 0 && y > x)) b = b + (x > 0 ? 1 : -1); else b = b + (x > 0 ? -1 : 1); i32[0] = b; return f32[0]; })(${x}, ${y})`,
 	Float64bits: ([x]) =>
-		`((f) => { const b = new ArrayBuffer(8); new Float64Array(b)[0] = f; return Number(new BigUint64Array(b)[0]); })(${x})`,
+		`((f) => { const b = new ArrayBuffer(8); new Float64Array(b)[0] = f; return new BigUint64Array(b)[0]; })(${x})`,
 	Float64frombits: ([b]) =>
 		`((u) => { const buf = new ArrayBuffer(8); new BigUint64Array(buf)[0] = BigInt(u); return new Float64Array(buf)[0]; })(${b})`,
 	Float32bits: ([x]) =>

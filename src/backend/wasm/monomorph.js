@@ -118,7 +118,11 @@ export function typeToTypeNode(t) {
 	if (t.kind === "array") {
 		return {
 			kind: "ArrayType",
-			len: t.len ?? t.size ?? 0,
+			size: {
+				kind: "BasicLit",
+				litKind: "INT",
+				value: String(t.len ?? t.size ?? 0),
+			},
 			elem: typeToTypeNode(t.elem),
 		};
 	}
@@ -133,13 +137,51 @@ export function typeToTypeNode(t) {
 	return { kind: "TypeName", name: t.name ?? "any" };
 }
 
+// Replaces the type parameters inside a checker type (`[]E`, `map[K]V`,
+// `Box[E]`) by their type arguments; the result mixes checker types and the
+// AST type nodes of the substitution, which `typeKey` and `typeToTypeNode`
+// both accept.
+function substituteInType(t, map) {
+	if (!t || typeof t !== "object") return t;
+	const sub = (x) => substituteInType(x, map);
+	switch (t.kind) {
+		case "typeParam":
+			return map.has(t.name) ? map.get(t.name) : t;
+		case "slice":
+		case "array":
+			return { ...t, elem: sub(t.elem) };
+		case "pointer":
+			return { ...t, base: sub(t.base) };
+		case "map":
+			return { ...t, key: sub(t.key), value: sub(t.value) };
+		case "func":
+			return {
+				...t,
+				params: (t.params ?? []).map(sub),
+				returns: (t.returns ?? []).map(sub),
+			};
+		case "named":
+			return t.typeArgs?.length ? { ...t, typeArgs: t.typeArgs.map(sub) } : t;
+		default:
+			return t;
+	}
+}
+
+// A partial instantiation (`Grow[S](nil, n)`) lists only the explicit type
+// arguments; the checker recorded the complete list, which replaces it.
+function completeTypeArgs(node, typeSubstMap) {
+	if (node._typeArgs?.length > (node.typeArgs?.length ?? 0))
+		return node._typeArgs.map((t) => substituteInType(t, typeSubstMap));
+	return node.typeArgs;
+}
+
 function getSpecializedName(baseName, typeArgs) {
 	if (!typeArgs || typeArgs.length === 0) return baseName;
 	const keys = typeArgs.map(typeKey).join("$");
 	return `${baseName}$${keys}`;
 }
 
-const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col"]);
+const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col", "_spread"]);
 
 function cloneAst(node) {
 	if (!node || typeof node !== "object") return node;
@@ -252,6 +294,7 @@ function substituteTypesInAst(
 		}
 		const baseName = node.expr?.name;
 		if (baseName) {
+			node.typeArgs = completeTypeArgs(node, typeSubstMap);
 			const sName = getSpecializedName(baseName, node.typeArgs);
 			const isType = genericTypes ? genericTypes.has(baseName) : false;
 			if (onGenericUsage) {
@@ -271,6 +314,13 @@ function substituteTypesInAst(
 	// 3b. CompositeLit
 	if (node.kind === "CompositeLit") {
 		const targetProp = node.typeExpr ? "typeExpr" : node.type ? "type" : null;
+		// `S{a, b}` with S a type parameter: the type is a bare identifier.
+		if (
+			targetProp &&
+			node[targetProp]?.kind === "Ident" &&
+			typeSubstMap.has(node[targetProp].name)
+		)
+			node[targetProp] = cloneAst(typeSubstMap.get(node[targetProp].name));
 		if (targetProp && node[targetProp]) {
 			node[targetProp] = substituteTypesInAst(
 				node[targetProp],
@@ -301,6 +351,18 @@ function substituteTypesInAst(
 				_line: node._line,
 			};
 		}
+		// `make(S, n)` / `new(S)`: the type argument is a bare identifier.
+		if (
+			node.func?.kind === "Ident" &&
+			(node.func.name === "make" || node.func.name === "new") &&
+			node.args?.[0]?.kind === "Ident" &&
+			typeSubstMap.has(node.args[0].name)
+		) {
+			node.args[0] = {
+				kind: "TypeExpr",
+				type: cloneAst(typeSubstMap.get(node.args[0].name)),
+			};
+		}
 		if (node.func?.kind === "Ident") {
 			let typeArgs = node._typeArgs ?? node.func._typeArgs;
 			if (typeArgs) {
@@ -309,7 +371,7 @@ function substituteTypesInAst(
 					if (name && typeSubstMap.has(name)) {
 						return typeSubstMap.get(name);
 					}
-					return t;
+					return substituteInType(t, typeSubstMap);
 				});
 				const baseName = node.func.name;
 				const sName = getSpecializedName(baseName, typeArgs);
@@ -559,9 +621,14 @@ export function monomorphise(programs, checker) {
 	const genericFuncs = new Map();
 	const genericTypes = new Map();
 	const genericMethods = new Map(); // recvBaseName -> Array<MethodDecl>
+	// Template declaration -> its program; a specialization joins the program
+	// of its template, so a wasm package's instances stay wasm-package
+	// declarations even when a Go-source stdlib package is linked first.
+	const homeOf = new Map();
 
 	for (const p of progs) {
 		for (const d of p?.decls ?? []) {
+			homeOf.set(d, p);
 			if (d.kind === "FuncDecl" && d.typeParams && d.typeParams.length > 0) {
 				genericFuncs.set(d.name, d);
 			} else if (
@@ -650,6 +717,7 @@ export function monomorphise(programs, checker) {
 			);
 			rebindNamedResults(monoTypeDecl);
 			specializedTypes.set(item.specializedName, monoTypeDecl);
+			homeOf.set(monoTypeDecl, homeOf.get(genDecl));
 
 			// Specialize all methods declared on this generic type
 			const methods = genericMethods.get(item.genericName) ?? [];
@@ -669,6 +737,7 @@ export function monomorphise(programs, checker) {
 				rebindNamedResults(monoMethod);
 				const mKey = `${item.specializedName}.${monoMethod.name}`;
 				specializedMethods.set(mKey, monoMethod);
+				homeOf.set(monoMethod, homeOf.get(m));
 			}
 		} else if (item.kind === "func") {
 			const genDecl = genericFuncs.get(item.genericName);
@@ -693,6 +762,7 @@ export function monomorphise(programs, checker) {
 			);
 			rebindNamedResults(monoFuncDecl);
 			specializedFuncs.set(item.specializedName, monoFuncDecl);
+			homeOf.set(monoFuncDecl, homeOf.get(genDecl));
 		}
 	}
 
@@ -744,15 +814,22 @@ export function monomorphise(programs, checker) {
 
 	const targetProg = progs[0];
 	if (targetProg) {
-		targetProg.decls.push(...specializedTypes.values());
-		targetProg.decls.push(...specializedMethods.values());
-		targetProg.decls.push(...specializedFuncs.values());
+		for (const group of [
+			specializedTypes,
+			specializedMethods,
+			specializedFuncs,
+		])
+			for (const d of group.values())
+				(homeOf.get(d) ?? targetProg).decls.push(d);
 	}
 
 	// 6. Typecheck the monomorphised program to annotate all concrete types
 	const monoChecker = new TypeChecker();
 	monoChecker.target = "wasm";
 	monoChecker.pkgName = targetProg?.pkg?.name ?? "main";
+	// The programs were checked once already, where `//gofront:native` is
+	// limited to the standard library; this pass only re-annotates them.
+	monoChecker.nativesChecked = true;
 	if (checker?.types) {
 		for (const [name, type] of checker.types.entries()) {
 			if (!monoChecker.types.has(name)) {

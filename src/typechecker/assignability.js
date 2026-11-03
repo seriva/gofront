@@ -9,6 +9,7 @@ import {
 	CMP_OPS,
 	COMPLEX128,
 	FLOAT64,
+	is64BitInt,
 	isAny,
 	isComplex,
 	isComplex64,
@@ -204,11 +205,23 @@ export const assignabilityMethods = {
 
 	// ── Assignability ─────────────────────────────────────────────────
 
+	_tag64BitNode(target, node) {
+		if (node && typeof node === "object" && is64BitInt(target)) {
+			node._is64Bit = true;
+			if (node.kind === "KeyValueExpr" && node.value)
+				node.value._is64Bit = true;
+			if (node.kind === "UnaryExpr" && node.operand)
+				node.operand._is64Bit = true;
+			if (node.kind === "ParenExpr" && node.expr) node.expr._is64Bit = true;
+		}
+	},
+
 	assertAssignable(target, source, node, ctx = "assignment") {
 		if (!target || !source) return;
 		if (this._checkConstOverflow(target, source, node, ctx)) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
+		this._tag64BitNode(target, node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
 		if (this._assertAssignableEarlyReturn(target, source)) return;
@@ -300,7 +313,7 @@ export const assignabilityMethods = {
 			return { type: t, ptr: isPtr };
 		if (!methods || methods.size === 0) return null;
 		// Only user-declared types (methods carry _ptrRecv); stdlib named types
-		// such as time.Duration have no box class.
+		// such as strings.Builder have no box class.
 		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
 			return null;
 		return { type: t, ptr: isPtr };

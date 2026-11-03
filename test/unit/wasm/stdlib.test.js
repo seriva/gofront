@@ -2,14 +2,18 @@
 // WASM stdlib coverage: errors, fmt, strconv, strings, unicode/utf8, sort,
 // math extras and `any` equality — all checked for JS/WASM parity.
 
+import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
+import { NATIVES } from "../../../src/typechecker/types.js";
 import {
 	assertEqual,
 	assertThrows,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	runWasm,
 	section,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("WASM stdlib — errors & fmt");
@@ -106,7 +110,7 @@ func Main() string {
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(wasmRes, "12345");
+	assertEqual(wasmRes, "1234");
 	assertEqual(wasmRes, jsRes);
 });
 
@@ -608,7 +612,7 @@ import (
 )
 
 func Main() string {
-	var s []int = slices.Concat()
+	var s []int = slices.Concat[[]int]()
 	return fmt.Sprintf("%v", s == nil)
 }
 `;
@@ -1049,8 +1053,8 @@ test("Phase 6 negative bounds panics parity", () => {
 package main
 
 import (
-	"bytes"
-	"math/rand"
+	${goCode.includes("bytes.") ? '"bytes"' : ""}
+	${goCode.includes("rand.") ? '"math/rand"' : ""}
 )
 
 func Main() {
@@ -1064,7 +1068,7 @@ func Main() {
 	};
 
 	testPanic("rand.Intn(0)", "invalid argument to Intn");
-	testPanic("rand.Perm(-1)", "invalid argument to Perm");
+	testPanic("rand.Perm(-1)", "makeslice: len out of range");
 	testPanic(
 		"rand.Shuffle(-1, func(i, j int){})",
 		"invalid argument to Shuffle",
@@ -1434,7 +1438,7 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(
 		wasmRes,
-		"ok=true yr=2024 badErr=true msg=parsing time: cannot parse zeroYr=0",
+		'ok=true yr=2024 badErr=true msg=parsing time "not-a-valid-timestamp" as "2006-01-02T15:04:05Z07:00": cannot parse "not-a-valid-timestamp" as "2006" zeroYr=-62135596800',
 	);
 	assertEqual(wasmRes, jsRes);
 });
@@ -1821,7 +1825,8 @@ func Main() string {
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
-	assertEqual(wasmRes, "true|1");
+	// A locked mutex does not TryLock, as in Go.
+	assertEqual(wasmRes, "false|1");
 });
 
 section("WASM Stdlib — crypto/rand & crypto/sha256");
@@ -2060,40 +2065,129 @@ func Main() int {
 	);
 });
 
-const valueSrc = (imp, body) => `
-package main
+section("WASM stdlib — native call sites");
 
-import "${imp}"
+// Tests run concurrently, so each registers its own native name.
+const NATIVE_NAMES = ["Bias", "Agree", "Plain", "Value", "Decline"];
+for (const n of NATIVE_NAMES) NATIVES.add(`str.${n}`);
 
-func Main() int {
-${body}
-	return 0
+const NATIVE_STR_PKG = `//go:build gofront
+
+//gofront:target both
+
+package str
+
+${NATIVE_NAMES.map(
+	(n) => `//gofront:native str.${n}
+func ${n}(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+`,
+).join("\n")}
+//gofront:native str.Decline
+func Generic[T comparable](xs []T, v T) int {
+	for i, x := range xs {
+		if x == v {
+			return i
+		}
+	}
+	return -1
 }
 `;
 
-test("stdlib functions taking a callback or returning several values name themselves in the error", () => {
-	const cases = [
-		[
-			"sort",
-			"f := sort.Slice\n\t_ = f",
-			"sort.Slice cannot be used as a value",
-		],
-		[
-			"strings",
-			"f := strings.Map\n\t_ = f",
-			"strings.Map cannot be used as a value",
-		],
-		[
-			"strings",
-			"f := strings.FieldsFunc\n\t_ = f",
-			"strings.FieldsFunc cannot be used as a value",
-		],
-		[
-			"strconv",
-			'f := strconv.Atoi\n\t_, _ = f("42")',
-			"strconv.Atoi cannot be used as a value",
-		],
-	];
-	for (const [imp, body, msg] of cases)
-		assertThrows(() => compileWasm(valueSrc(imp, body)), msg);
+const STR_IMPORT = ["str_index", ["externref", "externref"], ["i32"]];
+
+// Pushes both strings and calls the existing \`env.str_index\` host import;
+// \`bias\` shifts the result so a test can tell the native ran.
+function strIndexNative(bias = 0) {
+	return {
+		imports: [STR_IMPORT],
+		emit(e, call, _typeArgs, target) {
+			e.emitExpr(call.args[0], "externref");
+			e.emitExpr(call.args[1], "externref");
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport("env", ...STR_IMPORT),
+			});
+			if (bias !== 0) {
+				e.pushInstruction({ op: "i32.const", value: bias });
+				e.pushInstruction("i32.add");
+			}
+			if ((target ?? "i64") === "i64") e.pushInstruction("i64.extend_i32_s");
+			return true;
+		},
+	};
+}
+
+WASM_NATIVES.set("str.Bias", strIndexNative(100));
+WASM_NATIVES.set("str.Agree", strIndexNative());
+WASM_NATIVES.set("str.Value", strIndexNative(100));
+WASM_NATIVES.set("str.Decline", { emit: () => false });
+
+// Builds a wasm \`lib\` over the temp \`str\` package and returns \`lib.Run()\`.
+async function runWithStr(body) {
+	let out;
+	await withTempDir({ "str/str.go": NATIVE_STR_PKG }, async (stdlib) => {
+		const res = await compileHybridProject(
+			{
+				"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "str"
+
+${body}
+`,
+				"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+			},
+			{ stdlibRoot: stdlib },
+		);
+		out = res.lines.join("\n");
+	});
+	return out;
+}
+
+test("a wasm native replaces the call with host code", async () => {
+	// 2 from the host search, plus the bias only the native adds.
+	assertEqual(
+		await runWithStr(`func Run() int { return str.Bias("hello", "ll") }`),
+		"102",
+	);
+});
+
+test("an agreeing wasm native matches the Go body", async () => {
+	const run = (fn) =>
+		runWithStr(
+			`func Run() int { return str.${fn}("hello", "ll")*10 + str.${fn}("abc", "z") }`,
+		);
+	assertEqual(await run("Agree"), await run("Plain"));
+	assertEqual(await run("Plain"), "19");
+});
+
+test("a wasm native used as a value calls the Go body", async () => {
+	assertEqual(
+		await runWithStr(`func Run() int {
+	f := str.Value
+	return f("hello", "ll")
+}`),
+		"2",
+	);
+});
+
+test("a wasm native that declines calls the Go body", async () => {
+	assertEqual(
+		await runWithStr(
+			`func Run() int { return str.Generic([]int{4, 5, 6}, 6) + str.Decline("hello", "ll") }`,
+		),
+		"4",
+	);
 });

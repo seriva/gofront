@@ -1,7 +1,8 @@
 # Stdlib in Go — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft (2026-10-23; revised 2026-10-27 for the v1.8.0 simplification; re-audited 2026-10-29; re-audited 2026-11-01 on v1.8.0)  
+**Status:** Completed (2026-11-03)  
+**Base branch:** main  
 **Related:** Follows [`../v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md) (Go-source stdlib loader, overlays, reachability, `//gofront:intrinsic`; its Phase 8 retired the coverage manifest and the real-Go conformance harness, so this plan verifies with pasted Go-output unit cases), [`../v1.8.0/repo-structure-plan.md`](../v1.8.0/repo-structure-plan.md) (layout), and [`../v1.8.0/follow-up-fixes-plan.md`](../v1.8.0/follow-up-fixes-plan.md) (Completed 2026-10-30; its Boundary Matrix deferred stdlib-member bugs and the JS `uint64` representation limit to this plan, absorbed below). The v2.0.0 native engine is shelved, so this is an ordinary feature release.  
 **Release note:** Sorting now matches Go on both targets: `NaN` values sort first, equal elements keep Go's order, and WebAssembly sorts of large slices are fast instead of quadratic. Most standard-library packages now follow Go's real signatures and behaviour, so generic helpers such as `slices` and `maps` work with named slice and map types, and many small differences from Go in `strings`, `bytes`, `io`, `errors`, `strconv` and `time` are gone. `int64` and `uint64` are now exact in JavaScript output: they are BigInt values there, including across the WebAssembly boundary, while `int` stays a JavaScript number.  
 
@@ -34,7 +35,44 @@ A package or member is **moved to Go** when its behaviour can be written as ordi
 | **In scope: target-specific** | A native may exist on one backend only; the other backend calls the Go body | JS-only: `slices.Sort`/`Contains`/`Index`/`Reverse`/`Clone` for `int`/`string`/`float64` elements where JS equals Go (`Sort` accepts only `int`/`string`), `sort.Ints`/`Strings`, `utf8.RuneCountInString`; listed in Task 13.1's single-target allow-list | |
 | **Excluded: runtime / platform** | Unchanged from v1.8.0; clear error | goroutines, channels, `reflect`, `unsafe`, `runtime`, file I/O | No-runtime invariant (`plans/roadmap.md`) |
 | **Excluded: stays emitter** | Kept on today's path | `fmt` (verb engine, `%T`/`%v` tables; `Fprint*` changes only to call `io.Writer`), `encoding/json` (generated codecs + `internal/jsonrt`), `regexp`, `os`, `testing`, `gom`, `gofront/shared`, `gofront/simd`, browser/WebGL/WebGPU typings, `math`, `crypto/rand`, `errors.As`, `strings.Builder`, `encoding/binary` `Read`/`Write`, `time.Sleep` | Need per-type tables, generated code or host services: `errors.As` tests the dynamic type of `*target`; `binary.Read`/`Write` walk the fields of an `any`; a Go `strings.Builder` over `[]byte` makes `String()` O(n) against a JS `+=` (revisit after a string representation change) |
-| **Excluded: deferred** | Valid, but not this release | User-visible `//gofront:native`; a Go-source `fmt`; `regexp` in Go (RE2 port); `go/*`, `compress/*`, `math/big`; members v1.8.0 Task 9.4 removed (`unicode` range tables, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*`, `strconv.*ToGraphic`); `hex.Dump`/`Dumper`, `hex`/`base64` `NewEncoder`/`NewDecoder`, `Encoding.Strict`; new stdlib surface beyond Go's signatures of existing members; Go-exact `rand.New(rand.NewSource(seed))` sequences; WASM per-byte `str_get` cost of `s[i]`; strict-JS codegen costs (tuple swap allocates two arrays, constant-divisor zero guard); facade identifier for exported `strings.Builder` fields (`plans/follow-ups.md`) | Natives are a closed compiler registry with no safety story for user code; `fmt`/`regexp` need their own designs; streaming/strict codec variants have no in-tree user; v1.8.0 never documented seeded sequences; the string and codegen costs need a string-representation or strict-codegen plan, not a stdlib one; `strings.Builder` stays an emitter |
+| **Excluded: deferred** | Valid, but not this release | User-visible `//gofront:native`; a Go-source `fmt`; `regexp` in Go (RE2 port); `go/*`, `compress/*`, `math/big`; members v1.8.0 Task 9.4 removed (`unicode` range tables, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*`, `strconv.*ToGraphic`); `hex.Dump`/`Dumper`, `hex`/`base64` `NewEncoder`/`NewDecoder`, `Encoding.Strict`; new stdlib surface beyond Go's signatures of existing members; Go-exact `rand.New(rand.NewSource(seed))` sequences; WASM per-byte `str_get` cost of `s[i]`; strict-JS codegen costs (tuple swap allocates two arrays, constant-divisor zero guard); facade identifier for exported `strings.Builder` fields (`plans/follow-ups.md`) | Natives are a closed compiler registry with no safety story for user code; `fmt`/`regexp` need their own designs; streaming/strict codec variants have no in-tree user; v1.8.0 never documented seeded sequences; the string and codegen costs need a string-representation or strict-codegen plan, not a stdlib one; `strings.Builder` stays an emitter; the known bugs listed under this table (each with a repro). |
+
+**Deferred bugs found during review** (open at completion; each is a pre-existing or out-of-scope defect with a one-line repro):
+
+- **JS 64-bit divide/mod:** Double-evaluation of side-effecting divisor in 64-bit `/` and `%`. Repro: `count := 0; f := func() int64 { count++; return 2 }; _ = int64(10) / f(); fmt.Println(count)` → got `2`, want `1`. (PR #94, stdlib-in-go Phase 1, Low)
+- **Typechecker:** Untyped integer constant indexing into map (`m[1<<60]`) loses key value. Repro: `m := map[int64]string{1 << 60: "hello"}; fmt.Println(m[1<<60])` → got `""`, want `"hello"`. (PR #94, stdlib-in-go Phase 1, Out of Scope)
+- **Parser/Typechecker:** a lone pointer type argument without a call cannot instantiate a generic function value. Repro: `func Id[T any](x T) T { return x }; f := Id[*int]` → got `cannot dereference non-pointer type any`, want a function value. (PR #95, stdlib-in-go Phase 2, Out of Scope)
+- **Typechecker:** a constraint that refers to a type parameter declared later in the same list is rejected. Repro: `type SliceIface[E any] interface { ~[]E }; func F[S SliceIface[E], E any](s S) E { return s[0] }; F([]int{1})` → got `Unknown type 'E'`, want compiles. (PR #95, stdlib-in-go Phase 2, Out of Scope)
+- **Typechecker:** builtin `cap` accepts a map argument. Repro: `var m map[string]int; _ = cap(m)` → got compiles, want `invalid argument: m (variable of type map[string]int) for cap`. (PR #95, stdlib-in-go Phase 2, Out of Scope)
+- **Parser:** a `//gofront:native <name>` directive separated from its `func` by a doc comment is silently ignored. Repro: `//gofront:native str.Index` then `// Index returns index` then `func Index(s, sub string) int {…}` in a stdlib package → got directive dropped, want it attached or a syntax error. (PR #96, stdlib-in-go Phase 3, Low)
+- **WASM fmt argument order:** call arguments to `fmt.Println` are evaluated while earlier arguments are already formatted, so side effects interleave with the output. Repro: `func next(s string) int { fmt.Print(s); return 1 }; fmt.Println(next("a"), next("b"))` on `wasm` → got `a1b 1`, want `ab1 1` (js is right). (feat/stdlib-in-go-phase-4, stdlib-in-go Phase 4, Out of Scope)
+- **sort.Slice any argument:** `sort.Slice`, `SliceStable` and `SliceIsSorted` are generic over `S ~[]E` because GoFront has no `reflect`, so a slice held in an `any` is rejected. Repro: `var x any = []int{3, 1}; sort.Slice(x, func(i, j int) bool { return false })` → got a type error, want it to compile and sort. (feat/stdlib-in-go-phase-4, stdlib-in-go Phase 4, Low)
+- **WASM errors.As through multi-error trees:** `errors.As` follows only `Unwrap() error` chains, so it does not look inside `errors.Join` results or errors wrapped with several `%w`. Repro: `var nf NotFound; errors.As(errors.Join(e1, fmt.Errorf("n: %w", NotFound{"z"})), &nf)` → got wasm `false`, want `true` (js correct). (feat/stdlib-in-go-phase-5, stdlib-in-go Phase 5, Out of Scope)
+- **Negative rune to string:** converting an invalid rune to a string throws instead of giving U+FFFD. Repro: `x := rune(-1); fmt.Println(string(x) == "�")` → got js/wasm `Invalid code point -1` / runtime error, want `true`. (feat/stdlib-in-go-phase-5, stdlib-in-go Phase 5, Out of Scope)
+- **JS shadowed named result:** a loop body that assigns a named result and later declares the same name with `:=` hits the temporal dead zone. Repro: `func f() (err error) { for i := 0; i < 2; i++ { if i == 0 { err = nil; continue }; _, err := g(); _ = err }; return }` → got js `Cannot access 'err' before initialization`, want a normal return. (feat/stdlib-in-go-phase-5, stdlib-in-go Phase 5, Out of Scope)
+- **path.Match inverted range:** `[z-a]` is accepted instead of returning `ErrBadPattern`. Repro: `ok, err := path.Match("[z-a]", "b"); fmt.Println(ok, err == path.ErrBadPattern)` → got `false false`, want `false true`. (#98, stdlib-in-go Phase 5, Low)
+- **path.Match slash in class:** `/` inside a character class is not rejected. Repro: `path.Match("[/]", "/")` → got `true <nil>`, want `false syntax error in pattern`. (#98, stdlib-in-go Phase 5, Low)
+- **fmt.Fprint operand spacing:** `Fprint` joins operands without the space Go adds between two non-string operands, on both backends. Repro: `n, _ := fmt.Fprint(&sb, "b", 2, 3, "c"); fmt.Println(n, sb.String())` → got `4 b23c`, want `5 b2 3c`. (feat/stdlib-in-go-phase-6, stdlib-in-go Phase 6, Out of Scope)
+- **Invalid-UTF-8 string literals:** a `\x80`-`\xff` escape in a string literal becomes the UTF-8 encoding of that code point, so converting the string to `[]byte` gives two bytes. Repro: `b := []byte("a\xffb"); fmt.Println(len(b), bytes.IndexRune(b, utf8.RuneError))` → got `4 -1`, want `3 1`. (feat/stdlib-in-go-phase-7, stdlib-in-go Phase 7, Out of Scope)
+- **JS nil pointer receiver:** a method call on a nil pointer to a Go-source stdlib type throws instead of running the method, so the documented nil case of `(*bytes.Buffer).String` is unreachable. Repro: `var b *bytes.Buffer; fmt.Println(b.String())` → got js `Cannot read properties of null (reading 'String')`, want `<nil>`. (feat/stdlib-in-go-phase-7, stdlib-in-go Phase 7, Out of Scope)
+- **WASM size of Go-source bytes.Buffer:** a `wasm` module whose only `bytes` use is `var b bytes.Buffer; b.WriteString("hi"); b.Len()` is about 8,450 bytes of dev `app.wasm` (an empty module is 2,497), above the 4,500 byte budget of Task 7.2; the `grow` chain and the shared `env` import table that `unicode` and `io` imports declare dominate. Repro: `compileWasm` of that program, `wasm.length` → got `8454`, want `<= 4500`. (feat/stdlib-in-go-phase-7, stdlib-in-go Phase 7, Low)
+- **unicode.ToUpper multi-character mappings:** `unicode.ToUpper` and `ToLower` take the first code point of the host's full case mapping, so `strings.ToUpper` (native and Go body alike) maps `ß` to `S`. Repro: `fmt.Println(strings.ToUpper("ß"))` → got `S`, want `ß`. (feat/stdlib-in-go-phase-8, stdlib-in-go Phase 8, Out of Scope)
+- **Lexer astral rune literals:** a rune literal holding a character outside the BMP is rejected. Repro: `r := '😀'; fmt.Println(r)` → got `Rune literal must contain exactly one character`, want `128512`. (feat/stdlib-in-go-phase-8, stdlib-in-go Phase 8, Out of Scope)
+- **WASM recoverable host panics:** a host import that throws (rather than calling `env.panic`) cannot be recovered with `recover()` in `wasm` packages, so no native can raise a Go panic. Repro: a native that throws `new Error("x")` called inside `func() { defer func() { fmt.Println(recover()) }(); f() }()` → got the uncaught error, want `x`. (feat/stdlib-in-go-phase-8, stdlib-in-go Phase 8, Out of Scope)
+- **JS binary.Read of 64-bit integers:** `binary.Read` into an `int64` or `uint64` stores a Number although these types are BigInt in JS output, so later arithmetic throws. Repro: `var a int64; binary.Read(&buf, binary.LittleEndian, &a); fmt.Println(a + 1)` → got js `TypeError: Cannot mix BigInt and other types`, want `-4`. (feat/stdlib-in-go-phase-9, stdlib-in-go Phase 9, Out of Scope)
+- **WASM errors.As into a named non-struct type:** `errors.As` with a target of a named non-struct error type returns `false` in `wasm` packages (JS is correct). Repro: `type E byte; func (E) Error() string { return "E" }; var t E; fmt.Println(errors.As(error(E(7)), &t), byte(t))` → got wasm `false 0`, want `true 7`. (feat/stdlib-in-go-phase-9, stdlib-in-go Phase 9, Out of Scope)
+- **fmt %#v ignores GoStringer:** `%#v` prints the Go syntax of the value and never calls a `GoString() string` method. Repro: `type T struct{}; func (T) GoString() string { return "pkg.T" }; fmt.Printf("%#v\n", T{})` → got `main.T{}`, want `pkg.T`. (feat/stdlib-in-go-phase-9, stdlib-in-go Phase 9, Out of Scope)
+- **JS binary.Size of named structs:** `binary.Size` does not resolve named struct types in JS and counts every number field as 8 bytes. Repro: `type Point struct { X, Y int32 }; fmt.Println(binary.Size(Point{}))` → got js `16`, want `8`. (feat/stdlib-in-go-phase-9, stdlib-in-go Phase 9, Out of Scope)
+- **WASM numerics:** An untyped constant as the left operand of `%` or `/` with an unsigned right operand divides signed. Repro: `n := int32(10); fmt.Println((1<<31)%uint32(n), (1<<31)/uint32(n))` on a `wasm` package → got `4294967288 4080218932`, want `8 214748364`. (feat/stdlib-in-go-phase-10, stdlib-in-go Phase 10, Out of Scope) (feat/stdlib-in-go-phase-12, stdlib-in-go Phase 12)
+- **JS make:** `make([]T, n)` with a negative `n` throws a JS `RangeError` instead of Go's makeslice panic. Repro: `func f(n int) []int { return make([]int, n) }; defer func() { fmt.Println(recover()) }(); f(-1)` in a `both` package on JS → got `Invalid array length`, want `runtime error: makeslice: len out of range` (what WASM prints). (feat/stdlib-in-go-phase-10, stdlib-in-go Phase 10, Out of Scope)
+- **JS panic values:** `panic` of a value whose type is not a string loses it in JS: recover returns `[object Object]` for a named-string error type. Repro: `type rt string; func (e rt) Error() string { return "boom" }; defer func() { fmt.Println(recover()) }(); panic(error(rt("q")))` in a `both` package on JS → got `[object Object]`, want `boom` (what WASM prints). (feat/stdlib-in-go-phase-10, stdlib-in-go Phase 10, Out of Scope)
+- **JS for-post `/=`:** a compound division in the post statement of a `for` clause does not truncate. Repro: `w := 345; for ; w > 100; w /= 10 {}; fmt.Println(w)` → got js/both `34.5`, want `34` (wasm and a `/=` in the loop body are correct). (feat/stdlib-in-go-phase-11, stdlib-in-go Phase 11, Out of Scope)
+- **Typechecker:** indexing a string yields `int`, so a `byte` parameter or variable rejects it. Repro: `func cp(b byte) bool { return b == 46 }; func f(s string) bool { return cp(s[0]) }` → got `Cannot assign int to uint8`, want compiles (`var c byte = s[0]` fails the same way). (feat/stdlib-in-go-phase-11, stdlib-in-go Phase 11, Out of Scope)
+- **JS tuple assignment:** a dereferenced pointer as one target of a multi-value assignment is invalid JS. Repro: `var t T; p := &t; *p, err = f()` → got `SyntaxError: Invalid destructuring assignment target`, want compiles. (feat/stdlib-in-go-phase-11, stdlib-in-go Phase 11, Out of Scope)
+- **Constant folding:** untyped float constants are folded in float64 instead of exactly. Repro: `fmt.Println(0.2 + 0.1)` → got `0.30000000000000004`, want `0.3`. (feat/stdlib-in-go-phase-12, stdlib-in-go Phase 12, Out of Scope)
+- **JS shift constants:** an untyped constant shifted by a variable count in a `uint64` context is emitted as a Number. Repro: `k := uint(3); var m uint64 = (1 << k) - 1; var n uint64 = 5; fmt.Println(n & m)` in a `both` package → got `TypeError: Cannot mix BigInt and other types`, want `5`. (feat/stdlib-in-go-phase-12, stdlib-in-go Phase 12, Out of Scope)
+- **Parser:** an index expression whose index starts with a conversion cannot be a call argument. Repro: `f(byte(digits[uint(u)&m]))` → got `Parse error: expected ']' (got ( "(")`, want compiles. (feat/stdlib-in-go-phase-12, stdlib-in-go Phase 12, Out of Scope)
+- **strconv:** `Unquote` of a raw backtick string containing `\r` and a non-ASCII rune drops the string because UTF-16 code units are appended to a byte buffer. Repro: `strconv.Unquote("`\ré`")` → got `"" <nil>`, want `"é" <nil>`. (feat/stdlib-in-go-phase-12, stdlib-in-go Phase 12, Low)
 
 ---
 
@@ -166,12 +204,14 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 | `slices.SortFunc` / `sort.Slice` vs `Array.prototype.sort` with comparator, JS, 200,000 | Go pdqsort path ≈1.3–1.7× | ≤ 2× |
 | `strings.Index`, 1 MB `"a…ab"`, 20 calls, WASM | 145 ms (host `str_index`) | ≤ 1.25× |
 | Dev `app.wasm`, program using `bytes.Buffer` | 6,957 bytes (`04aa0c6`) | ≤ 4,500 bytes |
-| Type-check, program importing every migrated package | measured in Task 3.5 | ≤ +5 ms (lazy) |
+| Type-check, program importing every migrated package | Task 3.5, 5,600-line synthetic package, one call (Node 25.2.0): +0.9 ms (two declaration passes at 0.45 ms; eager bodies 6.05 ms per pass). Whole `compileDir` +18 ms (eager 33 ms), all of it lex and parse at 7.6 ms per pass, two passes | ≤ +5 ms (lazy) |
 | `src/backend/wasm/stdlib/` | 26,460 lines | ≤ 8,000 |
 | `src/typechecker/stdlib/{core,extended}.js` | 2,289 lines | ≤ 1,500 |
 | `src/backend/js/stdlib/` | 4,003 lines | ≤ 2,400 |
 | `npm run bench`, `test/perf/zero-alloc.js`, `test/perf/bce-mathx.js` | `9e22f74` numbers | unchanged (±3%) after every phase |
-| JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | ≈20× (micro-benchmark, Verified Gaps) | ≤ 25× (Task 1.6) |
+| JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | 14.3× (measured in Task 1.6) | ≤ 25× (Task 1.6) |
+
+*Final numbers (Task 13.2, Node 25.2.0, `test/perf/stdlib-bench.js`):* WASM `slices.Sort` of 200,000 `int` 32.0 ms; JS `slices.SortFunc` 68.9 ms and `sort.Slice` 65.5 ms against `Array.prototype.sort` with a comparator 88.4 ms (0.78× and 0.74×); WASM `strings.Index` on 1 MB × 20 156.4 ms (baseline 145 ms, 1.08×). `wc -l`: `src/backend/wasm/stdlib/` 5,823; `src/typechecker/stdlib/{core,extended}.js` 1,059; `src/backend/js/stdlib/` 2,395.
 
 ### 3. Edge Cases & Error Handling
 
@@ -222,37 +262,37 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 *Added 2026-10-29 from the follow-ups review; ordered bottom-up 2026-11-01 so `npm test` stays green after every task commit. Phases 4–12 compile Go that computes in `int64`/`uint64` (pdqsort's `xorshift`, `time.Time.unixNano`, `strconv` limits, `bits.Mul64`, `rand.Int63`) or copies `T` values (`slices.Clone`, `Insert`, `Compact`); JS gets both wrong today (Verified Gaps → 64-bit integers in JS, Generic value copies in JS). Takes over the v1.8.0 follow-up-fixes deferred row "JS-only representation limits". Design: Approach → 64-bit integers are BigInt in JS. Every case runs through `assertProgramOutput` (`both` vs WASM) and additionally as a `js` package.*
 
-- [ ] **Task 1.1 — Erased generics: value copies and 64-bit type-parameter plumbing**
+- [x] **Task 1.1 — Erased generics: value copies and 64-bit type-parameter plumbing**
   - Files: `src/backend/js/expressions.js` (`_isAddressableExpr`, `_typeArgFactories`, `_typeParamClone`, conversions to `T`), `src/backend/js/statements.js` (`_rangeValueExpr`, assignment), `src/backend/js/type-info.js`
   - Do: treat value identifiers whose type is `typeParam` as addressable in `_isAddressableExpr` (`!e._isTypeRef || e._type?.kind === "typeParam"`) and clone `T` values with `_typeParamClone` wherever Go copies them (`range` value variables in `_rangeValueExpr`, assignment, `append` arguments, call arguments and results). Thread per-type-parameter 64-bit metadata through `_typeArgFactories` and `__tconv` so `var z T`, untyped constants in `T` context (`s + 1`), `T(x)` and arithmetic on `T` operands know whether `T` is instantiated with `int64`/`uint64` (`T` stays a Number for every other integer type).
   - Test: `test/unit/types/generics.test.js` — `Clone[T any]` over `[]P{{1}}` appending each `range` value, then `b[0].V = 9` → `[{1}] [{9}]`; `func (l List[T]) Map(f func(T) T) (out List[T])` with a callback doing `p.Val *= 10` on a `Pair` leaves the source `[{a 1} {b 2}]`.
   - Done when: value-copy cases match Go on `js`, `both` and `wasm` and `npm test` is green.
 
-- [ ] **Task 1.2 — BigInt through the JS runtime: fmt, `any`, map keys, JSON**
+- [x] **Task 1.2 — BigInt through the JS runtime: fmt, `any`, map keys, JSON**
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/runtime.js` (key encoding, interface boxing, `__json_*`), `src/backend/js/type-info.js` (basic-type checks in type switches and assertions)
   - Do: work through the audit list in Edge Cases so the runtime accepts BigInt before codegen flips. fmt verbs (`%d %x %X %o %O %b %c %q %U %v`, width and flags) and `print`/`println` accept BigInt; 64-bit map keys and struct keys with 64-bit fields encode without `JSON.stringify` throwing and range back as BigInt; `encoding/json` writes all digits of 64-bit integers and `__json_int_decode` decodes `int64`/`uint64` into BigInt with Go's range errors.
   - Test: `test/unit/builtins/fmt-verbs.test.js` and `test/unit/builtins/json.test.js` unit checks for BigInt formatting, key encoding and JSON encode/decode helpers.
   - Done when: helpers accept BigInt cleanly and `npm test` is green.
 
-- [ ] **Task 1.3 — `int64`/`uint64` as BigInt in JS codegen**
+- [x] **Task 1.3 — `int64`/`uint64` as BigInt in JS codegen**
   - Files: `src/backend/js/expressions.js` (`_genStrictBinary`, `_genPrimitiveConversion`, `_typeNameCheckExpr`, constant and zero-value emission, `time` duration constants, `_genSelectorCall`), `src/backend/js/statements.js` (`++`/`--`, compound assignment, `for` counters), `src/backend/js/runtime.js` (`HELPER_SHIFT`, `__durationRound`, `__timeParseDuration`, `__binary_le`, `__binary_be`, `__binary_read`)
   - Do: every value whose underlying type is `int64`/`uint64` is a BigInt in all JS output; `int`, `uint`, `uintptr` stay Numbers. Constants and zero values emit `5n`/`0n` (no `exceeds JS Number precision` warning for constants typed `int64`/`uint64`); `+ - * & | ^ &^` wrap with `BigInt.asIntN/asUintN(64, …)`; `/` and `%` keep the zero-divisor panic and wrap `MinInt64 / -1`; shifts take `BigInt(count)` and keep the negative-count panic; unary `-` and `^` wrap, unary `+` emits the operand. Conversions: into 64-bit `BigInt.asIntN/asUintN(64, BigInt(x))`, floats truncated first with `NaN`/`±Inf` mapped as in Edge Cases; out of 64-bit `Number(BigInt.asIntN/asUintN(w, x))` for narrower integers and `Number(x)` for `int`, `uint` and floats. Type switches and assertions (`_typeNameCheckExpr`) match `case int64`/`case uint64` for a BigInt and never `case int`. 64-bit indexes, slice bounds, `make` lengths and shift counts on Number operands go through `Number(…)`. Until Tasks 1.4–1.5 update the remaining stdlib shims, `_genSelectorCall` coerces any `Number` returned for an `int64`/`uint64` stdlib call to `BigInt`.
   - Test: `test/unit/builtins/operators.test.js` — `var a int64 = 3037000500; a*a` → `-9223372036709301616`; `var t int64 = 1577934245000000000; t += 1; t, t%1000` → `1577934245000000001 1`; the `xorshift uint64` of `stdlib/sort/sort.go` from seed 40, three calls → `43290790440`, `9226231805932350012`, `13632027486628815208`; `var u uint64 = 5; ^u, -u` → `18446744073709551610 18446744073709551611` (v1.8.0 deferred row); `var m uint64 = 1<<64 - 1` → `18446744073709551615`; `a, b := int64(math.MinInt64), int64(-1); a / b` → `-9223372036854775808`; `int64(1) / z` (`z` zero) → recovered `integer divide by zero`; `int64(1) << n` with `n := -1` → recovered `negative shift amount`; `xs[int64(1)]` indexes; `x := int64(1<<40 + 5); int32(x)` → `5`; `y := int64(1<<53 + 1); float64(y)` → `9.007199254740992e+15`; `test/unit/types/generics.test.js` — `func Sum[T ~int | ~int64](xs []T) T { var s T; for _, x := range xs { s += x + 1 }; return s }` over `[]int64{1 << 60, 1}` → `1152921504606846979`, over `[]int{1, 2}` → `5`; `test/unit/builtins/fmt-verbs.test.js` — `a, b := int64(math.MaxInt64), uint64(math.MaxUint64); fmt.Printf("%d|%x|%22d|%v\n", a, a, b, b)` → `9223372036854775807|7fffffffffffffff|  18446744073709551615|18446744073709551615`; `fmt.Println(any(uint64(1 << 63)))` → `9223372036854775808`; `test/unit/wasm/maps.test.js` — `for k := range map[int64]string{1 << 60: "a"} { fmt.Println(k + 1) }` → `1152921504606846977`, `len(map[struct{ A int64 }]int{{1}: 1, {2}: 2})` → `2`; `test/unit/builtins/json.test.js` — `json.Marshal(struct{ N int64 }{math.MaxInt64})` → `{"N":9223372036854775807}` and back; `test/unit/wasm/interfaces.test.js` — a type switch on `any(int64(1))` with `case int:` before `case int64:` → `int64`.
   - Done when: every case matches Go on `js`, `both` and `wasm`; existing `int` tests and `npm run bench` unchanged.
 
-- [ ] **Task 1.4 — 64-bit `time` and `strconv` JS shims and the WASM facade**
+- [x] **Task 1.4 — 64-bit `time` and `strconv` JS shims and the WASM facade**
   - Files: `src/backend/js/stdlib/time.js`, `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/boundary.js`
   - Do: `time.Duration` and `time.Time` 64-bit methods (`Unix`, `UnixMilli`, `UnixNano`, `Sub`, `Since`, `Microseconds`, `Milliseconds`, `Truncate`, `Abs`) use BigInt; `time.Sleep`, timers and `Date` conversions go through `Number(…)`. `strconv.ParseInt` and `ParseUint` return the BigInt from `__strconv_parse_int`/`__strconv_parse_uint` without wrapping in `Number(…)`. The WASM facade passes `int64`/`uint64` as `i64` (BigInt in the JS API) instead of `f64`; `int` and `uint` keep `f64`.
   - Test: `test/unit/builtins/stdlib.test.js` — `(3 * time.Second).String()` → `3s`, `time.Duration(1 << 62)` prints Go's text, `time.Since(t) >= 0`, `strconv.ParseInt("9223372036854775807", 10, 64)` exact, `binary.LittleEndian.Uint64` of eight `0xff` bytes → `18446744073709551615`; `test/unit/wasm/boundary.test.js` — a wasm package exporting `func Inc(x int64) int64 { return x + 1 }` called from a `js` main with `1 << 60` → `1152921504606846977`; existing `int` boundary tests unchanged.
   - Done when: cases pass and `npm run test:e2e` is green (the examples use `time.Duration`).
 
-- [ ] **Task 1.5 — 64-bit `bits`, `math` and `rand` JS shims**
+- [x] **Task 1.5 — 64-bit `bits`, `math` and `rand` JS shims**
   - Files: `src/backend/js/stdlib/bits.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/rand.js`
   - Do: the `…64` functions in `bits.js` (`Add64`, `Sub64`, `Mul64`, `Div64`, `Rem64`, `RotateLeft64`, `Reverse64`, `ReverseBytes64`) return BigInt while `Add`, `Sub`, `Mul`, `Div`, `Rem`, `RotateLeft`, `Reverse`, `ReverseBytes` keep returning `Number` (`uint`); `math.Float64bits` returns `new BigUint64Array(b)[0]` directly (used by `stdlib/math/extra.go`); `rand.Int63`, `Int63n` and `Uint64` take and return BigInt.
   - Test: `test/unit/builtins/stdlib.test.js` — `bits.OnesCount64(1<<63 | 1)` → `2`, `bits.Mul64(1<<32, 1<<32)` → `1 0`, `math.Float64bits(1.0)` as `uint64` BigInt, `math.FMA` unchanged, `rand.Int63()` and `rand.Int63n(1 << 40)`.
   - Done when: cases pass on `js`, `both` and `wasm` and `npm test` is green.
 
-- [ ] **Task 1.6 — Docs and the `int64` cost bound**
+- [x] **Task 1.6 — Docs and the `int64` cost bound**
   - Files: `docs/language-support.md`, `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Do: say that `int64`/`uint64` are exact on every target and are BigInt in JS output and across the WASM facade, that `int`/`uint` stay JS numbers exact up to 2⁵³, and that hot loops should use `int`; update the boundary type table (`int64`, `uint64`, `time.Duration` cross as BigInt). Add new `test/perf/int64-bench.js` (an `int64` add/multiply loop against the same loop on `int`, 10⁷ iterations) and record its ratio in [§2](#2-invariants--safety-bounds).
   - Test: `test/unit/compiler/plan-paths.test.js` and the `language-support.md` fixture rows pass; `node test/perf/int64-bench.js` prints the ratio.
@@ -260,31 +300,31 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 2: Generic core types
 
-- [ ] **Task 2.1 — Core type of a constrained type parameter in expressions**
+- [x] **Task 2.1 — Core type of a constrained type parameter in expressions**
   - Files: `src/typechecker/types.js` (`coreType`), `src/typechecker/expressions.js`, `src/typechecker/statements.js` (`range`)
   - Do: for a type parameter whose constraint has one underlying type (`~[]E`, `~map[K]V`), use it for index, slice, `range`, `len`, `cap`, `append`, `copy`, `make(S, n)` and composite literals. A constraint with several underlying types keeps `Cannot index type S`.
   - Test: `test/unit/types/generics.test.js` — `First`, `Tail`, `Len`, `make(S, n)` over `[S ~[]E, E any]` and `[M ~map[K]V, K comparable, V any]` called with explicit type arguments; negative: `[T int | string]` indexing keeps its message.
   - Done when: `First[[]int, int]`-style calls print Go's output via `assertProgramOutput` on JS and WASM.
 
-- [ ] **Task 2.2 — Constraint type inference and conversions through core types**
+- [x] **Task 2.2 — Constraint type inference and conversions through core types**
   - Files: `src/typechecker/resolve.js` (unification), `src/typechecker/expressions.js`
   - Do: unify `S`'s core type with the argument's underlying type to derive `E`/`K`/`V`; `S(nil)` and `S(x)` convert when the core type accepts the operand; a call returning `S` has the argument's named type.
   - Test: `generics.test.js` — `First([]int{7, 8})` → `7`; `Z([]int{1}) == nil` → `true`; `Len(map[string]int{"a": 1})` → `1`; `Id(IDs{1, 2}).Sum()` with a method on `IDs` → `3`.
   - Done when: none of these reports `Cannot infer type arguments` or `cannot convert nil to S`, and all print Go's output on JS.
 
-- [ ] **Task 2.3 — Type-literal type arguments in explicit instantiation**
+- [x] **Task 2.3 — Type-literal type arguments in explicit instantiation**
   - Files: `src/parser/expressions.js`
   - Do: the index-or-instantiation parse at `expressions.js:182` accepts a type literal (`[]T`, `map[K]V`, `func(…)`, `*T`, `chan` excluded) as any type argument.
   - Test: `test/unit/parser/` — `Id[[]int, int]`, `slices.Index[[]int, int]`, `slices.Sort[[]int]`, `Keys[map[string]int, string, int]` parse; `a[[]int{1}[0]]` (index by composite literal) still parses as an index.
   - Done when: `f := slices.Index[[]int, int]; fmt.Println(f([]int{1}, 1))` prints `0` on JS and WASM.
 
-- [ ] **Task 2.4 — WASM: valid modules for named slice and map type arguments**
+- [x] **Task 2.4 — WASM: valid modules for named slice and map type arguments**
   - Files: `src/backend/wasm/monomorph.js`, `src/backend/wasm/types.js`
   - Do: substitute the concrete named type for `S`/`M` when a generic body is copied, so locals, parameters, results and `append` of `S` use the named type's representation.
   - Test: `test/unit/wasm/generics.test.js` — `Id[IDs, int](IDs{1, 2}).Sum()` with `return append(s, s...)` (today `array.set[2] expected type i64`), a function returning `S` with a method called on the result, `M ~map[K]V` over `type Set map[string]bool`; all as parity tests.
   - Done when: the modules validate and print the JS output.
 
-- [ ] **Task 2.5 — JS zero values for core-typed parameters and parity rows**
+- [x] **Task 2.5 — JS zero values for core-typed parameters and parity rows**
   - Files: `src/backend/js/expressions.js` (`S(nil)`, zero factory for `S`), `docs/language-support.md` (fixture rows)
   - Do: zero-value factories cover type parameters with a core type; add `<!-- fixture: … -->` rows for each pattern in Tasks 2.1–2.4.
   - Test: `test/unit/language/parity-matrix.test.js` picks up the rows; `generics.test.js` — `var zero S`, `S(nil)`, `append(S(nil), s...)`.
@@ -292,31 +332,31 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 3: Natives, differential testing and lazy checking
 
-- [ ] **Task 3.1 — `//gofront:native` directive and name set**
+- [x] **Task 3.1 — `//gofront:native` directive and name set**
   - Files: `src/lexer/lexer.js`, `src/parser/declarations.js`, `src/typechecker/types.js` (`NATIVES` beside `INTRINSICS`), `src/typechecker/index.js:1135`
   - Do: parse `//gofront:native <name>` before a func with a body, like `//gofront:intrinsic`; reject an unknown name, a native on a body-less func, and use outside `stdlib/`.
   - Test: `test/unit/compiler/stdlib-go.test.js` — `unknown native 'x'`, the body-less error, `//gofront:native is reserved for the standard library` (user package), via a temp-dir stdlib root; a valid test-only name compiles.
   - Done when: the four tests pass with those messages.
 
-- [ ] **Task 3.2 — JS call-site substitution with decline and value fallback**
+- [x] **Task 3.2 — JS call-site substitution with decline and value fallback**
   - Files: `src/backend/js/expressions.js`, new `src/backend/js/natives.js`
   - Do: at a call whose callee carries a native, ask the registry with the argument expressions and instantiated type arguments; emit the string, else call the Go function. Values, `defer` and method values call the Go function. Repeated arguments are bound to temporaries.
   - Test: `stdlib-go.test.js` — a test-only native `str.Index` emits `.indexOf(`; `f := str.Index; f(a, b)` calls the Go body; a template that declines for `float64` calls the Go body; `str.Index(next(), next())` evaluates each argument once, in order.
   - Done when: all four assertions pass on the generated JS.
 
-- [ ] **Task 3.3 — WASM call-site substitution**
+- [x] **Task 3.3 — WASM call-site substitution**
   - Files: `src/backend/wasm/emit-exprs.js`, new `src/backend/wasm/natives.js`
   - Do: the same contract for WASM; an implementation pushes instructions or a host-import call and returns `true`, or `false` to decline. The Go body is emitted whenever reachable.
   - Test: `test/unit/wasm/stdlib.test.js` — a test-only native calling an import; decline and value-fallback cases as parity tests against the Go body.
   - Done when: native-on and native-off modules validate and give the same output.
 
-- [ ] **Task 3.4 — Natives-off mode and `assertFourWay`**
+- [x] **Task 3.4 — Natives-off mode and `assertFourWay`**
   - Files: `src/compiler.js` (`natives` option), `src/link/stdlib.js` (pass it to the stdlib `CodeGen` and WASM unit), `src/cli/cli-core.js` (`--no-natives`, debugging only)
   - Do: `natives: false` makes both backends ignore their registries. Extend `compileHybridProgram` in `test/unit/helpers.js` with a `natives` option and add `assertFourWay(source, expected)`, which reports the failing configuration (`js (natives on)`, …).
   - Test: `stdlib-go.test.js` — a test-only native that disagrees with its Go body fails `assertFourWay` naming `js (natives on)`; an agreeing one passes.
   - Done when: both cases behave as stated.
 
-- [ ] **Task 3.5 — Lazy body checking for Go-source packages**
+- [x] **Task 3.5 — Lazy body checking for Go-source packages**
   - Files: `src/typechecker/index.js`, `src/link/stdlib.js` (`checkStdlibPrograms`, both passes), `src/lower/reachability.js`
   - Do: check declarations eagerly and function and method bodies when first reached (call, used type's method, interface satisfaction) in both the probe and the mangled pass; report stdlib body errors at the user's call site. Expose `checker.stats.bodiesChecked`.
   - Test: `stdlib-go.test.js` — a synthetic 5,600-line Go-source package of which the program calls one function checks ≤ 10 bodies; a type error in an unreached body is not reported; the same error in a reached body is reported at the call site with the `internal stdlib error` note; diagnostics for existing packages are unchanged.
@@ -324,28 +364,28 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 4: `sort` and `slices`
 
-- [ ] **Task 4.1 — pdqsort variant generator**
+- [x] **Task 4.1 — pdqsort variant generator**
   - Files: new `scripts/gen-pdq.js`, new `scripts/pdq-template.txt` (derived from the pdqsort in `stdlib/sort/sort.go`), `package.json` (`gen:pdq`; `npm run check` fails when regeneration changes a file)
   - Generates: `stdlib/sort/zsort_iface.go`, `stdlib/sort/zsort_func.go`, `stdlib/slices/zsort_ordered.go`, `stdlib/slices/zsort_cmp.go` (Go's BSD notice kept)
   - Do: one template with the four substitutions Go's `gen_sort_variants` uses; swap and inspect by index (`data[a], data[b] = data[b], data[a]`), never `&data[i]` (v1.8.0 D5).
   - Test: new `test/unit/compiler/gen-pdq.test.js` — regenerating is a no-op; `test/unit/stdlib/sort.test.js` tie cases print the order of equal keys for n = 5, 13, 40, 1000.
   - Done when: tie cases match Go's order in all four configurations.
 
-- [ ] **Task 4.2 — `slices` non-sorting members in Go**
+- [x] **Task 4.2 — `slices` non-sorting members in Go**
   - Files: `stdlib/slices/slices.go`, `src/backend/js/natives.js` (`slices.Contains`, `Index`, `Reverse`, `Clone` for primitive `E`)
   - Removes: `stdlib/slices/{extra,iter}.go`, non-sort members from `src/backend/js/stdlib/slices.js`, `emitSlices*` (non-sort) in `src/backend/wasm/stdlib/core.js`, `slices` entries in `src/typechecker/stdlib/extended.js`
   - Do: every existing non-sort/search member with Go's signatures (`S ~[]E`); JS natives keep today's `includes`/`indexOf` text and handle nil slices.
   - Test: `test/unit/stdlib/slices.test.js` — Insert/Delete/Compact/Concat/Clip/Grow/Equal/Compare/Min/Max with named, empty and nil slices; `type IDs []int` comes back as `IDs` from `Insert`/`Delete`/`Clone`/`Compact`/`Grow`; `slices.Contains(nil, 1)` → `false`, `slices.Index(nil, 1)` → `-1`.
   - Done when: cases pass four ways; `example/` JS differs only where a native's text differs (diff in the PR).
 
-- [ ] **Task 4.3 — `slices` sort and search family in Go**
+- [x] **Task 4.3 — `slices` sort and search family in Go**
   - Files: `stdlib/slices/sort.go`, `src/backend/js/natives.js` (`slices.Sort` for `int`/`string`), new `test/perf/stdlib-bench.js`
   - Removes: `emitSlicesSort*`, `BinarySearch*`, `IsSorted*`, `MinMax*` in `core.js`; the matching shim members and typings
   - Do: `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted*`, `BinarySearch*`, `Min*`, `Max*` over the generated pdqsort; floats order `NaN` first via `cmp.Less`.
   - Test: `slices.test.js` — `NaN`, ±0, ties via `SortFunc`, `SortStableFunc` stability, large n; `test/unit/wasm/slices.test.js` — a counting `SortFunc` on 20,000 elements makes ≤ 400,000 comparisons; `stdlib-bench.js` records the WASM 200,000-`int` sort and JS `SortFunc` vs `Array.prototype.sort`.
   - Done when: cases pass four ways; WASM 200,000 `int` ≤ 100 ms; JS `SortFunc` ≤ 2× `Array.prototype.sort` with a comparator.
 
-- [ ] **Task 4.4 — `sort` in Go**
+- [x] **Task 4.4 — `sort` in Go**
   - Files: `stdlib/sort/sort.go` (keeps the `Interface` API; its pdqsort moves to the generated files), `src/backend/js/natives.js` (`sort.Ints`, `sort.Strings`)
   - Removes: `src/backend/js/stdlib/sort.js`, `emitSort*` in `core.js`, `sort` typings in `src/typechecker/stdlib/core.js`
   - Do: `Ints`, `Strings`, `Float64s`, `Slice`, `SliceStable`, `Sort`, `Stable`, `Reverse`, `Search*`, `IntSlice`/`StringSlice`/`Float64Slice`, `IsSorted`, `*AreSorted`, `Find`, `SliceIsSorted`.
@@ -354,28 +394,28 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 5: `maps`, `errors`, `unicode/utf8`, `path`, `html`
 
-- [ ] **Task 5.1 — `maps` in Go and generic map range in JS**
+- [x] **Task 5.1 — `maps` in Go and generic map range in JS**
   - Files: `stdlib/maps/maps.go`, `src/backend/js/statements.js` (`_structKeyRange` for type-parameter maps), `src/typechecker/expressions.js` (remove `_derivedReturn`)
   - Removes: `stdlib/maps/iter.go`, `src/backend/js/stdlib/maps.js`, `emitMaps*` in `core.js`, `maps` typings in `extended.js`
   - Do: `Clone`, `Copy`, `Equal`, `EqualFunc`, `DeleteFunc`, `All`, `Keys`, `Values`, `Insert`, `Collect` with `M ~map[K]V`; `range` over a type-parameter map decodes keys from the instantiated key type.
   - Test: `test/unit/stdlib/maps.test.js` — sorted output, `NaN` keys kept once each; `slices.Collect(maps.Keys(map[K]int{{"a",1}:1}))` → `[{a 1}]`; `maps.Keys(map[any]int{L("a"):1})` keeps `L`; `for k := range maps.Keys(map[any]int{1:1}) { fmt.Printf("%T %v", k, k) }` → `int 1`.
   - Done when: cases pass four ways and `grep -rn _derivedReturn src` finds nothing.
 
-- [ ] **Task 5.2 — `errors` in Go, `As` stays an emitter member**
+- [x] **Task 5.2 — `errors` in Go, `As` stays an emitter member**
   - Files: `stdlib/errors/errors.go`, `src/backend/js/runtime.js` (`%w`/`Join` wrappers' `Unwrap`), `src/backend/wasm/module-emitter.js` (runtime error struct method set)
   - Removes: `stdlib/errors/overlay.go`, `emitErrorsCall` except `As` in `core.js`; `src/backend/js/stdlib/errors.js` except `As`; `errors` typings except `As`
   - Do: `New` (an `*errorString`), `Is`, `Unwrap`, `Join`, `ErrUnsupported` in Go, as an overlay with `As` the only emitter member; wrappers expose `Unwrap() error` / `Unwrap() []error` to type switches and assertions on both backends.
   - Test: `test/unit/stdlib/errors.test.js` — `%w`, multiple `%w`, `Join`, `Is` with `Is(error) bool` methods, `As` on pointer and value targets; `errors.Is(nil, nil)` → `true`; `%T` of `errors.New("x")` → `*errors.errorString`; `Errorf("%w")` matches `interface{ Unwrap() error }`; `Join` matches `interface{ Unwrap() []error }`; `Is2[error](errors.New("x"))` → `true`; `errors.Is(err, strconv.ErrRange)`.
   - Done when: cases pass four ways.
 
-- [ ] **Task 5.3 — `unicode/utf8` in Go**
+- [x] **Task 5.3 — `unicode/utf8` in Go**
   - Files: `stdlib/unicode/utf8/utf8.go`, `src/backend/js/natives.js` (`RuneCountInString`)
   - Removes: `stdlib/unicode/utf8/bytes.go`, `src/backend/js/stdlib/utf8.js`, `emitUtf8Call` in `core.js`, `utf8` typings in `core.js`
   - Do: the whole package over `[]byte` with Go's constants and signatures (`RuneError`, `UTFMax` untyped).
   - Test: `test/unit/stdlib/utf8.test.js` — invalid sequences, surrogates, `FullRune`, `DecodeLastRune`.
   - Done when: cases pass four ways and `unicode/utf8` has no typechecker table entry.
 
-- [ ] **Task 5.4 — `path` and `html` in Go**
+- [x] **Task 5.4 — `path` and `html` in Go**
   - Files: `stdlib/path/path.go`, `stdlib/html/html.go`, `src/typechecker/types.js` (`path/filepath` alias, `types.js:123`)
   - Removes: `src/backend/js/stdlib/{path,html}.js`, `path`/`html` emitters in `src/backend/wasm/stdlib/pure.js`, typings in `extended.js` (the alias at `extended.js:540` re-points to the Go `path`)
   - Do: `Join`, `Clean`, `Base`, `Dir`, `Ext`, `Split`, `IsAbs`, `Match`; `EscapeString`/`UnescapeString` with Go's entity subset documented in the file.
@@ -384,21 +424,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 6: `io`, readers and `strings.Replacer`
 
-- [ ] **Task 6.1 — `io` in Go; `fmt.Fprint*` through `io.Writer`**
+- [x] **Task 6.1 — `io` in Go; `fmt.Fprint*` through `io.Writer`**
   - Files: `stdlib/io/io.go`, `src/backend/js/fmt-runtime.js` (`Fprint*` calls `w.Write`), `src/backend/wasm/stdlib/core.js` (`Fprint*` dispatch through the interface)
   - Removes: `src/backend/js/stdlib/io.js`, `emitIo*`/`_emitIoCopy*`/`_emitIoReadAll` in `src/backend/wasm/stdlib/io.js`, `io` typings, `io.Writer`/`io.Reader` sites in `wasm/index.js`
   - Do: `Reader`, `Writer`, `Closer`, `Seeker` and composites, `EOF`, `ErrUnexpectedEOF`, `ErrShortWrite`, `Discard`, `Copy`, `CopyN`, `CopyBuffer`, `ReadAll`, `ReadFull`, `ReadAtLeast`, `WriteString`, `LimitReader`/`LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `SectionReader`; `Sscan` stays an emitter.
   - Test: `test/unit/stdlib/io.test.js` — `io.ReadAll(bytes.NewReader(nil))` → `0 <nil>`; `ReadAll(&io.LimitedReader{…, N: 3})` → `hel <nil>`; `NewSectionReader(…, 6, 5).Read` → `5 world`; `test/unit/stdlib/fmt.test.js` — `Fprintf` into `bytes.Buffer`, `strings.Builder`, `os.Stdout` and a user `Writer`.
   - Done when: cases pass four ways and `fmt.Fprintf(w, …)` type-checks against `io.Writer`.
 
-- [ ] **Task 6.2 — `strings.Reader` and `bytes.Reader` in Go**
+- [x] **Task 6.2 — `strings.Reader` and `bytes.Reader` in Go**
   - Files: `stdlib/strings/reader.go`, `stdlib/bytes/reader.go`, `src/backend/wasm/index.js` (10 + 9 sites)
   - Removes: reader helpers in `src/backend/wasm/stdlib/io.js`, reader sites in `wasm/emit-builtins.js` and `js/expressions.js`
   - Do: `NewReader`, `Read`, `ReadByte`, `UnreadByte`, `ReadRune`, `UnreadRune`, `Len`, `Size`, `Reset`, `Seek`, `ReadAt`, `WriteTo`.
   - Test: `test/unit/stdlib/strings.test.js`, `bytes.test.js` reader cases; `io.ReadAll` over each; `bytes.NewReader([]byte{0xff, 'a'})` then `ReadRune`, `ReadByte` → `a`.
   - Done when: cases pass four ways and `grep -rn 'strings\.Reader\|bytes\.Reader' src --include=*.js` outside `*/stdlib/` finds only comments.
 
-- [ ] **Task 6.3 — `strings.Replacer` in Go**
+- [x] **Task 6.3 — `strings.Replacer` in Go**
   - Files: `stdlib/strings/replacer.go`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js` (5 sites)
   - Removes: `emitReplacerMethodCall`, `emitStringsNewReplacer` in `core.js`
   - Do: `NewReplacer`, `Replace`, `WriteString` with Go's generic algorithm (first match, argument order).
@@ -407,21 +447,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 7: `bytes`
 
-- [ ] **Task 7.1 — `bytes` functions in Go with natives**
+- [x] **Task 7.1 — `bytes` functions in Go with natives**
   - Files: `stdlib/bytes/bytes.go`, `src/backend/js/natives.js` (`IndexByte`, `Equal`, `Compare`)
   - Removes: `stdlib/bytes/{iter,search,split}.go`, `emitBytesCall`/`_emitBytes*` in `src/backend/wasm/stdlib/bytes.js`, function members of `src/backend/js/stdlib/bytes.js`, `bytes` function typings
   - Do: every existing `bytes` function with Go's signatures (`rune`/`byte` types for `ContainsRune`, `IndexByte`, `Map`, `FieldsFunc`, `TrimFunc`).
   - Test: `test/unit/stdlib/bytes.test.js` — functions; `bytes.IndexRune([]byte("a\xffb"), utf8.RuneError)` → `1`; `bytes.ToTitle` on WASM; `test/unit/builtins/bytes.test.js` unchanged.
   - Done when: cases pass four ways and `bytes` functions have no typechecker entry.
 
-- [ ] **Task 7.2 — `bytes.Buffer` in Go**
+- [x] **Task 7.2 — `bytes.Buffer` in Go**
   - Files: `stdlib/bytes/buffer.go`, `src/backend/js/expressions.js`, `src/backend/wasm/index.js` (`bytes.Buffer` sites)
   - Removes: `emitBytesBufferMethodCall` (the rest of `src/backend/wasm/stdlib/bytes.js`), `Buffer` in `src/backend/js/stdlib/bytes.js`, `bytes.Buffer` sites in `wasm/emit-builtins.js`
   - Do: `Write*`, `Read*`, `Bytes`, `String`, `Len`, `Cap`, `Grow`, `Truncate`, `Reset`, `Next`, `ReadFrom`, `WriteTo`, `UnreadByte`, `UnreadRune`, `NewBuffer`, `NewBufferString`; `fmt.Fprint*` into a `Buffer` goes through `io.Writer` (Task 6.1).
   - Test: `bytes.test.js` — buffer cases; `n, _ := fmt.Fprint(&b, "héé")` → `5`; value-copy, pointer, interface and map-value cases in `test/unit/builtins/bytes.test.js`; a program using `Buffer` is ≤ 4,500 bytes of dev `app.wasm`.
   - Done when: both pass and `src/backend/wasm/stdlib/bytes.js` is deleted.
 
-- [ ] **Task 7.3 — Remove dead `bytes` internals**
+- [x] **Task 7.3 — Remove dead `bytes` internals**
   - Files: `src/backend/wasm/stdlib/io.js`, `src/backend/wasm/emit-builtins.js`, `scripts/check-layers.js` (`ALLOW` entries made obsolete)
   - Do: delete helpers only the `bytes` emitters used and any `ALLOW` entry whose shim is gone.
   - Test: `test/unit/compiler/check-layers.test.js` passes with the shorter `ALLOW`; `test/unit/wasm/stdlib.test.js` unchanged.
@@ -429,21 +469,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 8: `strings`
 
-- [ ] **Task 8.1 — Search family with host natives**
+- [x] **Task 8.1 — Search family with host natives**
   - Files: `stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`Index`, `LastIndex`, `IndexByte`, `IndexRune`, `IndexAny`, `Contains*`, `HasPrefix`, `HasSuffix`, `Count` via today's imports such as `str_index`)
   - Removes: `stdlib/strings/{extra,iter}.go`, matching `emitStrings*` cases in `core.js`, members of `src/backend/js/stdlib/strings.js`, typings
   - Do: Go bodies over `[]byte` (v1.8.0 §1.1); natives reproduce today's output.
   - Test: `test/unit/stdlib/strings.test.js` — search cases (ASCII, per §1.1); `stdlib-bench.js` records WASM `strings.Index` on 1 MB.
   - Done when: cases pass four ways and WASM `strings.Index` is ≤ 1.25× the 145 ms baseline.
 
-- [ ] **Task 8.2 — Split, join, repeat and replace family**
+- [x] **Task 8.2 — Split, join, repeat and replace family**
   - Files: `stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js`
   - Removes: matching `emitStrings*` cases, shim members and typings
   - Do: `Split*`, `Join`, `Repeat`, `Replace`, `ReplaceAll`, `Cut*`, `Fields`, `FieldsFunc` with natives where JS has the primitive.
   - Test: `strings.test.js` — split/join/replace cases including empty separators and `n` limits.
   - Done when: cases pass four ways.
 
-- [ ] **Task 8.3 — Case mapping, trimming and the rest**
+- [x] **Task 8.3 — Case mapping, trimming and the rest**
   - Files: `stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`ToUpper`, `ToLower`, `EqualFold`)
   - Removes: the remaining `emitStrings*` (except `strings.Builder`), the rest of `src/backend/js/stdlib/strings.js` (except `Builder`), `strings` typings
   - Do: `ToUpper`, `ToLower`, `ToTitle`, `Title`, `EqualFold`, `Trim*`, `Map`, `IndexFunc`, `ToValidUTF8`.
@@ -452,21 +492,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 9: Encodings and `crypto/sha256`
 
-- [ ] **Task 9.1 — `encoding/hex` and `encoding/base64` in Go**
+- [x] **Task 9.1 — `encoding/hex` and `encoding/base64` in Go**
   - Files: `stdlib/encoding/hex/hex.go`, `stdlib/encoding/base64/base64.go`, `scripts/check-layers.js` (drop the `jsonrt` `ALLOW` entries once `base64.js` is gone)
   - Removes: `src/backend/js/stdlib/{hex,base64}.js`, `HELPER_HEX`/`HELPER_BASE64` and `atob` fallback in `src/backend/js/runtime.js`, `emitHexCall`/`emitBase64*` in `src/backend/wasm/stdlib/packages.js`, typings
   - Do: over `[]byte` (§1.1): `hex` `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen`, `AppendEncode`, `AppendDecode`, `ErrLength`, `InvalidByteError`; `base64` `*Encoding` with `NewEncoding`, `WithPadding`, `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen`, `AppendEncode`, `AppendDecode`, `CorruptInputError`; `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` as `*Encoding` package vars. `internal/jsonrt` and `__json_b64`/`__json_b64_dec` use the Go `base64` (returning `CorruptInputError` on invalid base64 instead of throwing from `atob`).
   - Test: `test/unit/stdlib/{hex,base64}.test.js` — codecs and Go's error messages; `DecodeString("!!!")` → `illegal base64 data at input byte 0`; `test/unit/builtins/json.test.js` — `var b []byte; fmt.Println(json.Unmarshal([]byte("\"!!\""), &b))` → `illegal base64 data at input byte 0`, and valid `[]byte` fields unchanged.
   - Done when: cases pass four ways.
 
-- [ ] **Task 9.2 — `encoding/binary` (`ByteOrder`, varints) in Go**
+- [x] **Task 9.2 — `encoding/binary` (`ByteOrder`, varints) in Go**
   - Files: `stdlib/encoding/binary/binary.go`
   - Removes: `ByteOrder`/varint members of `src/backend/js/stdlib/binary.js` and `packages.js`, typings
   - Do: `ByteOrder` implementations with `Uint*`/`PutUint*`/`Append*`, varints, `MaxVarintLen*`; `Read`/`Write` stay emitter members (overlay).
   - Test: `test/unit/stdlib/binary.test.js` — both byte orders, varint round trips and overflow.
   - Done when: cases pass four ways and `binary.Read`/`Write` still pass their existing tests.
 
-- [ ] **Task 9.3 — `crypto/sha256` in Go**
+- [x] **Task 9.3 — `crypto/sha256` in Go**
   - Files: `stdlib/crypto/sha256/sha256.go`, `src/backend/wasm/index.js` (`sha256.digest` method table, 13 sites), `src/backend/wasm/boundary.js` (1 site)
   - Removes: `src/backend/js/stdlib/sha256.js`, sha256 write cores in `src/backend/wasm/stdlib/io.js`, emitters in `packages.js`, typings
   - Do: `Sum256`, `New`, `Sum224`, `New224`, `Size`, `BlockSize` as a Go digest satisfying `hash.Hash`.
@@ -475,21 +515,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 10: `math/bits`, `math/rand`, `sync`
 
-- [ ] **Task 10.1 — `math/bits` in Go with natives**
+- [x] **Task 10.1 — `math/bits` in Go with natives**
   - Files: `stdlib/math/bits/bits.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`Len*`, `LeadingZeros*`, `TrailingZeros*`, `OnesCount*` as `Math.clz32`/WASM `clz`/`ctz`/`popcnt`)
   - Removes: `src/backend/js/stdlib/bits.js`, `emitBitsCall` in `core.js`, typings; `stdlib/math/extra.go`'s `ALLOW` entry in `scripts/check-layers.js`
   - Do: every existing member with Go's signatures (`uint` vs `uint64`), absorbing `Add64`/`Mul64`/`Div64`.
   - Test: `test/unit/stdlib/bits.test.js` — wide arithmetic, edge widths; zero-alloc and raycast benches unchanged.
   - Done when: cases pass four ways.
 
-- [ ] **Task 10.2 — `math/rand` in Go over `rand_source`**
+- [x] **Task 10.2 — `math/rand` in Go over `rand_source`**
   - Files: `stdlib/math/rand/rand.go`, `src/typechecker/types.js` (`INTRINSICS`: `rand_source`), `src/backend/js/index.js` (`JS_INTRINSICS.rand_source`; the WASM side uses the existing random import)
   - Removes: `src/backend/js/stdlib/rand.js`, rand in `src/backend/wasm/stdlib/pure.js`, typings
   - Do: top-level functions draw from `//gofront:intrinsic rand_source`; `Intn`, `Int63`, `Float64`, `Perm`, `Shuffle`, `Rand`/`NewSource` in Go.
   - Test: `test/unit/stdlib/rand.test.js` — range checks, `Perm` is a permutation, `Shuffle` keeps the multiset; `rand.Perm(-1)` panics `runtime error: makeslice: len out of range`.
   - Done when: cases pass four ways.
 
-- [ ] **Task 10.3 — `sync` in Go**
+- [x] **Task 10.3 — `sync` in Go**
   - Files: `stdlib/sync/sync.go`
   - Removes: `stdlib/sync/extra.go`, `src/backend/js/stdlib/sync.js`, `emitSync*` in `packages.js`, typings
   - Do: `Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`/`OnceValue`/`OnceValues` as single-threaded structs; `Unlock` of an unlocked mutex panics with Go's message (`sync: unlock of unlocked mutex`).
@@ -498,21 +538,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 11: `time`
 
-- [ ] **Task 11.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
+- [x] **Task 11.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
   - Files: `stdlib/time/time.go`, `stdlib/time/duration.go`, `src/backend/wasm/natives.js` (`time.Now`, local offset over the existing clock import)
   - Removes: civil-day helpers and `emitDurationMethodCall` in `src/backend/wasm/stdlib/time.js`, matching members of `src/backend/js/stdlib/time.js`, `DURATION_T`/`TIME_T` tables in `src/typechecker/stdlib/core.js`
   - Do: `Duration` with methods and constants, `Month`/`Weekday` as named `int` types with `String`, `Time` with today's field layout (`unixNano int64`, `offset int32`), `Date`, `Unix`, `UnixMilli`, `UnixMicro`, `Add`, `Sub`, `AddDate`, `Truncate`, `Round`, `Clock`, `Date()`, `In`, `YearDay`, `ISOWeek`, `Compare`, `FixedZone`, `UTC`; `Now`/`Since`/`Until` stay natives.
   - Test: `test/unit/stdlib/time.test.js` — fixed dates, DST-free zones, leap years, ISO week edges; `t.Compare(t.Add(1))` → `-1`; `t.Clock()` → `3 4 5` on WASM; `var s fmt.Stringer = 3*time.Second; fmt.Println(s.String())` → `3s`; `test/unit/builtins/stdlib.test.js` time tests unchanged.
   - Done when: cases pass four ways and `Month`/`Weekday` are named types with `String()`.
 
-- [ ] **Task 11.2 — `time` layouts, printing and JSON**
+- [x] **Task 11.2 — `time` layouts, printing and JSON**
   - Files: `stdlib/time/format.go`, `stdlib/time/parse.go`, `src/backend/js/fmt-runtime.js` (promoted `String` on Go-source named types)
   - Removes: `_emitTimeMethodFormat`, `_emitTimeParse` in `src/backend/wasm/stdlib/time.js`; the rest of `src/backend/js/stdlib/time.js` except clock natives
   - Do: Go's layout engine for the supported layouts and constants (`RFC3339`, `Kitchen`, …), `ParseError`, `ParseDuration`, `Time.String`, `MarshalJSON`/`UnmarshalJSON`/`MarshalText`.
   - Test: `time.test.js` — all layout constants, 12-hour clocks, fractional seconds, parse errors; `fmt.Println(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC))` → `2020-01-02 03:04:05 +0000 UTC`; `fmt.Println(struct{ D time.Duration }{time.Second})` → `{1s}`; `type T struct{ time.Duration; N int }` prints `1s`; `json.Marshal(time.Date(…))` round-trips on JS and WASM.
   - Done when: cases pass four ways and `src/backend/wasm/stdlib/time.js` holds only clock natives.
 
-- [ ] **Task 11.3 — `time` at the boundary and in the backends**
+- [x] **Task 11.3 — `time` at the boundary and in the backends**
   - Files: `src/backend/wasm/boundary.js` (10 `time.Time` + `time.Duration` sites), `src/backend/js/expressions.js`, `src/typechecker/assignability.js`
   - Removes: `time.*` name checks in `wasm/emit-builtins.js`, `wasm/emit.js`, `js/runtime.js`
   - Do: `time.Time`/`Duration` follow ordinary struct and named-type rules except the documented JS `Date` conversion; the boundary representation is the one Phase 1 set (`int64` parts as BigInt).
@@ -521,28 +561,28 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 12: `strconv` and user docs
 
-- [ ] **Task 12.1 — `strconv` integers, bools and errors in Go**
+- [x] **Task 12.1 — `strconv` integers, bools and errors in Go**
   - Files: `stdlib/strconv/strconv.go`
   - Removes: integer/bool members of `src/backend/js/stdlib/strconv.js` and `emitStrconvCall`, typings
   - Do: `Itoa`, `Atoi`, `ParseInt` (returns `int64`), `ParseUint`, `ParseBool`, `FormatInt`, `FormatUint`, `FormatBool`, `Append*` forms, `NumError`, `ErrRange`, `ErrSyntax`, `IntSize`.
   - Test: `test/unit/stdlib/strconv.test.js` — error messages and `errors.Is(err, strconv.ErrRange)`; bases 2–36; `int64` limits.
   - Done when: cases pass four ways and `ParseInt` returns `int64`.
 
-- [ ] **Task 12.2 — `strconv` quoting in Go**
+- [x] **Task 12.2 — `strconv` quoting in Go**
   - Files: `stdlib/strconv/quote.go`
   - Removes: quote members of the shim and emitter, typings
   - Do: `Quote`, `QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII` and `Append*` forms, `Unquote`, `UnquoteChar`, `QuotedPrefix`, `CanBackquote`, `IsPrint`, `IsGraphic`.
   - Test: `strconv.test.js` — quote/unquote round trips and invalid input.
   - Done when: cases pass four ways.
 
-- [ ] **Task 12.3 — `strconv` floats as natives over a Go body**
-  - Files: `stdlib/strconv/float.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`FormatFloat`, `ParseFloat`, `AppendFloat`)
+- [x] **Task 12.3 — `strconv` floats as natives over a Go body**
+  - Files: `stdlib/strconv/float.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (built as the two internal natives `strconv.shortest` and `strconv.parseDecimal` that `FormatFloat`, `AppendFloat` and `ParseFloat` call, so every call shape gets the host path; `NATIVES` in `src/typechecker/types.js` lists them)
   - Removes: the rest of `src/backend/js/stdlib/strconv.js` and `emitStrconvCall`
   - Do: the Go body handles sign, `-0`, special values, `bitSize` 32 range errors and syntax; the shortest-representation digits come from the native (host number printer).
   - Test: `strconv.test.js` — round trips, `'g'`/`'e'`/`'f'`, bit sizes 32 and 64; `FormatFloat(-0, 'f', -1, 64)` → `-0`; `ParseFloat("1e39", 32)` → `+Inf` with the range error; `fmt.Println(strconv.ParseFloat(…))` validates on WASM.
   - Done when: cases pass four ways and `fmt` cases are unchanged.
 
-- [ ] **Task 12.4 — User documentation**
+- [x] **Task 12.4 — User documentation**
   - Files: `docs/go-compatibility.md`, `docs/language-support.md` (package tables), `docs/hybrid-wasm.md`
   - Do: document the sort tie order and `NaN` ordering, generic helpers with named slice and map types, the behaviour fixes, `--no-natives`, and `errors.As`/`strings.Builder` as the remaining emitter members.
   - Test: `test/unit/compiler/plan-paths.test.js` and the `language-support.md` fixture rows pass.
@@ -550,20 +590,20 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 13: Typings removal and native self-check
 
-- [ ] **Task 13.1 — Native registry self-check**
+- [x] **Task 13.1 — Native registry self-check**
   - Files: new `test/unit/compiler/natives.test.js`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js`
   - Do: scan `stdlib/**/*.go` for `//gofront:native <name>`; require each name in `NATIVES` and in both registries except the documented single-target allow-list; fail on a registry entry no Go file names.
   - Test: the test fails first against a temporary Go file naming an unregistered native.
   - Done when: the test passes on the real tree.
 
-- [ ] **Task 13.2 — Delete leftover typings and shrink the registries**
+- [x] **Task 13.2 — Delete leftover typings and shrink the registries**
   - Files: `src/typechecker/types.js` (`STDLIB_PACKAGES`, `WASM_STDLIB_MEMBERS`, `WASM_SUPPORTED_STDLIB`), `src/backend/js/stdlib/index.js`, `src/backend/wasm/stdlib/index.js`
   - Removes: leftover migrated entries in `src/typechecker/stdlib/{core,extended}.js`
   - Do: keep only `fmt`, `encoding/json`, `regexp`, `os`, `testing`, `math`, `gom`, `gofront/shared`, `gofront/simd`, `crypto/rand`, browser typings and the emitter members in the Boundary Matrix; run `wc -l` and record the sizes and final benchmark numbers in [§2](#2-invariants--safety-bounds).
   - Test: `test/unit/compiler/stdlib-go.test.js` — `STDLIB_PACKAGES` contains none of the migrated names.
   - Done when: the line-count bounds in [Done means](#goal) hold.
 
-- [ ] **Task 13.3 — Stdlib layout in the architecture docs**
+- [x] **Task 13.3 — Stdlib layout in the architecture docs**
   - Files: `docs/architecture.md`
   - Do: describe the Go-source stdlib, natives and intrinsics, lazy checking, and a per-package "where does it live" table (Go directory plus natives, or emitter).
   - Test: `test/unit/compiler/plan-paths.test.js` passes.

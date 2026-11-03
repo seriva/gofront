@@ -176,7 +176,7 @@ export const resolveMethods = {
 				}
 				const named = this.types.get(node.name);
 				if (named) {
-					const wasmErr = this._checkWasmStdlibTypeMember(node);
+					const wasmErr = this._checkWasmStdlibTypeMember(node, named);
 					if (wasmErr) return wasmErr;
 					this._useQualifiedTypeName(node, named);
 					return named;
@@ -252,8 +252,10 @@ export const resolveMethods = {
 		}
 	},
 
-	_checkWasmStdlibTypeMember(node) {
+	_checkWasmStdlibTypeMember(node, named) {
 		if (this.target !== "wasm" && this.target !== "both") return null;
+		// Types of Go-source packages are compiled for both targets.
+		if (named?.name?.includes("$$")) return null;
 		const dot = node.name.indexOf(".");
 		if (dot === -1) return null;
 		const pkg = node.name.slice(0, dot);
@@ -591,17 +593,51 @@ export const resolveMethods = {
 
 	// `explicit` seeds the leading type arguments of a partial instantiation
 	// (`F[int](x)`); the rest are inferred from the call arguments.
-	inferTypeArgs(genericType, argTypes, explicit = []) {
+	// `scope` resolves the type parameters of the calling function, so an
+	// argument of type `S ~[]E` unifies through its core type.
+	inferTypeArgs(genericType, argTypes, explicit = [], scope = null) {
 		const map = new Map();
+		const saved = this._inferScope;
+		this._inferScope = scope;
+		try {
+			return this._inferTypeArgs(genericType, argTypes, explicit, map);
+		} finally {
+			this._inferScope = saved;
+		}
+	},
+
+	_inferTypeArgs(genericType, argTypes, explicit, map) {
 		for (let i = 0; i < explicit.length; i++)
 			map.set(genericType.typeParams[i].name, explicit[i]);
 		const params = genericType.underlying.params;
 		for (let i = 0; i < params.length && i < argTypes.length; i++)
 			this._inferFromPair(params[i], argTypes[i], map);
+		this._inferFromCoreTypes(genericType.typeParams, map);
 		for (const tp of genericType.typeParams) {
 			if (!map.has(tp.name)) return null;
 		}
 		return genericType.typeParams.map((tp) => defaultType(map.get(tp.name)));
+	},
+
+	// Constraint type inference: a type parameter `S` constrained by `~[]E`
+	// whose argument is known unifies `E` with that argument's element type.
+	_inferFromCoreTypes(typeParams, map) {
+		const scope = new Scope(this.globals);
+		for (const tp of typeParams) scope.define(tp.name, tp);
+		for (let round = 0; round < typeParams.length; round++) {
+			const before = map.size;
+			for (const tp of typeParams) {
+				const arg = map.get(tp.name);
+				if (!arg || !tp.constraint) continue;
+				const terms = this._constraintTerms(tp.constraint, new Set(), scope);
+				if (terms?.length !== 1) continue;
+				const argUnder =
+					this._coreOfTypeParam(arg) ??
+					this._deepUnderlying(this.resolveType(arg));
+				if (argUnder) this._inferFromPair(terms[0], argUnder, map);
+			}
+			if (map.size === before) break;
+		}
 	},
 
 	_inferFromFuncPair(paramType, argType, map) {
@@ -638,8 +674,19 @@ export const resolveMethods = {
 		}
 	},
 
+	// An argument whose type is a type parameter of the calling function
+	// (`S ~[]E`) unifies through its core type: that type, or null.
+	// `paramType` (optional) is the parameter it is matched against; a bare
+	// type parameter takes the argument as it is.
+	_coreOfTypeParam(argType, paramType = null) {
+		if (argType.kind !== "typeParam" || !this._inferScope) return null;
+		if (paramType?.kind === "typeParam") return null;
+		return this._coreType(argType, this._inferScope);
+	},
+
 	_inferFromPair(paramType, argType, map) {
 		if (!paramType || !argType) return;
+		argType = this._coreOfTypeParam(argType, paramType) ?? argType;
 		if (paramType.kind === "typeParam") {
 			const prev = map.get(paramType.name);
 			if (!prev || untypedWins(prev, argType)) map.set(paramType.name, argType);
@@ -901,6 +948,14 @@ export const resolveMethods = {
 		const mangled = base._mangle?.get(field);
 		if (mangled) {
 			node._stdName = mangled;
+			// Lazy stdlib bodies: referencing a member checks what it reaches.
+			const failure = base._reach?.(mangled);
+			if (failure)
+				this.err(
+					`internal stdlib error in ${base._path}; please report`,
+					node,
+					failure,
+				);
 			return base.members[field];
 		}
 		if (field in base.members) {

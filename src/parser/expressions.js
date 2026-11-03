@@ -97,6 +97,12 @@ function _isDisallowedInTypeArgs(tt) {
 	return DISALLOWED_IN_TYPE_ARGS.has(tt);
 }
 
+// `[T]` followed by `(` or a composite literal's `{` is an instantiation.  A
+// `{` after the condition of if/for/switch opens the block (`if v == s[i] {`).
+function _opensArgs(after, noCompLit) {
+	return after.type === T.LPAREN || (after.type === T.LBRACE && !noCompLit);
+}
+
 function _isTypeIntroducerToken(tt) {
 	return (
 		tt === T.STAR ||
@@ -173,11 +179,20 @@ export const expressionParserMethods = {
 			} else if (t.type === T.LBRACKET) {
 				// Check if this looks like generic type args: Ident[Type](...)  or Ident[Type]{...}
 				// `pkg.F[int](x)` / `pkg.T[X]{...}` instantiate through a qualifier.
-				if (
-					(expr.kind === "Ident" ||
-						(expr.kind === "SelectorExpr" && expr.expr.kind === "Ident")) &&
-					this.looksLikeTypeArgList()
-				) {
+				const nameLike =
+					expr.kind === "Ident" ||
+					(expr.kind === "SelectorExpr" && expr.expr.kind === "Ident");
+				const plainArgs = nameLike && this.looksLikeTypeArgList(noCompLit);
+				const literalArgs =
+					nameLike && !plainArgs ? this.tryParseTypeLiteralArgs() : null;
+				if (literalArgs) {
+					expr = {
+						kind: "InstantiationExpr",
+						expr,
+						typeArgs: literalArgs,
+						_line: expr._line,
+					};
+				} else if (plainArgs) {
 					this.advance(); // consume [
 					const typeArgs = [this.parseType()];
 					while (this.match(T.COMMA)) typeArgs.push(this.parseType());
@@ -233,9 +248,52 @@ export const expressionParserMethods = {
 		);
 	},
 
+	// `Id[[]int, int]`, `slices.Sort[map[string]int]`: type arguments that are
+	// type literals.  Returns the parsed type list, or null (position restored)
+	// when the brackets hold an index expression such as `a[[]int{1}[0]]`.
+	tryParseTypeLiteralArgs() {
+		const first = this.peek2()?.type;
+		const startsLiteral =
+			first === T.LBRACKET || first === T.MAP || first === T.FUNC;
+		// `*T` could be a dereference in an index, but an index has no comma.
+		if (!startsLiteral && !(first === T.STAR || this._hasTopLevelComma()))
+			return null;
+		const start = this.pos;
+		try {
+			this.expect(T.LBRACKET);
+			const typeArgs = [this.parseType()];
+			while (this.match(T.COMMA)) typeArgs.push(this.parseType());
+			this.expect(T.RBRACKET);
+			if (!startsLiteral && typeArgs.length < 2) throw new Error("not types");
+			// `a[foo, bar]` is not an instantiation: names alone need a literal.
+			if (!startsLiteral && typeArgs.every((a) => a.kind === "TypeName"))
+				throw new Error("not type literals");
+			return typeArgs;
+		} catch {
+			this.pos = start;
+			return null;
+		}
+	},
+
+	// Whether the bracket pair at the current `[` contains a comma outside any
+	// nested brackets, parentheses or braces.
+	_hasTopLevelComma() {
+		let depth = 0;
+		for (let i = this.pos; i < this.tokens.length; i++) {
+			const tt = this.tokens[i].type;
+			if (tt === T.LBRACKET || tt === T.LPAREN || tt === T.LBRACE) depth++;
+			else if (tt === T.RBRACKET || tt === T.RPAREN || tt === T.RBRACE) {
+				depth--;
+				if (depth === 0) return false;
+			} else if (tt === T.COMMA && depth === 1) return true;
+			else if (tt === T.EOF) return false;
+		}
+		return false;
+	},
+
 	// Lookahead: does the [ ... ] after an Ident look like generic type args?
 	// Returns true if: only type-like tokens inside brackets, AND followed by a valid continuation
-	looksLikeTypeArgList() {
+	looksLikeTypeArgList(noCompLit = false) {
 		let i = this.pos + 1; // skip [
 		const src = this.tokens;
 		let depth = 1;
@@ -281,7 +339,7 @@ export const expressionParserMethods = {
 		const after = src[i + 1];
 		if (!after) return false;
 		// Call or composite lit — always valid as type args
-		if (after.type === T.LPAREN || after.type === T.LBRACE) return true;
+		if (_opensArgs(after, noCompLit)) return true;
 		// Function value in argument list: Identity[int], 99) — only if clearly a type
 		if (after.type === T.COMMA || after.type === T.RPAREN) {
 			return hasComma || hasTypeKeyword || hasUpperIdent;

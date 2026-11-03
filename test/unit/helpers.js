@@ -13,16 +13,23 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
-import { compileDir, compileFiles, compileWasm } from "../../src/compiler.js";
+import {
+	compileDir,
+	compileFiles,
+	compileWasm as compileWasmSource,
+} from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
-import { resolveAll } from "../../src/resolver.js";
+import {
+	isBuiltinPackage,
+	resolveAll,
+	resolveStdlibSource,
+} from "../../src/resolver.js";
 import { TypeChecker } from "../../src/typechecker/index.js";
 
 export {
 	compileDir,
-	compileWasm,
 	DtsParser,
 	instantiateWasm,
 	join,
@@ -69,6 +76,72 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
 
+// Packages whose typechecker table keeps only emitter members (`errors.As`,
+// `binary.Read`): the rest is Go source, so a program importing one is linked
+// like the others.
+const GO_OVERLAID_PACKAGES = new Set([
+	"errors",
+	"encoding/binary",
+	"encoding/json",
+	"time",
+]);
+
+// Emitter-backed packages that also carry Go-source members (all of `strings`
+// but Builder, and `bytes`); a program names one of them as `pkg.Member`.
+const GO_MEMBER_PACKAGES = new Set(["strings", "bytes"]);
+const GO_MEMBER_RE = /\b(?:strings\.(?!Builder\b)|bytes\.)/;
+
+// Whether the program imports a package that exists only as Go source under
+// stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
+// helpers do not link those; they go through `compileFiles` instead.
+function importsGoSourceStdlib(ast, source = "") {
+	return ast.imports.some((imp) =>
+		imp.imports.some(
+			({ path }) =>
+				!path.startsWith("js:") &&
+				!path.startsWith(".") &&
+				(!isBuiltinPackage(path) ||
+					GO_OVERLAID_PACKAGES.has(path) ||
+					(GO_MEMBER_PACKAGES.has(path) && GO_MEMBER_RE.test(source))) &&
+				resolveStdlibSource(path) !== null,
+		),
+	);
+}
+
+// `compileFiles` for one in-memory source; compile errors come back as an
+// `errors` array like the in-memory helpers return them.
+function compileSourceFile(source, target, options = {}) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-source-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		return {
+			res: compileFiles([goPath], { forceTarget: target, ...options }),
+			errors: [],
+		};
+	} catch (e) {
+		return { res: null, errors: [{ message: e.message }] };
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+export function compileWasm(source, options = {}) {
+	const ast = new Parser(
+		new Lexer(source, "main.go").tokenize(),
+		"main.go",
+		source,
+	).parse();
+	if (!importsGoSourceStdlib(ast, source))
+		return compileWasmSource(source, options);
+	const { res, errors } = compileSourceFile(source, "wasm", {
+		exportAll: options.exportAll ?? true,
+	});
+	return errors.length > 0
+		? { wasm: null, errors }
+		: { ...res, stringTable: res.stringTable ?? [], errors: [] };
+}
+
 export function compile(
 	source,
 	{
@@ -104,6 +177,13 @@ export function compile(
 		if (!info) continue;
 		checker.addDefinitions(info.types, info.values);
 		jsImports.set(path, [...info.values.keys()]);
+	}
+
+	if (importsGoSourceStdlib(ast, source)) {
+		const { res, errors } = compileSourceFile(source, pkgTarget);
+		return errors.length > 0
+			? { js: null, errors }
+			: { js: res.js, errors: [], warnings: [] };
 	}
 
 	const errors = checker.check(ast);
@@ -443,7 +523,12 @@ async function runProgramModule(js, wasm) {
 	}
 }
 
-export async function compileHybridProgram(source) {
+// `natives: false` compiles with the native registries off (the Go bodies of
+// `//gofront:native` functions run); `stdlibRoot` swaps the stdlib directory.
+export async function compileHybridProgram(
+	source,
+	{ natives = true, stdlibRoot } = {},
+) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
 	try {
 		const goPath = join(dir, "main.go");
@@ -451,7 +536,11 @@ export async function compileHybridProgram(source) {
 		const run = async (target, label) => {
 			let res;
 			try {
-				res = compileFiles([goPath], { forceTarget: target });
+				res = compileFiles([goPath], {
+					forceTarget: target,
+					natives,
+					...(stdlibRoot && { stdlibRoot }),
+				});
 			} catch (e) {
 				throw new Error(`${label} compile failed:\n${e.message}`);
 			}
@@ -481,6 +570,29 @@ export async function assertProgramOutput(source, expected) {
 		throw new Error(
 			`${backend} output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
 		);
+	}
+}
+
+// Runs `source` four ways -- JS (`both`) and WASM, each with natives on and
+// off -- and fails naming the first configuration whose output differs from
+// `expected` (`js (natives on)`, `wasm (natives off)`, ...).
+export async function assertFourWay(source, expected, options = {}) {
+	for (const natives of [true, false]) {
+		const state = natives ? "on" : "off";
+		const out = await compileHybridProgram(source, { ...options, natives });
+		for (const [backend, got] of [
+			["js", out.js],
+			["wasm", out.wasm],
+		]) {
+			if (got === expected) continue;
+			const w = expected.split("\n");
+			const g = got.split("\n");
+			let i = 0;
+			while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
+			throw new Error(
+				`${backend} (natives ${state}) output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
+			);
+		}
 	}
 }
 

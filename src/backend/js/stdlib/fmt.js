@@ -1,5 +1,6 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
+import { wrappedErrorfArgs } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
 	fmtDescIsSeq,
@@ -245,11 +246,6 @@ export const fmtMethods = {
 		if (tpf) return `(${tpf}.fb ?? ${tpf}.b ?? ((__v) => __v))(${js})`;
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
-		if (e?._type?.name === "time.Duration") {
-			this.useHelper("duration");
-			this.useHelper("sprintf");
-			return `__ft(${js}, { k: "named", n: "time.Duration" })`;
-		}
 		const desc = fmtTypeDesc(
 			e?._type,
 			(t) => this.checker?.resolveType?.(t) ?? t,
@@ -361,9 +357,13 @@ export const fmtMethods = {
 				this.useHelper("sprintf");
 				this.useHelper("error");
 				const fmtStr = expr.args[0];
-				if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
-					const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
-					return `__error(__sprintf(${fmtArgs}), ${lastArg})`;
+				const wrapped = wrappedErrorfArgs(fmtStr, expr.args);
+				if (wrapped.length === 1) {
+					return `__error(__sprintf(${fmtArgs}), ${this.genExpr(wrapped[0])})`;
+				}
+				if (wrapped.length > 1) {
+					const causes = wrapped.map((e) => this.genExpr(e)).join(", ");
+					return `__error(__sprintf(${fmtArgs}), [${causes}].filter((e) => e != null))`;
 				}
 				return `__error(__sprintf(${fmtArgs}))`;
 			}
@@ -476,14 +476,9 @@ export const fmtMethods = {
 			const base = this._unboxWriter(w);
 			return `((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall})`;
 		}
-		if (targetTypeName === "bytes.Buffer") {
-			const w = this.genExpr(writerArg);
-			const base = this._unboxWriter(w);
-			return `((__b, __s) => { const __bytes = new TextEncoder().encode(__s); for (let i = 0; i < __bytes.length; i++) __b._buf.push(__bytes[i]); return [__bytes.length, null]; })(${base}, ${sprintfCall})`;
-		}
-		// Generic io.Writer fallback — call .WriteString if available
+		// Any other io.Writer: Fprint* calls Write with the UTF-8 bytes.
 		const w = this.genExpr(writerArg);
-		return `((__w, __s) => typeof __w.WriteString === "function" ? __w.WriteString(__s) : __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
+		return `((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
 	},
 
 	_genStdoutWrite(strJs) {

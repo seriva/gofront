@@ -28,13 +28,12 @@ export const testingMethods = {
 		const args = expr.args
 			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
 			.join(", ");
-		if (
-			method === "Errorf" ||
-			method === "Fatalf" ||
-			method === "Logf" ||
-			method === "Skipf"
-		) {
+		if (["Errorf", "Fatalf", "Logf", "Skipf"].includes(method))
 			this.useHelper("sprintf");
+		// There is never a deadline: the zero time and false.
+		if (method === "Deadline") {
+			const time = this.checker?.types?.get("time.Time")?.name;
+			if (time) return `(${t}, [new ${time}(), false])`;
 		}
 		return `${t}.${method}(${args})`;
 	},

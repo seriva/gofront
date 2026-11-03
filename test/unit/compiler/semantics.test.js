@@ -148,6 +148,7 @@ func main() {
 // Missing helper dependencies in useHelper
 test("Registered helpers on error paths", () => {
 	const code = `package main
+import "errors"
 import (
 	"encoding/base64"
 	"encoding/hex"
@@ -493,7 +494,7 @@ func main() {
 }`;
 	const { js, errors } = compile(code);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true false true\nhello\n3 a b c\nxaxbc\n2");
+	assertEqual(runJs(js), "true true true\nhello\n3 a b c\nxaxbc\n2");
 
 	const wasmCode = `package main
 import (

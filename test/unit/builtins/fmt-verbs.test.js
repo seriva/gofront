@@ -3,6 +3,10 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	HELPER_SPRINTF,
+	HELPER_STRUCT_KEY,
+} from "../../../src/backend/js/runtime.js";
+import {
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -149,11 +153,11 @@ func Main() string {
 		exports.Main(),
 		"9223372036854775813 8000000000000005 1000000000000000000005",
 	);
-	// JS Number precision limit: prints the nearest Number.
+	// Exact 64-bit integer formatting in JS.
 	assertEqual(
 		runJsBody(`var u uint64 = 1<<63 + 5
 	fmt.Println(fmt.Sprintf("%d %x %o", u, u, u))`),
-		"9223372036854775808 8000000000000000 1000000000000000000000",
+		"9223372036854775813 8000000000000005 1000000000000000000005",
 	);
 });
 
@@ -1199,6 +1203,82 @@ test("multi-value operands keep pointers, values, floats and unsigned integers",
 func g() (*T, T, float32, uint32, any) { return &T{2}, T{3}, 0.1, 4000000000, uint64(1 << 63) }`,
 		),
 		"&{2} {3} 0.1 4000000000 9223372036854775808",
+	);
+});
+
+section("fmt BigInt formatting and key encoding helpers (Task 1.2)");
+
+test("BigInt with fmt verbs (%d %x %X %o %O %b %c %q %U %v, width and flags)", () => {
+	const sprintf = new Function(`${HELPER_SPRINTF}; return __sprintf;`)();
+	const max64 = 9223372036854775807n;
+	const min64 = -9223372036854775808n;
+	const umax64 = 18446744073709551615n;
+
+	assertEqual(sprintf("%d", max64), "9223372036854775807");
+	assertEqual(sprintf("%d", min64), "-9223372036854775808");
+	assertEqual(sprintf("%d", umax64), "18446744073709551615");
+	assertEqual(sprintf("%x", max64), "7fffffffffffffff");
+	assertEqual(sprintf("%X", max64), "7FFFFFFFFFFFFFFF");
+	assertEqual(sprintf("%o", max64), "777777777777777777777");
+	assertEqual(sprintf("%O", max64), "0o777777777777777777777");
+	assertEqual(sprintf("%b", 15n), "1111");
+	assertEqual(sprintf("%b", -15n), "-1111");
+	assertEqual(sprintf("%c", 65n), "A");
+	assertEqual(sprintf("%q", 65n), "'A'");
+	assertEqual(sprintf("%U", 65n), "U+0041");
+	assertEqual(sprintf("%#U", 65n), "U+0041 'A'");
+	assertEqual(sprintf("%U", -1n), "U+FFFFFFFFFFFFFFFF");
+	assertEqual(sprintf("%U", 1n << 60n), "U+1000000000000000");
+	assertEqual(sprintf("%v", max64), "9223372036854775807");
+	assertEqual(sprintf("%22d", max64), "   9223372036854775807");
+	assertEqual(sprintf("%-22d", max64), "9223372036854775807   ");
+	assertEqual(sprintf("%022d", max64), "0009223372036854775807");
+	assertEqual(sprintf("%+d", max64), "+9223372036854775807");
+	assertEqual(sprintf("% d", max64), " 9223372036854775807");
+	assertEqual(sprintf("%+d", min64), "-9223372036854775808");
+	assertEqual(sprintf("%f", 42n), "%!f(int64=42)");
+});
+
+test("BigInt and struct keys encoding and comparison helpers", () => {
+	const code = `
+${HELPER_STRUCT_KEY};
+const s1 = { A: 1n, toString() { return __sk(this); } };
+const s2 = { A: 2n, toString() { return __sk(this); } };
+const m = { [s1]: 10, [s2]: 20 };
+return {
+  keysLen: Object.keys(m).length,
+  ik: __ik(123n),
+  kd: __kd(__ik(123n)),
+  kcmpEq: __kcmp(s1, s1),
+  kcmpLt: __kcmp(s1, s2),
+  kcmpGt: __kcmp(s2, s1),
+};`;
+	const res = new Function(code)();
+	assertEqual(res.keysLen, 2);
+	assertEqual(res.ik, "\u0001bigint:123");
+	assertEqual(res.kd, 123n);
+	assertEqual(res.kcmpEq, 0);
+	assertEqual(res.kcmpLt, -1);
+	assertEqual(res.kcmpGt, 1);
+});
+
+test("64-bit int and uint Printf verbs and any boxing (Task 1.3)", async () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	a, b := int64(math.MaxInt64), uint64(math.MaxUint64)
+	fmt.Printf("%d|%x|%22d|%v\\n", a, a, b, b)
+	fmt.Println(any(uint64(1 << 63)))
+}
+`;
+	await assertProgramOutput(
+		src,
+		"9223372036854775807|7fffffffffffffff|  18446744073709551615|18446744073709551615\n9223372036854775808\n",
 	);
 });
 

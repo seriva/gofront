@@ -10,7 +10,11 @@ import {
 	nodeAssigns,
 	someChild,
 } from "../../lower/index.js";
-import { isComplex, isTypedArraySlice } from "../../typechecker/types.js";
+import {
+	is64BitInt,
+	isComplex,
+	isTypedArraySlice,
+} from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -257,28 +261,47 @@ export const statementGenMethods = {
 						: this.genExpr(stmt.expr.expr);
 					const idx = this.genExpr(stmt.expr.index);
 					const op = stmt.op === "++" ? "+" : "-";
+					const is64Val = is64BitInt(stmt.expr._mapValueType);
+					const delta = is64Val ? "1n" : "1";
 					if (
 						this._hasCallExpr(stmt.expr.expr) ||
 						this._hasCallExpr(stmt.expr.index)
 					) {
+						const rhs = is64Val
+							? this._gen64BitBinary(
+									op,
+									`(__m[__k] ?? ${zero})`,
+									delta,
+									stmt.expr._mapValueType,
+								)
+							: `(__m[__k] ?? ${zero}) ${op} 1`;
 						this.line(
-							`((__m, __k) => { ${this._genMapWriteBase("__m")}[__k] = (__m[__k] ?? ${zero}) ${op} 1; })(${base}, ${idx});`,
+							`((__m, __k) => { ${this._genMapWriteBase("__m")}[__k] = ${rhs}; })(${base}, ${idx});`,
 							srcLine,
 						);
 					} else {
+						const rhs = is64Val
+							? this._gen64BitBinary(
+									op,
+									`(${base}[${idx}] ?? ${zero})`,
+									delta,
+									stmt.expr._mapValueType,
+								)
+							: `(${base}[${idx}] ?? ${zero}) ${op} 1`;
 						this.line(
-							`${this._genMapWriteBase(base)}[${idx}] = (${base}[${idx}] ?? ${zero}) ${op} 1;`,
+							`${this._genMapWriteBase(base)}[${idx}] = ${rhs};`,
 							srcLine,
 						);
 					}
 					break;
 				}
+				const is64 = is64BitInt(stmt.expr._type);
 				if (
-					this.strict &&
+					(this.strict || is64) &&
 					this._genStrictCompound(
 						stmt.expr,
 						stmt.op === "++" ? "+" : "-",
-						"1",
+						is64 ? "1n" : "1",
 						srcLine,
 					)
 				)
@@ -308,7 +331,10 @@ export const statementGenMethods = {
 				}
 				break;
 			case "DeferStmt":
-				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
+				// A deferred native call runs the Go body.
+				this._withoutNatives(() =>
+					this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`),
+				);
 				break;
 			case "LabeledStmt":
 				if (stmt.body && stmt.body.kind === "ForStmt") {
@@ -724,27 +750,63 @@ export const statementGenMethods = {
 					: this.genExpr(stmt.lhs[0].expr);
 				const idx = this.genExpr(stmt.lhs[0].index);
 				const binOp = stmt.op.slice(0, -1);
+				const is64Val = is64BitInt(stmt.lhs[0]._mapValueType);
+				let rhsVal = active[0].r;
+				if (
+					is64Val &&
+					stmt.rhs[0]?._type?.kind === "untyped" &&
+					!rhsVal.endsWith("n") &&
+					/^-?\d+$/.test(rhsVal)
+				) {
+					rhsVal = `${rhsVal}n`;
+				}
+				const rhsExpr = is64Val
+					? this._gen64BitBinary(
+							binOp,
+							`(__m[__k] ?? ${zero})`,
+							rhsVal,
+							stmt.lhs[0]._mapValueType,
+						)
+					: `(__m[__k] ?? ${zero}) ${binOp} (${rhsVal})`;
+				const rhsExprDirect = is64Val
+					? this._gen64BitBinary(
+							binOp,
+							`(${base}[${idx}] ?? ${zero})`,
+							rhsVal,
+							stmt.lhs[0]._mapValueType,
+						)
+					: `(${base}[${idx}] ?? ${zero}) ${binOp} (${rhsVal})`;
 				if (
 					this._hasCallExpr(stmt.lhs[0].expr) ||
 					this._hasCallExpr(stmt.lhs[0].index)
 				) {
 					this.line(
-						`((__m, __k) => { ${this._genMapWriteBase("__m")}[__k] = (__m[__k] ?? ${zero}) ${binOp} (${active[0].r}); })(${base}, ${idx});`,
+						`((__m, __k) => { ${this._genMapWriteBase("__m")}[__k] = ${rhsExpr}; })(${base}, ${idx});`,
 					);
 				} else {
 					this.line(
-						`${this._genMapWriteBase(base)}[${idx}] = (${base}[${idx}] ?? ${zero}) ${binOp} (${active[0].r});`,
+						`${this._genMapWriteBase(base)}[${idx}] = ${rhsExprDirect};`,
 					);
 				}
 				return;
 			}
+			const is64 = is64BitInt(stmt.lhs[0]._type);
+			let rhsVal = active[0].r;
 			if (
-				this.strict &&
+				is64 &&
+				stmt.rhs[0]?._type?.kind === "untyped" &&
+				!rhsVal.endsWith("n") &&
+				/^-?\d+$/.test(rhsVal)
+			) {
+				rhsVal = `${rhsVal}n`;
+			}
+			if (
+				(this.strict || is64) &&
 				stmt.op !== "=" &&
 				this._genStrictCompound(
 					stmt.lhs[0],
 					stmt.op.slice(0, -1),
-					active[0].r,
+					rhsVal,
 					null,
 					active[0].l,
 				)
@@ -755,7 +817,7 @@ export const statementGenMethods = {
 				active[0].l.startsWith("{") && !active[0].l.startsWith("({")
 					? `(${active[0].l})`
 					: active[0].l;
-			this.line(`${targetL} ${stmt.op} ${active[0].r};`);
+			this.line(`${targetL} ${stmt.op} ${rhsVal};`);
 		} else if (hoisted) {
 			this.line("{");
 			this.indented(() => {
@@ -1085,7 +1147,7 @@ export const statementGenMethods = {
 			this.genIteratorForCond(stmt);
 			return;
 		}
-		const iterType = stmt.cond.expr._type;
+		const iterType = stmt.cond.expr._coreType ?? stmt.cond.expr._type;
 		const iteree = this.genExpr(stmt.cond.expr);
 		const limit = this._rangeExprLimit(iterType, iteree);
 		this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
@@ -1217,10 +1279,14 @@ export const statementGenMethods = {
 		const iterType = iterNode._type;
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const elemType = base?.elem;
-		if (!valNode || !this._aggregateBase(elemType)) return js;
-		if (isAssign || valNode.kind !== "Ident")
+		if (
+			!valNode ||
+			(!this._aggregateBase(elemType) && !this._typeParamClone(elemType, js))
+		)
+			return js;
+		if (valNode.kind === "Ident" && valNode.name === "_") return js;
+		if (isAssign || valNode.kind !== "Ident" || elemType?.kind === "typeParam")
 			return this._cloneJs(elemType, js);
-		if (valNode.name === "_") return js;
 		const root = this._rootIdentName(iterNode);
 		const mutated =
 			this._fnMutates(valNode.name) ||
@@ -1352,6 +1418,8 @@ export const statementGenMethods = {
 	_genIterFor(init, iterType, iteree, lhs, body) {
 		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
 		const keyDecode = this._structKeyRange(iterType);
+		const paramKey = this._typeParamKeyRange(iterType);
+		const is64Key = this._is64BitMapRange(iterType);
 		const binding =
 			lhs.length === 1
 				? lhs[0] === "_"
@@ -1361,12 +1429,36 @@ export const statementGenMethods = {
 		const kw = init.kind === "AssignStmt" ? "" : "let ";
 		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
 		this.indented(() => {
-			if (keyDecode && lhs[0] !== "_")
+			if (paramKey && lhs[0] !== "_")
+				this.line(`${lhs[0]} = __kdt(${paramKey}, ${lhs[0]});`);
+			else if (keyDecode && lhs[0] !== "_")
 				this.line(`${lhs[0]} = __kd(${lhs[0]}, true);`);
+			else if (is64Key && lhs[0] !== "_")
+				this.line(`${lhs[0]} = BigInt(${lhs[0]});`);
 			this._cloneMapRangeValue(init, iterType, lhs[1]);
 			this.genBlock(body);
 		});
 		this.line("}");
+	},
+
+	_is64BitMapRange(iterType) {
+		if (!this._isMapRangeType(iterType)) return false;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const key = base?.kind === "map" ? base.key : null;
+		return is64BitInt(key);
+	},
+
+	// Ranging over a map whose key type is a type parameter: the key is decoded
+	// from its property string by the instantiated key type's zero factory.
+	_typeParamKeyRange(iterType) {
+		if (!this._isMapRangeType(iterType)) return null;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const key = base?.kind === "map" ? base.key : null;
+		if (key?.kind !== "typeParam") return null;
+		const factory = this._typeParamZeroFactory(key.name);
+		if (!factory) return null;
+		this.useHelper("structKey");
+		return factory;
 	},
 
 	// Ranging over a map whose keys are structs: the key variable is decoded
@@ -1396,7 +1488,7 @@ export const statementGenMethods = {
 		const init = stmt.init;
 		const range = init.rhs[0];
 		const lhs = init.lhs.map((e) => e.name ?? this.genExpr(e));
-		const iterType = range.expr._type;
+		const iterType = range.expr._coreType ?? range.expr._type;
 		const wrapField = this._namedWrapperField(iterType, range.expr);
 		const iteree = wrapField
 			? `${this.genExpr(range.expr)}.${wrapField}`
@@ -1623,6 +1715,14 @@ export const statementGenMethods = {
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
+				if (is64BitInt(stmt.expr._type)) {
+					const l = this.genExpr(stmt.expr);
+					const binOp = stmt.op === "++" ? "+" : "-";
+					return this._withInlineSyncs(
+						syncs,
+						`${l} = ${this._gen64BitBinary(binOp, l, "1n", stmt.expr._type)}`,
+					);
+				}
 				return this._withInlineSyncs(
 					syncs,
 					`${this.genExpr(stmt.expr)}${stmt.op}`,
@@ -1664,8 +1764,22 @@ export const statementGenMethods = {
 	_inlineAssign(stmt) {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
-		if (stmt.lhs.length === 1)
+		if (stmt.lhs.length === 1) {
+			if (stmt.op !== "=" && is64BitInt(stmt.lhs[0]._type)) {
+				const binOp = stmt.op.slice(0, -1);
+				let r = rhs[0];
+				if (
+					stmt.rhs[0]?._type?.kind === "untyped" &&
+					!r.endsWith("n") &&
+					/^-?\d+$/.test(r)
+				) {
+					r = `${r}n`;
+				}
+				const l = this.genExpr(stmt.lhs[0]);
+				return `${l} = ${this._gen64BitBinary(binOp, l, r, stmt.lhs[0]._type)}`;
+			}
 			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
+		}
 		// `i, j = i+1, j-1`: every right-hand side is evaluated first.
 		const lhs = stmt.lhs.map((e) =>
 			e.name === "_" ? "" : this._genAssignLhsExpr(e),

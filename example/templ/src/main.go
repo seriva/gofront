@@ -1,6 +1,7 @@
 package main
 
 import "js:./browser.d.ts"
+import "strings"
 
 // ── Input handling ────────────────────────────────────────────
 

@@ -1,5 +1,7 @@
 package utils
 
+import "strings"
+
 // Plural formats a count with the correct singular/plural noun.
 func Plural(n int, word string) string {
 	if n == 1 {

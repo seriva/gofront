@@ -1,5 +1,7 @@
 package utils
 
+import "strings"
+
 // Plural formats a count with the correct singular/plural noun.
 //   Plural(1, "task") → "1 task"
 //   Plural(3, "task") → "3 tasks"

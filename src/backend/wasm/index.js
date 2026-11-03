@@ -23,6 +23,7 @@ import {
 import { desugarMethodExprs } from "./method-expr.js";
 import { ModuleEmitter } from "./module-emitter.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
+import { emitWasmIntrinsic, prepareWasmIntrinsic } from "./natives.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import {
 	_scanFuncSigInterfaces,
@@ -41,6 +42,7 @@ import {
 	isInterfaceType,
 	isMapType,
 	toWasmType,
+	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
 import { emitWat } from "./wat.js";
@@ -176,6 +178,7 @@ export function compileWasmModule(
 
 	const mod = new ModuleEmitter(resolvedChecker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,
+		natives: options.natives,
 	});
 
 	// 1. Collect all functions, methods, and package-level globals
@@ -702,6 +705,14 @@ export function compileWasmModule(
 			kind: "pointer",
 			base: { kind: "named", name: ERROR_STRUCT },
 		};
+		const wrapPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: WRAP_ERRORS_STRUCT },
+		};
+		const ERRS_T = {
+			kind: "slice",
+			elem: { kind: "interface", name: "error" },
+		};
 		funcDecls.push(
 			helper(
 				`${ERROR_STRUCT}.Error`,
@@ -734,7 +745,48 @@ export function compileWasmModule(
 				ANY_T,
 				"mk_error",
 			),
+			helper(
+				`${WRAP_ERRORS_STRUCT}.Error`,
+				[{ name: "e", type: wrapPtr }],
+				STR_T,
+				"wrap_msg",
+				{
+					_isMethod: true,
+					_recvTypeName: WRAP_ERRORS_STRUCT,
+					_methodName: "Error",
+				},
+			),
+			helper(
+				`${WRAP_ERRORS_STRUCT}.Unwrap`,
+				[{ name: "e", type: wrapPtr }],
+				ERRS_T,
+				"wrap_errs",
+				{
+					_isMethod: true,
+					_recvTypeName: WRAP_ERRORS_STRUCT,
+					_methodName: "Unwrap",
+				},
+			),
+			helper(
+				"__mk_wrap_errors",
+				[
+					{ name: "msg", type: STR_T },
+					{ name: "errs", type: ERRS_T },
+				],
+				ANY_T,
+				"mk_wrap_errors",
+			),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
+			// Used by the io and bytes emitters to compare an error with io.EOF.
+			helper(
+				"__errors_is",
+				[
+					{ name: "err", type: ANY_T },
+					{ name: "target", type: ANY_T },
+				],
+				BOOL_T,
+				"errors_is",
+			),
 			{
 				kind: "FuncDecl",
 				name: "__errors_unwrap",
@@ -748,15 +800,6 @@ export function compileWasmModule(
 				_methodName: "Unwrap",
 				_rootFuncDecl: null,
 			},
-			helper(
-				"__errors_is",
-				[
-					{ name: "err", type: ANY_T },
-					{ name: "target", type: ANY_T },
-				],
-				BOOL_T,
-				"errors_is",
-			),
 		);
 	}
 	if (mod.usesTestingRun) {
@@ -806,6 +849,7 @@ export function compileWasmModule(
 
 	// 2. Pre-scan for needed imports so import func indices are fixed
 	for (const fn of funcDecls) {
+		if (fn.intrinsic) prepareWasmIntrinsic(mod, fn);
 		_scanImportsInBody(fn.body, mod);
 	}
 	if (boundaryMeta) scanBoundaryImports(mod, boundaryMeta);
@@ -924,6 +968,8 @@ export function compileWasmModule(
 			emitter.emitRuntimeHelper(fn);
 		} else if (fn._isIoHelper || fn._isPhase7Helper) {
 			emitter.emitIoHelper(fn);
+		} else if (fn.intrinsic) {
+			emitWasmIntrinsic(emitter, fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -1042,14 +1088,8 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 		"fmt",
 		"strings",
 		"bytes",
-		"crypto/sha256",
-		"sha256",
 		"encoding/binary",
 		"binary",
-		"encoding/hex",
-		"hex",
-		"encoding/base64",
-		"base64",
 	]);
 	if (hasIo) {
 		const byteSliceType = {
@@ -1094,8 +1134,6 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 	const progs = Array.isArray(programs) ? programs : [programs];
 	const hasStrings = importsAnyOf(progs, ["strings"]);
-	const hasBytes = importsAnyOf(progs, ["bytes"]);
-	const hasIo = importsAnyOf(progs, ["io"]);
 
 	const BYTE_SLICE_T = {
 		kind: "slice",
@@ -1151,196 +1189,6 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 			),
 		);
 	}
-	if (hasBytes && mod.structTypes.has("bytes.Buffer")) {
-		const bPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "bytes.Buffer" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"bytes.Buffer.Write",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"buffer_write",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Buffer",
-					_methodName: "Write",
-				},
-			),
-			ioHelper(
-				"bytes.Buffer.WriteString",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "s", type: strType },
-				],
-				INT_ERR_RET,
-				"buffer_write_string",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Buffer",
-					_methodName: "WriteString",
-				},
-			),
-			ioHelper(
-				"bytes.Buffer.Read",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"buffer_read",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Buffer",
-					_methodName: "Read",
-				},
-			),
-		);
-	}
-	if (hasStrings && mod.structTypes.has("strings.Reader")) {
-		const rPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "strings.Reader" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"strings.Reader.Read",
-				[
-					{ name: "r", type: rPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"strings_reader_read",
-				{
-					_isMethod: true,
-					_recvTypeName: "strings.Reader",
-					_methodName: "Read",
-				},
-			),
-			ioHelper(
-				"strings.Reader.Len",
-				[{ name: "r", type: rPtr }],
-				INT_T,
-				"strings_reader_len",
-				{
-					_isMethod: true,
-					_recvTypeName: "strings.Reader",
-					_methodName: "Len",
-				},
-			),
-			ioHelper(
-				"strings.Reader.Reset",
-				[
-					{ name: "r", type: rPtr },
-					{ name: "s", type: strType },
-				],
-				null,
-				"strings_reader_reset",
-				{
-					_isMethod: true,
-					_recvTypeName: "strings.Reader",
-					_methodName: "Reset",
-				},
-			),
-		);
-	}
-	if (hasBytes && mod.structTypes.has("bytes.Reader")) {
-		const rPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "bytes.Reader" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"bytes.Reader.Read",
-				[
-					{ name: "r", type: rPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"bytes_reader_read",
-				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Read" },
-			),
-			ioHelper(
-				"bytes.Reader.Len",
-				[{ name: "r", type: rPtr }],
-				INT_T,
-				"bytes_reader_len",
-				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Len" },
-			),
-			ioHelper(
-				"bytes.Reader.Reset",
-				[
-					{ name: "r", type: rPtr },
-					{ name: "b", type: BYTE_SLICE_T },
-				],
-				null,
-				"bytes_reader_reset",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Reader",
-					_methodName: "Reset",
-				},
-			),
-		);
-	}
-	if (hasIo && mod.structTypes.has("io.discard")) {
-		const dPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "io.discard" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"io.discard.Write",
-				[
-					{ name: "d", type: dPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"discard_write",
-				{ _isMethod: true, _recvTypeName: "io.discard", _methodName: "Write" },
-			),
-			ioHelper(
-				"io.discard.WriteString",
-				[
-					{ name: "d", type: dPtr },
-					{ name: "s", type: strType },
-				],
-				INT_ERR_RET,
-				"discard_write_string",
-				{
-					_isMethod: true,
-					_recvTypeName: "io.discard",
-					_methodName: "WriteString",
-				},
-			),
-		);
-	}
-	if (hasIo && mod.structTypes.has("io.LimitedReader")) {
-		const lrPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "io.LimitedReader" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"io.LimitedReader.Read",
-				[
-					{ name: "l", type: lrPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"limited_reader_read",
-				{
-					_isMethod: true,
-					_recvTypeName: "io.LimitedReader",
-					_methodName: "Read",
-				},
-			),
-		);
-	}
 	const hasOs = importsAnyOf(progs, ["os"]);
 	if (hasOs && mod.structTypes.has("os.File")) {
 		const fPtr = {
@@ -1388,76 +1236,6 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 				ERR_T,
 				"os_file_close",
 				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Close" },
-			),
-		);
-	}
-	const hasSha256 = importsAnyOf(progs, ["crypto/sha256", "sha256"]);
-	if (
-		hasSha256 &&
-		(mod.structTypes.has("sha256.digest") ||
-			mod.structTypes.has("crypto/sha256.digest"))
-	) {
-		const dPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "sha256.digest" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"sha256.digest.Write",
-				[
-					{ name: "d", type: dPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"sha256_write",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "Write",
-				},
-			),
-			ioHelper(
-				"sha256.digest.Sum",
-				[
-					{ name: "d", type: dPtr },
-					{ name: "b", type: BYTE_SLICE_T },
-				],
-				BYTE_SLICE_T,
-				"sha256_sum",
-				{ _isMethod: true, _recvTypeName: "sha256.digest", _methodName: "Sum" },
-			),
-			ioHelper(
-				"sha256.digest.Reset",
-				[{ name: "d", type: dPtr }],
-				null,
-				"sha256_reset",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "Reset",
-				},
-			),
-			ioHelper(
-				"sha256.digest.Size",
-				[{ name: "d", type: dPtr }],
-				INT_T,
-				"sha256_size",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "Size",
-				},
-			),
-			ioHelper(
-				"sha256.digest.BlockSize",
-				[{ name: "d", type: dPtr }],
-				INT_T,
-				"sha256_block_size",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "BlockSize",
-				},
 			),
 		);
 	}

@@ -230,21 +230,6 @@ export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
 
 export const HELPER_S = "var __s = __s || function(a) { return a || []; };";
 
-// In-place stable sort driven by Go's less(i, j) index comparator. The
-// comparator reads the live slice, so elements are moved as it runs
-// (binary insertion: O(n log n) compares, O(n^2) moves, fine for typed arrays).
-export const HELPER_SORT_SLICE = `var __sortSlice = __sortSlice || function(s, less) {
-  if (!s) return;
-  for (let i = 1; i < s.length; i++) {
-    let lo = 0, hi = i;
-    while (lo < hi) { const mid = (lo + hi) >>> 1; if (less(i, mid)) hi = mid; else lo = mid + 1; }
-    if (lo === i) continue;
-    const v = s[i];
-    for (let k = i; k > lo; k--) s[k] = s[k - 1];
-    s[lo] = v;
-  }
-};`;
-
 // Copy of a struct value whose class is not statically known.
 export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
   if (x === null || typeof x !== "object") return x;
@@ -315,32 +300,6 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   }
   return c;
 };
-var __buffer_proto = __buffer_proto || {
-  Write(d) {
-    this._lastOp = 0;
-    for (let i = 0; i < d.length; i++) this._buf.push(d[i]);
-    return [d.length, null];
-  },
-  WriteString(s) {
-    this._lastOp = 0;
-    const bytes = new TextEncoder().encode(s);
-    for (let i = 0; i < bytes.length; i++) this._buf.push(bytes[i]);
-    return [bytes.length, null];
-  },
-  Read(p) {
-    if (!this._buf || this._buf.length === 0) return [0, typeof __io_eof !== "undefined" ? __io_eof : "EOF"];
-    const n = Math.min(p.length, this._buf.length);
-    for (let i = 0; i < n; i++) p[i] = this._buf.shift();
-    if (n > 0) { this._lastOp = 1; this._lastByte = p[n - 1]; } else { this._lastOp = 0; }
-    return [n, null];
-  },
-  String() {
-    return new TextDecoder().decode(new Uint8Array(this._buf));
-  },
-  Reset() {
-    this._buf = [];
-  }
-};
 var __builder_proto = __builder_proto || {
   Write(d) {
     this._buf += new TextDecoder().decode(new Uint8Array(d));
@@ -359,8 +318,7 @@ var __builder_proto = __builder_proto || {
 };
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
-  if (Array.isArray(x._buf) && typeof x.Write !== "function") Object.assign(x, __buffer_proto);
-  else if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
+  if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
   if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {
@@ -425,20 +383,44 @@ export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
 
 // Nil-interface method call guard (strict mode only): matches Go's panic
 // message instead of a JS TypeError.
-// Strict-mode 64-bit shifts (`both` packages): Go's wrap-around on `<<`, the
-// sign fill on `>>`, and the negative-count panic.
+// 64-bit shifts: count is converted to BigInt; negative count panics;
+// wraps with BigInt.asIntN / BigInt.asUintN.
 export const HELPER_SHIFT = `var __shl64 = __shl64 || function(x, n, u) {
-  if (n < 0) throw new Error("runtime error: negative shift amount");
-  if (n >= 64) return 0;
-  const r = x * 2 ** n;
+  var b = BigInt(n);
+  if (b < 0n) throw new Error("runtime error: negative shift amount");
+  if (typeof x === "bigint") {
+    if (b >= 64n) return 0n;
+    var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    var r = bx << b;
+    return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
+  }
+  if (b >= 64n) return 0;
+  var nb = Number(b);
+  var r = x * 2 ** nb;
   if (Number.isSafeInteger(r)) return r;
-  const b = BigInt(x) << BigInt(n);
-  return Number(u ? BigInt.asUintN(64, b) : BigInt.asIntN(64, b));
+  var bxx = BigInt(Math.trunc(x)) << b;
+  return Number(u ? BigInt.asUintN(64, bxx) : BigInt.asIntN(64, bxx));
 };
 var __shr64 = __shr64 || function(x, n, u) {
-  if (n < 0) throw new Error("runtime error: negative shift amount");
-  if (n >= 64) return u || x >= 0 ? 0 : -1;
-  return Math.floor(x / 2 ** n);
+  var b = BigInt(n);
+  if (b < 0n) throw new Error("runtime error: negative shift amount");
+  if (typeof x === "bigint") {
+    var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    if (b >= 64n) return u || bx >= 0n ? 0n : -1n;
+    var r = bx >> b;
+    return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
+  }
+  if (b >= 64n) return u || x >= 0 ? 0 : -1;
+  return Math.floor(x / 2 ** Number(b));
+};`;
+
+export const HELPER_TO64 = `var __to_i64 = __to_i64 || function(v) {
+  if (typeof v === "bigint") return BigInt.asIntN(64, v);
+  return Number.isFinite(v) ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : -9223372036854775808n;
+};
+var __to_u64 = __to_u64 || function(v) {
+  if (typeof v === "bigint") return BigInt.asUintN(64, v);
+  return Number.isFinite(v) ? BigInt.asUintN(64, BigInt(Math.trunc(v))) : 9223372036854775808n;
 };`;
 
 export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
@@ -473,6 +455,8 @@ var __zn = __zn || (() => null);
 var __z0 = __z0 || (() => 0);
 var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
+var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
+var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
 var __ti = __ti || function(f, k, id, is, u, b, fb) {
   const g = () => f();
   g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
@@ -482,18 +466,19 @@ var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
 };
 var __tconv = __tconv || function(f, v) {
-  v = typeof v === "bigint" ? Number(v) : v;
   switch (f?.k) {
-    case "int": case "int64": case "uint": case "uint64": case "uintptr": return Math.trunc(Number(v));
-    case "int8": return (Number(v) << 24) >> 24;
-    case "int16": return (Number(v) << 16) >> 16;
-    case "int32": case "rune": return Number(v) | 0;
-    case "uint8": case "byte": return Number(v) & 0xFF;
-    case "uint16": return Number(v) & 0xFFFF;
-    case "uint32": return Number(v) >>> 0;
-    case "float32": return Math.fround(Number(v));
-    case "float64": return Number(v);
-    default: return v;
+    case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : (typeof v === "number" ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : v);
+    case "uint64": return typeof v === "bigint" ? BigInt.asUintN(64, v) : (typeof v === "number" ? BigInt.asUintN(64, BigInt(Math.trunc(v))) : v);
+    case "int": case "uint": case "uintptr": return Math.trunc(Number(typeof v === "bigint" ? Number(v) : v));
+    case "int8": return (Number(typeof v === "bigint" ? Number(v) : v) << 24) >> 24;
+    case "int16": return (Number(typeof v === "bigint" ? Number(v) : v) << 16) >> 16;
+    case "int32": case "rune": return Number(typeof v === "bigint" ? Number(v) : v) | 0;
+    case "uint8": case "byte": return Number(typeof v === "bigint" ? Number(v) : v) & 0xFF;
+    case "uint16": return Number(typeof v === "bigint" ? Number(v) : v) & 0xFFFF;
+    case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
+    case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
+    case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
+    default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;
 
@@ -555,6 +540,17 @@ var __kd = __kd || function(s, copy) {
     return s;
   }
   return copy && typeof k.__clone === "function" ? k.__clone() : k;
+};
+var __kdt = __kdt || function(f, s) {
+  if (typeof s !== "string") return s;
+  const z = f?.();
+  switch (typeof z) {
+    case "number": return Number(s);
+    case "bigint": return BigInt(s);
+    case "boolean": return s === "true";
+    case "string": return s;
+    default: return __kd(s, true);
+  }
 };
 var __kcmp = __kcmp || function(a, b) {
   if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
@@ -722,15 +718,9 @@ var __sprintf = __sprintf || function(f, ...a) {
   const both = __fmtu.both;
   const formatV = (val, isPlus, isTopLevel, ro, fd, el) => {
     if (typeof __FT !== "undefined" && val instanceof __FT) {
-      if (val.t?.n === "time.Duration") {
-        return typeof __durationString === "function" ? __durationString(val.v) : String(val.v);
-      }
       return formatV(val.v, isPlus, isTopLevel, ro, both(val.t, val.v?.__fd), el);
     }
     const [td, sdesc] = __fmtu.split(fd);
-    if (td?.n === "time.Duration") {
-      return typeof __durationString === "function" ? __durationString(val) : String(val);
-    }
     if (sdesc?.b && !ro && !(val instanceof sdesc.b)) val = new sdesc.b(val);
     if (sdesc?.m === 1 && (val === null || val === undefined)) return "map[]";
     if (sdesc?.np !== undefined && (val === null || val === undefined)) val = sdesc.np;
@@ -744,9 +734,6 @@ var __sprintf = __sprintf || function(f, ...a) {
     if (typeof val === "number" || typeof val === "bigint") return Object.is(val, -0) ? "-0" : String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {
-      if (val._d instanceof Date) {
-        return typeof __timeFmt === "function" ? __timeFmt(val, "2006-01-02 15:04:05.999999999 -0700 MST") : String(val._d);
-      }
       if ("re" in val && "im" in val) {
         const isNeg = val.im < 0 || Object.is(val.im, -0);
         const sign = isNeg ? "" : "+";
@@ -796,6 +783,7 @@ var __sprintf = __sprintf || function(f, ...a) {
           const entries = Array.from(val.entries()).sort(([a], [b]) => {
             const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
+            if (typeof k1 === "bigint" && typeof k2 === "bigint") return k1 < k2 ? -1 : k1 > k2 ? 1 : 0;
             // Struct and array keys compare field by field, as in Go.
             if (k1 !== null && k2 !== null && typeof k1 === "object" && typeof k2 === "object" && !k1.__p && !k2.__p) {
               const cmp = (x, y) => {
@@ -825,6 +813,12 @@ var __sprintf = __sprintf || function(f, ...a) {
             // Struct keys (encoded, see __sk) sort field by field, as in Go.
             if (a.charCodeAt(0) === 1 && b.charCodeAt(0) === 1 && typeof __kd === "function")
               return __kcmp(__kd(a), __kd(b));
+            if (/^-?\\d+$/.test(a) && /^-?\\d+$/.test(b)) {
+              try {
+                const ba = BigInt(a), bb = BigInt(b);
+                return ba < bb ? -1 : ba > bb ? 1 : 0;
+              } catch (_) {}
+            }
             const na = Number(a), nb = Number(b);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
             if (a[0] === "{" && b[0] === "{") {
@@ -845,7 +839,15 @@ var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n) ? Number(k) : k;
+            const bkd = sd ? __fmtu.baseOf(sd.key) : null;
+            const is64 = bkd?.k === "b" && (bkd.n === "int64" || bkd.n === "uint64");
+            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function"
+              ? __kd(k)
+              : is64
+                ? BigInt(k)
+                : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n)
+                  ? (/^-?\\d+$/.test(k) && (BigInt(k) > 9007199254740991n || BigInt(k) < -9007199254740991n) ? BigInt(k) : Number(k))
+                  : k;
             parts.push(formatV(kv, isPlus, false, ro, both(sd?.key, cd?.k), cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, both(sd?.val, cd?.v), cd?.v?.sv === 1));
           }
         }
@@ -891,14 +893,20 @@ export const HELPER_SPRINT = `var __sprint = __sprint || function(ln, ...a) {
   return __sprintf(ln ? f + "\\n" : f, ...a);
 };`;
 
+// A runtime error value (\`fmt.Errorf\`, parse failures, io.EOF).  A wrapped
+// cause is exposed through \`Unwrap() error\`; an array of causes (several %w
+// verbs) through \`Unwrap() []error\`, tagged \`__multi\` so type assertions tell
+// the two apart.
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
-  return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
+  const e = { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
+  if (Array.isArray(cause)) {
+    e.Unwrap = function() { return cause; };
+    e.Unwrap.__multi = true;
+  } else if (cause !== undefined && cause !== null) {
+    e.Unwrap = function() { return cause; };
+  }
+  return e;
 };`;
-
-export const HELPER_STRCONV_ERROR = `var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
-var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
-
-export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
 
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 
@@ -934,37 +942,6 @@ var __os_stderr = __os_stderr || new __os_file(2);
 var __os_stdin = __os_stdin || new __os_file(0);
 `;
 
-export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
-  if (err === null || err === undefined) return false;
-  if (err === target) return true;
-  if (typeof err === "object" && typeof target === "object" && target !== null &&
-      typeof err.__gfUnbox === "function" && err.constructor === target.constructor &&
-      err.__gfUnbox() === target.__gfUnbox()) return true;
-  if (typeof err === "object" && typeof target === "object" &&
-      err._msg !== undefined && target._msg !== undefined &&
-      err._msg === target._msg) return true;
-  if (typeof err.Is === "function" && err.Is(target)) return true;
-  if (Array.isArray(err._errs)) {
-    for (const sub of err._errs) {
-      if (__errorIs(sub, target)) return true;
-    }
-  }
-  if (typeof err.Unwrap === "function") {
-    const unwrapped = err.Unwrap();
-    if (Array.isArray(unwrapped)) {
-      for (const sub of unwrapped) {
-        if (__errorIs(sub, target)) return true;
-      }
-    } else if (unwrapped !== null && unwrapped !== undefined) {
-      if (__errorIs(unwrapped, target)) return true;
-    }
-  }
-  if (err._cause !== undefined && err._cause !== null) {
-    return __errorIs(err._cause, target);
-  }
-  return false;
-};`;
-
 export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, target, matcher, extract) {
   if (err === null || err === undefined || target === null || typeof target !== "object") return false;
   let cur = err;
@@ -979,487 +956,20 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
       }
       return true;
     }
-    if (Array.isArray(cur._errs)) {
-      for (const sub of cur._errs) {
+    if (typeof cur.Unwrap !== "function") return false;
+    const unwrapped = cur.Unwrap();
+    if (Array.isArray(unwrapped)) {
+      for (const sub of unwrapped) {
         if (__errorAs(sub, target, matcher, extract)) return true;
       }
+      return false;
     }
-    if (typeof cur.Unwrap === "function") {
-      const unwrapped = cur.Unwrap();
-      if (Array.isArray(unwrapped)) {
-        for (const sub of unwrapped) {
-          if (__errorAs(sub, target, matcher, extract)) return true;
-        }
-      } else if (unwrapped !== null && unwrapped !== undefined) {
-        if (__errorAs(unwrapped, target, matcher, extract)) return true;
-      }
-    }
-    cur = cur?._cause ?? null;
+    cur = unwrapped;
   }
   return false;
 };`;
 
-export const HELPER_ERROR_JOIN = `var __errorJoin = __errorJoin || function(...errs) {
-  const filtered = [];
-  for (const e of errs) {
-    if (Array.isArray(e)) {
-      for (const sub of e) if (sub !== null && sub !== undefined) filtered.push(sub);
-    } else if (e !== null && e !== undefined) {
-      filtered.push(e);
-    }
-  }
-  if (filtered.length === 0) return null;
-  const msg = filtered.map(e => (typeof e === "object" && typeof e.Error === "function") ? e.Error() : String(e)).join("\\n");
-  const joined = __error(msg);
-  joined._errs = filtered;
-  joined.Unwrap = function() { return filtered; };
-  joined.Unwrap.__multi = true;
-  return joined;
-};`;
-
-// Go-semantics strconv parsers shared by the JS backend and the wasm runtime
-// imports (boundary.js), so both targets agree.  Each parser returns
-// [value, errorMessage | null]; integer values are BigInt (the wasm side
-// needs i64, the JS side converts with Number()).
-export const HELPER_STRCONV = `var __strconv_atoi = __strconv_atoi || function(s) {
-  if (!/^[+-]?[0-9]+$/.test(s)) return [0n, 'strconv.Atoi: parsing "' + s + '": invalid syntax'];
-  const v = BigInt(s);
-  if (v > 9223372036854775807n || v < -9223372036854775808n) {
-    return [v > 0n ? 9223372036854775807n : -9223372036854775808n, 'strconv.Atoi: parsing "' + s + '": value out of range'];
-  }
-  return [v, null];
-};
-var __strconv_parse_int = __strconv_parse_int || function(s, base, bits) {
-  let str = s, neg = false;
-  if (str[0] === "-" || str[0] === "+") { neg = str[0] === "-"; str = str.slice(1); }
-  if (base === 0) {
-    if (/^0[xX]/.test(str)) { base = 16; str = str.slice(2); }
-    else if (/^0[bB]/.test(str)) { base = 2; str = str.slice(2); }
-    else if (/^0[oO]/.test(str)) { base = 8; str = str.slice(2); }
-    else if (/^0[0-9]/.test(str)) { base = 8; str = str.slice(1); }
-    else base = 10;
-    str = str.replaceAll("_", "");
-  }
-  if (base < 2 || base > 36) return [0n, 'strconv.ParseInt: parsing "' + s + '": invalid base ' + base];
-  const digits = "0123456789abcdefghijklmnopqrstuvwxyz".slice(0, base);
-  if (str === "" || [...str.toLowerCase()].some((c) => !digits.includes(c))) {
-    return [0n, 'strconv.ParseInt: parsing "' + s + '": invalid syntax'];
-  }
-  let v = 0n; const B = BigInt(base);
-  for (const c of str.toLowerCase()) v = v * B + BigInt(digits.indexOf(c));
-  if (neg) v = -v;
-  const w = bits === 0 ? 64 : bits;
-  const max = (1n << BigInt(w - 1)) - 1n, min = -(1n << BigInt(w - 1));
-  if (v > max || v < min) return [v > max ? max : min, 'strconv.ParseInt: parsing "' + s + '": value out of range'];
-  return [v, null];
-};
-var __strconv_parse_uint = __strconv_parse_uint || function(s, base, bits) {
-  let str = s;
-  if (str[0] === "+") { str = str.slice(1); }
-  if (str[0] === "-") {
-    return [0n, 'strconv.ParseUint: parsing "' + s + '": invalid syntax'];
-  }
-  if (base === 0) {
-    if (/^0[xX]/.test(str)) { base = 16; str = str.slice(2); }
-    else if (/^0[bB]/.test(str)) { base = 2; str = str.slice(2); }
-    else if (/^0[oO]/.test(str)) { base = 8; str = str.slice(2); }
-    else if (/^0[0-9]/.test(str)) { base = 8; str = str.slice(1); }
-    else base = 10;
-    str = str.replaceAll("_", "");
-  }
-  if (base < 2 || base > 36) return [0n, 'strconv.ParseUint: parsing "' + s + '": invalid base ' + base];
-  const digits = "0123456789abcdefghijklmnopqrstuvwxyz".slice(0, base);
-  if (str === "" || [...str.toLowerCase()].some((c) => !digits.includes(c))) {
-    return [0n, 'strconv.ParseUint: parsing "' + s + '": invalid syntax'];
-  }
-  let v = 0n; const B = BigInt(base);
-  for (const c of str.toLowerCase()) v = v * B + BigInt(digits.indexOf(c));
-  const w = bits === 0 ? 64 : bits;
-  const max = w >= 64 ? 18446744073709551615n : (1n << BigInt(w)) - 1n;
-  if (v > max) return [max, 'strconv.ParseUint: parsing "' + s + '": value out of range'];
-  return [v, null];
-};
-var __strconv_parse_float = __strconv_parse_float || function(s) {
-  const str = s.replaceAll("_", "");
-  if (/^[+-]?(inf|infinity)$/i.test(str)) return [str[0] === "-" ? -Infinity : Infinity, null];
-  if (/^[+-]?nan$/i.test(str)) return [NaN, null];
-  if (str === "" || !/^[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?$|^[+-]?0[xX][0-9a-fA-F]+$/.test(str)) {
-    return [0, 'strconv.ParseFloat: parsing "' + s + '": invalid syntax'];
-  }
-  return [Number(str), null];
-};
-var __strconv_parse_bool = __strconv_parse_bool || function(s) {
-  if (["1", "t", "T", "TRUE", "true", "True"].includes(s)) return [true, null];
-  if (["0", "f", "F", "FALSE", "false", "False"].includes(s)) return [false, null];
-  return [false, 'strconv.ParseBool: parsing "' + s + '": invalid syntax'];
-};
-var __strconv_format_float = __strconv_format_float || function(f, fmtc, prec) {
-  const c = String.fromCharCode(fmtc);
-  if (!Number.isFinite(f)) return f !== f ? "NaN" : (f > 0 ? "+Inf" : "-Inf");
-  if (c === "f") return prec < 0 ? String(f) : f.toFixed(prec);
-  if (c === "e" || c === "E") {
-    const r = prec < 0 ? f.toExponential() : f.toExponential(prec);
-    const o = r.replace(/e([+-])(\\d)$/, "e$10$2");
-    return c === "E" ? o.toUpperCase() : o;
-  }
-  if (c === "g" || c === "G") {
-    const r = prec < 0 ? String(f) : f.toPrecision(prec);
-    return c === "G" ? r.toUpperCase() : r;
-  }
-  return String(f);
-};`;
-
-export const HELPER_PATH_CLEAN = `var __pathClean = __pathClean || function(p) {
-  if (!p) return ".";
-  const abs = p.startsWith("/");
-  const parts = p.split("/").reduce((acc, s) => {
-    if (s === "" || s === ".") return acc;
-    if (s === "..") {
-      if (acc.length && acc[acc.length - 1] !== "..") acc.pop();
-      else if (!abs) acc.push("..");
-    } else acc.push(s);
-    return acc;
-  }, []);
-  return (abs ? "/" : "") + (parts.join("/") || ".");
-};
-var __pathMatch = __pathMatch || function(pat, name) {
-  let rx = "^";
-  let hasErr = false;
-  let i = 0;
-  while (i < pat.length) {
-    const c = pat[i];
-    if (c === "\\\\") {
-      if (i + 1 >= pat.length) { hasErr = true; break; }
-      const next = pat[++i];
-      if (/[.^$*+?()|{}\\[\\]\\\\]/.test(next)) rx += "\\\\" + next;
-      else rx += next;
-      i++;
-    } else if (c === "*") {
-      rx += "[^/]*";
-      i++;
-    } else if (c === "?") {
-      rx += "[^/]";
-      i++;
-    } else if (c === "[") {
-      i++;
-      let negated = false;
-      if (i < pat.length && pat[i] === "^") {
-        negated = true;
-        i++;
-      }
-      if (i >= pat.length || pat[i] === "]") {
-        return [false, true];
-      }
-      let classContent = "";
-      let closed = false;
-      while (i < pat.length) {
-        let ch = pat[i];
-        if (ch === "]") {
-          closed = true;
-          i++;
-          break;
-        }
-        if (ch === "\\\\") {
-          if (i + 1 >= pat.length) { hasErr = true; break; }
-          ch = pat[++i];
-        }
-        if (ch === "/") {
-          return [false, true];
-        }
-        i++;
-        if (i + 1 < pat.length && pat[i] === "-" && pat[i + 1] !== "]") {
-          i++;
-          let end = pat[i];
-          if (end === "\\\\") {
-            if (i + 1 >= pat.length) { hasErr = true; break; }
-            end = pat[++i];
-          }
-          if (end === "/") return [false, true];
-          i++;
-          if (ch.charCodeAt(0) > end.charCodeAt(0)) return [false, true];
-          if (ch.charCodeAt(0) <= 47 && 47 <= end.charCodeAt(0)) return [false, true];
-          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
-          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
-          const escEnd = isSpec(end) ? "\\\\" + end : end;
-          classContent += escCh + "-" + escEnd;
-        } else {
-          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
-          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
-          classContent += escCh;
-        }
-      }
-      if (!closed || hasErr) return [false, true];
-      if (negated) {
-        rx += "[^/" + classContent + "]";
-      } else {
-        rx += "[" + classContent + "]";
-      }
-    } else if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c)) {
-      rx += "\\\\" + c;
-      i++;
-    } else {
-      rx += c;
-      i++;
-    }
-  }
-  if (hasErr) return [false, true];
-  try {
-    const re = new RegExp(rx + "$");
-    return [re.test(name), false];
-  } catch (e) {
-    return [false, true];
-  }
-};`;
-
-export const HELPER_TIME_FMT = `var __timeLocalDt = __timeLocalDt || function(t) {
-  const dt = t instanceof Date ? t : (t?._d ?? t);
-  if (typeof t?._offset === "number") {
-    return new Date(dt.getTime() + t._offset * 1000);
-  }
-  return null;
-};
-var __timeYear = __timeYear || function(t) {
-  var ld = __timeLocalDt(t);
-  return ld ? ld.getUTCFullYear() : (t instanceof Date ? t : t._d).getFullYear();
-};
-var __timeMonth = __timeMonth || function(t) {
-  var ld = __timeLocalDt(t);
-  return (ld ? ld.getUTCMonth() : (t instanceof Date ? t : t._d).getMonth()) + 1;
-};
-var __timeDay = __timeDay || function(t) {
-  var ld = __timeLocalDt(t);
-  return ld ? ld.getUTCDate() : (t instanceof Date ? t : t._d).getDate();
-};
-var __timeHour = __timeHour || function(t) {
-  var ld = __timeLocalDt(t);
-  return ld ? ld.getUTCHours() : (t instanceof Date ? t : t._d).getHours();
-};
-var __timeMinute = __timeMinute || function(t) {
-  var ld = __timeLocalDt(t);
-  return ld ? ld.getUTCMinutes() : (t instanceof Date ? t : t._d).getMinutes();
-};
-var __timeSecond = __timeSecond || function(t) {
-  var ld = __timeLocalDt(t);
-  return ld ? ld.getUTCSeconds() : (t instanceof Date ? t : t._d).getSeconds();
-};
-var __timeWeekday = __timeWeekday || function(t) {
-  var ld = __timeLocalDt(t);
-  return ld ? ld.getUTCDay() : (t instanceof Date ? t : t._d).getDay();
-};
-var __timeDate = __timeDate || function(t) {
-  var ld = __timeLocalDt(t);
-  var dt = t instanceof Date ? t : t._d;
-  return ld ? [ld.getUTCFullYear(), ld.getUTCMonth() + 1, ld.getUTCDate()] : [dt.getFullYear(), dt.getMonth() + 1, dt.getDate()];
-};
-var __timeClock = __timeClock || function(t) {
-  var ld = __timeLocalDt(t);
-  var dt = t instanceof Date ? t : t._d;
-  return ld ? [ld.getUTCHours(), ld.getUTCMinutes(), ld.getUTCSeconds()] : [dt.getHours(), dt.getMinutes(), dt.getSeconds()];
-};
-var __timeFmt = __timeFmt || function(d, layout) {
-  const dt = d instanceof Date ? d : (d?._d ?? d);
-  const hasOff = typeof d?._offset === "number" || typeof d?._loc?._offset === "number";
-  const offSec = typeof d?._offset === "number" ? d._offset : (d?._loc?._offset ?? 0);
-  const localDt = hasOff ? new Date(dt.getTime() + offSec * 1000) : null;
-  const pad = (n, w = 2) => String(n).padStart(w, "0");
-  const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const getFullYear = () => localDt ? localDt.getUTCFullYear() : dt.getFullYear();
-  const getMonth = () => localDt ? localDt.getUTCMonth() : dt.getMonth();
-  const getDate = () => localDt ? localDt.getUTCDate() : dt.getDate();
-  const getDay = () => localDt ? localDt.getUTCDay() : dt.getDay();
-  const getHours = () => localDt ? localDt.getUTCHours() : dt.getHours();
-  const getMinutes = () => localDt ? localDt.getUTCMinutes() : dt.getMinutes();
-  const getSeconds = () => localDt ? localDt.getUTCSeconds() : dt.getSeconds();
-  const getMilliseconds = () => localDt ? localDt.getUTCMilliseconds() : dt.getMilliseconds();
-  const getTimezoneOffset = () => hasOff ? Math.round(-offSec / 60) : dt.getTimezoneOffset();
-  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
-    if (t.startsWith(".")) {
-      const isZeroPad = t.includes("0");
-      const maxLen = t.length - 1;
-      const ms = getMilliseconds();
-      let frac = pad(ms, 3);
-      if (d?._ns) {
-        frac += String(d._ns).padStart(6, "0");
-      }
-      if (maxLen > frac.length) frac = frac.padEnd(maxLen, "0");
-      else frac = frac.slice(0, maxLen);
-      if (!isZeroPad) {
-        frac = frac.replace(/0+$/, "");
-        return frac.length > 0 ? "." + frac : "";
-      } else {
-        return "." + frac;
-      }
-    }
-    switch (t) {
-      case "2006": return getFullYear();
-      case "06":   return String(getFullYear()).slice(-2);
-      case "Monday": return DAYS[getDay()];
-      case "Mon":    return DAYS[getDay()].slice(0, 3);
-      case "January": return MONTHS[getMonth()];
-      case "Jan":     return MONTHS[getMonth()].slice(0, 3);
-      case "01": return pad(getMonth() + 1);
-      case "1":  return String(getMonth() + 1);
-      case "02": return pad(getDate());
-      case "2":  return String(getDate());
-      case "15": return pad(getHours());
-      case "PM": return getHours() < 12 ? "AM" : "PM";
-      case "pm": return getHours() < 12 ? "am" : "pm";
-      case "03": return pad(getHours() % 12 || 12);
-      case "3":  return String(getHours() % 12 || 12);
-      case "04": return pad(getMinutes());
-      case "4":  return String(getMinutes());
-      case "05": return pad(getSeconds());
-      case "5":  return String(getSeconds());
-      case "Z07:00": {
-        const o = -getTimezoneOffset();
-        return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
-      }
-      case "-07:00": {
-        const o = -getTimezoneOffset();
-        return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
-      }
-      case "-0700": {
-        const o = -getTimezoneOffset();
-        return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
-      }
-      case "MST": return d?._loc ? d._loc._name : (hasOff && offSec === 0 ? "UTC" : "LOCAL");
-      default: return t;
-    }
-  });
-};
-var __timeTruncate = __timeTruncate || function(t, d) {
-  d = BigInt(d);
-  if (d <= 0n) return t;
-  var nano = BigInt(t._d.getTime()) * 1000000n + BigInt(t._ns || 0);
-  var dt = nano + 62135596800000000000n;
-  var r = dt % d;
-  if (r < 0n) r += d;
-  var newNano = nano - r;
-  var newMs = Number(newNano / 1000000n);
-  var remNs = Number(newNano % 1000000n);
-  if (remNs < 0) { newMs--; remNs += 1000000; }
-  return { _d: new Date(newMs), _offset: t._offset, _loc: t._loc, _ns: remNs };
-};
-var __timeRound = __timeRound || function(t, d) {
-  d = BigInt(d);
-  if (d <= 0n) return t;
-  var nano = BigInt(t._d.getTime()) * 1000000n + BigInt(t._ns || 0);
-  var dt = nano + 62135596800000000000n;
-  var r = dt % d;
-  if (r < 0n) r += d;
-  var newNano = (r + r < d) ? (nano - r) : (nano + d - r);
-  var newMs = Number(newNano / 1000000n);
-  var remNs = Number(newNano % 1000000n);
-  if (remNs < 0) { newMs--; remNs += 1000000; }
-  return { _d: new Date(newMs), _offset: t._offset, _loc: t._loc, _ns: remNs };
-};
-var __timeAddDate = __timeAddDate || function(t, years, months, days) {
-  var d = t._d;
-  if (typeof t._offset === "number") {
-    var offSec = t._offset;
-    var localD = new Date(d.getTime() + offSec * 1000);
-    var newLocalD = new Date(Date.UTC(
-      localD.getUTCFullYear() + Number(years),
-      localD.getUTCMonth() + Number(months),
-      localD.getUTCDate() + Number(days),
-      localD.getUTCHours(),
-      localD.getUTCMinutes(),
-      localD.getUTCSeconds(),
-      localD.getUTCMilliseconds()
-    ));
-    var newDate = new Date(newLocalD.getTime() - offSec * 1000);
-    return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
-  }
-  var newDate = new Date(
-    d.getFullYear() + Number(years),
-    d.getMonth() + Number(months),
-    d.getDate() + Number(days),
-    d.getHours(),
-    d.getMinutes(),
-    d.getSeconds(),
-    d.getMilliseconds()
-  );
-  return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
-};
-var __timeYearDay = __timeYearDay || function(t) {
-  var d = t._d;
-  if (typeof t._offset === "number") {
-    var localD = new Date(d.getTime() + t._offset * 1000);
-    var start = new Date(Date.UTC(localD.getUTCFullYear(), 0, 0));
-    return Math.floor((localD.getTime() - start.getTime()) / 86400000);
-  }
-  var start = new Date(d.getFullYear(), 0, 0);
-  return Math.floor((d.getTime() - start.getTime()) / 86400000);
-};
-var __timeISOWeek = __timeISOWeek || function(t) {
-  if (typeof t._offset === "number") {
-    var d = new Date(t._d.getTime() + t._offset * 1000);
-    var day = (d.getUTCDay() + 6) % 7;
-    d.setUTCDate(d.getUTCDate() - day + 3);
-    var year = d.getUTCFullYear();
-    var firstThu = new Date(Date.UTC(year, 0, 4));
-    var firstDay = (firstThu.getUTCDay() + 6) % 7;
-    firstThu.setUTCDate(firstThu.getUTCDate() - firstDay + 3);
-    var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
-    return [year, week];
-  }
-  var d = new Date(t._d.getTime());
-  var day = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - day + 3);
-  var year = d.getFullYear();
-  var firstThu = new Date(year, 0, 4);
-  var firstDay = (firstThu.getDay() + 6) % 7;
-  firstThu.setDate(firstThu.getDate() - firstDay + 3);
-  var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
-  return [year, week];
-};
-var __timeMarshalJSON = __timeMarshalJSON || function(t) {
-  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
-  if (y < 0 || y > 9999) {
-    return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalJSON: year outside of range [0,9999]") : new Error("Time.MarshalJSON: year outside of range [0,9999]")];
-  }
-  var s = '"' + __timeFmt(t, "2006-01-02T15:04:05.999999999Z07:00") + '"';
-  return [new TextEncoder().encode(s), null];
-};
-var __timeMarshalText = __timeMarshalText || function(t) {
-  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
-  if (y < 0 || y > 9999) {
-    return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalText: year outside of range [0,9999]") : new Error("Time.MarshalText: year outside of range [0,9999]")];
-  }
-  var s = __timeFmt(t, "2006-01-02T15:04:05.999999999Z07:00");
-  return [new TextEncoder().encode(s), null];
-};
-var __timeUnmarshalJSON = __timeUnmarshalJSON || function(t, data) {
-  var s = typeof data === "string" ? data : new TextDecoder().decode(data);
-  s = s.trim();
-  if (s === "null") return null;
-  if (!s.startsWith('"') || !s.endsWith('"') || s.length < 2) {
-    return typeof __error === "function" ? __error("Time.UnmarshalJSON: input is not a JSON string") : new Error("Time.UnmarshalJSON: input is not a JSON string");
-  }
-  var inner = s.slice(1, -1);
-  var parsed = __timeParse("2006-01-02T15:04:05.999999999Z07:00", inner);
-  if (parsed[1]) parsed = __timeParse("2006-01-02T15:04:05Z07:00", inner);
-  if (parsed[1]) return parsed[1];
-  t._d = parsed[0]._d;
-  t._offset = parsed[0]._offset;
-  t._loc = parsed[0]._loc;
-  t._ns = parsed[0]._ns;
-  return null;
-};
-var __timeUnmarshalText = __timeUnmarshalText || function(t, data) {
-  var s = typeof data === "string" ? data : new TextDecoder().decode(data);
-  s = s.trim();
-  var parsed = __timeParse("2006-01-02T15:04:05.999999999Z07:00", s);
-  if (parsed[1]) parsed = __timeParse("2006-01-02T15:04:05Z07:00", s);
-  if (parsed[1]) return parsed[1];
-  t._d = parsed[0]._d;
-  t._offset = parsed[0]._offset;
-  t._loc = parsed[0]._loc;
-  t._ns = parsed[0]._ns;
-  return null;
-};
-var __timeAfterFunc = __timeAfterFunc || function(d, f) {
+export const HELPER_TIMER = `var __timeAfterFunc = __timeAfterFunc || function(d, f) {
   var timer = {
     _id: null,
     _active: true,
@@ -1489,36 +999,6 @@ var __timeAfterFunc = __timeAfterFunc || function(d, f) {
     timer._f();
   }, Math.round(Number(d) / 1000000));
   return timer;
-};`;
-
-export const HELPER_TIME_PARSE = `var __timeParse = __timeParse || function(layout, value) {
-  try {
-    const val = String(value);
-    const d = new Date(val);
-    if (isNaN(d.getTime())) throw 0;
-    let offset = undefined;
-    let loc = null;
-    let ns = 0;
-    const m = /\\.(\\d{1,9})/.exec(val);
-    if (m) {
-      const fracStr = m[1].padEnd(9, "0");
-      ns = Number(fracStr.slice(3));
-    }
-    if (val.endsWith("Z") || val.endsWith("z")) {
-      offset = 0;
-    } else {
-      const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(val);
-      if (tzMatch) {
-        const sign = tzMatch[1] === "+" ? 1 : -1;
-        const offSec = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
-        offset = offSec;
-        loc = { _name: tzMatch[0], _offset: offSec, String() { return this._name; } };
-      }
-    }
-    return [{ _d: d, _offset: offset, _loc: loc, _ns: ns }, null];
-  } catch {
-    return [{ _d: new Date(0) }, { Error() { return "parsing time: cannot parse"; }, toString() { return "parsing time: cannot parse"; }, _msg: "parsing time: cannot parse", _cause: null }];
-  }
 };`;
 
 export const HELPER_TESTING = `var __GoFront_FailNow = __GoFront_FailNow || class extends Error {
@@ -1840,135 +1320,6 @@ export const HELPER_INJECT_STYLES = `var __injectStyles = __injectStyles || func
   s.textContent += "\\n" + css;
 };`;
 
-export const HELPER_DURATION = `var __durationString = __durationString || function(d) {
-  d = BigInt(d);
-  if (d === 0n) return "0s";
-  let neg = false;
-  if (d < 0n) { neg = true; d = -d; }
-  let s = "";
-  const totalSec = d / 1000000000n;
-  const sec = totalSec % 60n;
-  const min = (totalSec / 60n) % 60n;
-  const hr = totalSec / 3600n;
-
-  if (hr > 0n) s += hr + "h";
-  const remAfterHr = d % 3600000000000n;
-  if (min > 0n || (hr > 0n && remAfterHr > 0n)) s += min + "m";
-  if (totalSec > 0n) {
-    const frac = d % 1000000000n;
-    if (sec > 0n || frac > 0n || (hr === 0n && min === 0n)) {
-      if (frac === 0n) {
-        s += sec + "s";
-      } else {
-        let fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
-        s += sec + "." + fracStr + "s";
-      }
-    }
-  } else {
-    const ms = (d / 1000000n) % 1000n;
-    const us = (d / 1000n) % 1000n;
-    const ns = d % 1000n;
-    if (ms > 0n) {
-      const frac = d % 1000000n;
-      if (frac === 0n) s += ms + "ms";
-      else {
-        let fracStr = frac.toString().padStart(6, "0").replace(/0+$/, "");
-        s += ms + "." + fracStr + "ms";
-      }
-    } else if (us > 0n) {
-      const frac = d % 1000n;
-      if (frac === 0n) s += us + "µs";
-      else {
-        let fracStr = frac.toString().padStart(3, "0").replace(/0+$/, "");
-        s += us + "." + fracStr + "µs";
-      }
-    } else {
-      s += ns + "ns";
-    }
-  }
-  return neg ? "-" + s : s;
-};
-var __durationRound = __durationRound || function(d, m) {
-  d = BigInt(d);
-  m = BigInt(m);
-  if (m <= 0n) return Number(d);
-  var r = d % m;
-  if (d < 0n) {
-    r = -r;
-    if (r + r < m) return Number(d + r);
-    return Number(d - m + r);
-  }
-  if (r + r < m) return Number(d - r);
-  return Number(d + m - r);
-};
-var __monthString = __monthString || function(m) {
-  var names = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  var n = Number(m);
-  if (n >= 1 && n <= 12) return names[n];
-  return "%!Month(" + n + ")";
-};
-var __weekdayString = __weekdayString || function(w) {
-  var names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  var n = Number(w);
-  if (n >= 0 && n <= 6) return names[n];
-  return "%!Weekday(" + n + ")";
-};
-var __timeParseDuration = __timeParseDuration || function(s) {
-  var orig = String(s);
-  if (orig === "0") return [0, null];
-  var str = orig.trim();
-  var neg = false;
-  if (str.startsWith("-")) { neg = true; str = str.slice(1); }
-  else if (str.startsWith("+")) { str = str.slice(1); }
-  if (str === "0") return [0, null];
-  if (str === "") return [0, typeof __error === "function" ? __error('time: invalid duration ""') : new Error('time: invalid duration ""')];
-
-  var totalNs = 0n;
-  var re = /^(\\d*(?:\\.\\d+)?)(ns|us|µs|\\u00b5s|\\u03bcs|ms|s|m|h)/;
-  while (str.length > 0) {
-    var m = re.exec(str);
-    if (!m || m[1] === "" || m[1] === ".") {
-      return [0, typeof __error === "function" ? __error('time: invalid duration "' + orig + '"') : new Error('time: invalid duration "' + orig + '"')];
-    }
-    var numStr = m[1];
-    var unitStr = m[2];
-    var unitMult = 1n;
-    if (unitStr === "ns") unitMult = 1n;
-    else if (unitStr === "us" || unitStr === "µs" || unitStr === "\\u00b5s" || unitStr === "\\u03bcs") unitMult = 1000n;
-    else if (unitStr === "ms") unitMult = 1000000n;
-    else if (unitStr === "s") unitMult = 1000000000n;
-    else if (unitStr === "m") unitMult = 60000000000n;
-    else if (unitStr === "h") unitMult = 3600000000000n;
-
-    if (numStr.includes(".")) {
-      var parts = numStr.split(".");
-      var whole = parts[0] ? BigInt(parts[0]) : 0n;
-      var frac = parts[1];
-      var fracScale = Math.pow(10, frac.length);
-      var fracVal = BigInt(Math.round((Number(frac) / fracScale) * Number(unitMult)));
-      totalNs += whole * unitMult + fracVal;
-    } else {
-      totalNs += BigInt(numStr) * unitMult;
-    }
-    str = str.slice(m[0].length);
-  }
-  if (neg) totalNs = -totalNs;
-  return [Number(totalNs), null];
-};`;
-
-export const HELPER_SYNC = `var __sync_mutex = __sync_mutex || function() {
-  return { Lock() {}, Unlock() {}, TryLock() { return true; } };
-};
-var __sync_rwmutex = __sync_rwmutex || function() {
-  return { Lock() {}, Unlock() {}, RLock() {}, RUnlock() {}, TryLock() { return true; }, TryRLock() { return true; } };
-};
-var __sync_once = __sync_once || function() {
-  return { done: 0, Do(f) { if (!this.done) { this.done = 1; f(); } } };
-};
-var __sync_waitgroup = __sync_waitgroup || function() {
-  return { counter: 0, Add(d) { this.counter = (this.counter || 0) + d; }, Done() { this.counter = (this.counter || 0) - 1; }, Wait() {} };
-};`;
-
 export const HELPER_CRYPTO_RAND = `var __crypto_rand_read = __crypto_rand_read || function(b) {
   if (!b || b.length === 0) return [0, null];
   const u8 = ArrayBuffer.isView(b) ? b : new Uint8Array(b.length);
@@ -1991,183 +1342,7 @@ var __crypto_rand_reader = __crypto_rand_reader || {
   Read: function(b) { return __crypto_rand_read(b); }
 };`;
 
-export const HELPER_SHA256 = `var __sha256 = __sha256 || (function() {
-  const K = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-  ];
-  function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
-  function block(H, M) {
-    const W = new Int32Array(64);
-    for (let i = 0; i < 16; i++) {
-      W[i] = (M[i * 4] << 24) | (M[i * 4 + 1] << 16) | (M[i * 4 + 2] << 8) | M[i * 4 + 3];
-    }
-    for (let i = 16; i < 64; i++) {
-      const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
-      const s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
-      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
-    }
-    let [a, b, c, d, e, f, g, h] = H;
-    for (let i = 0; i < 64; i++) {
-      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-      const ch = (e & f) ^ (~e & g);
-      const t1 = (h + S1 + ch + K[i] + W[i]) | 0;
-      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-      const maj = (a & b) ^ (a & c) ^ (b & c);
-      const t2 = (S0 + maj) | 0;
-      h = g; g = f; f = e; e = (d + t1) | 0;
-      d = c; c = b; b = a; a = (t1 + t2) | 0;
-    }
-    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
-    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
-  }
-  function digest(bytes) {
-    const H = new Int32Array([
-      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-    ]);
-    const len = bytes ? bytes.length : 0;
-    const padLen = (len % 64 < 56) ? (56 - (len % 64)) : (120 - (len % 64));
-    const total = len + padLen + 8;
-    const buf = new Uint8Array(total);
-    if (bytes) {
-      if (ArrayBuffer.isView(bytes)) buf.set(bytes);
-      else for (let i = 0; i < len; i++) buf[i] = bytes[i];
-    }
-    buf[len] = 0x80;
-    const bits = BigInt(len) * 8n;
-    for (let i = 0; i < 8; i++) {
-      buf[total - 1 - i] = Number((bits >> BigInt(i * 8)) & 0xffn);
-    }
-    for (let i = 0; i < total; i += 64) {
-      block(H, buf.subarray(i, i + 64));
-    }
-    const out = new Uint8Array(32);
-    for (let i = 0; i < 8; i++) {
-      out[i * 4] = (H[i] >>> 24) & 0xff;
-      out[i * 4 + 1] = (H[i] >>> 16) & 0xff;
-      out[i * 4 + 2] = (H[i] >>> 8) & 0xff;
-      out[i * 4 + 3] = H[i] & 0xff;
-    }
-    return out;
-  }
-  class Hash {
-    constructor() { this.Reset(); }
-    Reset() { this.buf = []; }
-    Write(p) {
-      if (p) {
-        for (let i = 0; i < p.length; i++) this.buf.push(p[i]);
-      }
-      return [p ? p.length : 0, null];
-    }
-    Sum(b) {
-      const d = digest(this.buf);
-      if (!b || b.length === 0) return d;
-      const res = new Uint8Array(b.length + d.length);
-      res.set(b, 0);
-      res.set(d, b.length);
-      return res;
-    }
-    Size() { return 32; }
-    BlockSize() { return 64; }
-  }
-  return {
-    Sum256: digest,
-    New: () => new Hash()
-  };
-})();`;
-
-export const HELPER_BINARY = `var __binary_le = __binary_le || {
-  Uint16: function(b) { return (b[0] | (b[1] << 8)) & 0xffff; },
-  Uint32: function(b) { return ((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0); },
-  Uint64: function(b) {
-    const lo = BigInt((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0);
-    const hi = BigInt((b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) >>> 0);
-    return Number(lo | (hi << 32n));
-  },
-  PutUint16: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; },
-  PutUint32: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; b[2] = (v >> 16) & 0xff; b[3] = (v >>> 24) & 0xff; },
-  PutUint64: function(b, v) {
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) b[Number(i)] = Number((bv >> (i * 8n)) & 0xffn);
-  },
-  AppendUint16: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 2);
-    if (len > 0) res.set(b, 0);
-    res[len] = v & 0xff;
-    res[len + 1] = (v >> 8) & 0xff;
-    return res;
-  },
-  AppendUint32: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 4);
-    if (len > 0) res.set(b, 0);
-    res[len] = v & 0xff;
-    res[len + 1] = (v >> 8) & 0xff;
-    res[len + 2] = (v >> 16) & 0xff;
-    res[len + 3] = (v >>> 24) & 0xff;
-    return res;
-  },
-  AppendUint64: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 8);
-    if (len > 0) res.set(b, 0);
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) res[len + Number(i)] = Number((bv >> (i * 8n)) & 0xffn);
-    return res;
-  },
-  String: function() { return "LittleEndian"; }
-};
-var __binary_be = __binary_be || {
-  Uint16: function(b) { return ((b[0] << 8) | b[1]) & 0xffff; },
-  Uint32: function(b) { return (((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0); },
-  Uint64: function(b) {
-    const hi = BigInt(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
-    const lo = BigInt(((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) >>> 0);
-    return Number((hi << 32n) | lo);
-  },
-  PutUint16: function(b, v) { b[0] = (v >> 8) & 0xff; b[1] = v & 0xff; },
-  PutUint32: function(b, v) { b[0] = (v >>> 24) & 0xff; b[1] = (v >> 16) & 0xff; b[2] = (v >> 8) & 0xff; b[3] = v & 0xff; },
-  PutUint64: function(b, v) {
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) b[Number(7n - i)] = Number((bv >> (i * 8n)) & 0xffn);
-  },
-  AppendUint16: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 2);
-    if (len > 0) res.set(b, 0);
-    res[len] = (v >> 8) & 0xff;
-    res[len + 1] = v & 0xff;
-    return res;
-  },
-  AppendUint32: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 4);
-    if (len > 0) res.set(b, 0);
-    res[len] = (v >>> 24) & 0xff;
-    res[len + 1] = (v >> 16) & 0xff;
-    res[len + 2] = (v >> 8) & 0xff;
-    res[len + 3] = v & 0xff;
-    return res;
-  },
-  AppendUint64: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 8);
-    if (len > 0) res.set(b, 0);
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) res[len + Number(i)] = Number((bv >> ((7n - i) * 8n)) & 0xffn);
-    return res;
-  },
-  String: function() { return "BigEndian"; }
-};
-var __binary_size = __binary_size || function(v) {
+export const HELPER_BINARY = `var __binary_size = __binary_size || function(v) {
   if (typeof v === "number" || typeof v === "bigint") return 8;
   if (Array.isArray(v) || ArrayBuffer.isView(v)) return v.length;
   if (v && typeof v === "object") {
@@ -2220,9 +1395,9 @@ var __binary_read = __binary_read || function(r, order, data, sz, typeTag) {
     else if (typeTag === "int64") target.value = Number(view.getBigInt64(0, isLe));
     else if (typeTag === "uint64") target.value = Number(view.getBigUint64(0, isLe));
     else if (s === 1) target.value = buf[0];
-    else if (s === 2) target.value = order.Uint16(buf);
-    else if (s === 4) target.value = order.Uint32(buf);
-    else if (s === 8) target.value = order.Uint64(buf);
+    else if (s === 2) target.value = view.getUint16(0, isLe);
+    else if (s === 4) target.value = view.getUint32(0, isLe);
+    else if (s === 8) target.value = view.getBigUint64(0, isLe);
     return null;
   }
   if (Array.isArray(data) || ArrayBuffer.isView(data)) {
@@ -2263,9 +1438,9 @@ var __binary_write = __binary_write || function(w, order, data, sz, typeTag) {
     if (typeTag === "float32") view.setFloat32(0, Number(v), isLe);
     else if (typeTag === "float64") view.setFloat64(0, Number(v), isLe);
     else if (s === 1) buf[0] = Number(v) & 0xff;
-    else if (s === 2) order.PutUint16(buf, Number(v));
-    else if (s === 4) order.PutUint32(buf, Number(v));
-    else order.PutUint64(buf, v);
+    else if (s === 2) view.setUint16(0, Number(v), isLe);
+    else if (s === 4) view.setUint32(0, Number(v), isLe);
+    else view.setBigUint64(0, BigInt.asUintN(64, BigInt(v)), isLe);
     const [, err] = writeChunk(buf);
     return err;
   }
@@ -2275,117 +1450,6 @@ var __binary_write = __binary_write || function(w, order, data, sz, typeTag) {
   }
   return __error("binary.Write: unsupported type");
 };`;
-
-export const HELPER_HEX = `var __hex_encode_to_string = __hex_encode_to_string || function(src) {
-  if (!src || src.length === 0) return "";
-  let s = "";
-  for (let i = 0; i < src.length; i++) s += src[i].toString(16).padStart(2, "0");
-  return s;
-};
-var __hex_decode_string = __hex_decode_string || function(s) {
-  if (s.length % 2 !== 0) return [new Uint8Array(0), __error("encoding/hex: odd length hex string")];
-  const out = new Uint8Array(s.length / 2);
-  for (let i = 0; i < s.length; i += 2) {
-    const pair = s.slice(i, i + 2);
-    if (!/^[0-9a-fA-F]{2}$/.test(pair)) {
-      return [out.subarray(0, i / 2), __error("encoding/hex: invalid byte: " + pair)];
-    }
-    out[i / 2] = parseInt(pair, 16);
-  }
-  return [out, null];
-};
-var __hex_encode = __hex_encode || function(dst, src) {
-  const hex = __hex_encode_to_string(src);
-  for (let i = 0; i < hex.length; i++) dst[i] = hex.charCodeAt(i);
-  return hex.length;
-};
-var __hex_decode = __hex_decode || function(dst, src) {
-  const str = typeof src === "string" ? src : (src instanceof Uint8Array ? new TextDecoder().decode(src) : String.fromCharCode(...src));
-  const [res, err] = __hex_decode_string(str);
-  for (let i = 0; i < res.length; i++) dst[i] = res[i];
-  return [res.length, err];
-};`;
-
-export const HELPER_BASE64 = `var __base64_make = __base64_make || function(alphabet, padChar) {
-  const encMap = alphabet.split("");
-  const decMap = {};
-  for (let i = 0; i < 64; i++) decMap[alphabet[i]] = i;
-  return {
-    EncodeToString: function(src) {
-      if (!src || src.length === 0) return "";
-      let res = "";
-      let i = 0;
-      for (; i + 2 < src.length; i += 3) {
-        const n = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
-        res += encMap[(n >> 18) & 63] + encMap[(n >> 12) & 63] + encMap[(n >> 6) & 63] + encMap[n & 63];
-      }
-      if (i < src.length) {
-        if (src.length - i === 1) {
-          const n = src[i] << 16;
-          res += encMap[(n >> 18) & 63] + encMap[(n >> 12) & 63];
-          if (padChar) res += padChar + padChar;
-        } else {
-          const n = (src[i] << 16) | (src[i + 1] << 8);
-          res += encMap[(n >> 18) & 63] + encMap[(n >> 12) & 63] + encMap[(n >> 6) & 63];
-          if (padChar) res += padChar;
-        }
-      }
-      return res;
-    },
-    DecodeString: function(s) {
-      let str = s.replace(/\\s+/g, "");
-      if (padChar) {
-        if (str.length % 4 !== 0) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
-        if (str.endsWith(padChar + padChar)) {
-          if (str.endsWith(padChar + padChar + padChar)) return [new Uint8Array(0), __error("illegal base64 data at input byte " + (str.length - 3))];
-          str = str.slice(0, -2);
-          if (str.length % 4 !== 2) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
-        } else if (str.endsWith(padChar)) {
-          str = str.slice(0, -1);
-          if (str.length % 4 !== 3) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
-        }
-      }
-      const out = [];
-      let i = 0;
-      for (; i + 3 < str.length; i += 4) {
-        const c0 = decMap[str[i]], c1 = decMap[str[i+1]], c2 = decMap[str[i+2]], c3 = decMap[str[i+3]];
-        if (c0 === undefined || c1 === undefined || c2 === undefined || c3 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-        const n = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
-        out.push((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
-      }
-      const rem = str.length - i;
-      if (rem === 2) {
-        const c0 = decMap[str[i]], c1 = decMap[str[i+1]];
-        if (c0 === undefined || c1 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-        out.push((c0 << 2) | (c1 >> 4));
-      } else if (rem === 3) {
-        const c0 = decMap[str[i]], c1 = decMap[str[i+1]], c2 = decMap[str[i+2]];
-        if (c0 === undefined || c1 === undefined || c2 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-        out.push((c0 << 2) | (c1 >> 4), ((c1 & 15) << 4) | (c2 >> 2));
-      } else if (rem === 1) {
-        return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-      }
-      return [new Uint8Array(out), null];
-    },
-    Encode: function(dst, src) {
-      const s = this.EncodeToString(src);
-      for (let i = 0; i < s.length; i++) dst[i] = s.charCodeAt(i);
-    },
-    Decode: function(dst, src) {
-      const str = String.fromCharCode(...src);
-      const [res, err] = this.DecodeString(str);
-      for (let i = 0; i < res.length; i++) dst[i] = res[i];
-      return [res.length, err];
-    },
-    EncodedLen: function(n) { return padChar ? Math.ceil(n / 3) * 4 : Math.floor((n * 8 + 5) / 6); },
-    DecodedLen: function(n) { return padChar ? Math.floor(n * 3 / 4) : Math.floor(n * 6 / 8); },
-    WithPadding: function(p) { return __base64_make(alphabet, p === -1 ? "" : String.fromCharCode(p)); }
-  };
-};
-var __base64_std = __base64_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", "=");
-var __base64_url = __base64_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "=");
-var __base64_raw_std = __base64_raw_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", "");
-var __base64_raw_url = __base64_raw_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "");`;
 
 export const HELPER_JSON = `var __json_esc = __json_esc || function(s) {
   if (typeof s !== "string") s = String(s);
@@ -2736,7 +1800,7 @@ var __json_number_value = __json_number_value || function(v) {
   return typeof v === "string" && v.endsWith("__bigint") ? Number(v.slice(0, -8)) : v;
 };
 var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw) {
-  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : __json_type(v);
+  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : typeof v === "bigint" ? "number" : __json_type(v);
   var fail = function() {
     return __json_err("cannot unmarshal " + (type === "number" ? "number " + __json_lit(v, raw) : type) + " into " + __json_ctx(ctxType));
   };
@@ -2746,7 +1810,9 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
   var integer;
   var signed = typeName === "int" || typeName.startsWith("int");
   if (typeName === "int64" || typeName === "uint64") {
-    if (typeof v === "string" && v.endsWith("__bigint")) {
+    if (typeof v === "bigint") {
+      integer = v;
+    } else if (typeof v === "string" && v.endsWith("__bigint")) {
       try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
     } else if (typeof v === "number" && Number.isSafeInteger(v)) {
       integer = BigInt(v);
@@ -2754,36 +1820,38 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
     if (integer !== undefined) {
       var min64 = typeName === "int64" ? -(1n << 63n) : 0n;
       var max64 = typeName === "int64" ? (1n << 63n) - 1n : (1n << 64n) - 1n;
-      if (integer >= min64 && integer <= max64) return typeof v === "number" ? v : integer;
+      if (integer >= min64 && integer <= max64) return integer;
     }
     return fail();
   }
-  if (typeof v === "number" && Number.isSafeInteger(v)) {
-    if (typeName === "int") return v;
+  if (typeof v === "bigint") {
+    integer = v;
+  } else if (typeof v === "string" && v.endsWith("__bigint")) {
+    try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
+  } else if (typeof v === "number" && Number.isSafeInteger(v)) {
+    integer = BigInt(v);
+  }
+  if (integer !== undefined) {
+    if (typeName === "int") {
+      if (integer >= -9007199254740991n && integer <= 9007199254740991n) return Number(integer);
+      return fail();
+    }
     var bits = typeName === "uint" ? 53 : Number(typeName.replace(/^(u?int|byte|rune)/, ""));
     if (!bits) bits = typeName === "byte" ? 8 : typeName === "rune" ? 32 : 53;
-    var min = signed ? -(2 ** (bits - 1)) : 0;
-    var max = signed ? (2 ** (bits - 1)) - 1 : (2 ** bits) - 1;
-    if (v >= min && v <= max) return v;
+    var min = signed ? -(1n << BigInt(bits - 1)) : 0n;
+    var max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
+    if (integer >= min && integer <= max) return Number(integer);
   }
   return fail();
 };
 var __json_b64 = __json_b64 || function(u8) {
   if (u8 === null || u8 === undefined) return "null";
-  if (typeof __base64_std !== "undefined") return '"' + __base64_std.EncodeToString(u8) + '"';
-  var bstr = "";
-  for (var i = 0; i < u8.length; i++) bstr += String.fromCharCode(u8[i]);
-  return '"' + (typeof btoa !== "undefined" ? btoa(bstr) : Buffer.from(u8).toString("base64")) + '"';
+  return '"' + EncodeBytes$$internal$jsonrt(u8) + '"';
 };
 var __json_b64_dec = __json_b64_dec || function(str) {
-  if (typeof __base64_std !== "undefined") {
-    var res = __base64_std.DecodeString(str);
-    if (!res[1]) return res[0];
-  }
-  var bin = typeof atob !== "undefined" ? atob(str) : Buffer.from(str, "base64").toString("binary");
-  var u8 = new Uint8Array(bin.length);
-  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-  return u8;
+  var res = DecodeBytes$$internal$jsonrt(str);
+  if (res[1]) return { _msg: res[1].Error(), __userErr: res[1] };
+  return res[0];
 };
 var __json_is_zero = __json_is_zero || function(val, isStruct, isMap) {
   if (isStruct) return false;
@@ -3096,9 +2164,9 @@ var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];
-  d.offset += skipped;
+  d.offset += typeof d.offset === "bigint" ? BigInt(skipped) : skipped;
   if (err != null) return err;
-  d.offset += data.length;
+  d.offset += typeof d.offset === "bigint" ? BigInt(data.length) : data.length;
   OptUseNumber$$internal$jsonrt = d.useNumber;
   OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
   var uerr;

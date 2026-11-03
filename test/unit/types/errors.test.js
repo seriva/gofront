@@ -436,6 +436,7 @@ func main() {
 
 test("errors.New(msg) creates object with .Error() method", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   e := errors.New("not found")
   console.log(e.Error())
@@ -558,6 +559,7 @@ func main() {
 
 test("type assertion fails for non-matching error type", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 type ErrA struct {}
 func (e ErrA) Error() string { return "a" }
 type ErrB struct {}
@@ -576,6 +578,7 @@ section("errors.Is / errors.Unwrap");
 
 test("errors.Unwrap returns wrapped error", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   inner := errors.New("disk full")
   outer := fmt.Errorf("write failed: %w", inner)
@@ -588,6 +591,7 @@ func main() {
 
 test("errors.Unwrap returns nil for non-wrapped error", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   e := errors.New("plain")
   u := errors.Unwrap(e)
@@ -599,6 +603,7 @@ func main() {
 
 test("errors.Is matches sentinel error", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 var ErrNotFound = errors.New("not found")
 func lookup() error { return ErrNotFound }
 func main() {
@@ -611,6 +616,7 @@ func main() {
 
 test("errors.Is walks error chain", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 var ErrNotFound = errors.New("not found")
 func main() {
   wrapped := fmt.Errorf("lookup: %w", ErrNotFound)
@@ -622,6 +628,7 @@ func main() {
 
 test("errors.Is returns false for different sentinel", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 var ErrNotFound = errors.New("not found")
 var ErrTimeout = errors.New("timeout")
 func main() {
@@ -635,6 +642,7 @@ section("fmt.Errorf with %w");
 
 test("fmt.Errorf with %w wraps error", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   inner := errors.New("file not found")
   outer := fmt.Errorf("read config: %w", inner)
@@ -646,6 +654,7 @@ func main() {
 
 test("fmt.Errorf with %w: Unwrap returns original", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   inner := errors.New("disk full")
   outer := fmt.Errorf("write: %w", inner)
@@ -658,6 +667,7 @@ func main() {
 
 test("fmt.Errorf without %w does not wrap", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   e := fmt.Errorf("error %d", 42)
   u := errors.Unwrap(e)
@@ -671,6 +681,7 @@ section("Sentinel errors");
 
 test("package-level error vars as sentinels", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 var ErrAuth = errors.New("unauthorized")
 func check(ok bool) error {
   if !ok { return ErrAuth }
@@ -688,6 +699,7 @@ func main() {
 
 test("errors.Is with sentinel across function call", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 var ErrNotFound = errors.New("not found")
 func find(name string) error {
   if name == "" { return ErrNotFound }
@@ -708,6 +720,7 @@ section("Error backward compatibility");
 
 test("error toString() in string concatenation", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
   e := errors.New("bad")
   s := "error: " + e.Error()

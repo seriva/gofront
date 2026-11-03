@@ -596,6 +596,35 @@ async func TestAsyncFailure(t *testing.T) {
 	);
 });
 
+test("t.Deadline and b.Elapsed return time values without importing time", async () => {
+	await withTempDir(
+		{
+			"clock_test.go": `package clockpkg
+import "testing"
+
+func TestClock(t *testing.T) {
+  d, ok := t.Deadline()
+  if ok || !d.IsZero() {
+    t.Error("expected no deadline")
+  }
+}
+
+func BenchmarkClock(b *testing.B) {
+  _ = b.Elapsed().Seconds()
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+				verbose: true,
+			});
+			assertEqual(result.exitCode, 0);
+			assertContains(result.stdout, "--- PASS: TestClock");
+		},
+	);
+});
+
 test("runTests marks parent test failed if any subtest fails", async () => {
 	await withTempDir(
 		{

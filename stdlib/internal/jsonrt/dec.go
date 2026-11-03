@@ -207,6 +207,12 @@ func (d *Dec) Bytes(typ string) (v []byte, ok bool) {
 	return b, true
 }
 
+// DecodeBytes decodes standard base64 text; the JavaScript JSON codec calls it
+// for []byte values.
+func DecodeBytes(s string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(s)
+}
+
 // KeyInt parses the current object member name as an integer map key.
 func (d *Dec) KeyInt(bits int, signed bool, typ string) (int64, bool) {
 	s := d.key
