@@ -191,7 +191,7 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
 
 ### Phase 3: Typechecker Checks and Diagnostics
 
-- [ ] Task 3.1: Reject implicit `float64` → `int` assignment
+- [x] Task 3.1: Reject implicit `float64` → `int` assignment
   - Files: `src/typechecker/assignability.js`, `test/unit/types/checks.test.js`
   - Test: L20 `var y float64 = 1; var i int = y` → `assertErrorContains(errors, "cannot use y (variable of type float64) as int value")`; untyped constants `var i int = 1.0` still accepted.
   - Done when: repro is a type error on all targets; `npm run check` (examples) and `npm test` stay green.

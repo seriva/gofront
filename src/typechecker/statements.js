@@ -210,7 +210,13 @@ export const statementCheckMethods = {
 				continue;
 			if (!isAny(lhsTypes[i]) && !isAny(r)) {
 				this._skipIfaceMark = true;
-				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
+				this.assertAssignable(
+					lhsTypes[i],
+					r,
+					stmt.lhs[i],
+					"assignment",
+					stmt.rhs.length === lhsTypes.length ? stmt.rhs[i] : undefined,
+				);
 				this._skipIfaceMark = false;
 			}
 		}

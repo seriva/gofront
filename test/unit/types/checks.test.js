@@ -8,6 +8,7 @@ import {
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
+	compileWasm,
 	runJs,
 	section,
 	summarize,
@@ -1410,6 +1411,77 @@ func f(n int) int {
 }
 func main() { _ = f(1) }`);
 	assertErrorContains(errors, "missing return at end of function 'f'");
+});
+
+test("a float64 variable is not assignable to int", () => {
+	for (const target of ["js", "both"]) {
+		assertErrorContains(
+			compile(
+				`package main
+func main() {
+	var y float64 = 1
+	var i int = y
+	_ = i
+}`,
+				{ target },
+			).errors,
+			"cannot use y (variable of type float64) as int value",
+		);
+	}
+	assertErrorContains(
+		compileWasm(`package main
+func main() {
+	var y float64 = 1
+	var i int = y
+	_ = i
+}`).errors,
+		"cannot use y (variable of type float64) as int value",
+	);
+});
+
+test("a float64 expression is not assignable to int in assignments, calls and returns", () => {
+	assertErrorContains(
+		compile(`package main
+func main() {
+	y := 1.5
+	i := 0
+	i = y * 2
+	_ = i
+}`).errors,
+		"cannot use y * 2 (value of type float64) as int value in assignment",
+	);
+	assertErrorContains(
+		compile(`package main
+func f(n int) {}
+func main() {
+	y := 1.5
+	f(y)
+}`).errors,
+		"cannot use y (variable of type float64) as int value in argument",
+	);
+	assertErrorContains(
+		compile(`package main
+func f(y float64) int { return y }
+func main() { _ = f(1) }`).errors,
+		"cannot use y (variable of type float64) as int value in return statement",
+	);
+});
+
+test("untyped constants and explicit conversions still reach int", async () => {
+	await assertProgramOutput(
+		`package main
+import "fmt"
+const c = 2.0
+func main() {
+	var i int = 1.0
+	var j int = c
+	y := 2.7
+	k := int(y)
+	var f float64 = 3
+	fmt.Println(i, j, k, f)
+}`,
+		"1 2 2 3\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
