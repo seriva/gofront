@@ -30,6 +30,7 @@ Fix the 170 entries of `plans/follow-ups.md` that still reproduce on `ea3231a` (
 | **Excluded: runtime / platform** | No new runtime model | Goroutines, reflection, raw addresses (`%p`/`%d` of pointers print stable per-object ids, not machine addresses); S08 `var x any = []int{3, 1}; sort.Slice(x, func(i, j int) bool { return false })` → `Cannot infer type arguments for generic function 'Slice$$sort'` | No memory addresses or `reflect.Swapper` exist in JS or WasmGC; `sort.Slice*` is generic over `S ~[]E` (`stdlib/sort/sort.go`) |
 | **Excluded: deferred** | Map keys the WASM facade cannot carry | L57 exported `func Count(m map[any]int) int` from a wasm package → `map with unsupported key type 'any' is not yet supported across the wasm boundary (planned)`; L58-wasm exported `Keys(map[P]int)` (struct key) → same diagnostic (unexported `keys` gives `a` = Go) | Already a clear compile-time diagnostic; carrying `any`/struct keys across the boundary needs a facade key-encoding design of its own. |
 | **Excluded: deferred** | Missing `json.Decoder.Token` | L166b `d.Token()` → `No field 'Token' on json.Decoder`, Go `[ <nil>` | New API surface (token stream state machine on both backends), not a defect; candidate for a later JSON feature plan. |
+| **Excluded: deferred** | Narrow-element slice identity on WASM | L154 `func f(v any) string { switch v.(type) { case []uint8: return "u8"; case []int32: return "i32" }; return "other" }; f([]int32{1})` on wasm → `u8`, Go `i32` | `[]uint8`, `[]int32`, `[]bool` and `[]int16` share one WasmGC slice type; splitting them needs a type-descriptor design change of its own. |
 
 ---
 
@@ -413,7 +414,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/interfaces.test.js`
   - Test: L11 → `nil`; L53 `case error:` on `any` → `d`.
   - Done when: both compile, validate and match Go.
-- [ ] Task 13.2: Type identity of defined and generic types
+- [x] Task 13.2: Type identity of defined and generic types (L154 slice identity deferred, see Excluded: deferred)
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/monomorph.js`, `test/unit/wasm/interfaces.test.js`
   - Test: L44a/L98 `type L string` cases → `L string`; L44b (wasm) → `T str`; L44c `conv[Small](130)` → `-126`; L154 (wasm) → `i32`; L104a `a.(iter.Seq[int])` → `true`.
   - Done when: five repros match Go on wasm.
