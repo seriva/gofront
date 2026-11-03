@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
@@ -460,6 +461,49 @@ func main() {
 	// Actually with current impl, unary minus on complex object won't work trivially
 	// Let's handle via the unary check allowing complex
 	assertEqual(runJs(js), "-3 -4");
+});
+
+section("Complex: untyped constants in complex context");
+
+test("untyped constants convert to complex128 on return and assignment", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f() complex128 { return 1 }
+
+func main() {
+	fmt.Println(f())
+	var c complex128 = 5
+	c = 7
+	fmt.Println(c, c == 7, c*2)
+	c += 1
+	fmt.Println(c, c != 8, 2*c)
+}
+`,
+		"(1+0i)\n(7+0i) true (14+0i)\n(8+0i) false (16+0i)\n",
+	);
+});
+
+test("untyped constants convert in arguments, literals and variable declarations", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g(z complex128) complex128 { return z * 2 }
+
+func main() {
+	fmt.Println(g(3))
+	fmt.Println([]complex128{1, 2})
+	var d complex128 = 1.5
+	e := complex128(2)
+	fmt.Println(d, e)
+}
+`,
+		"(6+0i)\n[(1+0i) (2+0i)]\n(1.5+0i) (2+0i)\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

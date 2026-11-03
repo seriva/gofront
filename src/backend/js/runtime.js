@@ -410,7 +410,11 @@ export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
 // message instead of a JS TypeError.
 // 64-bit shifts: count is converted to BigInt; negative count panics;
 // wraps with BigInt.asIntN / BigInt.asUintN.
-export const HELPER_SHIFT = `var __shl64 = __shl64 || function(x, n, u) {
+export const HELPER_SHIFT = `var __shc = __shc || function(n) {
+  if (n < 0) throw new Error("runtime error: negative shift amount");
+  return n;
+};
+var __shl64 = __shl64 || function(x, n, u) {
   var b = BigInt(n);
   if (b < 0n) throw new Error("runtime error: negative shift amount");
   if (typeof x === "bigint") {
@@ -486,6 +490,60 @@ var __ti = __ti || function(f, k, id, is, u, b, fb) {
   const g = () => f();
   g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
   return g;
+};
+var __tar = __tar || function(f, op, a, b) {
+  const k = f?.k;
+  const dz = () => { throw new Error("runtime error: integer divide by zero"); };
+  const ns = () => { throw new Error("runtime error: negative shift amount"); };
+  if (typeof a === "bigint") {
+    const sh = op === "<<" || op === ">>";
+    if (sh) { b = Number(b); if (b < 0) ns(); }
+    else if (typeof b !== "bigint") b = BigInt(b);
+    const w = k === "uint64" ? (v) => BigInt.asUintN(64, v) : (v) => BigInt.asIntN(64, v);
+    switch (op) {
+      case "+": return w(a + b);
+      case "-": return w(a - b);
+      case "*": return w(a * b);
+      case "/": return b === 0n ? dz() : w(a / b);
+      case "%": return b === 0n ? dz() : w(a % b);
+      case "&": return w(a & b);
+      case "|": return w(a | b);
+      case "^": return w(a ^ b);
+      case "&^": return w(a & ~b);
+      case "<<": return b >= 64 ? 0n : w(a << BigInt(b));
+      default: return b >= 64 ? (k === "uint64" || a >= 0n ? 0n : -1n) : w(a >> BigInt(b));
+    }
+  }
+  let bits = 0, signed = true;
+  switch (k) {
+    case "int8": bits = 8; break;
+    case "int16": bits = 16; break;
+    case "int32": case "rune": bits = 32; break;
+    case "uint8": case "byte": bits = 8; signed = false; break;
+    case "uint16": bits = 16; signed = false; break;
+    case "uint32": bits = 32; signed = false; break;
+  }
+  const w = bits === 0 ? (v) => v
+    : bits === 32 ? (signed ? (v) => v | 0 : (v) => v >>> 0)
+    : signed ? (v) => (v << (32 - bits)) >> (32 - bits)
+    : (v) => v & ((1 << bits) - 1);
+  const int = bits !== 0 || k === "int" || k === "uint" || k === "uintptr";
+  switch (op) {
+    case "+": return k === "float32" ? Math.fround(a + b) : w(a + b);
+    case "-": return k === "float32" ? Math.fround(a - b) : w(a - b);
+    case "*": return k === "float32" ? Math.fround(a * b) : bits === 0 ? a * b : w(Math.imul(a, b));
+    case "/": return int ? (b === 0 ? dz() : w(Math.trunc(a / b))) : k === "float32" ? Math.fround(a / b) : a / b;
+    case "%": return int && b === 0 ? dz() : w(a % b);
+    case "&": return bits === 0 ? a & b : w(a & b);
+    case "|": return bits === 0 ? a | b : w(a | b);
+    case "^": return bits === 0 ? a ^ b : w(a ^ b);
+    case "&^": return bits === 0 ? a & ~b : w(a & ~b);
+  }
+  b = Number(b);
+  if (b < 0) ns();
+  if (bits === 0) return op === "<<" ? a << b : a >> b;
+  if (b >= bits) return op === ">>" && signed && a < 0 ? -1 : 0;
+  return op === "<<" ? w(a << b) : signed ? a >> b : a >>> b;
 };
 var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;

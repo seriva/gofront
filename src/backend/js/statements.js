@@ -328,7 +328,7 @@ export const statementGenMethods = {
 				}
 				const is64 = is64BitInt(stmt.expr._type);
 				if (
-					(this.strict || is64) &&
+					(this.strict || is64 || this._isFloat32(stmt.expr._type)) &&
 					this._genStrictCompound(
 						stmt.expr,
 						stmt.op === "++" ? "+" : "-",
@@ -829,7 +829,7 @@ export const statementGenMethods = {
 				rhsVal = `${rhsVal}n`;
 			}
 			if (
-				(this.strict || is64) &&
+				(this.strict || is64 || this._isFloat32(stmt.lhs[0]._type)) &&
 				stmt.op !== "=" &&
 				this._genStrictCompound(
 					stmt.lhs[0],
@@ -837,6 +837,7 @@ export const statementGenMethods = {
 					rhsVal,
 					null,
 					active[0].l,
+					stmt.rhs[0]?._type,
 				)
 			) {
 				return;

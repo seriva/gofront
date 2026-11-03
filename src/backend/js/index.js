@@ -22,6 +22,7 @@ import {
 	hasDirectRecover,
 	isReferenceType,
 	markInBoundsIndexes,
+	markRedundantNilChecks,
 	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
@@ -314,7 +315,10 @@ export class CodeGen {
 		// `lower()`, the JS path here.
 		normalizeDefers(program);
 		// Strict mode: index checks the loop shape proves unnecessary are elided.
-		if (this.strict) markInBoundsIndexes(program);
+		if (this.strict) {
+			markInBoundsIndexes(program);
+			markRedundantNilChecks(program, (d) => comparesToNil(d.body, d.recvName));
+		}
 		if (program._filename) this._srcFileNames = [program._filename];
 		// Ensure _pkgName is set on all decls (generateAll sets it for
 		// multi-file; for single-file compiles we derive it from the AST).
@@ -1282,6 +1286,7 @@ export class CodeGen {
 			if (spec.type?.name === "complex128" || spec.type?.name === "complex64") {
 				if (
 					!isComplex(v._type) &&
+					!v._asComplex &&
 					(isNumeric(v._type) || v._type?.kind === "untyped")
 				) {
 					return `{ re: ${js}, im: 0 }`;
