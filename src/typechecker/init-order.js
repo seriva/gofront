@@ -349,6 +349,21 @@ function orderConsts(constEntries) {
 	return { consts, cycles };
 }
 
+// A literal initialiser (or none: the zero value) reads nothing and has no
+// effect, and gc initialises it statically, so a function that runs during
+// another variable's initialiser sees it set even when it is declared later
+// (an interface method call adds no dependency in the spec).
+const isStaticValue = (v) =>
+	v?.kind === "BasicLit" ||
+	(v?.kind === "UnaryExpr" &&
+		["-", "+"].includes(v.op) &&
+		isStaticValue(v.operand));
+
+function staticInitsFirst(vars) {
+	const isStatic = (e) => (e.spec.value ?? []).every(isStaticValue);
+	return [...vars.filter(isStatic), ...vars.filter((e) => !isStatic(e))];
+}
+
 /**
  * @param {object[]} programs parsed (and, for method resolution, checked) files
  * @returns {{ consts: object[], vars: object[], cycles: object[] }}
@@ -358,7 +373,10 @@ function orderConsts(constEntries) {
 export function orderPackageInits(programs) {
 	const decls = collectDecls(programs);
 	const depsOf = buildVarDeps(decls);
-	const { vars, cycles } = orderVars(decls.varEntries, depsOf);
+	const ordered = orderVars(decls.varEntries, depsOf);
+	const { cycles } = ordered;
+	const vars =
+		cycles.length === 0 ? staticInitsFirst(ordered.vars) : ordered.vars;
 	const constOrder = orderConsts(decls.constEntries);
 	return {
 		consts: constOrder.consts,

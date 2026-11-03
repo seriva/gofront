@@ -295,3 +295,26 @@ func main() {
 		"1 [5 2]\n1 [10 2 3]\n[2 10 3]\n4 map[1:7]\n{3 4} {3 4}\n",
 	);
 });
+
+test("tuple assignment evaluates the index inside a field target first", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ A int }
+
+func main() {
+	ps := []P{{0}, {0}}
+	n := 0
+	n, ps[n].A = 1, 50
+	fmt.Println(ps, n)
+	var arr [2]P
+	k := 0
+	k, arr[k].A = 1, 7
+	fmt.Println(arr, k)
+}
+`,
+		"[{50} {0}] 1\n[{7} {0}] 1\n",
+	);
+});

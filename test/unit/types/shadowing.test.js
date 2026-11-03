@@ -7,6 +7,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	compileHybridProject,
@@ -269,4 +270,115 @@ test("interfaces, method-less named types and DOM names are allowed", () => {
 	);
 	assertEqual(errors.map((e) => e.message).join("\n"), "");
 	assert(js.includes("class Element"), "Element struct emitted");
+});
+
+section("Declarations that read the name they shadow");
+
+test("comma-ok map lookup, switch init, for init and case body read the outer name", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func f(x int) int { return x * 3 }
+
+func main() {
+	m := map[int]int{4: 7}
+	k := 4
+	{
+		k, ok := m[k]
+		fmt.Println(k, ok)
+	}
+	x := 1
+	switch x := x + 1; x {
+	case 1:
+		fmt.Println("one")
+	case 2:
+		fmt.Println("two")
+	}
+	n := 2
+	for n := n; n < 4; n++ {
+		fmt.Println("n", n)
+	}
+	switch y := 5; y {
+	case 5:
+		x := f(x)
+		fmt.Println(x)
+	}
+}
+`,
+		"7 true\ntwo\nn 2\nn 3\n3\n",
+	);
+});
+
+section("Comma-ok := that reuses a name");
+
+test("type assertion comma-ok with a reused name", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type L struct{}
+type N int
+type T struct{}
+
+func main() {
+	var a, b any = 1, N(0)
+	_, ok2 := a.(L)
+	n, ok2 := b.(N)
+	fmt.Println(n, ok2)
+	var x any = 1
+	var y any = &T{}
+	p, ok := x.(int)
+	q, ok := y.(*T)
+	fmt.Println(p, ok, q != nil)
+	var z any = "s"
+	r, ok := z.(int)
+	fmt.Println(r, ok)
+}
+`,
+		"0 true\n1 true true\n0 false\n",
+	);
+});
+
+test("map comma-ok with a reused ok", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]int{"a": 1}
+	_, ok := m["z"]
+	v, ok := m["a"]
+	fmt.Println(v, ok)
+}
+`,
+		"1 true\n",
+	);
+});
+
+test("a labeled for whose init reads the outer name still continues the label", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 1
+outer:
+	for n := n + 1; n < 5; n++ {
+		for j := 0; j < 2; j++ {
+			if j == 1 {
+				continue outer
+			}
+			fmt.Println(n, j)
+		}
+	}
+	fmt.Println(n)
+}
+`,
+		"2 0\n3 0\n4 0\n1\n",
+	);
 });

@@ -339,3 +339,24 @@ test("a declaration's initialiser still sees the outer variable", () => {
 	);
 	assertErrorContains(errors, "initialization cycle: x refers to itself");
 });
+
+section("Init order — statically initialised variables");
+
+test("a call through an interface reads a later variable with a literal initialiser", async () => {
+	await assertProgramOutput(
+		prog(
+			`type G interface{ Get() int }
+
+type impl struct{}
+
+func (impl) Get() int { return later + zero }
+
+var iface G = impl{}
+var viaIface = iface.Get()
+var later = 5
+var zero int`,
+			`fmt.Println(viaIface, later)`,
+		),
+		"5 5\n",
+	);
+});
