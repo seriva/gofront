@@ -1067,9 +1067,6 @@ export class BuiltinsEmitter {
 			case "math":
 				this.emitMathCall(func.field, args);
 				return true;
-			case "strconv":
-				this.emitStrconvCall(func.field, args);
-				return true;
 			case "fmt":
 				if (func.field.startsWith("Fprint")) {
 					this.emitFprintCall(func.field, call, targetWasmType);

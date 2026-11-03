@@ -259,10 +259,6 @@ const NS_CONSTANTS = {
 		MaxUint: "18446744073709551615",
 		MaxUint64: "18446744073709551615n",
 	},
-	strconv: {
-		ErrSyntax: "__strconv_err_syntax",
-		ErrRange: "__strconv_err_range",
-	},
 	rand: {
 		Reader: "__crypto_rand_reader",
 	},
@@ -1090,9 +1086,7 @@ export const expressionGenMethods = {
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) {
-				if (expr.expr.name === "strconv") {
-					this.useHelper("strconvError");
-				} else if (expr.expr.name === "rand" && expr.field === "Reader") {
+				if (expr.expr.name === "rand" && expr.field === "Reader") {
 					this.useHelper("cryptoRand");
 				} else if (expr.expr.name === "os") {
 					this.useHelper("os");

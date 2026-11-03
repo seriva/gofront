@@ -13,7 +13,6 @@ import { osMethods } from "./os.js";
 import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
-import { strconvMethods } from "./strconv.js";
 import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
 import { unicodeMethods } from "./unicode.js";
@@ -24,7 +23,6 @@ import { unicodeMethods } from "./unicode.js";
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
-	strconv: "_genStrconv",
 	math: "_genMath",
 	unicode: "_genUnicode",
 	os: "_genOs",
@@ -87,7 +85,6 @@ export const stdlibGenMethods = {
 	...regexpMethods,
 	...sharedMethods,
 	...simdMethods,
-	...strconvMethods,
 	...timeMethods,
 	...unicodeMethods,
 	...testingMethods,

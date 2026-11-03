@@ -46,6 +46,17 @@ GoFront supports standard library packages that compile to self-contained JavaSc
 | **Not supported: reflection** | Targeted diagnostic on `import` in every target | `text/template`, `html/template`, `encoding/xml`, `encoding/gob`, `flag` |
 | **Not supported: large packages** | Targeted diagnostic in every target: on the `import`, on use for the `unicode` tables, and on the directive for `//go:embed` | `math/big`, `compress/*`, `archive/*`, `image/*`, `crypto/{aes,cipher,rsa,ecdsa,ed25519,x509,tls,elliptic}`, `encoding/{asn1,pem,ascii85}`, `text/{tabwriter,scanner}`, `go/*`, `debug/*`, `hash/{crc64,maphash}`, script and property tables in `unicode`, `//go:embed` |
 
+### Standard library behaviour
+
+Most packages (`slices`, `sort`, `maps`, `errors`, `io`, `strings`, `bytes`, `strconv`, `time`, `math/bits`, `math/rand`, `sync`, `encoding/hex`, `encoding/base64`, `encoding/binary`, `crypto/sha256` and the others under [`stdlib/`](../stdlib/)) are written in Go from the real packages' algorithms, so they follow Go's signatures and results on `js`, `wasm` and `both` packages alike:
+
+- **Sorting:** `sort.Slice`, `slices.SortFunc` and friends break ties in the same order as Go, and `NaN` values sort before every other float. Use `sort.SliceStable` or `slices.SortStableFunc` when equal elements must keep their input order.
+- **Generic helpers on named types:** `slices` and `maps` functions accept named slice and map types such as `type IDs []int`, and return the same named type.
+- **Errors:** `strconv` parse failures are `*strconv.NumError` values wrapping `strconv.ErrSyntax` or `strconv.ErrRange`, so use `errors.Is` or `errors.As` instead of comparing text. `base64` reports Go's error positions, and `time` formats and parses every layout.
+- **Numbers:** `strconv.FormatFloat` and `ParseFloat` round exactly as Go does for bit sizes 32 and 64, including `-0`, hexadecimal floats and `1e39` as `float32`. `strconv.Atoi` and `strconv.Itoa` use `int`, which is exact up to 2⁵³ in JavaScript output; `ParseInt` and `ParseUint` return exact `int64` and `uint64`.
+- **Host fast paths:** Searching, sorting primitive slices, trimming and case conversion in `strings`, `bytes`, `slices` and `sort`, and the digit conversion in `strconv.FormatFloat` and `ParseFloat`, call the host (`indexOf`, `toExponential`, `Number`) where it gives Go's result. The Go body runs for every other case. Pass `--no-natives` when compiling an input (`gofront <input> -o out.js --no-natives`) to run the Go bodies everywhere, for example to compare results.
+- **Still provided by the compiler:** `errors.As` and `strings.Builder` are the only members of the Go-source packages that the backends implement directly; `fmt`, `encoding/json`, `regexp`, `os`, `testing` and `math` also keep compiler support.
+
 ### String semantics (both backends)
 
 GoFront strings are JavaScript strings on both backends (`externref` in WebAssembly; string length, indexing, and range operate over UTF-16 code units):

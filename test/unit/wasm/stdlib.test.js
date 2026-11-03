@@ -2065,29 +2065,6 @@ func Main() int {
 	);
 });
 
-const valueSrc = (imp, body) => `
-package main
-
-import "${imp}"
-
-func Main() int {
-${body}
-	return 0
-}
-`;
-
-test("stdlib functions taking a callback or returning several values name themselves in the error", () => {
-	const cases = [
-		[
-			"strconv",
-			'f := strconv.Atoi\n\t_, _ = f("42")',
-			"strconv.Atoi cannot be used as a value",
-		],
-	];
-	for (const [imp, body, msg] of cases)
-		assertThrows(() => compileWasm(valueSrc(imp, body)), msg);
-});
-
 section("WASM stdlib — native call sites");
 
 // Tests run concurrently, so each registers its own native name.

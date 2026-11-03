@@ -573,10 +573,6 @@ export class ExprsEmitter {
 			this.emitUtf8Const(expr.field, targetWasmType);
 			return true;
 		}
-		if (this._isStrconvConst(expr)) {
-			this.emitStrconvConst(expr.field, targetWasmType);
-			return true;
-		}
 		if (this._isOsConst?.(expr)) {
 			this.emitOsConst(expr.field, targetWasmType);
 			return true;

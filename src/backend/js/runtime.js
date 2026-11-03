@@ -908,9 +908,6 @@ export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return e;
 };`;
 
-export const HELPER_STRCONV_ERROR = `var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
-var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
-
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 
 export const HELPER_OS = `var __os_buf = "";
@@ -970,98 +967,6 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
     cur = unwrapped;
   }
   return false;
-};`;
-
-// Go-semantics strconv parsers shared by the JS backend and the wasm runtime
-// imports (boundary.js), so both targets agree.  Each parser returns
-// [value, errorMessage | null]; integer values are BigInt (the wasm side
-// needs i64, the JS side converts with Number()).
-export const HELPER_STRCONV = `var __strconv_atoi = __strconv_atoi || function(s) {
-  if (!/^[+-]?[0-9]+$/.test(s)) return [0n, 'strconv.Atoi: parsing "' + s + '": invalid syntax'];
-  const v = BigInt(s);
-  if (v > 9223372036854775807n || v < -9223372036854775808n) {
-    return [v > 0n ? 9223372036854775807n : -9223372036854775808n, 'strconv.Atoi: parsing "' + s + '": value out of range'];
-  }
-  return [v, null];
-};
-var __strconv_parse_int = __strconv_parse_int || function(s, base, bits) {
-  let str = s, neg = false;
-  if (str[0] === "-" || str[0] === "+") { neg = str[0] === "-"; str = str.slice(1); }
-  if (base === 0) {
-    if (/^0[xX]/.test(str)) { base = 16; str = str.slice(2); }
-    else if (/^0[bB]/.test(str)) { base = 2; str = str.slice(2); }
-    else if (/^0[oO]/.test(str)) { base = 8; str = str.slice(2); }
-    else if (/^0[0-9]/.test(str)) { base = 8; str = str.slice(1); }
-    else base = 10;
-    str = str.replaceAll("_", "");
-  }
-  if (base < 2 || base > 36) return [0n, 'strconv.ParseInt: parsing "' + s + '": invalid base ' + base];
-  const digits = "0123456789abcdefghijklmnopqrstuvwxyz".slice(0, base);
-  if (str === "" || [...str.toLowerCase()].some((c) => !digits.includes(c))) {
-    return [0n, 'strconv.ParseInt: parsing "' + s + '": invalid syntax'];
-  }
-  let v = 0n; const B = BigInt(base);
-  for (const c of str.toLowerCase()) v = v * B + BigInt(digits.indexOf(c));
-  if (neg) v = -v;
-  const w = bits === 0 ? 64 : bits;
-  const max = (1n << BigInt(w - 1)) - 1n, min = -(1n << BigInt(w - 1));
-  if (v > max || v < min) return [v > max ? max : min, 'strconv.ParseInt: parsing "' + s + '": value out of range'];
-  return [v, null];
-};
-var __strconv_parse_uint = __strconv_parse_uint || function(s, base, bits) {
-  let str = s;
-  if (str[0] === "+") { str = str.slice(1); }
-  if (str[0] === "-") {
-    return [0n, 'strconv.ParseUint: parsing "' + s + '": invalid syntax'];
-  }
-  if (base === 0) {
-    if (/^0[xX]/.test(str)) { base = 16; str = str.slice(2); }
-    else if (/^0[bB]/.test(str)) { base = 2; str = str.slice(2); }
-    else if (/^0[oO]/.test(str)) { base = 8; str = str.slice(2); }
-    else if (/^0[0-9]/.test(str)) { base = 8; str = str.slice(1); }
-    else base = 10;
-    str = str.replaceAll("_", "");
-  }
-  if (base < 2 || base > 36) return [0n, 'strconv.ParseUint: parsing "' + s + '": invalid base ' + base];
-  const digits = "0123456789abcdefghijklmnopqrstuvwxyz".slice(0, base);
-  if (str === "" || [...str.toLowerCase()].some((c) => !digits.includes(c))) {
-    return [0n, 'strconv.ParseUint: parsing "' + s + '": invalid syntax'];
-  }
-  let v = 0n; const B = BigInt(base);
-  for (const c of str.toLowerCase()) v = v * B + BigInt(digits.indexOf(c));
-  const w = bits === 0 ? 64 : bits;
-  const max = w >= 64 ? 18446744073709551615n : (1n << BigInt(w)) - 1n;
-  if (v > max) return [max, 'strconv.ParseUint: parsing "' + s + '": value out of range'];
-  return [v, null];
-};
-var __strconv_parse_float = __strconv_parse_float || function(s) {
-  const str = s.replaceAll("_", "");
-  if (/^[+-]?(inf|infinity)$/i.test(str)) return [str[0] === "-" ? -Infinity : Infinity, null];
-  if (/^[+-]?nan$/i.test(str)) return [NaN, null];
-  if (str === "" || !/^[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?$|^[+-]?0[xX][0-9a-fA-F]+$/.test(str)) {
-    return [0, 'strconv.ParseFloat: parsing "' + s + '": invalid syntax'];
-  }
-  return [Number(str), null];
-};
-var __strconv_parse_bool = __strconv_parse_bool || function(s) {
-  if (["1", "t", "T", "TRUE", "true", "True"].includes(s)) return [true, null];
-  if (["0", "f", "F", "FALSE", "false", "False"].includes(s)) return [false, null];
-  return [false, 'strconv.ParseBool: parsing "' + s + '": invalid syntax'];
-};
-var __strconv_format_float = __strconv_format_float || function(f, fmtc, prec) {
-  const c = String.fromCharCode(fmtc);
-  if (!Number.isFinite(f)) return f !== f ? "NaN" : (f > 0 ? "+Inf" : "-Inf");
-  if (c === "f") return prec < 0 ? String(f) : f.toFixed(prec);
-  if (c === "e" || c === "E") {
-    const r = prec < 0 ? f.toExponential() : f.toExponential(prec);
-    const o = r.replace(/e([+-])(\\d)$/, "e$10$2");
-    return c === "E" ? o.toUpperCase() : o;
-  }
-  if (c === "g" || c === "G") {
-    const r = prec < 0 ? String(f) : f.toPrecision(prec);
-    return c === "G" ? r.toUpperCase() : r;
-  }
-  return String(f);
 };`;
 
 export const HELPER_TIMER = `var __timeAfterFunc = __timeAfterFunc || function(d, f) {

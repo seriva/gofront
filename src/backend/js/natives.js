@@ -261,6 +261,18 @@ JS_NATIVES.set(
 	strFn("s, p", "s.endsWith(p) ? s.slice(0, s.length - p.length) : s"),
 );
 
+// ── strconv ───────────────────────────────────────────────────
+//
+// The host number printer gives the shortest digits that read back as the
+// float64 and `Number` converts a decimal with correct rounding; both agree
+// with the Go bodies.
+
+JS_NATIVES.set("strconv.shortest", (a) => `${a[0]}.toExponential()`);
+JS_NATIVES.set(
+	"strconv.parseDecimal",
+	(a) => `Number(${a[0]}.replaceAll("_", ""))`,
+);
+
 // ── math/bits ─────────────────────────────────────────────────
 //
 // Only the 8, 16 and 32 bit forms: their operands are Numbers that

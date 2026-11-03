@@ -133,65 +133,6 @@ export function setupCoreGlobals(globals, types) {
 		members: { Builder: ANY },
 	});
 
-	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
-
-	globals.define("strconv", {
-		kind: "namespace",
-		name: "strconv",
-		members: {
-			Itoa: { kind: "func", params: [INT], returns: [STRING] },
-			Atoi: { kind: "func", params: [STRING], returns: [INT, ERROR] },
-			FormatFloat: {
-				kind: "func",
-				params: [FLOAT64, INT, INT, INT],
-				returns: [STRING],
-			},
-			FormatBool: { kind: "func", params: [BOOL], returns: [STRING] },
-			FormatInt: { kind: "func", params: [INT64, INT], returns: [STRING] },
-			FormatUint: { kind: "func", params: [UINT64, INT], returns: [STRING] },
-			ParseFloat: {
-				kind: "func",
-				params: [STRING, INT],
-				returns: [FLOAT64, ERROR],
-			},
-			ParseInt: {
-				kind: "func",
-				params: [STRING, INT, INT],
-				returns: [INT64, ERROR],
-			},
-			ParseUint: {
-				kind: "func",
-				params: [STRING, INT, INT],
-				returns: [UINT64, ERROR],
-			},
-			ParseBool: { kind: "func", params: [STRING], returns: [BOOL, ERROR] },
-			Quote: { kind: "func", params: [STRING], returns: [STRING] },
-			Unquote: { kind: "func", params: [STRING], returns: [STRING, ERROR] },
-			AppendInt: {
-				kind: "func",
-				params: [BYTE_SLICE, INT64, INT],
-				returns: [BYTE_SLICE],
-			},
-			AppendUint: {
-				kind: "func",
-				params: [BYTE_SLICE, UINT64, INT],
-				returns: [BYTE_SLICE],
-			},
-			AppendFloat: {
-				kind: "func",
-				params: [BYTE_SLICE, FLOAT64, INT, INT, INT],
-				returns: [BYTE_SLICE],
-			},
-			AppendBool: {
-				kind: "func",
-				params: [BYTE_SLICE, BOOL],
-				returns: [BYTE_SLICE],
-			},
-			ErrSyntax: ERROR,
-			ErrRange: ERROR,
-		},
-	});
-
 	globals.define("math", {
 		kind: "namespace",
 		name: "math",

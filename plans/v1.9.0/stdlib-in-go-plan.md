@@ -522,28 +522,28 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 12: `strconv` and user docs
 
-- [ ] **Task 12.1 — `strconv` integers, bools and errors in Go**
+- [x] **Task 12.1 — `strconv` integers, bools and errors in Go**
   - Files: `stdlib/strconv/strconv.go`
   - Removes: integer/bool members of `src/backend/js/stdlib/strconv.js` and `emitStrconvCall`, typings
   - Do: `Itoa`, `Atoi`, `ParseInt` (returns `int64`), `ParseUint`, `ParseBool`, `FormatInt`, `FormatUint`, `FormatBool`, `Append*` forms, `NumError`, `ErrRange`, `ErrSyntax`, `IntSize`.
   - Test: `test/unit/stdlib/strconv.test.js` — error messages and `errors.Is(err, strconv.ErrRange)`; bases 2–36; `int64` limits.
   - Done when: cases pass four ways and `ParseInt` returns `int64`.
 
-- [ ] **Task 12.2 — `strconv` quoting in Go**
+- [x] **Task 12.2 — `strconv` quoting in Go**
   - Files: `stdlib/strconv/quote.go`
   - Removes: quote members of the shim and emitter, typings
   - Do: `Quote`, `QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII` and `Append*` forms, `Unquote`, `UnquoteChar`, `QuotedPrefix`, `CanBackquote`, `IsPrint`, `IsGraphic`.
   - Test: `strconv.test.js` — quote/unquote round trips and invalid input.
   - Done when: cases pass four ways.
 
-- [ ] **Task 12.3 — `strconv` floats as natives over a Go body**
-  - Files: `stdlib/strconv/float.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`FormatFloat`, `ParseFloat`, `AppendFloat`)
+- [x] **Task 12.3 — `strconv` floats as natives over a Go body**
+  - Files: `stdlib/strconv/float.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (built as the two internal natives `strconv.shortest` and `strconv.parseDecimal` that `FormatFloat`, `AppendFloat` and `ParseFloat` call, so every call shape gets the host path; `NATIVES` in `src/typechecker/types.js` lists them)
   - Removes: the rest of `src/backend/js/stdlib/strconv.js` and `emitStrconvCall`
   - Do: the Go body handles sign, `-0`, special values, `bitSize` 32 range errors and syntax; the shortest-representation digits come from the native (host number printer).
   - Test: `strconv.test.js` — round trips, `'g'`/`'e'`/`'f'`, bit sizes 32 and 64; `FormatFloat(-0, 'f', -1, 64)` → `-0`; `ParseFloat("1e39", 32)` → `+Inf` with the range error; `fmt.Println(strconv.ParseFloat(…))` validates on WASM.
   - Done when: cases pass four ways and `fmt` cases are unchanged.
 
-- [ ] **Task 12.4 — User documentation**
+- [x] **Task 12.4 — User documentation**
   - Files: `docs/go-compatibility.md`, `docs/language-support.md` (package tables), `docs/hybrid-wasm.md`
   - Do: document the sort tie order and `NaN` ordering, generic helpers with named slice and map types, the behaviour fixes, `--no-natives`, and `errors.As`/`strings.Builder` as the remaining emitter members.
   - Test: `test/unit/compiler/plan-paths.test.js` and the `language-support.md` fixture rows pass.
