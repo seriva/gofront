@@ -3,6 +3,7 @@
 // maps, slices, strings, strconv, fmt, errors, sort, unicode/utf8,
 // testing) plus the runtime helper bodies they rely on.
 
+import { typeStr } from "../../../typechecker/types.js";
 import { wrappedErrorfIndices } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
@@ -554,7 +555,9 @@ export class StdlibCoreEmitter {
 	// format: strings pass through, scalars are boxed by their dynamic type,
 	// anything else (and nil) becomes a null externref.
 	_emitAnyToExternref() {
-		const helper = this.mod.resolveFuncIndex("__any_fmt");
+		const helper = this.mod.resolveFuncIndex(
+			this._fmtMapKey ? "__any_fmt_key" : "__any_fmt",
+		);
 		if (helper !== null && helper !== undefined) {
 			this.pushInstruction({ op: "call", funcIndex: helper });
 			return;
@@ -1004,7 +1007,9 @@ export class StdlibCoreEmitter {
 			typeIndex: mapInfo.entryTypeIndex,
 			fieldIndex: 0,
 		});
+		this._fmtMapKey = true;
 		this.emitToExternref(keyType, true, nextSeen);
+		this._fmtMapKey = false;
 
 		this.pushInstruction({ op: "local.get", index: entryTmp });
 		this.pushInstruction({
@@ -2990,8 +2995,27 @@ export class StdlibCoreEmitter {
 			this.pushInstruction({ op: "struct.get", typeIndex, fieldIndex: 0 });
 		}
 		this.emitToExternref(goType);
+		if (unbox && this._fmtKeyNamed && this._isPlainNamedBasic(goType)) {
+			const tmp = this.acquireTemp("externref");
+			this.pushInstruction({ op: "local.set", index: tmp });
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtNewStringerIndex(),
+			});
+			this.releaseTemp(tmp, "externref");
+		}
 		this.pushInstruction("return");
 		this.pushInstruction("end");
+	}
+
+	// A named type with a basic underlying type and no String/Error method.
+	_isPlainNamedBasic(goType) {
+		if (goType?.kind !== "named") return false;
+		const u = goType.underlying;
+		return u?.kind === "basic" && !this._fmtMethodOf(goType);
 	}
 
 	// errors.New / fmt.Errorf values print their message.
@@ -3205,17 +3229,28 @@ export class StdlibCoreEmitter {
 				this.pushInstruction("end");
 
 				// Check unhashable types
-				const checkUnhashable = (typeIndex) => {
+				const checkUnhashable = (typeIndex, goType) => {
 					this.pushInstruction({ op: "local.get", index: 0 });
 					this.pushInstruction({ op: "ref.test", typeIndex });
 					this.pushInstruction({ op: "if", blockType: "void" });
-					this.emitPanic("runtime error: hash of unhashable type");
+					this.emitPanic(
+						goType
+							? `runtime error: hash of unhashable type ${typeStr(goType)}`
+							: "runtime error: hash of unhashable type",
+					);
 					this.pushInstruction("end");
 				};
 				for (const sliceInfo of this.mod.sliceTypes.values())
-					checkUnhashable(sliceInfo.typeIndex);
+					checkUnhashable(sliceInfo.typeIndex, {
+						kind: "slice",
+						elem: sliceInfo.elemGoType,
+					});
 				for (const mapInfo of this.mod.mapTypes.values())
-					checkUnhashable(mapInfo.typeIndex);
+					checkUnhashable(mapInfo.typeIndex, {
+						kind: "map",
+						key: mapInfo.keyGoType,
+						value: mapInfo.valGoType,
+					});
 				for (const closureInfo of this.mod.closureTypes.values())
 					checkUnhashable(closureInfo.typeIndex);
 				for (const box of this.mod.ifaceBoxTypes.values()) {
@@ -3323,6 +3358,13 @@ export class StdlibCoreEmitter {
 				return;
 			case "any_fmt":
 				this._emitAnyFmtHelper();
+				return;
+			case "any_fmt_key":
+				// Map keys of interface type: a named string or number stays
+				// distinct from its plain value (see _emitAnyFmtArm).
+				this._fmtKeyNamed = true;
+				this._emitAnyFmtHelper();
+				this._fmtKeyNamed = false;
 				return;
 			case "error_str":
 				this.pushInstruction({ op: "local.get", index: 0 });

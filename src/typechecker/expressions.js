@@ -774,6 +774,17 @@ export const expressionCheckMethods = {
 		return t?.kind === "named" ? t.underlying : t;
 	},
 
+	_markCompositeKey(key, kb, node, srcType) {
+		if (!node || !srcType || isAny(key) || kb?.kind === "interface")
+			return false;
+		// Arrays, anonymous structs and pointers are not JS property names: the
+		// backend encodes them by value (`sk`) or by identity (`pk`).
+		if (kb?.kind === "pointer") node._mapKeyEnc = "pk";
+		else if (kb?.kind === "array" || (key?.kind === "struct" && kb === key))
+			node._mapKeyEnc = "sk";
+		return true;
+	},
+
 	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
 	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
 	// A named basic value is boxed first, exactly as in any interface
@@ -791,8 +802,10 @@ export const expressionCheckMethods = {
 			}
 			return;
 		}
+		if (this._markCompositeKey(key, kb, node, srcType)) return;
 		if (!node || !srcType || (!isAny(key) && kb?.kind !== "interface")) return;
 		node._ifaceKey = true;
+		node._ifaceKeyType = src;
 		this._markIfaceBox(key, this.resolveType(srcType), node);
 		if (node._ifaceBox === "named" || node._ifaceBox === "named_ptr") return;
 		node._ifaceBox = undefined;
