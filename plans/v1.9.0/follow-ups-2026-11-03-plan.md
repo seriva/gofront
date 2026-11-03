@@ -161,7 +161,7 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
   - Files: `src/lexer/tokens.js`, `src/parser/statements.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: L39 `x := 7; x &^= 4` → `3` on all targets; `x &^ 4` unchanged.
   - Done when: repro runs on all targets.
-- [ ] Task 1.3: Parser: generic instances in func-type parameters
+- [x] Task 1.3: Parser: generic instances in func-type parameters
   - Files: `src/parser/types.js`, `src/parser/expressions.js`, `test/unit/parser/generics.test.js`
   - Test: L08 `func call(f func(Stack[int]) int, s Stack[int]) int` → `0`; `Stack[[2]int]{}` stays green.
   - Done when: repro compiles and runs on all targets.
