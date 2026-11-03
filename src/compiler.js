@@ -73,8 +73,9 @@ export function parseCacheSize() {
 // ── Helpers ──────────────────────────────────────────────────
 
 function parseGoFrontFile(filePath) {
+	const key = resolve(filePath);
 	const mtime = statSync(filePath).mtimeMs;
-	const cached = _parseCache.get(filePath);
+	const cached = _parseCache.get(key);
 	if (cached && cached.mtime === mtime) return cached.ast;
 
 	const source = readFileSync(filePath, "utf8");
@@ -90,7 +91,7 @@ function parseGoFrontFile(filePath) {
 	ast._path = resolve(filePath);
 	// compileFiles overwrites `target` with the resolved one; keep the directive.
 	ast._declaredTarget = ast.target;
-	_parseCache.set(filePath, { mtime, ast });
+	_parseCache.set(key, { mtime, ast });
 	return ast;
 }
 

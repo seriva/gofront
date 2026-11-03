@@ -28,20 +28,54 @@ export function mangleCollidingTypes(programs, pkgKey, pkgName, owners) {
 	}
 	if (renamed.size > 0)
 		for (const p of programs)
-			for (const d of p.decls ?? []) renameTypeRefs(d, renamed, new Set());
+			for (const d of p.decls ?? [])
+				renameTypeRefs(d, renamed, new Set(), new Set());
 	return renamed;
 }
 
-function renameTypeRefs(node, renamed, tparams) {
+// `tparams` are type parameters in scope; `values` are names a function
+// declares as parameters or locals, which shadow a same-spelled bare `Ident`.
+function renameTypeRefs(node, renamed, tparams, values) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
-		for (const n of node) renameTypeRefs(n, renamed, tparams);
+		for (const n of node) renameTypeRefs(n, renamed, tparams, values);
 		return;
 	}
 	const tp = withTypeParams(node, tparams);
-	if (isTypeRef(node) && renamed.has(node.name) && !tp.has(node.name))
+	const vals = FUNC_KINDS.has(node.kind) ? withLocals(node, values) : values;
+	if (isTypeRef(node, vals) && renamed.has(node.name) && !tp.has(node.name))
 		node.name = renamed.get(node.name);
-	forEachChild(node, (child) => renameTypeRefs(child, renamed, tp));
+	forEachChild(node, (child) => {
+		if (node.kind === "KeyValueExpr" && child === node.key) return;
+		renameTypeRefs(child, renamed, tp, vals);
+	});
+}
+
+const FUNC_KINDS = new Set(["FuncDecl", "MethodDecl", "FuncLit"]);
+
+// Adds every parameter and local name declared anywhere inside a function.
+function withLocals(fn, values) {
+	const out = new Set(values);
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) return node.forEach(visit);
+		for (const n of declaredNames(node)) out.add(n);
+		forEachChild(node, visit);
+	};
+	visit(fn);
+	return out;
+}
+
+function declaredNames(node) {
+	const names = [];
+	if (node.kind === "DefineStmt")
+		for (const l of node.lhs) if (l.kind === "Ident") names.push(l.name);
+	if (node.kind === "VarDecl" || node.kind === "ConstDecl")
+		for (const d of node.decls ?? []) names.push(...(d.names ?? []));
+	if (node.kind === "TypeSwitchStmt" && node.assign) names.push(node.assign);
+	for (const p of node.params ?? []) if (p.name) names.push(p.name);
+	if (node.recvName) names.push(node.recvName);
+	return names;
 }
 
 function withTypeParams(node, tparams) {
@@ -56,7 +90,8 @@ const TYPE_REF_KINDS = new Set([
 	"Ident",
 ]);
 
-function isTypeRef(node) {
+function isTypeRef(node, values) {
+	if (node.kind === "Ident") return !values.has(node.name);
 	return TYPE_REF_KINDS.has(node.kind);
 }
 
