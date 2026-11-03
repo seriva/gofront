@@ -819,19 +819,23 @@ var __recover = __recover || function(ok) {
 export const HELPER_SPRINTF =
 	HELPER_FMT_UTIL +
 	`
+var __fmtptr = __fmtptr || { m: new WeakMap(), n: 1 };
+var __fmtid = __fmtid || function(o) {
+  let id = __fmtptr.m.get(o);
+  if (!id) {
+    id = __fmtptr.n++;
+    __fmtptr.m.set(o, id);
+  }
+  return id;
+};
 var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
-  const ptrMap = new WeakMap();
   const ptrSet = new WeakSet();
-  let ptrCounter = 1;
-  const getPtr = (o) => {
-    let p = ptrMap.get(o);
-    if (!p) {
-      p = "0x" + (ptrCounter++).toString(16);
-      ptrMap.set(o, p);
-    }
-    return p;
-  };
+  // Pointer and func identity: one id per object for the whole run, so the
+  // same pointer prints the same text in every call (the WASM host tags the
+  // shadow object it builds for a pointer with the id of the Go object).
+  const ptrId = (o) => (o.__pid !== undefined ? o.__pid : __fmtid(o));
+  const getPtr = (o) => "0x" + ptrId(o).toString(16);
   const markPtr = (o) => {
     if (o !== null && typeof o === "object") ptrSet.add(o);
   };
@@ -1054,8 +1058,8 @@ var __sprintf = __sprintf || function(f, ...a) {
       }
       return prefix + parts.join(" ") + "}";
     }
-    // A func value prints as an address; the targets share one fixed text.
-    if (typeof val === "function") return "0x1";
+    // A func value prints as an address id.
+    if (typeof val === "function") return getPtr(val);
     return String(val);
   };
 ` +

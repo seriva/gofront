@@ -156,7 +156,7 @@ Notable members per package:
 - `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand`
 - `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`)
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints Go's bad-verb form as in `js` packages)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints an id for pointers and funcs as in `js` packages)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `IsPrint`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`

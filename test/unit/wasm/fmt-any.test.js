@@ -274,7 +274,7 @@ test("a pointer to a scalar formats with a stable id per target", () => {
 		out(`x := 1
 	y := 2
 	fmt.Println(fmt.Sprintf("%p|%p|%p", &x, &x, &y))`),
-		"%!p(*int=0x1)|%!p(*int=0x1)|%!p(*int=0x2)",
+		"0x1|0x1|0x2",
 	);
 });
 
