@@ -195,7 +195,7 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
   - Files: `src/typechecker/assignability.js`, `test/unit/types/checks.test.js`
   - Test: L20 `var y float64 = 1; var i int = y` → `assertErrorContains(errors, "cannot use y (variable of type float64) as int value")`; untyped constants `var i int = 1.0` still accepted.
   - Done when: repro is a type error on all targets; `npm run check` (examples) and `npm test` stay green.
-- [ ] Task 3.2: Switch case types must match the tag
+- [x] Task 3.2: Switch case types must match the tag
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: L183 `switch name { case 5: }` (`name string`) → `assertErrorContains(errors, "cannot convert 5 (untyped int constant) to type string")`; same for the templ form (`test/unit/compiler/templ.test.js`).
   - Done when: both forms are type errors; no invalid WASM is emitted.
