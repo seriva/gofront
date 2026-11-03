@@ -51,6 +51,20 @@ function _isFmtMethodSig(sig, isPtr) {
 	return ret.length === 1 && ret[0]?.name === "string";
 }
 
+// Whether evaluating the expression may run user code or block (a call or a
+// channel receive).  Underscore-prefixed keys hold checker data, not children.
+function _fmtArgHasEffects(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(_fmtArgHasEffects);
+	if (node.kind === "CallExpr") return true;
+	if (node.kind === "UnaryExpr" && node.op === "<-") return true;
+	for (const key of Object.keys(node)) {
+		if (key.startsWith("_")) continue;
+		if (_fmtArgHasEffects(node[key])) return true;
+	}
+	return false;
+}
+
 function _isUint32(goType) {
 	let t = goType;
 	while (t && (t.kind === "named" || t.kind === "TypeName") && t.underlying) {
@@ -2607,7 +2621,12 @@ export class StdlibCoreEmitter {
 			}
 			// Float operands need their static type (float32, Go's exponent
 			// forms), which only the argument buffer carries.
-			if (args.some((a) => this._fmtOperandNeedsBuffer(a))) {
+			// A later operand with side effects must run before anything prints,
+			// so those calls also take the buffered path.
+			if (
+				args.some((a) => this._fmtOperandNeedsBuffer(a)) ||
+				args.slice(1).some(_fmtArgHasEffects)
+			) {
 				const temps = this._emitArgBuffer(args, true);
 				this.pushInstruction({ op: "i32.const", value: 1 });
 				this._callStdlib("fmt_print");
