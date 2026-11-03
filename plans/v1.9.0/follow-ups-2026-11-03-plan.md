@@ -371,19 +371,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 11: fmt Verbs (Both Backends)
 
-- [ ] Task 11.1: Round-half-even precision and bad-verb float text
+- [x] Task 11.1: Round-half-even precision and bad-verb float text
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L61 `%.0f|%.1f|%.1v` of `2.5, 0.25, 2.5` → `2|0.2|2`; L72a `%d` of `1e-7` → `%!d(float64=1e-07)`; L72b `%d` of `+Inf` → `%!d(float64=+Inf)`.
   - Done when: three repros match Go on all targets.
-- [ ] Task 11.2: Width applies per element of composites
+- [x] Task 11.2: Width applies per element of composites
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L77 `%5v|%-5v` of `[]int{1}` → `[    1]|[1    ]`; maps and structs likewise.
   - Done when: repro matches Go on all targets.
-- [ ] Task 11.3: Nil pointer, interface and map operands
+- [x] Task 11.3: Nil pointer, interface and map operands
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L63 `%d` of nil `*C` → `0`; L64 → `%!s(<nil>)|<nil>|%!d(<nil>)`; L73 `%#v` of nil map → `map[string]int(nil)`.
   - Done when: three repros match Go on all targets.
-- [ ] Task 11.4: Pointer and func identity (`%p`, `%d`, `%v`, `%T` of funcs)
+- [x] Task 11.4: Pointer and func identity (`%p`, `%d`, `%v`, `%T` of funcs)
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L91 distinct pointers to equal structs → different `%p`, same pointer twice → equal; L82 `%d` of `&x` → decimal digits only; L83 `%v` of a func → `0x` + hex id, `%T` → `func()`; L96 `Sprint(f, 1)` → contains a space; L97 `%p` of pointer in `any` → `0x…`.
   - Done when: five repros satisfy the properties on all targets.
