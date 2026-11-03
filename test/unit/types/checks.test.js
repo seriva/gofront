@@ -5,6 +5,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsProgramOutput,
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
@@ -1578,6 +1579,139 @@ func main() {
 	}
 }`,
 		"mode\ncolor\nfloat\nrune\nnil\nany\nsame\ntagless\n",
+	);
+});
+
+section("JS dynamic types: boxed values keep their type");
+
+test("a nil map or nil pointer in any is not the nil interface", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ x int }
+type many []error
+
+func (m many) Error() string   { return "m" }
+func (m many) Unwrap() []error { return m }
+
+func chk(a any) bool { return a == nil }
+
+func main() {
+	fmt.Println(any(map[string]int(nil)) == nil)
+	var m map[string]int
+	fmt.Println(chk(m), chk(map[int]int(nil)))
+	var a any = (*P)(nil)
+	fmt.Println(a == nil)
+	var i *int
+	fmt.Println(chk(i), chk((*P)(nil)))
+	var e error = many{}
+	_, ok := e.(interface{ Unwrap() []error })
+	fmt.Println(ok)
+	_, ok = error(many{}).(interface{ Unwrap() error })
+	fmt.Println(ok)
+}`,
+		"false\nfalse false\nfalse\nfalse false\ntrue\nfalse\n",
+	);
+});
+
+section("JS dynamic types: assertions and type switches");
+
+test("assertions match Go's type identity", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"iter"
+)
+
+type L string
+type T struct{ n int }
+
+func (t T) Name() string { return "n" }
+func (t *T) Size() int   { return 1 }
+
+type namer interface{ Name() string }
+type sizer interface {
+	Name() string
+	Size() int
+}
+
+func main() {
+	_, ok := any(new(L)).(*string)
+	fmt.Println(ok)
+	var s string
+	_, ok = any(&s).(*string)
+	fmt.Println(ok)
+	_, ok = any(&s).(*int)
+	fmt.Println(ok)
+	var v any = T{4}
+	switch v.(type) {
+	case sizer:
+		fmt.Println("sizer")
+	case namer:
+		fmt.Println("namer")
+	}
+	v = &T{4}
+	switch v.(type) {
+	case sizer:
+		fmt.Println("sizer")
+	case namer:
+		fmt.Println("namer")
+	}
+	var d any
+	json.Unmarshal([]byte(\`{"a":1}\`), &d)
+	switch d.(type) {
+	case []any:
+		fmt.Println("slice")
+	case map[string]any:
+		fmt.Println("map")
+	}
+	switch any([]int32{1}).(type) {
+	case []uint8:
+		fmt.Println("u8")
+	case []int32:
+		fmt.Println("i32")
+	}
+	switch any(map[string]int{}).(type) {
+	case map[string]string:
+		fmt.Println("ss")
+	case map[string]int:
+		fmt.Println("si")
+	}
+	var n any
+	_, ok = n.(iter.Seq[int])
+	fmt.Println(ok)
+}`,
+		"false\ntrue\nfalse\nnamer\nsizer\nmap\ni32\nsi\nfalse\n",
+	);
+});
+
+test("a type parameter case matches before and after a basic case", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import "fmt"
+
+type Name string
+
+func Kind[T any](v any) string {
+	switch v.(type) {
+	case string:
+		return "str"
+	case T:
+		return "T"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Kind[Name](Name("a")), Kind[Name]("a"))
+}`,
+		"T str\n",
 	);
 });
 

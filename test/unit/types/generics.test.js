@@ -1804,6 +1804,29 @@ func main() {
 	);
 });
 
+test("a constraint method is callable on named non-struct type arguments", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Color int
+
+func (c Color) String() string { return "col" }
+
+type Cs []int
+
+func (c Cs) String() string { return "cs" }
+
+func S[T fmt.Stringer](x T) string { return x.String() }
+
+func main() {
+	fmt.Println(S(Color(2)), S(Cs{1}))
+}`,
+		"col cs\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

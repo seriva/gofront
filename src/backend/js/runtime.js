@@ -395,6 +395,28 @@ var __ifps = __ifps || function(x) {
     Object.defineProperty(x, "__ptr_slice", { value: true, configurable: true });
   }
   return x;
+};
+var __ity = __ity || function(x, t, ptr) {
+  if (x === null || x === undefined) {
+    if (!ptr) return x;
+    const n = {};
+    Object.defineProperty(n, "__nilp", { value: true });
+    Object.defineProperty(n, "__t", { value: t });
+    return n;
+  }
+  if (typeof x === "object" && Object.isExtensible(x))
+    Object.defineProperty(x, "__t", { value: t, configurable: true, writable: true });
+  return x;
+};
+var __isty = __isty || function(v, t, k, c, n) {
+  if (v === null || v === undefined || (typeof v !== "object" && typeof v !== "function")) return false;
+  if (k === "func") return typeof v === "function";
+  if (v.__t !== undefined && t !== "") return v.__t === t;
+  if (v.__nilp === true) return false;
+  if (k === "ptr") return typeof v === "object" && "value" in v && typeof v.__gfUnbox !== "function" && !(v instanceof Array);
+  if (k === "map") return typeof v === "object" && (v.__map === true || Object.getPrototypeOf(v) === Object.prototype);
+  if (k === "array") return Array.isArray(v) && v.length === n;
+  return c ? v instanceof c : Array.isArray(v);
 };`;
 
 // fmt metadata: the Stringer/error element types of a slice, array or map
@@ -486,6 +508,9 @@ var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
 var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
 var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
+var __tbox = __tbox || function(f, x) {
+  return f && f.b ? f.b(x) : x;
+};
 var __ti = __ti || function(f, k, id, is, u, b, fb) {
   const g = () => f();
   g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
