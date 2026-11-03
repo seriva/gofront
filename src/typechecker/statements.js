@@ -72,9 +72,7 @@ export const statementCheckMethods = {
 
 	_checkDefineCommaOkAssert(stmt, rhs, scope) {
 		if (!stmt.rhs[0]?._commaOk) return false;
-		const lhsNames = stmt.lhs.map((e) => e.name ?? e);
-		if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
-		if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
+		this._declareDefineVars(stmt, [rhs[0], BOOL], scope);
 		stmt._rhsTypes = [rhs[0], BOOL];
 		return true;
 	},

@@ -270,23 +270,23 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 6: JS Statements, Scoping and Evaluation Order
 
-- [ ] Task 6.1: `else if` init statements
+- [x] Task 6.1: `else if` init statements
   - Files: `src/backend/js/statements.js`, `test/unit/language/control-flow.test.js`
   - Test: L23 → `elif`; a new name declared in the init is scoped to the chain.
   - Done when: repro prints `elif` on js/both.
-- [ ] Task 6.2: Shadowing declarations that read the outer name
+- [x] Task 6.2: Shadowing declarations that read the outer name
   - Files: `src/backend/js/statements.js`, `test/unit/types/shadowing.test.js`
   - Test: L24 `{ k, ok := m[k]; … }` → `7 true`; L144 `switch x := x + 1; x {…}` → `two`; plus `for n := n; …` and a `case` body `x := f(x)`.
   - Done when: no TDZ ReferenceError for the four forms on js/both.
-- [ ] Task 6.3: Comma-ok `:=` that reuses an existing name
+- [x] Task 6.3: Comma-ok `:=` that reuses an existing name
   - Files: `src/backend/js/statements.js`, `test/unit/types/shadowing.test.js`
   - Test: L43 → `<nil> false`; L107 → `1 true true`.
   - Done when: both run on js/both.
-- [ ] Task 6.4: Tuple assignment evaluates nested index operands first
+- [x] Task 6.4: Tuple assignment evaluates nested index operands first
   - Files: `src/lower/index.js`, `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/value-semantics.test.js` — L37 `n, ps[n].A = 1, 50` → `[{50} {0}]` on all targets.
   - Done when: repro matches Go on js/both/wasm.
-- [ ] Task 6.5: Package init order through interface method calls
+- [x] Task 6.5: Package init order through interface method calls
   - Files: `src/typechecker/init-order.js`, `test/unit/language/init-order.test.js`
   - Test: L115 `var viaIface = iface.Get()` reading a later var → `5`.
   - Done when: repro prints `5` on all targets.

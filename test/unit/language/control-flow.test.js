@@ -5,6 +5,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileWasm,
 	runJs,
@@ -536,6 +537,39 @@ test("goto without a label is a parse error", () => {
 		err = e;
 	}
 	assert(err !== null, "expected a parse error");
+});
+
+section("else-if init statements");
+
+test("else if with an init statement runs the init and scopes its names to the chain", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a, b := 1, 5
+	if a > 5 {
+		fmt.Println("if")
+	} else if b := b + 1; b > 5 {
+		fmt.Println("elif", b)
+	} else {
+		fmt.Println("else", b)
+	}
+	fmt.Println(b)
+	if a > 5 {
+		fmt.Println("if")
+	} else if c := a + 1; c > 5 {
+		fmt.Println("c big")
+	} else if d := c * 10; d > 15 {
+		fmt.Println("d", c, d)
+	} else {
+		fmt.Println("else", c, d)
+	}
+}
+`,
+		"elif 6\n5\nd 2 20\n",
+	);
 });
 
 // ═════════════════════════════════════════════════════════════

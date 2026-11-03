@@ -310,21 +310,24 @@ export class StmtsEmitter {
 		if (assigned.size === 0) return null;
 		const undo = [];
 		const names = [];
-		for (const l of lhsNodes) {
+		const visit = (l) => {
 			let keys;
 			if (l.kind === "IndexExpr") keys = ["expr", "index"];
 			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
-			else continue;
+			else return;
 			for (const key of keys) {
 				const operand = l[key];
 				if (!this._mentions(operand, assigned)) continue;
 				const goType = operand._type ?? this._resolveExprGoType(operand);
-				// A struct or array value names the variable's storage in Go.
+				// A struct or array value names the variable's storage in Go: hoist
+				// the operands inside it (`ps[n].A`) instead of the value.
 				if (
 					key === "expr" &&
 					(this._isValueStruct(goType) || this._isValueArray(goType))
-				)
+				) {
+					visit(operand);
 					continue;
+				}
 				const wType = this.toWasmType(goType);
 				const name = `__lhs_tmp_${this.tempCounter++}`;
 				const idx = this.allocLocal(name, wType, goType, true);
@@ -334,7 +337,8 @@ export class StmtsEmitter {
 				names.push(name);
 				l[key] = { kind: "Ident", name, _type: goType, _parTmp: true };
 			}
-		}
+		};
+		for (const l of lhsNodes) visit(l);
 		if (undo.length === 0) return null;
 		return () => {
 			for (const [node, key, v] of undo) node[key] = v;

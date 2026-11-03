@@ -162,8 +162,7 @@ export const statementGenMethods = {
 	// `x := f(x)` declaring a new `x` that its own right-hand side reads (the
 	// outer `x`): JS `let` would put the read in its temporal dead zone.
 	_definesShadowedRead(stmt) {
-		if (stmt.kind !== "DefineStmt" || this._isCommaOkMapExpr(stmt, stmt.rhs[0]))
-			return false;
+		if (stmt.kind !== "DefineStmt") return false;
 		const names = new Set(
 			stmt.lhs.filter((l) => !l._redecl && l.name !== "_").map((l) => l.name),
 		);
@@ -177,9 +176,35 @@ export const statementGenMethods = {
 		return stmt.rhs.some(reads);
 	},
 
+	// Emits an `if`/`switch` init statement, then `body`; an init that reads the
+	// name it declares goes through `_genShadowingDefine`.
+	_genScopedInit(init, body) {
+		const shadowing = this._definesShadowedRead(init);
+		if (shadowing) this._genShadowingDefine(init);
+		else this.genStmt(init);
+		body();
+		if (shadowing) {
+			this.indent--;
+			this.line("}");
+		}
+	},
+
 	// Evaluates the right-hand side in the enclosing scope, then opens a nested
 	// block (closed at the end of the enclosing block) that declares the names.
 	_genShadowingDefine(stmt) {
+		if (this._isCommaOkMapExpr(stmt, stmt.rhs[0])) {
+			const node = stmt.rhs[0];
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const m = `__sm${this._tmpCounter}`;
+			const k = `__sk${this._tmpCounter}`;
+			this.line(
+				`const ${m} = ${this.genExpr(node.expr)}, ${k} = ${this.genExpr(node.index)};`,
+			);
+			this.line("{");
+			this.indent++;
+			this._genCommaOkMapIndex(stmt, node, true, { map: m, key: k });
+			return;
+		}
 		const rhs = this._defineRhs(stmt);
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__t${this._tmpCounter}`;
@@ -194,11 +219,15 @@ export const statementGenMethods = {
 	},
 
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
-	_genCommaOkMapIndex(stmt, rhsNode, isDefine) {
-		const mapExpr = this.genExpr(rhsNode.expr);
-		const keyExpr = this.genExpr(rhsNode.index);
+	// `pre` carries the map and key already evaluated (a shadowing declaration
+	// reads them before its names exist).
+	_genCommaOkMapIndex(stmt, rhsNode, isDefine, pre = null) {
+		const mapExpr = pre?.map ?? this.genExpr(rhsNode.expr);
+		const keyExpr = pre?.key ?? this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-		const decl = isDefine ? "let " : "";
+		// A name `:=` reuses is assigned, not declared again.
+		const declOf = (l) => (isDefine && !l._redecl ? "let " : "");
+		const [vDecl, okDecl] = stmt.lhs.map(declOf);
 		// An array map value is a copy, not the stored array.
 		const valType = rhsNode._mapValueType;
 		const copyVal = (js) =>
@@ -207,10 +236,10 @@ export const statementGenMethods = {
 				: js;
 		if (isDefine && !this.strict) {
 			if (vName !== "_") {
-				this.line(`let ${vName} = ${copyVal(`${mapExpr}[${keyExpr}]`)};`);
+				this.line(`${vDecl}${vName} = ${copyVal(`${mapExpr}[${keyExpr}]`)};`);
 			}
 			if (okName !== "_") {
-				this.line(`let ${okName} = (${keyExpr}) in ${mapExpr};`);
+				this.line(`${okDecl}${okName} = (${keyExpr}) in ${mapExpr};`);
 			}
 			return;
 		}
@@ -223,11 +252,13 @@ export const statementGenMethods = {
 		this.line(`const ${mTmp} = ${mapExpr}, ${kTmp} = ${keyExpr};`);
 		if (vName !== "_") {
 			this.line(
-				`${decl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero};`,
+				`${vDecl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero};`,
 			);
 		}
 		if (okName !== "_") {
-			this.line(`${decl}${okName} = Boolean(${mTmp} && (${kTmp} in ${mTmp}));`);
+			this.line(
+				`${okDecl}${okName} = Boolean(${mTmp} && (${kTmp} in ${mTmp}));`,
+			);
 		}
 	},
 
@@ -316,14 +347,7 @@ export const statementGenMethods = {
 				if (stmt.init) {
 					this.line("{");
 					this.indented(() => {
-						const shadowing = this._definesShadowedRead(stmt.init);
-						if (shadowing) this._genShadowingDefine(stmt.init);
-						else this.genStmt(stmt.init);
-						this._genIf(stmt);
-						if (shadowing) {
-							this.indent--;
-							this.line("}");
-						}
+						this._genScopedInit(stmt.init, () => this._genIf(stmt));
 					});
 					this.line("}");
 				} else {
@@ -340,8 +364,12 @@ export const statementGenMethods = {
 				if (stmt.body && stmt.body.kind === "ForStmt") {
 					stmt.body.label = stmt.label;
 				}
-				this.line(`${stmt.label}:`);
-				this.genStmt(stmt.body);
+				{
+					const hoisted = this._hoistForInit(stmt.body);
+					this.line(`${stmt.label}:`);
+					this.genStmt(stmt.body);
+					if (hoisted) this._closeHoistedForInit();
+				}
 				break;
 			case "Block":
 				this.line("{");
@@ -849,23 +877,28 @@ export const statementGenMethods = {
 			((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
 		const lines = [];
 		const undo = [];
-		for (const l of stmt.lhs) {
+		const visit = (l) => {
 			let keys;
 			if (l.kind === "IndexExpr") keys = ["expr", "index"];
 			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
-			else continue;
+			else return;
 			for (const key of keys) {
 				const operand = l[key];
 				if (!mentions(operand)) continue;
-				// A struct or array value names the variable's storage in Go.
-				if (key === "expr" && this._aggregateBase(operand._type)) continue;
+				// A struct or array value names the variable's storage in Go: hoist
+				// the operands inside it (`ps[n].A`) instead of the value.
+				if (key === "expr" && this._aggregateBase(operand._type)) {
+					visit(operand);
+					continue;
+				}
 				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 				const name = `__h${this._tmpCounter}`;
 				lines.push(`const ${name} = ${this.genExpr(operand)};`);
 				undo.push([l, key, operand]);
 				l[key] = { kind: "Ident", name, _type: operand._type };
 			}
-		}
+		};
+		for (const l of stmt.lhs) visit(l);
 		if (lines.length === 0) return null;
 		return {
 			lines,
@@ -1126,7 +1159,12 @@ export const statementGenMethods = {
 			this.line("}");
 			return;
 		}
-		if (elseBody.kind === "IfStmt") {
+		if (elseBody.kind === "IfStmt" && elseBody.init) {
+			// `else if init; cond`: the init runs only when this branch is taken.
+			this.line("} else {");
+			this.indented(() => this.genStmt(elseBody));
+			this.line("}");
+		} else if (elseBody.kind === "IfStmt") {
 			this.line(`} else if (${this.genExpr(elseBody.cond)}) {`);
 			this.indented(() => this.genBlock(elseBody.body));
 			this._genElse(elseBody.elseBody);
@@ -1166,7 +1204,47 @@ export const statementGenMethods = {
 		this.line("}");
 	},
 
+	// `for n := n; ...` declares a loop variable its own initialiser reads: the
+	// initialiser values are evaluated into temporaries ahead of the loop.
+	_hoistForInit(stmt) {
+		const init = stmt.kind === "ForStmt" && stmt.init;
+		if (
+			!init ||
+			stmt._initPre ||
+			init.kind !== "DefineStmt" ||
+			this.isRangeFor(stmt) ||
+			stmt.cond?.kind === "RangeExpr" ||
+			!this._definesShadowedRead(init)
+		)
+			return false;
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const values = this._defineRhs(init);
+		const names = values.map((_, i) => `__fi${this._tmpCounter}_${i}`);
+		this.line("{");
+		this.indent++;
+		this.line(
+			`const ${values.map((v, i) => `${names[i]} = ${v}`).join(", ")};`,
+		);
+		stmt._initPre = names;
+		return true;
+	},
+
+	_closeHoistedForInit() {
+		this.indent--;
+		this.line("}");
+	},
+
 	genFor(stmt) {
+		const hoisted = this._hoistForInit(stmt);
+		try {
+			this._genForLoop(stmt);
+		} finally {
+			delete stmt._initPre;
+		}
+		if (hoisted) this._closeHoistedForInit();
+	},
+
+	_genForLoop(stmt) {
 		const isInner = this._inIteratorBody;
 		if (isInner) {
 			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
@@ -1189,7 +1267,7 @@ export const statementGenMethods = {
 				this._genSimpleWhileFor(stmt);
 				return;
 			}
-			const init = stmt.init ? this.stmtInline(stmt.init) : "";
+			const init = stmt.init ? this.stmtInline(stmt.init, stmt._initPre) : "";
 			const cond = stmt.cond ? this.genExpr(stmt.cond) : "";
 			const post = this._perIterationClones(
 				stmt,
@@ -1703,10 +1781,10 @@ export const statementGenMethods = {
 	},
 
 	// Inline a statement as a for-init/post string (no semicolon)
-	stmtInline(stmt) {
+	stmtInline(stmt, pre = null) {
 		switch (stmt.kind) {
 			case "DefineStmt":
-				return this._inlineDefine(stmt);
+				return this._inlineDefine(stmt, pre);
 			case "AssignStmt":
 				return this._withInlineSyncs(
 					this._resliceSyncs(stmt.lhs, stmt, true),
@@ -1740,14 +1818,14 @@ export const statementGenMethods = {
 		return syncs ? `${js}, ${syncs.join(", ")}` : js;
 	},
 
-	_inlineDefine(stmt) {
+	_inlineDefine(stmt, pre = null) {
 		const boxed =
 			stmt.lhs.length === 1 &&
 			stmt.rhs.length === 1 &&
 			this._boxedVars.has(stmt.lhs[0].name);
 		if (boxed)
-			return `let ${stmt.lhs[0].name} = { value: ${this.genValueExpr(stmt.rhs[0])} }`;
-		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+			return `let ${stmt.lhs[0].name} = { value: ${pre ? pre[0] : this.genValueExpr(stmt.rhs[0])} }`;
+		const rhs = pre ?? stmt.rhs.map((e) => this.genExpr(e));
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		if (lhs.length === 1) return `let ${lhs[0]} = ${rhs[0]}`;
 		// `for i, j := 0, 10`: one declarator per variable.
@@ -1821,7 +1899,7 @@ export const statementGenMethods = {
 					// across sibling cases (JS switch shares one block scope).
 					this.line("{");
 					this.indented(() => {
-						for (const s of c.stmts) this.genStmt(s);
+						this.genBlock(c);
 						// Go doesn't fall through by default — add break unless last stmt is return/break
 						const last = c.stmts[c.stmts.length - 1];
 						if (
@@ -1840,8 +1918,7 @@ export const statementGenMethods = {
 		if (stmt.init) {
 			this.line("{");
 			this.indented(() => {
-				this.genStmt(stmt.init);
-				genBody();
+				this._genScopedInit(stmt.init, genBody);
 			});
 			this.line("}");
 		} else {
