@@ -661,3 +661,54 @@ func main() {
 		"true\nruntime error: index out of range [5] with length 1\n",
 	);
 });
+
+section("WASM Defer — closures in switch clauses");
+
+test("deferred closures capture clause locals of different types", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	for i := 1; i <= 2; i++ {
+		switch i {
+		case 1:
+			s := "zero"
+			defer func() { fmt.Println("deferred", s) }()
+		case 2:
+			s := i
+			defer func() { fmt.Println("deferred2", s-1) }()
+		}
+	}
+}
+`,
+		"deferred2 1\ndeferred zero\n",
+	);
+});
+
+test("deferred closure in a switch clause inside a loop", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	for i := 1; i <= 2; i++ {
+		switch i {
+		case 1, 2:
+			s := i
+			defer func() {
+				if s == 1 {
+					fmt.Println("deferred zero")
+				} else {
+					fmt.Println("deferred2", s-1)
+				}
+			}()
+		}
+	}
+}
+`,
+		"deferred2 1\ndeferred zero\n",
+	);
+});

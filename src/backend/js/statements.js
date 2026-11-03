@@ -1969,7 +1969,13 @@ export const statementGenMethods = {
 		this.indented(() => {
 			const val = this.genExpr(stmt.expr);
 			this.line(`const __tsw = ${val};`);
-			if (stmt.assign) this.line(`let ${stmt.assign} = __tsw;`);
+			// The binding is declared per clause, after the switch expression
+			// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
+			const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
+			const bind = (valueJs) =>
+				this.line(
+					`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
+				);
 
 			let first = true;
 			let hasDefault = false;
@@ -1984,24 +1990,16 @@ export const statementGenMethods = {
 					.join(" || ");
 				this.line(`${first ? "if" : "else if"} (${cond}) {`);
 				this.indented(() => {
-					// A single named non-struct case binds the unboxed value.
-					if (
-						stmt.assign &&
-						c.types.length === 1 &&
-						this._assertedValueJs(c.types[0], "__tsw") !== "__tsw"
-					)
-						this.line(
-							`const ${stmt.assign} = ${this._assertedValueJs(c.types[0], "__tsw")};`,
-						);
-					// An array case binds a copy of the boxed value.
-					else if (
-						stmt.assign &&
-						c.types.length === 1 &&
-						this._typeFromNode(c.types[0])?.kind === "array"
-					)
-						this.line(
-							`let ${stmt.assign} = ${this._cloneJs(this._typeFromNode(c.types[0]), "__tsw")};`,
-						);
+					if (stmt.assign) {
+						const only = c.types.length === 1 ? c.types[0] : null;
+						// A single named non-struct case binds the unboxed value.
+						if (only && this._assertedValueJs(only, "__tsw") !== "__tsw")
+							bind(this._assertedValueJs(only, "__tsw"));
+						// An array case binds a copy of the boxed value.
+						else if (only && this._typeFromNode(only)?.kind === "array")
+							bind(this._cloneJs(this._typeFromNode(only), "__tsw"));
+						else bind("__tsw");
+					}
 					for (const s of c.stmts) this.genStmt(s);
 				});
 				this.line("}");
@@ -2010,6 +2008,7 @@ export const statementGenMethods = {
 			if (hasDefault) {
 				this.line(first ? "{" : "else {");
 				this.indented(() => {
+					if (stmt.assign) bind("__tsw");
 					for (const s of hasDefault.stmts) this.genStmt(s);
 				});
 				this.line("}");
