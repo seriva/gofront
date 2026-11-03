@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -366,6 +367,44 @@ func main() {}`);
 });
 
 // ── Entry point ───────────────────────────────────────────────
+section("Type inference — pointer arguments");
+
+test("type arguments are inferred from pointer arguments", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func swap[T any](a, b *T) { *a, *b = *b, *a }
+
+func main() {
+	x, y := 1, 2
+	swap(&x, &y)
+	fmt.Println(x, y)
+}
+`,
+		"2 1\n",
+	);
+});
+
+test("type arguments are inferred through a pointer to pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func deref[T any](p **T) T { return **p }
+
+func main() {
+	x := 7
+	p := &x
+	fmt.Println(deref(&p))
+}
+`,
+		"7\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

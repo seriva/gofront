@@ -1472,7 +1472,10 @@ export const expressionCheckMethods = {
 			}
 			return tp;
 		}
-		if (isNumeric(argTypes[0]) && !this._constraintHasTypeSet(tp.constraint))
+		if (
+			isNumeric(argTypes[0]) &&
+			!this._constraintHasTypeSet(tp.constraint, scope)
+		)
 			return this.err(
 				`cannot convert ${typeStr(argTypes[0])} to type ${typeStr(tp)}: ${typeStr(tp)} is not constrained to a set of convertible types`,
 				expr,
@@ -1492,15 +1495,20 @@ export const expressionCheckMethods = {
 	// A conversion to a type parameter needs a constraint that lists types
 	// (`~int | ~float64`, or an interface embedding such a union); `any`,
 	// `comparable` and method-only constraints allow every type argument.
-	_constraintHasTypeSet(constraint) {
+	_constraintHasTypeSet(constraint, scope = this.globals) {
 		if (!constraint) return true;
 		if (constraint.kind === "UnionConstraint") return true;
-		const c = this.resolveType(constraint);
+		// Receiver type parameters keep their constraint as an AST node.
+		const c = this.resolveType(
+			constraint.kind === "TypeName" || constraint.kind === "InterfaceType"
+				? this.resolveTypeNode(constraint, scope)
+				: constraint,
+		);
 		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
 		if (base?.kind !== "interface") return false;
 		if (base.unionConstraint) return true;
 		return (base._typeSetEmbeds ?? []).some((e) =>
-			this._constraintHasTypeSet(e),
+			this._constraintHasTypeSet(e, scope),
 		);
 	},
 
