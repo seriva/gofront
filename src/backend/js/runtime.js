@@ -198,7 +198,11 @@ var __mkslice = __mkslice || function(n, b) {
   return __slice(b, 0, n);
 };`;
 
-export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
+export const HELPER_APPEND = `var __tn = __tn || function(c) {
+  return Object.hasOwn(c, "__tnil") ? c.__tnil : Object.defineProperty(c, "__tnil", { value: Object.defineProperty(new c(0), "__nilt", { value: true }) }).__tnil;
+};
+var __append = __append || function(a, ...b) {
+  if (b.length === 0) return a !== null && a !== undefined && a.__nilt === true ? null : a;
   if (a && ArrayBuffer.isView(a)) {
     const c = __tcap.get(a);
     if (c !== undefined && a.length + b.length <= c) {
@@ -338,6 +342,27 @@ var __ifp = __ifp || function(x, ptrFields, seen) {
     }
   }
   return x;
+};
+var __mknil = __mknil || function(C) {
+  const s = Object.create(C.prototype);
+  Object.defineProperty(s, "__nilp", { value: true });
+  Object.defineProperty(s, "__p", { value: true });
+  const vm = C.__vm || [];
+  for (const k of Object.getOwnPropertyNames(C.prototype)) {
+    const f = C.prototype[k];
+    if (k === "constructor" || k === "toString" || k.startsWith("__") || typeof f !== "function") continue;
+    Object.defineProperty(s, k, { value: vm.includes(k)
+      ? function() { throw new Error("runtime error: invalid memory address or nil pointer dereference"); }
+      : function(...a) { return f.apply(null, a); } });
+  }
+  Object.defineProperty(C, "__nil", { value: s });
+  return s;
+};
+var __ifn = __ifn || function(x, C) {
+  return x === null ? (Object.hasOwn(C, "__nil") ? C.__nil : __mknil(C)) : x;
+};
+var __unnil = __unnil || function(x) {
+  return x != null && x.__nilp === true ? null : x;
 };
 var __ifm = __ifm || function(x) {
   if (x === null || x === undefined) return x;
@@ -648,7 +673,11 @@ var __recover = __recover || function(ok) {
   const top = s.length > 0 ? s[s.length - 1] : null;
   if (top === null || top.recovered) return null;
   top.recovered = true;
-  return top.err?.message ?? String(top.err);
+  const e = top.err;
+  // A JS TypeError from using null as a pointer is Go's nil dereference.
+  if (e && e.name === "TypeError" && /of null|undefined or null/.test(e.message))
+    return "runtime error: invalid memory address or nil pointer dereference";
+  return e?.message ?? String(e);
 };`;
 
 export const HELPER_SPRINTF =
@@ -698,6 +727,7 @@ var __sprintf = __sprintf || function(f, ...a) {
   // A nil *T boxed in an interface (a named non-struct type) has no value to call
   // a value-receiver method on: fmt prints <nil>, as Go does after recovering.
   const callMethod = (val, name) => {
+    if (val.__nilp === true) { try { return val[name](); } catch (e) { return "<nil>"; } }
     if (typeof val[name] !== "function") return val[val.__pe[name]][name]();
     if (typeof val.__gfUnbox !== "function" || val.__gfUnbox() !== null) return val[name]();
     try { return val[name](); } catch (e) { return "<nil>"; }
@@ -723,8 +753,13 @@ var __sprintf = __sprintf || function(f, ...a) {
     const [td, sdesc] = __fmtu.split(fd);
     if (sdesc?.b && !ro && !(val instanceof sdesc.b)) val = new sdesc.b(val);
     if (sdesc?.m === 1 && (val === null || val === undefined)) return "map[]";
+    if (sdesc?.s === 1 && (val === null || val === undefined)) return "[]";
     if (sdesc?.np !== undefined && (val === null || val === undefined)) val = sdesc.np;
     if (val === null || val === undefined) return "<nil>";
+    if (val.__nilp === true) {
+      const nm = ro ? "" : stringMethod(val, el);
+      return nm ? String(callMethod(val, nm)) : "<nil>";
+    }
     if (typeof val === "boolean") return String(val);
     if (typeof val === "number" && td) {
       const fb = __fmtu.baseOf(td);
@@ -950,7 +985,8 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
     if (typeof cur.As === "function" && cur.As(target)) return true;
     if (matcher ? matcher(unboxed) : (unboxed !== err && typeof unboxed === "object" && !("_msg" in unboxed && "_cause" in unboxed))) {
       if ("value" in target) {
-        target.value = extract ? extract(unboxed) : unboxed;
+        const found = extract ? extract(unboxed) : unboxed;
+        target.value = found != null && found.__nilp === true ? null : found;
       } else {
         Object.assign(target, unboxed);
       }
@@ -1888,7 +1924,7 @@ var __json_enc_raw = __json_enc_raw || function(v) {
   return __json_marshaler_out([v, null], "json.RawMessage");
 };
 var __json_enc_any = __json_enc_any || function(v) {
-  if (v === null || v === undefined) return "null";
+  if (v === null || v === undefined || v.__nilp === true) return "null";
   var t = typeof v;
   if (t === "boolean") return v ? "true" : "false";
   if (t === "number") {
@@ -2088,6 +2124,7 @@ var __json_invalid_target = __json_invalid_target || function(name, isPtr) {
   return typeof __error === "function" ? __error(msg) : new Error(msg);
 };
 var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName, targetKind) {
+  if (target?.__nilp === true) target = null;
   __json_structs.length = 0;
   __json_path.length = 0;
   __json_current_offset = 0;
@@ -2161,6 +2198,7 @@ var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   return null;
 };
 var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName, targetKind) {
+  if (target?.__nilp === true) target = null;
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];

@@ -130,13 +130,13 @@ export const jsonMethods = {
 			this._markJsonAnyEncoders();
 			const argType = expr.args[0]?._type;
 			const enc = this._getJsonEncoder(argType);
-			return `__json_marshal(${enc}, ${args[0]})`;
+			return `__json_marshal(${enc}, ${this._jsonOperand(args[0], argType)})`;
 		}
 		if (fn === "MarshalIndent") {
 			this._markJsonAnyEncoders();
 			const argType = expr.args[0]?._type;
 			const enc = this._getJsonEncoder(argType);
-			return `__json_marshal_indent(${enc}, ${args[0]}, ${args[1]}, ${args[2]})`;
+			return `__json_marshal_indent(${enc}, ${this._jsonOperand(args[0], argType)}, ${args[1]}, ${args[2]})`;
 		}
 		if (fn === "Unmarshal") {
 			const targetType = expr.args[1]?._type;
@@ -147,6 +147,14 @@ export const jsonMethods = {
 			return `__json_valid(${args[0]})`;
 		}
 		return undefined;
+	},
+
+	// A nil pointer operand is boxed as a typed nil for the `any` parameter;
+	// the pointer's own encoder expects a plain null.
+	_jsonOperand(js, type) {
+		if (type?.kind !== "pointer") return js;
+		this.useHelper("ifaceBox");
+		return `__unnil(${js})`;
 	},
 
 	// Name and static kind of an Unmarshal/Decode target, for the argument

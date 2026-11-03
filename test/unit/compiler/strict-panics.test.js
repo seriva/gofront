@@ -10,6 +10,7 @@ import {
 	assertEqual,
 	compile,
 	compileHybrid,
+	runJs,
 	section,
 	summarize,
 	test,
@@ -362,6 +363,54 @@ func main() {
 	assertEqual(errors.length, 0);
 	for (const helper of ["__at(", "__ix(", "__nilmap", "__mw(", "__nilcall("])
 		assert(!js.includes(helper), `unexpected ${helper} in js output`);
+});
+
+section("Nil dereference panics with Go's message");
+
+const NIL_DEREF =
+	"runtime error: invalid memory address or nil pointer dereference";
+
+function recoveredNilDeref(body, decls = "") {
+	const src = `package main
+import "fmt"
+type S struct{ A int }
+type T struct{ A int }
+${decls}
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	${body}
+}`;
+	const outs = [];
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.map((e) => e.message).join("\n"), "");
+		outs.push(runJs(js));
+	}
+	assertEqual(outs[0], outs[1], "js and both disagree");
+	return outs[0];
+}
+
+for (const [name, body] of [
+	["a field read through a nil struct pointer", "var p *S; _ = p.A"],
+	["assigning through a nil struct pointer", "var p *T; *p = T{1}"],
+	[
+		"dereferencing a nil pointer held in an any",
+		"var e any = (*T)(nil); x := *e.(*T); fmt.Println(x)",
+	],
+	["assigning through a nil int pointer", "var p *int; *p = 3"],
+	["indexing a nil array pointer", "var ap *[3]int; fmt.Println(ap[1])"],
+	["copying a nil array pointer", "var ap *[3]int; a := *ap; fmt.Println(a)"],
+]) {
+	test(`${name} recovers Go's nil dereference message`, () => {
+		assertEqual(recoveredNilDeref(body), NIL_DEREF);
+	});
+}
+
+test("a TypeError that is not a null access keeps its own message", () => {
+	assertEqual(
+		recoveredNilDeref(`var f func(); f()`).includes("nil pointer dereference"),
+		false,
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
