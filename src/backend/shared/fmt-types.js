@@ -270,10 +270,30 @@ export function fmtWantsTypes(format, nargs, seqArgs = false, ptrArgs = false) {
 		if (verb === "T" || verb === "p") return true;
 		if (verb === "v" && m[1].includes("#")) return true;
 		if (seqArgs && "sqxX".includes(verb)) return true;
-		if (ptrArgs && "bodxXs".includes(verb)) return true;
+		if (ptrArgs && "bodxXsq".includes(verb)) return true;
 		if (verb !== "" && !VERBS.includes(verb) && verb !== "w") return true;
 		if (/[[*]/.test(m[2])) indexed = true;
 		count++;
 	}
 	return nargs >= 0 && !indexed && nargs > count;
+}
+
+/**
+ * The operand of `any(x)` seen by fmt as `x` with its static type: the
+ * conversion would hide the concrete type from `%T`, `%v` of a float32 and
+ * typed nil pointers.  Conversions to a non-empty interface (`error(e)`) and
+ * of an operand that is already an interface or nil stay as they are.
+ * @param {any} e call operand
+ * @returns {any}
+ */
+export function fmtPeelAny(e) {
+	if (e?.kind !== "TypeConversion" || !e.expr || e._spread) return e;
+	const to = e._type;
+	if (!(to?.kind === "basic" && to.name === "any")) return e;
+	const from = e.expr._type;
+	if (!from || from.kind === "interface" || from.kind === "tuple") return e;
+	if (from.kind === "basic" && (from.name === "any" || from.name === "nil"))
+		return e;
+	if (from.kind === "untyped" && from.base === "nil") return e;
+	return e.expr;
 }

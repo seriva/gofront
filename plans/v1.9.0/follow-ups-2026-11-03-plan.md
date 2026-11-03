@@ -390,19 +390,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 12: fmt Typed Values
 
-- [ ] Task 12.1: `%T` and `%v` use static types through `any` and type parameters
+- [x] Task 12.1: `%T` and `%v` use static types through `any` and type parameters
   - Files: `src/backend/shared/fmt-types.js`, `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`
   - Test: `test/unit/builtins/fmt-verbs.test.js` — L50 `%T` of `any(N(1))` → `main.N`; L85/L102 → `uint64 main.Color *main.P`; L68a → `[]int map[string]int`; L70 `any(float32(0.1))` → `0.1`; L78 → `*main.Color %!q(*main.Color=<nil>)`.
   - Done when: six repros match Go on all targets.
-- [ ] Task 12.2: Nil pointers with pointer-receiver `String` keep their type
+- [x] Task 12.2: Nil pointers with pointer-receiver `String` keep their type
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-stringer.test.js`
   - Test: L62 nil `*G[int]` in `any` → `g`, `Sprint([]any{nilC})` → `[c]`; L95 `Println(nilp())` → `P* <nil>`.
   - Done when: repros match Go on all targets.
-- [ ] Task 12.3: Multi-value calls as the whole argument list
+- [x] Task 12.3: Multi-value calls as the whole argument list
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L89 `Printf(fa())` → `v=5`; L90 `Fprint(fw())` → `hello`; L94 `Println(c())` (`(any, int)`, struct) → `{1} 1`.
   - Done when: three repros match Go on all targets; WASM validates.
-- [ ] Task 12.4: `%#v` of maps inside `any` in JS
+- [x] Task 12.4: `%#v` of maps inside `any` in JS
   - Files: `src/backend/js/fmt-runtime.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L67 → `main.M{M:map[string]int{"k":1}}`.
   - Done when: repro matches Go on js/both.
