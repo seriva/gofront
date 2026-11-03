@@ -111,6 +111,31 @@ export function _usesAnyEq(funcDecls, mod) {
 	);
 }
 
+// Whether a map with interface keys is reachable through `t`: its keys are
+// formatted by dynamic type (`__any_fmt_key`).
+function typeHasIfaceMapKey(t, mod, seen = new Set(), depth = 0) {
+	if (!t || typeof t !== "object" || seen.has(t) || depth > 6) return false;
+	seen.add(t);
+	const sub = (x) => typeHasIfaceMapKey(x, mod, seen, depth + 1);
+	switch (t.kind) {
+		case "named":
+			return sub(t.underlying);
+		case "pointer":
+			return sub(t.base);
+		case "slice":
+		case "array":
+			return sub(t.elem);
+		case "map":
+			return (
+				isAnyType(t.key, mod.checker) ||
+				isInterfaceType(t.key, mod.checker) ||
+				sub(t.value)
+			);
+		default:
+			return false;
+	}
+}
+
 // An `fmt` call with an `any`/interface operand or a `xs...` spread needs
 // `__any_fmt`.  `emitFmtCall` falls back to scalar-only dispatch without it.
 export function _usesFmtAny(funcDecls, mod) {
@@ -126,7 +151,8 @@ export function _usesFmtAny(funcDecls, mod) {
 					(a) =>
 						a._spread ||
 						isAnyType(a._type, mod.checker) ||
-						isInterfaceType(a._type, mod.checker),
+						isInterfaceType(a._type, mod.checker) ||
+						typeHasIfaceMapKey(a._type, mod),
 				),
 		),
 	);

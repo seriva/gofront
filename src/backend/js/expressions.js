@@ -594,10 +594,22 @@ export const expressionGenMethods = {
 				expr._ifaceKeying = true;
 				try {
 					this.useHelper("structKey");
-					return `__ik(${this.genExpr(expr)})`;
+					const tag = this._ifaceKeyTag(expr._ifaceKeyType);
+					return `__ik(${this.genExpr(expr)}${tag ? `, ${JSON.stringify(tag)}` : ""})`;
 				} finally {
 					expr._ifaceKeying = false;
 				}
+			}
+		}
+		if (expr._mapKeyEnc && !expr._mapKeying) {
+			// Array, anonymous struct and pointer keys: see HELPER_STRUCT_KEY.
+			expr._mapKeying = true;
+			try {
+				this.useHelper("structKey");
+				const enc = expr._mapKeyEnc === "pk" ? "__pk" : "__sk";
+				return `${enc}(${this.genExpr(expr)})`;
+			} finally {
+				expr._mapKeying = false;
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);

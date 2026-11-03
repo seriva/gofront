@@ -351,7 +351,7 @@ func main() {
 				"should not emit array destructuring for map index",
 			);
 			const output = runJs(js);
-			assertEqual(output, "yes true\nundefined false");
+			assertEqual(output, "yes true\n false");
 		},
 	);
 });
