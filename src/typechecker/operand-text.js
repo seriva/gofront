@@ -32,7 +32,8 @@ export function exprText(node) {
 
 // "variable of type float64", "untyped int constant", "value of type float64".
 export function operandKind(node, typeName, isUntypedConst) {
-	if (isUntypedConst) return `${typeName} constant`;
+	if (isUntypedConst)
+		return `untyped ${typeName === "float64" ? "float" : typeName} constant`;
 	return node?.kind === "Ident"
 		? `variable of type ${typeName}`
 		: `value of type ${typeName}`;

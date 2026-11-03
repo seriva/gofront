@@ -15,6 +15,7 @@ const CHECK_STMT_DELEGATE = {
 	BranchStmt: "_checkBranchStmt",
 };
 
+import { exprText, operandKind } from "./operand-text.js";
 import {
 	ANY,
 	BOOL,
@@ -22,9 +23,12 @@ import {
 	is64BitInt,
 	isAny,
 	isBool,
+	isNil,
+	isUntyped,
 	isVoid,
 	iteratorYieldParams,
 	Scope,
+	typeStr,
 } from "./types.js";
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
@@ -373,6 +377,7 @@ export const statementCheckMethods = {
 			if (c.list) {
 				for (const e of c.list) {
 					this.checkExpr(e, caseScope);
+					this._checkCaseValue(stmt.tag, e);
 					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
 				}
 			}
@@ -381,6 +386,57 @@ export const statementCheckMethods = {
 		}
 		this._switchDepth--;
 		this._reportUnused(inner, stmt);
+	},
+
+	// `case e:` compares `tag == e`, so `e` must convert to the tag's type
+	// (or the other way round for typed values).
+	_checkCaseValue(tag, e) {
+		if (!tag) return;
+		const tagType = this.resolveType(tag._type);
+		const caseType = this.resolveType(e._type);
+		if (this._caseValueUnchecked(tagType, caseType)) return;
+		if (isUntyped(caseType)) {
+			if (this._isUntypedAssignable(tagType, caseType)) return;
+			this.err(
+				`cannot convert ${exprText(e)} (${operandKind(e, caseType.base, true)}) to type ${typeStr(tagType)}`,
+				e,
+			);
+			return;
+		}
+		if (
+			this._assignableQuietly(tagType, caseType) ||
+			this._assignableQuietly(caseType, tagType)
+		)
+			return;
+		this.err(
+			`invalid case ${exprText(e)} in switch on ${exprText(tag)} (mismatched types ${typeStr(caseType)} and ${typeStr(tagType)})`,
+			e,
+		);
+	},
+
+	// Operands whose comparison the checker cannot (or need not) judge: unknown
+	// or recovered types, `any`/interface tags, nil cases, type parameters.
+	_caseValueUnchecked(tagType, caseType) {
+		if (!tagType || !caseType || tagType._tainted || caseType._tainted)
+			return true;
+		if (isAny(tagType) || isAny(caseType) || isNil(caseType)) return true;
+		if (isUntyped(tagType) || tagType.kind === "typeParam") return true;
+		return (
+			this.resolveType(tagType.underlying ?? tagType)?.kind === "interface"
+		);
+	},
+
+	// Whether assertAssignable(target, source) reports nothing.
+	_assignableQuietly(target, source) {
+		const saved = this.errors;
+		const savedSkip = this._skipIfaceMark;
+		this.errors = [];
+		this._skipIfaceMark = true;
+		this.assertAssignable(target, source, null);
+		const ok = this.errors.length === 0;
+		this.errors = saved;
+		this._skipIfaceMark = savedSkip;
+		return ok;
 	},
 
 	// A case naming an interface (literal or declared) records the resolved

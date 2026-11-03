@@ -1081,6 +1081,7 @@ export class TypeChecker {
 		this._checkTemplExpr(n, n.exprTokens, scope);
 		for (const c of n.cases ?? []) {
 			this._checkTemplExpr(c, c.caseTokens, scope);
+			if (c.expr) this._checkCaseValue(n.expr, c.expr);
 			this._checkTemplNodes(c.body, scope);
 		}
 	}
