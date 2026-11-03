@@ -909,6 +909,35 @@ func main() {
 	assertEqual(runJs(c3.js), "1 true");
 });
 
+test("one diagnostic per root cause", () => {
+	const unknown = compile(`package main
+func F(x Foo) {}
+func main() {}`);
+	assertEqual(unknown.errors.length, 1);
+	assertErrorContains(unknown.errors, "Unknown type 'Foo'");
+
+	const pkg = compile(`package main
+import "reflect"
+func main() { _ = reflect.TypeOf(1) }`);
+	assertEqual(pkg.errors.length, 1);
+	assertErrorContains(pkg.errors, "package 'reflect' is not available");
+
+	const member = compile(`package main
+import "os"
+func main() { _, _ = os.ReadFile("x") }`);
+	assertEqual(member.errors.length, 1);
+	assertErrorContains(member.errors, "os.ReadFile is not available");
+
+	const real = compile(`package main
+func two() (int, int) { return 1, 2 }
+func main() { _, _ = 1 }`);
+	assertEqual(real.errors.length, 1);
+	assertErrorContains(
+		real.errors,
+		"assignment mismatch: 2 variables but 1 value",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

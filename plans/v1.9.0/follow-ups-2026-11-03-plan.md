@@ -203,11 +203,11 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
   - Files: `src/typechecker/init-order.js`, `src/typechecker/constants.js`, `test/unit/language/init-order.test.js`
   - Test: L108 `const a = b; const b = a` → `assertErrorContains(errors, "initialization cycle")`; L114 `var x = func() int { { x := 1; _ = x }; return x }()` → same; `var x = func() int { x := 1; return x }()` still compiles.
   - Done when: both cycles are compile errors; the shadowed-only form compiles.
-- [ ] Task 3.4: One diagnostic per root cause
+- [x] Task 3.4: One diagnostic per root cause
   - Files: `src/typechecker/resolve.js`, `src/typechecker/expressions.js`, `test/unit/types/errors.test.js`
   - Test: L184 `func F(x Foo) {}` → exactly one `Unknown type 'Foo'`; L186a → only `package 'reflect' is not available`; L186b → only `os.ReadFile is not available` (count errors, assert message).
   - Done when: each repro yields exactly one error.
-- [ ] Task 3.5: Precision warning position and float contexts
+- [x] Task 3.5: Precision warning position and float contexts
   - Files: `src/backend/js/expressions.js`, `src/typechecker/const-fold.js`, `test/unit/language/constants.test.js`
   - Test: L187 package-level `var g float64 = 1<<53 + 1` → no warning (float context, see L188); `var g int = 1<<53 + 1` → warning text contains `main.go at line 3:`; L188 `var f float64 = 9007199254740993` → no warning.
   - Done when: warnings carry `line:col` and fire only for integer-typed contexts.

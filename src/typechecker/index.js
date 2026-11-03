@@ -107,6 +107,7 @@ export class TypeChecker {
 		this.universe = new Scope();
 		this.globals = new Scope(this.universe);
 		this.errors = [];
+		this._reportedAt = new WeakMap();
 		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
 		this.pkgName = null;
@@ -263,6 +264,14 @@ export class TypeChecker {
 	}
 
 	err(msg, node, hint = null) {
+		// One diagnostic per root cause: a node revisited by a later pass (a
+		// signature resolved at declaration and again in the body) reports once.
+		if (node && typeof node === "object") {
+			const seen = this._reportedAt.get(node) ?? new Set();
+			this._reportedAt.set(node, seen);
+			if (seen.has(msg)) return TAINTED_ANY;
+			seen.add(msg);
+		}
 		const e = new TypeCheckError(
 			msg,
 			node,
@@ -1393,7 +1402,7 @@ export class TypeChecker {
 		const isTuple =
 			!commaOk && valTypes.length === 1 && valTypes[0]?.kind === "tuple";
 		const flat = isTuple ? valTypes[0].types : valTypes;
-		if (spec.names.length !== flat.length)
+		if (spec.names.length !== flat.length && !flat.some((t) => t?._tainted))
 			this._reportAssignMismatch(spec.names.length, flat.length, isTuple, spec);
 		return flat;
 	}
