@@ -1353,3 +1353,34 @@ func main() {
 		"true [[3 4]]\n",
 	);
 });
+
+section("%T of generic instances");
+
+test("%T spells a generic instance with its type arguments", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Foo struct{ a int }
+type Box[T any] struct{ v T }
+type Pair[K comparable, V any] struct {
+	k K
+	v V
+}
+
+func main() {
+	fmt.Printf("%T\\n", Box[int]{})
+	fmt.Printf("%T\\n", Pair[string, int]{})
+	fmt.Printf("%T\\n", &Box[string]{})
+	fmt.Printf("%T\\n", []Box[int]{})
+	fmt.Printf("%T\\n", Box[Foo]{})
+	fmt.Printf("%T\\n", Box[*Foo]{})
+	fmt.Printf("%T\\n", Box[Pair[string, []int]]{})
+	fmt.Printf("%T\\n", Pair[Foo, map[string]Foo]{})
+	fmt.Printf("%v\\n", Box[Foo]{})
+}
+`,
+		"main.Box[int]\nmain.Pair[string,int]\n*main.Box[string]\n[]main.Box[int]\nmain.Box[main.Foo]\nmain.Box[*main.Foo]\nmain.Box[main.Pair[string,[]int]]\nmain.Pair[main.Foo,map[string]main.Foo]\n{{0}}\n",
+	);
+});
