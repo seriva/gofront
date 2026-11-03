@@ -60,7 +60,7 @@ export const binaryMethods = {
 		this.useHelper("binary");
 		this.useHelper("error");
 		const args = a();
-		if (fn === "Read") {
+		if (fn === "Read" || fn === "Write") {
 			const targetType = expr?.args?.[2]?._type;
 			const baseType = targetType?.base ?? targetType;
 			const resolved =
@@ -71,20 +71,7 @@ export const binaryMethods = {
 			const typeTag =
 				resolved?.name ??
 				(resolved?.kind === "basic" ? resolved.name : (baseType?.name ?? ""));
-			return `__binary_read(${args[0]}, ${args[1]}, ${args[2]}${sz > 0 ? `, ${sz}` : ", 0"}, "${typeTag}")`;
-		}
-		if (fn === "Write") {
-			const targetType = expr?.args?.[2]?._type;
-			const baseType = targetType?.base ?? targetType;
-			const resolved =
-				baseType?.kind === "named"
-					? (baseType.underlying ?? baseType)
-					: baseType;
-			const sz = sizeOfGoType(resolved);
-			const typeTag =
-				resolved?.name ??
-				(resolved?.kind === "basic" ? resolved.name : (baseType?.name ?? ""));
-			return `__binary_write(${args[0]}, ${args[1]}, ${args[2]}${sz > 0 ? `, ${sz}` : ", 0"}, "${typeTag}")`;
+			return `__binary_${fn.toLowerCase()}(${args[0]}, ${args[1]}, ${args[2]}${sz > 0 ? `, ${sz}` : ", 0"}, "${typeTag}")`;
 		}
 		if (fn === "Size") {
 			const sz = sizeOfGoType(expr?.args?.[0]?._type);

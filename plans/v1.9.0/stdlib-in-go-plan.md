@@ -174,6 +174,8 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 | `npm run bench`, `test/perf/zero-alloc.js`, `test/perf/bce-mathx.js` | `9e22f74` numbers | unchanged (±3%) after every phase |
 | JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | 14.3× (measured in Task 1.6) | ≤ 25× (Task 1.6) |
 
+*Final numbers (Task 13.2, Node 25.2.0, `test/perf/stdlib-bench.js`):* WASM `slices.Sort` of 200,000 `int` 32.0 ms; JS `slices.SortFunc` 68.9 ms and `sort.Slice` 65.5 ms against `Array.prototype.sort` with a comparator 88.4 ms (0.78× and 0.74×); WASM `strings.Index` on 1 MB × 20 156.4 ms (baseline 145 ms, 1.08×). `wc -l`: `src/backend/wasm/stdlib/` 5,823; `src/typechecker/stdlib/{core,extended}.js` 1,059; `src/backend/js/stdlib/` 2,395.
+
 ### 3. Edge Cases & Error Handling
 
 **Natives**
@@ -557,7 +559,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: the test fails first against a temporary Go file naming an unregistered native.
   - Done when: the test passes on the real tree.
 
-- [ ] **Task 13.2 — Delete leftover typings and shrink the registries**
+- [x] **Task 13.2 — Delete leftover typings and shrink the registries**
   - Files: `src/typechecker/types.js` (`STDLIB_PACKAGES`, `WASM_STDLIB_MEMBERS`, `WASM_SUPPORTED_STDLIB`), `src/backend/js/stdlib/index.js`, `src/backend/wasm/stdlib/index.js`
   - Removes: leftover migrated entries in `src/typechecker/stdlib/{core,extended}.js`
   - Do: keep only `fmt`, `encoding/json`, `regexp`, `os`, `testing`, `math`, `gom`, `gofront/shared`, `gofront/simd`, `crypto/rand`, browser typings and the emitter members in the Boundary Matrix; run `wc -l` and record the sizes and final benchmark numbers in [§2](#2-invariants--safety-bounds).

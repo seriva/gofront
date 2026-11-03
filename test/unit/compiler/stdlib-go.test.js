@@ -53,6 +53,31 @@ test("cmp has no hand-written checker entry", () => {
 	assert(!STDLIB_PACKAGES.has("cmp"), "cmp must come from stdlib");
 });
 
+test("migrated packages have no STDLIB_PACKAGES entry", () => {
+	for (const name of [
+		"bytes",
+		"cmp",
+		"crypto/sha256",
+		"encoding/base64",
+		"encoding/hex",
+		"hash",
+		"html",
+		"io",
+		"iter",
+		"maps",
+		"math/bits",
+		"math/rand",
+		"path",
+		"path/filepath",
+		"slices",
+		"sort",
+		"strconv",
+		"sync",
+		"unicode/utf8",
+	])
+		assert(!STDLIB_PACKAGES.has(name), `${name} must come from stdlib`);
+});
+
 test("js package imports cmp", async () => {
 	const res = await compileHybridProject({
 		"main.go": `package main
