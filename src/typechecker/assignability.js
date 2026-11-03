@@ -217,6 +217,19 @@ export const assignabilityMethods = {
 		}
 	},
 
+	// An untyped real constant flowing into a complex type becomes a complex
+	// value in codegen.
+	_tagComplexConst(target, source, valueNode) {
+		if (
+			valueNode &&
+			typeof valueNode === "object" &&
+			isComplex(target) &&
+			isUntyped(source) &&
+			!isComplex(source)
+		)
+			valueNode._asComplex = true;
+	},
+
 	// `operand` is the expression whose value flows in, when `node` (the
 	// position and codegen tag) is not that expression.
 	assertAssignable(target, source, node, ctx = "assignment", operand = node) {
@@ -225,6 +238,7 @@ export const assignabilityMethods = {
 		target = this.resolveType(target);
 		source = this.resolveType(source);
 		this._tag64BitNode(target, node);
+		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
 		if (this._assertAssignableEarlyReturn(target, source)) return;

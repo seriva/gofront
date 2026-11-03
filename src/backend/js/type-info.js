@@ -79,8 +79,20 @@ export const typeInfoGenMethods = {
 				return typeNodeMentions(node.targetType, names);
 			case "BinaryExpr":
 				return (
-					(node.op === "==" || node.op === "!=") &&
-					node.left._type?.kind === "typeParam"
+					((node.op === "==" || node.op === "!=") &&
+						node.left._type?.kind === "typeParam") ||
+					(node._type?.kind === "typeParam" && names.has(node._type.name))
+				);
+			case "AssignStmt":
+				return (
+					node.op !== "=" &&
+					node.lhs?.[0]?._type?.kind === "typeParam" &&
+					names.has(node.lhs[0]._type.name)
+				);
+			case "IncDecStmt":
+				return (
+					node.expr?._type?.kind === "typeParam" &&
+					names.has(node.expr._type.name)
 				);
 			case "CallExpr":
 				return this._callUsesTypeInfo(node);

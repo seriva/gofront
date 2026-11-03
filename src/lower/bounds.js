@@ -385,6 +385,159 @@ function paramNames(decl) {
 	return names;
 }
 
+// ── Nil-check elision ───────────────────────────────────────────
+//
+// A pointer parameter or receiver that is declared once and never assigned
+// or address-taken stays the same pointer for the whole function.  Strict mode
+// checks it for nil at a field access (`__nilcall`); marking later accesses
+// `_nonNil` drops the repeats, and a receiver of a method that never compares
+// itself to nil cannot be nil at all (a nil receiver fails at the call).
+
+function isPointerIdent(node, names) {
+	return (
+		isIdent(node) &&
+		names.has(node.name) &&
+		underlying(node._type)?.kind === "pointer"
+	);
+}
+
+function derefBase(node) {
+	if (node.kind === "SelectorExpr") return node.expr;
+	if (node.kind === "UnaryExpr" && node.op === "*") return node.operand;
+	return null;
+}
+
+// Names whose address is taken anywhere under `body`.
+function addressTakenNames(body) {
+	const taken = new Set();
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		if (node.kind === "UnaryExpr" && node.op === "&" && isIdent(node.operand))
+			taken.add(node.operand.name);
+		forEachChild(node, visit);
+	};
+	visit(body);
+	return taken;
+}
+
+function hasLabelOrGoto(body) {
+	let hit = false;
+	const visit = (node) => {
+		if (hit || !node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		if (
+			node.kind === "LabeledStmt" ||
+			(node.kind === "BranchStmt" && node.tok === "goto")
+		)
+			hit = true;
+		forEachChild(node, visit);
+	};
+	visit(body);
+	return hit;
+}
+
+// The children of `node` that run whenever `node` runs, or null when all do.
+function alwaysRunChildren(node) {
+	switch (node.kind) {
+		case "FuncLit":
+		case "DeferStmt":
+		case "GoStmt":
+			return [];
+		case "IfStmt":
+			return [node.init, node.cond];
+		case "ForStmt":
+			return [node.init];
+		case "SwitchStmt":
+		case "TypeSwitchStmt":
+			return [node.init, node.tag];
+		case "BinaryExpr":
+			return node.op === "&&" || node.op === "||" ? [node.left] : null;
+		default:
+			return null;
+	}
+}
+
+// Marks derefs of `names` under `root` that run whenever `root` runs and
+// follow the first one per name (`seen`) or are in `always`.
+function markRepeats(root, names, seen, always) {
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		const kids = alwaysRunChildren(node);
+		if (kids) {
+			for (const k of kids) visit(k);
+			return;
+		}
+		const base = derefBase(node);
+		if (base && isPointerIdent(base, names)) {
+			if (seen.has(base.name) || always.has(base.name)) node._nonNil = true;
+			else seen.add(base.name);
+		}
+		forEachChild(node, visit);
+	};
+	visit(root);
+}
+
+// Marks every deref of `names` under `root` (receivers that cannot be nil).
+function markAll(root, names) {
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		const base = derefBase(node);
+		if (base && isPointerIdent(base, names)) node._nonNil = true;
+		forEachChild(node, visit);
+	};
+	visit(root);
+}
+
+function markNilFunc(decl, nilSafeRecv) {
+	const body = decl.body;
+	const params = paramNames(decl);
+	const stats = nameStats(params, body);
+	const taken = addressTakenNames(body);
+	const stable = (n) =>
+		n && stats.declared.get(n) === 1 && !stats.assigned.has(n) && !taken.has(n);
+	const always = new Set();
+	if (decl.kind === "MethodDecl" && decl.recvPointer && !nilSafeRecv(decl))
+		if (stable(decl.recvName)) always.add(decl.recvName);
+	const candidates = new Set(
+		(decl.params ?? []).map((p) => p.name).filter(stable),
+	);
+	for (const n of always) candidates.add(n);
+	if (candidates.size === 0) return;
+	if (always.size > 0) markAll(body, always);
+	if (hasLabelOrGoto(body)) return;
+	const seen = new Set();
+	for (const stmt of body.stmts ?? [])
+		markRepeats(stmt, candidates, seen, always);
+}
+
+/**
+ * Marks pointer derefs that need no nil check in strict mode: those of a
+ * receiver that cannot be nil and repeats after the first unconditional
+ * deref of an unchanged pointer parameter.  `nilSafeRecv(decl)` tells
+ * whether a method accepts a nil receiver.
+ */
+export function markRedundantNilChecks(program, nilSafeRecv) {
+	for (const d of program?.decls ?? []) {
+		if ((d.kind === "FuncDecl" || d.kind === "MethodDecl") && d.body)
+			markNilFunc(d, nilSafeRecv);
+	}
+}
+
 /** Marks provably in-range IndexExprs `_inBounds` in every function. */
 export function markInBoundsIndexes(program) {
 	for (const d of program?.decls ?? []) {

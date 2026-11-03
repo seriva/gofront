@@ -563,6 +563,14 @@ function hasTypeParamType(t) {
 
 export const expressionGenMethods = {
 	genExpr(expr) {
+		if (expr._asComplex && !expr._complexWrapping) {
+			expr._complexWrapping = true;
+			try {
+				return `{ re: ${this.genExpr(expr)}, im: 0 }`;
+			} finally {
+				expr._complexWrapping = false;
+			}
+		}
 		if (expr._ifaceKeyDyn && !expr._ifaceKeying) {
 			// A key typed by a type parameter: encode it for the instantiated type.
 			const f = this._typeParamZeroFactory(expr._ifaceKeyParam);
@@ -1047,7 +1055,9 @@ export const expressionGenMethods = {
 		// Dereference: *p
 		if (op === "*") {
 			if (this._isStructPointerType(expr.operand._type)) {
-				return this._genNilChecked(this.genExpr(expr.operand));
+				return expr._nonNil
+					? this.genExpr(expr.operand)
+					: this._genNilChecked(this.genExpr(expr.operand));
 			}
 			if (expr.operand._type?.base?.kind === "typeParam") {
 				if (expr._derefOpTarget) return `${this.genExpr(expr.operand)}.value`;
@@ -1388,7 +1398,9 @@ export const expressionGenMethods = {
 		if (this._isStructPointerType(expr.expr._type)) {
 			// Strict mode: a field of a nil struct pointer panics as in Go.
 			const recv =
-				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
+				this.strict && !expr._isMethodValue && !expr._nonNil
+					? this._genNilChecked(base)
+					: base;
 			const sel = `${recv}${this._promotedPath(expr)}.${expr.field}`;
 			if (expr._isMethodValue && !expr._callee) {
 				// `p.M` with a value receiver binds a copy of `*p` now.
@@ -2516,7 +2528,7 @@ export const expressionGenMethods = {
 	// ── Helpers ───────────────────────────────────────────────────
 
 	_genComplexOperand(expr) {
-		if (isComplex(expr._type)) return this.genExpr(expr);
+		if (isComplex(expr._type) || expr._asComplex) return this.genExpr(expr);
 		return `{ re: ${this.genExpr(expr)}, im: 0 }`;
 	},
 
@@ -2929,10 +2941,13 @@ export const expressionGenMethods = {
 
 		if (this._is64BitInt(expr._type)) return this._gen64BitBinaryExpr(expr);
 
-		if (this.strict && this._needsStrictOp(expr.op, expr._type)) {
+		if (
+			(this.strict || this._isFloat32(expr._type)) &&
+			this._needsStrictOp(expr.op, expr._type)
+		) {
 			const l = this.genExpr(expr.left);
 			const r = this.genExpr(expr.right);
-			return this._genStrictBinary(expr.op, l, r, expr._type);
+			return this._genStrictBinary(expr.op, l, r, expr._type, expr.right._type);
 		}
 
 		return this._genStandardBinaryExpr(expr);
@@ -3310,6 +3325,15 @@ export const expressionGenMethods = {
 		return is64BitInt(t);
 	},
 
+	// float32 arithmetic rounds through Math.fround and arithmetic on a type
+	// parameter wraps for the instantiated type (`__tar`) in every package kind.
+	_isFloat32(t) {
+		return (
+			this._typeName(t) === "float32" ||
+			(t?.kind === "typeParam" && this._typeParamZeroFactory(t.name) != null)
+		);
+	},
+
 	_is64BitSigned(t) {
 		return is64BitSigned(t);
 	},
@@ -3338,6 +3362,10 @@ export const expressionGenMethods = {
 	},
 
 	_needsStrictOp(op, type) {
+		if (type?.kind === "typeParam")
+			return (
+				STRICT_OPS.has(op) && this._typeParamZeroFactory(type.name) != null
+			);
 		if (this._is64BitInt(type))
 			return STRICT_OPS.has(op) || op === "<<" || op === ">>" || op === "&^";
 		if (!STRICT_OPS.has(op)) return false;
@@ -3349,7 +3377,14 @@ export const expressionGenMethods = {
 
 	// Emits `lhs = strict(lhs op rhs)` for any lvalue shape; returns false when not applicable.
 	// Indexed / nested targets are split into object + key temps so sub-expressions run once.
-	_genStrictCompound(lhsNode, op, rhsJs, srcLine = null, lhsJs = null) {
+	_genStrictCompound(
+		lhsNode,
+		op,
+		rhsJs,
+		srcLine = null,
+		lhsJs = null,
+		countType = null,
+	) {
 		const type = lhsNode._type;
 		if (!this._needsStrictOp(op, type)) return false;
 		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
@@ -3357,7 +3392,7 @@ export const expressionGenMethods = {
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
 			this.line(
-				`${l} = ${this._genStrictBinary(op, l, rhsJs, type)};`,
+				`${l} = ${this._genStrictBinary(op, l, rhsJs, type, countType)};`,
 				srcLine,
 			);
 			return true;
@@ -3370,24 +3405,40 @@ export const expressionGenMethods = {
 			const k = `__k${this._tmpCounter}`;
 			const target = `${o}[${k}]`;
 			this.line(
-				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type)}; }`,
+				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType)}; }`,
 				srcLine,
 			);
 		} else {
 			const target = `${o}.${split.prop}`;
 			this.line(
-				`{ const ${o} = ${split.obj}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type)}; }`,
+				`{ const ${o} = ${split.obj}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType)}; }`,
 				srcLine,
 			);
 		}
 		return true;
 	},
 
-	_genStrictBinary(op, l, r, type) {
+	// A non-constant signed shift count on a narrow integer is checked for a
+	// negative value (Go panics); 64-bit counts arrive as BigInt.
+	_guardShiftCount(r, countType) {
+		if (!countType || countType.kind === "untyped") return r;
+		const name = this._typeName(countType);
+		if (!name || name.startsWith("u")) return r;
+		this.useHelper("shift");
+		return `__shc(${this._is64BitInt(countType) ? `Number(${r})` : r})`;
+	},
+
+	_genStrictBinary(op, l, r, type, countType = null) {
+		if (type?.kind === "typeParam") {
+			this.useHelper("generics");
+			return `__tar(${this._typeParamZeroFactory(type.name)}, "${op}", ${l}, ${r})`;
+		}
 		if (this._is64BitInt(type)) {
 			return this._gen64BitBinary(op, l, r, type);
 		}
 		const tName = this._typeName(type);
+		const isShift = op === "<<" || op === ">>";
+		const rc = isShift ? this._guardShiftCount(r, countType) : r;
 		if (tName === "float32") {
 			return `Math.fround(${l} ${op} ${r})`;
 		}
@@ -3407,7 +3458,7 @@ export const expressionGenMethods = {
 			if (op === "<<" || op === ">>") {
 				const ovf = signed && op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0";
 				const jsOp = !signed && op === ">>" ? ">>>" : op;
-				return `(((${r}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast})`;
+				return `(((${rc}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast})`;
 			}
 			if (op === "&^") return `(((${l}) & ~(${r})) ${cast})`;
 			return `((${l} ${op} ${r}) ${cast})`;
@@ -3420,7 +3471,7 @@ export const expressionGenMethods = {
 			if (op === "%")
 				return `((${r}) === 0 ? ${divZero} : (((((${l}) % (${r})) << ${sh}) >> ${sh})))`;
 			if (op === "<<" || op === ">>") {
-				return `((${r}) >= ${bits} ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << ${sh} >> ${sh}))`;
+				return `((${rc}) >= ${bits} ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << ${sh} >> ${sh}))`;
 			}
 			if (op === "&^") return `((((${l}) & ~(${r})) << ${sh}) >> ${sh})`;
 			return `((((${l} ${op} ${r})) << ${sh}) >> ${sh})`;
@@ -3434,7 +3485,7 @@ export const expressionGenMethods = {
 				return `((${r}) === 0 ? ${divZero} : (((${l}) % (${r})) & ${mask}))`;
 			if (op === "<<" || op === ">>") {
 				const jsOp = op === ">>" ? ">>>" : "<<";
-				return `((${r}) >= ${bits} ? 0 : (((${l}) ${jsOp} (${r})) & ${mask}))`;
+				return `((${rc}) >= ${bits} ? 0 : (((${l}) ${jsOp} (${r})) & ${mask}))`;
 			}
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;

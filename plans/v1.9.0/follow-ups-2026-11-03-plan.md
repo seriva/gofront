@@ -312,23 +312,23 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 8: JS Numeric Semantics and Strict Checks
 
-- [ ] Task 8.1: Negative shift counts on narrow integers panic
+- [x] Task 8.1: Negative shift counts on narrow integers panic
   - Files: `src/backend/js/expressions.js`, `test/unit/builtins/operators.test.js`
   - Test: L33 `var x int32 = 5; x << n` (`n := -1`) → recovered `runtime error: negative shift amount` for `int32`, `int16`, `int8`, `uint8`.
   - Done when: all four widths panic on js/both.
-- [ ] Task 8.2: Generic arithmetic wraps and truncates for the instantiated integer type
+- [x] Task 8.2: Generic arithmetic wraps and truncates for the instantiated integer type
   - Files: `src/backend/js/expressions.js`, `test/unit/types/generics.test.js`
   - Test: L46a `Half[int](9)`, `Wrap[uint8](255)` → `4 0`; L93 `Gen(uint8(0))` → `255`. Builds on the per-`T` metadata stdlib-in-go added.
   - Done when: repros match Go on js/both; non-integer `T` unchanged.
-- [ ] Task 8.3: `float32` arithmetic rounds in `js` packages
+- [x] Task 8.3: `float32` arithmetic rounds in `js` packages
   - Files: `src/backend/js/expressions.js`, `test/unit/builtins/operators.test.js`
   - Test: L75 `float32(1)/3` → `0.33333334` in a `js` package.
   - Done when: repro matches Go on js (both pinned).
-- [ ] Task 8.4: Untyped constants in complex context
+- [x] Task 8.4: Untyped constants in complex context
   - Files: `src/backend/js/expressions.js`, `test/unit/types/complex.test.js`
   - Test: L99 `return 1` from `complex128` func → `(1+0i)`; `var c complex128 = 5; c = 7; c == 7; c*2` → `(7+0i) true (14+0i)`.
   - Done when: repro matches Go on js/both.
-- [ ] Task 8.5: Elide redundant strict nil checks
+- [x] Task 8.5: Elide redundant strict nil checks
   - Files: `src/backend/js/expressions.js`, `src/lower/bounds.js`, `test/unit/compiler/strict-mode.test.js`
   - Test: L170 `TransformMat4` in a `both` package → emitted JS contains no `__nilcall(out)` (receiver alias of `this`) and at most one `__nilcall(a)`; a nil `a` still panics with Go's message.
   - Done when: counts hold; strict-panics tests stay green.
