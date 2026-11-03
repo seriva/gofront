@@ -242,6 +242,13 @@ export const resolveMethods = {
 				return this._resolveStructType(node, scope);
 			case "InterfaceType":
 				return this._resolveInterfaceType(node, scope);
+			case "UnaryExpr":
+				// `new(*T)`: the parser reads the pointer type as a dereference.
+				if (node.op !== "*") return ANY;
+				return {
+					kind: "pointer",
+					base: this.resolveTypeNode(node.operand, scope),
+				};
 			case "Ident":
 				return this.resolveTypeNode(
 					{ kind: "TypeName", name: node.name },

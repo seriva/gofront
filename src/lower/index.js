@@ -18,7 +18,7 @@ import { computeEmbeddedStubs } from "./embedding.js";
 import { paramEscapes } from "./escape.js";
 import { extractNamedReturns, hasDefer, normalizeDefers } from "./functions.js";
 import { computeGlobalAnalysis } from "./globals.js";
-import { OwnershipContext } from "./ownership.js";
+import { OwnershipContext, takesElementAddress } from "./ownership.js";
 
 class LowerResult {
 	constructor() {
@@ -40,6 +40,8 @@ class LowerResult {
 		this.initPathFunctions = new Set();
 		// Map<ASTNode, Array<string>>
 		this.cachedGlobalsByFunc = new Map();
+		// True when some code takes `&xs[i]` (see takesElementAddress)
+		this.elemAddrTaken = false;
 	}
 }
 
@@ -80,6 +82,8 @@ export function lower(programOrPrograms, checker = null) {
 		: [programOrPrograms];
 
 	normalizeDefers(programs);
+
+	res.elemAddrTaken = programs.some((p) => takesElementAddress(p?.decls));
 
 	// 1. Aggregate methods across all files in the package
 	const methodMap = new Map();

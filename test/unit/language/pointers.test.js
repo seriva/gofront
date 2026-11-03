@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
@@ -673,6 +674,109 @@ func main() {
 	fmt.Println(ok1, ok2, ok3)
 }`),
 		"true true true",
+	);
+});
+
+// ── Element pointers survive whole-element stores ──
+
+section("Element pointers and whole-element stores");
+
+test("a pointer into a slice from a callee sees a later element store", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func first(xs []S) *S { return &xs[0] }
+
+func main() {
+	ys := []S{{1}, {2}}
+	q := first(ys)
+	ys[0] = S{9}
+	fmt.Println(q.A)
+}
+`,
+		"9\n",
+	);
+});
+
+test("a tuple assignment into slice elements keeps element pointers", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func main() {
+	xs := []S{{1}, {2}}
+	p := &xs[0]
+	xs[1], xs[0] = S{4}, S{3}
+	fmt.Println(p.A, xs)
+	xs[0], xs[1] = xs[1], xs[0]
+	fmt.Println(p.A, xs)
+}
+`,
+		"3 [{3} {4}]\n4 [{4} {3}]\n",
+	);
+});
+
+test("an element pointer survives a reslice, append and indexed store", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func idx() int { return 0 }
+
+func main() {
+	xs := []S{{1}, {2}, {3}}
+	p := &xs[0]
+	xs = xs[:1]
+	xs = append(xs, S{5})
+	xs[idx()] = S{7}
+	fmt.Println(p.A, xs)
+	var arr [3]S
+	q := &arr[0]
+	arr[idx()] = S{6}
+	fmt.Println(q.A)
+	ys := make([]S, 2)
+	r := &ys[1]
+	ys[idx()+1] = S{8}
+	fmt.Println(r.A)
+}
+`,
+		"7 [{7} {5}]\n6\n8\n",
+	);
+});
+
+test("storing into a slice element beyond the length of a grown slice", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct {
+	A int
+	B [2]int
+}
+
+func main() {
+	xs := make([]S, 0, 4)
+	xs = xs[:2]
+	xs[0] = S{A: 1}
+	ys := xs[:4]
+	ys[3] = S{A: 4, B: [2]int{1, 2}}
+	grid := make([][2]int, 2)
+	grid[1] = [2]int{5, 6}
+	fmt.Println(xs, ys, grid)
+}
+`,
+		"[{1 [0 0]} {0 [0 0]}] [{1 [0 0]} {0 [0 0]} {0 [0 0]} {4 [1 2]}] [[0 0] [5 6]]\n",
 	);
 });
 

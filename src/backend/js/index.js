@@ -25,6 +25,7 @@ import {
 	markRedundantNilChecks,
 	normalizeDefers,
 	scanAddressTaken,
+	takesElementAddress,
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
@@ -330,6 +331,7 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
+		this._elemAddrTaken = takesElementAddress(program.decls);
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);

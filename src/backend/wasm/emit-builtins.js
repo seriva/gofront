@@ -2,6 +2,7 @@
 // FunctionEmitter mixin: panic/recover, Go builtins (len, append, make, …) and
 // call expression dispatch (static, method, closure, package).
 
+import { hasCallOrReceive } from "../../lower/walk.js";
 import {
 	anonIfaceName,
 	getMapKeyValTypes,
@@ -98,6 +99,14 @@ export class BuiltinsEmitter {
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
+		// `len` of an array (or a pointer to one) is a constant, and the
+		// operand is not evaluated unless it contains a call or a receive.
+		if (call._constLen != null && !hasCallOrReceive(arg)) {
+			this.pushInstruction({ op: "i32.const", value: call._constLen });
+			if ((targetWasmType ?? "i64") === "i64")
+				this.pushInstruction("i64.extend_i32_u");
+			return;
+		}
 		if (this._sharedInfo(argType)) {
 			this.emitSharedLen(arg, targetWasmType);
 			return;
@@ -318,11 +327,9 @@ export class BuiltinsEmitter {
 					typeIndex: arrInfo.typeIndex,
 				});
 			} else {
-				this.pushInstruction({ op: "local.get", index: capTmp });
-				this.pushInstruction({
-					op: "array.new_default",
-					typeIndex: arrInfo.typeIndex,
-				});
+				this._emitNewArray(elemGoType, arrInfo, () =>
+					this.pushInstruction({ op: "local.get", index: capTmp }),
+				);
 				this.pushInstruction({ op: "i32.const", value: 0 });
 				this.pushInstruction({ op: "local.get", index: lenTmp });
 				this.pushInstruction({ op: "local.get", index: capTmp });
@@ -421,11 +428,9 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "local.set", index: newCapTmp });
 		this.pushInstruction("end");
 
-		this.pushInstruction({ op: "local.get", index: newCapTmp });
-		this.pushInstruction({
-			op: "array.new_default",
-			typeIndex: arrInfo.typeIndex,
-		});
+		this._emitNewArray(elemGoType, arrInfo, () =>
+			this.pushInstruction({ op: "local.get", index: newCapTmp }),
+		);
 		this.pushInstruction({ op: "local.set", index: newArrTmp });
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: newOffTmp });
