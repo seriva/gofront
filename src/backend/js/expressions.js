@@ -464,6 +464,8 @@ const BUILTIN_GEN = {
 		return `__recover(${s._recoverOkInScope ? "__recoverOk" : "false"})`;
 	},
 	error: (s, e) => {
+		// `error(x)` of an error (or nil) is the conversion: x itself.
+		if (!s._isStringExprType(e.args[0]?._type)) return s.genExpr(e.args[0]);
 		s.useHelper("error");
 		return `__error(${s.genExpr(e.args[0])})`;
 	},
@@ -606,11 +608,12 @@ export const expressionGenMethods = {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
-				return this._ifaceBoxWrap(
+				const boxed = this._ifaceBoxWrap(
 					this.genExpr(expr),
 					expr._ifaceBox,
 					expr._ifacePtrFields,
 				);
+				return this._typedNilWrap(boxed, expr);
 			} finally {
 				expr._ifaceBoxing = false;
 			}
@@ -714,6 +717,18 @@ export const expressionGenMethods = {
 			}[box] ?? "__ifv";
 		const extra = ptrFields?.length ? `, ${JSON.stringify(ptrFields)}` : "";
 		return `${fn}(${js}${extra})`;
+	},
+
+	// A nil `*T` entering an interface is a typed nil: it keeps T's methods
+	// (callable with a nil receiver) and differs from the nil interface.
+	_typedNilWrap(js, expr) {
+		if (expr._ifaceBox !== "ptr") return js;
+		const src = expr._ifaceSrc;
+		const base = src?.kind === "pointer" ? src.base : null;
+		if (base?.kind !== "named" || base.underlying?.kind !== "struct") return js;
+		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
+		if (!this.structNames.has(cls)) return js;
+		return `__ifn(${js}, ${cls})`;
 	},
 
 	// `js` tagged with the fmt descriptor source `desc` (see _fmtDesc).
@@ -1081,6 +1096,15 @@ export const expressionGenMethods = {
 		if (expr._isMethodExpr) {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
+			const rt = expr._methodExprRecv;
+			const nilSafe =
+				rt?.kind === "pointer" &&
+				rt.base?.kind === "named" &&
+				!rt.base.typeArgs?.length
+					? rt.base.name
+					: null;
+			if (nilSafe && this.nilSafeMethods?.has(`${nilSafe}.${expr.field}`))
+				return `((recv, ...args) => ${nilSafe}.prototype.${expr.field}.call(recv, ...args))`;
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
@@ -1375,6 +1399,8 @@ export const expressionGenMethods = {
 					);
 					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
 				}
+				const nilSafe = this._nilSafeMethodClass(expr);
+				if (nilSafe) return `${nilSafe}.prototype.${expr.field}.bind(${base})`;
 				return `${sel}.bind(${base})`;
 			}
 			return sel;
@@ -1438,8 +1464,8 @@ export const expressionGenMethods = {
 	_genMapIndexExpr(expr, base, idx) {
 		const zero = this.zeroValueForType(expr._mapValueType);
 		if (this._hasCallExpr(expr.expr) || this._hasCallExpr(expr.index))
-			return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
-		return `(${base}[${idx}] ?? ${zero})`;
+			return `((__m, __k) => __m?.[__k] ?? ${zero})(${base}, ${idx})`;
+		return `(${base}?.[${idx}] ?? ${zero})`;
 	},
 
 	_isStringExprType(exprType) {
@@ -1613,11 +1639,28 @@ export const expressionGenMethods = {
 	// for a type parameter).
 	_assertedValueJs(typeNode, val) {
 		if (this._isNamedBoxTypeNode(typeNode)) return `${val}.__gfUnbox()`;
+		if (this._isStructPtrTypeNode(typeNode)) {
+			this.useHelper("ifaceBox");
+			return `__unnil(${val})`;
+		}
 		const factory =
 			typeNode?.kind === "TypeName"
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
 		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+	},
+
+	_isStructPtrTypeNode(typeNode) {
+		const base = typeNode?.kind === "PointerType" ? typeNode.base : null;
+		const name =
+			base?.kind === "TypeName"
+				? base.name
+				: base?.kind === "GenericTypeName"
+					? this._dequalify(base.name)
+					: null;
+		return (
+			name !== null && this.structNames.has(this._qualifiedStructName(name))
+		);
 	},
 
 	_isNamedBoxTypeNode(typeNode) {
@@ -1937,7 +1980,7 @@ export const expressionGenMethods = {
 		const wrapField = this._namedWrapperField(t, arg);
 		if (wrapField) return `${this.genExpr(arg)}.${wrapField}.length`;
 		const js = this.genExpr(arg);
-		if (t?.kind === "map") return `Object.keys(${js}).length`;
+		if (t?.kind === "map") return `Object.keys(${js} ?? {}).length`;
 		this.useHelper("len");
 		return `__len(${js})`;
 	},
@@ -2021,7 +2064,7 @@ export const expressionGenMethods = {
 				)
 			: null;
 		if (typedCtor)
-			return `__append((${slice}) ?? new ${typedCtor}(0), ${elems.join(", ")})`;
+			return `__append((${slice}) ?? __tn(${typedCtor}), ${elems.join(", ")})`;
 		return `__append(${slice}, ${elems.join(", ")})`;
 	},
 
@@ -3128,6 +3171,7 @@ export const expressionGenMethods = {
 		if (target === "error") {
 			// A boxed named value that implements error is already an error.
 			if (this._isNamedBoxKind(expr.expr)) return inner;
+			if (!this._isStringExprType(expr.expr._type)) return inner;
 			this.useHelper("error");
 			return `__error(${inner})`;
 		}

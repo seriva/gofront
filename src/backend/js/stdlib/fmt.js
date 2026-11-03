@@ -48,6 +48,7 @@ export const fmtMethods = {
 	//                    Error/String; Class boxes it, n: numeric (map keys)
 	//   { sv: 1 }        a struct value with a pointer-receiver Error/String
 	//   { e }            elements of a slice or array
+	//   { s: 1 }         a slice that is an element or field: nil prints `[]`
 	//   { k, v }         keys and values of a map
 	//   { np: obj }      a *T whose Error/String has a pointer receiver: obj
 	//                    stands in for a nil element (see _fmtNilPtrOperand)
@@ -62,7 +63,11 @@ export const fmtMethods = {
 		if (t.kind === "named") return this._fmtNamedDesc(t, next, bare);
 		if (t.kind === "slice" || t.kind === "array") {
 			const e = this._fmtDesc(t.elem, next, false);
-			return e ? `{ e: ${e} }` : null;
+			// A nil slice that is not the operand itself (an element or a
+			// struct field) is `null`; `s` tells fmt to print it as `[]`.
+			const nil = t.kind === "slice" && !bare ? "s: 1" : null;
+			const parts = [nil, e ? `e: ${e}` : null].filter(Boolean);
+			return parts.length ? `{ ${parts.join(", ")} }` : null;
 		}
 		if (t.kind === "struct") return this._fmtAnonStructDesc(t, next);
 		if (t.kind === "pointer") {
