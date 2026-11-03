@@ -7,6 +7,7 @@
 // (e.g. Identity$int, Box$int, Stack$int.Push) and re-typechecks the monomorphised AST.
 
 import { TypeChecker } from "../../typechecker/index.js";
+import { goTypeName } from "../shared/fmt-types.js";
 
 /**
  * Returns true if the AST contains any generic declarations.
@@ -678,6 +679,7 @@ export function monomorphise(programs, checker) {
 		}
 	}
 
+	const typeInstances = new Map();
 	const specializedFuncs = new Map();
 	const specializedTypes = new Map();
 	const specializedMethods = new Map();
@@ -705,6 +707,7 @@ export function monomorphise(programs, checker) {
 				typeSubstMap.set(tp.name, typeToTypeNode(concrete));
 			}
 
+			typeInstances.set(item.specializedName, item);
 			const monoTypeDecl = cloneAst(genDecl);
 			monoTypeDecl.name = item.specializedName;
 			monoTypeDecl.typeParams = null;
@@ -841,6 +844,23 @@ export function monomorphise(programs, checker) {
 	// One pass over all programs: declarations of every linked package are
 	// visible to the others (cross-package references are dequalified).
 	monoChecker.checkAll(progs);
+	nameInstances(monoChecker, typeInstances);
 
 	return { programs: progs, checker: monoChecker };
+}
+
+// Records Go's spelling of each generic instance (`Box[int]`) on its
+// monomorphised type, which is named `Box$int`; `%T` prints the spelling.
+function nameInstances(checker, instances) {
+	const spelling = {
+		has: (name) => instances.has(name),
+		get: (name) => {
+			const { genericName, typeArgs } = instances.get(name);
+			return `${genericName}[${typeArgs.map((a) => goTypeName(a, spelling)).join(",")}]`;
+		},
+	};
+	for (const name of instances.keys()) {
+		const type = checker.types.get(name);
+		if (type) type._goName = spelling.get(name);
+	}
 }
