@@ -71,6 +71,30 @@ function typeSize(t) {
 	}
 }
 
+// Whether `t` mentions one of the type parameters `params` below its root.
+function nestsTypeParam(t, params) {
+	const mentions = (u) => {
+		switch (u?.kind) {
+			case "typeParam":
+				return params.includes(u);
+			case "pointer":
+				return mentions(u.base);
+			case "slice":
+			case "array":
+				return mentions(u.elem);
+			case "map":
+				return mentions(u.key) || mentions(u.value);
+			case "func":
+				return [...(u.params ?? []), ...(u.returns ?? [])].some(mentions);
+			case "named":
+				return (u.typeArgs ?? []).some(mentions);
+			default:
+				return false;
+		}
+	};
+	return t?.kind !== "typeParam" && mentions(t);
+}
+
 function instanceKey(t) {
 	switch (t?.kind) {
 		case "named":
@@ -503,8 +527,15 @@ export const resolveMethods = {
 		// settles (`T[X]` containing `T[[]X]`), and doubling forms such as
 		// `T[Pair[X, X]]` blow up long before a depth limit is reached.
 		const top = generic._buildSizes[generic._buildSizes.length - 1];
+		// Inside a method of `G[T]`, `G[[]T]` makes every instance ask for a
+		// larger one, even if the method is never called.
+		const growsReceiver =
+			this._recvGeneric === generic &&
+			typeArgs.some((a) => nestsTypeParam(a, generic.typeParams));
 		if (
+			growsReceiver ||
 			building.length >= MAX_INSTANTIATION_DEPTH ||
+			(generic._syncDepth ?? 0) >= MAX_INSTANTIATION_DEPTH ||
 			(top !== undefined && size > top)
 		) {
 			if (!generic._cycleReported) {
@@ -559,13 +590,20 @@ export const resolveMethods = {
 		const methods = named.methods;
 		if (!methods || !named._instMap || named._syncing) return;
 		// A method signature that names the instance reaches this again.
+		// `func (s Stack[T]) Wrap() Stack[[]T]` makes every instance's methods
+		// ask for a larger instance: count the nesting to diagnose it.
 		named._syncing = true;
-		for (const [mName, mType] of generic.methods ?? [])
-			if (!methods.has(mName))
-				methods.set(mName, this.substituteType(mType, named._instMap));
-		// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
-		this._promoteEmbeddedInto(named.underlying);
-		named._syncing = false;
+		generic._syncDepth = (generic._syncDepth ?? 0) + 1;
+		try {
+			for (const [mName, mType] of generic.methods ?? [])
+				if (!methods.has(mName))
+					methods.set(mName, this.substituteType(mType, named._instMap));
+			// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
+			this._promoteEmbeddedInto(named.underlying);
+		} finally {
+			generic._syncDepth--;
+			named._syncing = false;
+		}
 	},
 
 	// A[X] for `type A[P any] = T`: resolve T with each P bound to the
@@ -658,6 +696,8 @@ export const resolveMethods = {
 	_inferFromStructuredPair(paramType, argType, map) {
 		if (paramType.kind === "slice" && argType.kind === "slice")
 			this._inferFromPair(paramType.elem, argType.elem, map);
+		if (paramType.kind === "pointer" && argType.kind === "pointer")
+			this._inferFromPair(paramType.base, argType.base, map);
 		if (paramType.kind === "map" && argType.kind === "map") {
 			this._inferFromPair(paramType.key, argType.key, map);
 			this._inferFromPair(paramType.value, argType.value, map);

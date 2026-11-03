@@ -1251,33 +1251,52 @@ export class BuiltinsEmitter {
 		return false;
 	}
 
+	// The embedded struct (possibly several levels down) that declares or
+	// forwards `method`: the chain of embeds to follow and the method's name.
+	_findEmbeddedMethod(structInfo, method, seen = new Set()) {
+		if (seen.has(structInfo)) return null;
+		seen.add(structInfo);
+		for (const embed of structInfo.embeds ?? []) {
+			const typeName = embed.typeName ?? embed.name;
+			const methodName = `${typeName}.${method}`;
+			if (this.mod.resolveFuncIndex(methodName) !== null)
+				return { chain: [{ structInfo, embed }], methodName };
+			const inner = this.mod.getStructType(typeName);
+			const deeper = inner && this._findEmbeddedMethod(inner, method, seen);
+			if (deeper)
+				return {
+					chain: [{ structInfo, embed }, ...deeper.chain],
+					methodName: deeper.methodName,
+				};
+		}
+		return null;
+	}
+
 	_emitEmbeddedMethodCall(recvTypeName, func, args, recvType) {
 		const structInfo = this.mod.getStructType(recvTypeName);
 		if (!structInfo) return false;
-		for (const embed of structInfo.embeds) {
-			const embedMethodName = `${embed.typeName ?? embed.name}.${func.field}`;
-			const subIdx = this.mod.resolveFuncIndex(embedMethodName);
-			if (subIdx !== null) {
-				const targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
-				const baseWType = this.toWasmType(recvType);
-				this.emitExpr(func.expr, baseWType);
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: structInfo.typeIndex,
-					fieldIndex: embed.fieldIndex,
-				});
-				for (let i = 0; i < args.length; i++) {
-					const pType = targetParamTypes[i + 1] ?? null;
-					this.emitExpr(args[i], pType);
-				}
-				this.pushInstruction({
-					op: "call",
-					funcIndex: subIdx,
-				});
-				return true;
-			}
+		const found = this._findEmbeddedMethod(structInfo, func.field);
+		if (!found) return false;
+		const { chain, methodName } = found;
+		const subIdx = this.mod.resolveFuncIndex(methodName);
+		const targetParamTypes = this.mod.getFuncParamTypes(methodName);
+		this.emitExpr(func.expr, this.toWasmType(recvType));
+		for (const { structInfo: owner, embed } of chain) {
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: owner.typeIndex,
+				fieldIndex: embed.fieldIndex,
+			});
 		}
-		return false;
+		for (let i = 0; i < args.length; i++) {
+			const pType = targetParamTypes[i + 1] ?? null;
+			this.emitExpr(args[i], pType);
+		}
+		this.pushInstruction({
+			op: "call",
+			funcIndex: subIdx,
+		});
+		return true;
 	}
 
 	_emitStaticCall(call) {
