@@ -61,6 +61,15 @@ export class StmtsEmitter {
 			const names = spec.names ?? (spec.name ? [spec.name] : []);
 			const values = spec.value ?? (spec.init ? [spec.init] : []);
 
+			// `var a, b = f()` / `var v, ok = m[k]` bind like `a, b := ...`.
+			if (names.length > 1 && values.length === 1) {
+				this.emitDefineStmt({
+					lhs: names.map((name) => ({ kind: "Ident", name })),
+					rhs: values,
+				});
+				continue;
+			}
+
 			for (let i = 0; i < names.length; i++) {
 				const name = names[i];
 				const rawType = spec.type ?? values[i]?._type;

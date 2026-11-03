@@ -21,6 +21,7 @@ import { setupGlobals } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
+	BOOL,
 	defaultType,
 	ERROR,
 	INTRINSICS,
@@ -838,6 +839,9 @@ export class TypeChecker {
 			this.globals.define(decl.name, named);
 			return;
 		}
+		// A type declared inside a function is registered before its fields
+		// resolve so `next *L` finds it; package-level types already are.
+		this._registerLocalTypePlaceholder(decl);
 		let underlying = this.resolveTypeNode(decl.type, this.globals);
 		// `type W V` with V a named array: W's underlying type is V's array.
 		if (!decl.isAlias && underlying.kind === "named") {
@@ -871,6 +875,13 @@ export class TypeChecker {
 		}
 		this.types.set(decl.name, named);
 		this.globals.define(decl.name, named);
+	}
+
+	_registerLocalTypePlaceholder(decl) {
+		if (decl.isAlias || this.types.has(decl.name)) return;
+		const placeholder = { kind: "named", name: decl.name, underlying: null };
+		this.types.set(decl.name, placeholder);
+		this.globals.define(decl.name, placeholder);
 	}
 
 	// type A[P any] = T[P] — Go 1.24 generic alias. The declaration is a
@@ -1346,21 +1357,7 @@ export class TypeChecker {
 		for (const spec of decl.decls) {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
 			if (spec.value) {
-				const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
-				const isTuple = valTypes.length === 1 && valTypes[0]?.kind === "tuple";
-				const valTypesFlat = isTuple ? valTypes[0].types : valTypes;
-				if (spec.names.length !== valTypesFlat.length) {
-					const vars =
-						spec.names.length === 1
-							? "1 variable"
-							: `${spec.names.length} variables`;
-					const vals = isTuple
-						? `returns ${valTypesFlat.length} values`
-						: valTypesFlat.length === 1
-							? "1 value"
-							: `${valTypesFlat.length} values`;
-					this.err(`assignment mismatch: ${vars} but ${vals}`, spec);
-				}
+				const valTypesFlat = this._varSpecValueTypes(spec, scope);
 				for (let i = 0; i < spec.names.length; i++) {
 					const vt = valTypesFlat[i] ?? ANY;
 					const varType = type ?? defaultType(vt) ?? ANY;
@@ -1381,6 +1378,45 @@ export class TypeChecker {
 			}
 		}
 		this._sharedAllocOk = savedSharedAlloc;
+	}
+
+	// The type of each value a `var` spec binds (a multi-value call or a
+	// comma-ok form spreads over several names); reports a count mismatch.
+	_varSpecValueTypes(spec, scope) {
+		const commaOk = this._checkVarCommaOk(spec, scope);
+		const valTypes = commaOk ?? spec.value.map((v) => this.checkExpr(v, scope));
+		const isTuple =
+			!commaOk && valTypes.length === 1 && valTypes[0]?.kind === "tuple";
+		const flat = isTuple ? valTypes[0].types : valTypes;
+		if (spec.names.length !== flat.length)
+			this._reportAssignMismatch(spec.names.length, flat.length, isTuple, spec);
+		return flat;
+	}
+
+	_reportAssignMismatch(nameCount, valueCount, isTuple, node) {
+		const vars = nameCount === 1 ? "1 variable" : `${nameCount} variables`;
+		const vals = isTuple
+			? `returns ${valueCount} values`
+			: valueCount === 1
+				? "1 value"
+				: `${valueCount} values`;
+		this.err(`assignment mismatch: ${vars} but ${vals}`, node);
+	}
+
+	// `var v, ok = m[k]` / `var v, ok = x.(T)`: the comma-ok forms yield the
+	// value and a bool. Returns their types, or null for any other spec.
+	_checkVarCommaOk(spec, scope) {
+		if (spec.names.length !== 2 || spec.value.length !== 1) return null;
+		const value = spec.value[0];
+		if (value.kind === "TypeAssertExpr") {
+			value._commaOk = true;
+			spec._commaOk = true;
+			return [this.checkExpr(value, scope), BOOL];
+		}
+		const stmt = { lhs: spec.names, rhs: spec.value };
+		const types = this._checkAssignCommaOkMap(stmt, scope);
+		if (types) spec._commaOk = true;
+		return types;
 	}
 
 	checkConstDecl(decl, scope) {

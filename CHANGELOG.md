@@ -14,7 +14,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
 
 ### Fixed
-- **Valid Go that failed to parse now compiles**: float literals such as `1.`, imaginary literals such as `.5i`, the `&^=` assignment, func types with generic parameters such as `func(Stack[int]) int`, conversions like `[]int(nil) == nil` or `append(b, []byte("bc")...)` as call arguments, and `m[k.(int)]` now compile and behave like Go on every target, and `case func():` in a type switch now parses.
+- **Valid Go that failed to compile now works**: float literals such as `1.`, the `&^=` assignment, conversions like `[]int(nil) == nil` or `(*T)(nil)`, `NS(nil)` on a named slice, named results in function literals, `var v, ok = m[k]`, types that refer to themselves inside a function, and a `switch` that falls through into a returning case now compile and behave like Go. Func types with generic parameters and `case func():` in a type switch now parse as well.
 
 ### Changed
 - **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
