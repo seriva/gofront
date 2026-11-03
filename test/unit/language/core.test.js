@@ -717,6 +717,57 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 
+// Runs `src` as a `js` package and as the JS half of a `both` package.
+function runJsAndBoth(src) {
+	const outs = [];
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.map((e) => e.message).join("\n"), "");
+		outs.push(runJs(js));
+	}
+	assertEqual(outs[0], outs[1], "js and both disagree");
+	return outs[0];
+}
+
+section("Nil conversions produce nil values");
+
+test("error(nil) is the nil error", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func main() {
+	fmt.Println(error(nil) == nil)
+	fmt.Println(error(nil))
+}`),
+		"true\n<nil>",
+	);
+});
+
+test("error(x) of an error value is that error", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import ("errors"; "fmt")
+func main() {
+	e := errors.New("x")
+	f := error(e)
+	fmt.Println(f == e, f)
+}`),
+		"true x",
+	);
+});
+
+test("a nil map converted from nil reads as empty", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func main() {
+	m := map[string]int(nil)
+	fmt.Println(m["a"], m == nil, len(m))
+}`),
+		"0 true 0",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

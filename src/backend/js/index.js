@@ -929,7 +929,18 @@ export class CodeGen {
 				`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
 			);
 		}
+		this._genValueMethodMeta(name, methodDecls);
 		this._genFmtClassMeta(name, methodDecls);
+	}
+
+	// Names of the value-receiver methods: a typed nil pointer in an interface
+	// panics when one is called (see __mknil).
+	_genValueMethodMeta(name, methodDecls) {
+		const vm = methodDecls.filter((m) => !m.recvPointer).map((m) => m.name);
+		if (vm.length === 0) return;
+		this.line(
+			`Object.defineProperty(${name}, "__vm", { value: ${JSON.stringify(vm)} });`,
+		);
 	}
 
 	_emitJsonCodecs() {

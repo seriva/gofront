@@ -293,19 +293,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 7: JS Nil Semantics
 
-- [ ] Task 7.1: Nil pointer receivers through interfaces, method values and expressions
+- [x] Task 7.1: Nil pointer receivers through interfaces, method values and expressions
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/language/pointers.test.js`
   - Test: L25 → `0 0 0`; L103 → `true e`; L132 → `-1`; L137 value method on nil `*S` via interface → recovered `invalid memory address or nil pointer dereference` (js and both; wasm half is Task 13.3).
   - Done when: four repros match Go on js/both.
-- [ ] Task 7.2: Nil dereference panics instead of TypeErrors
+- [x] Task 7.2: Nil dereference panics instead of TypeErrors
   - Files: `src/backend/js/expressions.js`, `src/backend/js/statements.js`, `test/unit/compiler/strict-panics.test.js`
   - Test: L26 (`js` target), L32a, L32b, L123a, L123b, L123c → recovered `runtime error: invalid memory address or nil pointer dereference` on js/both.
   - Done when: all six recover Go's message on js/both.
-- [ ] Task 7.3: Nil conversions produce nil values
+- [x] Task 7.3: Nil conversions produce nil values
   - Files: `src/backend/js/expressions.js`, `test/unit/language/core.test.js`
   - Test: L30a `error(nil) == nil` → `true`; L65 `Println(error(nil))` → `<nil>`; L30b `map[string]int(nil)` → `0 true`.
   - Done when: three repros match Go on js/both.
-- [ ] Task 7.4: Nil slices stay nil through `make` elements, struct zeroes and `append`
+- [x] Task 7.4: Nil slices stay nil through `make` elements, struct zeroes and `append`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/language/value-semantics.test.js`
   - Test: L30c `make([][]int, 2)` → `[[] []]`; L66 `A{}` → `{[]}`; L34 → `true`; L100 → `true true`.
   - Done when: four repros match Go on js/both.
