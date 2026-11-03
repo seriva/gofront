@@ -165,7 +165,7 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
   - Files: `src/parser/types.js`, `src/parser/expressions.js`, `test/unit/parser/generics.test.js`
   - Test: L08 `func call(f func(Stack[int]) int, s Stack[int]) int` → `0`; `Stack[[2]int]{}` stays green.
   - Done when: repro compiles and runs on all targets.
-- [ ] Task 1.4: Parser: conversions, func types and composite literals in expression position
+- [x] Task 1.4: Parser: conversions, func types and composite literals in expression position
   - Files: `src/parser/expressions.js`, `src/parser/statements.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: L31 `fmt.Println([]int(nil) == nil)` → `true`; L56 `m[k.(int)]` → `a`; L109a `append(b, []byte("bc")...)` → `abc`; L109b `switch x.(type) { case func(): … }` → `f`.
   - Done when: all four parse and run on all targets; existing `looksLikeTypeArgList` tests stay green.

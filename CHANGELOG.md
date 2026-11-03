@@ -13,6 +13,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Generic code over named slice and map types**: type parameters such as `[S ~[]E, E any]` and `[M ~map[K]V, K comparable, V any]` support indexing, slicing, `range`, `len`, `append` and `make`, and type arguments can be written as `[]int`, `map[K]V` or `func(…)`.
 - **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
 
+### Fixed
+- **Valid Go that failed to parse now compiles**: float literals such as `1.`, imaginary literals such as `.5i`, the `&^=` assignment, func types with generic parameters such as `func(Stack[int]) int`, conversions like `[]int(nil) == nil` or `append(b, []byte("bc")...)` as call arguments, `m[k.(int)]`, and `case func():` in a type switch all behave like Go on every target.
+
 ### Changed
 - **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
 - **Breaking:** `maps.Delete` and the top-level `binary.AppendUint16`, `AppendUint32` and `AppendUint64` are removed because Go has no such functions. Use the built-in `delete` and `binary.LittleEndian.AppendUint16` (or `binary.BigEndian`).

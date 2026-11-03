@@ -1187,6 +1187,76 @@ test("lexer: &^= is one token and &^ then = stays two", () => {
 	assertEqual(types("x &^ 1").join(","), [T.IDENT, T.AND_NOT, T.INT].join(","));
 });
 
+section(
+	"Parser: conversions, func types and type assertions in expression position",
+);
+
+test("a conversion call argument can be compared, spread or selected from", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+
+func main() {
+	fmt.Println([]int(nil) == nil)
+	fmt.Println(map[string]int(nil) == nil, []int([]int{1}) == nil)
+	b := []byte("a")
+	b = append(b, []byte("bc")...)
+	fmt.Println(string(b))
+	fmt.Println(len([]int([]int{1, 2})), [2]int([2]int{3, 4})[1])
+}
+`,
+		"true\ntrue false\nabc\n2 4\n",
+	);
+});
+
+test("an index whose operand is a type assertion is an index, not generic arguments", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[int]string{1: "a"}
+	var k any = 1
+	fmt.Println(m[k.(int)])
+	var s any = "x"
+	fmt.Println(len(m[1]), m[k.(int)] + s.(string))
+}
+`,
+		"a\n1 ax\n",
+	);
+});
+
+test("a type-switch case can name a func type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func kind(x any) string {
+	switch x.(type) {
+	case int:
+		return "i"
+	case func():
+		return "f"
+	case func(int) string, func(a, b int) (int, error):
+		return "g"
+	default:
+		return "d"
+	}
+}
+
+func main() {
+	fmt.Println(kind(1), kind(func() {}))
+}
+`,
+		"i f\n",
+	);
+});
+
 section("Parser: predeclared names as identifiers, empty labeled statements");
 
 test("parser: new and other predeclared names work as parameter and result names", async () => {
