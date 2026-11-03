@@ -452,15 +452,15 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 15: WASM Control Flow and Evaluation Order
 
-- [ ] Task 15.1: Labeled `break` out of nested switches
+- [x] Task 15.1: Labeled `break` out of nested switches
   - Files: `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: L139 → `end` only; labeled `continue` from a nested switch in a loop.
   - Done when: repro matches Go on wasm.
-- [ ] Task 15.2: Switch case lists short-circuit; struct-valued tags compare by value
+- [x] Task 15.2: Switch case lists short-circuit; struct-valued tags compare by value
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/js/statements.js`, `test/unit/language/control-flow.test.js`
   - Test: L130 → `g 5`, `g 1`, `g 5` (no `g 6`); L129 `switch p { case P{1, 2}: }` → `p12` (all targets).
   - Done when: both repros match Go on all targets.
-- [ ] Task 15.3: Call arguments evaluate before output; panics leave no partial line
+- [x] Task 15.3: Call arguments evaluate before output; panics leave no partial line
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: L131 → `h1;h3;1 3`; S07 `fmt.Println(next("a"), next("b"))` → `ab1 1`; L143 → `|` only.
   - Done when: all three repros match Go on wasm.

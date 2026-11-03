@@ -572,6 +572,95 @@ func main() {
 	);
 });
 
+section("switch case lists");
+
+test("case lists stop evaluating once an expression matches", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g(n int) int {
+	fmt.Println("g", n)
+	return n
+}
+
+func main() {
+	switch g(5) {
+	case g(1), g(5), g(6):
+		fmt.Println("hit")
+	}
+	switch {
+	case g(0) > 1, g(2) > 1, g(3) > 1:
+		fmt.Println("hit2")
+	}
+	switch g(7) {
+	case g(1), g(5):
+	case g(7), g(8):
+		fmt.Println("hit3")
+	}
+}
+`,
+		"g 5\ng 1\ng 5\nhit\ng 0\ng 2\nhit2\ng 7\ng 1\ng 5\ng 7\nhit3\n",
+	);
+});
+
+test("fallthrough switches short-circuit case lists too", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g(n int) int {
+	fmt.Println("g", n)
+	return n
+}
+
+func main() {
+	switch g(5) {
+	case g(1), g(5), g(6):
+		fmt.Println("a")
+		fallthrough
+	case 9:
+		fmt.Println("b")
+	}
+}
+`,
+		"g 5\ng 1\ng 5\na\nb\n",
+	);
+});
+
+test("struct-valued switch tags compare by value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	p := P{1, 2}
+	switch p {
+	case P{0, 0}:
+		fmt.Println("origin")
+	case P{1, 2}:
+		fmt.Println("p12")
+	default:
+		fmt.Println("other")
+	}
+	a := [2]int{3, 4}
+	switch a {
+	case [2]int{3, 4}:
+		fmt.Println("a34")
+	default:
+		fmt.Println("other")
+	}
+}
+`,
+		"p12\na34\n",
+	);
+});
+
 // ═════════════════════════════════════════════════════════════
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

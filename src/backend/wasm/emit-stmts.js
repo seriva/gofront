@@ -3237,16 +3237,7 @@ export class StmtsEmitter {
 				defaultIdx = i;
 				continue;
 			}
-			for (let j = 0; j < vals.length; j++) {
-				if (stmt.tag) {
-					this.pushInstruction({ op: "local.get", index: tagTmp });
-					this.emitExpr(vals[j], tagWType);
-					this.emitBinaryOp("==", tagWType, tagGoType);
-				} else {
-					this.emitExpr(vals[j], "i32");
-				}
-				if (j > 0) this.pushInstruction("i32.or");
-			}
+			this._emitCaseListMatch(stmt, vals, tagTmp, tagWType, tagGoType);
 			// The innermost block ends the first clause, so clause i is depth i.
 			this.pushInstruction({ op: "br_if", depth: i });
 		}
@@ -3263,6 +3254,26 @@ export class StmtsEmitter {
 			}
 		}
 		this.pushInstruction("end");
+	}
+
+	// Leaves an i32 on the stack: whether any expression of a case list matches.
+	// Later expressions are not evaluated once one matches, as in Go.
+	_emitCaseListMatch(stmt, vals, tagTmp, tagWType, tagGoType) {
+		for (let j = 0; j < vals.length; j++) {
+			if (stmt.tag) {
+				this.pushInstruction({ op: "local.get", index: tagTmp });
+				this.emitExpr(vals[j], tagWType);
+				this._emitElemEq(tagGoType, tagWType);
+			} else {
+				this.emitExpr(vals[j], "i32");
+			}
+			if (j < vals.length - 1) {
+				this.pushInstruction({ op: "if", blockType: "i32" });
+				this.pushInstruction({ op: "i32.const", value: 1 });
+				this.pushInstruction("else");
+			}
+		}
+		for (let j = 0; j < vals.length - 1; j++) this.pushInstruction("end");
 	}
 
 	emitSwitchStmt(stmt) {
@@ -3305,16 +3316,7 @@ export class StmtsEmitter {
 		let ifCount = 0;
 		for (const c of nonDefaultCases) {
 			const vals = getCaseVals(c);
-			for (let i = 0; i < vals.length; i++) {
-				if (stmt.tag) {
-					this.pushInstruction({ op: "local.get", index: tagTmp });
-					this.emitExpr(vals[i], tagWType);
-					this.emitBinaryOp("==", tagWType, tagGoType);
-				} else {
-					this.emitExpr(vals[i], "i32");
-				}
-				if (i > 0) this.pushInstruction("i32.or");
-			}
+			this._emitCaseListMatch(stmt, vals, tagTmp, tagWType, tagGoType);
 			this.pushInstruction({ op: "if", blockType: "void" });
 			ifCount++;
 
