@@ -45,6 +45,14 @@ GoFront is a Go-inspired language that compiles to JavaScript and WebAssembly (W
 - **c8** — V8 code coverage for unit tests
 - **No runtime dependencies** — the compiler has zero `dependencies` in package.json
 
+## Commands
+
+- **Test**: `npm test && npm run test:e2e` (or unit only: `npm test`)
+- **Lint**: `npm run check`
+- **Format**: `npm run format`
+- **Build**: `npm run build`
+- **Pre-commit gate**: `lefthook run pre-commit && npm test`
+
 ## Architecture
 
 The compiler pipeline lives in `src/` and flows strictly downward: `index.js` (CLI entry) → `cli/` (`cli-core.js` and the dev server, test runner, asset, vendor, PWA and minifier modules) → `compiler.js` (with `link/` for source maps, WASM unit linking and the Go-source stdlib) → `lexer/` / `parser/` → `typechecker/` → `lower/` → `backend/` (`backend/js/`, `backend/wasm/`, with `backend/shared/` for code both use). `parser/`, `typechecker/`, `lower/`, and `backend/js/` split concerns across declarations, types, statements, and expressions. The WebAssembly backend in `backend/wasm/` includes generics monomorphisation (`monomorph.js`), the module emitter (`module-emitter.js`), a dependency-free binary encoder (`encode.js`), Binaryen optimizer wrapper (`optimize.js`), WAT emitter (`wat.js`), and runtime boundary facade generator (`boundary.js`). Standard library type knowledge lives in `typechecker/stdlib/`, package resolution in `resolver.js`, and `.d.ts` support in `dts-parser.js`. Tests live in `test/unit/` (organized by domain: `language/`, `types/`, `builtins/`, `compiler/`, `cli/`, `wasm/`; `run.js` discovers every `*.test.js`), `test/e2e/` (Playwright specs) and `test/perf/` (benchmarks). Examples in `example/` (simple, preact, gom, templ, webgl, hybrid) serve as E2E fixtures and documentation.
