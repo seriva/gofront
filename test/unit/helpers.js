@@ -596,6 +596,25 @@ export async function assertFourWay(source, expected, options = {}) {
 	}
 }
 
+// `assertProgramOutput` (`both` + `wasm`) plus the same program as a plain
+// `js` package.
+export async function assertAllTargetsOutput(source, expected) {
+	await assertProgramOutput(source, expected);
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		const res = compileFiles([goPath], { forceTarget: "js" });
+		const out = await runProgramModule(res.js, null);
+		if (out !== expected)
+			throw new Error(
+				`js package output differs: want ${JSON.stringify(expected)}, got ${JSON.stringify(out)}`,
+			);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 // Same as assertProgramOutput for a program only the JS side of a `both`
 // package is expected to run (the WASM backend cannot compile it yet).
 export async function assertJsProgramOutput(source, expected) {

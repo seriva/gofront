@@ -1242,46 +1242,58 @@ export class CodeGen {
 
 	genVarDecl(decl) {
 		for (const spec of decl.decls) {
-			if (spec.value) {
-				const paired = spec.value.length === spec.names.length;
-				const vals = spec.value.map((v, i) => {
-					const js = paired
-						? this._genDeclValue(spec.names[i], v)
-						: this.genExpr(v);
-					// Wrap numeric values assigned to complex-typed vars
-					if (
-						spec.type?.name === "complex128" ||
-						spec.type?.name === "complex64"
-					) {
-						if (
-							!isComplex(v._type) &&
-							(isNumeric(v._type) || v._type?.kind === "untyped")
-						) {
-							return `{ re: ${js}, im: 0 }`;
-						}
-					}
-					if (spec.type?.name === "int64" || spec.type?.name === "uint64") {
-						if (
-							v._type?.kind === "untyped" &&
-							!js.endsWith("n") &&
-							/^-?\d+$/.test(js)
-						) {
-							return `${js}n`;
-						}
-					}
-					return js;
-				});
-				this._emitVarBindings(spec.names, vals, paired);
-			} else {
-				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
-				for (const name of spec.names) {
-					if (name === "_") continue;
-					this._markOwnership(name, true);
-					const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
-					this.line(`let ${name} = ${val};`);
+			if (spec._commaOk) this._genDefineStmt(this._varSpecAsDefine(spec));
+			else if (spec.value) this._genVarSpecValues(spec);
+			else this._genVarSpecZero(spec);
+		}
+	}
+
+	_genVarSpecValues(spec) {
+		const paired = spec.value.length === spec.names.length;
+		const vals = spec.value.map((v, i) => {
+			const js = paired
+				? this._genDeclValue(spec.names[i], v)
+				: this.genExpr(v);
+			// Wrap numeric values assigned to complex-typed vars
+			if (spec.type?.name === "complex128" || spec.type?.name === "complex64") {
+				if (
+					!isComplex(v._type) &&
+					(isNumeric(v._type) || v._type?.kind === "untyped")
+				) {
+					return `{ re: ${js}, im: 0 }`;
 				}
 			}
+			if (spec.type?.name === "int64" || spec.type?.name === "uint64") {
+				if (
+					v._type?.kind === "untyped" &&
+					!js.endsWith("n") &&
+					/^-?\d+$/.test(js)
+				) {
+					return `${js}n`;
+				}
+			}
+			return js;
+		});
+		this._emitVarBindings(spec.names, vals, paired);
+	}
+
+	_genVarSpecZero(spec) {
+		const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
+		for (const name of spec.names) {
+			if (name === "_") continue;
+			this._markOwnership(name, true);
+			const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
+			this.line(`let ${name} = ${val};`);
 		}
+	}
+
+	// `var v, ok = m[k]` generates like `v, ok := m[k]`.
+	_varSpecAsDefine(spec) {
+		return {
+			kind: "DefineStmt",
+			lhs: spec.names.map((name) => ({ kind: "Ident", name })),
+			rhs: spec.value,
+		};
 	}
 
 	// `var a = v` / `var a, b = v1, v2` / `var a, b = f()`, boxing address-taken names.

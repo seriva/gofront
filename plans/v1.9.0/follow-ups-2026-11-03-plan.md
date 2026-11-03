@@ -172,19 +172,19 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
 
 ### Phase 2: Typechecker Declarations and Conversions
 
-- [ ] Task 2.1: Named results in function literals
+- [x] Task 2.1: Named results in function literals
   - Files: `src/typechecker/expressions.js`, `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: L09 `g := func() (xs []int) { xs = []int{1}; return }` → `[1]`; L110a package-level `var f = func() (res int) { res = 4; return }` → `4`; L110b → `x`.
   - Done when: all three run on all targets.
-- [ ] Task 2.2: Parenthesised pointer-type and `nil` conversions
+- [x] Task 2.2: Parenthesised pointer-type and `nil` conversions
   - Files: `src/typechecker/expressions.js`, `src/parser/expressions.js`, `test/unit/types/pointers.test.js`
   - Test: L18 `(*S)(&b)` → `1`; L29a `var x I = (*T)(nil)` → `true`; L29b `NS(nil)`, `F(nil)`, `(*int)(nil)` → `true true true`; L109c `M(nil)` → `true`; `int(nil)` → `assertErrorContains(errors, "cannot convert nil")`.
   - Done when: positive repros run on all targets; the negative stays an error.
-- [ ] Task 2.3: Comma-ok in `var` declarations and self-referential local types
+- [x] Task 2.3: Comma-ok in `var` declarations and self-referential local types
   - Files: `src/typechecker/statements.js`, `src/typechecker/resolve.js`, `test/unit/types/checks.test.js`
   - Test: L45b `var _, ok = error(many{}).(interface{ Unwrap() []error })` → `true` (also `var v, ok = m["k"]`); L116 local `type L struct{ next *L; v int }` → `2`.
   - Done when: both run on all targets.
-- [ ] Task 2.4: Termination analysis follows `fallthrough`
+- [x] Task 2.4: Termination analysis follows `fallthrough`
   - Files: `src/typechecker/termination.js`, `test/unit/types/checks.test.js`
   - Test: L128 switch ending `case 1: fallthrough; case 2: return 1; default: return 2` → `1`; a switch whose last clause falls off still → `missing return`.
   - Done when: repro compiles; negative keeps its error.
