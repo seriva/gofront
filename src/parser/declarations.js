@@ -126,10 +126,16 @@ export const declarationParseMethods = {
 	// `Name[…]` followed by `,` or `)` in a result list is an instantiated
 	// generic type; a result name is followed by its type (`a []int`).
 	_isGenericResultType() {
-		if (this.peek2()?.type !== T.LBRACKET) return false;
+		return this._isGenericInstanceAt(this.pos);
+	},
+
+	// True when the IDENT at `at` starts an instantiated type (`Box[int]`) that
+	// ends a list entry, rather than `name [N]T` / `name []T`.
+	_isGenericInstanceAt(at) {
+		if (this.tokens[at + 1]?.type !== T.LBRACKET) return false;
 		const src = this.tokens;
 		let depth = 0;
-		for (let i = this.pos + 1; i < src.length; i++) {
+		for (let i = at + 1; i < src.length; i++) {
 			const t = src[i].type;
 			if (t === T.LBRACKET) depth++;
 			else if (t === T.RBRACKET && --depth === 0) {
@@ -186,11 +192,13 @@ export const declarationParseMethods = {
 	// if a type-start token follows — if so, the IDENTs are names; if ) or ,
 	// follows, the IDENTs are themselves types.
 	_isNamedParam() {
+		if (this._isGenericInstanceAt(this.pos)) return false;
 		let pos = this.pos + 1; // skip current IDENT
 		while (
 			this.tokens[pos]?.type === T.COMMA &&
 			this.tokens[pos + 1]?.type === T.IDENT
 		) {
+			if (this._isGenericInstanceAt(pos + 1)) return false;
 			pos += 2;
 		}
 		const next = this.tokens[pos];
@@ -219,8 +227,12 @@ export const declarationParseMethods = {
 			this.check(T.EOF)
 		)
 			return null;
-		// Inside a type expression (e.g. func type in a tuple), `,` and `)` also end the type
-		if (inTypeExpr && (this.check(T.COMMA) || this.check(T.RPAREN)))
+		// Inside a type expression (e.g. func type in a tuple or a type-switch
+		// `case func():`), `,`, `)` and `:` also end the type
+		if (
+			inTypeExpr &&
+			(this.check(T.COMMA) || this.check(T.RPAREN) || this.check(T.COLON))
+		)
 			return null;
 		// Multiple return values: (int, string) or named (result int, ok bool)
 		if (this.check(T.LPAREN)) {

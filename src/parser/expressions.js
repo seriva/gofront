@@ -315,6 +315,8 @@ export const expressionParserMethods = {
 				i++;
 				continue;
 			}
+			// `k.(int)` is a type assertion on a value: an index expression
+			if (tt === T.DOT && src[i + 1]?.type === T.LPAREN) return false;
 			// Reject literals — it's an index expression
 			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
 			// Reject binary operators that wouldn't appear in type args
@@ -365,17 +367,15 @@ export const expressionParserMethods = {
 					(t.type === T.MAP || isSliceOrArrayType) &&
 					!this.looksLikeCompositeLitArg()
 				) {
+					const start = this.pos;
 					const typeNode = this.parseType();
-					// []byte(s) / []rune(s) used as a call argument — it's a type conversion
+					// `[]byte(s)` / `[]int(nil)` is a conversion: an ordinary
+					// operand that may be compared, spread or selected from.
 					if (this.check(T.LPAREN)) {
-						this.advance();
-						const convExpr = this.parseExpr();
-						this.expect(T.RPAREN);
-						args.push({
-							kind: "TypeConversion",
-							targetType: typeNode,
-							expr: convExpr,
-						});
+						this.pos = start;
+						const arg = this.parseExpr();
+						if (this.match(T.ELLIPSIS)) arg._spread = true;
+						args.push(arg);
 					} else {
 						args.push({ kind: "TypeExpr", type: typeNode });
 					}
