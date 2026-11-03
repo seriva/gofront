@@ -91,7 +91,7 @@ a WebAssembly GC module:
 | `emit-builtins.js` | `panic`/`recover`, Go builtins (`len`, `append`, `make`, …) and call dispatch |
 | `emit-maps.js` | map runtime helpers (key hash/eq, get/set/delete, iteration) and zero values |
 | `emit-shared.js` | `gofront/shared` linear-memory buffer allocation, load/store indexing, `Subarray` and `copy` |
-| `stdlib/` | natively implemented stdlib modules (`core.js`, `bytes.js`, `pure.js`, `io.js`, `time.js`, `packages.js`, `simd.js`, indexed by `index.js`) |
+| `stdlib/` | natively implemented stdlib modules (`core.js`, `pure.js`, `io.js`, `packages.js`, `simd.js`, indexed by `index.js`) |
 | `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section, `app.wasm.map` source maps) — no dependencies |
 | `optimize.js` | Binaryen (`wasm-opt`) optimization pipeline (`-O3` + `--gufa`) and source map pass-through for `--release` / `--wasm-opt` |
 | `wat.js` | Module IR → WAT text for `--emit-wat` and golden tests |
@@ -113,7 +113,23 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 ### Go-source standard library (`stdlib/`)
 
-GoFront provides pure Go implementations of standard library packages (such as `cmp`, `iter`, `slices`, `strings`, and the `encoding/json` support code), located in `stdlib/`. Most of these packages are written in GoFront Go with `//gofront:target both` and `//go:build gofront`. The resolver loads them before built-in fallbacks and compiles them into the caller's target (`js`, `wasm`, or `both`) with no external runtime dependencies. Package overlays extend emitter-backed namespaces with pure Go implementations.
+Most standard library packages are ordinary GoFront Go under `stdlib/<import path>/`, written with `//gofront:target both` and `//go:build gofront`. The resolver loads them before the built-in namespaces and compiles them into the caller's target (`js`, `wasm` or `both`), so each package is written once and behaves the same on both backends. A package that is also a built-in namespace (`strings`, `errors`, `time`, `encoding/binary`, `unicode`) is an overlay: its Go declarations extend the namespace and the built-in members stay with the emitters.
+
+Function bodies in these packages are type-checked only when the program reaches them, and only reachable declarations are emitted, so an unused import adds nothing to `app.js` or `app.wasm`.
+
+Two markers connect Go source to the backends:
+
+- `//gofront:native <name>` keeps the Go body as the specification and lets a backend replace calls with a faster host primitive (`indexOf` for `strings.Index`, `Math.clz32` or a WASM instruction for `math/bits`). A native may decline an instantiation, in which case the call runs the Go body. Names form a closed set in `src/typechecker/types.js`; implementations live in `src/backend/js/natives.js` and `src/backend/wasm/natives.js`. `test/unit/compiler/natives.test.js` fails when a name is missing from a registry (outside a short single-target list) or when a registry entry has no Go declaration.
+- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset).
+
+| Package | Where it lives |
+|---|---|
+| `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
+| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math/bits`, `strconv`, `math/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
+| `encoding/binary` | Go in `stdlib/encoding/binary/`; `Read`, `Write` and `Size` are emitters |
+| `errors.As`, `strings.Builder`, `time.Sleep`, `time.AfterFunc`, `time.Timer` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
+| `fmt`, `math`, `unicode` (`Is*`, `To*`), `os`, `testing`, `regexp`, `crypto/rand`, `gom`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
+| `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |
 
 ---
 

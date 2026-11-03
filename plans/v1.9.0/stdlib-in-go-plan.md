@@ -566,7 +566,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/compiler/stdlib-go.test.js` — `STDLIB_PACKAGES` contains none of the migrated names.
   - Done when: the line-count bounds in [Done means](#goal) hold.
 
-- [ ] **Task 13.3 — Stdlib layout in the architecture docs**
+- [x] **Task 13.3 — Stdlib layout in the architecture docs**
   - Files: `docs/architecture.md`
   - Do: describe the Go-source stdlib, natives and intrinsics, lazy checking, and a per-package "where does it live" table (Go directory plus natives, or emitter).
   - Test: `test/unit/compiler/plan-paths.test.js` passes.
