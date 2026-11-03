@@ -1729,6 +1729,81 @@ func main() {
 	);
 });
 
+test("generic integer arithmetic truncates and wraps for the instantiated type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Int interface {
+	~int | ~int8 | ~uint8 | ~int32 | ~uint32
+}
+
+func Half[T Int](x T) T { return x / 2 }
+
+func Wrap[T Int](x T) T { return x + 1 }
+
+func Gen[T Int](x T) T { return x - 1 }
+
+func Shl[T Int](x T) T { return x << 7 }
+
+func main() {
+	fmt.Println(Half[int](9), Wrap[uint8](255))
+	fmt.Println(Gen(uint8(0)), Gen(int8(-128)), Gen(uint32(0)))
+	fmt.Println(Half(int8(-7)), Wrap(int32(2147483647)), Shl(uint8(3)))
+}
+`,
+		"4 0\n255 127 4294967295\n-3 -2147483648 128\n",
+	);
+});
+
+test("generic compound assignment, increments and 64-bit arithmetic wrap", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Int interface {
+	~int8 | ~uint8 | ~int64 | ~uint64 | ~int
+}
+
+func Acc[T Int](x T) T {
+	x += 100
+	x *= 2
+	x++
+	x >>= 1
+	return x
+}
+
+func Neg[T Int](x T) T { return x - 1 }
+
+func main() {
+	fmt.Println(Acc(int8(60)), Acc(uint8(200)), Acc(int(5)))
+	fmt.Println(Neg(uint64(0)), Neg(int64(-9223372036854775808)))
+}
+`,
+		"32 44 105\n18446744073709551615 9223372036854775807\n",
+	);
+});
+
+test("generic float arithmetic is unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num interface{ ~int | ~float64 }
+
+func Half[T Num](x T) T { return x / 2 }
+
+func main() {
+	fmt.Println(Half(9.0), Half(9))
+}
+`,
+		"4.5 4\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
