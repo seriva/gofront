@@ -350,22 +350,24 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 10: JS Map Keys
 
-- [ ] Task 10.1: Typed key decoding in `range` (generic and non-generic)
+- [x] Task 10.1: Typed key decoding in `range` (generic and non-generic)
   - Files: `src/backend/js/statements.js`, `src/lower/range.js`, `test/unit/wasm/maps.test.js`
   - Test: L42a `k + 1` over `map[int]string` → `2`; float keys likewise; a generic `Keys` over `map[int]int` returns ints.
   - Done when: repros match Go on js/both.
-- [ ] Task 10.2: Composite key encoding (structs, arrays, non-finite floats)
+- [x] Task 10.2: Composite key encoding (structs, arrays, non-finite floats)
   - Files: `src/backend/js/runtime.js`, `test/unit/wasm/maps.test.js`
   - Test: L42b → `2`; L42c → `map[[1 2]:a]`; L51 `±Inf` struct keys → `2`; L86 → `map[{-1}:1 {5}:2]`.
   - Done when: repros match Go on js/both; no `JSON.stringify` on key values remains.
-- [ ] Task 10.3: Pointer and interface keys
+- [x] Task 10.3: Pointer and interface keys
   - Files: `src/backend/js/runtime.js`, `src/backend/js/expressions.js`, `test/unit/wasm/maps.test.js`
   - Test: L52 → `2`; L54 (js) → `0 false`; L55 → `true`; L60a → `2`; L60b → recovered `runtime error: hash of unhashable type []int` (wasm message gains the type too); L101b → `2`.
   - Done when: six repros match Go on js/both (L60b also wasm).
-- [ ] Task 10.4: Map printing uses Go's key order and text
+- [x] Task 10.4: Map printing uses Go's key order and text
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: L59b `map[any]int` with `int`, `string` and named-string keys → `map[1:3 1:2 1:1]`; L87 → `map[B:3 a:2 b:1]` (all targets).
   - Done when: both repros match Go on all targets.
+
+*Phase 10 notes: the generic `Keys` half of L42a, L42b and the `both` half of L54 no longer reproduced on the base and were skipped (covered by existing behaviour); tests live in `test/unit/wasm/maps.test.js`.*
 
 ### Phase 11: fmt Verbs (Both Backends)
 

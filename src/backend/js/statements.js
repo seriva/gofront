@@ -218,6 +218,16 @@ export const statementGenMethods = {
 		);
 	},
 
+	// `m[k]` of a non-strict comma-ok: a missing key reads as the scalar zero
+	// value, not `undefined`.
+	_nonStrictMapRead(mapExpr, keyExpr, valType, copyVal) {
+		const zero = valType ? this.zeroValueForType(valType) : "";
+		const read = `${mapExpr}[${keyExpr}]`;
+		return /^(0n?|""|false)$/.test(zero)
+			? `(${read} ?? ${zero})`
+			: copyVal(read);
+	},
+
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
 	// `pre` carries the map and key already evaluated (a shadowing declaration
 	// reads them before its names exist).
@@ -236,7 +246,8 @@ export const statementGenMethods = {
 				: js;
 		if (isDefine && !this.strict) {
 			if (vName !== "_") {
-				this.line(`${vDecl}${vName} = ${copyVal(`${mapExpr}[${keyExpr}]`)};`);
+				const val = this._nonStrictMapRead(mapExpr, keyExpr, valType, copyVal);
+				this.line(`${vDecl}${vName} = ${val};`);
 			}
 			if (okName !== "_") {
 				this.line(`${okDecl}${okName} = (${keyExpr}) in ${mapExpr};`);
@@ -1500,6 +1511,7 @@ export const statementGenMethods = {
 		const keyDecode = this._structKeyRange(iterType);
 		const paramKey = this._typeParamKeyRange(iterType);
 		const is64Key = this._is64BitMapRange(iterType);
+		const scalarKey = this._scalarKeyRange(iterType);
 		const binding =
 			lhs.length === 1
 				? lhs[0] === "_"
@@ -1515,6 +1527,12 @@ export const statementGenMethods = {
 				this.line(`${lhs[0]} = __kd(${lhs[0]}, true);`);
 			else if (is64Key && lhs[0] !== "_")
 				this.line(`${lhs[0]} = BigInt(${lhs[0]});`);
+			else if (scalarKey && lhs[0] !== "_")
+				this.line(
+					scalarKey === "bool"
+						? `${lhs[0]} = ${lhs[0]} === "true";`
+						: `${lhs[0]} = Number(${lhs[0]});`,
+				);
 			this._cloneMapRangeValue(init, iterType, lhs[1]);
 			this.genBlock(body);
 		});
@@ -1526,6 +1544,19 @@ export const statementGenMethods = {
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const key = base?.kind === "map" ? base.key : null;
 		return is64BitInt(key);
+	},
+
+	// Ranging over a map with plain int, float or bool keys: object property
+	// names are strings, so the key variable is converted back.
+	_scalarKeyRange(iterType) {
+		if (!this._isMapRangeType(iterType)) return null;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const key = base?.kind === "map" ? base.key : null;
+		if (!key || key.kind === "typeParam") return null;
+		const u = this._underlyingOf(key);
+		if (u?.kind !== "basic" || this._is64BitInt(key)) return null;
+		if (u.name === "bool") return "bool";
+		return /^(u?int\d*|uintptr|float(32|64))$/.test(u.name) ? "num" : null;
 	},
 
 	// Ranging over a map whose key type is a type parameter: the key is decoded
@@ -1548,7 +1579,13 @@ export const statementGenMethods = {
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const key = base?.kind === "map" ? base.key : null;
 		const keyBase = key?.kind === "named" ? key.underlying : key;
-		if (keyBase?.kind !== "struct" && !this._isIfaceType(key)) return false;
+		if (
+			keyBase?.kind !== "struct" &&
+			keyBase?.kind !== "array" &&
+			keyBase?.kind !== "pointer" &&
+			!this._isIfaceType(key)
+		)
+			return false;
 		this.useHelper("structKey");
 		return true;
 	},
