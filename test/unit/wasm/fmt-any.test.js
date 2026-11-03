@@ -495,3 +495,37 @@ func (*A) String() string { return "ps" }`,
 	);
 	assertEqual(o, "[ps]");
 });
+
+section("fmt on WASM: interface fields inside structs");
+
+test("a struct with an any field prints the dynamic value", () => {
+	const o = out(
+		`fmt.Println(S{X: 123})
+	fmt.Println(struct{ X any }{123})`,
+		"type S struct{ X any }",
+	);
+	assertEqual(o, "{123}\n{123}");
+});
+
+test("any fields reached through nested structs, pointers and named types print", () => {
+	const o = out(
+		`fmt.Println(Outer{In: In{V: "a"}})
+	fmt.Println(&Outer{In: In{V: 2.5}})
+	fmt.Println(Wrap{Outer{In: In{V: true}}})
+	fmt.Println([]Outer{{In: In{V: 7}}})
+	fmt.Println(map[string]In{"k": {V: 8}})
+	fmt.Println([2]In{{V: 1}, {V: "z"}})`,
+		`type In struct{ V any }
+type Outer struct{ In In }
+type Wrap struct{ O Outer }`,
+	);
+	assertEqual(o, "{{a}}\n&{{2.5}}\n{{{true}}}\n[{{7}}]\nmap[k:{8}]\n[{1} {z}]");
+});
+
+test("a struct with a slice of any or an uint64 field printed with an any field", () => {
+	const o = out(
+		`fmt.Println(S{Xs: []any{1, "b"}, U: 5, A: uint64(9)})`,
+		"type S struct {\n\tXs []any\n\tU uint64\n\tA any\n}",
+	);
+	assertEqual(o, "{[1 b] 5 9}");
+});

@@ -113,8 +113,8 @@ export function _usesAnyEq(funcDecls, mod) {
 }
 
 // Whether an `any`/interface value is reachable through `t` as a slice or
-// array element, a map key or a map value: such operands are formatted by
-// dynamic type (`__any_fmt`, `__any_fmt_key`).
+// array element, a map key or a map value, or a struct field: such operands
+// are formatted by dynamic type (`__any_fmt`, `__any_fmt_key`).
 function typeHasIfaceInContainer(t, mod, seen = new Set(), depth = 0) {
 	if (!t || typeof t !== "object" || seen.has(t) || depth > 6) return false;
 	seen.add(t);
@@ -131,6 +131,14 @@ function typeHasIfaceInContainer(t, mod, seen = new Set(), depth = 0) {
 			return isIface(t.elem) || sub(t.elem);
 		case "map":
 			return isIface(t.key) || isIface(t.value) || sub(t.value);
+		case "struct": {
+			const fields =
+				t.fields instanceof Map ? [...t.fields.values()] : t.fields;
+			return (fields ?? []).some((f) => {
+				const ft = f?.type ?? f;
+				return isIface(ft) || sub(ft);
+			});
+		}
 		default:
 			return false;
 	}
