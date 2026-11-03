@@ -500,6 +500,47 @@ func (g *G[T]) String() string { return "g" }`,
 	);
 });
 
+test("a nil pointer converted to any keeps its pointer-receiver String", () => {
+	assertEqual(
+		allTargets(
+			`var g *G[int]
+	var cp *C
+	return fmt.Sprint(any(g)) + "|" + fmt.Sprintf("%v|%s", any(g), any(cp))`,
+			`type G[T any] struct{ v T }
+func (g *G[T]) String() string { return "g" }
+${NIL_C}`,
+		),
+		"g|g|c",
+	);
+});
+
+test("a nil pointer stored in an any variable or []any keeps its String on js", () => {
+	assertEqual(
+		run(
+			`var g *G[int]
+	var x any = g
+	var cp *C
+	fmt.Println(x, fmt.Sprint([]any{cp}))`,
+			`type G[T any] struct{ v T }
+func (g *G[T]) String() string { return "g" }
+${NIL_C}`,
+		),
+		"g [c]",
+	);
+});
+
+test("a nil pointer returned by a multi-value call prints through String", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintln(nilp())`,
+			`type P struct{ n int }
+func (p *P) String() string { return "P*" }
+func nilp() (*P, error) { return nil, nil }`,
+		),
+		"P* <nil>\n",
+	);
+});
+
 test("a nil pointer to a type with a value-receiver String prints <nil>", () => {
 	assertEqual(
 		allTargets(
