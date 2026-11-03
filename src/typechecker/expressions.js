@@ -15,6 +15,7 @@ import {
 	compositeLitMaxIndex,
 	displayTypeName,
 	ERROR,
+	embeddedFieldName,
 	FLOAT32,
 	FLOAT64,
 	INT,
@@ -1925,18 +1926,7 @@ export const expressionCheckMethods = {
 	_checkStructPositionalElems(expr, scope, t, base) {
 		const fieldNames = base._structFields
 			? base._structFields.flatMap((f) =>
-					f.embedded
-						? [
-								(
-									(f.type?.kind === "pointer"
-										? f.type.base?.name
-										: f.type?.name) ?? ""
-								)
-									.split(".")
-									.pop()
-									.replace(/\$\$.*$/, ""),
-							]
-						: f.names,
+					f.embedded ? [embeddedFieldName(f)] : f.names,
 				)
 			: [...(base.fields?.keys() ?? [])];
 		for (let i = 0; i < expr.elems.length; i++) {
@@ -1958,17 +1948,9 @@ export const expressionCheckMethods = {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				const keyName = elem.key.name;
-				const embed = base._embeds?.find((e) => {
-					const inner = e.kind === "pointer" ? e.base : e;
-					const name =
-						inner.kind === "named"
-							? inner.name
-									.split(".")
-									.pop()
-									.replace(/\$\$.*$/, "")
-							: null;
-					return name === keyName;
-				});
+				const embed = base._structFields?.find(
+					(f) => f.embedded && embeddedFieldName(f) === keyName,
+				)?.type;
 				if (embed) elem._isEmbedInit = true;
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {

@@ -941,10 +941,10 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(method, embedName, valueEmbed = false) {
+	_embedStub(method, embedName, valueEmbed = false, fieldName = null) {
 		// The field is named after the type without its package suffix
-		// (`Mutex$$sync` is the field `Mutex`).
-		const field = embedName.replace(/\$\$.*$/, "");
+		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
+		const field = fieldName || embedName.replace(/\$\$.*$/, "");
 		// A named non-struct type is boxed: its methods are static, taking
 		// the value as the receiver.
 		if (valueEmbed)
@@ -973,7 +973,12 @@ export class CodeGen {
 		for (const stub of stubs) {
 			this.blank();
 			this.line(
-				this._embedStub(stub.methodName, stub.embedName, stub.valueEmbed),
+				this._embedStub(
+					stub.methodName,
+					stub.embedName,
+					stub.valueEmbed,
+					stub.fieldName,
+				),
 			);
 		}
 	}

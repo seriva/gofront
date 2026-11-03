@@ -635,6 +635,17 @@ export function typeStr(t) {
 	}
 }
 
+// The field an embedded type declares is named after the type as written, so
+// an alias (`type A = Base; struct{ A }`) gives the field `A`.
+export function embeddedFieldName(f) {
+	const ast = f.astType?.kind === "PointerType" ? f.astType.base : f.astType;
+	const t = f.type?.kind === "pointer" ? f.type.base : f.type;
+	return (ast?.name ?? t?.name ?? "")
+		.split(".")
+		.pop()
+		.replace(/\$\$.*$/, "");
+}
+
 // Go-source stdlib names are mangled to `Name$$path` (`List$$container$list`);
 // diagnostics show them qualified, as Go does (`list.List`).
 export function displayTypeName(name) {
