@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { compileFiles, compileSingleFile } from "../../../src/compiler.js";
@@ -719,6 +719,56 @@ func main() {
 		},
 		(dir) => {
 			assertThrows(() => compileDir(dir), "Cannot assign Box[b.Pt] to Box[Pt]");
+		},
+	);
+});
+
+// Package b redeclares `Pt`, so its type is renamed; same-spelled values
+// (parameters, locals, composite literal keys) must keep their names.
+const B_BODIES = {
+	"composite literal field key": [
+		`type Container struct{ Pt Pt }\nfunc Make(Pt Pt) Container { return Container{Pt: Pt} }\nfunc (c Container) Y() string { return c.Pt.Y }`,
+		`fmt.Println(b.Make(b.Pt{"k"}).Y())`,
+		"k",
+	],
+	parameter: [
+		`func Foo(Pt int) int { return Pt + 1 }`,
+		`fmt.Println(b.Foo(2))`,
+		"3",
+	],
+	"local variable": [
+		`func Foo() int { var Pt int = 10; return Pt + 1 }`,
+		`fmt.Println(b.Foo())`,
+		"11",
+	],
+};
+
+for (const [what, [body, call, want]] of Object.entries(B_BODIES)) {
+	test(`renamed type does not rename a ${what}`, async () => {
+		const { lines } = await compileHybridProject({
+			"a/a.go": "package a\ntype Pt struct{ X int }\n",
+			"b/b.go": `package b\ntype Pt struct{ Y string }\n${body}\n`,
+			"main.go": `package main\nimport ("fmt"; "./a"; "./b")\nvar _ = a.Pt{}\nfunc main() { ${call} }\n`,
+		});
+		assertEqual(lines.join("\n"), want);
+	});
+}
+
+test("parse cache never serves renamed ASTs to a later build", () => {
+	withTempDir(
+		{
+			"a/a.go": "package a\ntype Pt struct{ X int }\n",
+			"b/b.go": "package b\ntype Pt struct{ Y string }\n",
+			"main.go": `package main\nimport ("./a"; "./b")\nvar _ = a.Pt{}\nvar _ = b.Pt{}\nfunc main() {}\n`,
+		},
+		(dir) => {
+			const rel = (f) => relative(process.cwd(), join(dir, f));
+			const typeOwners = new Map();
+			compileFiles([rel("a/a.go")], { typeOwners });
+			compileFiles([rel("b/b.go")], { typeOwners });
+			const res = compileFiles([rel("b/b.go")]);
+			const decl = res.programs[0].decls.find((d) => d.kind === "TypeDecl");
+			assertEqual(decl.name, "Pt");
 		},
 	);
 });
