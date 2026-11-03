@@ -2,6 +2,7 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -360,5 +361,141 @@ func main() {
 	fmt.Println(len(b), b[0])
 }`),
 		"true\ntrue true\n2 104",
+	);
+});
+
+// ── Struct values copied out of maps, range keys and interfaces ──
+
+section("Copies out of maps, range keys and interfaces");
+
+test("a range key assigned to an existing variable is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct {
+	S string
+	N int
+}
+
+func main() {
+	m := map[K]int{{"a", 1}: 2}
+	var k2 K
+	for k2 = range m {
+	}
+	k2.N = 99
+	for k := range m {
+		k.N = 5
+	}
+	fmt.Println(m, k2)
+}
+`,
+		"map[{a 1}:2] {a 99}\n",
+	);
+});
+
+test("range key and value of struct type are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct {
+	S string
+	N int
+}
+
+func main() {
+	m := map[K]K{{"a", 1}: {"b", 2}}
+	var k2, v2 K
+	for k2, v2 = range m {
+	}
+	k2.N = 98
+	v2.N = 97
+	for k, v := range m {
+		k.N = 5
+		v.N = 6
+	}
+	fmt.Println(m, k2, v2)
+}
+`,
+		"map[{a 1}:{b 2}] {a 98} {b 97}\n",
+	);
+});
+
+test("comma-ok map reads of struct and array values are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	m := map[string]P{"a": {1, 1}}
+	pt, _ := m["a"]
+	pt.X = 100
+	fmt.Println(m["a"])
+	q, ok := m["zz"]
+	q.X = 5
+	var r P
+	var ok3 bool
+	r, ok3 = m["a"]
+	r.Y = 7
+	arrm := map[int][2]int{1: {1, 2}}
+	a, _ := arrm[1]
+	a[0] = 9
+	if w, ok := m["a"]; ok {
+		w.X = 3
+	}
+	fmt.Println(m, ok, q, r, ok3, arrm, a)
+}
+`,
+		"{1 1}\nmap[a:{1 1}] false {5 0} {1 7} true map[1:[1 2]] [9 2]\n",
+	);
+});
+
+test("comma-ok type assertions to a struct are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct {
+	S string
+	N int
+}
+
+func main() {
+	var x any = K{"x", 1}
+	y, ok := x.(K)
+	y.N = 50
+	var z K
+	z, ok = x.(K)
+	z.N = 51
+	fmt.Println(x, y, z, ok)
+}
+`,
+		"{x 1} {x 50} {x 51} true\n",
+	);
+});
+
+test("fmt prints the contents a slice holds after later operands run", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	w := make([]byte, 3)
+	p := []byte("abc")
+	fmt.Println(w, copy(w, p))
+	m := map[string]int{}
+	set := func() int { m["k"] = 1; return 2 }
+	fmt.Println(m, set())
+}
+`,
+		"[97 98 99] 3\nmap[k:1] 2\n",
 	);
 });

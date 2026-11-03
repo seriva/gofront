@@ -515,3 +515,52 @@ func main() { println(a) }
 	);
 	assertEqual(errors.length, 0);
 });
+
+section("WASM Structs — complex fields and string zero values");
+
+test("a complex128 field of an exported struct is assignable", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ C complex128 }
+
+func main() {
+	var s S
+	s.C = complex(1, 1)
+	fmt.Println(s.C, s)
+}
+`,
+		"(1+1i) {(1+1i)}\n",
+	);
+});
+
+test("string arrays and slices start as empty strings", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct {
+	S string
+	A [2]string
+}
+
+func main() {
+	var a [2]string
+	b := make([]string, 2)
+	c := make([]string, 1, 4)
+	c = c[:3]
+	var t T
+	e := new([3]string)
+	g := make([][2]string, 2)
+	var arr [2][2]string
+	fmt.Println(a, b, c, t, *e, g, arr)
+	fmt.Println(a[0] == "", b[1] == "", len(c[2]), c[2]+"!", t.A[1] == "", e[2] == "", g[1][0] == "")
+	fmt.Printf("%q %q\\n", a, b)
+}
+`,
+		'[ ] [ ] [  ] { [ ]} [  ] [[ ] [ ]] [[ ] [ ]]\ntrue true 0 ! true true true\n["" ""] ["" ""]\n',
+	);
+});

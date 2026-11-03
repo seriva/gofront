@@ -9,7 +9,7 @@ import {
 	isIteratorRangeFor,
 	isRangeFor,
 } from "../../lower/range.js";
-import { someChild } from "../../lower/walk.js";
+import { hasCallOrReceive, someChild } from "../../lower/walk.js";
 import {
 	getMapKeyValTypes,
 	isArrayType,
@@ -677,6 +677,10 @@ export class StmtsEmitter {
 			// A whole struct or array stored into an element whose address is
 			// taken writes into the existing element, so `p := &xs[0]` stays valid.
 			if (this._needsStableStore(l, elemGoType)) {
+				if (sliceInfo) {
+					this._emitSliceElemStableStore(l, elemGoType, r, sliceInfo, arrInfo);
+					return;
+				}
 				this._emitStableStore(elemGoType, r, () => {
 					this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
 					this.pushInstruction({
@@ -836,6 +840,10 @@ export class StmtsEmitter {
 			)
 		)
 			return false;
+		// Any callee may hold `&xs[i]` of a slice element, so when the program
+		// takes one, a whole-value store into an element writes in place.
+		if (this.mod.lowerResult?.elemAddrTaken && this._isSliceElemTarget(l))
+			return true;
 		const root = rootIdentName(l);
 		if (!root) return false;
 		// Any code may hold the address of a package-level variable.
@@ -843,6 +851,45 @@ export class StmtsEmitter {
 		const decl = this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl;
 		const ctx = this.mod.lowerResult?.ownership?.get(decl);
 		return Boolean(ctx?.fnMutates(root, true));
+	}
+
+	// `xs[i] = v` into a slice element in place.  Capacity beyond the length
+	// may hold null elements (a reslice exposes them), so a null element is
+	// first replaced by a zero value that the store then fills.
+	_emitSliceElemStableStore(l, elemGoType, r, sliceInfo, arrInfo) {
+		const arrT = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const arr = this.acquireTemp(arrT);
+		const idx = this.acquireTemp("i32");
+		this._emitElemAddr(l.expr, l.index, sliceInfo, arrInfo);
+		this.pushInstruction({ op: "local.set", index: idx });
+		this.pushInstruction({ op: "local.set", index: arr });
+		const getElem = () => {
+			this.pushInstruction({ op: "local.get", index: arr });
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		};
+		getElem();
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.emitZeroValue(elemGoType, arrInfo.elemWType);
+		this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction("end");
+		this._emitStableStore(elemGoType, r, getElem);
+		this.releaseTemp(idx, "i32");
+		this.releaseTemp(arr, arrT);
+	}
+
+	// True when `l` is `xs[i]` on a slice (not an array or map).
+	_isSliceElemTarget(l) {
+		if (l.kind !== "IndexExpr") return false;
+		const t = l.expr._type ?? this._resolveExprGoType(l.expr);
+		return isSliceType(t, this.mod.checker) && !this._sharedInfo(t);
 	}
 
 	_emitStableStore(goType, r, emitDst) {
@@ -934,6 +981,7 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "local.set", index: tmpL });
 		this.emitExpr(r, baseWType);
 		this.pushInstruction({ op: "local.set", index: tmpR });
+		this._emitNilGuard(tmpL, operand._type);
 		for (let i = 0; i < structInfo.fields.length; i++) {
 			this.pushInstruction({ op: "local.get", index: tmpL });
 			this.pushInstruction({ op: "local.get", index: tmpR });
@@ -950,6 +998,16 @@ export class StmtsEmitter {
 		}
 		this.releaseTemp(tmpR, baseWType);
 		this.releaseTemp(tmpL, baseWType);
+	}
+
+	// Raises Go's nil-dereference panic when the pointer held in `tmp` is nil
+	// (a plain cast or field write would trap, which `recover` cannot see).
+	_emitNilGuard(tmp, goType) {
+		if (goType?.kind !== "pointer") return;
+		if (this.resolveBranchDepthToRole("nil") == null) return;
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this._emitNilBranch();
+		this.pushInstruction("drop");
 	}
 
 	_emitDerefAssign(l, r) {
@@ -988,6 +1046,7 @@ export class StmtsEmitter {
 		const valTmp = this.acquireTemp(box.wType);
 		this.emitExpr(operand, ptrWType);
 		this.pushInstruction({ op: "local.set", index: ptrTmp });
+		this._emitNilGuard(ptrTmp, operandGoType);
 		this.emitExpr(r, box.wType);
 		this.pushInstruction({ op: "local.set", index: valTmp });
 
@@ -1124,12 +1183,40 @@ export class StmtsEmitter {
 		this.releaseTemp(okTmp, "i32");
 	}
 
-	// Pushes a comma-ok result (map value / asserted value).  An array is a
-	// value: the stored one must not alias the map entry or boxed interface.
+	// Copies the struct or array a map entry holds (a range key or value is a
+	// copy, not the stored value).
+	_emitCopyMapEntry(goType, wType) {
+		const isStruct =
+			isStructType(goType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(goType, this.mod.checker, this.mod);
+		if (isStruct) {
+			const sInfo = this._resolveStructInfo({ _type: goType });
+			if (sInfo) this.emitCloneStruct(sInfo, wType);
+		} else if (
+			goType?.kind !== "pointer" &&
+			isArrayType(goType, this.mod.checker)
+		) {
+			this.emitCopyArray(goType);
+		}
+	}
+
+	// Pushes a comma-ok result (map value / asserted value).  An array or
+	// struct is a value: the stored one must not alias the map entry or boxed
+	// interface.
 	_emitGetTempValue(tempIdx, goType) {
 		this.pushInstruction({ op: "local.get", index: tempIdx });
 		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker))
 			this.emitCopyArray(goType);
+		else if (
+			isStructType(goType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(goType, this.mod.checker, this.mod)
+		) {
+			// A struct read out of a map or an interface is a copy.
+			const info =
+				this._resolveStructInfo({ _type: goType }) ??
+				this.mod.getStructType(goType?.name);
+			if (info) this.emitCloneStruct(info, this.toWasmType(goType));
+		}
 	}
 
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
@@ -1735,6 +1822,7 @@ export class StmtsEmitter {
 				const ptrTmp = this.acquireTemp(ptrWType);
 				this.emitExpr(operand, ptrWType);
 				this.pushInstruction({ op: "local.set", index: ptrTmp });
+				this._emitNilGuard(ptrTmp, operandGoType);
 
 				this.pushInstruction({ op: "local.get", index: ptrTmp });
 				this.pushInstruction({
@@ -1873,6 +1961,7 @@ export class StmtsEmitter {
 					const ptrTmp = this.acquireTemp(ptrWType);
 					this.emitExpr(operand, ptrWType);
 					this.pushInstruction({ op: "local.set", index: ptrTmp });
+					this._emitNilGuard(ptrTmp, operandGoType);
 
 					this.pushInstruction({ op: "local.get", index: ptrTmp });
 					this.pushInstruction({
@@ -2520,6 +2609,7 @@ export class StmtsEmitter {
 					typeIndex: mapInfo.entryTypeIndex,
 					fieldIndex: 0,
 				});
+				this._emitCopyMapEntry(keyType, mapInfo.keyWType);
 				if (this.resolveLocal(lhs[0].name)) {
 					this.pushInstruction({
 						op: "local.set",
@@ -2541,20 +2631,7 @@ export class StmtsEmitter {
 					typeIndex: mapInfo.entryTypeIndex,
 					fieldIndex: 1,
 				});
-				const isValStruct =
-					isStructType(valType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(valType, this.mod.checker, this.mod);
-				if (isValStruct) {
-					const sInfo = this._resolveStructInfo({ _type: valType });
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, mapInfo.valWType);
-					}
-				} else if (
-					valType?.kind !== "pointer" &&
-					isArrayType(valType, this.mod.checker)
-				) {
-					this.emitCopyArray(valType);
-				}
+				this._emitCopyMapEntry(valType, mapInfo.valWType);
 				if (this.resolveLocal(lhs[1].name)) {
 					this.pushInstruction({
 						op: "local.set",
@@ -2654,6 +2731,15 @@ export class StmtsEmitter {
 				});
 			}
 			this.releaseTemp(sliceTmp, sliceWType);
+		} else if (!hasVal && !hasCallOrReceive(iterExpr)) {
+			// Ranging over an array for its indexes only does not evaluate it
+			// (`range p` on a nil array pointer is valid): the length is the
+			// type's.
+			this.pushInstruction({
+				op: "i32.const",
+				value: this._getArraySize(isPtrToArr ? iterType.base : iterType),
+			});
+			this.pushInstruction({ op: "local.set", index: lenTmp });
 		} else {
 			this.emitExpr(iterExpr, arrWType);
 			// Go ranges over a copy of an array (the range expression is

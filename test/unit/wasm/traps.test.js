@@ -2,6 +2,7 @@
 // Tests for Phase 3c: Traps, Panics, and Math / Math/bits imports.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	compileHybrid,
 	compileWasm,
@@ -239,4 +240,76 @@ func Main() {
 		);
 	}
 	assertEqual(caught, true);
+});
+
+section("Nil writes and pointer-to-pointer are recoverable");
+
+test("nil pointer writes, array pointer accesses and ranges panic like Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover()) }()
+	f()
+}
+
+func main() {
+	var p *int
+	try("assign", func() { *p = 3 })
+	try("inc", func() { *p++ })
+	try("addassign", func() { *p += 2 })
+	try("read", func() { fmt.Println(*p) })
+	var s *string
+	try("string", func() { *s = "x" })
+	var tp *T
+	try("struct", func() { *tp = T{1} })
+	var ap *[3]int
+	try("index", func() { fmt.Println(ap[1]) })
+	try("store", func() { ap[1] = 2 })
+	try("incr", func() { ap[1]++ })
+	try("copy", func() { a := *ap; fmt.Println(a) })
+	try("slice", func() { fmt.Println(ap[:]) })
+	try("keys", func() {
+		for i := range ap {
+			fmt.Println(i)
+		}
+	})
+	try("values", func() {
+		for i, v := range ap {
+			fmt.Println(i, v)
+		}
+	})
+	try("len", func() { fmt.Println(len(ap)) })
+}
+`,
+		"assign runtime error: invalid memory address or nil pointer dereference\ninc runtime error: invalid memory address or nil pointer dereference\naddassign runtime error: invalid memory address or nil pointer dereference\nread runtime error: invalid memory address or nil pointer dereference\nstring runtime error: invalid memory address or nil pointer dereference\nstruct runtime error: invalid memory address or nil pointer dereference\nindex runtime error: invalid memory address or nil pointer dereference\nstore runtime error: invalid memory address or nil pointer dereference\nincr runtime error: invalid memory address or nil pointer dereference\ncopy runtime error: invalid memory address or nil pointer dereference\nslice runtime error: invalid memory address or nil pointer dereference\n0\n1\n2\nkeys <nil>\nvalues runtime error: invalid memory address or nil pointer dereference\n3\nlen <nil>\n",
+	);
+});
+
+test("a pointer to a pointer reads and writes through both levels", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	x := 9
+	pp := new(*int)
+	*pp = &x
+	fmt.Println(**pp, *pp == &x)
+	**pp = 4
+	q := *pp
+	*q += 1
+	fmt.Println(x, **pp)
+	var np **int
+	defer func() { fmt.Println(recover()) }()
+	fmt.Println(*np)
+}
+`,
+		"9 true\n5 5\nruntime error: invalid memory address or nil pointer dereference\n",
+	);
 });
