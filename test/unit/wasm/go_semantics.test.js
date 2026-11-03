@@ -858,3 +858,59 @@ float rec: runtime error: invalid memory address or nil pointer dereference
 `,
 	);
 });
+
+section("Go semantics — multi-value assignment targets");
+
+test("var with a blank name takes the later result of a call", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func two() (int, int) { return 1, 2 }
+
+var _, y = two()
+
+func main() { fmt.Println(y) }
+`,
+		"2\n",
+	);
+});
+
+test("comma-ok map index and type assertion into index targets", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	mi := map[string]int{"k": 5}
+	var a any = 3
+	res := make([]int, 2)
+	oks := make([]bool, 2)
+	res[0], oks[0] = mi["k"]
+	res[1], oks[1] = a.(int)
+	fmt.Println(res, oks)
+}
+`,
+		"[5 3] [true true]\n",
+	);
+});
+
+test("multi-value call assigned to interface variables", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func two() (int, string) { return 1, "a" }
+
+func main() {
+	var x, y interface{}
+	x, y = two()
+	fmt.Println(x, y)
+}
+`,
+		"1 a\n",
+	);
+});

@@ -1009,8 +1009,26 @@ export class StmtsEmitter {
 		this.releaseTemp(ptrTmp, ptrWType);
 	}
 
+	// A plain variable target of interface type receiving a concrete result
+	// (`var x any; x, y = two()`) needs the value converted first.
+	_needsTupleConversion(lhsNodes, tupleTypes) {
+		return lhsNodes.some((l, i) => {
+			if (l.kind !== "Ident" || l.name === "_") return false;
+			const dest = this.resolveLocal(l.name) ?? this.mod.resolveGlobal(l.name);
+			const checker = this.mod.checker;
+			return (
+				isInterfaceType(dest?.goType ?? l._type, checker) &&
+				!isInterfaceType(tupleTypes[i], checker)
+			);
+		});
+	}
+
 	_emitTupleAssign(lhsNodes, rhsNode, op) {
-		if (op === "=" && lhsNodes.some((l) => !this._isPlainTupleTarget(l))) {
+		if (
+			op === "=" &&
+			(lhsNodes.some((l) => !this._isPlainTupleTarget(l)) ||
+				this._needsTupleConversion(lhsNodes, rhsNode._type.types))
+		) {
 			this._emitTupleViaTemps(
 				lhsNodes,
 				rhsNode,
@@ -1115,7 +1133,28 @@ export class StmtsEmitter {
 	}
 
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
-		if (lhsNode.kind !== "Ident" || lhsNode.name === "_") return;
+		if (lhsNode.kind === "Ident" && lhsNode.name === "_") return;
+		const redeclared =
+			isDefine && lhsNode._redecl && this.resolveLocal(lhsNode.name);
+		if (lhsNode.kind !== "Ident" || redeclared) {
+			// An index, field or dereference target (or a name `:=` redeclares):
+			// assign from a named view of the temporary.
+			const name = `__ok_tmp_${this.tempCounter++}`;
+			this.locals.set(name, {
+				index: tempIdx,
+				type: wType,
+				goType,
+				isParam: false,
+				isBoxed: false,
+			});
+			this._emitAssignSingle(
+				lhsNode,
+				{ kind: "Ident", name, _type: goType, _parTmp: true },
+				"=",
+			);
+			this.locals.delete(name);
+			return;
+		}
 		if (isDefine) {
 			const idx = this.allocLocal(lhsNode.name, wType, goType);
 			const local = this.locals.get(lhsNode.name);
@@ -3297,6 +3336,17 @@ export class StmtsEmitter {
 		this.pushInstruction("end");
 	}
 
+	// Wraps the value on the stack in a box when the just-declared local `name`
+	// is captured and mutated.
+	_emitBoxIfCaptured(name) {
+		const info = this.locals.get(name);
+		if (info?.isBoxed)
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: info.boxInfo.typeIndex,
+			});
+	}
+
 	emitTypeSwitchStmt(stmt) {
 		this.pushInstruction({ op: "block", blockType: "void" });
 		this.pushControl("break", stmt.label);
@@ -3357,6 +3407,7 @@ export class StmtsEmitter {
 				} else {
 					this.pushInstruction({ op: "local.get", index: tswTmp });
 				}
+				this._emitBoxIfCaptured(stmt.assign);
 				this.pushInstruction({ op: "local.set", index: assignLocal });
 			}
 
@@ -3372,6 +3423,7 @@ export class StmtsEmitter {
 					name: "any",
 				});
 				this.pushInstruction({ op: "local.get", index: tswTmp });
+				this._emitBoxIfCaptured(stmt.assign);
 				this.pushInstruction({ op: "local.set", index: assignLocal });
 			}
 			this._emitClauseBody(defaultCase.stmts);

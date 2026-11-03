@@ -433,19 +433,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 14: WASM Locals, Captures and Multi-value Targets
 
-- [ ] Task 14.1: Shadowing and captured locals
+- [x] Task 14.1: Shadowing and captured locals
   - Files: `src/lower/captures.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/closures.test.js`
   - Test: L27 → `9 7`; L113 → `9`; L118 → `2 0`.
   - Done when: three repros validate and match Go.
-- [ ] Task 14.2: Type switch bindings that shadow or are captured
+- [x] Task 14.2: Type switch bindings that shadow or are captured
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/js/statements.js`, `test/unit/wasm/closures.test.js`
   - Test: L119 → `4` (js/both `NaN` today); L141 → `3`.
   - Done when: both repros match Go on all targets.
-- [ ] Task 14.3: Multi-value assignment into blank, computed and interface targets
+- [x] Task 14.3: Multi-value assignment into blank, computed and interface targets
   - Files: `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: L28 `var _, y = two()` → `2`; L122 → `[5 3] [true true]`; L142 → `1 a`.
   - Done when: three repros validate and match Go.
-- [ ] Task 14.4: Deferred closures in switch clauses inside loops
+- [x] Task 14.4: Deferred closures in switch clauses inside loops
   - Files: `src/lower/captures.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/defer_recover.test.js`
   - Test: L140 → `deferred2 1` then `deferred zero`.
   - Done when: repro validates and matches Go.

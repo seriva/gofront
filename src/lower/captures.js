@@ -13,6 +13,9 @@ export class CaptureAnalysis {
 	constructor() {
 		// Map<FuncLit, Set<string>>: free variables captured by each closure
 		this.capturesByClosure = new Map();
+		// Map<FuncLit, Map<string, Type>>: the type of each captured variable,
+		// read off the closure's first reference to it.
+		this.captureTypes = new Map();
 		// Set<string>: variables in the enclosing scope that are captured AND mutated
 		this.mutatedCaptures = new Set();
 	}
@@ -48,48 +51,83 @@ export function collectDeclaredNames(node, names = new Set()) {
 }
 
 /**
- * Finds all identifier references in a node that are not shadowed by inner declarations.
+ * Finds the identifiers a function literal body reads from outside itself.  A
+ * name is local only from its declaration onwards and only inside its block,
+ * so `m := f(m)` reads the enclosing `m`, and `{ m := 1 }; use(m)` reads it
+ * too.  `scopes` is the stack of name sets visible inside the literal;
+ * `types` receives the type of the first reference to each free name.
  */
-function collectReferencedNames(node, localDecls, refs = new Set()) {
+function collectReferencedNames(node, scopes, refs = new Set(), types) {
 	if (!node || typeof node !== "object") return refs;
 	if (Array.isArray(node)) {
-		for (const item of node) collectReferencedNames(item, localDecls, refs);
+		for (const item of node) collectReferencedNames(item, scopes, refs, types);
 		return refs;
 	}
+	const walk = (child) => collectReferencedNames(child, scopes, refs, types);
+	const scoped = (fn) => {
+		scopes.push(new Set());
+		fn();
+		scopes.pop();
+	};
+	const declare = (name) => {
+		if (name && name !== "_") scopes[scopes.length - 1].add(name);
+	};
 
-	// In struct literals, field names in KeyValueExpr are not variable references
-	if (node.kind === "KeyValueExpr") {
-		collectReferencedNames(node.value, localDecls, refs);
-		return refs;
-	}
-
-	if (node.kind === "FuncLit") {
-		const innerLocals = new Set(localDecls);
-		for (const p of node.params ?? []) {
-			if (p.name && p.name !== "_") innerLocals.add(p.name);
-		}
-		for (const r of node.returnType?._namedReturns ?? []) {
-			if (r.name && r.name !== "_") innerLocals.add(r.name);
-		}
-		collectDeclaredNames(node.body, innerLocals);
-		forEachChild(node, (child) =>
-			collectReferencedNames(child, innerLocals, refs),
-		);
-		return refs;
-	}
-
-	if (
-		node.kind === "Ident" &&
-		!localDecls.has(node.name) &&
-		node.name !== "_"
-	) {
-		refs.add(node.name);
+	switch (node.kind) {
+		// In struct literals, field names in KeyValueExpr are not variable references
+		case "KeyValueExpr":
+			walk(node.value);
+			return refs;
+		case "FuncLit":
+			scoped(() => {
+				for (const p of node.params ?? []) declare(p.name);
+				for (const r of node.returnType?._namedReturns ?? []) declare(r.name);
+				forEachChild(node, walk);
+			});
+			return refs;
+		case "DefineStmt":
+			walk(node.rhs);
+			for (const l of node.lhs ?? []) {
+				if (l.kind === "Ident") declare(l.name);
+				else walk(l);
+			}
+			return refs;
+		case "VarDecl":
+		case "ConstDecl":
+			for (const spec of node.decls ?? []) {
+				walk(spec.value ?? spec.init);
+				for (const name of spec.names ?? []) declare(name);
+			}
+			return refs;
+		case "TypeSwitchStmt":
+			scoped(() => {
+				walk(node.expr);
+				for (const c of node.cases ?? []) {
+					scoped(() => {
+						declare(node.assign);
+						walk(c.stmts);
+					});
+				}
+			});
+			return refs;
+		case "Block":
+		case "CaseClause":
+		case "IfStmt":
+		case "ForStmt":
+		case "SwitchStmt":
+			scoped(() => forEachChild(node, walk));
+			return refs;
+		case "Ident":
+			if (node.name !== "_" && !scopes.some((sc) => sc.has(node.name))) {
+				refs.add(node.name);
+				if (node._type && types && !types.has(node.name))
+					types.set(node.name, node._type);
+			}
+			return refs;
 	}
 
 	// For nested closures, free variables are also referenced
-	forEachChild(node, (child) =>
-		collectReferencedNames(child, localDecls, refs),
-	);
+	forEachChild(node, walk);
 	return refs;
 }
 
@@ -226,6 +264,7 @@ export function analyzeCaptures(fnDecl) {
 		for (const r of node.returnType?._namedReturns ?? []) {
 			if (r.name && r.name !== "_") closureLocals.add(r.name);
 		}
+		const paramScope = new Set(closureLocals);
 		collectDeclaredNames(node.body, closureLocals);
 
 		const allOuterScope = new Set();
@@ -233,14 +272,23 @@ export function analyzeCaptures(fnDecl) {
 			for (const name of scope) allOuterScope.add(name);
 		}
 
-		const allRefs = collectReferencedNames(node.body, closureLocals);
+		const refTypes = new Map();
+		const allRefs = collectReferencedNames(
+			node.body,
+			[paramScope],
+			new Set(),
+			refTypes,
+		);
 		const captured = new Set();
+		const capturedTypes = new Map();
 		for (const ref of allRefs) {
 			if (allOuterScope.has(ref)) {
 				captured.add(ref);
+				if (refTypes.has(ref)) capturedTypes.set(ref, refTypes.get(ref));
 			}
 		}
 		result.capturesByClosure.set(node, captured);
+		result.captureTypes.set(node, capturedTypes);
 
 		for (const varName of captured) {
 			if (mutatedVars.has(varName)) {

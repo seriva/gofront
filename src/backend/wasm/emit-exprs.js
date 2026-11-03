@@ -327,7 +327,7 @@ export class ExprsEmitter {
 		if (capturedNames.length === 0) {
 			this.pushInstruction({ op: "ref.null", heapType: "any" });
 		} else {
-			const envFields = this._buildEnvFields(capturedNames);
+			const envFields = this._buildEnvFields(capturedNames, funcLit);
 			const envInfo = this.mod.getEnvType(envFields);
 
 			for (const field of envFields) {

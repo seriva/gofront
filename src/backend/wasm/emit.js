@@ -893,11 +893,12 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	_buildEnvFields(capturedNames) {
+	_buildEnvFields(capturedNames, funcLit) {
 		const envFields = [];
+		const types = this.captureAnalysis?.captureTypes?.get(funcLit);
 		for (const name of capturedNames) {
 			const isBoxed = this.mutatedCaptures.has(name);
-			const goType = this._findCapturedVarGoType(name);
+			const goType = types?.get(name) ?? this._findCapturedVarGoType(name);
 			const boxInfo = isBoxed ? this.mod.getBoxType(goType) : null;
 			envFields.push({
 				name,
@@ -913,7 +914,10 @@ export class FunctionEmitter {
 	}
 
 	_unpackClosureEnv() {
-		const envFields = this._buildEnvFields(this.capturedNames);
+		const envFields = this._buildEnvFields(
+			this.capturedNames,
+			this.funcDecl._funcLit,
+		);
 		const envInfo = this.mod.getEnvType(envFields);
 		this.envInfo = envInfo;
 		this.envFields = envFields;
