@@ -255,7 +255,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/backend/js/index.js`, `src/typechecker/assignability.js`, `test/unit/compiler/packages.test.js`
   - Test: L19 `a.Pt{1}`, `b.Pt{"y"}` from main → `{1} {y}`; L19b `var x Box[a.Pt]; x = Box[b.Pt]{}` → `assertErrorContains(errors, "cannot use")`.
   - Done when: multi-package repro runs (js and hybrid); identity check rejects the mixed assignment.
-- [ ] Task 5.2: Aliases of struct types in JS
+- [x] Task 5.2: Aliases of struct types in JS
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`, `test/unit/language/declarations.test.js`
   - Test: L22a `A{3}` → `{3}`; L22b `A{V: 3}.Get()` → `3`; L22c copy → `{1} {2}`; L22d `W{A{5}}.V` → `5` (js and both; wasm pinned).
   - Done when: all four run on all targets.

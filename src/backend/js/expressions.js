@@ -11,6 +11,7 @@ import {
 	BROWSER_GLOBALS,
 	compositeLitIndices,
 	ERROR,
+	embeddedFieldName,
 	is64BitInt,
 	is64BitSigned,
 	is64BitUnsigned,
@@ -1174,7 +1175,7 @@ export const expressionGenMethods = {
 			const inner = sf.type?.kind === "pointer" ? sf.type.base : sf.type;
 			if (inner?.kind !== "named" || !this.structNames.has(inner.name))
 				continue;
-			const name = inner.name;
+			const name = embeddedFieldName(sf);
 			if (name === field) return null;
 			const ist = inner.underlying;
 			if (!ist?.fields?.has(field)) continue;
@@ -2479,9 +2480,10 @@ export const expressionGenMethods = {
 	getTypeName(typeNode) {
 		if (!typeNode) return null;
 		if (typeNode._stdName) return typeNode._stdName;
-		if (typeNode.kind === "TypeName") return this._dequalify(typeNode.name);
+		if (typeNode.kind === "TypeName")
+			return this._aliasTarget(this._dequalify(typeNode.name));
 		if (typeNode.kind === "GenericTypeName") return typeNode.name;
-		if (typeNode.kind === "Ident") return typeNode.name;
+		if (typeNode.kind === "Ident") return this._aliasTarget(typeNode.name);
 		if (typeNode.kind === "InstantiationExpr")
 			return this.getTypeName(typeNode.expr);
 		if (typeNode.kind === "SelectorExpr") {
@@ -2490,6 +2492,17 @@ export const expressionGenMethods = {
 			return `${base}.${typeNode.field}`;
 		}
 		return null;
+	},
+
+	// `type A = Base`: no class is emitted for A, so it names Base's.
+	_aliasTarget(name) {
+		const t = this.checker?.types.get(name);
+		return t?.kind === "named" &&
+			t.name &&
+			t.name !== name &&
+			!name.includes(".")
+			? t.name
+			: name;
 	},
 
 	// Bundled GoFront packages are inlined, so `pkg.T` names the class `T`.
