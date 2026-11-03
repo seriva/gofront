@@ -1830,6 +1830,8 @@ function indent(text, prefix) {
 // quoted, helpers prefixed with `__`.
 export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
+	// Each instance numbers its pointers and funcs from 1 (see __fmtid).
+	if (typeof __fmtptr !== "undefined") __fmtptr = { m: new WeakMap(), n: 1 };
 	let lineBuf = "";
 	let targs = [];
 	let fmtStructMap = new WeakMap();
@@ -1990,11 +1992,17 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			// One object per struct and per kind: a value and a pointer to it
 			// in the same call (fmt.Println(&s, s)) must stay distinct.
 			const slot = isPtr;
+			if (isPtr === 3) {
+				const fn = function () {};
+				Object.defineProperty(fn, "__pid", { value: __fmtid(ref) });
+				return fn;
+			}
 			if (isPtr === 2) {
 				const seenBox = ref !== null && ref !== undefined && typeof ref === "object" ? fmtStructMap.get(ref) : undefined;
 				if (seenBox?.[2]) return seenBox[2];
 				const b = { value: null, __p: true, __box: true };
 				if (ref !== null && ref !== undefined && typeof ref === "object") {
+					Object.defineProperty(b, "__pid", { value: __fmtid(ref) });
 					if (seenBox) seenBox[2] = b;
 					else fmtStructMap.set(ref, [undefined, undefined, b]);
 				}
@@ -2005,7 +2013,10 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			if (seen?.[slot]) return seen[slot];
 			const o = {};
 			Object.defineProperty(o, "__struct", { value: true, configurable: true });
-			if (isPtr !== 0) Object.defineProperty(o, "__p", { value: true, configurable: true });
+			if (isPtr !== 0) {
+				Object.defineProperty(o, "__p", { value: true, configurable: true });
+				if (isRef) Object.defineProperty(o, "__pid", { value: __fmtid(ref) });
+			}
 			if (isRef) {
 				if (seen) seen[slot] = o;
 				else fmtStructMap.set(ref, slot ? [undefined, o] : [o, undefined]);
@@ -2028,7 +2039,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_arg_u64": (v) => { v = BigInt.asUintN(64, v); targ(v > ${P}MAX ? v : Number(v)); },
 		"fmt_arg_type": (i) => { if (targs.length > 0) targs[targs.length - 1] = __ft(targs[targs.length - 1], JSON.parse(stringTable[i])); },
 		"testing_arg_spread": (a) => { if (a) for (const v of a) targs.push(v); },
-		"testing_arg_err": (s) => targ({ Error() { return s; } }),
+		"testing_arg_err": (s) => targ(s === null ? null : { Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => Number(t[stringTable[i]]()),

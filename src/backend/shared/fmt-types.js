@@ -133,7 +133,9 @@ export function fmtTypeDesc(t, resolve = (x) => x, depth = 0) {
 			return {
 				k: "func",
 				p: (t.params ?? []).map(sub),
-				r: (t.returns ?? []).map(sub),
+				r: (t.returns ?? [])
+					.filter((r) => !(r?.kind === "basic" && r.name === "void"))
+					.map(sub),
 				v: Boolean(t.variadic),
 			};
 		case "chan":
@@ -233,6 +235,17 @@ export function fmtDescIsSeq(desc) {
 }
 
 /**
+ * Whether the type is a pointer: a nil one prints `0` under `%d` and the other
+ * integer verbs and <nil> under `%s`, which only the static type can tell from
+ * a nil interface.
+ * @param {any} desc result of fmtTypeDesc
+ * @returns {boolean}
+ */
+export function fmtDescIsPtr(desc) {
+	return desc?.k === "ptr";
+}
+
+/**
  * Whether a call with this literal format string needs operand types: `%T`,
  * `%#v`, an unknown verb (`%!z(int=5)`), or more operands than verbs
  * (`%!(EXTRA int=1)`).
@@ -240,8 +253,10 @@ export function fmtDescIsSeq(desc) {
  * @param {number} nargs operand count, -1 when not known statically
  * @param {boolean} [seqArgs] some operand is a slice or array, whose element
  *   type decides how `%s`, `%q`, `%x` and `%X` read it
+ * @param {boolean} [ptrArgs] some operand is a pointer, whose nil value is told
+ *   from a nil interface by its type
  */
-export function fmtWantsTypes(format, nargs, seqArgs = false) {
+export function fmtWantsTypes(format, nargs, seqArgs = false, ptrArgs = false) {
 	if (typeof format !== "string") return false;
 	const re = new RegExp(
 		`%([${FLAGS}]*)((?:\\[\\d+\\])?(?:\\*|\\d+)?(?:\\.(?:\\[\\d+\\])?(?:\\*|\\d*))?(?:\\[\\d+\\])?)([^]?)`,
@@ -255,6 +270,7 @@ export function fmtWantsTypes(format, nargs, seqArgs = false) {
 		if (verb === "T" || verb === "p") return true;
 		if (verb === "v" && m[1].includes("#")) return true;
 		if (seqArgs && "sqxX".includes(verb)) return true;
+		if (ptrArgs && "bodxXs".includes(verb)) return true;
 		if (verb !== "" && !VERBS.includes(verb) && verb !== "w") return true;
 		if (/[[*]/.test(m[2])) indexed = true;
 		count++;

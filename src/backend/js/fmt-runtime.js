@@ -74,17 +74,55 @@ var __fmtu = __fmtu || (() => {
     }
     return v.toExponential();
   };
+  // The exact decimal expansion of a finite double: abs = n / 10^k.
+  const exactDec = (abs) => {
+    const dv = new DataView(new ArrayBuffer(8));
+    dv.setFloat64(0, abs);
+    const bits = dv.getBigUint64(0);
+    let e = Number((bits >> 52n) & 0x7ffn);
+    let m = bits & 0xfffffffffffffn;
+    if (e === 0) e = -1074; else { m |= 1n << 52n; e -= 1075; }
+    return e >= 0 ? [m << BigInt(e), 0] : [m * 5n ** BigInt(-e), -e];
+  };
+  // n / 10^drop rounded to the nearest integer, ties to even (strconv's rule).
+  const divRound = (n, drop) => {
+    if (drop <= 0) return n * 10n ** BigInt(-drop);
+    const d = 10n ** BigInt(drop);
+    let q = n / d;
+    const r = n % d;
+    if (r * 2n > d || (r * 2n === d && (q & 1n) === 1n)) q += 1n;
+    return q;
+  };
+  // [digits, x]: abs rounded to prec+1 significant digits, ties to even, as d.ddd e x.
+  const expDigits = (abs, prec) => {
+    if (abs === 0) return ["0".repeat(prec + 1), 0];
+    const sh = abs.toExponential();
+    if (sh.indexOf("e") - (sh.indexOf(".") < 0 ? 0 : 1) <= prec + 2) {
+      const [n, k] = exactDec(abs);
+      const len = n.toString().length;
+      let x = len - 1 - k;
+      let q = divRound(n, len - (prec + 1));
+      let ds = q.toString();
+      if (ds.length > prec + 1) { x++; ds = ds.slice(0, prec + 1); }
+      return [ds, x];
+    }
+    return expParts(abs.toExponential(Math.min(prec, 100)));
+  };
   const fmtE = (abs, prec, upper) => {
-    const [ds, x] = expParts(abs.toExponential(Math.min(prec, 100)));
+    const [ds, x] = expDigits(abs, Math.min(prec, 100));
     return ds[0] + (prec > 0 ? "." + ds.slice(1).padEnd(prec, "0") : "") + expStr(x, upper);
   };
   const fmtF = (abs, prec) => {
     if (abs >= 1e21) return BigInt(abs).toString() + (prec > 0 ? "." + "0".repeat(prec) : "");
-    return abs.toFixed(Math.min(prec, 100));
+    prec = Math.min(prec, 100);
+    if (!Number.isInteger(abs * 2 ** (prec + 1))) return abs.toFixed(prec);
+    const [n, k] = exactDec(abs);
+    const s = divRound(n, k - prec).toString().padStart(prec + 1, "0");
+    return prec > 0 ? s.slice(0, s.length - prec) + "." + s.slice(s.length - prec) : s;
   };
   const fmtG = (abs, prec, upper, f32) => {
     if (prec === 0) prec = 1;
-    const [d0, x] = expParts(prec < 0 ? (f32 ? shortest32(abs) : abs.toExponential()) : abs.toExponential(Math.min(prec - 1, 100)));
+    const [d0, x] = prec < 0 ? expParts(f32 ? shortest32(abs) : abs.toExponential()) : expDigits(abs, Math.min(prec - 1, 100));
     const ds = d0.replace(/0+$/, "") || "0";
     let eprec = prec < 0 ? 6 : prec;
     if (prec >= 0 && eprec > ds.length && ds.length >= x + 1) eprec = ds.length;
@@ -299,7 +337,7 @@ var __fmtu = __fmtu || (() => {
   const gsComp = (v, t, nm, top, gs) => {
     if (t.k === "map") {
       const tn = nm ?? typeName(t);
-      if (v == null) return tn + "(nil)";
+      if (v == null || v.__nilm === true || (v.__nm === true && Object.keys(v).length === 0)) return tn + "(nil)";
       return tn + "{" + sortedEntries(v, t.key).map(([k, x]) => gs(k, t.key, false) + ":" + gs(x, t.val, false)).join(", ") + "}";
     }
     if (v == null) return (nm ?? typeName(t)) + "(nil)";
@@ -352,7 +390,14 @@ export const HELPER_FMT_LOOP = String.raw`
     if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqxXw".includes(verb)) && !("vsqxX".includes(verb) && stringMethod(v))) return v.__gfUnbox();
     return v;
   };
-  const bad = (verb, v, t) => "%!" + verb + "(" + (v === null || v === undefined ? "<nil>" : U.typeName(t ?? U.descOf(v)) + "=" + formatV(v, false, true)) + ")";
+  const badVal = (v, d) => {
+    const b = U.baseOf(d);
+    return typeof v === "number" && b?.k === "b" && U.isFloatN(b.n) ? U.fmtFloat(v, "g", {}, 0, false, -1, false, b.n === "float32") : formatV(v, false, true);
+  };
+  const bad = (verb, v, t) => {
+    const d = t ?? U.descOf(v);
+    return "%!" + verb + "(" + (v === null || v === undefined ? "<nil>" : U.typeName(d) + "=" + badVal(v, d)) + ")";
+  };
   const elemOf = (t) => {
     t = U.baseOf(t);
     return t && (t.k === "slice" || t.k === "array") ? t.e : null;
@@ -417,14 +462,18 @@ export const HELPER_FMT_LOOP = String.raw`
     sd = sd ?? v?.__fd;
     if (sd?.b && v != null && !(v instanceof sd.b)) v = new sd.b(v);
     v = unbox(v, verb);
-    if (v?.__nilp === true && !stringMethod(v)) v = null;
+    if (v?.__nilp === true && "bod".includes(verb)) return fmtNum(verb, 0n, null, fl, wid, hasWid, prec, hasPrec);
+    let nilPtr = false;
+    if (v?.__nilp === true && !stringMethod(v)) { v = null; nilPtr = true; }
     const bt = U.baseOf(t);
     if (v === null || v === undefined) {
       if (bt?.k === "slice") v = [];
       else if (bt?.k === "map") v = {};
       // A nil *T with a String/Error method prints <nil> under %s (Go recovers
       // the nil-dereference panic); a bare null cannot tell it from a nil interface.
-      else return verb === "s" || verb === "v" ? U.pad("<nil>", fl, wid) : bad(verb, v, t);
+      else if ((bt?.k === "ptr" || nilPtr) && "bodxX".includes(verb)) return fmtNum(verb, 0n, null, fl, wid, hasWid, prec, hasPrec);
+      else if (verb === "v" || (verb === "s" && (bt != null || nilPtr))) return U.pad("<nil>", fl, wid);
+      else return bad(verb, v, t);
     }
     switch (typeof v) {
       case "boolean": return verb === "t" || verb === "v" ? U.pad(String(v), fl, wid) : bad(verb, v, t);
@@ -470,10 +519,24 @@ export const HELPER_FMT_LOOP = String.raw`
       if (v.__ptr_map === true) entries.forEach(([, x]) => markPtr(x));
       return "map[" + entries.map(([k, x]) => fmtv(verb, k, kt, fl, wid, hasWid, prec, hasPrec, false, sd?.k) + ":" + fmtv(verb, nilStand(x, sd?.v, verb), vt, fl, wid, hasWid, prec, hasPrec, false, sd?.v)).join(" ") + "]";
     }
+    if (isBox(v) || typeof v === "function") {
+      if ("bodxX".includes(verb)) return fmtNum(verb, BigInt(ptrId(v)), null, fl, wid, hasWid, prec, hasPrec);
+      return verb === "v" ? U.pad(getPtr(v), fl, wid) : bad(verb, v, t);
+    }
     if (isPointer(v) && !top) return getPtr(v);
     const ff = typeof v.__ff === "function" ? v.__ff() : (sd?.ff ?? null);
     const body = U.keys(v).map((k) => fmtv(verb, nilStand(v[k], ff?.[k], verb), fieldOf(t, k), fl, wid, hasWid, prec, hasPrec, false, ff?.[k])).join(" ");
     return (isPointer(v) ? "&{" : "{") + body + "}";
+  };
+  // A pointer to a scalar: the box object holding its value.
+  const isBox = (o) => o !== null && typeof o === "object" && "value" in o && (o.__box === true || (!o.__struct && !("__v" in o) && Object.keys(o).length === 1 && (o.constructor === Object || !o.constructor || o.constructor?.name === "Object")));
+  // %p: the identity id of a pointer, func, map or slice; nil prints 0x0.
+  const fmtPtr = (v, t, fl, wid) => {
+    const bt = U.baseOf(t);
+    const refT = bt != null && (bt.k === "ptr" || bt.k === "func" || bt.k === "map" || bt.k === "slice" || bt.k === "chan");
+    if (v === null || v === undefined) return refT ? U.pad("0x0", fl, wid) : null;
+    if (typeof v === "function" || (typeof v === "object" && (isBox(v) || isPointer(v) || bt?.k === "ptr" || bt?.k === "map" || bt?.k === "slice" || v instanceof Map))) return U.pad(getPtr(v), fl, wid);
+    return null;
   };
   const typedArg = (x) => (x instanceof __FT ? { v: x.v, t: x.t } : { v: x, t: null });
   let out = "";
@@ -560,9 +623,11 @@ export const HELPER_FMT_LOOP = String.raw`
     }
     sharp = verb === "v" && fl.sharp;
     // The stand-in for a nil pointer with a pointer-receiver String/Error only serves %v and %s.
-    if (v && v.__nilp === true && !(verb === "s" || verb === "q" || (verb === "v" && !sharp))) v = null;
+    if (v && v.__nilp === true && !(verb === "s" || verb === "q" || (verb === "v" && !sharp) || "bodxX".includes(verb))) v = null;
     if (verb === "T") { out += U.pad(U.typeName(t ?? U.descOf(unbox(v, "T"))), fl, wid); continue; }
-    if (verb === "v" && hasPrec && !sharp) {
+    // A width applies to each element of a composite, as Go does.
+    const widComposite = hasWid && !fl.plus && v !== null && typeof v === "object" && !(v instanceof __FT) && !(v.re !== undefined && v.im !== undefined);
+    if (verb === "v" && (hasPrec || widComposite) && !sharp) {
       // A precision applies to each scalar (%.3v of 3.14159 is 3.14, of "abc" is abc cut to 3 runes).
       out += fmtv("v", v, t, fl, wid, hasWid, prec, hasPrec, true);
       continue;
@@ -580,7 +645,7 @@ export const HELPER_FMT_LOOP = String.raw`
       out += U.pad(String(v == null ? "<nil>" : typeof v === "object" && v.Error ? v.Error() : v), fl, wid);
       continue;
     }
-    if (verb === "p") { out += bad("p", v, t); continue; }
+    if (verb === "p") { out += fmtPtr(unbox(v, "p"), t, fl, wid) ?? bad("p", v, t); continue; }
     if (!"bcdoOqxXUeEfFgGstp".includes(verb)) { out += bad(verb, v, t); continue; }
     out += fmtv(verb, v, t, fl, wid, hasWid, prec, hasPrec, true);
   }

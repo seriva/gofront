@@ -31,9 +31,11 @@ ${body}
 
 // Runs `body` (which returns a string) on the JS and the WASM backend and
 // returns the shared result.
-function parity(body, decls = "") {
+function parity(body, decls = "", imports = []) {
+	const extra = imports.map((i) => `import "${i}"`).join("\n");
 	const src = `package main
 import "fmt"
+${extra}
 ${decls}
 func Main() string {
 ${body}
@@ -52,18 +54,21 @@ test("%p prints %!p(T=value): there are no addresses", () => {
 	);
 });
 
-test("%p of a pointer prints the bad-verb form with its pointee", () => {
+test("%p of a pointer prints the same id for the same pointer and a new one per object", () => {
 	assertEqual(
 		parity(
-			`p := &P{1}
-	return fmt.Sprintf("%p", p)`,
+			`a := &P{1}
+	b := &P{1}
+	pa, pb := fmt.Sprintf("%p", a), fmt.Sprintf("%p", b)
+	return fmt.Sprint(strings.HasPrefix(pa, "0x"), pa == fmt.Sprintf("%p", a), pa == pb, fmt.Sprintf("%p", a) == fmt.Sprintf("%p", &P{1}))`,
 			"type P struct{ X int }",
+			["strings"],
 		),
-		"%!p(*main.P=&{1})",
+		"true true false false",
 	);
 });
 
-test("%p of boxed scalar pointers, struct pointers and nil agree on both backends", () => {
+test("%p of boxed scalar pointers, struct pointers and nil", () => {
 	assertEqual(
 		parity(
 			`x := 5
@@ -72,7 +77,40 @@ test("%p of boxed scalar pointers, struct pointers and nil agree on both backend
 	return fmt.Sprintf("%p|%p|%p", &x, s, nilPtr)`,
 			"type P struct{ X int }",
 		),
-		"%!p(*int=0x1)|%!p(*main.P=&{1})|%!p(<nil>)",
+		"0x1|0x2|0x0",
+	);
+});
+
+test("%p of a pointer held in an any and of a func", () => {
+	assertEqual(
+		parity(
+			`b := 1
+	var x any = &b
+	f := func() {}
+	return fmt.Sprintf("%p|%p|%p", x, f, f)`,
+		),
+		"0x1|0x2|0x2",
+	);
+});
+
+test("%d of a pointer to a scalar prints decimal digits", () => {
+	assertEqual(
+		parity(
+			`x := 1
+	return fmt.Sprintf("%d|%d", &x, &x)`,
+		),
+		"1|1",
+	);
+});
+
+test("a func prints an id with %v and its signature with %T, and Sprint spaces it", () => {
+	assertEqual(
+		parity(
+			`f := func() {}
+	g := func(a int) string { return "" }
+	return fmt.Sprintf("%v|%T|%T|", f, f, g) + fmt.Sprint(f, 1)`,
+		),
+		"0x1|func()|func(int) string|0x1 1",
 	);
 });
 
@@ -1279,6 +1317,51 @@ func main() {
 	await assertProgramOutput(
 		src,
 		"9223372036854775807|7fffffffffffffff|  18446744073709551615|18446744073709551615\n9223372036854775808\n",
+	);
+});
+
+section("fmt rounding, width and nil operands");
+
+test("float precision rounds exact ties to even", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintf("%.0f|%.1f|%.1v|%.0f|%.2f|%.1e|%.2g", 2.5, 0.25, 2.5, 3.5, 1.005, 12500.0, 0.125)`,
+		),
+		"2|0.2|2|4|1.00|1.2e+04|0.12",
+	);
+});
+
+test("integer verbs on infinities and small floats print Go's bad-verb text", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintf("%d|%d|%d", 1e-7, math.Inf(1), math.Inf(-1))`,
+			"",
+			["math"],
+		),
+		"%!d(float64=1e-07)|%!d(float64=+Inf)|%!d(float64=-Inf)",
+	);
+});
+
+test("a width applies to each element of slices, maps and structs", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintf("%5v|%-5v|%3v|%3v", []int{1}, []int{1}, map[string]int{"a": 1}, T{1, 2})`,
+			"type T struct{ A, B int }",
+		),
+		"[    1]|[1    ]|map[  a:  1]|{  1   2}",
+	);
+});
+
+test("nil pointers, interfaces and maps follow Go", () => {
+	assertEqual(
+		parity(
+			`var c *C
+	var e error
+	var m map[string]int
+	return fmt.Sprintf("%d|%s|%.2v|%d|%#v", c, e, e, e, m)`,
+			"type C struct{ X int }",
+		),
+		"0|%!s(<nil>)|<nil>|%!d(<nil>)|map[string]int(nil)",
 	);
 });
 

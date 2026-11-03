@@ -7,6 +7,7 @@ import { typeStr } from "../../../typechecker/types.js";
 import { wrappedErrorfIndices } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
+	fmtDescIsPtr,
 	fmtDescIsSeq,
 	fmtTypeDesc,
 	fmtWantsTypes,
@@ -529,21 +530,23 @@ export class StdlibCoreEmitter {
 			return;
 		}
 		if (isFuncType(goType, this.mod.checker)) {
-			// A func value has no address in WebAssembly: a nil one prints
-			// <nil>, any other prints a fixed address-style text.
+			// A nil func prints <nil>; any other gets a host-side stand-in
+			// (kind 3) whose id is stable per closure object.
+			const fnTmp = this.acquireTemp("anyref");
 			this.emitExpr(arg, toWasmType(goType, this.mod.checker, this.mod));
+			this.pushInstruction({ op: "local.set", index: fnTmp });
+			this.pushInstruction({ op: "local.get", index: fnTmp });
 			this.pushInstruction("ref.is_null");
 			this.pushInstruction({ op: "if", blockType: "externref" });
 			this.pushInstruction({ op: "ref.null", heapType: "extern" });
 			this.pushInstruction("else");
-			this.pushInstruction({
-				op: "i32.const",
-				value: this.mod.internString("0x1"),
-			});
+			this.pushInstruction({ op: "local.get", index: fnTmp });
+			this.pushInstruction({ op: "i32.const", value: 3 });
 			this.pushInstruction({
 				op: "call",
-				funcIndex: this.mod.getStringImportIndex(),
+				funcIndex: this.mod.getFmtNewStructIndex(),
 			});
+			this.releaseTemp(fnTmp, "anyref");
 			this.pushInstruction("end");
 			return;
 		}
@@ -1540,10 +1543,18 @@ export class StdlibCoreEmitter {
 				const tmp = this.acquireTemp("externref");
 				this.emitExpr(arg, "anyref");
 				this.pushInstruction({ op: "local.tee", index: errTmp });
+				// A nil interface travels as a null operand (fmt prints
+				// %!s(<nil>) for it), not as the text "<nil>".
+				this.pushInstruction("ref.is_null");
+				this.pushInstruction({ op: "if", blockType: "externref" });
+				this.pushInstruction({ op: "ref.null", heapType: "extern" });
+				this.pushInstruction("else");
+				this.pushInstruction({ op: "local.get", index: errTmp });
 				this.pushInstruction({
 					op: "call",
 					funcIndex: this.mod.resolveFuncIndex("__error_str"),
 				});
+				this.pushInstruction("end");
 				this.pushInstruction({ op: "local.set", index: tmp });
 				temps.push({
 					tmp,
@@ -1721,7 +1732,20 @@ export class StdlibCoreEmitter {
 				),
 			),
 		);
-		return fmtWantsTypes(format.value, spread ? -1 : operands.length, seqArgs);
+		const ptrArgs = operands.some((a) =>
+			fmtDescIsPtr(
+				fmtTypeDesc(
+					a._type ?? this._resolveExprGoType(a),
+					(t) => this.mod.checker?.resolveType?.(t) ?? t,
+				),
+			),
+		);
+		return fmtWantsTypes(
+			format.value,
+			spread ? -1 : operands.length,
+			seqArgs,
+			ptrArgs,
+		);
 	}
 
 	_releaseArgBuffer(temps) {
