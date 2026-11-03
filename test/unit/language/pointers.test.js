@@ -632,6 +632,50 @@ func main() {
 	);
 });
 
+section("Dynamic type checks");
+
+test("assertion and type switch on a slice of a type parameter match tagged slices", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func F[T any](x any) bool {
+	_, ok := x.([]T)
+	return ok
+}
+func G[T any](x any) string {
+	switch x.(type) {
+	case []T:
+		return "slice"
+	}
+	return "other"
+}
+func main() {
+	fmt.Println(F[int]([]int{1, 2}), G[int]([]int{1, 2}), G[int](3))
+}`),
+		"true slice other",
+	);
+});
+
+test("any and interface{} spell the same element type in assertions", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func main() {
+	x := []interface{}{}
+	var a any = x
+	_, ok1 := a.([]any)
+	y := []any{}
+	var b any = y
+	_, ok2 := b.([]interface{})
+	m := map[string]interface{}{}
+	var c any = m
+	_, ok3 := c.(map[string]any)
+	fmt.Println(ok1, ok2, ok3)
+}`),
+		"true true true",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

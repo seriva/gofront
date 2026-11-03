@@ -235,7 +235,8 @@ export const typeInfoGenMethods = {
 		return typeStr(t)
 			.replace(/\bbyte\b/g, "uint8")
 			.replace(/\brune\b/g, "int32")
-			.replace(/\bany\b/g, "interface {}");
+			.replace(/\bany\b/g, "interface {}")
+			.replace(/interface\{\.\.\.\}/g, "interface {}");
 	},
 
 	// Run-time test that `val` holds a value of the unnamed composite type
