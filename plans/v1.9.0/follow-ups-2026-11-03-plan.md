@@ -232,19 +232,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 4: Generics Typechecking and Instantiation
 
-- [ ] Task 4.1: Instantiation-cycle diagnostic
+- [x] Task 4.1: Instantiation-cycle diagnostic
   - Files: `src/typechecker/types.js`, `src/backend/wasm/monomorph.js`, `test/unit/types/generics.test.js`
   - Test: L21a `func (s Stack[T]) Wrap() Stack[[]T]` and L21b body `Stack[[]T]{}` → `assertErrorContains(errors, "instantiation cycle")` on all targets (no stack overflow, no monomorph limit error).
   - Done when: both give the diagnostic in < 1 s.
-- [ ] Task 4.2: Infer type arguments from pointer arguments
+- [x] Task 4.2: Infer type arguments from pointer arguments
   - Files: `src/typechecker/expressions.js`, `test/unit/types/inference.test.js`
   - Test: L38 `swap(&x, &y)` → `2 1`; `func f[T any](p **T)` with `&&x`-equivalent infers `int`.
   - Done when: repro runs on all targets.
-- [ ] Task 4.3: Conversions to `T` inside methods of generic types
+- [x] Task 4.3: Conversions to `T` inside methods of generic types
   - Files: `src/typechecker/expressions.js`, `src/typechecker/types.js`, `test/unit/types/generics.test.js`
   - Test: L48 `Box[float64]{}.Scaled(3)` → `6`; `func a[T any](n int) T { return T(n) }` still → `cannot convert`.
   - Done when: repro runs on all targets; negative keeps its error.
-- [ ] Task 4.4: Promotion through embedded generic instances
+- [x] Task 4.4: Promotion through embedded generic instances
   - Files: `src/typechecker/types.js`, `src/lower/embedding.js`, `src/backend/wasm/emit-exprs.js`
   - Test: `test/unit/types/generics.test.js` — L15 `W{Inner[int]}.Get()` → `0`; L10b `P[string]{&Inner[string]{"x"}}.v` → `x`; L111 `Deep{}.Hello()` two levels → `1` (all targets).
   - Done when: all three run on js/both/wasm.

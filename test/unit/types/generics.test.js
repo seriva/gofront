@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertJsProgramOutput,
@@ -1605,6 +1606,126 @@ test("a[foo, bar] on a non-generic value is an error, not an instantiation", () 
 				"package main\nfunc Main() int { var a int = 42; return a[foo, bar] }",
 			),
 		"expected ']'",
+	);
+});
+
+section(
+	"Generics — instantiation cycles, T(n) conversions, embedded promotion",
+);
+
+const cycleDecl = `package main
+type Stack[T any] struct{ items []T }
+func (s Stack[T]) Wrap() Stack[[]T] { return Stack[[]T]{} }
+func main() {}
+`;
+const cycleBody = `package main
+type Stack[T any] struct{ items []T }
+func (s Stack[T]) Wrap() int {
+	x := Stack[[]T]{}
+	return len(x.items)
+}
+func main() {}
+`;
+
+for (const [name, src] of [
+	["declaration", cycleDecl],
+	["body", cycleBody],
+]) {
+	test(`an instantiation cycle in a method ${name} is diagnosed on js`, () => {
+		const { errors } = compile(src);
+		assertErrorContains(errors, "instantiation cycle");
+	});
+	test(`an instantiation cycle in a method ${name} is diagnosed on wasm`, () => {
+		const { errors } = compile(src, { target: "wasm" });
+		assertErrorContains(errors, "instantiation cycle");
+	});
+}
+
+test("T(n) inside a method of a generic type converts with a numeric constraint", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num interface{ ~int | ~float64 }
+
+type Box[T Num] struct{ v T }
+
+func (b Box[T]) Scaled(n int) T { return T(n) * 2 }
+
+func main() {
+	fmt.Println(Box[float64]{}.Scaled(3))
+}
+`,
+		"6\n",
+	);
+});
+
+test("T(n) in an unconstrained generic function still errors", () => {
+	const { errors } = compile(`package main
+func a[T any](n int) T { return T(n) }
+func main() { _ = a[int](1) }`);
+	assertErrorContains(errors, "cannot convert");
+});
+
+test("methods promote through an embedded generic instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner[T any] struct{ v T }
+
+func (i Inner[T]) Get() T { return i.v }
+
+type W struct{ Inner[int] }
+
+func main() {
+	fmt.Println(W{}.Get())
+}
+`,
+		"0\n",
+	);
+});
+
+test("fields promote through an embedded pointer to a generic instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner[T any] struct{ v T }
+
+type P[T any] struct{ *Inner[T] }
+
+func main() {
+	p := P[string]{&Inner[string]{"x"}}
+	fmt.Println(p.v)
+}
+`,
+		"x\n",
+	);
+});
+
+test("methods promote through two levels of embedding", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+
+func (b Base) Hello() int { return b.n + 1 }
+
+type E struct{ Base }
+
+type Deep struct{ E }
+
+func main() {
+	fmt.Println(Deep{}.Hello())
+}
+`,
+		"1\n",
 	);
 });
 
