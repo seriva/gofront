@@ -1381,6 +1381,7 @@ export class FunctionEmitter {
 
 		// 2. Iterate candidates
 		for (const cand of candidates) {
+			this._emitNilPtrCandidate(cand, fn, recvLocal);
 			this.pushInstruction({ op: "block", blockType: "void" });
 			this.pushInstruction({ op: "local.get", index: recvLocal });
 			this.pushInstruction({ op: "ref.test", typeIndex: cand.testTypeIndex });
@@ -1443,6 +1444,36 @@ export class FunctionEmitter {
 		}
 
 		emitMiss("interface conversion: nil or unmatched type for method call");
+	}
+
+	// A typed nil `*S` inside the interface is a marker object (see
+	// getNilBoxType): a pointer-receiver method runs with a nil receiver, as in
+	// Go; a value-receiver or promoted method must read through the nil pointer.
+	_emitNilPtrCandidate(cand, fn, recvLocal) {
+		if (cand.isBoxedValue || !cand.structInfo) return;
+		if (cand.testTypeIndex !== cand.structInfo.typeIndex) return;
+		const nilBox = this.mod.getNilBoxType({
+			kind: "pointer",
+			base: { kind: "named", name: cand.recvTypeName },
+		});
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: recvLocal });
+		this.pushInstruction({ op: "ref.test", typeIndex: nilBox.typeIndex });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+		if (cand.needsValueDeref || cand.embedPath) {
+			this.emitPanic(
+				"runtime error: invalid memory address or nil pointer dereference",
+			);
+		} else {
+			this.pushInstruction({ op: "ref.null", heapType: cand.testTypeIndex });
+			for (let p = 1; p < fn.params.length; p++) {
+				this.pushInstruction({ op: "local.get", index: p });
+			}
+			this.pushInstruction({ op: "call", funcIndex: cand.funcIndex });
+			this.pushInstruction("return");
+		}
+		this.pushInstruction("end");
 	}
 
 	// A value-receiver method reached through a pointer box reads the pointee

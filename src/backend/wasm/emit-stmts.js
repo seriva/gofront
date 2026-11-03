@@ -1205,7 +1205,28 @@ export class StmtsEmitter {
 		);
 	}
 
+	// A bare type name in a case list or assertion (`case L:`, `case error:`)
+	// is the declared type, not its underlying one: a defined string type is
+	// boxed apart from `string`, and `error` carries a method set.
+	_resolveTestTarget(t) {
+		if ((t?.kind !== "TypeName" && t?.kind !== "Ident") || !t.name) return t;
+		if (t.name === "nil" || t.name === "any" || t.name === "interface{}")
+			return t;
+		return this.mod.checker?.types?.get(t.name) ?? t;
+	}
+
+	// A defined func or map type that has methods lives in `any` as a box.
+	_isMethodNamedRef(goType) {
+		const t = this._resolveTestTarget(goType);
+		return (
+			t?.kind === "named" &&
+			t.methods?.size > 0 &&
+			(isFuncType(t, this.mod.checker) || isMapType(t, this.mod.checker))
+		);
+	}
+
 	_emitTypeTest(targetGoType) {
+		targetGoType = this._resolveTestTarget(targetGoType);
 		if (!targetGoType) {
 			this.pushInstruction("drop");
 			this.pushInstruction({ op: "i32.const", value: 1 });
@@ -1224,31 +1245,7 @@ export class StmtsEmitter {
 		}
 
 		if (isNonEmptyInterface(targetGoType, this.mod.checker)) {
-			const candidates = this.mod.getTypesImplementingInterface(targetGoType);
-			if (candidates.length === 0) {
-				this.pushInstruction("drop");
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				return;
-			}
-			const anyTmp = this.acquireTemp("anyref");
-			this.pushInstruction({ op: "local.set", index: anyTmp });
-
-			this.pushInstruction({ op: "local.get", index: anyTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction("i32.eqz");
-
-			for (let i = 0; i < candidates.length; i++) {
-				this.pushInstruction({ op: "local.get", index: anyTmp });
-				this.pushInstruction({
-					op: "ref.test",
-					typeIndex: candidates[i].typeIndex,
-				});
-				if (i > 0) {
-					this.pushInstruction("i32.or");
-				}
-			}
-			this.pushInstruction("i32.and");
-			this.releaseTemp(anyTmp, "anyref");
+			this._emitInterfaceTypeTest(targetGoType);
 			return;
 		}
 
@@ -1257,6 +1254,12 @@ export class StmtsEmitter {
 		if (isBareStringType(targetGoType, this.mod.checker)) {
 			const isStrIdx = this.mod.getIsStringImportIndex();
 			this.pushInstruction({ op: "call", funcIndex: isStrIdx });
+			return;
+		}
+
+		if (this._isMethodNamedRef(targetGoType)) {
+			const box = this.mod.getIfaceBoxType(targetGoType);
+			this.pushInstruction({ op: "ref.test", typeIndex: box.typeIndex });
 			return;
 		}
 
@@ -1316,6 +1319,45 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "i32.const", value: 1 });
 	}
 
+	// Whether the interface value on the stack holds a type implementing the
+	// non-empty interface: a `ref.test` over every implementing type (a typed
+	// nil `*S` marker included).
+	_emitInterfaceTypeTest(targetGoType) {
+		const candidates = this.mod.getTypesImplementingInterface(targetGoType);
+		if (candidates.length === 0) {
+			this.pushInstruction("drop");
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			return;
+		}
+		const anyTmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.set", index: anyTmp });
+
+		this.pushInstruction({ op: "local.get", index: anyTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction("i32.eqz");
+
+		for (let i = 0; i < candidates.length; i++) {
+			this.pushInstruction({ op: "local.get", index: anyTmp });
+			this.pushInstruction({
+				op: "ref.test",
+				typeIndex: candidates[i].typeIndex,
+			});
+			if (candidates[i].nilTypeIndex !== undefined) {
+				this.pushInstruction({ op: "local.get", index: anyTmp });
+				this.pushInstruction({
+					op: "ref.test",
+					typeIndex: candidates[i].nilTypeIndex,
+				});
+				this.pushInstruction("i32.or");
+			}
+			if (i > 0) {
+				this.pushInstruction("i32.or");
+			}
+		}
+		this.pushInstruction("i32.and");
+		this.releaseTemp(anyTmp, "anyref");
+	}
+
 	// `ref.test` for a map, func or `*T`, which also accepts the typed-nil
 	// marker of the same Go type (see getNilBoxType).
 	_emitRefTestOrNil(goType, typeIndex) {
@@ -1350,10 +1392,19 @@ export class StmtsEmitter {
 		this.releaseTemp(tmp, "anyref");
 	}
 
+	// An interface target keeps the value as is; a boxed defined func or map
+	// type is unboxed.  True when the cast is done.
+	_emitCastNoRepack(targetGoType) {
+		if (isInterfaceType(targetGoType, this.mod.checker)) return true;
+		if (!this._isMethodNamedRef(targetGoType)) return false;
+		this._emitUnbox(
+			this.mod.getIfaceBoxType(this._resolveTestTarget(targetGoType)),
+		);
+		return true;
+	}
+
 	_emitTypeCast(targetGoType, targetWType) {
-		if (isInterfaceType(targetGoType, this.mod.checker)) {
-			return;
-		}
+		if (this._emitCastNoRepack(targetGoType)) return;
 
 		if (isBareStringType(targetGoType, this.mod.checker)) {
 			this.pushInstruction("extern.convert_any");
