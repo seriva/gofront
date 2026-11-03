@@ -29,7 +29,7 @@ features (e.g. `plans/v1.8.0/`).
 | Encodings, `sha256`, `bits`, `rand`, `sync` | Medium | ✅ Done | Go source; `binary.Read`/`Write` stay emitters; `rand_source` intrinsic. |
 | `time` & `strconv` | High | ✅ Done | Civil dates, layouts and `Duration` in Go; clock and shortest-repr floats native; user docs. |
 | Typings removal | Medium | ✅ Done | Leftover type tables deleted, native registry self-check, stdlib layout in the architecture docs. |
-| Follow-up fixes | High | Planned | 170 v1.8.0 ledger defects that still reproduce after the stdlib work, in 21 phases: front end, typechecker, generics, JS nil/numerics/dynamic types/map keys, `fmt`, WASM interfaces/locals/control flow/pointers/facade, JSON, templ `for` forms. Design document in [`plans/v1.9.0/follow-ups-2026-11-03-plan.md`](v1.9.0/follow-ups-2026-11-03-plan.md). |
+| Follow-up fixes | High | In Progress | 170 v1.8.0 ledger defects plus 32 `stdlib-in-go` review follow-ups that still reproduce, in 27 phases: front end, typechecker, generics, JS nil/numerics/dynamic types/map keys, `fmt`, WASM interfaces/locals/control flow/pointers/facade, JSON, templ `for` forms, and Go-source stdlib/emitter fixes. Design document in [`plans/v1.9.0/follow-ups-2026-11-03-plan.md`](v1.9.0/follow-ups-2026-11-03-plan.md). |
 
 ---
 
