@@ -240,7 +240,7 @@ package main
 
 func Main() (res string) {
 	defer func() {
-		if r := recover(); r != nil { res = r.(string) }
+		if r := recover(); r != nil { res = r.(error).Error() }
 	}()
 	var m map[string]int
 	m["key"] = 123
