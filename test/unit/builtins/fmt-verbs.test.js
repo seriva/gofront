@@ -1365,6 +1365,67 @@ test("nil pointers, interfaces and maps follow Go", () => {
 	);
 });
 
+section("fmt typed values through any and type parameters");
+
+test("%T of a named scalar boxed in any keeps its name", () => {
+	assertEqual(
+		parity(`return fmt.Sprintf("%T %T", any(N(1)), any(1))`, "type N int"),
+		"main.N int",
+	);
+});
+
+test("%T of sized and named values in any, and typed nil pointers", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintf("%T %T %T", any(uint64(1)), any(Color(2)), any((*P)(nil)))`,
+			"type Color int\ntype P struct{ X int }",
+		),
+		"uint64 main.Color *main.P",
+	);
+});
+
+test("%T of nil slices and maps reached through a type parameter", () => {
+	assertEqual(
+		parity(
+			`return T([]int(nil)) + " " + T(map[string]int{})`,
+			'func T[V any](x V) string { return fmt.Sprintf("%T", x) }',
+		),
+		"[]int map[string]int",
+	);
+});
+
+test("a float32 converted to any prints its shortest float32 form", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprint(any(float32(0.1))) + " " + fmt.Sprintf("%v", any(float32(0.1)))`,
+		),
+		"0.1 0.1",
+	);
+});
+
+test("a nil pointer keeps its type for %T and %q", () => {
+	assertEqual(
+		parity(
+			`var p *Color
+	return fmt.Sprintf("%T %q", any(p), p)`,
+			"type Color int",
+		),
+		"*main.Color %!q(*main.Color=<nil>)",
+	);
+});
+
+test("a nil pointer stored in a JS any variable keeps its type for %T", () => {
+	assertEqual(
+		runJsBody(
+			`var p *Color
+	var a any = p
+	fmt.Println(fmt.Sprintf("%T %q", a, p))`,
+			"type Color int",
+		),
+		"*main.Color %!q(*main.Color=<nil>)",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

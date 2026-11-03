@@ -4,6 +4,7 @@ import { wrappedErrorfArgs } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
 	fmtDescIsSeq,
+	fmtPeelAny,
 	fmtTypeDesc,
 	fmtWantsTypes,
 	structOwnFields,
@@ -238,6 +239,7 @@ export const fmtMethods = {
 	// `__ft(value, descriptor)`; operands of interface type carry their dynamic
 	// type and stay bare.
 	_fmtArgJs(e, typed = false) {
+		e = fmtPeelAny(e);
 		// `xs...` passes each element as its own operand.
 		if (e?._spread) return `...(${this.genExpr(e)} ?? [])`;
 		// A multi-value call (`f()` returning a tuple) passes every result.
@@ -251,7 +253,12 @@ export const fmtMethods = {
 			e?._type?.kind === "typeParam"
 				? this._typeParamZeroFactory(e._type.name)
 				: null;
-		if (tpf) return `(${tpf}.fb ?? ${tpf}.b ?? ((__v) => __v))(${js})`;
+		if (tpf) {
+			const boxed = `(${tpf}.fb ?? ${tpf}.b ?? ((__v) => __v))(${js})`;
+			if (!typed) return boxed;
+			this.useHelper("sprintf");
+			return `__ft(${boxed}, ${tpf}.td ?? null)`;
+		}
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
 		const desc = fmtTypeDesc(
@@ -310,6 +317,7 @@ export const fmtMethods = {
 
 	// The operands of a Printf-style call whose format is args[fmtIdx].
 	_fmtFormatArgsJs(args, fmtIdx) {
+		args = args.map((e, i) => (i > fmtIdx ? fmtPeelAny(e) : e));
 		const lit = args[fmtIdx];
 		const spread = args.some((e) => e?._spread);
 		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;

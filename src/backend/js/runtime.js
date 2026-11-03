@@ -511,9 +511,9 @@ var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
 var __tbox = __tbox || function(f, x) {
   return f && f.b ? f.b(x) : x;
 };
-var __ti = __ti || function(f, k, id, is, u, b, fb) {
+var __ti = __ti || function(f, k, id, is, u, b, fb, td) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.td = td;
   return g;
 };
 var __tar = __tar || function(f, op, a, b) {

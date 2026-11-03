@@ -283,7 +283,8 @@ var __fmtu = __fmtu || (() => {
     if (typeof v.__gfUnbox === "function") {
       const nm = v.constructor?.name ?? "";
       if (nm === "FmtStr" || nm === "FmtErr") return descOf(v.__gfUnbox());
-      return { k: "named", n: qualName(nm.replace(/\$Ptr$/, "")), u: descOf(v.__gfUnbox()) };
+      if (nm.endsWith("$Ptr")) return { k: "ptr", e: { k: "named", n: qualName(nm.slice(0, -4)), u: null } };
+      return { k: "named", n: qualName(nm), u: descOf(v.__gfUnbox()) };
     }
     const proto = Object.getPrototypeOf(v);
     if ((proto === null || Object.getPrototypeOf(proto) === null) && typeof v.Error === "function") {
@@ -396,7 +397,8 @@ export const HELPER_FMT_LOOP = String.raw`
   };
   const bad = (verb, v, t) => {
     const d = t ?? U.descOf(v);
-    return "%!" + verb + "(" + (v === null || v === undefined ? "<nil>" : U.typeName(d) + "=" + badVal(v, d)) + ")";
+    if (v === null || v === undefined) return "%!" + verb + "(" + (t?.k === "ptr" ? U.typeName(t) + "=<nil>" : "<nil>") + ")";
+    return "%!" + verb + "(" + U.typeName(d) + "=" + badVal(v, d) + ")";
   };
   const elemOf = (t) => {
     t = U.baseOf(t);
@@ -624,7 +626,7 @@ export const HELPER_FMT_LOOP = String.raw`
     sharp = verb === "v" && fl.sharp;
     // The stand-in for a nil pointer with a pointer-receiver String/Error only serves %v and %s.
     if (v && v.__nilp === true && !(verb === "s" || verb === "q" || (verb === "v" && !sharp) || "bodxX".includes(verb))) v = null;
-    if (verb === "T") { out += U.pad(U.typeName(t ?? U.descOf(unbox(v, "T"))), fl, wid); continue; }
+    if (verb === "T") { out += U.pad(U.typeName(t ?? U.descOf(v)), fl, wid); continue; }
     // A width applies to each element of a composite, as Go does.
     const widComposite = hasWid && !fl.plus && v !== null && typeof v === "object" && !(v instanceof __FT) && !(v.re !== undefined && v.im !== undefined);
     if (verb === "v" && (hasPrec || widComposite) && !sharp) {
