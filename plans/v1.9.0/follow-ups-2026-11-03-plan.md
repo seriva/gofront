@@ -467,20 +467,20 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 16: Element Pointers, Value Copies and WASM Values
 
-- [ ] Task 16.1: Element pointers survive whole-element stores
-  - Files: `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/language/pointers.test.js`
-  - Test: L35a pointer from a callee → `9`; L35b tuple swap → `3`; L41 reslice + append + call index → `7` (all targets).
+- [x] Task 16.1: Element pointers survive whole-element stores
+  - Files: `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`, `src/lower/ownership.js`, `src/lower/index.js`, `test/unit/language/pointers.test.js`
+  - Test: L35a pointer from a callee → `9`; L35b tuple swap → `3`; L41 reslice + append + call index → `7` (all targets). Whole-element stores into slices write in place only when the program takes some `&xs[i]` (`takesElementAddress`); L41 as logged already matched Go on `ea3231a`, so the test uses the reslice + append form that did not (`xs = xs[:1]; xs = append(xs, S{5}); xs[idx()] = S{7}` → `7`).
   - Done when: three repros match Go on all targets.
-- [ ] Task 16.2: Struct values copied out of maps, `range` keys and boxed operands
-  - Files: `src/backend/wasm/emit-maps.js`, `src/backend/js/expressions.js`, `test/unit/language/value-semantics.test.js`
+- [x] Task 16.2: Struct values copied out of maps, `range` keys and boxed operands
+  - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/js/statements.js`, `src/backend/js/expressions.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/language/value-semantics.test.js`
   - Test: L49 → `map[{a 1}:2]`; L127 → `{1 1}` (all targets); L106 `Println(w, copy(w, p))` → `[97 98 99] 3`.
   - Done when: three repros match Go on all targets.
-- [ ] Task 16.3: Recoverable nil writes and pointer-to-pointer on WASM
-  - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/traps.test.js`
-  - Test: L123a–c and L32a (wasm) → recovered `invalid memory address or nil pointer dereference` (also `*p++`, `*p += 2`, `for i := range ap`); L126 `**pp` → `9`.
+- [x] Task 16.3: Recoverable nil writes and pointer-to-pointer on WASM
+  - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js`, `src/backend/wasm/emit-builtins.js`, `src/typechecker/resolve.js`, `test/unit/wasm/traps.test.js`
+  - Test: L123a–c and L32a (wasm) → recovered `invalid memory address or nil pointer dereference` (also `*p++`, `*p += 2`, `for i, v := range ap`); `for i := range ap` and `len(ap)` on a nil array pointer do not panic in Go (`0 1 2`, `3`); L126 `**pp` → `9` (`new(*int)` was typed `*any`).
   - Done when: no uncatchable trap; repros match Go on wasm.
-- [ ] Task 16.4: Complex struct fields and string zero values
-  - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `test/unit/wasm/structs.test.js`
+- [x] Task 16.4: Complex struct fields and string zero values
+  - Files: `src/backend/wasm/module-emitter.js`, `src/backend/wasm/emit.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/structs.test.js`
   - Test: L112 `s.C = complex(1, 1)` → `(1+1i)`; L125 `[2]string`, `make([]string, 2)` → `[ ] [ ]`.
   - Done when: both repros validate and match Go.
 

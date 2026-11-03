@@ -453,9 +453,11 @@ export class ModuleEmitter {
 		const typeEntry = {
 			form: "struct",
 			name: typeName,
+			// Mutable so the facade's per-field setters for an exported struct
+			// that holds a complex value validate.
 			fields: [
-				{ type: elemWType, mutable: false },
-				{ type: elemWType, mutable: false },
+				{ type: elemWType, mutable: true },
+				{ type: elemWType, mutable: true },
 			],
 		};
 		this._pushType(typeEntry);
