@@ -780,12 +780,29 @@ export class TypeChecker {
 
 	// ── Shared pass helpers ──────────────────────────────────────
 
+	// Instances made while types were collected (`struct{ Inner[int] }`) have
+	// no methods yet, and a type embedding another embedder (`Deep` over `E`
+	// over `Base`) needs the inner promotion first, so repeat until nothing
+	// new is promoted.
 	_promoteEmbeddedMethods() {
+		const structs = [];
 		for (const type of this.types.values()) {
-			this._promoteEmbeddedInto(type.underlying);
-			for (const inst of type._generic?._instances?.values() ?? [])
-				this._promoteEmbeddedInto(inst.underlying);
+			structs.push(type.underlying);
+			for (const inst of type._generic?._instances?.values() ?? []) {
+				this._syncInstanceMethods(type._generic, inst);
+				structs.push(inst.underlying);
+			}
 		}
+		const count = () =>
+			structs.reduce(
+				(n, st) => n + (st?.methods?.size ?? 0) + (st?.fields?.size ?? 0),
+				0,
+			);
+		let before;
+		do {
+			before = count();
+			for (const st of structs) this._promoteEmbeddedInto(st);
+		} while (count() !== before);
 	}
 
 	_promoteEmbeddedInto(struct) {
@@ -793,6 +810,11 @@ export class TypeChecker {
 		for (const embed of struct._embeds) {
 			const inner = embed.kind === "pointer" ? embed.base : embed;
 			const base = inner.kind === "named" ? inner.underlying : inner;
+			// Fields of an embedded type declared after the embedder were not
+			// there when the embedder's fields were collected.
+			if (base?.kind === "struct" && struct.fields)
+				for (const [k, v] of base.fields)
+					if (!struct.fields.has(k)) struct.fields.set(k, v);
 			// A named non-struct type (`time.Duration`) keeps its methods on
 			// the named type itself.
 			const methods =
@@ -1285,7 +1307,13 @@ export class TypeChecker {
 			inner.define(p.name, this._paramType(p, inner));
 		}
 		const returnType = this._setupFuncReturnType(decl, inner);
-		this._runFuncBody(decl, inner, returnType);
+		const savedRecvGeneric = this._recvGeneric;
+		this._recvGeneric = recvNamedType?._generic;
+		try {
+			this._runFuncBody(decl, inner, returnType);
+		} finally {
+			this._recvGeneric = savedRecvGeneric;
+		}
 		this._checkMissingReturn(decl, returnType, "method");
 	}
 
