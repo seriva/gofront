@@ -2,6 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { constIntValue } from "./const-fold.js";
+import { exprText, operandKind } from "./operand-text.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
@@ -216,7 +217,9 @@ export const assignabilityMethods = {
 		}
 	},
 
-	assertAssignable(target, source, node, ctx = "assignment") {
+	// `operand` is the expression whose value flows in, when `node` (the
+	// position and codegen tag) is not that expression.
+	assertAssignable(target, source, node, ctx = "assignment", operand = node) {
 		if (!target || !source) return;
 		if (this._checkConstOverflow(target, source, node, ctx)) return;
 		target = this.resolveType(target);
@@ -234,14 +237,7 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-		if (this._isNumericCoercible(target, source)) {
-			if (!this._isGenericCallResult(node)) return;
-			this.err(
-				`mismatched types ${typeStr(source)} and ${typeStr(target)} in ${ctx}`,
-				node,
-			);
-			return;
-		}
+		if (this._checkNumericCoercion(target, source, node, ctx, operand)) return;
 		if (this._checkArrayAssignable(target, source, node)) return;
 		if (this._checkTypedArrayAssignable(target, source, node)) return;
 		if (this._checkFuncAssignable(target, source, node)) return;
@@ -515,10 +511,39 @@ export const assignabilityMethods = {
 		const pair = `${target.name}:${source.name}`;
 		return (
 			pair === "float64:int" ||
-			pair === "int:float64" ||
 			// rune was historically int in GoFront; keep rune/int interchangeable.
 			pair === "int:int32" ||
 			pair === "int32:int"
+		);
+	},
+
+	// The lenient numeric pairs: accepted, except that a generic call result
+	// is a mismatch and a float64 never reaches an int implicitly.
+	// Returns true when the pair was handled.
+	_checkNumericCoercion(target, source, node, ctx, operand) {
+		const floatToInt = this._isFloatToInt(target, source);
+		if (!floatToInt && !this._isNumericCoercible(target, source)) return false;
+		if (this._isGenericCallResult(node))
+			this.err(
+				`mismatched types ${typeStr(source)} and ${typeStr(target)} in ${ctx}`,
+				node,
+			);
+		else if (floatToInt)
+			this.err(
+				`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
+				node,
+			);
+		return true;
+	},
+
+	// Go has no implicit float64 -> int conversion; only an untyped constant
+	// (handled earlier) or an explicit `int(x)` reaches an int.
+	_isFloatToInt(target, source) {
+		return (
+			target.kind === "basic" &&
+			source.kind === "basic" &&
+			target.name === "int" &&
+			source.name === "float64"
 		);
 	},
 

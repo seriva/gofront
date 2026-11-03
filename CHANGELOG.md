@@ -14,9 +14,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
 
 ### Fixed
-- **Valid Go that failed to compile now works**: float literals such as `1.`, the `&^=` assignment, conversions like `[]int(nil) == nil` or `(*T)(nil)`, `NS(nil)` on a named slice, named results in function literals, `var v, ok = m[k]`, types that refer to themselves inside a function, and a `switch` that falls through into a returning case now compile and behave like Go. Func types with generic parameters and `case func():` in a type switch now parse as well.
+- **Valid Go that failed to compile now works**: float literals such as `1.`, the `&^=` assignment, conversions like `[]int(nil) == nil` or `(*T)(nil)`, `NS(nil)` on a named slice, named results in function literals, `var v, ok = m[k]`, types that refer to themselves inside a function, and a `switch` that falls through into a returning case now compile and behave like Go. Func types with generic parameters and `case func():` in a type switch now parse as well. An unknown type, unavailable package or unavailable function reports one error instead of several, and the JS precision warning shows its position and stays quiet for `float64` values.
 
 ### Changed
+- **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable to an `int`, a `switch` case whose constant does not fit the tag's type, and constants or package variables that depend on themselves. Convert explicitly, for example `int(y)`, or fix the case value or the circular definition.
 - **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
 - **Breaking:** `maps.Delete` and the top-level `binary.AppendUint16`, `AppendUint32` and `AppendUint64` are removed because Go has no such functions. Use the built-in `delete` and `binary.LittleEndian.AppendUint16` (or `binary.BigEndian`).
 - **Breaking:** `sort.Slice`, `slices.SortFunc` and similar sorts now order equal elements as Go does, which can change output that depended on the old order. Use `sort.SliceStable` or `slices.SortStableFunc` when equal elements must keep their input order.

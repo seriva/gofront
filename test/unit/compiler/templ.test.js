@@ -1184,6 +1184,19 @@ for (const [where, body] of [
 	});
 }
 
+test("a templ switch case of the wrong type is a type error", () => {
+	const { build, check } = checkTempl(
+		"switch name {\n\tcase 5:\n\t\t<p>x</p>\n\t}",
+	);
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(
+			r.stderr,
+			"cannot convert 5 (untyped int constant) to type string",
+		);
+	}
+});
+
 test("a non-bool if condition is a type error", () => {
 	const { build, check } = checkTempl("if name {\n\t\t<p>x</p>\n\t}");
 	for (const r of [build, check]) {

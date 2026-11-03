@@ -8,6 +8,7 @@ import {
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
+	compileWasm,
 	runJs,
 	section,
 	summarize,
@@ -1410,6 +1411,174 @@ func f(n int) int {
 }
 func main() { _ = f(1) }`);
 	assertErrorContains(errors, "missing return at end of function 'f'");
+});
+
+test("a float64 variable is not assignable to int", () => {
+	for (const target of ["js", "both"]) {
+		assertErrorContains(
+			compile(
+				`package main
+func main() {
+	var y float64 = 1
+	var i int = y
+	_ = i
+}`,
+				{ target },
+			).errors,
+			"cannot use y (variable of type float64) as int value",
+		);
+	}
+	assertErrorContains(
+		compileWasm(`package main
+func main() {
+	var y float64 = 1
+	var i int = y
+	_ = i
+}`).errors,
+		"cannot use y (variable of type float64) as int value",
+	);
+});
+
+test("a float64 expression is not assignable to int in assignments, calls and returns", () => {
+	assertErrorContains(
+		compile(`package main
+func main() {
+	y := 1.5
+	i := 0
+	i = y * 2
+	_ = i
+}`).errors,
+		"cannot use y * 2 (value of type float64) as int value in assignment",
+	);
+	assertErrorContains(
+		compile(`package main
+func f(n int) {}
+func main() {
+	y := 1.5
+	f(y)
+}`).errors,
+		"cannot use y (variable of type float64) as int value in argument",
+	);
+	assertErrorContains(
+		compile(`package main
+func f(y float64) int { return y }
+func main() { _ = f(1) }`).errors,
+		"cannot use y (variable of type float64) as int value in return statement",
+	);
+});
+
+test("untyped constants and explicit conversions still reach int", async () => {
+	await assertProgramOutput(
+		`package main
+import "fmt"
+const c = 2.0
+func main() {
+	var i int = 1.0
+	var j int = c
+	y := 2.7
+	k := int(y)
+	var f float64 = 3
+	fmt.Println(i, j, k, f)
+}`,
+		"1 2 2 3\n",
+	);
+});
+
+section("Switch case types");
+
+test("a case value must be convertible to the switch tag type", () => {
+	const prog = (decl, tag, cas) => `package main
+${decl}
+func main() {
+	var v ${tag}
+	switch v {
+	case ${cas}:
+	}
+}`;
+	for (const target of ["js", "both"]) {
+		assertErrorContains(
+			compile(prog("", "string", "5"), { target }).errors,
+			"cannot convert 5 (untyped int constant) to type string",
+		);
+	}
+	assertErrorContains(
+		compileWasm(prog("", "string", "5")).errors,
+		"cannot convert 5 (untyped int constant) to type string",
+	);
+	assertErrorContains(
+		compile(prog("", "int", '"a"')).errors,
+		'cannot convert "a" (untyped string constant) to type int',
+	);
+	assertErrorContains(
+		compile(prog("", "bool", "1")).errors,
+		"cannot convert 1 (untyped int constant) to type bool",
+	);
+});
+
+test("a typed case value must match the switch tag type", () => {
+	assertErrorContains(
+		compile(`package main
+func main() {
+	var v int
+	s := "a"
+	switch v {
+	case s:
+	}
+}`).errors,
+		"invalid case s in switch on v (mismatched types string and int)",
+	);
+});
+
+test("valid switch case types still compile", async () => {
+	await assertProgramOutput(
+		`package main
+import "fmt"
+type Mode string
+type Color int
+const Red Color = 1
+func main() {
+	var m Mode = "x"
+	var c Color = 1
+	var f float64 = 2
+	var r rune = 'a'
+	var e error
+	var a any = 3
+	n := 3
+	switch m {
+	case "x":
+		fmt.Println("mode")
+	}
+	switch c {
+	case Red, 2:
+		fmt.Println("color")
+	}
+	switch f {
+	case 2:
+		fmt.Println("float")
+	}
+	switch r {
+	case 'a':
+		fmt.Println("rune")
+	}
+	switch e {
+	case nil:
+		fmt.Println("nil")
+	}
+	switch a {
+	case 3, "s":
+		fmt.Println("any")
+	}
+	switch n {
+	case n:
+		fmt.Println("same")
+	}
+	switch {
+	case n > 2:
+		fmt.Println("tagless")
+	}
+}`,
+		"mode\ncolor\nfloat\nrune\nnil\nany\nsame\ntagless\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

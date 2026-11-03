@@ -605,8 +605,13 @@ export class CodeGen {
 	// Records a non-fatal diagnostic at `node` ("main.go at line 3:5: msg").
 	_warn(msg, node) {
 		const file = this._srcFileNames[this._currentSrcFileIdx ?? 0];
-		const line = node?.line ?? node?._line;
-		const at = line ? `at line ${line}:${node.col ?? node._col ?? 1}` : "";
+		// Binary and unary expressions carry no position of their own: use the
+		// leftmost operand that does.
+		let pos = node;
+		while (pos && !(pos.line ?? pos._line))
+			pos = pos.left ?? pos.operand ?? pos.expr;
+		const line = pos?.line ?? pos?._line;
+		const at = line ? `at line ${line}:${pos.col ?? pos._col ?? 1}` : "";
 		const loc = [file, at].filter(Boolean).join(" ");
 		this.warnings.push(loc ? `${loc}: ${msg}` : msg);
 	}

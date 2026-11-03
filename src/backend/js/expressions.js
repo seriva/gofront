@@ -690,7 +690,8 @@ export const expressionGenMethods = {
 	// per node per generate run: some forms generate the same node more than
 	// once, and cached ASTs are generated again by later compiles).
 	_warnConstPrecision(val, expr) {
-		if (this._is64BitInt(expr?._type) || expr?._is64Bit) return;
+		if (this._is64BitInt(expr?._type) || expr?._is64Bit || expr?._floatConst)
+			return;
 		const i = constIntValue(val);
 		if (i === null || (i <= JS_SAFE_INT && i >= -JS_SAFE_INT)) return;
 		if (BigInt(Number(i)) !== i && !this._precisionWarned.has(expr)) {

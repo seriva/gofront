@@ -1,6 +1,7 @@
 // GoFront test suite — type errors and type assertions
 
 import { fileURLToPath } from "node:url";
+import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assertContains,
 	assertEqual,
@@ -907,6 +908,41 @@ func main() {
 }`);
 	assertEqual(c3.errors.length, 0);
 	assertEqual(runJs(c3.js), "1 true");
+});
+
+test("one diagnostic per root cause", () => {
+	const unknown = compile(`package main
+func F(x Foo) {}
+func main() {}`);
+	assertEqual(unknown.errors.length, 1);
+	assertErrorContains(unknown.errors, "Unknown type 'Foo'");
+
+	const pkg = compile(`package main
+import "reflect"
+func main() { _ = reflect.TypeOf(1) }`);
+	assertEqual(pkg.errors.length, 1);
+	assertErrorContains(pkg.errors, "package 'reflect' is not available");
+
+	const member = compile(`package main
+import "os"
+func main() { _, _ = os.ReadFile("x") }`);
+	assertEqual(member.errors.length, 1);
+	assertErrorContains(member.errors, "os.ReadFile is not available");
+
+	const real = compile(`package main
+func two() (int, int) { return 1, 2 }
+func main() { _, _ = 1 }`);
+	assertEqual(real.errors.length, 1);
+	assertErrorContains(
+		real.errors,
+		"assignment mismatch: 2 variables but 1 value",
+	);
+});
+
+test("a bare checker reports an undefined identifier", () => {
+	const tc = new TypeChecker();
+	tc.checkExpr({ kind: "Ident", name: "foo" }, tc.globals);
+	assertErrorContains(tc.errors, "Undefined: 'foo'");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
