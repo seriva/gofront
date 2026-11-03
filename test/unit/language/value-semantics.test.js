@@ -318,3 +318,47 @@ func main() {
 		"[{50} {0}] 1\n[{7} {0}] 1\n",
 	);
 });
+
+// Runs `src` as a `js` package and as the JS half of a `both` package.
+function runJsAndBoth(src) {
+	const outs = [];
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.map((e) => e.message).join("\n"), "");
+		outs.push(runJs(js));
+	}
+	assertEqual(outs[0], outs[1], "js and both disagree");
+	return outs[0];
+}
+
+section("Nil slices stay nil");
+
+test("nil slice elements and struct fields print as []", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type A struct{ S []int }
+func main() {
+	fmt.Println(make([][]int, 2))
+	fmt.Println(A{})
+	fmt.Println(fmt.Sprintf("%+v", []A{{}}))
+}`),
+		"[[] []]\n{[]}\n[{S:[]}]",
+	);
+});
+
+test("append with nothing to add keeps a nil slice nil", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func main() {
+	var ap []int
+	ap = append(ap, ap...)
+	fmt.Println(ap == nil)
+	fmt.Println(append([]int(nil), []int{}...) == nil, append([]byte(nil), ""...) == nil)
+	b := append([]byte(nil), "hi"...)
+	fmt.Println(len(b), b[0])
+}`),
+		"true\ntrue true\n2 104",
+	);
+});

@@ -519,6 +519,119 @@ func main() {
 	}
 });
 
+// Runs `src` as a `js` package and as the JS half of a `both` package.
+function runJsAndBoth(src) {
+	const outs = [];
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.map((e) => e.message).join("\n"), "");
+		outs.push(runJs(js));
+	}
+	assertEqual(outs[0], outs[1], "js and both disagree");
+	return outs[0];
+}
+
+section(
+	"Nil pointer receivers through interfaces, method values and expressions",
+);
+
+test("nil receiver reached through an interface, a method value and a method expression", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type L struct{ n int }
+func (l *L) Len() int {
+	if l == nil {
+		return 0
+	}
+	return l.n
+}
+type Lener interface{ Len() int }
+func main() {
+	var nl *L
+	var li Lener = nl
+	f := nl.Len
+	g := (*L).Len
+	fmt.Println(li.Len(), f(), g(nl))
+}`),
+		"0 0 0",
+	);
+});
+
+test("a typed nil pointer in an error is not nil and keeps its method set", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type E struct{}
+func (e *E) Error() string { return "e" }
+func main() {
+	var err error = (*E)(nil)
+	_, ok := err.(error)
+	fmt.Println(ok, err.Error(), err != nil)
+}`),
+		"true e true",
+	);
+});
+
+test("a nil-safe pointer method runs through an interface holding a nil pointer", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type T struct{ v int }
+func (t *T) PGet() int {
+	if t == nil {
+		return -1
+	}
+	return t.v
+}
+type G interface{ PGet() int }
+func main() {
+	var t *T
+	var g G = t
+	fmt.Println(g.PGet())
+}`),
+		"-1",
+	);
+});
+
+test("a value method called through an interface holding a nil pointer panics", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type S struct{ v int }
+func (s S) Get() int { return s.v }
+type G interface{ Get() int }
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var s *S
+	var g G = s
+	fmt.Println(g.Get())
+}`),
+		"runtime error: invalid memory address or nil pointer dereference",
+	);
+});
+
+test("asserting a typed nil back to its pointer type gives nil", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type T struct{ v int }
+func (t *T) M() {}
+func main() {
+	var a any = (*T)(nil)
+	p := a.(*T)
+	q, ok := a.(*T)
+	fmt.Println(a == nil, p == nil, q == nil, ok)
+	switch v := a.(type) {
+	case *T:
+		fmt.Println(v == nil)
+	}
+	fmt.Println(a)
+}`),
+		"false true true true\ntrue\n<nil>",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

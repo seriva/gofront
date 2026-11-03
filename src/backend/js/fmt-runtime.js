@@ -417,6 +417,7 @@ export const HELPER_FMT_LOOP = String.raw`
     sd = sd ?? v?.__fd;
     if (sd?.b && v != null && !(v instanceof sd.b)) v = new sd.b(v);
     v = unbox(v, verb);
+    if (v?.__nilp === true && !stringMethod(v)) v = null;
     const bt = U.baseOf(t);
     if (v === null || v === undefined) {
       if (bt?.k === "slice") v = [];
