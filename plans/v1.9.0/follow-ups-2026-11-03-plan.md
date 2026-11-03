@@ -1,7 +1,7 @@
 # v1.9.0 Follow-up Fixes — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft (2026-11-03; re-probed 2026-11-03 on `ea3231a`, after stdlib-in-go landed)  
+**Status:** In Progress (2026-11-03; re-probed 2026-11-03 on `ea3231a`, after stdlib-in-go landed)  
 **Base branch:** main  
 **Related:** Schedules the open ledger in [`../follow-ups.md`](../follow-ups.md) (entries logged while executing [`../v1.8.0/follow-up-fixes-plan.md`](../v1.8.0/follow-up-fixes-plan.md), whose Done-means deferred their triage to v1.9.0). Follows [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md) (completed in PR #107; it made `int64`/`uint64` BigInt in JS and rewrote most stdlib members, which fixed the 64-bit and `%w` entries). Task 8.2 builds on its per-type-parameter metadata in `_typeArgFactories`. Re-probe the phase's entries on its base commit before starting each phase; drop tasks whose repro stopped reproducing.  
 **Release note:** Many Go programs that failed to compile, built an invalid WebAssembly module, or printed different results on JavaScript and WebAssembly now behave like Go, including nil pointers in interfaces, map keys, `fmt` verbs, `encoding/json` values stored in `any`, and generic types exported from WebAssembly packages. Templ components can now use every Go `for` form (three-clause, index-only, and ranging over maps, strings and integers) and a `switch` without a tag.  
