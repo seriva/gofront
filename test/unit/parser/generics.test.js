@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
+	assertProgramOutput,
 	compile,
 	Lexer,
 	Parser,
@@ -122,6 +123,43 @@ test("an index before the block of an if or for stays an index", () => {
 	);
 	const text = JSON.stringify(ast);
 	assertEqual(text.includes('"InstantiationExpr"'), false);
+});
+
+section("Parser — generic instances in func-type parameters");
+
+test("a generic instance as the only parameter of a func type compiles and runs", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Stack[T any] struct{ items []T }
+
+type A int
+
+func call(f func(Stack[int]) int, s Stack[int]) int {
+	if f == nil {
+		return 0
+	}
+	return f(s)
+}
+
+func two(f func(A, Stack[int]) int) int { return 1 }
+
+func pair(f func(Stack[int], Stack[string]) int) int { return 2 }
+
+func arr(f func(xs [2]int, ys []int) int) int { return 3 }
+
+func main() {
+	fmt.Println(call(nil, Stack[int]{}))
+	fmt.Println(call(func(s Stack[int]) int { return len(s.items) + 7 }, Stack[int]{}))
+	fmt.Println(two(nil), pair(nil), arr(nil))
+	x := Stack[[2]int]{}
+	fmt.Println(len(x.items))
+}
+`,
+		"0\n7\n1 2 3\n0\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

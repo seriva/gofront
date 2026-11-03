@@ -454,12 +454,10 @@ export class Lexer {
 				break;
 			}
 		}
-		if (
-			this.pos + 1 < this.src.length &&
-			this.src.charCodeAt(this.pos) === 46
-		) {
+		if (this.src.charCodeAt(this.pos) === 46) {
+			// `1.` is a float literal; `1..` and `1.x` keep the dot separate.
 			const next = this.src.charCodeAt(this.pos + 1);
-			if (next >= 48 && next <= 57) {
+			if (this._dotContinuesNumber(next)) {
 				isFloat = true;
 				n += this.advance();
 				while (this.pos < this.src.length) {
@@ -472,6 +470,7 @@ export class Lexer {
 						break;
 					}
 				}
+				if (n.endsWith(".")) n += "0";
 			}
 		}
 		if (this.pos < this.src.length) {
@@ -482,6 +481,32 @@ export class Lexer {
 			}
 		}
 		return { n, isFloat };
+	}
+
+	// Whether the "." at the cursor belongs to the decimal literal before it.
+	// `next` is the code after the dot: a digit, an exponent (`1.e3`), an
+	// imaginary suffix (`1.i`) or anything that cannot start a selector or a
+	// range-style `..` makes `1.` a float; `1.x` and `1..` keep the dot apart.
+	_dotContinuesNumber(next) {
+		if (Number.isNaN(next)) return true;
+		if (next >= 48 && next <= 57) return true;
+		if (next === 46) return false;
+		const after = this.src.charCodeAt(this.pos + 2);
+		const identAfter =
+			(after >= 97 && after <= 122) ||
+			(after >= 65 && after <= 90) ||
+			after === 95 ||
+			(after >= 48 && after <= 57);
+		if (next === 101 || next === 69) {
+			return (after >= 48 && after <= 57) || after === 43 || after === 45;
+		}
+		if (next === 105) return !identAfter;
+		return !(
+			(next >= 97 && next <= 122) ||
+			(next >= 65 && next <= 90) ||
+			next === 95 ||
+			next > 127
+		);
 	}
 
 	_startsUnicodeIdent() {
@@ -621,8 +646,10 @@ export class Lexer {
 
 	_readAmpOp(l, c) {
 		if (this.match("&")) this.push(T.AND, "&&", l, c);
-		else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
-		else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
+		else if (this.match("^")) {
+			if (this.match("=")) this.push(T.AND_NOT_ASSIGN, "&^=", l, c);
+			else this.push(T.AND_NOT, "&^", l, c);
+		} else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
 		else this.push(T.AMP, "&", l, c);
 	}
 
@@ -664,7 +691,12 @@ export class Lexer {
 			case ".":
 				if (/[0-9]/.test(this.peek() ?? "")) {
 					const { n } = this._readLeadingDotFloat();
-					this.push(T.FLOAT, n, l, c);
+					if (this.src[this.pos] === "i") {
+						this.advance();
+						this.push(T.IMAG, n, l, c);
+					} else {
+						this.push(T.FLOAT, n, l, c);
+					}
 				} else if (this.peek() === "." && this.peek(1) === ".") {
 					this.advance();
 					this.advance();

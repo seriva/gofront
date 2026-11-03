@@ -767,7 +767,7 @@ export const statementGenMethods = {
 							rhsVal,
 							stmt.lhs[0]._mapValueType,
 						)
-					: `(__m[__k] ?? ${zero}) ${binOp} (${rhsVal})`;
+					: `(__m[__k] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
 				const rhsExprDirect = is64Val
 					? this._gen64BitBinary(
 							binOp,
@@ -775,7 +775,7 @@ export const statementGenMethods = {
 							rhsVal,
 							stmt.lhs[0]._mapValueType,
 						)
-					: `(${base}[${idx}] ?? ${zero}) ${binOp} (${rhsVal})`;
+					: `(${base}[${idx}] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
 				if (
 					this._hasCallExpr(stmt.lhs[0].expr) ||
 					this._hasCallExpr(stmt.lhs[0].index)
@@ -817,7 +817,8 @@ export const statementGenMethods = {
 				active[0].l.startsWith("{") && !active[0].l.startsWith("({")
 					? `(${active[0].l})`
 					: active[0].l;
-			this.line(`${targetL} ${stmt.op} ${rhsVal};`);
+			if (stmt.op === "&^=") this.line(`${targetL} &= ~(${rhsVal});`);
+			else this.line(`${targetL} ${stmt.op} ${rhsVal};`);
 		} else if (hoisted) {
 			this.line("{");
 			this.indented(() => {
@@ -1778,6 +1779,8 @@ export const statementGenMethods = {
 				const l = this.genExpr(stmt.lhs[0]);
 				return `${l} = ${this._gen64BitBinary(binOp, l, r, stmt.lhs[0]._type)}`;
 			}
+			if (stmt.op === "&^=")
+				return `${this.genExpr(stmt.lhs[0])} &= ~(${rhs[0]})`;
 			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
 		}
 		// `i, j = i+1, j-1`: every right-hand side is evaluated first.

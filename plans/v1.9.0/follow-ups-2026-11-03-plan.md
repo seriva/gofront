@@ -153,19 +153,19 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
 
 *Phases 1–21 were scheduled from review follow-ups on 2026-11-03 (see Verified Gaps → Review follow-ups).*
 
-- [ ] Task 1.1: Lexer: trailing-dot floats and leading-dot imaginary literals
+- [x] Task 1.1: Lexer: trailing-dot floats and leading-dot imaginary literals
   - Files: `src/lexer/lexer.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: L12 `z := 1.; fmt.Println(z)` → `1`; L14 `c := .5i; fmt.Println(c)` → `(0+0.5i)` (all targets via `assertProgramOutput`); `x.y` selectors and `1..` still lex as before.
   - Done when: both repros run on js/both/wasm.
-- [ ] Task 1.2: Parser: `&^=` compound assignment
+- [x] Task 1.2: Parser: `&^=` compound assignment
   - Files: `src/lexer/tokens.js`, `src/parser/statements.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: L39 `x := 7; x &^= 4` → `3` on all targets; `x &^ 4` unchanged.
   - Done when: repro runs on all targets.
-- [ ] Task 1.3: Parser: generic instances in func-type parameters
+- [x] Task 1.3: Parser: generic instances in func-type parameters
   - Files: `src/parser/types.js`, `src/parser/expressions.js`, `test/unit/parser/generics.test.js`
   - Test: L08 `func call(f func(Stack[int]) int, s Stack[int]) int` → `0`; `Stack[[2]int]{}` stays green.
   - Done when: repro compiles and runs on all targets.
-- [ ] Task 1.4: Parser: conversions, func types and composite literals in expression position
+- [x] Task 1.4: Parser: conversions, func types and composite literals in expression position
   - Files: `src/parser/expressions.js`, `src/parser/statements.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: L31 `fmt.Println([]int(nil) == nil)` → `true`; L56 `m[k.(int)]` → `a`; L109a `append(b, []byte("bc")...)` → `abc`; L109b `switch x.(type) { case func(): … }` → `f`.
   - Done when: all four parse and run on all targets; existing `looksLikeTypeArgList` tests stay green.

@@ -1097,6 +1097,166 @@ test("lexer: lone dot still errors", () => {
 	);
 });
 
+test("lexer: trailing-dot float and leading-dot imaginary run on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	z := 1.
+	fmt.Println(z)
+	e := 1.e2
+	fmt.Println(e)
+	c := .5i
+	fmt.Println(c)
+	d := 2.i
+	fmt.Println(d)
+}
+`,
+		"1\n100\n(0+0.5i)\n(0+2i)\n",
+	);
+});
+
+test("lexer: a dot after an integer stays a separate token before selectors and ranges", () => {
+	const kinds = (src) =>
+		new Lexer(src, "t.go")
+			.tokenize()
+			.map((t) => t.type)
+			.filter((t) => t !== T.EOF && t !== T.SEMICOLON);
+	assertEqual(kinds("1.x").join(","), [T.INT, T.DOT, T.IDENT].join(","));
+	assertEqual(kinds("1..").join(","), [T.INT, T.DOT, T.DOT].join(","));
+	assertEqual(kinds("1.").join(","), [T.FLOAT].join(","));
+	assertEqual(kinds("1.5i").join(","), [T.IMAG].join(","));
+	assertEqual(kinds(".5i").join(","), [T.IMAG].join(","));
+});
+
+section("Parser: &^= compound assignment");
+
+test("&^= clears bits on every target and &^ is unchanged", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f uint8 }
+
+func main() {
+	x := 7
+	x &^= 4
+	fmt.Println(x, 7&^4)
+	var u uint8 = 255
+	u &^= 15
+	fmt.Println(u)
+	var a uint32 = 0xFFFFFFFF
+	a &^= 0xF0
+	fmt.Println(a)
+	var b uint64 = 1<<63 | 7
+	b &^= 2
+	fmt.Println(b)
+	s := &S{f: 0xff}
+	s.f &^= 0x0f
+	fmt.Println(s.f)
+	xs := []int{15}
+	xs[0] &^= 5
+	fmt.Println(xs[0])
+	m := map[string]int{"k": 15}
+	m["k"] &^= 3
+	fmt.Println(m["k"])
+	n := 0
+	for i := 15; i > 0; i &^= i & -i {
+		n++
+	}
+	fmt.Println(n)
+}
+`,
+		"3 3\n240\n4294967055\n9223372036854775813\n240\n10\n12\n4\n",
+	);
+});
+
+test("lexer: &^= is one token and &^ then = stays two", () => {
+	const types = (src) =>
+		new Lexer(src, "t.go")
+			.tokenize()
+			.map((t) => t.type)
+			.filter((t) => t !== T.EOF && t !== T.SEMICOLON);
+	assertEqual(
+		types("x &^= 1").join(","),
+		[T.IDENT, T.AND_NOT_ASSIGN, T.INT].join(","),
+	);
+	assertEqual(types("x &^ 1").join(","), [T.IDENT, T.AND_NOT, T.INT].join(","));
+});
+
+section(
+	"Parser: conversions, func types and type assertions in expression position",
+);
+
+test("a conversion call argument can be compared, spread or selected from", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+
+func main() {
+	fmt.Println([]int(nil) == nil)
+	fmt.Println(map[string]int(nil) == nil, []int([]int{1}) == nil)
+	b := []byte("a")
+	b = append(b, []byte("bc")...)
+	fmt.Println(string(b))
+	fmt.Println(len([]int([]int{1, 2})), [2]int([2]int{3, 4})[1])
+}
+`,
+		"true\ntrue false\nabc\n2 4\n",
+	);
+});
+
+test("an index whose operand is a type assertion is an index, not generic arguments", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[int]string{1: "a"}
+	var k any = 1
+	fmt.Println(m[k.(int)])
+	var s any = "x"
+	fmt.Println(len(m[1]), m[k.(int)] + s.(string))
+}
+`,
+		"a\n1 ax\n",
+	);
+});
+
+test("a type-switch case can name a func type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func kind(x any) string {
+	switch x.(type) {
+	case int:
+		return "i"
+	case func():
+		return "f"
+	case func(int) string, func(a, b int) (int, error):
+		return "g"
+	default:
+		return "d"
+	}
+}
+
+func main() {
+	fmt.Println(kind(1), kind(func() {}))
+}
+`,
+		"i f\n",
+	);
+});
+
 section("Parser: predeclared names as identifiers, empty labeled statements");
 
 test("parser: new and other predeclared names work as parameter and result names", async () => {
