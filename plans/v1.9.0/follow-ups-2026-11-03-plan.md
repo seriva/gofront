@@ -259,7 +259,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`, `test/unit/language/declarations.test.js`
   - Test: L22a `A{3}` → `{3}`; L22b `A{V: 3}.Get()` → `3`; L22c copy → `{1} {2}`; L22d `W{A{5}}.V` → `5` (js and both; wasm pinned).
   - Done when: all four run on all targets.
-- [ ] Task 5.3: Defined types over generic instances and aliases keep fields
+- [x] Task 5.3: Defined types over generic instances and aliases keep fields
   - Files: `src/backend/js/index.js`, `src/typechecker/resolve.js`, `test/unit/language/named-type-methods.test.js`
   - Test: L17a `type S Base[int]` → `3 {3} 3`; L17b `type T A` (`A = Base`) → `3 {3}`.
   - Done when: both run on all targets.

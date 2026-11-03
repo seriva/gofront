@@ -643,9 +643,12 @@ export class CodeGen {
 		let t = decl.type;
 		for (let depth = 0; depth < 16 && t; depth++) {
 			if (t.kind === "StructType") return t;
+			// `type S Base[int]`: the fields come from the checked type.
+			if (t.kind === "GenericTypeName" || t.kind === "InstantiationExpr")
+				return { kind: "StructType", fields: [] };
 			if (t.kind !== "TypeName" && t.kind !== "Ident") return null;
 			const next = this._typeDeclsByName?.get(t.name);
-			if (!next || next.isAlias) return null;
+			if (!next) return null;
 			t = next.type;
 		}
 		return null;
