@@ -9,6 +9,7 @@ import {
 	fmtDescHasFloat,
 	fmtDescIsPtr,
 	fmtDescIsSeq,
+	fmtPeelAny,
 	fmtTypeDesc,
 	fmtWantsTypes,
 } from "../../shared/fmt-types.js";
@@ -1517,6 +1518,7 @@ export class StdlibCoreEmitter {
 	// fmtWantsTypes) tags each operand of a concrete static type with that
 	// type through `fmt_arg_type`, so the host can print `%T` and `%#v`.
 	_emitArgBuffer(args, markErrors = false, typed = false) {
+		args = args.map(fmtPeelAny);
 		const temps = [];
 		for (const arg of args) {
 			const goType = arg._type ?? this._resolveExprGoType(arg);
@@ -1604,6 +1606,7 @@ export class StdlibCoreEmitter {
 	// nil, floats (static type), and unsigned 32/64-bit integers, whose
 	// signedness only the argument buffer preserves.
 	_fmtOperandNeedsBuffer(arg) {
+		arg = fmtPeelAny(arg);
 		if (arg._spread || this._fmtOperandHasFloat(arg)) return true;
 		const goType = arg._type ?? this._resolveExprGoType(arg);
 		if (
@@ -1722,6 +1725,7 @@ export class StdlibCoreEmitter {
 	// Whether a Printf-style call's operands need their static types: the
 	// format must be a literal that uses `%T`, `%#v` or has surplus operands.
 	_fmtNeedsTypes(format, operands) {
+		operands = operands.map(fmtPeelAny);
 		if (format?.kind !== "BasicLit") return false;
 		const spread = operands.some((a) => a._spread);
 		const seqArgs = operands.some((a) =>

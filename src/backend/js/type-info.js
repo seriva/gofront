@@ -13,6 +13,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+import { fmtTypeDesc } from "../shared/fmt-types.js";
 import { mentionsTypeParam } from "./expressions.js";
 
 // True when type node `node` names one of the type parameters `names`.
@@ -178,11 +179,18 @@ export const typeInfoGenMethods = {
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t);
 		const fmtBox = this._fmtBoxFor(t);
-		const tail = fmtBox
-			? `, ${box ?? "null"}, ${fmtBox}`
-			: box
-				? `, ${box}`
-				: "";
+		// The static type for fmt (`%T` of a type parameter operand).
+		const td = mentionsTypeParam(t)
+			? null
+			: fmtTypeDesc(t, (x) => this.checker?.resolveType?.(x) ?? x);
+		const tdJs = td && td.k !== "i" ? JSON.stringify(td) : null;
+		const tail = tdJs
+			? `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${tdJs}`
+			: fmtBox
+				? `, ${box ?? "null"}, ${fmtBox}`
+				: box
+					? `, ${box}`
+					: "";
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
