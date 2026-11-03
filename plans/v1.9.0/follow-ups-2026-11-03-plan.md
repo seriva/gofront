@@ -335,15 +335,15 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 9: JS Dynamic Types and Assertions
 
-- [ ] Task 9.1: Boxed values in `any` keep their dynamic type
+- [x] Task 9.1: Boxed values in `any` keep their dynamic type
   - Files: `src/backend/js/type-info.js`, `src/backend/js/runtime.js`, `test/unit/language/parity-matrix.test.js`
   - Test: L101a `any(map[string]int(nil)) == nil` → `false`; L101c typed nil pointer in `any` `== nil` → `false`; L45c `error(many{})` keeps `many`'s method set → `true`.
   - Done when: repros match Go on js/both.
-- [ ] Task 9.2: Assertions and type switches match Go's type identity
+- [x] Task 9.2: Assertions and type switches match Go's type identity
   - Files: `src/backend/js/type-info.js`, `src/backend/js/statements.js`, `test/unit/types/checks.test.js`
   - Test: L47 → `false`; L120 → `namer`; L155 → `map`; L154 (js half) → `i32`; L104b → `false`; L44b (js half) → `T str`.
   - Done when: six repros match Go on js/both.
-- [ ] Task 9.3: Method calls through constraints on named non-struct types
+- [x] Task 9.3: Method calls through constraints on named non-struct types
   - Files: `src/backend/js/expressions.js`, `test/unit/types/generics.test.js`
   - Test: L69 `S(Color(2))` → `col`; same for a named slice type with a method.
   - Done when: repro matches Go on js/both.

@@ -601,6 +601,19 @@ export const expressionGenMethods = {
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
+		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
+			const tag = this._dynTypeTag(expr._ifaceSrc);
+			if (tag) {
+				this.useHelper("ifaceBox");
+				expr._ityTagging = true;
+				try {
+					const ptr = expr._ifaceSrc.kind === "pointer" ? ", true" : "";
+					return `__ity(${this.genExpr(expr)}, ${JSON.stringify(tag)}${ptr})`;
+				} finally {
+					expr._ityTagging = false;
+				}
+			}
+		}
 		if (expr._ifaceSrc && !expr._fmtDescing && !this._isNamedBoxKind(expr)) {
 			const desc = this._fmtDesc(expr._ifaceSrc);
 			if (desc) {
@@ -1638,11 +1651,14 @@ export const expressionGenMethods = {
 	},
 
 	_ifaceMethodCheck(val, methodNames, multiUnwrap = null) {
-		const checks = methodNames.map((m) =>
-			m === "Unwrap" && multiUnwrap !== null
-				? `typeof ${val}.${m} === "function" && (${val}.${m}.__multi === true) === ${multiUnwrap}`
-				: `typeof ${val}.${m} === "function"`,
-		);
+		const checks = methodNames.map((m) => {
+			const base =
+				m === "Unwrap" && multiUnwrap !== null
+					? `typeof ${val}.${m} === "function" && (${val}.${m}.__multi === true) === ${multiUnwrap}`
+					: `typeof ${val}.${m} === "function"`;
+			// A struct value's method set lacks the pointer-receiver methods.
+			return `${base} && !(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
+		});
 		return `(${[`${val} != null`, ...checks].join(" && ")})`;
 	},
 
@@ -1651,7 +1667,10 @@ export const expressionGenMethods = {
 	// for a type parameter).
 	_assertedValueJs(typeNode, val) {
 		if (this._isNamedBoxTypeNode(typeNode)) return `${val}.__gfUnbox()`;
-		if (this._isStructPtrTypeNode(typeNode)) {
+		if (
+			this._isStructPtrTypeNode(typeNode) ||
+			(typeNode?.kind === "PointerType" && typeNode._assertType)
+		) {
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
@@ -1717,6 +1736,8 @@ export const expressionGenMethods = {
 			targetType?.name === "encoding/json.RawMessage";
 		const base =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
+		if (base?.kind === "map" && this._isNilLiteral(expr.args[0]))
+			return this._nilMapZero();
 		if (
 			targetType?.kind === "named" &&
 			base?.kind === "basic" &&
@@ -1756,6 +1777,9 @@ export const expressionGenMethods = {
 			if (builtin !== undefined) return builtin;
 		}
 
+		const viaBox = this._genTypeParamMethodCall(expr);
+		if (viaBox !== null) return viaBox;
+
 		if (expr.func.kind === "SelectorExpr") {
 			const result = this._genSelectorCall(expr);
 			if (result !== undefined) return result;
@@ -1777,6 +1801,18 @@ export const expressionGenMethods = {
 		const zeros = this._genericCallZeros(expr);
 		if (!zeros) return `${fn}(${args})`;
 		return `${fn}(${args ? `${zeros}, ${args}` : zeros})`;
+	},
+
+	// `x.M(...)` on a type-parameter value: a raw value of a named non-struct
+	// type argument is boxed (by the type's factory) to reach its methods.
+	_genTypeParamMethodCall(expr) {
+		if (!this._isTypeParamMethodCall(expr)) return null;
+		const factory = this._typeParamZeroFactory(expr.func.expr._type.name);
+		if (!factory) return null;
+		this.useHelper("generics");
+		const recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
+		const args = this._genCallArgs(expr);
+		return `${recv}.${expr.func.field}(${args})`;
 	},
 
 	// The class of a pointer-receiver struct method that accepts a nil receiver
@@ -2828,6 +2864,8 @@ export const expressionGenMethods = {
 			return this._typeNameCheckExpr(typeNode.name, val);
 		const generic = this._genericInstanceCheck(typeNode, val);
 		if (generic) return generic;
+		const dynamic = this._dynTypeCheck(typeNode, val);
+		if (dynamic) return dynamic;
 		const extended = this._namedOrIfaceCheckExpr(typeNode, val);
 		if (extended) return extended;
 		if (
@@ -3176,6 +3214,10 @@ export const expressionGenMethods = {
 			return this._genArrayTypeConversion(expr, inner, t);
 		if (t?.kind === "SliceType")
 			return this._genSliceTypeConversion(expr, inner, t);
+		// `map[K]V(nil)` is a nil map value, which stays distinct from the nil
+		// interface once boxed in an `any`.
+		if (t?.kind === "MapType" && this._isNilLiteral(expr.expr))
+			return this._nilMapZero();
 		const target = t?.name;
 		const structConv = this._genStructClassConversion(
 			target,
