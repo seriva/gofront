@@ -839,6 +839,12 @@ export function compileWasmModule(
 	if (_usesFmtAny(funcDecls, mod)) {
 		funcDecls.push(
 			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
+			helper(
+				"__any_fmt_key",
+				[{ name: "a", type: ANY_T }],
+				STR_T,
+				"any_fmt_key",
+			),
 		);
 	}
 

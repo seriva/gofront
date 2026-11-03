@@ -49,7 +49,7 @@ export const fmtMethods = {
 	//   { sv: 1 }        a struct value with a pointer-receiver Error/String
 	//   { e }            elements of a slice or array
 	//   { s: 1 }         a slice that is an element or field: nil prints `[]`
-	//   { k, v }         keys and values of a map
+	//   { k, v, sk }     keys and values of a map; sk: string keys
 	//   { np: obj }      a *T whose Error/String has a pointer receiver: obj
 	//                    stands in for a nil element (see _fmtNilPtrOperand)
 	//   { m: 1, ... }    a map that is not boxed itself (a struct field or an
@@ -80,6 +80,9 @@ export const fmtMethods = {
 			["k", this._fmtDesc(t.key, next, false)],
 			["v", this._fmtDesc(t.value, next, false)],
 		].filter(([, d]) => d);
+		// String keys are told apart from numeric-looking ones when sorting.
+		const ku = this._underlyingOf(t.key);
+		if (ku?.kind === "basic" && ku.name === "string") parts.push(["sk", "1"]);
 		if (!bare) parts.unshift(["m", "1"]);
 		return parts.length
 			? `{ ${parts.map(([n, d]) => `${n}: ${d}`).join(", ")} }`

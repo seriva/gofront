@@ -2,7 +2,9 @@
 // Tests for Phase H4 Task H4.3: Maps & stdlib in WASM and JS-strict parity.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
+	assertJsProgramOutput,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
@@ -761,4 +763,132 @@ func main() {
 		assertEqual(errors.length, 0);
 		assertEqual(runJs(js), "1152921504606846977\n2");
 	}
+});
+
+section("Map keys: typed range, composite and interface keys");
+
+const mapKeyProg = (decls, body) => `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+var _ = math.Inf
+${decls}
+func main() {
+${body}
+}
+`;
+
+test("range over int, float and named numeric keys yields numbers", async () => {
+	await assertAllTargetsOutput(
+		mapKeyProg(
+			"type N int",
+			`	for k := range map[int]string{1: "a"} {
+		fmt.Println(k + 1)
+	}
+	for k := range map[float64]string{1.5: "a"} {
+		fmt.Println(k + 1)
+	}
+	for k, v := range map[N]string{3: "a"} {
+		fmt.Println(k+1, v)
+	}
+	for k := range map[bool]int{true: 1} {
+		fmt.Println(!k)
+	}`,
+		),
+		"2\n2.5\n4 a\nfalse\n",
+	);
+});
+
+test("array, anonymous struct and non-finite float keys encode injectively", async () => {
+	await assertAllTargetsOutput(
+		mapKeyProg(
+			"type P struct{ X float64 }",
+			`	fmt.Println(map[[2]int]string{{1, 2}: "a"})
+	fmt.Println(len(map[P]int{{math.Inf(1)}: 1, {math.Inf(-1)}: 2}))
+	fmt.Println(map[struct{ A int8 }]int{{-1}: 1, {5}: 2})
+`,
+		),
+		"map[[1 2]:a]\n2\nmap[{-1}:1 {5}:2]\n",
+	);
+});
+
+test("a ranged array key is a copy of the stored key", async () => {
+	await assertJsProgramOutput(
+		mapKeyProg(
+			"",
+			`	ar := map[[2]int]int{{1, 2}: 1}
+	for k := range ar {
+		k[0]++
+	}
+	for k := range ar {
+		fmt.Println(k)
+	}`,
+		),
+		"[1 2]\n",
+	);
+});
+
+test("pointer keys compare by identity", async () => {
+	await assertAllTargetsOutput(
+		mapKeyProg(
+			"type K struct{ A int }",
+			`	a, b := &K{1}, &K{1}
+	m := map[*K]int{a: 1}
+	m[b] = 2
+	_, ok := m[a]
+	fmt.Println(len(m), ok)
+	delete(m, a)
+	for k, v := range m {
+		fmt.Println(k == b, v)
+	}
+	x := 5
+	mp := map[*int]string{&x: "x"}
+	fmt.Println(mp[&x], len(mp))`,
+		),
+		"2 true\ntrue 2\nx 1\n",
+	);
+});
+
+test("interface keys keep nil and the dynamic numeric type", async () => {
+	await assertAllTargetsOutput(
+		mapKeyProg(
+			"",
+			`	m := map[any]int{}
+	v, ok := m[1]
+	fmt.Println(v, ok)
+	for k := range map[any]int{nil: 1} {
+		fmt.Println(k == nil)
+	}
+	fmt.Println(len(map[any]int{int8(3): 1, uint(3): 2}))
+	fmt.Println(len(map[any]int{uint64(1): 1, int64(1): 2}))`,
+		),
+		"0 false\ntrue\n2\n2\n",
+	);
+});
+
+test("an unhashable interface key panics with its type", async () => {
+	await assertAllTargetsOutput(
+		mapKeyProg(
+			"",
+			`	defer func() { fmt.Println(recover()) }()
+	m := map[any]int{}
+	m[[]int{1}] = 1`,
+		),
+		"runtime error: hash of unhashable type []int\n",
+	);
+});
+
+test("maps print in Go's key order", async () => {
+	await assertAllTargetsOutput(
+		mapKeyProg(
+			"type L string",
+			`	fmt.Println(map[any]int{1: 1, "1": 2, L("1"): 3})
+	fmt.Println(map[string]int{"b": 1, "a": 2, "B": 3})
+	fmt.Println(map[string]int{"b": 1, "10": 2, "9": 3})`,
+		),
+		"map[1:3 1:2 1:1]\nmap[B:3 a:2 b:1]\nmap[10:2 9:3 b:1]\n",
+	);
 });

@@ -186,6 +186,22 @@ export const typeInfoGenMethods = {
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
+	// How `__ik` tells the dynamic type of an interface map key apart where
+	// the JS value cannot: the numeric type name for types sharing a JS
+	// representation with `int`/`float64`/`int64`, `*` for pointers (keyed by
+	// identity) and `!type` for types Go cannot hash.
+	_ifaceKeyTag(t) {
+		if (!t || t.kind === "named" || mentionsTypeParam(t)) return null;
+		if (t.kind === "pointer") return "*";
+		if (t.kind === "slice" || t.kind === "map" || t.kind === "func")
+			return `!${this._dynTypeName(t)}`;
+		if (t.kind !== "basic") return null;
+		const name = this._dynTypeName(t);
+		if (["int", "float64", "int64", "string", "bool"].includes(name))
+			return null;
+		return /^(u?int\d*|uintptr|float32)$/.test(name) ? name : null;
+	},
+
 	// A function boxing a plain value of named basic type `t`, as converting
 	// it to an interface does; null when `t` is not boxed.
 	_ifaceKeyBox(t) {

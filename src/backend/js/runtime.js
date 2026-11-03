@@ -613,13 +613,48 @@ var __isnm = __isnm || function(m) {
 // through `toString` to an injective encoding, and the key value is kept in
 // a table so ranging and fmt can recover it.
 export const HELPER_STRUCT_KEY = `var __kt = __kt || new Map();
+var __kcl = __kcl || function(o) {
+  if (o === null || typeof o !== "object") return o;
+  if (typeof o.__clone === "function") return o.__clone();
+  if (ArrayBuffer.isView(o)) return o.slice();
+  if (Array.isArray(o)) return o.map(__kcl);
+  const c = Object.create(Object.getPrototypeOf(o));
+  for (const f of Object.keys(o)) c[f] = __kcl(o[f]);
+  return c;
+};
 var __sk = __sk || function(o) {
-  const s = "\\u0001" + JSON.stringify(o, (k, v) => typeof v === "bigint" ? v.toString() + "n" : v);
-  if (!__kt.has(s)) __kt.set(s, typeof o.__clone === "function" ? o.__clone() : o);
+  const s = "\\u0001" + JSON.stringify(o, (k, v) => typeof v === "bigint" ? v.toString() + "n" : typeof v === "number" && !Number.isFinite(v) ? { $f: String(v) } : v);
+  if (!__kt.has(s)) __kt.set(s, __kcl(o));
   return s;
 };
-var __ik = __ik || function(k) {
+// Pointer keys compare by identity: a per-object id (a pointer to an element
+// is its container plus index) keys the property, and the pointer is kept
+// in the table so ranging and fmt can recover it.
+var __pids = __pids || new WeakMap();
+var __pidn = __pidn || { n: 0 };
+var __pid = __pid || function(o) {
+  let id = __pids.get(o);
+  if (id === undefined) __pids.set(o, id = ++__pidn.n);
+  return id;
+};
+var __pk = __pk || function(p) {
+  if (p === null || p === undefined) return "\\u0001nil";
+  const s = "\\u0001*" + (p.__target !== undefined && p.__target !== null ? __pid(p.__target) + ":" + p.__index : __pid(p));
+  if (!__kt.has(s)) __kt.set(s, p);
+  return s;
+};
+var __ik = __ik || function(k, tag) {
   const t = typeof k;
+  if (k === null || k === undefined) return "\\u0001nil";
+  if (tag !== undefined) {
+    if (tag === "*") return __pk(k);
+    if (tag.charCodeAt(0) === 33) throw new Error("runtime error: hash of unhashable type " + tag.slice(1));
+    if (t === "number" || t === "bigint") {
+      const s = "\\u0001" + tag + ":" + String(k);
+      if (!__kt.has(s)) __kt.set(s, k);
+      return s;
+    }
+  }
   if (t === "number" || t === "boolean" || t === "bigint") return "\\u0001" + t + ":" + String(k);
   if (k !== null && t === "object" && typeof k.__gfUnbox === "function" && !k.constructor.name.endsWith("$Ptr")) {
     const v = k.__gfUnbox(), vt = typeof v;
@@ -641,13 +676,15 @@ var __ikt = __ikt || function(f, k, box) {
 var __kd = __kd || function(s, copy) {
   if (typeof s !== "string" || s.charCodeAt(0) !== 1) return s;
   const k = __kt.get(s);
+  if (s === "\\u0001nil") return null;
+  if (k !== undefined && s.charCodeAt(1) === 42) return k;
   if (k === undefined) {
     if (s.startsWith("\\u0001number:")) return Number(s.slice(8));
     if (s.startsWith("\\u0001boolean:")) return s.slice(9) === "true";
     if (s.startsWith("\\u0001bigint:")) return BigInt(s.slice(8));
     return s;
   }
-  return copy && typeof k.__clone === "function" ? k.__clone() : k;
+  return copy ? __kcl(k) : k;
 };
 var __kdt = __kdt || function(f, s) {
   if (typeof s !== "string") return s;
@@ -660,7 +697,23 @@ var __kdt = __kdt || function(f, s) {
     default: return __kd(s, true);
   }
 };
+// Interface keys of different dynamic types sort by type first: nil, named
+// types, strings, bools, numbers.
+var __krank = __krank || function(v) {
+  if (v === null || v === undefined) return 0;
+  const t = typeof v;
+  if (t === "object" && typeof v.__gfUnbox === "function") return 1;
+  return t === "string" ? 2 : t === "boolean" ? 3 : t === "number" || t === "bigint" ? 4 : 5;
+};
 var __kcmp = __kcmp || function(a, b) {
+  const ra = __krank(a), rb = __krank(b);
+  if (ra !== rb) return ra - rb;
+  if (ra === 1) {
+    const na = a.constructor.name, nb = b.constructor.name;
+    if (na !== nb) return na < nb ? -1 : 1;
+    a = a.__gfUnbox();
+    b = b.__gfUnbox();
+  }
   if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
     for (const f of Object.keys(a)) {
       const c = __kcmp(a[f], b[f]);
@@ -898,7 +951,10 @@ var __sprintf = __sprintf || function(f, ...a) {
         if (val instanceof Map) {
           // Keys of a type with String()/Error() sort by their raw value, as in Go.
           const raw = (k) => (k !== null && typeof k === "object" && typeof k.__gfUnbox === "function" ? k.__gfUnbox() : k);
+          // Interface keys of different dynamic types sort by type first.
+          const rank = (k) => k === null || k === undefined ? 0 : typeof k === "object" && typeof k.__gfUnbox === "function" ? 1 : typeof k === "string" ? 2 : typeof k === "boolean" ? 3 : typeof k === "number" || typeof k === "bigint" ? 4 : 5;
           const entries = Array.from(val.entries()).sort(([a], [b]) => {
+            if (rank(a) !== rank(b)) return rank(a) - rank(b);
             const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
             if (typeof k1 === "bigint" && typeof k2 === "bigint") return k1 < k2 ? -1 : k1 > k2 ? 1 : 0;
@@ -916,9 +972,11 @@ var __sprintf = __sprintf || function(f, ...a) {
               };
               return cmp(k1, k2);
             }
+            if (typeof k1 === "string" && typeof k2 === "string") return k1 < k2 ? -1 : k1 > k2 ? 1 : 0;
             const na = Number(k1), nb = Number(k2);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-            return String(k1).localeCompare(String(k2));
+            const p = String(k1), q = String(k2);
+            return p < q ? -1 : p > q ? 1 : 0;
           });
           for (const [k, v] of entries) {
             if (isElemPtr && v !== null && typeof v === "object") {
@@ -927,9 +985,13 @@ var __sprintf = __sprintf || function(f, ...a) {
             parts.push(formatV(k, isPlus, false, ro, both(sd?.key, cd?.k), cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, both(sd?.val, cd?.v), cd?.v?.sv === 1));
           }
         } else {
+          const skd = __fmtu.baseOf(sd?.key) ?? __fmtu.baseOf(cd?.k);
+          const strKeys = cd?.sk === 1 || (skd?.k === "b" && skd.n === "string");
           const keys = Object.keys(val).sort((a, b) => {
+            // String keys sort by bytes, as in Go.
+            if (strKeys) return a < b ? -1 : a > b ? 1 : 0;
             // Struct keys (encoded, see __sk) sort field by field, as in Go.
-            if (a.charCodeAt(0) === 1 && b.charCodeAt(0) === 1 && typeof __kd === "function")
+            if ((a.charCodeAt(0) === 1 || b.charCodeAt(0) === 1) && typeof __kd === "function")
               return __kcmp(__kd(a), __kd(b));
             if (/^-?\\d+$/.test(a) && /^-?\\d+$/.test(b)) {
               try {
@@ -950,7 +1012,7 @@ var __sprintf = __sprintf || function(f, ...a) {
               }
               return ta.length - tb.length;
             }
-            return a.localeCompare(b);
+            return a < b ? -1 : a > b ? 1 : 0;
           });
           for (const k of keys) {
             const v = val[k];
