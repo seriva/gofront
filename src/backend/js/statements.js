@@ -1910,6 +1910,17 @@ export const statementGenMethods = {
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
 		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		if (stmt.tag && this._isStructOrArrayType(stmt.tag._type)) {
+			// Struct and array tags compare by value, not by reference.
+			this.useHelper("equal");
+			this._swCounter = (this._swCounter ?? 0) + 1;
+			const tmp = `__sw${this._swCounter}`;
+			this.line(`const ${tmp} = ${tag};`);
+			return {
+				tag: "true",
+				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
+			};
+		}
 		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
 			return { tag, caseExpr: (e) => this.genExpr(e) };
 		this.useHelper("ifeq");

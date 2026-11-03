@@ -914,3 +914,115 @@ func main() {
 		"1 a\n",
 	);
 });
+
+section("Go semantics — labeled break/continue through switches");
+
+test("labeled break out of a nested switch leaves the outer switch", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+sw:
+	switch 1 {
+	case 1:
+		switch 2 {
+		case 2:
+			break sw
+		}
+		fmt.Println("unreached")
+	}
+	fmt.Println("end")
+}
+`,
+		"end\n",
+	);
+});
+
+test("labeled continue from a nested switch continues the outer loop", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+outer:
+	for i := 0; i < 4; i++ {
+		switch i {
+		case 1, 3:
+			switch {
+			case true:
+				continue outer
+			}
+		}
+		fmt.Println("i", i)
+	}
+	var v any = 1
+tsw:
+	switch v.(type) {
+	case int:
+		switch 1 {
+		case 1:
+			break tsw
+		}
+		fmt.Println("unreached")
+	}
+	fmt.Println("done")
+}
+`,
+		"i 0\ni 2\ndone\n",
+	);
+});
+
+section("Go semantics — call arguments evaluate before output");
+
+test("Println evaluates every argument before printing", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func h(n int) int {
+	fmt.Print("h", n, ";")
+	return n
+}
+
+func main() {
+	c := 0
+	next := func(s string) string {
+		c++
+		fmt.Print(s)
+		return fmt.Sprint(c)
+	}
+	fmt.Println(h(1), h(3))
+	fmt.Println(next("a"), next("b"))
+}
+`,
+		"h1;h3;1 3\nab1 2\n",
+	);
+});
+
+test("a panicking argument leaves no partial output line", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type G struct{ p *int }
+
+func (g G) Get() int { return *g.p }
+
+func main() {
+	defer func() {
+		recover()
+		fmt.Println("|")
+	}()
+	name := "n"
+	g := G{}
+	fmt.Println(name, g.Get())
+}
+`,
+		"|\n",
+	);
+});
