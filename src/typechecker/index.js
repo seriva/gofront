@@ -183,7 +183,9 @@ export class TypeChecker {
 				this._ambiguousImported.add(prior);
 				this._ambiguousImported.add(type);
 			}
-			this.types.set(name, type);
+			// A renamed type (`Pt` declared as `Pt$$b`) keeps a bare name another
+			// package already owns; it is reached as `pkg.Pt`.
+			if (!(prior && type.name !== name)) this.types.set(name, type);
 			this.types.set(`${pkgName}.${name}`, type);
 		}
 	}
