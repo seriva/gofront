@@ -7,10 +7,18 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { JS_NATIVES } from "../../../src/backend/js/natives.js";
-import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
-import { NATIVES } from "../../../src/typechecker/types.js";
 import { assertEqual, section, test } from "../helpers.js";
+
+// Other test files register throwaway natives in the shared registries, and a
+// worker keeps modules between files. A query string gives this check its own
+// untouched copy of each registry, whatever ran before it.
+const { JS_NATIVES } = await import(
+	"../../../src/backend/js/natives.js?pristine"
+);
+const { WASM_NATIVES } = await import(
+	"../../../src/backend/wasm/natives.js?pristine"
+);
+const { NATIVES } = await import("../../../src/typechecker/types.js?pristine");
 
 const STDLIB_ROOT = fileURLToPath(new URL("../../../stdlib", import.meta.url));
 
