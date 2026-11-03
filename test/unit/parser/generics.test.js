@@ -65,6 +65,65 @@ func Test() { f(Id[int], Id[[]int](nil)) }
 	assertEqual(findCall(ast, "f").args[0].kind, "InstantiationExpr");
 });
 
+section("Parser — type-literal type arguments");
+
+// Kind of the first expression statement's or var initialiser's node.
+function firstInit(body) {
+	const ast = parse(`package main\n${body}\n`);
+	const fn = ast.decls?.find((d) => d.kind === "FuncDecl");
+	const stmt = fn ? fn.body.stmts[0] : null;
+	return stmt?.rhs?.[0] ?? stmt?.expr ?? stmt;
+}
+
+for (const [name, src, typeArgs] of [
+	["Id[[]int, int]", "func g() { f := Id[[]int, int]; _ = f }", 2],
+	[
+		"slices.Index[[]int, int]",
+		"func g() { f := slices.Index[[]int, int]; _ = f }",
+		2,
+	],
+	["slices.Sort[[]int]", "func g() { f := slices.Sort[[]int]; _ = f }", 1],
+	[
+		"Keys[map[string]int, string, int]",
+		"func g() { f := Keys[map[string]int, string, int]; _ = f }",
+		3,
+	],
+	[
+		"Id[func(int) int, int]",
+		"func g() { f := Id[func(int) int, int]; _ = f }",
+		2,
+	],
+	["Id[*T, int]", "func g() { f := Id[*T, int]; _ = f }", 2],
+]) {
+	test(`${name} parses as an instantiation`, () => {
+		const node = firstInit(src);
+		assertEqual(node.kind, "InstantiationExpr");
+		assertEqual(node.typeArgs.length, typeArgs);
+	});
+}
+
+test("index by a composite literal is still an index", () => {
+	const node = firstInit("func g() { x := a[[]int{1}[0]]; _ = x }");
+	assertEqual(node.kind, "IndexExpr");
+	assertEqual(node.index.kind, "IndexExpr");
+});
+
+test("index by a conversion or dereference is still an index", () => {
+	assertEqual(
+		firstInit("func g() { x := a[[]byte(s)[0]]; _ = x }").kind,
+		"IndexExpr",
+	);
+	assertEqual(firstInit("func g() { x := a[*p]; _ = x }").kind, "IndexExpr");
+});
+
+test("an index before the block of an if or for stays an index", () => {
+	const ast = parse(
+		"package p\nfunc f(s []int, v int) int { for i := 0; i < len(s); i++ { if v == s[i] { return i } }; for range s[v] { }; return -1 }",
+	);
+	const text = JSON.stringify(ast);
+	assertEqual(text.includes('"InstantiationExpr"'), false);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

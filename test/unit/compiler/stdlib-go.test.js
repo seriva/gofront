@@ -1,15 +1,19 @@
 // Go-source stdlib: packages written in GoFront Go under stdlib/,
 // compiled into the caller's target (js, wasm, or both).
 
-import { STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
+import { JS_NATIVES } from "../../../src/backend/js/natives.js";
+import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
+import { NATIVES, STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
 import {
 	assert,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertFourWay,
 	assertThrows,
 	compile,
 	compileDir,
+	compileHybridProgram,
 	compileHybridProject,
 	join,
 	section,
@@ -47,6 +51,31 @@ section("Go-source stdlib: loader (cmp)");
 
 test("cmp has no hand-written checker entry", () => {
 	assert(!STDLIB_PACKAGES.has("cmp"), "cmp must come from stdlib");
+});
+
+test("migrated packages have no STDLIB_PACKAGES entry", () => {
+	for (const name of [
+		"bytes",
+		"cmp",
+		"crypto/sha256",
+		"encoding/base64",
+		"encoding/hex",
+		"hash",
+		"html",
+		"io",
+		"iter",
+		"maps",
+		"math/bits",
+		"math/rand",
+		"path",
+		"path/filepath",
+		"slices",
+		"sort",
+		"strconv",
+		"sync",
+		"unicode/utf8",
+	])
+		assert(!STDLIB_PACKAGES.has(name), `${name} must come from stdlib`);
 });
 
 test("js package imports cmp", async () => {
@@ -127,19 +156,19 @@ test("an overlay that redeclares an emitter member is rejected", () => {
 
 package errors
 
-func New(text string) error { return nil }
+func As(err error, target any) bool { return false }
 `,
 			"app/main.go": `package main
 
 import "errors"
 
-func main() { println(errors.New("x") != nil) }
+func main() { println(errors.As(nil, nil)) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares errors.New",
+				"overlay redeclares errors.As",
 			);
 		},
 	);
@@ -847,4 +876,478 @@ func Run() string {
 }
 `);
 	assertEqual(out, 'true HÉLLO "é" 0.5 4 8 3 0.25 7 7 2 4 5');
+});
+
+section("Go-source stdlib: //gofront:native");
+
+// A test-only native name; the production set is closed (see NATIVES).
+NATIVES.add("str.Index");
+
+const STR_PKG = `//go:build gofront
+
+//gofront:target both
+
+package str
+
+//gofront:native str.Index
+func Index(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+`;
+
+const STR_APP = `package main\n\nimport "str"\n\nfunc main() { println(str.Index("hello", "ll")) }\n`;
+
+function compileWithStr(pkg, app = STR_APP) {
+	return withTempDir({ "stdlib/str/str.go": pkg, "app/main.go": app }, (dir) =>
+		compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
+	);
+}
+
+test("an unknown native name is rejected", () => {
+	assertThrows(
+		() => compileWithStr(STR_PKG.replace("str.Index\n", "x\n")),
+		"unknown native 'x'",
+	);
+});
+
+test("a native on a body-less func is rejected", () => {
+	assertThrows(
+		() =>
+			compileWithStr(
+				STR_PKG.replace(
+					/func Index[\s\S]*$/,
+					"func Index(s, sub string) int\n",
+				),
+			),
+		"native 'str.Index' must have a Go body",
+	);
+});
+
+test("a native outside the standard library is rejected", () => {
+	const src = `package main
+
+//gofront:native str.Index
+func idx(s, sub string) int { return 0 }
+
+func main() { println(idx("a", "b")) }
+`;
+	assertErrorContains(
+		compile(src).errors,
+		"//gofront:native is reserved for the standard library",
+	);
+});
+
+test("a native on a method is rejected", () => {
+	assertThrows(
+		() =>
+			compileWithStr(
+				`${STR_PKG}
+type T struct{}
+
+//gofront:native str.Index
+func (T) M() {}
+`,
+			),
+		"must mark a function, not a method",
+	);
+});
+
+test("a registered native name compiles", () => {
+	const res = compileWithStr(STR_PKG);
+	assert(res.js.includes("Index$$str"), "the Go body is still emitted");
+});
+
+section("Go-source stdlib: JS native call sites");
+
+JS_NATIVES.set("str.Index", (a, targs) =>
+	targs.length === 0 ? `${a[0]}.indexOf(${a[1]})` : null,
+);
+
+const callJs = (body) =>
+	compileWithStr(
+		STR_PKG,
+		`package main\n\nimport "str"\n\nfunc main() {\n${body}\n}\n`,
+	).js;
+
+test("a native call site emits the host code", () => {
+	const js = callJs(`println(str.Index("hello", "ll"))`);
+	assertContains(js, `"hello".indexOf("ll")`);
+});
+
+test("a native used as a value calls the Go body", () => {
+	const js = callJs(`f := str.Index\nprintln(f("hello", "ll"))`);
+	assert(!js.includes(".indexOf("), "a function value must not be inlined");
+	assertContains(js, "f(");
+});
+
+test("a deferred native call runs the Go body", () => {
+	const js = callJs(`defer str.Index("hello", "ll")`);
+	assert(!js.includes(".indexOf("), "defer must call the Go body");
+});
+
+test("a native that declines calls the Go body", () => {
+	JS_NATIVES.set("str.Index", () => null);
+	try {
+		const js = callJs(`println(str.Index("hello", "ll"))`);
+		assert(!js.includes(".indexOf("), "a declined call must not be inlined");
+		assertContains(js, "Index$$str(");
+	} finally {
+		JS_NATIVES.set("str.Index", (a) => `${a[0]}.indexOf(${a[1]})`);
+	}
+});
+
+test("a native evaluates each argument once, in order", async () => {
+	// The template repeats its second argument.
+	JS_NATIVES.set(
+		"str.Index",
+		(a) => `(${a[0]}.indexOf(${a[1]}) + ${a[1]}.length * 0)`,
+	);
+	try {
+		await withTempDir({ "str/str.go": STR_PKG }, async (stdlib) => {
+			const res = await compileHybridProject(
+				{
+					"main.go": `package main
+
+import "str"
+
+var log string
+
+func next(s string) string {
+	log += s
+	return s
+}
+
+func main() {
+	println(str.Index(next("hello"), next("ll")), log)
+}
+`,
+				},
+				{ stdlibRoot: stdlib },
+			);
+			assertEqual(res.lines.join("\n"), "2 helloll");
+		});
+	} finally {
+		JS_NATIVES.set("str.Index", (a) => `${a[0]}.indexOf(${a[1]})`);
+	}
+});
+
+test("a generic native that declines one instantiation calls the Go body", () => {
+	NATIVES.add("str.IndexOf");
+	JS_NATIVES.set("str.IndexOf", (a, targs) =>
+		targs[0]?.name === "float64" ? null : `${a[0]}.indexOf(${a[1]})`,
+	);
+	const pkg = `${STR_PKG}
+//gofront:native str.IndexOf
+func IndexOf[T comparable](xs []T, v T) int {
+	for i, x := range xs {
+		if x == v {
+			return i
+		}
+	}
+	return -1
+}
+`;
+	const js = compileWithStr(
+		pkg,
+		`package main
+
+import "str"
+
+func main() {
+	println(str.IndexOf([]int{1, 2}, 2))
+	println(str.IndexOf([]float64{1, 2}, 2))
+}
+`,
+	).js;
+	assertContains(js, "[1, 2]");
+	assertEqual(js.split(".indexOf(").length - 1, 1);
+	assertContains(js, "IndexOf$$str(");
+});
+
+section("Go-source stdlib: natives off and assertFourWay");
+
+const FOUR_PKG = `//go:build gofront
+
+//gofront:target both
+
+package four
+
+//gofront:native four.Agree
+func Agree(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+//gofront:native four.Disagree
+func Disagree(s, sub string) int { return Agree(s, sub) }
+
+//gofront:native four.WasmDisagree
+func WasmDisagree(s, sub string) int { return Agree(s, sub) }
+`;
+for (const n of ["Agree", "Disagree", "WasmDisagree"]) NATIVES.add(`four.${n}`);
+
+JS_NATIVES.set("four.Agree", (a) => `${a[0]}.indexOf(${a[1]})`);
+JS_NATIVES.set("four.Disagree", (a) => `(${a[0]}.indexOf(${a[1]}) + 1)`);
+WASM_NATIVES.set("four.WasmDisagree", {
+	emit(e, call, _typeArgs, target) {
+		e.emitExpr(call.args[0], "externref");
+		e.emitExpr(call.args[1], "externref");
+		e.pushInstruction("drop");
+		e.pushInstruction("drop");
+		e.pushInstruction({ op: "i32.const", value: 41 });
+		if ((target ?? "i64") === "i64") e.pushInstruction("i64.extend_i32_s");
+		return true;
+	},
+});
+
+const fourProgram = (fn) => `package main
+
+import "four"
+
+func main() { println(four.${fn}("hello", "ll")) }
+`;
+
+test("assertFourWay passes when a native agrees with its Go body", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, (stdlib) =>
+		assertFourWay(fourProgram("Agree"), "2\n", { stdlibRoot: stdlib }),
+	);
+});
+
+test("assertFourWay names a JS native that disagrees with its Go body", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		let msg = null;
+		try {
+			await assertFourWay(fourProgram("Disagree"), "2\n", {
+				stdlibRoot: stdlib,
+			});
+		} catch (e) {
+			msg = e.message;
+		}
+		assert(msg !== null, "a disagreeing native must fail");
+		assertContains(msg, "js (natives on)");
+	});
+});
+
+test("assertFourWay names a WASM native that disagrees with its Go body", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		let msg = null;
+		try {
+			await assertFourWay(fourProgram("WasmDisagree"), "2\n", {
+				stdlibRoot: stdlib,
+			});
+		} catch (e) {
+			msg = e.message;
+		}
+		assert(msg !== null, "a disagreeing native must fail");
+		assertContains(msg, "wasm (natives on)");
+	});
+});
+
+const FX_PKG = `//go:build gofront
+
+//gofront:target both
+
+package fx
+
+//gofront:native fx.Hit
+func Hit() int {
+	println("body")
+	return 1
+}
+`;
+NATIVES.add("fx.Hit");
+JS_NATIVES.set("fx.Hit", () => "1");
+WASM_NATIVES.set("fx.Hit", {
+	emit(e) {
+		e.pushInstruction({ op: "i64.const", value: 1n });
+		return true;
+	},
+});
+
+test("a deferred native call runs the Go body on both backends", async () => {
+	await withTempDir({ "fx/fx.go": FX_PKG }, async (stdlib) => {
+		const res = await compileHybridProgram(
+			`package main
+
+import "fx"
+
+func main() {
+	defer fx.Hit()
+}
+`,
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(`wasm:${res.wasm}`, "wasm:body\n");
+		assertEqual(`js:${res.js}`, "js:body\n");
+	});
+});
+
+test("a package-level variable holding a native is not a native call", async () => {
+	await withTempDir({ "fx/fx.go": FX_PKG }, async (stdlib) => {
+		const res = await compileHybridProgram(
+			`package main
+
+import "fx"
+
+var F = fx.Hit
+
+func main() {
+	F()
+}
+`,
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(res.js, "body\n");
+		assertEqual(res.wasm, "body\n");
+	});
+});
+
+test("natives off runs the Go body on both backends", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		for (const fn of ["Disagree", "WasmDisagree"]) {
+			const off = await compileHybridProgram(fourProgram(fn), {
+				natives: false,
+				stdlibRoot: stdlib,
+			});
+			assertEqual(off.js, "2\n");
+			assertEqual(off.wasm, "2\n");
+		}
+	});
+});
+
+section("Go-source stdlib: lazy body checking");
+
+// A Go-source package of `count` functions of 14 lines each (about 5,600
+// lines for 400): Fn returns a distinct value, so the bodies are checkable
+// but never call one another.
+function bigPackage(count, extra = "") {
+	const fns = [];
+	for (let i = 0; i < count; i++)
+		fns.push(`func F${i}(x int) int {
+	total := 0
+	for i := 0; i < x; i++ {
+		if i%2 == 0 {
+			total += i * ${i + 1}
+		} else {
+			total -= ${i}
+		}
+	}
+	return total
+}
+`);
+	return `//go:build gofront
+
+//gofront:target both
+
+package big
+
+${fns.join("\n")}
+${extra}
+`;
+}
+
+// Compiles `main` against a temp stdlib holding `big`; returns the build and
+// the stdlib cache (to read the checker's statistics).
+function compileBig(pkg, mainBody) {
+	const stdlibCache = new Map();
+	const res = withTempDir(
+		{
+			"stdlib/big/big.go": pkg,
+			"app/main.go": `package main\n\nimport "big"\n\nfunc main() {\n${mainBody}\n}\n`,
+		},
+		(dir) =>
+			compileDir(join(dir, "app"), {
+				stdlibRoot: join(dir, "stdlib"),
+				stdlibCache,
+			}),
+	);
+	return { res, checker: stdlibCache.get("big").checker };
+}
+
+test("a large package checks only the bodies a call reaches", () => {
+	const pkg = bigPackage(480);
+	assert(pkg.split("\n").length >= 5600, "the package is about 5,600 lines");
+	const { checker } = compileBig(pkg, "println(big.F7(3))");
+	assert(
+		checker.stats.bodiesChecked <= 10,
+		`checked ${checker.stats.bodiesChecked} bodies`,
+	);
+	assertEqual(checker.stats.bodiesChecked, 1);
+});
+
+test("a type error in an unreached body is not reported", () => {
+	const pkg = bigPackage(3, `func Broken() int { return "x" }`);
+	const { res } = compileBig(pkg, "println(big.F1(3))");
+	assertContains(res.js, "F1$$big");
+	assert(!res.js.includes("Broken"), "an unreached function is not emitted");
+});
+
+test("a type error in a reached body is reported at the call", () => {
+	const pkg = bigPackage(3, `func Broken() int { return "x" }`);
+	assertThrows(
+		() => compileBig(pkg, "println(big.Broken())"),
+		"internal stdlib error in big; please report",
+	);
+	assertThrows(
+		() => compileBig(pkg, "println(big.Broken())"),
+		"Type error in main.go",
+	);
+});
+
+test("a body reached through another body is checked and reported", () => {
+	const pkg = bigPackage(
+		3,
+		`func Outer() int { return inner() }\nfunc inner() int { return "x" }`,
+	);
+	assertThrows(
+		() => compileBig(pkg, "println(big.Outer())"),
+		"internal stdlib error in big; please report",
+	);
+});
+
+test("a wasm package checks the Go-source bodies it reaches", async () => {
+	const pkg = bigPackage(3, `func Broken() int { return "x" }`);
+	await withTempDir({ "big/big.go": pkg }, async (stdlib) => {
+		const res = await compileHybridProject(
+			{
+				"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "big"
+
+func Run() int { return big.F2(4) }
+`,
+				"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+			},
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(res.lines.join("\n"), "2");
+	});
+});
+
+test("diagnostics for an existing package are unchanged", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import "cmp"
+
+func main() { println(cmp.Compare(1, "a")) }
+`,
+		},
+		(dir) =>
+			assertThrows(
+				() => compileDir(dir),
+				`Type error in main.go at line 5:38: Cannot assign untyped string to int`,
+			),
+	);
 });

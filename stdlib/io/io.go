@@ -2,12 +2,37 @@
 
 //gofront:target both
 
-// Overlay on the emitter-backed io package.
+// Package io provides the basic interfaces to I/O primitives, written in
+// Go over the real package's algorithms. io.Pipe is not supported.
 package io
 
 import (
 	"errors"
 )
+
+// EOF is the error returned by Read when no more input is available.
+var EOF = errors.New("EOF")
+
+// Reader is the interface that wraps the basic Read method.
+type Reader interface {
+	Read(p []byte) (n int, err error)
+}
+
+// Writer is the interface that wraps the basic Write method.
+type Writer interface {
+	Write(p []byte) (n int, err error)
+}
+
+// Closer is the interface that wraps the basic Close method.
+type Closer interface {
+	Close() error
+}
+
+// ReadWriter is the interface that groups the basic Read and Write methods.
+type ReadWriter interface {
+	Reader
+	Writer
+}
 
 // Seek whence values.
 const (
@@ -344,3 +369,134 @@ func (s *SectionReader) Size() int64 { return s.limit - s.base }
 func (s *SectionReader) Outer() (r ReaderAt, off int64, n int64) {
 	return s.r, s.base, s.n
 }
+
+// WriteString writes the contents of the string s to w.
+func WriteString(w Writer, s string) (n int, err error) {
+	if sw, ok := w.(StringWriter); ok {
+		return sw.WriteString(s)
+	}
+	return w.Write([]byte(s))
+}
+
+// ReadAll reads from r until an error or EOF and returns the data it read.
+func ReadAll(r Reader) ([]byte, error) {
+	b := make([]byte, 0, 512)
+	for {
+		n, err := r.Read(b[len(b):cap(b)])
+		b = b[:len(b)+n]
+		if err != nil {
+			if err == EOF {
+				err = nil
+			}
+			return b, err
+		}
+		if len(b) == cap(b) {
+			b = append(b, 0)[:len(b)]
+		}
+	}
+}
+
+// A LimitedReader reads from R but limits the amount of data returned to just N bytes.
+type LimitedReader struct {
+	R Reader // underlying reader
+	N int64  // max bytes remaining
+}
+
+func (l *LimitedReader) Read(p []byte) (n int, err error) {
+	if l.N <= 0 {
+		return 0, EOF
+	}
+	if int64(len(p)) > l.N {
+		p = p[0:l.N]
+	}
+	n, err = l.R.Read(p)
+	l.N -= int64(n)
+	return
+}
+
+// LimitReader returns a Reader that reads from r but stops with EOF after n bytes.
+func LimitReader(r Reader, n int64) Reader { return &LimitedReader{r, n} }
+
+type discard struct{}
+
+func (discard) Write(p []byte) (int, error)       { return len(p), nil }
+func (discard) WriteString(s string) (int, error) { return len(s), nil }
+
+// Discard is a Writer on which all Write calls succeed without doing anything.
+var Discard Writer = discard{}
+
+// Copy copies from src to dst until either EOF is reached on src or an error occurs.
+func Copy(dst Writer, src Reader) (written int64, err error) {
+	return copyBuffer(dst, src, nil)
+}
+
+// CopyN copies n bytes (or until an error) from src to dst.
+func CopyN(dst Writer, src Reader, n int64) (written int64, err error) {
+	written, err = Copy(dst, LimitReader(src, n))
+	if written == n {
+		return n, nil
+	}
+	if written < n && err == nil {
+		// src stopped early; must have been EOF.
+		err = EOF
+	}
+	return
+}
+
+// CopyBuffer is identical to Copy except that it stages through the provided buffer.
+func CopyBuffer(dst Writer, src Reader, buf []byte) (written int64, err error) {
+	if buf != nil && len(buf) == 0 {
+		panic("empty buffer in CopyBuffer")
+	}
+	return copyBuffer(dst, src, buf)
+}
+
+func copyBuffer(dst Writer, src Reader, buf []byte) (written int64, err error) {
+	if wt, ok := src.(WriterTo); ok {
+		return wt.WriteTo(dst)
+	}
+	if rf, ok := dst.(ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	if buf == nil {
+		size := 32 * 1024
+		if l, ok := src.(*LimitedReader); ok && int64(size) > l.N {
+			if l.N < 1 {
+				size = 1
+			} else {
+				size = int(l.N)
+			}
+		}
+		buf = make([]byte, size)
+	}
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[0:nr])
+			if nw < 0 || nr < nw {
+				nw = 0
+				if ew == nil {
+					ew = errInvalidWrite
+				}
+			}
+			written += int64(nw)
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			if er != EOF {
+				err = er
+			}
+			break
+		}
+	}
+	return written, err
+}
+
+var errInvalidWrite = errors.New("invalid write result")

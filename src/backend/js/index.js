@@ -34,21 +34,16 @@ import {
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
-	HELPER_BASE64,
 	HELPER_BINARY,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
 	HELPER_CRYPTO_RAND,
-	HELPER_DURATION,
 	HELPER_EQUAL,
 	HELPER_ERROR,
 	HELPER_ERROR_AS,
-	HELPER_ERROR_IS,
-	HELPER_ERROR_JOIN,
 	HELPER_GENERICS,
 	HELPER_GEQ,
-	HELPER_HEX,
 	HELPER_IFACE_BOX,
 	HELPER_IFD,
 	HELPER_IFEQ,
@@ -61,26 +56,19 @@ import {
 	HELPER_NM,
 	HELPER_OS,
 	HELPER_PANIC,
-	HELPER_PATH_CLEAN,
-	HELPER_PATH_ERROR,
 	HELPER_PTREQ,
 	HELPER_S,
 	HELPER_SCLONE,
-	HELPER_SHA256,
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
-	HELPER_SORT_SLICE,
 	HELPER_SPRINT,
 	HELPER_SPRINTF,
-	HELPER_STRCONV,
-	HELPER_STRCONV_ERROR,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
-	HELPER_SYNC,
 	HELPER_TESTING,
-	HELPER_TIME_FMT,
-	HELPER_TIME_PARSE,
+	HELPER_TIMER,
+	HELPER_TO64,
 	HELPER_VA,
 	HELPER_VCLONE,
 } from "./runtime.js";
@@ -159,6 +147,7 @@ const HELPER_MAP = [
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
 	["shift", HELPER_SHIFT],
+	["to64", HELPER_TO64],
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
@@ -168,33 +157,26 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
-	["errorIs", HELPER_ERROR_IS],
 	["errorAs", HELPER_ERROR_AS],
-	["errorJoin", HELPER_ERROR_JOIN],
-	["strconvError", HELPER_STRCONV_ERROR],
-	["pathError", HELPER_PATH_ERROR],
 	["ioEOF", HELPER_IO_EOF],
 	["os", HELPER_OS],
-	["strconv", HELPER_STRCONV],
-	["pathClean", HELPER_PATH_CLEAN],
-	["sortSlice", HELPER_SORT_SLICE],
-	["timeFmt", HELPER_TIME_FMT],
-	["timeParse", HELPER_TIME_PARSE],
-	["duration", HELPER_DURATION],
+	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
-	["sync", HELPER_SYNC],
 	["cryptoRand", HELPER_CRYPTO_RAND],
-	["sha256", HELPER_SHA256],
 	["binary", HELPER_BINARY],
-	["hex", HELPER_HEX],
-	["base64", HELPER_BASE64],
 	["json", HELPER_JSON],
 	["simd", HELPER_SIMD],
 ];
 
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
-const JS_INTRINSICS = {};
+const JS_INTRINSICS = {
+	rand_source: () => "return Math.random();",
+	time_now: () =>
+		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
+	time_zone_offset: ([unix]) =>
+		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
+};
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
@@ -209,6 +191,7 @@ export class CodeGen {
 		this.checker = checker;
 		this.target = options.target ?? "js";
 		this.strict = Boolean(options.strict || this.target === "both");
+		this.natives = options.natives !== false; // replace native calls with host code
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
@@ -567,18 +550,8 @@ export class CodeGen {
 		this._helpers.add(name);
 		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
 		if (name === "geq") this._helpers.add("ifeq");
-		if (
-			name === "strconvError" ||
-			name === "pathError" ||
-			name === "ioEOF" ||
-			name === "base64" ||
-			name === "hex" ||
-			name === "json"
-		) {
+		if (name === "ioEOF" || name === "json") {
 			this._helpers.add("error");
-		}
-		if (name === "json") {
-			this.useHelper("base64");
 		}
 		if (name === "os") {
 			this.useHelper("ioEOF");
@@ -963,9 +936,16 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(method, embedName) {
+	_embedStub(method, embedName, valueEmbed = false) {
+		// The field is named after the type without its package suffix
+		// (`Mutex$$sync` is the field `Mutex`).
+		const field = embedName.replace(/\$\$.*$/, "");
+		// A named non-struct type is boxed: its methods are static, taking
+		// the value as the receiver.
+		if (valueEmbed)
+			return `${method}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
 		const call = this.structNames.has(embedName)
-			? `this.${embedName}.${method}(...__a)`
+			? `this.${field}.${method}(...__a)`
 			: `${embedName}.prototype.${method}.call(this, ...__a)`;
 		return `${method}(...__a) { return ${call}; }`;
 	}
@@ -987,7 +967,9 @@ export class CodeGen {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		for (const stub of stubs) {
 			this.blank();
-			this.line(this._embedStub(stub.methodName, stub.embedName));
+			this.line(
+				this._embedStub(stub.methodName, stub.embedName, stub.valueEmbed),
+			);
 		}
 	}
 
@@ -1276,6 +1258,15 @@ export class CodeGen {
 							(isNumeric(v._type) || v._type?.kind === "untyped")
 						) {
 							return `{ re: ${js}, im: 0 }`;
+						}
+					}
+					if (spec.type?.name === "int64" || spec.type?.name === "uint64") {
+						if (
+							v._type?.kind === "untyped" &&
+							!js.endsWith("n") &&
+							/^-?\d+$/.test(js)
+						) {
+							return `${js}n`;
 						}
 					}
 					return js;

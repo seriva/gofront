@@ -239,10 +239,10 @@ func main() {
 
 section("Parity Matrix — Summary");
 
-test("parity matrix completeness: all 52 rows parsed and covered", () => {
-	assertEqual(parsedRows.length, 52);
+test("parity matrix completeness: all 55 rows parsed and covered", () => {
+	assertEqual(parsedRows.length, 55);
 	console.log(
-		`\n── Parity Matrix: 52 rows parsed (39 active, ${skippedRows.length} skipped/pending) ──`,
+		`\n── Parity Matrix: 55 rows parsed (42 active, ${skippedRows.length} skipped/pending) ──`,
 	);
 	for (const skip of skippedRows) {
 		console.log(`  - [${skip.table}] ${skip.feature}: ${skip.reason}`);

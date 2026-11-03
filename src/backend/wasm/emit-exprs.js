@@ -11,6 +11,7 @@ import {
 	compositeLitIndices,
 	compositeLitMaxIndex,
 } from "../../typechecker/types.js";
+import { emitWasmNative } from "./natives.js";
 import {
 	getMapKeyValTypes,
 	isAnyType,
@@ -240,7 +241,8 @@ export class ExprsEmitter {
 				break;
 
 			case "CallExpr":
-				this.emitCallExpr(expr, targetWasmType);
+				if (!emitWasmNative(this, expr, targetWasmType))
+					this.emitCallExpr(expr, targetWasmType);
 				break;
 
 			case "TypeConversion":
@@ -571,32 +573,8 @@ export class ExprsEmitter {
 			this.emitUtf8Const(expr.field, targetWasmType);
 			return true;
 		}
-		if (this._isStrconvConst(expr)) {
-			this.emitStrconvConst(expr.field, targetWasmType);
-			return true;
-		}
-		if (this._isPathConst(expr)) {
-			this.emitPathConst(expr.field, targetWasmType);
-			return true;
-		}
-		if (this._isIoConst(expr)) {
-			this.emitIoConst(expr.field, targetWasmType);
-			return true;
-		}
 		if (this._isOsConst?.(expr)) {
 			this.emitOsConst(expr.field, targetWasmType);
-			return true;
-		}
-		if (this._isTimeConst(expr)) {
-			this.emitTimeConst(expr.field, targetWasmType);
-			return true;
-		}
-		if (this._isBitsConst?.(expr)) {
-			this.emitBitsConst(expr.field, targetWasmType);
-			return true;
-		}
-		if (this._isExtendedPkgConst?.(expr)) {
-			this.emitExtendedPkgConst(expr, targetWasmType);
 			return true;
 		}
 		return false;

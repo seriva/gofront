@@ -107,7 +107,7 @@ export function gwFilesIn(dir, { includeTests = false } = {}) {
 // wasm-opt when requested and produce the wasm source map.
 function finishWasm(options, merged, pkgTarget, outputDir) {
 	const wantMap = Boolean(options.sourceMap && !options.isDependency);
-	let { wasm, wat, sourceMapInfo } = linkIntoBundle(
+	let { wasm, wat, sourceMapInfo, stringTable } = linkIntoBundle(
 		options,
 		merged,
 		pkgTarget,
@@ -132,7 +132,7 @@ function finishWasm(options, merged, pkgTarget, outputDir) {
 		wasmOptInfo = opt;
 		if (opt.sourceMap) wasmSourceMap = opt.sourceMap;
 	}
-	return { wasm, wat, wasmOptInfo, wasmSourceMap };
+	return { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable };
 }
 
 // Prints non-fatal diagnostics (e.g. JS Number precision of a constant).
@@ -454,6 +454,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	const cg = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
 		strict: isStrict,
+		natives: options.natives,
 	});
 	const mainJs =
 		pkgTarget === "wasm" ? wasmMarker(checker.pkgName) : cg.generate(ast);
@@ -468,7 +469,7 @@ export function compileSingleFile(inputPath, options = {}) {
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
 	finishStdlibJs(merged, options, [ast], pkgTarget);
-	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
+	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
 		{ ...options, sourceMap },
 		merged,
 		pkgTarget,
@@ -487,6 +488,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		wat,
 		wasmOptInfo,
 		wasmSourceMap,
+		stringTable,
 	};
 }
 
@@ -621,6 +623,7 @@ export function compileFiles(files, options = {}) {
 	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
 		strict: isStrict,
+		natives: options.natives,
 	});
 	const mainJs =
 		emitTarget === "wasm"
@@ -639,7 +642,7 @@ export function compileFiles(files, options = {}) {
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
 	finishStdlibJs(merged, options, programs, emitTarget);
-	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
+	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
 		options,
 		merged,
 		pkgTarget,
@@ -664,6 +667,7 @@ export function compileFiles(files, options = {}) {
 		wat,
 		wasmOptInfo,
 		wasmSourceMap,
+		stringTable,
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),

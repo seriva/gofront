@@ -27,6 +27,7 @@ import {
 	isAny,
 	isBool,
 	isVoid,
+	NATIVES,
 	Scope,
 	TAINTED_ANY,
 	TypeCheckError,
@@ -117,6 +118,12 @@ export class TypeChecker {
 		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
+		// Lazy body checking (Go-source stdlib): with `lazyBodies` set, checkAll
+		// types declarations only and `checkBody` types a function or method
+		// body when it is first reached.
+		this.lazyBodies = false;
+		this.stats = { bodiesChecked: 0 };
+		this._lazyBodies = new Map(); // FuncDecl/MethodDecl -> its program
 		this._constExprs = new Map(); // name -> AST initializer expr
 		this._importedConsts = new Map(); // dot-imported const name -> value
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
@@ -725,6 +732,11 @@ export class TypeChecker {
 			this._setCurrentFile(p);
 			for (const d of p.decls) {
 				if (
+					this.lazyBodies &&
+					(d.kind === "FuncDecl" || d.kind === "MethodDecl")
+				)
+					this._deferBody(d, p);
+				else if (
 					d.kind === "FuncDecl" ||
 					d.kind === "MethodDecl" ||
 					d.kind === "TemplDecl"
@@ -733,6 +745,23 @@ export class TypeChecker {
 				}
 			}
 		}
+	}
+
+	// Lazy mode: validate what does not need the body now, check it on demand.
+	_deferBody(decl, program) {
+		if (decl.intrinsic) this._checkIntrinsic(decl);
+		if (decl.native) this._checkNative(decl);
+		this._lazyBodies.set(decl, program);
+	}
+
+	// Types the body of a function or method deferred by `lazyBodies`; a
+	// declaration checked already (or not deferred) is left alone.
+	checkBody(decl) {
+		const program = this._lazyBodies.get(decl);
+		if (!program) return;
+		this._lazyBodies.delete(decl);
+		this._setCurrentFile(program);
+		this.checkTopDecl(decl, this.globals);
 	}
 
 	// ── Shared pass helpers ──────────────────────────────────────
@@ -750,8 +779,16 @@ export class TypeChecker {
 		for (const embed of struct._embeds) {
 			const inner = embed.kind === "pointer" ? embed.base : embed;
 			const base = inner.kind === "named" ? inner.underlying : inner;
-			if (base?.kind !== "struct" || !base.methods) continue;
-			for (const [mName, mType] of base.methods.entries()) {
+			// A named non-struct type (`time.Duration`) keeps its methods on
+			// the named type itself.
+			const methods =
+				base?.kind === "struct"
+					? base.methods
+					: inner.kind === "named" && base?.kind !== "interface"
+						? inner.methods
+						: null;
+			if (!methods) continue;
+			for (const [mName, mType] of methods.entries()) {
 				if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
 			}
 		}
@@ -888,6 +925,9 @@ export class TypeChecker {
 	_registerFuncDecl(decl, funcType, typeParamTypes) {
 		if (this.globals.symbols.has(decl.name) && decl.name !== "init")
 			this.err(`${decl.name} redeclared in this block`, decl);
+		if (decl.native) funcType.native = decl.native;
+		this._funcDeclNames ??= new Set();
+		this._funcDeclNames.add(decl.name);
 		if (typeParamTypes) {
 			this.globals.define(decl.name, {
 				kind: "generic",
@@ -1147,8 +1187,27 @@ export class TypeChecker {
 			);
 	}
 
+	_checkNative(decl) {
+		if (!this.isStdlib && !this.nativesChecked)
+			return this.err(
+				"//gofront:native is reserved for the standard library",
+				decl,
+			);
+		if (decl.kind !== "FuncDecl")
+			return this.err(
+				`native '${decl.native}' must mark a function, not a method`,
+				decl,
+			);
+		if (!NATIVES.has(decl.native))
+			return this.err(`unknown native '${decl.native}'`, decl);
+		if (decl._bodyless)
+			this.err(`native '${decl.native}' must have a Go body`, decl);
+	}
+
 	checkFuncDecl(decl, outer) {
+		this.stats.bodiesChecked++;
 		if (decl.intrinsic) this._checkIntrinsic(decl);
+		if (decl.native) this._checkNative(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)
@@ -1173,6 +1232,8 @@ export class TypeChecker {
 	}
 
 	checkMethodDecl(decl, outer) {
+		this.stats.bodiesChecked++;
+		if (decl.native) this._checkNative(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)
@@ -1258,7 +1319,11 @@ export class TypeChecker {
 	}
 
 	_checkMissingReturn(decl, returnType, kind) {
-		if (!isVoid(returnType) && !returnType._hasNamedReturns) {
+		if (
+			!decl._bodyless &&
+			!isVoid(returnType) &&
+			!returnType._hasNamedReturns
+		) {
 			if (!this._isTerminating(decl.body)) {
 				this.err(`missing return at end of ${kind} '${decl.name}'`, decl);
 			}
@@ -1335,6 +1400,8 @@ export class TypeChecker {
 						expr,
 						"constant declaration",
 					);
+				// `const D Duration = 1` is a BigInt in JS.
+				if (spec.type && expr) this._tag64BitNode(this.resolveType(type), expr);
 				scope.defineConst(name, type, expr);
 			}
 		}

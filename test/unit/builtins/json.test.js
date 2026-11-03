@@ -1,6 +1,7 @@
 // GoFront test suite — encoding/json package
 
 import { fileURLToPath } from "node:url";
+import { HELPER_ERROR, HELPER_JSON } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
 	assertContains,
@@ -565,6 +566,59 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "hello");
+});
+
+test("[]byte decodes Go's base64 error instead of throwing on invalid input", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Payload struct {
+	B []byte \`json:"b"\`
+}
+
+func main() {
+	var b []byte
+	fmt.Println(json.Unmarshal([]byte("\\"!!\\""), &b))
+	fmt.Println(json.Unmarshal([]byte("\\"aGVsbG8=\\""), &b), string(b))
+	var p Payload
+	fmt.Println(json.Unmarshal([]byte("{\\"b\\":\\"aGk\\"}"), &p))
+	fmt.Println(json.Unmarshal([]byte("{\\"b\\":\\"aGk=\\"}"), &p), string(p.B))
+	out, err := json.Marshal(Payload{B: []byte("hi?")})
+	fmt.Println(string(out), err)
+}
+`,
+		`illegal base64 data at input byte 0
+<nil> hello
+illegal base64 data at input byte 0
+<nil> hi
+{"b":"aGk/"} <nil>
+`,
+	);
+});
+
+test("[]byte in a js package reports Go's base64 error and round-trips", () => {
+	const { js, errors } = compile(`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+func main() {
+	var b []byte
+	fmt.Println(json.Unmarshal([]byte("\\"!!\\""), &b))
+	fmt.Println(json.Unmarshal([]byte("\\"aGVsbG8=\\""), &b), string(b))
+	out, _ := json.Marshal(b)
+	fmt.Println(string(out))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js).trim(),
+		'illegal base64 data at input byte 0\n<nil> hello\n"aGVsbG8="',
+	);
 });
 
 test("Probe 11: Defined string types type MyString string in []byte(s)", () => {
@@ -2456,7 +2510,83 @@ func main() {
 	);
 });
 
+section("encoding/json BigInt helpers (Task 1.2)");
+
+test("BigInt JSON encoding writes exact digits", () => {
+	const code = `
+${HELPER_ERROR};
+${HELPER_JSON};
+return {
+  max64: __json_enc_any(9223372036854775807n),
+  min64: __json_enc_any(-9223372036854775808n),
+  umax64: __json_enc_any(18446744073709551615n),
+};`;
+	const res = new Function(code)();
+	assertEqual(res.max64, "9223372036854775807");
+	assertEqual(res.min64, "-9223372036854775808");
+	assertEqual(res.umax64, "18446744073709551615");
+});
+
+test("__json_int_decode with BigInt and 64-bit integer range checks", () => {
+	const code = `
+${HELPER_ERROR};
+${HELPER_JSON};
+return {
+  decMax: __json_int_decode(9223372036854775807n, "int64", "int64"),
+  decMin: __json_int_decode(-9223372036854775808n, "int64", "int64"),
+  decRaw: __json_int_decode("9223372036854775807__bigint", "int64", "int64"),
+  decUint: __json_int_decode(18446744073709551615n, "uint64", "uint64"),
+  decUintNeg: __json_int_decode(-1n, "uint64", "uint64")?._msg,
+  decIntOverflow: __json_int_decode(9223372036854775808n, "int64", "int64")?._msg,
+  decNarrow: __json_int_decode(42n, "int32", "int32"),
+  decNarrowOverflow: __json_int_decode(3000000000n, "int32", "int32")?._msg,
+};`;
+	const res = new Function(code)();
+	assertEqual(res.decMax, 9223372036854775807n);
+	assertEqual(res.decMin, -9223372036854775808n);
+	assertEqual(res.decRaw, 9223372036854775807n);
+	assertEqual(res.decUint, 18446744073709551615n);
+	assertContains(
+		res.decUintNeg,
+		"cannot unmarshal number -1 into Go value of type uint64",
+	);
+	assertContains(
+		res.decIntOverflow,
+		"cannot unmarshal number 9223372036854775808 into Go value of type int64",
+	);
+	assertEqual(res.decNarrow, 42);
+	assertContains(
+		res.decNarrowOverflow,
+		"cannot unmarshal number 3000000000 into Go value of type int32",
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
+test("json.Marshal and Unmarshal with int64 Math.MaxInt64 (Task 1.3)", async () => {
+	const src = `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type S struct {
+	N int64
+}
+
+func main() {
+	b, _ := json.Marshal(S{N: math.MaxInt64})
+	fmt.Println(string(b))
+
+	var out S
+	_ = json.Unmarshal(b, &out)
+	fmt.Println(out.N == math.MaxInt64)
+}
+`;
+	await assertProgramOutput(src, '{"N":9223372036854775807}\ntrue\n');
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

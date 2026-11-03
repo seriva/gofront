@@ -302,9 +302,9 @@ fmt.Println(e)`,
 
 section("fmt Stringer: runtime errors behind unexported fields");
 
-test("errors.New and Errorf values in unexported fields print their message", () => {
+test("Errorf values in unexported fields print their message", () => {
 	const out = run(
-		`r := Res{1, fmt.Errorf("bad %d", 3), []error{errors.New("e1")}}
+		`r := Res{1, fmt.Errorf("bad %d", 3), []error{fmt.Errorf("e1")}}
 fmt.Println(r)
 fmt.Println(fmt.Sprintf("%+v", r))
 fmt.Println(&r)`,

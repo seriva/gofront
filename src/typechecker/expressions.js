@@ -14,6 +14,7 @@ import {
 	FLOAT32,
 	FLOAT64,
 	INT,
+	is64BitInt,
 	isAny,
 	isArray,
 	isBool,
@@ -68,15 +69,18 @@ const BUILTIN_CHECK = {
 		}
 		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
 		if (sb?.kind === "slice") {
+			const is64 = is64BitInt(sb.elem);
 			for (let i = 1; i < e.args.length; i++) {
 				if (e.args[i]._spread)
 					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
-				if (!e.args[i]._spread && at[i])
+				if (!e.args[i]._spread && at[i]) {
+					if (is64) e.args[i]._is64Bit = true;
 					s._markIfaceBox(
 						s.resolveType(sb.elem),
 						s.resolveType(at[i]),
 						e.args[i],
 					);
+				}
 			}
 		}
 		return st;
@@ -91,7 +95,11 @@ const BUILTIN_CHECK = {
 		if (e.args.length < 1) return ANY;
 		const ta = e.args[0];
 		const tn = ta.kind === "TypeExpr" ? ta.type : ta;
-		return s.resolveTypeNode(tn, sc) ?? ANY;
+		const made = s.resolveTypeNode(tn, sc) ?? ANY;
+		// `make(S, n)` with S a type parameter makes its core type.
+		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
+		if (core) ta._coreType = core;
+		return made;
 	},
 	new: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
@@ -205,7 +213,13 @@ export const expressionCheckMethods = {
 				if (isAny(lt) || isAny(rt))
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				this._checkConstOperands(expr.op, lt, rt, expr);
-				return this.binaryResultType(expr.op, lt, rt, expr);
+				this._markTypeParamMapNil(expr, lt, rt, scope);
+				const res = this.binaryResultType(expr.op, lt, rt, expr);
+				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
+					expr.right._is64Bit = true;
+				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
+					expr.left._is64Bit = true;
+				return res;
 			}
 			case "AwaitExpr": {
 				if (this.target === "wasm" || this.target === "both") {
@@ -281,23 +295,26 @@ export const expressionCheckMethods = {
 		return terms !== null && terms.length > 0 && terms.every(pred);
 	},
 
-	_constraintTerms(c, seen) {
+	// `scope` resolves the type parameters a term mentions (`~[]E`); it
+	// defaults to the package scope.
+	_constraintTerms(c, seen, scope = this.globals) {
 		if (!c || seen.has(c)) return null;
 		seen.add(c);
 		// Receiver type parameters keep their constraint as an AST node.
 		if (c.kind === "TypeName" || c.kind === "InterfaceType")
-			return this._constraintTerms(this.resolveTypeNode(c, this.globals), seen);
-		if (c.kind === "named") return this._constraintTerms(c.underlying, seen);
-		if (c.kind === "interface") return this._interfaceTerms(c, seen);
+			return this._constraintTerms(this.resolveTypeNode(c, scope), seen, scope);
+		if (c.kind === "named")
+			return this._constraintTerms(c.underlying, seen, scope);
+		if (c.kind === "interface") return this._interfaceTerms(c, seen, scope);
 		if (c.kind === "typeParam")
-			return this._constraintTerms(c.constraint, seen);
+			return this._constraintTerms(c.constraint, seen, scope);
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
 		const out = [];
 		for (const term of c.terms) {
-			const t = this.resolveTypeNode(term.type, this.globals);
+			const t = this.resolveTypeNode(term.type, scope);
 			const inner =
 				t?.kind === "named" && t.underlying?.kind === "interface"
-					? this._constraintTerms(t, seen)
+					? this._constraintTerms(t, seen, scope)
 					: [t];
 			if (inner === null) return null;
 			out.push(...inner);
@@ -307,10 +324,10 @@ export const expressionCheckMethods = {
 
 	// An interface's type set is the intersection of its own union and the
 	// type sets of the interfaces it embeds; null when it has none.
-	_interfaceTerms(iface, seen) {
+	_interfaceTerms(iface, seen, scope) {
 		const sets = [iface.unionConstraint, ...(iface._typeSetEmbeds ?? [])]
 			.filter(Boolean)
-			.map((s) => this._constraintTerms(s, new Set(seen)));
+			.map((s) => this._constraintTerms(s, new Set(seen), scope));
 		if (sets.length === 0 || sets.includes(null)) return null;
 		const [first, ...rest] = sets;
 		return first.filter((t) =>
@@ -688,6 +705,46 @@ export const expressionCheckMethods = {
 		return u;
 	},
 
+	// Core type of type parameter `tp`: the one underlying type shared by every
+	// type in its constraint (`~[]E`, `~map[K]V`), or null when there is none.
+	_coreType(tp, scope) {
+		if (tp?.kind !== "typeParam") return null;
+		const terms = this._constraintTerms(tp.constraint, new Set(), scope);
+		if (!terms || terms.length === 0) return null;
+		const unders = terms.map((t) => this._deepUnderlying(this.resolveType(t)));
+		const key = typeStr(unders[0]);
+		if (unders.some((u) => !u || typeStr(u) !== key)) return null;
+		return unders[0];
+	},
+
+	// `m == nil` on a type parameter whose core type is a map: the backends
+	// compare it as a map, so record the core type on the operand.
+	_markTypeParamMapNil(expr, lt, rt, scope) {
+		if (expr.op !== "==" && expr.op !== "!=") return;
+		const [operand, other] =
+			rt === NIL
+				? [expr.left, lt]
+				: lt === NIL
+					? [expr.right, rt]
+					: [null, null];
+		if (!operand || other?.kind !== "typeParam") return;
+		const core = this._coreType(other, scope);
+		if (core?.kind === "map") operand._coreType = core;
+	},
+
+	// Underlying type of `t` for indexing, slicing, ranging and the like; a
+	// type parameter stands for its core type.
+	_coreUnderlying(t, scope) {
+		if (t?.kind === "typeParam") return this._coreType(t, scope) ?? t;
+		return this._deepUnderlying(t);
+	},
+
+	// One step of underlying type, or the core type for a type parameter.
+	_underlyingOrCore(t, scope) {
+		if (t?.kind === "typeParam") return this._coreType(t, scope) ?? t;
+		return t?.kind === "named" ? t.underlying : t;
+	},
+
 	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
 	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
 	// A named basic value is boxed first, exactly as in any interface
@@ -729,7 +786,7 @@ export const expressionCheckMethods = {
 		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		const btu = this._deepUnderlying(bt);
+		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array") {
 			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
@@ -823,7 +880,7 @@ export const expressionCheckMethods = {
 		if (expr.max) this.checkExpr(expr.max, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		const btu = this._deepUnderlying(bt);
+		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array")
 			return { kind: "slice", elem: btu.elem };
 		if (isString(bt)) return STRING;
@@ -1091,8 +1148,10 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		const resolved =
-			collType?.kind === "named" ? collType.underlying : collType;
+		const resolved = this._underlyingOrCore(collType, scope);
+		// Backends range over the core type of a type parameter.
+		if (collType?.kind === "typeParam" && resolved !== collType)
+			expr.expr._coreType = resolved;
 		return this._rangeCollTypeTuple(resolved, collType);
 	},
 
@@ -1298,12 +1357,12 @@ export const expressionCheckMethods = {
 			if (!resolved) return null;
 			fnType = resolved;
 		}
-		return this._completePartialInstantiation(expr, argTypes) ?? fnType;
+		return this._completePartialInstantiation(expr, argTypes, scope) ?? fnType;
 	},
 
 	// `F[int](x)` with fewer explicit type arguments than type parameters:
 	// infer the rest from the call arguments and record the full list.
-	_completePartialInstantiation(expr, argTypes) {
+	_completePartialInstantiation(expr, argTypes, scope) {
 		const inst = expr.func;
 		const generic = inst?.kind === "InstantiationExpr" && inst._genericFnType;
 		if (!generic || inst._typeArgs.length >= generic.typeParams.length)
@@ -1312,6 +1371,7 @@ export const expressionCheckMethods = {
 			generic,
 			this._inferArgTypes(expr, argTypes),
 			inst._typeArgs,
+			scope,
 		);
 		if (!typeArgs) {
 			this.err(
@@ -1327,7 +1387,7 @@ export const expressionCheckMethods = {
 
 	// `T(x)` with T a type parameter: only a numeric x converts (the constraint
 	// decides the target at instantiation).
-	_checkTypeParamConversion(tp, argTypes, expr) {
+	_checkTypeParamConversion(tp, argTypes, expr, scope) {
 		expr._isTypeConversion = true;
 		expr._conversionTargetType = tp;
 		if (expr.args.length !== 1) {
@@ -1335,6 +1395,19 @@ export const expressionCheckMethods = {
 				`cannot convert ${expr.args.length} arguments to type ${typeStr(tp)}`,
 				expr,
 			);
+		}
+		// A constraint with a core type (`~[]E`) converts as that type does.
+		const core = this._coreType(tp, scope);
+		if (core) {
+			const src = argTypes[0];
+			const nilOk = ["slice", "map", "pointer", "func", "chan", "interface"];
+			if (src === NIL || (src?.kind === "basic" && src.name === "nil")) {
+				if (!nilOk.includes(core.kind))
+					this.err(`cannot convert nil to ${typeStr(tp)}`, expr);
+			} else if (src?.kind !== "typeParam") {
+				this._checkConversionValidity(src, core, expr);
+			}
+			return tp;
 		}
 		if (isNumeric(argTypes[0]) && !this._constraintHasTypeSet(tp.constraint))
 			return this.err(
@@ -1368,6 +1441,21 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// A direct call of a `//gofront:native` function is marked `_native` so a
+	// backend may substitute host code.  A function used as a value (`f :=
+	// str.Index; f(a, b)`) is not a direct reference and calls the Go body.
+	_markNativeCall(expr, fnType, scope) {
+		const callee =
+			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
+		const native = fnType?.native ?? fnType?.underlying?.native ?? null;
+		const direct =
+			callee.kind === "Ident"
+				? scope.lookupScope(callee.name) === this.globals &&
+					Boolean(this._funcDeclNames?.has(callee.name))
+				: callee.kind === "SelectorExpr" && Boolean(callee._stdName);
+		expr._native = native && direct ? native : null;
+	},
+
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
@@ -1391,6 +1479,7 @@ export const expressionCheckMethods = {
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
+		this._markNativeCall(expr, fnType, scope);
 		const argTypes = this._resolveCallArgTypes(expr, scope);
 
 		if (fnType?._tainted) return TAINTED_ANY;
@@ -1416,7 +1505,7 @@ export const expressionCheckMethods = {
 		}
 
 		if (fnType.kind === "typeParam" && expr.func._isTypeRef) {
-			return this._checkTypeParamConversion(fnType, argTypes, expr);
+			return this._checkTypeParamConversion(fnType, argTypes, expr, scope);
 		}
 
 		fnType = this._resolveCallFnType(fnType, argTypes, expr, scope);
@@ -1426,13 +1515,6 @@ export const expressionCheckMethods = {
 		}
 
 		this._checkCallArgs(fnType, argTypes, expr, scope);
-
-		// Pseudo-generic stdlib helpers (maps.Keys, slices.Clone, ...) declare
-		// how their result derives from the first argument.
-		if (fnType._derivedReturn) {
-			const derived = this._derivedReturnType(fnType._derivedReturn, argTypes);
-			if (derived) return derived;
-		}
 
 		const ret = fnType.returns;
 		if (!ret || ret.length === 0) return VOID;
@@ -1483,19 +1565,6 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	_derivedReturnType(mode, argTypes) {
-		const arg = argTypes[0];
-		const under = arg?.kind === "named" ? arg.underlying : arg;
-		switch (mode) {
-			case "arg0":
-				return under ? arg : null;
-			case "elemOfArg0":
-				return under?.elem ?? null;
-			default:
-				return null;
-		}
-	},
-
 	// Argument types for inference: a spread argument `xs...` stands for its
 	// elements, which is what the variadic parameter type describes.
 	_inferArgTypes(expr, argTypes) {
@@ -1510,6 +1579,8 @@ export const expressionCheckMethods = {
 		const typeArgs = this.inferTypeArgs(
 			fnType,
 			this._inferArgTypes(expr, argTypes),
+			[],
+			scope,
 		);
 		if (!typeArgs) {
 			this.err(
@@ -1786,7 +1857,8 @@ export const expressionCheckMethods = {
 										: f.type?.name) ?? ""
 								)
 									.split(".")
-									.pop(),
+									.pop()
+									.replace(/\$\$.*$/, ""),
 							]
 						: f.names,
 				)
@@ -1813,7 +1885,12 @@ export const expressionCheckMethods = {
 				const embed = base._embeds?.find((e) => {
 					const inner = e.kind === "pointer" ? e.base : e;
 					const name =
-						inner.kind === "named" ? inner.name.split(".").pop() : null;
+						inner.kind === "named"
+							? inner.name
+									.split(".")
+									.pop()
+									.replace(/\$\$.*$/, "")
+							: null;
 					return name === keyName;
 				});
 				if (embed) elem._isEmbedInit = true;

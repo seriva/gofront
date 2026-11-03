@@ -271,6 +271,8 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 		...call,
 		func: funcExpr,
 		args: callArgs,
+		// A deferred native call runs the Go body, as on the JS backend.
+		_noNative: true,
 		_multiForward: tempIdents.length > 0 ? false : call._multiForward,
 	};
 	const synthFuncLit = {

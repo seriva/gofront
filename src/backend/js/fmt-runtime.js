@@ -35,7 +35,7 @@ var __fmtu = __fmtu || (() => {
     }
     return out + q;
   };
-  const validRune = (c) => c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c < 0xe000);
+  const validRune = (c) => typeof c === "number" && c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c < 0xe000);
   const runeStr = (c) => String.fromCodePoint(validRune(c) ? c : 0xfffd);
   const quoteRune = (c, ascii) => quote(runeStr(c), ascii, "'");
   const toBig = (n) => (typeof n === "bigint" ? n : BigInt(Math.trunc(n)));
@@ -190,6 +190,9 @@ var __fmtu = __fmtu || (() => {
     while (t && t.k === "named") t = t.u;
     return t;
   };
+  // Go-source standard-library types are mangled Name$$pkg: print pkg.Name.
+  const unmangle = (n) => typeof n === "string" ? n.replace(/^main\.(.+)\$\$(.+)$/, (_, t, p) => p.split("$").at(-1) + "." + t) : n;
+  const qualName = (n) => unmangle("main." + n);
   const isFloatN = (n) => n === "float32" || n === "float64";
   const isComplexN = (n) => n === "complex64" || n === "complex128";
   const IFACE = { k: "i", n: "interface {}" };
@@ -197,9 +200,9 @@ var __fmtu = __fmtu || (() => {
     if (t == null) return "<nil>";
     switch (t.k) {
       case "b": return t.n === "any" ? "interface {}" : t.n;
-      case "named": case "i": return t.n;
+      case "named": case "i": return unmangle(t.n);
       case "struct":
-        if (t.n) return t.n;
+        if (t.n) return unmangle(t.n);
         return !t.f || t.f.length === 0 ? "struct {}" : "struct { " + t.f.map(([k, ft]) => k + " " + typeName(ft ?? IFACE)).join("; ") + " }";
       case "ptr": return "*" + typeName(t.e ?? IFACE);
       case "slice": return "[]" + typeName(t.e ?? IFACE);
@@ -238,19 +241,18 @@ var __fmtu = __fmtu || (() => {
       const kd = k0 === undefined ? IFACE : v instanceof Map ? descOf(k0) : k0.charCodeAt(0) === 1 && typeof __kd === "function" ? descOf(__kd(k0)) : /^-?\d+$/.test(k0) ? { k: "b", n: "int" } : { k: "b", n: "string" };
       return { k: "map", key: kd, val: k0 === undefined || v0 == null ? IFACE : descOf(v0) };
     }
-    if (v._d instanceof Date) return { k: "struct", n: "time.Time", f: [] };
     if (v.re !== undefined && v.im !== undefined) return { k: "b", n: "complex128" };
     if (typeof v.__gfUnbox === "function") {
       const nm = v.constructor?.name ?? "";
       if (nm === "FmtStr" || nm === "FmtErr") return descOf(v.__gfUnbox());
-      return { k: "named", n: "main." + nm.replace(/\$Ptr$/, ""), u: descOf(v.__gfUnbox()) };
+      return { k: "named", n: qualName(nm.replace(/\$Ptr$/, "")), u: descOf(v.__gfUnbox()) };
     }
     const proto = Object.getPrototypeOf(v);
     if ((proto === null || Object.getPrototypeOf(proto) === null) && typeof v.Error === "function") {
       return { k: "ptr", e: { k: "struct", n: "errors.errorString", f: [] } };
     }
     if (v.constructor && v.constructor !== Object) {
-      const st = { k: "struct", n: "main." + v.constructor.name.replace(/\$Ptr$/, ""), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
+      const st = { k: "struct", n: qualName(v.constructor.name.replace(/\$Ptr$/, "")), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
       return v.__p === true ? { k: "ptr", e: st } : st;
     }
     const host = { k: "struct", n: v.__tn ?? "", f: Object.keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
@@ -262,12 +264,25 @@ var __fmtu = __fmtu || (() => {
   const sortedEntries = (m, kd) => {
     const es = m instanceof Map
       ? Array.from(m.entries())
-      : Object.keys(m).map((k) => [k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : isNumKey(kd) || (!kd && /^-?\d+$/.test(k)) ? Number(k) : k, m[k]]);
+      : Object.keys(m).map((k) => {
+          if (k.charCodeAt(0) === 1 && typeof __kd === "function") return [__kd(k), m[k]];
+          const bkd = baseOf(kd);
+          if (bkd?.k === "b" && (bkd.n === "int64" || bkd.n === "uint64")) return [BigInt(k), m[k]];
+          if (isNumKey(kd)) return [Number(k), m[k]];
+          if (!kd && /^-?\d+$/.test(k)) {
+            try {
+              const b = BigInt(k);
+              return [b > 9007199254740991n || b < -9007199254740991n ? b : Number(k), m[k]];
+            } catch (_) { return [Number(k), m[k]]; }
+          }
+          return [k, m[k]];
+        });
     const raw = (k) => (k !== null && typeof k === "object" && typeof k.__gfUnbox === "function" ? k.__gfUnbox() : k);
     return es.sort(([a], [b]) => {
       if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && typeof __kcmp === "function" && !a.__gfUnbox) return __kcmp(a, b);
       const x = raw(a), y = raw(b);
       if (typeof x === "number" && typeof y === "number") return x - y;
+      if (typeof x === "bigint" && typeof y === "bigint") return x < y ? -1 : x > y ? 1 : 0;
       const p = String(x), q = String(y);
       return p < q ? -1 : p > q ? 1 : 0;
     });
@@ -326,7 +341,7 @@ var __fmtu = __fmtu || (() => {
   // string "k", a type descriptor always does.
   const both = (t, s) => (t && s ? { $both: 1, t, s } : (t ?? s));
   const split = (fd) => (fd?.$both ? [fd.t, fd.s] : typeof fd?.k === "string" ? [fd, null] : [null, fd]);
-  return { both, split, runes, pad, quote, quoteRune, runeStr, validRune, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
+  return { both, split, runes, pad, quote, quoteRune, runeStr, validRune, toBig, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
 })();`;
 
 // The format-string scanner and per-verb dispatch, spliced into `__sprintf`
@@ -369,18 +384,26 @@ export const HELPER_FMT_LOOP = String.raw`
         return U.fmtInt(v, base, verb === "X", verb === "O", fl, wid, hasWid, prec, hasPrec);
       }
       case "v": return isFloatV ? U.fmtFloat(v, "g", fl, wid, hasWid, prec, hasPrec, bn === "float32") : U.fmtInt(v, 10, false, false, fl, wid, hasWid, prec, hasPrec);
-      case "c": return U.pad(U.runeStr(Number(v)), fl, wid);
-      case "q": return U.pad(U.quoteRune(Number(v), fl.plus), fl, wid);
+      case "c": {
+        const b = U.toBig(v);
+        const c = b >= 0n && b <= 0x10ffffn ? Number(b) : -1;
+        return U.pad(U.runeStr(c), fl, wid);
+      }
+      case "q": {
+        const b = U.toBig(v);
+        const c = b >= 0n && b <= 0x10ffffn ? Number(b) : -1;
+        return U.pad(U.quoteRune(c, fl.plus), fl, wid);
+      }
       case "U": {
-        const c = Number(v);
-        // A negative value prints as its 64-bit two's complement, as Go's uint64 conversion.
-        const hx = c < 0 ? BigInt.asUintN(64, BigInt(c)).toString(16) : U.hex(c, 1);
+        const b = U.toBig(v);
+        const hx = b < 0n ? BigInt.asUintN(64, b).toString(16) : b.toString(16);
         let s = "U+" + hx.toUpperCase().padStart(Math.max(4, hasPrec ? prec : 0), "0");
+        const c = b >= 0n && b <= 0x10ffffn ? Number(b) : -1;
         if (fl.sharp && U.validRune(c) && U.PRINTABLE.test(String.fromCodePoint(c))) s += " '" + String.fromCodePoint(c) + "'";
         return U.pad(s, fl, wid);
       }
       case "e": case "E": case "f": case "F": case "g": case "G":
-        if (isIntT) return null;
+        if (isIntT || typeof v === "bigint") return null;
         return U.fmtFloat(v, verb, fl, wid, hasWid, prec, hasPrec, bn === "float32");
       default: return null;
     }
@@ -401,9 +424,6 @@ export const HELPER_FMT_LOOP = String.raw`
       // A nil *T with a String/Error method prints <nil> under %s (Go recovers
       // the nil-dereference panic); a bare null cannot tell it from a nil interface.
       else return verb === "s" || verb === "v" ? U.pad("<nil>", fl, wid) : bad(verb, v, t);
-    }
-    if (t?.n === "time.Duration" && "vs".includes(verb)) {
-      return typeof __durationString === "function" ? __durationString(v) : String(v);
     }
     switch (typeof v) {
       case "boolean": return verb === "t" || verb === "v" ? U.pad(String(v), fl, wid) : bad(verb, v, t);
@@ -551,7 +571,7 @@ export const HELPER_FMT_LOOP = String.raw`
         const bt0 = U.baseOf(t);
         v = bt0?.k === "slice" ? [] : v;
       }
-      const vStr = t?.n === "time.Duration" && typeof __durationString === "function" ? __durationString(v) : formatV(unbox(v, "v"), fl.plus, true, false, U.both(t, v?.__fd));
+      const vStr = formatV(unbox(v, "v"), fl.plus, true, false, U.both(t, v?.__fd));
       out += U.pad(sharp ? U.gs(v, t, true) : vStr, fl, wid);
       continue;
     }

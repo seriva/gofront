@@ -172,7 +172,7 @@ func (e *Enc) Float(f float64, bits int) {
 }
 
 // floatFormat picks 'e' or 'f' as if by ES6 number to string conversion.
-func floatFormat(f float64, bits int) int {
+func floatFormat(f float64, bits int) byte {
 	abs := math.Abs(f)
 	if abs == 0 {
 		return 'f'
@@ -249,6 +249,12 @@ func (e *Enc) Bytes(v []byte) {
 	e.B = append(e.B, '"')
 	e.B = appendStr(e.B, base64.StdEncoding.EncodeToString(v))
 	e.B = append(e.B, '"')
+}
+
+// EncodeBytes returns the standard base64 text of v; the JavaScript JSON codec
+// calls it for []byte values.
+func EncodeBytes(v []byte) string {
+	return base64.StdEncoding.EncodeToString(v)
 }
 
 // Raw appends a json.RawMessage: validated and compacted, null when empty.

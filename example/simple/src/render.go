@@ -1,6 +1,8 @@
 package main
 
 import "./utils"
+import "html"
+import "strings"
 
 // dragSrcId holds the id of the todo currently being dragged.
 var dragSrcId int

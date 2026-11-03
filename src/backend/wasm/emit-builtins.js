@@ -1067,25 +1067,6 @@ export class BuiltinsEmitter {
 			case "math":
 				this.emitMathCall(func.field, args);
 				return true;
-			case "bits":
-				this.emitBitsCall(func.field, args);
-				return true;
-			case "maps":
-				this.emitMapsCall(func.field, args, targetWasmType);
-				return true;
-			case "slices":
-				this.emitSlicesCall(func.field, args, targetWasmType);
-				return true;
-			case "strings":
-				if (func.field === "NewReader") {
-					this.emitStringsNewReader(call, targetWasmType);
-					return true;
-				}
-				this.emitStringsCall(func.field, args, targetWasmType);
-				return true;
-			case "strconv":
-				this.emitStrconvCall(func.field, args);
-				return true;
 			case "fmt":
 				if (func.field.startsWith("Fprint")) {
 					this.emitFprintCall(func.field, call, targetWasmType);
@@ -1100,12 +1081,6 @@ export class BuiltinsEmitter {
 			case "errors":
 				this.emitErrorsCall(func.field, args);
 				return true;
-			case "utf8":
-				this.emitUtf8Call(func.field, args, targetWasmType);
-				return true;
-			case "sort":
-				this.emitSortCall(func.field, args, targetWasmType);
-				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;
@@ -1115,45 +1090,8 @@ export class BuiltinsEmitter {
 			case "rand":
 				this.emitRandCall(func.field, args, targetWasmType);
 				return true;
-			case "bytes":
-				if (func.field === "NewReader") {
-					this.emitBytesNewReader(call, targetWasmType);
-					return true;
-				}
-				if (func.field === "NewBuffer") {
-					this.emitBytesNewBuffer(call, targetWasmType);
-					return true;
-				}
-				if (func.field === "NewBufferString") {
-					this.emitBytesNewBufferString(call, targetWasmType);
-					return true;
-				}
-				this.emitBytesCall(func.field, args, targetWasmType);
-				return true;
-			case "path":
-			case "filepath":
-				this.emitPathCall(func.field, args);
-				return true;
-			case "html":
-				this.emitHtmlCall(func.field, args);
-				return true;
-			case "io":
-				this.emitIoCall(func.field, call, targetWasmType);
-				return true;
-			case "time":
-				this.emitTimeCall(func.field, call, targetWasmType);
-				return true;
 			case "binary":
 				this.emitBinaryCall(func.field, call, targetWasmType);
-				return true;
-			case "sha256":
-				this.emitSha256Call(func.field, call, targetWasmType);
-				return true;
-			case "hex":
-				this.emitHexCall(func.field, call, targetWasmType);
-				return true;
-			case "base64":
-				this.emitBase64Call(func.field, call, targetWasmType);
 				return true;
 			case "simd":
 				this.emitSimdPackageCall(func.field, args, targetWasmType);
@@ -1204,10 +1142,6 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName === "strings.Builder") {
 			this.emitBuilderMethodCall(func.field, func.expr, args);
-			return true;
-		}
-		if (recvTypeName === "strings.Replacer") {
-			this.emitReplacerMethodCall(func.field, func.expr, args);
 			return true;
 		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
@@ -1314,87 +1248,6 @@ export class BuiltinsEmitter {
 			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
-		if (recvTypeName === "strings.Replacer") {
-			this.emitReplacerMethodCall(field, expr, args);
-			return true;
-		}
-		if (recvTypeName === "bytes.Buffer") {
-			this.emitBytesBufferMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "strings.Reader") {
-			this.emitStringsReaderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "bytes.Reader") {
-			this.emitBytesReaderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "time.Time") {
-			this.emitTimeMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "time.Duration") {
-			this.emitDurationMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (
-			recvTypeName === "time.Month" ||
-			recvTypeName === "time.Weekday" ||
-			recvTypeName === "time.Location"
-		) {
-			this.emitTimeAuxMethodCall(
-				recvTypeName,
-				field,
-				expr,
-				args,
-				targetWasmType,
-			);
-			return true;
-		}
-		if (recvTypeName === "io.LimitedReader") {
-			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (
-			(recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") &&
-			field !== "RLocker"
-		) {
-			this.emitSyncMutexMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "sync.Once") {
-			this.emitSyncOnceMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "sync.WaitGroup") {
-			this.emitSyncWaitGroupMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (
-			recvTypeName === "binary.LittleEndian" ||
-			recvTypeName === "binary.BigEndian" ||
-			recvTypeName === "encoding/binary.LittleEndian" ||
-			recvTypeName === "encoding/binary.BigEndian" ||
-			recvTypeName === "binary.ByteOrder" ||
-			recvTypeName === "encoding/binary.ByteOrder"
-		) {
-			this.emitBinaryOrderMethodCall(
-				recvTypeName,
-				field,
-				expr,
-				args,
-				targetWasmType,
-			);
-			return true;
-		}
-		if (
-			recvTypeName === "base64.Encoding" ||
-			recvTypeName === "encoding/base64.Encoding"
-		) {
-			this.emitBase64EncodingMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
 		return false;
 	}
 
@@ -1402,7 +1255,7 @@ export class BuiltinsEmitter {
 		const structInfo = this.mod.getStructType(recvTypeName);
 		if (!structInfo) return false;
 		for (const embed of structInfo.embeds) {
-			const embedMethodName = `${embed.name}.${func.field}`;
+			const embedMethodName = `${embed.typeName ?? embed.name}.${func.field}`;
 			const subIdx = this.mod.resolveFuncIndex(embedMethodName);
 			if (subIdx !== null) {
 				const targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);

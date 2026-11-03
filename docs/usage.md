@@ -25,6 +25,7 @@ gofront <input> -o out.js                    write output to file (prints elapse
 gofront <input> -o out.js --release          compile + minify + optimize wasm with Binaryen
 gofront <input> -o out.js --wasm-opt         compile + optimize wasm with Binaryen
 gofront <input> -o out.js --emit-wat         also write app.wat
+gofront <input> -o out.js --no-natives       run the Go bodies of standard library functions instead of host fast paths
 gofront <input> -o out.js --copy-assets      compile + copy static assets
 gofront <input> --check                      type-check only (single file / directory)
 gofront <input> --watch                      watch for changes and recompile

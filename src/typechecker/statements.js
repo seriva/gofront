@@ -19,6 +19,7 @@ import {
 	ANY,
 	BOOL,
 	defaultType,
+	is64BitInt,
 	isAny,
 	isBool,
 	isVoid,
@@ -97,8 +98,7 @@ export const statementCheckMethods = {
 		)
 			return false;
 		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
-		const resolvedBase =
-			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return false;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
@@ -156,8 +156,7 @@ export const statementCheckMethods = {
 		)
 			return null;
 		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
-		const resolvedBase =
-			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return null;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
@@ -321,6 +320,8 @@ export const statementCheckMethods = {
 				this.err("For condition must be bool", stmt);
 		} else {
 			const ct = this.checkExpr(stmt.cond.expr, inner);
+			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
+			if (core) stmt.cond.expr._coreType = core;
 			const info = iteratorYieldParams(ct);
 			if (info) {
 				stmt.cond._isIterator = true;
@@ -359,10 +360,16 @@ export const statementCheckMethods = {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		if (stmt.tag) this.checkExpr(stmt.tag, inner);
+		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
 		this._switchDepth++;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
-			if (c.list) for (const e of c.list) this.checkExpr(e, caseScope);
+			if (c.list) {
+				for (const e of c.list) {
+					this.checkExpr(e, caseScope);
+					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
+				}
+			}
 			for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
 			this._reportUnused(caseScope, stmt);
 		}

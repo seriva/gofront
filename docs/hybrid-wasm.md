@@ -106,6 +106,7 @@ copies agree bit-for-bit:
 | Construct | JS emission |
 |---|---|
 | `float32` arithmetic | `Math.fround(a op b)` |
+| `int64` / `uint64` arithmetic | `BigInt.asIntN(64, …)` / `BigInt.asUintN(64, …)`; exact on all targets (hot loops should use `int`) |
 | `int32` / `uint32` arithmetic | `(a op b) \| 0` / `(a op b) >>> 0`; `Math.imul` for `*` |
 | `int8` / `int16` / `uint8` / `uint16` | masked and sign-extended to width |
 | Integer `/`, `%` by zero | panics |
@@ -130,10 +131,10 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `bytes` | js, wasm, both | Buffer, Reader and the search/split/trim helpers |
 | `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
-| `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
-| `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
-| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
-| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
+| `crypto/sha256` | js, wasm, both | `Sum256`, `Sum224`, `New`, `New224`, `Size`, `Size224`, `BlockSize` |
+| `encoding/base64` | js, wasm, both | Std, URL and Raw encodings, `NewEncoding`, `WithPadding`, `Encode*`, `Decode*`, `Append*` |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` (`ByteOrder`, `AppendByteOrder`), varints, `Read`, `Write`, `Size` |
+| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `Append*`, `EncodedLen`, `DecodedLen`, `ErrLength`, `InvalidByteError` |
 | `encoding/json` | js, wasm, both | Struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
 | `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
@@ -142,11 +143,11 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
 | `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
-| `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
+| `math/rand` | js, wasm, both | Top-level functions draw from the host; `New(NewSource(seed))` repeats for a seed but not in Go's sequence |
 | `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
 | `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
-| `sync` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
+| `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
 | `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
 | `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
@@ -157,15 +158,15 @@ Notable members per package:
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
 - `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints Go's bad-verb form as in `js` packages)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
-- `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
+- `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `IsPrint`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
 - `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
-- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader` (not yet over `strings.Reader` or `bytes.Reader`), `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`, `CopyBuffer`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)
 - `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
 - `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `time.Sleep` stays JS-only)
 - `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`)
-- `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256`
-- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`
+- `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256` (`Sum256`, `Sum224`, `New`, `New224`)
+- `encoding/binary` (`LittleEndian`, `BigEndian`, varints, `Read`, `Write`, `Size`), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 
@@ -195,7 +196,8 @@ compile error.
 
 | Go type | Crossing JS → WASM / WASM → JS |
 |---|---|
-| `bool`, `float32`, `float64`, sized ints | Converted directly. `int`/`int64` are a JS `Number` on the JS side. |
+| `bool`, `float32`, `float64`, narrow ints, `int`/`uint` | Converted directly as JS `Number`. |
+| `int64`, `uint64` | Passed as JS `BigInt` across the boundary (matching WebAssembly JS API `i64`). |
 | `string`, `any` | Passed through. |
 | Struct from a `both` package (`T`, `*T`) | Copied into its JS class. `*T` parameters are written back after the call. |
 | Struct from a `wasm` package (`T`, `*T`) | Opaque **handle** class with stable identity. Scalar fields are read/written through accessors; aggregate fields (`b.Pos.X = 1`, `b.Tags[0] = 2`) are live views, so writes reach WASM memory. |
@@ -212,8 +214,8 @@ compile error.
 | Anonymous structs | Copied as plain JS objects `{ [field]: value }` with the same field names. |
 | Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
 | Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |
-| `time.Duration` | Nanoseconds crossing as a JS `Number` (`int64`). |
-| `time.Time` | Copied into the JS backend's `time.Time` object via Unix milliseconds (preserving timezone offset). Rounded to the JS shim's millisecond precision. |
+| `time.Duration` | Nanoseconds crossing as a JS `BigInt` (`int64`). |
+| `time.Time` | Copied field by field like any struct, so nanoseconds and the zone offset survive. A `Date` (or an object holding one in `_d`) is accepted as an argument, and a `Time` handed to JS also reads as a `Date` through `_d`. |
 | `chan` | **Rejected** with `chan is not yet supported across the wasm boundary (planned)`. |
 
 ### Shared linear-memory buffers (`gofront/shared`)

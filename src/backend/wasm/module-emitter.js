@@ -12,121 +12,46 @@ import {
 	isScalarType,
 	isSliceType,
 	toWasmType,
+	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 
 const ERROR_PRODUCING_PKGS = new Set([
 	"errors",
 	"fmt",
-	"strconv",
-	"path",
-	"path/filepath",
 	"io",
 	"os",
 	"strings",
-	"bytes",
 	"time",
-	"sync",
 	"crypto/rand",
 	"rand",
-	"crypto/sha256",
-	"sha256",
 	"encoding/binary",
 	"binary",
-	"encoding/hex",
-	"hex",
-	"encoding/base64",
-	"base64",
-	"math/bits",
-	"bits",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
 // declare the imports and ship that JS block.
 const STDLIB_ENV_PKGS = new Set([
 	"strings",
-	"strconv",
-	"unicode/utf8",
 	"fmt",
 	"testing",
 	"unicode",
-	"math/rand",
-	"path",
-	"path/filepath",
-	"html",
-	"bytes",
 	"io",
 	"os",
 	"time",
-	"sync",
 	"crypto/rand",
 	"rand",
-	"crypto/sha256",
-	"sha256",
-	"encoding/binary",
-	"binary",
-	"encoding/hex",
-	"hex",
-	"encoding/base64",
-	"base64",
-	"math/bits",
-	"bits",
 ]);
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
 // side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
 // (when any STDLIB_ENV_PKGS package is imported) because the import table is
 // locked before function bodies are emitted.
+// Emitter-backed types whose interface methods are registered as synthetic
+// functions (see _registerIoSyntheticMethods in index.js).
+const SYNTHETIC_METHOD_TYPES = new Set(["strings.Builder", "os.File"]);
+
 const S = "externref";
 const STDLIB_IMPORTS = [
-	// strings
-	["str_trim", [S, S], [S]],
-	["str_trim_left", [S, S], [S]],
-	["str_trim_right", [S, S], [S]],
-	["str_trim_prefix", [S, S], [S]],
-	["str_trim_suffix", [S, S], [S]],
-	["str_cut", [S, S], ["i32"]],
-	["str_cut_before", [], [S]],
-	["str_cut_after", [], [S]],
-	["str_cut_prefix", [S, S], ["i32"]],
-	["str_cut_suffix", [S, S], ["i32"]],
-	["str_replace", [S, S, S, "i32"], [S]],
-	["str_contains_rune", [S, "i32"], ["i32"]],
-	["str_contains_any", [S, S], ["i32"]],
-	["str_index_byte", [S, "i32"], ["i32"]],
-	["str_index_rune", [S, "i32"], ["i32"]],
-	["str_index_any", [S, S], ["i32"]],
-	["str_last_index_byte", [S, "i32"], ["i32"]],
-	["str_last_index_any", [S, S], ["i32"]],
-	["str_title", [S], [S]],
-	["str_split", [S, S], ["i32"]],
-	["str_split_n", [S, S, "i32"], ["i32"]],
-	["str_split_after", [S, S], ["i32"]],
-	["str_split_after_n", [S, S, "i32"], ["i32"]],
-	["str_fields", [S], ["i32"]],
-	["str_part", ["i32"], [S]],
-	["str_replacer_init", [S], []],
-	["str_replacer_add", [S, S], []],
-	["str_replacer_run", [], [S]],
-	// strconv
-	["strconv_atoi", [S], ["i64"]],
-	["strconv_parse_int", [S, "i32", "i32"], ["i64"]],
-	["strconv_parse_float", [S], ["f64"]],
-	["strconv_parse_bool", [S], ["i32"]],
-	["strconv_err", [], [S]],
-	["strconv_err_kind", [], ["i32"]],
-	["strconv_format_float", ["f64", "i32", "i32", "i32"], [S]],
-	["strconv_format_int", ["i64", "i32"], [S]],
-	["strconv_format_uint", ["i64", "i32"], [S]],
-	["strconv_parse_uint", [S, "i32", "i32"], ["i64"]],
-	["strconv_quote", [S], [S]],
-	["strconv_unquote", [S], [S]],
-	// unicode/utf8
-	["utf8_rune_count", [S], ["i32"]],
-	["utf8_rune_len", ["i32"], ["i32"]],
-	["utf8_valid_string", [S], ["i32"]],
-	["utf8_decode_rune", [S, "i32"], ["i32"]],
-	["utf8_decode_size", [], ["i32"]],
-	["utf8_full_rune", [S], ["i32"]],
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
@@ -161,66 +86,19 @@ const STDLIB_IMPORTS = [
 	["unicode_is_graphic", ["i32"], ["i32"]],
 	["unicode_to_upper", ["i32"], ["i32"]],
 	["unicode_to_lower", ["i32"], ["i32"]],
-	// html
-	["html_escape", [S], [S]],
-	["html_unescape", [S], [S]],
-	// path
-	["path_base", [S], [S]],
-	["path_dir", [S], [S]],
-	["path_ext", [S], [S]],
-	["path_is_abs", [S], ["i32"]],
-	["path_clean", [S], [S]],
-	["path_split", [S], []],
-	["path_split_dir", [], [S]],
-	["path_split_file", [], [S]],
-	["path_join_init", [], []],
-	["path_join_push", [S], []],
-	["path_join_run", [], [S]],
-	["path_match", [S, S], ["i32"]],
-	["path_match_has_err", [], ["i32"]],
 	["bytes_trim", [S, S, "i32", "i32"], []],
 	["bytes_trim_start", [], ["i32"]],
 	["bytes_trim_end", [], ["i32"]],
 	// time
 	["time_now_ms", [], ["f64"]],
 	["time_timezone_offset", ["f64"], ["i32"]],
-	["time_parse", [S, S], ["f64"]],
-	["time_parse_err", [], [S]],
-	["time_parse_offset", [], ["i32"]],
-	["time_parse_sub_ns", [], ["i32"]],
-	[
-		"time_format",
-		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
-		[S],
-	],
-	["time_duration_string", ["i64"], [S]],
-	["time_parse_duration", [S], ["i64"]],
-	["time_parse_duration_err", [], [S]],
-	["time_month_string", ["i32"], [S]],
-	["time_weekday_string", ["i32"], [S]],
-	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
+	// raw binary buffer for crypto/rand
 	["raw_bytes_init", ["i32"], []],
 	["raw_bytes_push", ["i32"], []],
 	["raw_bytes_len", [], ["i32"]],
 	["raw_bytes_get", ["i32"], ["i32"]],
 	// crypto/rand
 	["crypto_rand_fill", ["i32"], ["i32"]],
-	// crypto/sha256
-	["crypto_sha256_sum", [], ["i32"]],
-	// encoding/hex
-	["hex_encode_to_string", [], [S]],
-	["hex_decode_string", [S], ["i32"]],
-	["hex_get_err", [], [S]],
-	// encoding/base64
-	["base64_encode_to_string", ["i32"], [S]],
-	["base64_decode_string", ["i32", S], ["i32"]],
-	["base64_get_err", [], [S]],
-	["bits_div32", ["i32", "i32", "i32"], ["i32"]],
-	["bits_div32_rem", [], ["i32"]],
-	["bits_rem32", ["i32", "i32", "i32"], ["i32"]],
-	["bits_div64", ["i64", "i64", "i64"], ["i64"]],
-	["bits_div64_rem", [], ["i64"]],
-	["bits_rem64", ["i64", "i64", "i64"], ["i64"]],
 ];
 
 export class ModuleEmitter {
@@ -230,6 +108,7 @@ export class ModuleEmitter {
 		// Local package names whose code is linked into this module; selectors
 		// like `mathx.NewVec3` are de-qualified to `NewVec3` by the emitter.
 		this.bundledPackages = options.bundledPackages ?? new Set();
+		this.natives = options.natives !== false; // replace native calls with host code
 		this.constCache = new Map(); // name -> BasicLit (package-level literal consts)
 		this.nonLiteralConsts = new Set(); // package-level consts the backend cannot evaluate yet
 
@@ -288,6 +167,33 @@ export class ModuleEmitter {
 		this._initRuntimeImports();
 	}
 
+	// The runtime error struct is not declared in Go source: give the checker a
+	// named type with its method set (`Error() string`, `Unwrap() error`) so
+	// type assertions to `interface{ Unwrap() error }` find it as a candidate.
+	_registerRuntimeErrorType() {
+		const types = this.checker?.types;
+		if (!types || types.has(ERROR_STRUCT)) return;
+		const STRING = { kind: "basic", name: "string" };
+		const ERROR = { kind: "interface", name: "error" };
+		const named = (name, unwrapReturn) => ({
+			kind: "named",
+			name,
+			underlying: {
+				kind: "struct",
+				fields: new Map(),
+				methods: new Map([
+					["Error", { kind: "func", params: [], returns: [STRING] }],
+					["Unwrap", { kind: "func", params: [], returns: [unwrapReturn] }],
+				]),
+			},
+		});
+		types.set(ERROR_STRUCT, named(ERROR_STRUCT, ERROR));
+		types.set(
+			WRAP_ERRORS_STRUCT,
+			named(WRAP_ERRORS_STRUCT, { kind: "slice", elem: ERROR }),
+		);
+	}
+
 	initTypes(programs) {
 		const progs = Array.isArray(programs) ? programs : [programs];
 		const rawStructs = [];
@@ -295,6 +201,7 @@ export class ModuleEmitter {
 		const aliases = []; // qualified key (pkg.T) -> unqualified struct name
 
 		if (this.hasErrorType) {
+			this._registerRuntimeErrorType();
 			seen.add(ERROR_STRUCT);
 			rawStructs.push({
 				name: ERROR_STRUCT,
@@ -303,6 +210,20 @@ export class ModuleEmitter {
 					fields: new Map([
 						["msg", { kind: "basic", name: "string" }],
 						["cause", { kind: "basic", name: "any" }],
+					]),
+				},
+			});
+			seen.add(WRAP_ERRORS_STRUCT);
+			rawStructs.push({
+				name: WRAP_ERRORS_STRUCT,
+				structType: {
+					kind: "struct",
+					fields: new Map([
+						["msg", { kind: "basic", name: "string" }],
+						[
+							"errs",
+							{ kind: "slice", elem: { kind: "interface", name: "error" } },
+						],
 					]),
 				},
 			});
@@ -416,8 +337,16 @@ export class ModuleEmitter {
 						});
 						fieldIndexMap.set(n, fIdx);
 						if (f.embedded) {
+							// The embedded type, when it differs from the field
+							// name (`Mutex$$sync` for the field `Mutex`).
+							const ref =
+								f.type?.kind === "PointerType"
+									? f.type.base?.name
+									: f.type?.name;
+							const typeName = this.checker?.types?.get(ref)?.name;
 							embeds.push({
 								name: n,
+								...(typeName && typeName !== n && { typeName }),
 								fieldIndex: fIdx,
 							});
 						}
@@ -971,19 +900,6 @@ export class ModuleEmitter {
 		this.getStringFromCodePointImportIndex(); // env.str_from_code_point
 		this.getStringCodePointAtImportIndex(); // env.str_code_point_at
 		this.getStringHashImportIndex(); // env.str_hash
-		this.getStringToUpperImportIndex();
-		this.getStringToLowerImportIndex();
-		this.getStringTrimSpaceImportIndex();
-		this.getStringContainsImportIndex();
-		this.getStringHasPrefixImportIndex();
-		this.getStringHasSuffixImportIndex();
-		this.getStringIndexImportIndex();
-		this.getStringLastIndexImportIndex();
-		this.getStringRepeatImportIndex();
-		this.getStringReplaceAllImportIndex();
-		this.getStringEqualFoldImportIndex();
-		this.getStringCountImportIndex();
-		this.getStringToValidUTF8ImportIndex();
 		this.getStrFromI64ImportIndex();
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
@@ -1137,50 +1053,6 @@ export class ModuleEmitter {
 		return gIdx;
 	}
 
-	getRandStateGlobalIndex() {
-		if (this.randStateGlobalIndex !== undefined) {
-			return this.randStateGlobalIndex;
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "i64",
-			mutable: true,
-			init: [{ op: "i64.const", value: 1n }],
-		});
-		this.randStateGlobalIndex = gIdx;
-		return gIdx;
-	}
-
-	getStrconvErrGlobalIndex(field) {
-		if (!this.strconvErrGlobals) this.strconvErrGlobals = new Map();
-		if (this.strconvErrGlobals.has(field)) {
-			return this.strconvErrGlobals.get(field);
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.strconvErrGlobals.set(field, gIdx);
-		return gIdx;
-	}
-
-	getPathErrGlobalIndex(field) {
-		if (!this.pathErrGlobals) this.pathErrGlobals = new Map();
-		if (this.pathErrGlobals.has(field)) {
-			return this.pathErrGlobals.get(field);
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.pathErrGlobals.set(field, gIdx);
-		return gIdx;
-	}
-
 	getIoErrGlobalIndex(field) {
 		if (!this.ioErrGlobals) this.ioErrGlobals = new Map();
 		if (this.ioErrGlobals.has(field)) {
@@ -1193,21 +1065,6 @@ export class ModuleEmitter {
 			init: [{ op: "ref.null", heapType: "any" }],
 		});
 		this.ioErrGlobals.set(field, gIdx);
-		return gIdx;
-	}
-
-	getIoDiscardGlobalIndex() {
-		if (this.ioDiscardGlobalIndex !== undefined) {
-			return this.ioDiscardGlobalIndex;
-		}
-		this.getStructType("io.discard");
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.ioDiscardGlobalIndex = gIdx;
 		return gIdx;
 	}
 
@@ -1656,123 +1513,6 @@ export class ModuleEmitter {
 		return this.getOrAddFuncImport("env", "str_hash", ["externref"], ["i32"]);
 	}
 
-	getStringToUpperImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_to_upper",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getStringToLowerImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_to_lower",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getStringTrimSpaceImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_trim_space",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getStringContainsImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_contains",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringHasPrefixImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_has_prefix",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringHasSuffixImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_has_suffix",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringIndexImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_index",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringLastIndexImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_last_index",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringRepeatImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_repeat",
-			["externref", "i32"],
-			["externref"],
-		);
-	}
-
-	getStringReplaceAllImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_replace_all",
-			["externref", "externref", "externref"],
-			["externref"],
-		);
-	}
-
-	getStringEqualFoldImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_equal_fold",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringCountImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_count",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringToValidUTF8ImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_to_valid_utf8",
-			["externref", "externref"],
-			["externref"],
-		);
-	}
-
 	getStrFromI64ImportIndex() {
 		return this.getOrAddFuncImport(
 			"env",
@@ -1963,13 +1703,14 @@ export class ModuleEmitter {
 			// Promoted methods on sName
 			if (sInfo.embeds && sInfo.embeds.length > 0) {
 				for (const embed of sInfo.embeds) {
-					const embedMethodName = `${embed.name}.${methodName}`;
+					const embedType = embed.typeName ?? embed.name;
+					const embedMethodName = `${embedType}.${methodName}`;
 					if (this.funcMap.has(embedMethodName)) {
 						const fIdx = this.resolveFuncIndex(embedMethodName);
 						const paramGoTypes = this.getFuncParamGoTypes(embedMethodName);
 						const paramWTypes = this.getFuncParamTypes(embedMethodName);
 						const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
-						const embedSInfo = this.getStructType(embed.name);
+						const embedSInfo = this.getStructType(embedType);
 
 						const ptrKey = `ptr:${sName}`;
 						if (!seenKeys.has(ptrKey)) {
@@ -2160,6 +1901,16 @@ export class ModuleEmitter {
 		});
 	}
 
+	// An emitter-backed type declares more methods than it dispatches: only
+	// those with a synthetic method implement an interface.
+	_structsDispatching(iface) {
+		const dispatches = (sName) =>
+			!SYNTHETIC_METHOD_TYPES.has(sName) ||
+			!iface?.methods ||
+			[...iface.methods.keys()].every((m) => this.funcMap.has(`${sName}.${m}`));
+		return [...this.structTypes.entries()].filter(([n]) => dispatches(n));
+	}
+
 	getTypesImplementingInterface(ifaceType) {
 		const candidates = [];
 		const seen = new Set();
@@ -2169,7 +1920,7 @@ export class ModuleEmitter {
 			) ?? ifaceType;
 
 		// 1. Struct types
-		for (const [sName, sInfo] of this.structTypes.entries()) {
+		for (const [sName, sInfo] of this._structsDispatching(ifaceResolved)) {
 			const namedType = this.checker?.types?.get(sName) ?? {
 				kind: "named",
 				name: sName,

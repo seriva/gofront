@@ -20,15 +20,15 @@ features (e.g. `plans/v1.8.0/`).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Exact 64-bit integers in JS | High | Planned | `int64`/`uint64` as BigInt in all JS output and across the WASM facade (today Numbers: `int64` `*`/`+` and the pdqsort `uint64` xorshift round above 2⁵³); struct copies through `T` in erased JS generics. Prerequisite for the Go-source packages. |
-| Generic core types | Medium | Planned | `S ~[]E` / `M ~map[K]V` index, slice, conversion and constraint type inference (today `Cannot index type S`, `Cannot infer type arguments`); type-literal type arguments (`Id[[]int, int]` fails to parse); valid WASM for named `S`. |
-| Natives, differential testing, lazy checking | High | Planned | `//gofront:native` name set and per-backend registries (decline and value fallback); `assertFourWay`; declarations checked eagerly, stdlib bodies on demand. |
-| `sort` & `slices` | High | Planned | Generated pdqsort variants (Go's tie order), `NaN` ordering, O(n log n) in WASM (200k ints: ≈20 s → ≤ 100 ms), JS comparator sorts ≤ 2× `Array.prototype.sort`. |
-| `maps`, `errors`, `utf8`, `path`, `html` | Medium | Planned | Go source with Go's signatures; JS generic map range fixed; `errors.As` stays the one emitter member. |
-| `io`, readers, `bytes`, `strings` | High | Planned | `io.Writer`-based `fmt.Fprint*`, `Reader`/`Buffer`/`Replacer` in Go, host natives for search and case mapping; name-coupled backend special cases removed. |
-| Encodings, `sha256`, `bits`, `rand`, `sync` | Medium | Planned | Go source; `binary.Read`/`Write` stay emitters; `rand_source` intrinsic. |
-| `time` & `strconv` | High | Planned | Civil dates, layouts and `Duration` in Go; clock and shortest-repr floats native; user docs. |
-| Typings removal | Medium | Planned | Leftover type tables deleted, native registry self-check, stdlib layout in the architecture docs. |
+| Exact 64-bit integers in JS | High | ✅ Done | `int64`/`uint64` as BigInt in all JS output and across the WASM facade (today Numbers: `int64` `*`/`+` and the pdqsort `uint64` xorshift round above 2⁵³); struct copies through `T` in erased JS generics. Prerequisite for the Go-source packages. |
+| Generic core types | Medium | ✅ Done | `S ~[]E` / `M ~map[K]V` index, slice, conversion and constraint type inference (today `Cannot index type S`, `Cannot infer type arguments`); type-literal type arguments (`Id[[]int, int]` fails to parse); valid WASM for named `S`. |
+| Natives, differential testing, lazy checking | High | ✅ Done | `//gofront:native` name set and per-backend registries (decline and value fallback); `assertFourWay`; declarations checked eagerly, stdlib bodies on demand. |
+| `sort` & `slices` | High | ✅ Done | Generated pdqsort variants (Go's tie order), `NaN` ordering, O(n log n) in WASM (200k ints: ≈20 s → ≤ 100 ms), JS comparator sorts ≤ 2× `Array.prototype.sort`. |
+| `maps`, `errors`, `utf8`, `path`, `html` | Medium | ✅ Done | Go source with Go's signatures; JS generic map range fixed; `errors.As` stays the one emitter member. |
+| `io`, readers, `bytes`, `strings` | High | ✅ Done | `io.Writer`-based `fmt.Fprint*`, `Reader`/`Buffer`/`Replacer` in Go, host natives for search and case mapping; name-coupled backend special cases removed. |
+| Encodings, `sha256`, `bits`, `rand`, `sync` | Medium | ✅ Done | Go source; `binary.Read`/`Write` stay emitters; `rand_source` intrinsic. |
+| `time` & `strconv` | High | ✅ Done | Civil dates, layouts and `Duration` in Go; clock and shortest-repr floats native; user docs. |
+| Typings removal | Medium | ✅ Done | Leftover type tables deleted, native registry self-check, stdlib layout in the architecture docs. |
 
 ---
 

@@ -5,7 +5,9 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertJsProgramOutput,
 	assertProgramOutput,
+	assertThrows,
 	compile,
 	compileDir,
 	compileHybrid,
@@ -1343,6 +1345,266 @@ func main() {
 }
 `,
 		"false\ntrue false true\n",
+	);
+});
+
+test("Clone over []P copies range values when appending", async () => {
+	const src = `package main
+
+import "fmt"
+
+type P struct{ V int }
+
+func Clone[T any](s []T) []T {
+	var out []T
+	for _, v := range s {
+		out = append(out, v)
+	}
+	return out
+}
+
+func main() {
+	a := []P{{1}}
+	b := Clone(a)
+	b[0].V = 9
+	fmt.Println(a, b)
+}
+`;
+	await assertProgramOutput(src, "[{1}] [{9}]\n");
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "[{1}] [{9}]");
+});
+
+test("List[T].Map with callback mutating Pair leaves source intact", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Pair struct {
+	Key string
+	Val int
+}
+
+type List[T any] struct {
+	items []T
+}
+
+func (l List[T]) Map(f func(T) T) (out List[T]) {
+	for _, item := range l.items {
+		out.items = append(out.items, f(item))
+	}
+	return out
+}
+
+func main() {
+	l := List[Pair]{items: []Pair{{"a", 1}, {"b", 2}}}
+	_ = l.Map(func(p Pair) Pair {
+		p.Val *= 10
+		return p
+	})
+	fmt.Println(l.items)
+}
+`;
+	await assertProgramOutput(src, "[{a 1} {b 2}]\n");
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "[{a 1} {b 2}]");
+});
+
+test("generic Sum over int64 and int slices (Task 1.3)", async () => {
+	const src = `package main
+
+import "fmt"
+
+func Sum[T ~int | ~int64](xs []T) T {
+	var s T
+	for _, x := range xs {
+		s += x + 1
+	}
+	return s
+}
+
+func main() {
+	fmt.Println(Sum([]int64{1 << 60, 1}))
+	fmt.Println(Sum([]int{1, 2}))
+}
+`;
+	await assertProgramOutput(src, "1152921504606846979\n5\n");
+});
+
+section("Generics — core types of constrained type parameters");
+
+const CORE_PRELUDE = `package main
+import "fmt"
+type IDs []int
+func (s IDs) Sum() int { t := 0; for _, v := range s { t += v }; return t }
+type Set map[string]bool
+`;
+
+test("core type: index, slice, len, cap, range on [S ~[]E, E any]", async () => {
+	const src = `${CORE_PRELUDE}
+func First[S ~[]E, E any](s S) E { return s[0] }
+func Tail[S ~[]E, E any](s S) S { return s[1:] }
+func Count[S ~[]E, E any](s S) int {
+	n := 0
+	for range s { n++ }
+	for i := range s { n += i }
+	return n + len(s) + cap(s)
+}
+func Put[S ~[]E, E any](s S, v E) { s[0] = v }
+func main() {
+	xs := []int{7, 8, 9}
+	fmt.Println(First[[]int, int](xs), len(Tail[[]int, int](xs)), Count[[]int, int](xs))
+	Put[[]int, int](xs, 5)
+	fmt.Println(xs[0], First[IDs, int](IDs{4}))
+}
+`;
+	await assertProgramOutput(src, "7 2 12\n5 4\n");
+});
+
+test("core type: make, append, copy, composite literal on a slice core", async () => {
+	const src = `${CORE_PRELUDE}
+func Mk[S ~[]E, E any](n int) S { return make(S, n) }
+func Dbl[S ~[]E, E any](s S) S { return append(s, s...) }
+func Cp[S ~[]E, E any](d, s S) int { return copy(d, s) }
+func Lit[S ~[]E, E any](a, b E) S { return S{a, b} }
+func main() {
+	fmt.Println(len(Mk[IDs, int](3)))
+	fmt.Println(Dbl[IDs, int](IDs{1, 2}).Sum())
+	d := make([]int, 2)
+	fmt.Println(Cp[[]int, int](d, []int{5, 6, 7}), d)
+	fmt.Println(Lit[IDs, int](3, 4).Sum())
+}
+`;
+	await assertProgramOutput(src, "3\n6\n2 [5 6]\n7\n");
+});
+
+test("core type: map index, range, len, make on [M ~map[K]V, K comparable, V any]", async () => {
+	const src = `${CORE_PRELUDE}
+func Get[M ~map[K]V, K comparable, V any](m M, k K) V { return m[k] }
+func Len[M ~map[K]V, K comparable, V any](m M) int { return len(m) }
+func Mk[M ~map[K]V, K comparable, V any]() M { return make(M) }
+func Keys[M ~map[K]V, K comparable, V any](m M) int {
+	n := 0
+	for range m { n++ }
+	return n
+}
+func main() {
+	s := Set{"a": true}
+	fmt.Println(Get[Set, string, bool](s, "a"), Len[Set, string, bool](s), Keys[Set, string, bool](s))
+	m := Mk[Set, string, bool]()
+	m["x"] = true
+	fmt.Println(len(m))
+}
+`;
+	await assertProgramOutput(src, "true 1 1\n1\n");
+});
+
+test("core type: several underlying types keep Cannot index type", () => {
+	const { errors } = compile(`package main
+func F[T int | string](x T) { _ = x[0] }
+func main() { F[string]("a") }`);
+	assertErrorContains(errors, "Cannot index type T");
+});
+
+test("core type: several underlying types cannot be sliced", () => {
+	const { errors } = compile(`package main
+func F[T ~[]int | ~[]string](x T) { _ = x[1:] }
+func main() {}`);
+	assertErrorContains(errors, "Cannot slice type T");
+});
+
+test("inference through core types derives E, K and V", async () => {
+	const src = `${CORE_PRELUDE}
+func First[S ~[]E, E any](s S) E { return s[0] }
+func Z[S ~[]E, E any](s S) S { return S(nil) }
+func Len[M ~map[K]V, K comparable, V any](m M) int { return len(m) }
+func Id[S ~[]E, E any](s S) S { return s }
+func main() {
+	fmt.Println(First([]int{7, 8}))
+	fmt.Println(Z([]int{1}) == nil)
+	fmt.Println(Len(map[string]int{"a": 1}), Len(Set{"k": true}))
+	fmt.Println(Id(IDs{1, 2}).Sum())
+}
+`;
+	await assertProgramOutput(src, "7\ntrue\n1 1\n3\n");
+});
+
+test("core type: var zero S, S(nil) and append(S(nil), s...)", async () => {
+	const src = `${CORE_PRELUDE}
+func Zero[S ~[]E, E any]() S { var z S; return z }
+func Nil[S ~[]E, E any]() S { return S(nil) }
+func Cl[S ~[]E, E any](s S) S { return append(S(nil), s...) }
+func main() {
+	fmt.Println(Zero[IDs, int]() == nil, Nil[IDs, int]() == nil, len(Zero[[]int, int]()))
+	c := Cl(IDs{1, 2})
+	c[0] = 9
+	fmt.Println(c.Sum())
+}
+`;
+	await assertProgramOutput(src, "true true 0\n11\n");
+});
+
+test("named slice and map type arguments produce valid WASM", async () => {
+	const src = `${CORE_PRELUDE}
+func Id[S ~[]E, E any](s S) S { return append(s, s...) }
+func Keep[M ~map[K]V, K comparable, V any](m M) M { m2 := make(M); for k, v := range m { m2[k] = v }; return m2 }
+func main() {
+	fmt.Println(Id[IDs, int](IDs{1, 2}).Sum())
+	k := Keep[Set, string, bool](Set{"a": true})
+	fmt.Println(len(k), k["a"])
+}
+`;
+	await assertProgramOutput(src, "6\n1 true\n");
+});
+
+test("type-literal type arguments instantiate a function value", async () => {
+	const src = `package main
+import "fmt"
+func Index[S ~[]E, E comparable](s S, v E) int {
+	for i, x := range s {
+		if x == v { return i }
+	}
+	return -1
+}
+func Keys[M ~map[K]V, K comparable, V any](m M) int { return len(m) }
+func main() {
+	f := Index[[]int, int]
+	g := Keys[map[string]int, string, int]
+	fmt.Println(f([]int{4, 5}, 5), g(map[string]int{"a": 1}))
+}
+`;
+	await assertProgramOutput(src, "1 1\n");
+});
+
+test("slices.Index[[]int, int] is a function value in JS", async () => {
+	await assertJsProgramOutput(
+		`package main
+import (
+	"fmt"
+	"slices"
+)
+func main() {
+	f := slices.Index[[]int, int]
+	fmt.Println(f([]int{1}, 1))
+}
+`,
+		"0\n",
+	);
+});
+
+test("a[foo, bar] on a non-generic value is an error, not an instantiation", () => {
+	assertThrows(
+		() => compile("package main\nfunc main() { var a int; _ = a[foo, bar] }"),
+		"expected ']'",
+	);
+	assertThrows(
+		() =>
+			compile(
+				"package main\nfunc Main() int { var a int = 42; return a[foo, bar] }",
+			),
+		"expected ']'",
 	);
 });
 

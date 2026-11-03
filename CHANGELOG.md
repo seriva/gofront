@@ -5,6 +5,26 @@ All notable changes to this project will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [Unreleased]
+
+### Added
+- **Standard library that matches Go**: `slices`, `sort`, `maps`, `errors`, `io`, `strings`, `bytes`, `strconv`, `time`, `sync`, `math/bits`, `math/rand` and the `encoding` and `crypto/sha256` packages now follow Go's signatures and results on every target, so sorting orders ties and `NaN` like Go, `slices` and `maps` accept named types such as `type IDs []int`, `errors.Is` walks `errors.Join` trees, and `io.Copy` and `io.ReadAll` work with `bytes.Buffer`. `time` keeps nanoseconds and parses every layout, `strconv` formats and parses floats exactly as Go does, and `encoding/binary` gains varints and `sha256` gains `Sum224` and `New224` ([details](docs/go-compatibility.md#standard-library-behaviour)).
+- **Exact 64-bit integers**: `int64` and `uint64` are now exact in JavaScript output, including across the WebAssembly boundary, while `int` stays a JavaScript number that is exact up to 2⁵³. Prefer `int` in hot loops, because 64-bit arithmetic is slower in JavaScript.
+- **Generic code over named slice and map types**: type parameters such as `[S ~[]E, E any]` and `[M ~map[K]V, K comparable, V any]` support indexing, slicing, `range`, `len`, `append` and `make`, and type arguments can be written as `[]int`, `map[K]V` or `func(…)`.
+- **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
+
+### Changed
+- **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
+- **Breaking:** `maps.Delete` and the top-level `binary.AppendUint16`, `AppendUint32` and `AppendUint64` are removed because Go has no such functions. Use the built-in `delete` and `binary.LittleEndian.AppendUint16` (or `binary.BigEndian`).
+- **Breaking:** `sort.Slice`, `slices.SortFunc` and similar sorts now order equal elements as Go does, which can change output that depended on the old order. Use `sort.SliceStable` or `slices.SortStableFunc` when equal elements must keep their input order.
+- **Breaking:** `errors.New` values with equal text no longer match each other under `errors.Is`; compare against the same error value instead.
+- **Breaking:** Locking a locked `sync.Mutex`, or calling `WaitGroup.Wait` with a positive counter, now panics instead of carrying on. Fix the lock or counter logic that the program was silently skipping.
+- **Breaking:** `rand.Seed` no longer repeats the top-level `math/rand` sequence in WebAssembly. Use `rand.New(rand.NewSource(seed))` for repeatable numbers.
+- **Breaking:** `strconv.FormatFloat` takes its format as a `byte`, so pass `'f'` rather than an `int` variable.
+- **Breaking:** In JavaScript, `time.Time` is a struct rather than a plain object, and across the WebAssembly boundary `_d` is a read-only `Date`. Read fields through `Time` methods or `_d` instead of building or mutating the object by hand.
+- **Breaking:** `math/bits` functions on a `uint` are exact only below 2⁵³ in JavaScript. Convert to `uint64` and use the `*64` forms for wider values.
+- **Breaking:** Exported JavaScript functions and the WebAssembly facade now take and return `BigInt` for `int64` and `uint64`, including `time.Duration`. Pass `BigInt(n)` from hand-written JavaScript and convert results with `Number(…)` where a plain number is needed.
+
 ## [1.8.0] - 2026-10-30
 
 ### Added

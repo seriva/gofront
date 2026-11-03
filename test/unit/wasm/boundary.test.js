@@ -185,7 +185,7 @@ func main() {
 	assertEqual(res.mod.Echo("same"), "same");
 });
 
-test("int64 beyond the safe JS range throws RangeError on the way out", async () => {
+test("int64 beyond the safe JS range crosses boundary as BigInt", async () => {
 	const res = await compileHybridProject(
 		{
 			"prims/prims.go": PRIMS_WASM,
@@ -198,7 +198,34 @@ func main() { println(prims.AddInt(1, 1)) }
 		},
 		{ exports: ["Big"] },
 	);
-	assertThrows(() => res.mod.Big(), "exceeds the safe JS integer range");
+	assertEqual(res.mod.Big(), 1n << 53n);
+});
+
+test("wasm package exporting func Inc(x int64) int64 crosses 64-bit BigInt", async () => {
+	const res = await compileHybridProject(
+		{
+			"inc/inc.go": `//gofront:target wasm
+package inc
+
+func Inc(x int64) int64 { return x + 1 }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./inc"
+)
+
+func main() {
+	var v int64 = 1 << 60
+	fmt.Println(inc.Inc(v))
+}
+`,
+		},
+		{ exports: ["Inc"] },
+	);
+	assertEqual(res.lines.join("\n"), "1152921504606846977");
+	assertEqual(res.mod.Inc(1n << 60n), 1152921504606846977n);
 });
 
 test("wasm panic surfaces as a JS Error with the Go message", async () => {

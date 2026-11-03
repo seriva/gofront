@@ -25,30 +25,27 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
-			// Native registries (listed as "new" in Tasks 3.2/3.3; Task 13.1 adds the test).
-			"src/backend/{js,wasm}/natives.js",
-			// Pdq generator and template (Task 4.1 "new"), and the new tests of Tasks 4.1 and 13.1.
-			"scripts/{gen-pdq.js,pdq-template.txt}",
-			"test/unit/compiler/{gen-pdq,natives}.test.js",
-			// Go-output cases (one file per package).
-			"test/unit/stdlib/*",
-			// Sort and string-search benchmark (Task 4.3 "new").
-			"test/perf/stdlib-bench.js",
-			// int64 cost benchmark (Task 1.6 "new").
-			"test/perf/int64-bench.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
-			"stdlib/bytes/{buffer,bytes,reader}.go",
-			"stdlib/crypto/sha256/sha256.go",
-			"stdlib/encoding/{base64/base64,binary/binary,hex/hex}.go",
-			"stdlib/{errors/errors,html/html,maps/maps,path/path,sync/sync}.go",
-			"stdlib/math/{bits/bits,rand/rand}.go",
-			"stdlib/slices/{slices,sort,zsort_cmp,zsort_ordered}.go",
-			"stdlib/sort/{zsort_func,zsort_iface}.go",
-			"stdlib/strconv/{float,strconv}.go",
-			"stdlib/strings/{reader,replacer,strings}.go",
-			"stdlib/time/{duration,format,parse,time}.go",
-			"stdlib/unicode/utf8/utf8.go",
+			// Files that completed tasks removed (their "Removes" lines still cite them).
+			"src/backend/js/stdlib/{slices,sort}.js",
+			"stdlib/slices/{extra,iter}.go",
+			"src/backend/js/stdlib/maps.js",
+			"stdlib/maps/iter.go",
+			"stdlib/errors/overlay.go",
+			"src/backend/js/stdlib/{html,path}.js",
+			"src/backend/js/stdlib/utf8.js",
+			"stdlib/unicode/utf8/bytes.go",
+			"src/backend/js/stdlib/io.js",
+			"stdlib/bytes/{iter,search,split}.go",
+			"src/backend/{js,wasm}/stdlib/bytes.js",
+			"src/backend/js/stdlib/strings.js",
+			"stdlib/strings/{extra,iter}.go",
+			"src/backend/js/stdlib/{base64,hex,sha256}.js",
+			"src/backend/js/stdlib/{bits,rand,sync}.js",
+			"stdlib/sync/extra.go",
+			"src/backend/wasm/stdlib/time.js",
+			"src/backend/js/stdlib/strconv.js",
 		],
 	},
 ];
