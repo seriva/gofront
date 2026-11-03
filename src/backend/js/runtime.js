@@ -411,7 +411,7 @@ var __ity = __ity || function(x, t, ptr) {
 var __isty = __isty || function(v, t, k, c, n) {
   if (v === null || v === undefined || (typeof v !== "object" && typeof v !== "function")) return false;
   if (k === "func") return typeof v === "function";
-  if (v.__t !== undefined) return v.__t === t;
+  if (v.__t !== undefined && t !== "") return v.__t === t;
   if (v.__nilp === true) return false;
   if (k === "ptr") return typeof v === "object" && "value" in v && typeof v.__gfUnbox !== "function" && !(v instanceof Array);
   if (k === "map") return typeof v === "object" && (v.__map === true || Object.getPrototypeOf(v) === Object.prototype);
