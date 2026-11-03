@@ -302,8 +302,14 @@ export const fmtMethods = {
 	// boxed as if it were assigned to an `any`, so pointers print as `&{...}`
 	// and floats keep their width.
 	_fmtTupleJs(e) {
+		return `...((__t) => [${this._fmtTupleParts(e, 0).join(", ")}])(${this.genExpr(e)})`;
+	},
+
+	// The results of tuple call `e` from index `from`, each boxed for fmt.
+	_fmtTupleParts(e, from) {
 		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
-		const parts = e._type.types.map((t, i) => {
+		return e._type.types.slice(from).map((t, j) => {
+			const i = j + from;
 			const nilOperand = this._fmtNilPtrOperand(t);
 			const value = this._fmtBoxValue(`__t[${i}]`, t);
 			const boxed = nilOperand
@@ -316,11 +322,19 @@ export const fmtMethods = {
 			}
 			return boxed;
 		});
-		return `...((__t) => [${parts.join(", ")}])(${this.genExpr(e)})`;
 	},
 
 	// The operands of a Printf-style call whose format is args[fmtIdx].
 	_fmtFormatArgsJs(args, fmtIdx) {
+		// `Printf(f())`: the call supplies the format and every operand.
+		if (args.length === fmtIdx + 1 && args[fmtIdx]?._type?.kind === "tuple") {
+			const call = args[fmtIdx];
+			const rest = this._fmtTupleParts(call, 1);
+			return [
+				...args.slice(0, fmtIdx).map((e) => this.genExpr(e)),
+				`...((__t) => [__t[0], ${rest.join(", ")}])(${this.genExpr(call)})`,
+			];
+		}
 		args = args.map((e, i) => (i > fmtIdx ? fmtPeelAny(e) : e));
 		const lit = args[fmtIdx];
 		const spread = args.some((e) => e?._spread);
@@ -479,6 +493,8 @@ export const fmtMethods = {
 
 	_genFmtFprint(fn, expr) {
 		this.useHelper("sprintf");
+		if (expr.args.length === 1 && expr.args[0]._type?.kind === "tuple")
+			return this._genFmtFprintTuple(fn, expr.args[0]);
 		const writerArg = expr.args[0];
 		const rest = expr.args.slice(1);
 		const restJs = (
@@ -499,6 +515,25 @@ export const fmtMethods = {
 		// Any other io.Writer: Fprint* calls Write with the UTF-8 bytes.
 		const w = this.genExpr(writerArg);
 		return `((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
+	},
+
+	// `Fprint(f())`: the call supplies the writer and the operands.
+	_genFmtFprintTuple(fn, call) {
+		const parts = this._fmtTupleParts(call, 1);
+		const sprintfCall = this._buildFprintSprintfCall(
+			fn,
+			parts.length,
+			parts.join(", "),
+		);
+		const writerType = call._type.types[0];
+		const targetTypeName =
+			writerType?.name ??
+			(writerType?.kind === "pointer" ? writerType.base?.name : null);
+		if (targetTypeName === "strings.Builder") {
+			const base = this._unboxWriter("__t[0]");
+			return `((__t) => ((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall}))(${this.genExpr(call)})`;
+		}
+		return `((__t) => ((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(__t[0], ${sprintfCall}))(${this.genExpr(call)})`;
 	},
 
 	_genStdoutWrite(strJs) {
