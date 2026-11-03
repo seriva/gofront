@@ -263,7 +263,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/backend/js/index.js`, `src/typechecker/resolve.js`, `test/unit/language/named-type-methods.test.js`
   - Test: L17a `type S Base[int]` → `3 {3} 3`; L17b `type T A` (`A = Base`) → `3 {3}`.
   - Done when: both run on all targets.
-- [ ] Task 5.4: `%T` names of generic instances
+- [x] Task 5.4: `%T` names of generic instances
   - Files: `src/typechecker/types.js`, `src/backend/shared/fmt-types.js`, `test/unit/wasm/generics.test.js`
   - Test: L136 `Printf("%T", Box[int]{})` → `main.Box[int]` on all targets (also `Pair[string, int]`).
   - Done when: repro prints Go's text on all targets.

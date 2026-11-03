@@ -14,7 +14,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
 
 ### Fixed
-- **Valid Go that failed to compile now works**: many Go programs that failed to compile or reported spurious diagnostics now behave like Go, including float literals such as `1.`, named results in function literals, self-referential local types, and generics that infer type arguments from pointer arguments, convert inside methods, and promote through embedded instances. Generic types that keep growing their own type arguments now report an instantiation cycle, and one mistake reports one error instead of several.
+- **Valid Go that failed to compile now works**: many Go programs that failed to compile or reported spurious diagnostics now behave like Go, including float literals such as `1.`, named results in function literals, self-referential local types, two packages that declare the same type name, aliases of struct types, `%T` of generic instances such as `main.Box[int]`, and generics that infer type arguments from pointer arguments, convert inside methods, and promote through embedded instances. Generic types that keep growing their own type arguments now report an instantiation cycle, and one mistake reports one error instead of several.
 
 ### Changed
 - **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable to an `int`, a `switch` case whose constant does not fit the tag's type, and constants or package variables that depend on themselves. Convert explicitly, for example `int(y)`, or fix the case value or the circular definition.
