@@ -147,12 +147,14 @@ export function _usesFmtAny(funcDecls, mod) {
 				n.func?.kind === "SelectorExpr" &&
 				n.func.expr?.kind === "Ident" &&
 				n.func.expr.name === "fmt" &&
-				n.args?.some(
-					(a) =>
-						a._spread ||
-						isAnyType(a._type, mod.checker) ||
-						isInterfaceType(a._type, mod.checker) ||
-						typeHasIfaceMapKey(a._type, mod),
+				n.args?.some((a) =>
+					(a._type?.kind === "tuple" ? a._type.types : [a._type]).some(
+						(t) =>
+							a._spread ||
+							isAnyType(t, mod.checker) ||
+							isInterfaceType(t, mod.checker) ||
+							typeHasIfaceMapKey(t, mod),
+					),
 				),
 		),
 	);

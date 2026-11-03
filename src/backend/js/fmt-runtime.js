@@ -262,7 +262,7 @@ var __fmtu = __fmtu || (() => {
     return kd?.k === "b" && /^(u?int|float|uintptr)/.test(kd.n);
   };
   // Best-effort type of a value that carries none (an any/interface operand).
-  const descOf = (v) => {
+  const descOf = (v, asMap) => {
     if (v === null || v === undefined) return null;
     if (typeof v === "boolean") return { k: "b", n: "bool" };
     if (typeof v === "string") return { k: "b", n: "string" };
@@ -272,7 +272,7 @@ var __fmtu = __fmtu || (() => {
     const ta = TYPED.find(([c]) => v instanceof c);
     if (ta) return { k: "slice", e: { k: "b", n: ta[1] } };
     if (Array.isArray(v)) return { k: "slice", e: v.length > 0 && v[0] != null ? descOf(v[0]) : IFACE };
-    if (v instanceof Map || v.__map === true) {
+    if (v instanceof Map || v.__map === true || asMap === true) {
       const ks = v instanceof Map ? Array.from(v.keys()) : Object.keys(v);
       const k0 = ks[0];
       const v0 = v instanceof Map ? v.get(k0) : v[k0];
@@ -291,7 +291,8 @@ var __fmtu = __fmtu || (() => {
       return { k: "ptr", e: { k: "struct", n: "errors.errorString", f: [] } };
     }
     if (v.constructor && v.constructor !== Object) {
-      const st = { k: "struct", n: qualName(v.constructor.name.replace(/\$Ptr$/, "")), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
+      const ff = typeof v.__ff === "function" ? v.__ff() : null;
+      const st = { k: "struct", n: qualName(v.constructor.name.replace(/\$Ptr$/, "")), f: keys(v).map((k) => [k, descOf(v[k], ff?.[k]?.m === 1) ?? IFACE]) };
       return v.__p === true ? { k: "ptr", e: st } : st;
     }
     const host = { k: "struct", n: v.__tn ?? "", f: Object.keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };

@@ -213,9 +213,10 @@ export class IoEmitter {
 	}
 
 	emitFprintCall(fn, call, _targetWasmType) {
-		const wExpr = call.args[0];
+		const args = this._expandTupleFmtArgs(call.args);
+		const wExpr = args[0];
 		const strTmp = this.acquireTemp("externref");
-		this._emitFprintFormatString(fn, call.args.slice(1));
+		this._emitFprintFormatString(fn, args.slice(1));
 		this.pushInstruction({ op: "local.set", index: strTmp });
 
 		const wType = wExpr._type;
