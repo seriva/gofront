@@ -710,7 +710,11 @@ export class TypeChecker {
 		const { cycles } = orderPackageInits(programs);
 		for (const c of cycles) {
 			const owner = programs.find((p) =>
-				p.decls?.some((d) => d.kind === "VarDecl" && d.decls?.includes(c.spec)),
+				p.decls?.some(
+					(d) =>
+						(d.kind === "VarDecl" || d.kind === "ConstDecl") &&
+						d.decls?.includes(c.spec),
+				),
 			);
 			if (owner) this._setCurrentFile(owner);
 			this.err(c.message, c.spec);
