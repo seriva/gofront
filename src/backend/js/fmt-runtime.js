@@ -262,7 +262,7 @@ var __fmtu = __fmtu || (() => {
     return kd?.k === "b" && /^(u?int|float|uintptr)/.test(kd.n);
   };
   // Best-effort type of a value that carries none (an any/interface operand).
-  const descOf = (v) => {
+  const descOf = (v, asMap) => {
     if (v === null || v === undefined) return null;
     if (typeof v === "boolean") return { k: "b", n: "bool" };
     if (typeof v === "string") return { k: "b", n: "string" };
@@ -272,7 +272,7 @@ var __fmtu = __fmtu || (() => {
     const ta = TYPED.find(([c]) => v instanceof c);
     if (ta) return { k: "slice", e: { k: "b", n: ta[1] } };
     if (Array.isArray(v)) return { k: "slice", e: v.length > 0 && v[0] != null ? descOf(v[0]) : IFACE };
-    if (v instanceof Map || v.__map === true) {
+    if (v instanceof Map || v.__map === true || asMap === true) {
       const ks = v instanceof Map ? Array.from(v.keys()) : Object.keys(v);
       const k0 = ks[0];
       const v0 = v instanceof Map ? v.get(k0) : v[k0];
@@ -283,14 +283,16 @@ var __fmtu = __fmtu || (() => {
     if (typeof v.__gfUnbox === "function") {
       const nm = v.constructor?.name ?? "";
       if (nm === "FmtStr" || nm === "FmtErr") return descOf(v.__gfUnbox());
-      return { k: "named", n: qualName(nm.replace(/\$Ptr$/, "")), u: descOf(v.__gfUnbox()) };
+      if (nm.endsWith("$Ptr")) return { k: "ptr", e: { k: "named", n: qualName(nm.slice(0, -4)), u: null } };
+      return { k: "named", n: qualName(nm), u: descOf(v.__gfUnbox()) };
     }
     const proto = Object.getPrototypeOf(v);
     if ((proto === null || Object.getPrototypeOf(proto) === null) && typeof v.Error === "function") {
       return { k: "ptr", e: { k: "struct", n: "errors.errorString", f: [] } };
     }
     if (v.constructor && v.constructor !== Object) {
-      const st = { k: "struct", n: qualName(v.constructor.name.replace(/\$Ptr$/, "")), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
+      const ff = typeof v.__ff === "function" ? v.__ff() : null;
+      const st = { k: "struct", n: qualName(v.constructor.name.replace(/\$Ptr$/, "")), f: keys(v).map((k) => [k, descOf(v[k], ff?.[k]?.m === 1) ?? IFACE]) };
       return v.__p === true ? { k: "ptr", e: st } : st;
     }
     const host = { k: "struct", n: v.__tn ?? "", f: Object.keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
@@ -396,7 +398,8 @@ export const HELPER_FMT_LOOP = String.raw`
   };
   const bad = (verb, v, t) => {
     const d = t ?? U.descOf(v);
-    return "%!" + verb + "(" + (v === null || v === undefined ? "<nil>" : U.typeName(d) + "=" + badVal(v, d)) + ")";
+    if (v === null || v === undefined) return "%!" + verb + "(" + (t?.k === "ptr" ? U.typeName(t) + "=<nil>" : "<nil>") + ")";
+    return "%!" + verb + "(" + U.typeName(d) + "=" + badVal(v, d) + ")";
   };
   const elemOf = (t) => {
     t = U.baseOf(t);
@@ -624,7 +627,7 @@ export const HELPER_FMT_LOOP = String.raw`
     sharp = verb === "v" && fl.sharp;
     // The stand-in for a nil pointer with a pointer-receiver String/Error only serves %v and %s.
     if (v && v.__nilp === true && !(verb === "s" || verb === "q" || (verb === "v" && !sharp) || "bodxX".includes(verb))) v = null;
-    if (verb === "T") { out += U.pad(U.typeName(t ?? U.descOf(unbox(v, "T"))), fl, wid); continue; }
+    if (verb === "T") { out += U.pad(U.typeName(t ?? U.descOf(v)), fl, wid); continue; }
     // A width applies to each element of a composite, as Go does.
     const widComposite = hasWid && !fl.plus && v !== null && typeof v === "object" && !(v instanceof __FT) && !(v.re !== undefined && v.im !== undefined);
     if (verb === "v" && (hasPrec || widComposite) && !sharp) {

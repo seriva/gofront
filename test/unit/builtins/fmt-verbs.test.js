@@ -1365,6 +1365,133 @@ test("nil pointers, interfaces and maps follow Go", () => {
 	);
 });
 
+section("fmt typed values through any and type parameters");
+
+test("%T of a named scalar boxed in any keeps its name", () => {
+	assertEqual(
+		parity(`return fmt.Sprintf("%T %T", any(N(1)), any(1))`, "type N int"),
+		"main.N int",
+	);
+});
+
+test("%T of sized and named values in any, and typed nil pointers", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintf("%T %T %T", any(uint64(1)), any(Color(2)), any((*P)(nil)))`,
+			"type Color int\ntype P struct{ X int }",
+		),
+		"uint64 main.Color *main.P",
+	);
+});
+
+test("%T of nil slices and maps reached through a type parameter", () => {
+	assertEqual(
+		parity(
+			`return T([]int(nil)) + " " + T(map[string]int{})`,
+			'func T[V any](x V) string { return fmt.Sprintf("%T", x) }',
+		),
+		"[]int map[string]int",
+	);
+});
+
+test("a float32 converted to any prints its shortest float32 form", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprint(any(float32(0.1))) + " " + fmt.Sprintf("%v", any(float32(0.1)))`,
+		),
+		"0.1 0.1",
+	);
+});
+
+test("a nil pointer keeps its type for %T and %q", () => {
+	assertEqual(
+		parity(
+			`var p *Color
+	return fmt.Sprintf("%T %q", any(p), p)`,
+			"type Color int",
+		),
+		"*main.Color %!q(*main.Color=<nil>)",
+	);
+});
+
+test("a nil pointer stored in a JS any variable keeps its type for %T", () => {
+	assertEqual(
+		runJsBody(
+			`var p *Color
+	var a any = p
+	fmt.Println(fmt.Sprintf("%T %q", a, p))`,
+			"type Color int",
+		),
+		"*main.Color %!q(*main.Color=<nil>)",
+	);
+});
+
+section("fmt multi-value calls as the whole argument list");
+
+test("Printf(f()) takes the format and operands from the call", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintf(fa())`,
+			`func fa() (string, int) { return "v=%d", 5 }`,
+		),
+		"v=5",
+	);
+});
+
+test("Fprint(f()) takes the writer and operands from the call", () => {
+	assertEqual(
+		parity(
+			`var sb strings.Builder
+	fmt.Fprint(fw(&sb))
+	return sb.String()`,
+			`func fw(sb *strings.Builder) (*strings.Builder, string) { return sb, "hello" }`,
+			["strings"],
+		),
+		"hello",
+	);
+});
+
+test("Fprint(f()) writes to an *os.File returned by the call", async () => {
+	await assertProgramOutput(
+		`package main
+import (
+	"fmt"
+	"os"
+)
+func fw() (*os.File, string) { return os.Stdout, "hello" }
+func main() {
+	fmt.Fprint(fw())
+	fmt.Fprintln(fw())
+}
+`,
+		"hellohello\n",
+	);
+});
+
+test("Println(f()) of an any result holding a struct prints the struct", () => {
+	assertEqual(
+		parity(
+			`return fmt.Sprintln(c())`,
+			`type S struct{ A int }
+func c() (any, int) { return S{1}, 1 }`,
+		),
+		"{1} 1\n",
+	);
+});
+
+section("fmt %#v of maps inside any");
+
+test("%#v of a struct holding a map prints the map type", () => {
+	assertEqual(
+		parity(
+			`var x any = M{map[string]int{"k": 1}}
+	return fmt.Sprintf("%#v", x)`,
+			"type M struct{ M map[string]int }",
+		),
+		'main.M{M:map[string]int{"k":1}}',
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
