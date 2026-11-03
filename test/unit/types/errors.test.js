@@ -1,6 +1,7 @@
 // GoFront test suite — type errors and type assertions
 
 import { fileURLToPath } from "node:url";
+import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assertContains,
 	assertEqual,
@@ -936,6 +937,12 @@ func main() { _, _ = 1 }`);
 		real.errors,
 		"assignment mismatch: 2 variables but 1 value",
 	);
+});
+
+test("a bare checker reports an undefined identifier", () => {
+	const tc = new TypeChecker();
+	tc.checkExpr({ kind: "Ident", name: "foo" }, tc.globals);
+	assertErrorContains(tc.errors, "Undefined: 'foo'");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

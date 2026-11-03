@@ -188,7 +188,7 @@ export const expressionCheckMethods = {
 					// The import of an excluded package already reported; its
 					// uses are not a second root cause.
 					const imported = this._fileImports
-						.get(this._currentFile)
+						?.get(this._currentFile)
 						?.get(expr.name);
 					if (imported && EXCLUDED_STDLIB_PACKAGES.has(imported))
 						return TAINTED_ANY;
