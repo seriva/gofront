@@ -251,7 +251,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 5: JS Types, Aliases and Packages
 
-- [ ] Task 5.1: Package-qualified type identity and JS names
+- [x] Task 5.1: Package-qualified type identity and JS names
   - Files: `src/backend/js/index.js`, `src/typechecker/assignability.js`, `test/unit/compiler/packages.test.js`
   - Test: L19 `a.Pt{1}`, `b.Pt{"y"}` from main → `{1} {y}`; L19b `var x Box[a.Pt]; x = Box[b.Pt]{}` → `assertErrorContains(errors, "cannot use")`.
   - Done when: multi-package repro runs (js and hybrid); identity check rejects the mixed assignment.
