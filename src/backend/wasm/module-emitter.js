@@ -1931,7 +1931,12 @@ export class ModuleEmitter {
 			if (this.checker?.implements?.(ptrType, ifaceResolved)) {
 				if (!seen.has(sInfo.typeIndex)) {
 					seen.add(sInfo.typeIndex);
-					candidates.push({ name: `*${sName}`, typeIndex: sInfo.typeIndex });
+					// A typed nil `*S` is a marker object, which also satisfies it.
+					candidates.push({
+						name: `*${sName}`,
+						typeIndex: sInfo.typeIndex,
+						nilTypeIndex: this.getNilBoxType(ptrType).typeIndex,
+					});
 				}
 			}
 

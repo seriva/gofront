@@ -26,13 +26,33 @@ export class BuiltinsEmitter {
 		const funcIdx = this.mod.getStringImportIndex();
 		this.pushInstruction({ op: "i32.const", value: strIdx });
 		this.pushInstruction({ op: "call", funcIndex: funcIdx });
-		this.pushInstruction("any.convert_extern");
-		this.emitPanicThrow();
+		this.emitRuntimePanicThrow();
 	}
 
-	// Consumes the anyref message on the stack, pushes a PanicNode, and raises the panic via
-	// `env.panic`; `unreachable` tells the validator control never returns.
-	emitPanicThrow() {
+	// Raises a Go runtime error from the externref message on the stack.  A
+	// program that uses `error` recovers it as an `error` value (as Go's
+	// `runtime.Error`); the host still reports the message text.
+	emitRuntimePanicThrow() {
+		if (!this.mod.hasErrorType) {
+			this.pushInstruction("any.convert_extern");
+			this.emitPanicThrow();
+			return;
+		}
+		const msgTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.tee", index: msgTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.emitPanicThrow(msgTmp);
+		this.releaseTemp(msgTmp, "externref");
+	}
+
+	// Consumes the anyref value on the stack, pushes a PanicNode, and raises the
+	// panic via `env.panic` (with the value, or the externref message in
+	// `hostMsgTmp`); `unreachable` tells the validator control never returns.
+	emitPanicThrow(hostMsgTmp = null) {
 		const panicNodeTypeIndex = this.mod.getPanicNodeTypeIndex();
 		const panicGlobal = this.mod.getPanicGlobalIndex();
 		const tmpVal = this.acquireTemp("anyref");
@@ -49,8 +69,12 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "global.set", index: panicGlobal });
 
 		// Prepare externref for env.panic
-		this.pushInstruction({ op: "local.get", index: tmpVal });
-		this.pushInstruction("extern.convert_any");
+		if (hostMsgTmp !== null) {
+			this.pushInstruction({ op: "local.get", index: hostMsgTmp });
+		} else {
+			this.pushInstruction({ op: "local.get", index: tmpVal });
+			this.pushInstruction("extern.convert_any");
+		}
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getPanicImportIndex(),
