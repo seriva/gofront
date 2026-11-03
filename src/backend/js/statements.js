@@ -1970,6 +1970,15 @@ export const statementGenMethods = {
 				this._genScopedInit(stmt.init, genBody);
 			});
 			this.line("}");
+		} else if (
+			stmt.tag &&
+			(this._isStructOrArrayType(stmt.tag._type) ||
+				this._isIfaceType(stmt.tag._type))
+		) {
+			// The tag temporary is a `const`, which cannot directly follow a label.
+			this.line("{");
+			this.indented(genBody);
+			this.line("}");
 		} else {
 			genBody();
 		}

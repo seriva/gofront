@@ -1026,3 +1026,57 @@ func main() {
 		"|\n",
 	);
 });
+
+section("Go semantics — labeled switch with value tags and stacked labels");
+
+test("labeled switch with a struct tag can break out", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	p := P{1, 2}
+sw:
+	switch p {
+	case P{1, 2}:
+		if p.X == 1 {
+			break sw
+		}
+		fmt.Println("unreached")
+	}
+	fmt.Println("end")
+}
+`,
+		"end\n",
+	);
+});
+
+test("stacked labels keep the inner label usable", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+outer:
+inner:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				continue inner
+			}
+			if i == 2 {
+				break inner
+			}
+			fmt.Println(i, j)
+		}
+	}
+	fmt.Println("end")
+}
+`,
+		"0 0\n1 0\nend\n",
+	);
+});

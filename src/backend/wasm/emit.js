@@ -1833,7 +1833,8 @@ export class FunctionEmitter {
 
 			case "LabeledStmt":
 				if (stmt.body) {
-					stmt.body.label = stmt.label;
+					// Stacked labels (`a: b: for`) keep the inner label.
+					if (stmt.body.kind !== "LabeledStmt") stmt.body.label = stmt.label;
 					this.emitStmt(stmt.body);
 				}
 				break;
