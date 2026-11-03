@@ -528,6 +528,16 @@ export class StdlibCoreEmitter {
 		);
 	}
 
+	// A slice or map prints what it holds when fmt reads it, not what it held
+	// when the operand was evaluated.
+	_isLiveFmtOperand(goType) {
+		return (
+			this._fmtMethodOf(goType) === null &&
+			(isSliceType(goType, this.mod.checker) ||
+				isMapType(goType, this.mod.checker))
+		);
+	}
+
 	_isFmtExternOperand(goType) {
 		return (
 			isFuncType(goType, this.mod.checker) ||
@@ -1534,7 +1544,10 @@ export class StdlibCoreEmitter {
 	_emitArgBuffer(args, markErrors = false, typed = false) {
 		args = args.map(fmtPeelAny);
 		const temps = [];
-		for (const arg of args) {
+		// Slice and map operands print the contents they hold once every
+		// operand has been evaluated, so a later call (`copy(w, p)`) shows.
+		const deferred = [];
+		for (const [argIdx, arg] of args.entries()) {
 			const goType = arg._type ?? this._resolveExprGoType(arg);
 			const isBool =
 				isBoolGoType(goType) ||
@@ -1583,8 +1596,18 @@ export class StdlibCoreEmitter {
 			}
 			if (this._isFmtExternOperand(goType)) {
 				const tmp = this.acquireTemp("externref");
-				this._emitOperandExternref(arg, goType, typed);
-				this.pushInstruction({ op: "local.set", index: tmp });
+				if (
+					this._isLiveFmtOperand(goType) &&
+					args.slice(argIdx + 1).some(_fmtArgHasEffects)
+				) {
+					const rawTmp = this.acquireTemp(valW);
+					this.emitExpr(arg, valW);
+					this.pushInstruction({ op: "local.set", index: rawTmp });
+					deferred.push({ tmp, rawTmp, valW, goType });
+				} else {
+					this._emitOperandExternref(arg, goType, typed);
+					this.pushInstruction({ op: "local.set", index: tmp });
+				}
 				temps.push({ tmp, wType: "externref", isBool: false, errTmp: null });
 				continue;
 			}
@@ -1601,6 +1624,12 @@ export class StdlibCoreEmitter {
 			}
 			this.pushInstruction({ op: "local.set", index: tmp });
 			temps.push({ tmp, wType, isBool, errTmp: null, u64 });
+		}
+		for (const { tmp, rawTmp, valW, goType } of deferred) {
+			this.pushInstruction({ op: "local.get", index: rawTmp });
+			this.emitToExternref(goType, false, new Set(), typed);
+			this.pushInstruction({ op: "local.set", index: tmp });
+			this.releaseTemp(rawTmp, valW);
 		}
 		for (const [i, temp] of temps.entries()) {
 			const { tmp, wType, isBool, markErr, spread, u64 } = temp;

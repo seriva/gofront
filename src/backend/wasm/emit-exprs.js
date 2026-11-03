@@ -1283,12 +1283,14 @@ export class ExprsEmitter {
 			constIdx < arrayLen
 		) {
 			this.emitExpr(baseNode, arrWType);
+			this._emitNilCheck(rawBaseType);
 			this.pushInstruction({ op: "i32.const", value: constIdx });
 			return;
 		}
 
 		const arrTmp = this.acquireTemp(arrWType);
 		this.emitExpr(baseNode, arrWType);
+		this._emitNilCheck(rawBaseType);
 		this.pushInstruction({ op: "local.tee", index: arrTmp });
 		this._emitCheckedIndex(indexNode, () => {
 			this.pushInstruction({ op: "local.get", index: arrTmp });
@@ -1784,6 +1786,7 @@ export class ExprsEmitter {
 		if (!isScalarType(baseGoType, this.mod.checker, this.mod)) {
 			const baseWType = this.toWasmType(baseGoType);
 			this.emitExpr(operand, baseWType);
+			this._emitNilCheck(operandGoType);
 			return;
 		}
 		const box = this.mod.getBoxType(baseGoType);

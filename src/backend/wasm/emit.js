@@ -782,6 +782,14 @@ export class FunctionEmitter {
 	// operand raises Go's panic through the `nil` block.
 	_isNilTrapSite(node) {
 		if (node.kind === "CallExpr") return this._isFuncValueCall(node);
+		// A pointer to an array: indexing, slicing and ranging with a value
+		// read the array.
+		if (
+			node.kind === "IndexExpr" ||
+			node.kind === "SliceExpr" ||
+			node.kind === "RangeExpr"
+		)
+			return node.expr?._type?.kind === "pointer";
 		const star =
 			(node.kind === "UnaryExpr" && node.op === "*") ||
 			node.kind === "StarExpr";
@@ -1605,11 +1613,9 @@ export class FunctionEmitter {
 						size,
 					});
 				} else {
-					this.pushInstruction({ op: "i32.const", value: size });
-					this.pushInstruction({
-						op: "array.new_default",
-						typeIndex: arrInfo.typeIndex,
-					});
+					this._emitNewArray(elemType, arrInfo, () =>
+						this.pushInstruction({ op: "i32.const", value: size }),
+					);
 				}
 				return;
 			}
@@ -1649,6 +1655,26 @@ export class FunctionEmitter {
 		} else {
 			this.pushInstruction({ op: "ref.null", heapType: "any" });
 		}
+	}
+
+	// Pushes a new array of `arrInfo` with the length `emitLen` pushes.  Elements
+	// start at their zero value: strings are the empty string, not a null
+	// reference, so the array reads, compares and prints like Go's.
+	_emitNewArray(elemType, arrInfo, emitLen) {
+		if (
+			arrInfo.elemWType === "externref" &&
+			isStringType(elemType, this.mod.checker)
+		) {
+			this.emitZeroValue(elemType, "externref");
+			emitLen();
+			this.pushInstruction({ op: "array.new", typeIndex: arrInfo.typeIndex });
+			return;
+		}
+		emitLen();
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
 	}
 
 	allocTemp(wasmType) {

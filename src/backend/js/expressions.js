@@ -1580,11 +1580,11 @@ export const expressionGenMethods = {
 				`(${check} ? ${out} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
 			);
 		}
-		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted array
-		// is a copy of the boxed value.
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct
+		// or array is a copy of the boxed value.
 		const zero = this.zeroValueForTypeNode(expr.type);
-		const arrT = this._typeFromNode(expr.type);
-		const okOut = arrT?.kind === "array" ? this._cloneJs(arrT, out) : out;
+		const valT = this._typeFromNode(expr.type);
+		const okOut = this._aggregateBase(valT) ? this._cloneJs(valT, out) : out;
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 

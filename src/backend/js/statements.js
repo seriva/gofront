@@ -1,6 +1,7 @@
 import {
 	bodyRedeclares,
 	forEachChild,
+	hasCallOrReceive,
 	isIntRangeType,
 	isMapRangeType,
 	isRangeFor,
@@ -223,9 +224,10 @@ export const statementGenMethods = {
 	_nonStrictMapRead(mapExpr, keyExpr, valType, copyVal) {
 		const zero = valType ? this.zeroValueForType(valType) : "";
 		const read = `${mapExpr}[${keyExpr}]`;
-		return /^(0n?|""|false)$/.test(zero)
-			? `(${read} ?? ${zero})`
-			: copyVal(read);
+		if (/^(0n?|""|false)$/.test(zero)) return `(${read} ?? ${zero})`;
+		return copyVal(
+			this._aggregateBase(valType) ? `(${read} ?? ${zero})` : read,
+		);
 	},
 
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
@@ -238,12 +240,10 @@ export const statementGenMethods = {
 		// A name `:=` reuses is assigned, not declared again.
 		const declOf = (l) => (isDefine && !l._redecl ? "let " : "");
 		const [vDecl, okDecl] = stmt.lhs.map(declOf);
-		// An array map value is a copy, not the stored array.
+		// A struct or array map value is a copy, not the stored value.
 		const valType = rhsNode._mapValueType;
 		const copyVal = (js) =>
-			this._aggregateBase(valType)?.kind === "array"
-				? this._cloneJs(valType, js)
-				: js;
+			this._aggregateBase(valType) ? this._cloneJs(valType, js) : js;
 		if (isDefine && !this.strict) {
 			if (vName !== "_") {
 				const val = this._nonStrictMapRead(mapExpr, keyExpr, valType, copyVal);
@@ -760,6 +760,10 @@ export const statementGenMethods = {
 			this._genStableWholeAssign(stmt);
 			return;
 		}
+		if (this._isStableTupleAssign(stmt)) {
+			this._genStableTupleAssign(stmt);
+			return;
+		}
 		const paired = stmt.rhs.length === stmt.lhs.length && stmt.op === "=";
 		const rhs = stmt.rhs.map((e, i) =>
 			paired && stmt.lhs[i].name !== "_"
@@ -936,7 +940,13 @@ export const statementGenMethods = {
 	_isStableWholeAssign(stmt) {
 		if (stmt.op !== "=" || stmt.lhs.length !== 1 || stmt.rhs.length !== 1)
 			return false;
-		const l = stmt.lhs[0];
+		return this._isStableTarget(stmt.lhs[0], stmt.rhs[0]);
+	},
+
+	// `l = rhs` writes into the existing storage of `l` (see above).  When the
+	// program takes `&xs[i]` anywhere, an element of a slice does too: any
+	// callee may hold the pointer.
+	_isStableTarget(l, rhs) {
 		if (l.kind === "IndexExpr" && l._mapValueType) return false;
 		if (
 			l.kind !== "Ident" &&
@@ -945,13 +955,57 @@ export const statementGenMethods = {
 		)
 			return false;
 		if (l.kind === "Ident" && l.name === "_") return false;
-		if (
-			!this._aggregateBase(l._type) ||
-			!this._aggregateBase(stmt.rhs[0]._type)
-		)
+		if (!this._aggregateBase(l._type) || !this._aggregateBase(rhs._type))
 			return false;
+		if (this._elemAddrTaken && this._isSliceElemTarget(l)) return true;
 		const root = this._rootIdentName(l);
 		return root !== null && this._fnMutates(root, true);
+	},
+
+	// `xs[i]` on a plain slice (not a typed array, array or map).
+	_isSliceElemTarget(l) {
+		if (l.kind !== "IndexExpr" || l._mapValueType) return false;
+		const u =
+			l.expr._type?.kind === "named" ? l.expr._type.underlying : l.expr._type;
+		return u?.kind === "slice" && !isTypedArraySlice(l.expr._type);
+	},
+
+	// `a, b = x, y` where a target is stored in place: every right-hand value
+	// is evaluated (and copied) first, then each target is assigned in order.
+	_isStableTupleAssign(stmt) {
+		return (
+			stmt.op === "=" &&
+			stmt.lhs.length > 1 &&
+			stmt.rhs.length === stmt.lhs.length &&
+			stmt.lhs.some((l, i) => this._isStableTarget(l, stmt.rhs[i]))
+		);
+	},
+
+	_genStableTupleAssign(stmt) {
+		const hoisted = this._hoistLhsOperands(stmt);
+		const stable = stmt.lhs.map((l, i) => this._isStableTarget(l, stmt.rhs[i]));
+		this.line("{");
+		this.indented(() => {
+			for (const l of hoisted?.lines ?? []) this.line(l);
+			const base = (this._tmpCounter ?? 0) + 1;
+			this._tmpCounter = base + stmt.lhs.length;
+			const val = (i) => `__s${base + i}`;
+			const dst = (i) => `__d${base + i}`;
+			stmt.rhs.forEach((r, i) => {
+				this.line(`const ${val(i)} = ${this.genValueExpr(r)};`);
+			});
+			stmt.lhs.forEach((l, i) => {
+				if (stable[i])
+					this.line(`const ${dst(i)} = ${this._genAssignLhsExpr(l)};`);
+			});
+			stmt.lhs.forEach((l, i) => {
+				if (stable[i]) this._emitCopyInto(dst(i), val(i), l._type);
+				else if (!(l.kind === "Ident" && l.name === "_"))
+					this.line(`${this._genAssignLhsExpr(l)} = ${val(i)};`);
+			});
+		});
+		this.line("}");
+		hoisted?.restore();
 	},
 
 	_genStableWholeAssign(stmt) {
@@ -1640,9 +1694,22 @@ export const statementGenMethods = {
 			!!valNode &&
 			iterBase?.kind === "slice" &&
 			!isTypedArraySlice(iterType);
+		// Ranging over an array for its indexes only does not evaluate the
+		// array (`range p` on a nil array pointer is valid): the length is the
+		// type's.
+		const arrayLen = this._aggregateBase(iterType)?.size;
+		const indexOnlyArray =
+			(!valNode || valNode.name === "_") &&
+			typeof arrayLen === "number" &&
+			this._aggregateBase(iterType)?.kind === "array" &&
+			!hasCallOrReceive(range.expr);
 		this._genSliceRangeFor(
 			stmt,
-			rangesArrayValue ? this._cloneJs(iterType, iteree) : iteree,
+			indexOnlyArray
+				? `({ length: ${arrayLen} })`
+				: rangesArrayValue
+					? this._cloneJs(iterType, iteree)
+					: iteree,
 			init.kind === "AssignStmt",
 			unwrapView,
 		);
