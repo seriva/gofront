@@ -452,6 +452,22 @@ export const statementCheckMethods = {
 		if (u?.kind === "interface") t._type = resolved;
 	},
 
+	// Records the resolved type of a composite type node used as an assertion
+	// or type-switch target (`[]int`, `map[string]any`, `*int`, `iter.Seq[int]`)
+	// so the backend can match it against the dynamic type of an interface value.
+	_markDynamicType(node, resolved) {
+		const kind = node?.kind;
+		if (
+			kind === "SliceType" ||
+			kind === "ArrayType" ||
+			kind === "MapType" ||
+			kind === "PointerType" ||
+			kind === "FuncType" ||
+			kind === "GenericTypeName"
+		)
+			node._assertType = resolved;
+	},
+
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
@@ -465,6 +481,8 @@ export const statementCheckMethods = {
 				const base = t?.kind === "PointerType" ? t.base : t;
 				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
 				this._markInterfaceCaseType(t, inner);
+				if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
+					this._markDynamicType(t, this.resolveTypeNode(t, inner));
 			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or any for multi/default.

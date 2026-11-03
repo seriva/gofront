@@ -1173,6 +1173,7 @@ export const expressionCheckMethods = {
 	_checkTypeAssertExpr(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.type, scope);
+		this._markDynamicType(expr.type, targetType);
 
 		// In Go, the source of a type assertion must be an interface type.
 		// We allow `any` (which is GoFront's basic any) and interface types.

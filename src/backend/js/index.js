@@ -700,6 +700,7 @@ export class CodeGen {
 					);
 				}
 			}
+			this._tagMultiUnwrap(methodDecls);
 		});
 		this.line("}");
 		// Box for *T in an interface. It also proxies `.value` to the pointer, so
@@ -717,8 +718,18 @@ export class CodeGen {
 					`${m.name}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
 				);
 			}
+			this._tagMultiUnwrap(methodDecls);
 		});
 		this.line("}");
+	}
+
+	// `Unwrap() []error` on a box class is told apart from `Unwrap() error`
+	// in type tests, as on struct classes.
+	_tagMultiUnwrap(methodDecls) {
+		const unwrap = methodDecls.find(
+			(m) => m.name === "Unwrap" && m.returnType?.kind === "SliceType",
+		);
+		if (unwrap) this.line("static { this.prototype.Unwrap.__multi = true; }");
 	}
 
 	_namedBoxField(underlying) {
@@ -941,10 +952,17 @@ export class CodeGen {
 	// panics when one is called (see __mknil).
 	_genValueMethodMeta(name, methodDecls) {
 		const vm = methodDecls.filter((m) => !m.recvPointer).map((m) => m.name);
-		if (vm.length === 0) return;
-		this.line(
-			`Object.defineProperty(${name}, "__vm", { value: ${JSON.stringify(vm)} });`,
-		);
+		if (vm.length > 0)
+			this.line(
+				`Object.defineProperty(${name}, "__vm", { value: ${JSON.stringify(vm)} });`,
+			);
+		// Pointer-receiver methods are outside the method set of a struct value
+		// held in an interface (see _ifaceMethodCheck).
+		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
+		if (pm.length > 0)
+			this.line(
+				`Object.defineProperty(${name}, "__pm", { value: ${JSON.stringify(pm)} });`,
+			);
 	}
 
 	_emitJsonCodecs() {
