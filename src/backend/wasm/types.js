@@ -767,6 +767,32 @@ export function isSigned(goType) {
 	return true;
 }
 
+// How a builtin `print`/`println` operand is handed to the host.  The host
+// prints an i32 or i64 as signed, so a uint32 widens to i64 and a uint64 uses
+// its own unsigned import (`wType` "u64").
+export function printOperandKind(arg, checker) {
+	const isBool =
+		isBoolGoType(arg._type) ||
+		(arg.kind === "BasicLit" && arg.litKind === "BOOL");
+	let wType = toWasmType(arg._type, checker);
+	let widen = false;
+	if (!isBool && (wType === "i32" || wType === "i64") && !isSigned(arg._type)) {
+		if (wType === "i64") wType = "u64";
+		else if (_namedBasic(arg._type) === "uint32") {
+			wType = "i64";
+			widen = true;
+		}
+	}
+	return { wType, isBool, widen };
+}
+
+function _namedBasic(t) {
+	while (t && (t.kind === "named" || t.kind === "TypeName") && t.underlying) {
+		t = t.underlying;
+	}
+	return t?.name;
+}
+
 export function isFloat(goType) {
 	if (!goType) return false;
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {

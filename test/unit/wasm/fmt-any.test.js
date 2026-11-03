@@ -467,3 +467,31 @@ func true
 `,
 	);
 });
+
+section("fmt on WASM: interface values inside containers");
+
+test("a slice of any prints the dynamic struct value", () => {
+	const o = out(`fmt.Println([]any{A{1}})`, "type A struct{ X int }");
+	assertEqual(o, "[{1}]");
+});
+
+test("slices of error, Stringer and any call the dynamic String/Error method", () => {
+	const o = out(
+		`fmt.Println([]error{Er{"x"}}, []fmt.Stringer{Vs{}}, []any{Vs{}})`,
+		`type Er struct{ s string }
+func (e Er) Error() string { return "er:" + e.s }
+type Vs struct{}
+func (Vs) String() string { return "vs" }`,
+	);
+	assertEqual(o, "[er:x] [vs] [vs]");
+});
+
+test("a slice of any holding a pointer calls the pointer receiver String", () => {
+	const o = out(
+		`a := A{}
+	fmt.Println([]any{&a})`,
+		`type A struct{}
+func (*A) String() string { return "ps" }`,
+	);
+	assertEqual(o, "[ps]");
+});
