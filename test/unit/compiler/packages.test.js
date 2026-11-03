@@ -10,6 +10,7 @@ import {
 	assertThrows,
 	compile,
 	compileDir,
+	compileHybridProject,
 	FIXTURES,
 	ROOT,
 	runJs,
@@ -676,6 +677,48 @@ test("//gofront:target both cannot import wasm package", () => {
 				() => compileDir(dir),
 				/can only import 'both' packages; 'sub' is wasm/,
 			);
+		},
+	);
+});
+
+section("same type name in two local packages");
+
+const PT_PACKAGES = (target) => ({
+	"a/a.go": `//gofront:target ${target}\npackage a\ntype Pt struct{ X int }\nfunc (p Pt) Get() int { return p.X }\n`,
+	"b/b.go": `//gofront:target ${target}\npackage b\ntype Pt struct{ Y string }\nfunc (p Pt) Get() string { return p.Y }\n`,
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a.Pt and b.Pt coexist in one program (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			...PT_PACKAGES(target),
+			"main.go": `//gofront:target ${target}
+package main
+import ("fmt"; "./a"; "./b")
+func main() { fmt.Println(a.Pt{1}, b.Pt{"y"}, a.Pt{4}.Get(), b.Pt{"q"}.Get()) }
+`,
+		});
+		assertEqual(lines.join("\n"), "{1} {y} 4 q");
+	});
+}
+
+test("generic instances over different package types are distinct", () => {
+	withTempDir(
+		{
+			...PT_PACKAGES("js"),
+			"main.go": `//gofront:target js
+package main
+import ("./a"; "./b")
+type Box[T any] struct{ v T }
+func main() {
+	var x Box[a.Pt]
+	x = Box[b.Pt]{}
+	_ = x
+}
+`,
+		},
+		(dir) => {
+			assertThrows(() => compileDir(dir), "Cannot assign Box[b.Pt] to Box[Pt]");
 		},
 	);
 });

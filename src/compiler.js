@@ -35,6 +35,8 @@ import {
 	checkJsonCodecs,
 	finishStdlibJs,
 	importStdlibPackages,
+	mangleCollidingTypes,
+	withOriginalTypeNames,
 } from "./link/stdlib.js";
 import {
 	linkIntoBundle,
@@ -520,6 +522,7 @@ export function compileFiles(files, options = {}) {
 		jsRootPrograms: options.jsRootPrograms ?? [],
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
+		typeOwners: options.typeOwners ?? new Map(),
 	};
 	const outputDir =
 		options.outputDir ??
@@ -546,6 +549,15 @@ export function compileFiles(files, options = {}) {
 			`Mixed package names in ${fromDir}: ${pkgNames.join(", ")}`,
 		);
 	const pkgName = pkgNames[0];
+
+	// Local packages share one flat JS module: a type name another package
+	// already declared is renamed here (`Pt` -> `Pt$$b`).
+	const renamedTypes = mangleLocalTypes(
+		programs,
+		resolve(fromDir),
+		pkgName,
+		options.typeOwners,
+	);
 
 	// Validate target directives across files in this package
 	const declaredTargets = new Map();
@@ -670,12 +682,22 @@ export function compileFiles(files, options = {}) {
 		stringTable,
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
-		exportedTypes: checker.getExportedTypes(),
+		exportedTypes: withOriginalTypeNames(
+			checker.getExportedTypes(),
+			renamedTypes,
+		),
 		exportedConsts: checker.getExportedConsts(),
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
 	};
+}
+
+// The renamed ASTs must not be reused from the parse cache by a later build.
+function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
+	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
+	if (renamed.size > 0) for (const p of programs) _parseCache.delete(p._path);
+	return renamed;
 }
 
 export function compileWasm(source, options = {}) {
