@@ -304,7 +304,11 @@ export const fmtMethods = {
 	_fmtTupleJs(e) {
 		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
 		const parts = e._type.types.map((t, i) => {
-			const boxed = this._fmtBoxValue(`__t[${i}]`, t);
+			const nilOperand = this._fmtNilPtrOperand(t);
+			const value = this._fmtBoxValue(`__t[${i}]`, t);
+			const boxed = nilOperand
+				? `(__t[${i}] == null ? ${nilOperand} : ${value})`
+				: value;
 			const desc = fmtTypeDesc(t, resolve);
 			if (fmtDescHasFloat(desc) && desc.k !== "i") {
 				this.useHelper("sprintf");
