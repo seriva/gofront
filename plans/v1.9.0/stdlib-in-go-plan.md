@@ -551,7 +551,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 13: Typings removal and native self-check
 
-- [ ] **Task 13.1 — Native registry self-check**
+- [x] **Task 13.1 — Native registry self-check**
   - Files: new `test/unit/compiler/natives.test.js`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js`
   - Do: scan `stdlib/**/*.go` for `//gofront:native <name>`; require each name in `NATIVES` and in both registries except the documented single-target allow-list; fail on a registry entry no Go file names.
   - Test: the test fails first against a temporary Go file naming an unregistered native.

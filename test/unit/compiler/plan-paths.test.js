@@ -25,8 +25,6 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
-			// The new test of Task 13.1.
-			"test/unit/compiler/natives.test.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			// Files that completed tasks removed (their "Removes" lines still cite them).
