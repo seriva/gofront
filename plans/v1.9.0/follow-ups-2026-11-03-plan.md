@@ -548,26 +548,27 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 21: Templ and Tooling
 
-- [ ] Task 21.1: Every Go `for` form in templ bodies
+- [x] Task 21.1: Every Go `for` form in templ bodies
   - Files: `src/backend/js/templ.js`, `src/parser/templ.js`, `src/lexer/templ-lexer.js`
   - Test: `test/unit/compiler/templ.test.js` — L172 map → one `<b>` per key; L173 three-clause → `n` `<p>`; L174 composite literal header → `<p>1</p>`; L175 `for range xs` → two `<p>` (terminates); L176 `range n` → `0..n-1`; L177 string → byte index + rune pairs; L185 index-only → `0`,`1` and `i, _` → `1`,`2`.
   - Done when: seven repros render Go's output; `_genTemplFor` heuristics removed.
-- [ ] Task 21.2: Tagless switch and conditional attribute types
+- [x] Task 21.2: Tagless switch and conditional attribute types
   - Files: `src/backend/js/templ.js`, `src/typechecker/statements.js`, `test/unit/compiler/templ.test.js`
   - Test: L178 → `big`; L180 `hidden?={ name }` → `assertErrorContains(errors, "must be bool")`.
   - Done when: both behave as specified.
-- [ ] Task 21.3: Templ expression positions and trailing tokens
+- [x] Task 21.3: Templ expression positions and trailing tokens
   - Files: `src/parser/templ.js`, `src/compiler.js`, `test/unit/compiler/templ.test.js`
   - Test: L171 error on line 3 of `v.templ` → message contains `v.templ at line 3:`; L179 `{ name ) }` → parse error.
   - Done when: both repros yield the specified diagnostics.
-- [ ] Task 21.4: Variadic slots: nil spread and any parameter name; docs
+- [x] Task 21.4: Variadic slots: nil spread and any parameter name; docs
   - Files: `src/backend/js/templ.js`, `docs/language-support.md`, `test/unit/compiler/templ.test.js`
   - Test: L181 `W(ns...)` nil → `<div></div>`; L182 `items...` → both `<i>` mounted.
   - Done when: repros render as specified; the templ `for` row in `docs/language-support.md` lists all forms as supported.
-- [ ] Task 21.5: `check-layers` reports a missing root
+- [x] Task 21.5: `check-layers` reports a missing root
   - Files: `scripts/check-layers.js`, `test/unit/compiler/check-layers.test.js`
   - Test: L189 `node scripts/check-layers.js no-such-dir` → stderr `check-layers: cannot read no-such-dir/.sentrux/rules.toml`, exit 1, no stack trace.
   - Done when: test passes.
+  - Note: all 15 repros re-probed on the phase base and still reproduced (L175 hangs); none dropped. L177 test uses `"aé"` (indices agree): multi-byte byte offsets are a pre-existing backend divergence, see `plans/follow-ups.md`.
 
 ### Phase 22: Lexer, Parser and Literals (stdlib-in-go Follow-ups)
 
