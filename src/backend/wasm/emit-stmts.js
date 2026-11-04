@@ -24,6 +24,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	isTaggedSliceType,
 } from "./types.js";
 
 function hasReturnInBlock(n) {
@@ -1407,7 +1408,9 @@ export class StmtsEmitter {
 
 		if (isSliceType(targetGoType, this.mod.checker)) {
 			const elem = this._getSliceElemType(targetGoType);
-			const sInfo = this.mod.getSliceType(elem);
+			const sInfo = isTaggedSliceType(targetGoType, this.mod.checker)
+				? this.mod.getTaggedSliceType(targetGoType, elem)
+				: this.mod.getSliceType(elem);
 			if (sInfo) {
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
 				return;
@@ -1418,7 +1421,7 @@ export class StmtsEmitter {
 			const elem = this._getArrayElemType(targetGoType);
 			const aInfo = this.mod.getArrayType(elem);
 			if (aInfo) {
-				this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
+				this._emitArrayTypeTest(targetGoType, aInfo);
 				return;
 			}
 		}
@@ -1443,6 +1446,32 @@ export class StmtsEmitter {
 
 		this.pushInstruction("drop");
 		this.pushInstruction({ op: "i32.const", value: 1 });
+	}
+
+	// `[3]int` and `[2]int` share one wasm array type, so the test also compares
+	// the length.
+	_emitArrayTypeTest(goType, aInfo) {
+		let t = goType?._assertType ?? goType;
+		for (let i = 0; i < 16 && t && t.kind !== "array"; i++)
+			t = t.underlying ?? this.mod.checker?.types?.get(t.name);
+		const size = typeof t?.size === "number" ? t.size : null;
+		if (size === null) {
+			this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
+			return;
+		}
+		const tmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.tee", index: tmp });
+		this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction({ op: "ref.cast", typeIndex: aInfo.typeIndex });
+		this.pushInstruction("array.len");
+		this.pushInstruction({ op: "i32.const", value: size });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("end");
+		this.releaseTemp(tmp, "anyref");
 	}
 
 	// Whether the interface value on the stack holds a type implementing the
@@ -3475,7 +3504,7 @@ export class StmtsEmitter {
 				const targetGoType = isNilCase
 					? (stmt.expr._type ?? { kind: "basic", name: "any" })
 					: types.length === 1
-						? (types[0]._type ?? types[0])
+						? (types[0]._type ?? this._resolveTestTarget(types[0]))
 						: { kind: "basic", name: "any" };
 				const targetWType = this.toWasmType(targetGoType);
 				const assignLocal = this.allocLocal(

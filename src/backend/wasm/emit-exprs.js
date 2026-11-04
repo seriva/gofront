@@ -27,6 +27,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	isTaggedSliceType,
 	isTestingT,
 	toWasmType,
 } from "./types.js";
@@ -122,6 +123,8 @@ export class ExprsEmitter {
 				// An array stored in an interface is a copy.
 				if (isArrayType(goType, this.mod.checker))
 					this._emitCopyIfValue(expr, goType, refWType);
+				if (isTaggedSliceType(goType, this.mod.checker))
+					this._emitTagSlice(goType, refWType);
 				if (
 					isFuncType(goType, this.mod.checker) ||
 					isMapType(goType, this.mod.checker)
@@ -139,6 +142,40 @@ export class ExprsEmitter {
 		}
 
 		this._emitRawExpr(expr, targetWasmType);
+	}
+
+	// The slice on the stack becomes the tagged subtype of its Go type, so a
+	// type test can tell `[]byte` from `[]bool` (see getTaggedSliceType).  The
+	// copy shares the backing array; slice headers are immutable.
+	_emitTagSlice(goType, refWType) {
+		const tagged = this.mod.getTaggedSliceType(
+			goType,
+			this._getSliceElemType(goType),
+		);
+		const base = tagged.base;
+		const tmp = this.acquireTemp(refWType);
+		this.pushInstruction({ op: "local.tee", index: tmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({
+			op: "if",
+			blockType: { kind: "ref", nullable: true, typeIndex: base.typeIndex },
+		});
+		this.pushInstruction({ op: "global.get", index: base.emptyGlobalIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: tmp });
+		for (let i = 0; i < 4; i++) {
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: base.typeIndex,
+				fieldIndex: i,
+			});
+		}
+		this.pushInstruction({ op: "ref.null", heapType: tagged.tagTypeIndex });
+		this.pushInstruction({ op: "struct.new", typeIndex: tagged.typeIndex });
+		this.releaseTemp(tmp, refWType);
 	}
 
 	// The nullable ref on the stack becomes an interface value: a nil map, func

@@ -1235,6 +1235,8 @@ export const jsonMethods = {
 			return;
 		}
 
+		if (this._emitNestedPointerFieldDecoder(f, lines)) return;
+
 		if (f.type?.kind === "pointer" && f.type.base) {
 			const innerBase = unwrapNamed(f.type.base);
 			if (innerBase?.kind === "basic") {
@@ -1289,6 +1291,40 @@ export const jsonMethods = {
 		}
 
 		this._emitAssign(f, "__json_dec_any(val)", lines);
+	},
+
+	// `**T` (and deeper) fields: the value is decoded once and wrapped in one
+	// `{ value }` box per pointer level (a pointer to a struct is the struct).
+	// Returns false when the field is not a nested pointer to a scalar or struct.
+	_emitNestedPointerFieldDecoder(f, lines) {
+		let levels = 0;
+		let inner = f.type;
+		while (inner?.kind === "pointer" && inner.base) {
+			levels++;
+			inner = inner.base;
+		}
+		if (levels < 2) return false;
+		const base = unwrapNamed(inner);
+		let boxes = levels;
+		if (base?.kind === "basic" && SCALAR_KINDS.has(base.name)) {
+			lines.push(
+				`      var dv = ${this._jsonScalarDecodeExpr(base.name, this._jsonDisplayType(inner), "val", "raw")};`,
+				`      ${this._softSkip("dv")}`,
+			);
+		} else if (base?.kind === "struct") {
+			lines.push(
+				`      var dv = ${this._newStructExpr(inner)};`,
+				`      var err = ${this._getJsonDecoder(inner)}(val, dv);`,
+				`      if (err) return err;`,
+			);
+			boxes--;
+		} else {
+			return false;
+		}
+		let expr = "dv";
+		for (let i = 0; i < boxes; i++) expr = `{ value: ${expr}, __p: true }`;
+		this._emitAssign(f, expr, lines);
+		return true;
 	},
 
 	// `*T` scalar fields: Go reports the element type in errors.
