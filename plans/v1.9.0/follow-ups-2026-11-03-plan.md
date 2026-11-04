@@ -522,7 +522,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/lower/json-codecs.js`, `src/backend/js/stdlib/json.js`, `test/unit/builtins/json.test.js`
   - Test: L149a → `[1,2,3]`; L149b → `5`; L149c → `0.1`; L163a → `12`; L163b → `[1]`; L152 → `"t-x"`; L167a/b → `json: unsupported type: func()`; L168 → `json: unsupported type: map[bool]int`.
   - Done when: repros match Go on js/both.
-- [ ] Task 19.3: Codecs for anonymous and function-local struct types
+- [x] Task 19.3: Codecs for anonymous and function-local struct types (same-named function-local types deferred to plans/follow-ups.md)
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: L148a → `Go struct field .Nest.X`; L148b → `{"a":1}`; L148c → the type error on all targets (no "please report"); L158 → `{"X":1} {"Y":"y"}`; L169 → `{"A":null} {"S":1}`.
   - Done when: repros match Go on all targets; WASM validates.

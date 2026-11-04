@@ -16,21 +16,6 @@ function declareCodec(fnName, params, body) {
 	return `var ${fnName} = typeof ${fnName} !== "undefined" ? ${fnName} : function ${fnName}(${params}) {\n${body}\n};`;
 }
 
-function typeCodecName(t, fallback = "val") {
-	if (!t) return fallback;
-	if (t.kind === "pointer" && t.base) {
-		return `${typeCodecName(t.base, fallback)}_ptr`;
-	}
-	if (t.name) return t.name;
-	if (t.kind === "slice") return `slice_${typeCodecName(t.elem, "elem")}`;
-	if (t.kind === "map")
-		return `map_${typeCodecName(t.value ?? t.elem, "elem")}`;
-	if (t.kind === "array")
-		return `array${t.size}_${typeCodecName(t.elem, "elem")}`;
-	// Other unnamed types (func, chan, anonymous struct) are told apart by spelling.
-	return typeStr(t) ? safeIdent(typeStr(t)) : fallback;
-}
-
 function unwrapNamed(t) {
 	return t?.kind === "named" ? t.underlying : t;
 }
@@ -192,6 +177,35 @@ export const jsonMethods = {
 		return `${JSON.stringify(this._jsonDisplayType(targetType))}, ${JSON.stringify(kind)}`;
 	},
 
+	// Identifier part naming the codecs of a (possibly unnamed) type.
+	_typeCodecName(t, fallback = "val") {
+		if (!t) return fallback;
+		if (t.kind === "pointer" && t.base) {
+			return `${this._typeCodecName(t.base, fallback)}_ptr`;
+		}
+		if (t.name) return t.name;
+		if (t.kind === "slice")
+			return `slice_${this._typeCodecName(t.elem, "elem")}`;
+		if (t.kind === "map")
+			return `map_${this._typeCodecName(t.value ?? t.elem, "elem")}`;
+		if (t.kind === "array")
+			return `array${t.size}_${this._typeCodecName(t.elem, "elem")}`;
+		if (t.kind === "struct") return this._structCodecName(t);
+		// Other unnamed types (func, chan) are told apart by spelling.
+		return typeStr(t) ? safeIdent(typeStr(t)) : fallback;
+	},
+
+	// Codec name part for a struct type: its name, or an id of its own for each
+	// distinct anonymous struct type.
+	_structCodecName(type) {
+		if (type.name) return safeIdent(type.name.split(".").pop());
+		this._jsonAnonIds ??= new Map();
+		const key = unwrapNamed(type);
+		if (!this._jsonAnonIds.has(key))
+			this._jsonAnonIds.set(key, this._jsonAnonIds.size + 1);
+		return `AnonStruct${this._jsonAnonIds.get(key)}`;
+	},
+
 	_getJsonEncoder(type, addr = false) {
 		if (!type) return "__json_enc_any";
 		if (isNumberType(type)) return "__json_enc_number";
@@ -225,8 +239,7 @@ export const jsonMethods = {
 
 		if (base?.kind === "struct") {
 			const needsAddr = addr && this._jsonNeedsAddr(type);
-			const typeName = safeIdent((type.name ?? "AnonStruct").split(".").pop());
-			const fnName = `__json_enc_${typeName}${needsAddr ? "_addr" : ""}`;
+			const fnName = `__json_enc_${this._structCodecName(type)}${needsAddr ? "_addr" : ""}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(fnName, "");
 				const code = this._buildStructEncoder(type, fnName, needsAddr);
@@ -239,7 +252,7 @@ export const jsonMethods = {
 			const innerEnc = this._getJsonEncoder(type.base, true);
 			// Pointers to structs are the struct object; other pointers are { value } boxes.
 			const deref = unwrapNamed(type.base)?.kind === "struct" ? "v" : "v.value";
-			const fnName = `__json_enc_ptr_${safeIdent(typeCodecName(type.base, "val").split(".").pop())}`;
+			const fnName = `__json_enc_ptr_${safeIdent(this._typeCodecName(type.base, "val").split(".").pop())}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(
 					fnName,
@@ -255,7 +268,7 @@ export const jsonMethods = {
 
 		if (base?.kind === "slice" || base?.kind === "array") {
 			const elemEnc = this._getJsonEncoder(base.elem, true);
-			const fnName = `__json_enc_slice_${safeIdent(typeCodecName(base.elem, "elem").split(".").pop())}`;
+			const fnName = `__json_enc_slice_${safeIdent(this._typeCodecName(base.elem, "elem").split(".").pop())}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(
 					fnName,
@@ -272,7 +285,7 @@ export const jsonMethods = {
 		if (base?.kind === "map") {
 			const valType = base.value ?? base.elem;
 			const valEnc = this._getJsonEncoder(valType, false);
-			const fnName = `__json_enc_map_${safeIdent(typeCodecName(valType, "val").split(".").pop())}`;
+			const fnName = `__json_enc_map_${safeIdent(this._typeCodecName(valType, "val").split(".").pop())}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(
 					fnName,
@@ -807,10 +820,7 @@ export const jsonMethods = {
 
 		const base = unwrapNamed(baseType);
 		if (base?.kind === "struct") {
-			const typeName = safeIdent(
-				(baseType.name ?? "AnonStruct").split(".").pop(),
-			);
-			const fnName = `__json_dec_${typeName}`;
+			const fnName = `__json_dec_${this._structCodecName(baseType)}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(fnName, "");
 				const code = this._buildStructDecoder(baseType, fnName);
@@ -829,7 +839,7 @@ export const jsonMethods = {
 	},
 
 	_getSliceDecoder(base) {
-		const elemTypeName = typeCodecName(base.elem, "elem");
+		const elemTypeName = this._typeCodecName(base.elem, "elem");
 		const fnName = `__json_dec_slice_${safeIdent(elemTypeName.split(".").pop())}`;
 		if (!this._jsonCodecs.has(fnName)) {
 			const elemDec = this._genElemDecoder(base.elem);
@@ -852,7 +862,7 @@ export const jsonMethods = {
 	// Arrays decode into a fresh array of the fixed length: surplus JSON elements
 	// are dropped and missing ones are zero. JSON null leaves the array alone.
 	_getArrayDecoder(base) {
-		const elemTypeName = typeCodecName(base.elem, "elem");
+		const elemTypeName = this._typeCodecName(base.elem, "elem");
 		const fnName = `__json_dec_array${base.size}_${safeIdent(elemTypeName.split(".").pop())}`;
 		if (!this._jsonCodecs.has(fnName)) {
 			this._jsonCodecs.set(
@@ -903,7 +913,7 @@ export const jsonMethods = {
 
 	_getMapDecoder(base) {
 		const valType = base.value ?? base.elem;
-		const valTypeName = typeCodecName(valType, "val");
+		const valTypeName = this._typeCodecName(valType, "val");
 		const keyKind = this._jsonMapKeyKind(base.key);
 		const display = this._jsonDisplayType(base);
 		const keyTypeName = safeIdent(this._jsonDisplayType(base.key));
@@ -969,6 +979,15 @@ export const jsonMethods = {
 			func: funcSig,
 			chan: () => `chan ${show(t.elem)}`,
 			interface: () => t.name || "interface {}",
+			struct: () => {
+				const fields = (t._structFields ?? []).flatMap((f) => {
+					const tag = f.tag ? ` ${JSON.stringify(f.tag)}` : "";
+					const type = show(f.type);
+					if (f.embedded) return [`${type}${tag}`];
+					return f.names.map((n) => `${n} ${type}${tag}`);
+				});
+				return fields.length ? `struct { ${fields.join("; ")} }` : "struct {}";
+			},
 			pointer: () => `*${show(t.base)}`,
 			named: () => this._jsonTypeName(t),
 			basic: () => BASIC_DISPLAY[t.name] ?? t.name,
@@ -1020,11 +1039,17 @@ export const jsonMethods = {
 		if (ptrElem) return ptrElem;
 		if (base?.kind === "struct") {
 			const dec = this._getJsonDecoder(elemType);
-			const structName = elemType.name?.split(".").pop() ?? "Object";
 			return (v) =>
-				`(() => { var inst = new ${structName}(); var err = ${dec}(${v}, inst); return err || inst; })()`;
+				`(() => { var inst = ${this._newStructExpr(elemType)}; var err = ${dec}(${v}, inst); return err || inst; })()`;
 		}
 		return this._compositeElemDecoder(elemType, base);
+	},
+
+	// A new zero struct of `type`: its class, or the zero value of an anonymous struct.
+	_newStructExpr(type) {
+		return type.name
+			? `new ${type.name.split(".").pop()}()`
+			: this.zeroValueForType(type);
 	},
 
 	// `*Struct` and `*scalar` elements; null stays nil.
@@ -1033,9 +1058,8 @@ export const jsonMethods = {
 		const innerBase = unwrapNamed(elemType.base);
 		if (innerBase?.kind === "struct") {
 			const dec = this._getJsonDecoder(elemType.base);
-			const structName = elemType.base.name?.split(".").pop() ?? "Object";
 			return (v) =>
-				`(${v} === null ? null : (() => { var inst = new ${structName}(); var err = ${dec}(${v}, inst); return err || inst; })())`;
+				`(${v} === null ? null : (() => { var inst = ${this._newStructExpr(elemType.base)}; var err = ${dec}(${v}, inst); return err || inst; })())`;
 		}
 		if (innerBase?.kind !== "basic") return null;
 		const basicDec = this._genElemDecoder(elemType.base);
@@ -1060,7 +1084,8 @@ export const jsonMethods = {
 	_buildStructDecoder(structType, fnName) {
 		const underlying = unwrapNamed(structType);
 		const fields = this.checker?.resolveJsonFields(underlying) ?? [];
-		const structName = structType.name?.split(".").pop() ?? "T";
+		// An anonymous struct has no name in decode errors (".Nest.X").
+		const structName = structType.name?.split(".").pop() ?? "";
 		const lines = [];
 		lines.push(
 			`var ${fnName} = typeof ${fnName} !== "undefined" ? ${fnName} : function ${fnName}(parsed, target, box) {`,
@@ -1204,11 +1229,10 @@ export const jsonMethods = {
 				return;
 			}
 			if (innerBase?.kind === "struct") {
-				const innerName = f.type.base.name?.split(".").pop() ?? "Object";
 				const dec = this._getJsonDecoder(f.type.base);
 				lines.push(`      var sub = target.${f.goName};`);
 				lines.push(
-					`      if (!sub) { sub = new ${innerName}(); target.${f.goName} = sub; }`,
+					`      if (!sub) { sub = ${this._newStructExpr(f.type.base)}; target.${f.goName} = sub; }`,
 				);
 				lines.push(`      var err = ${dec}(val, sub);`);
 				lines.push(`      if (err) return err;`);
@@ -1220,11 +1244,10 @@ export const jsonMethods = {
 		}
 
 		if (base?.kind === "struct") {
-			const innerName = f.type.name?.split(".").pop() ?? "Object";
 			const dec = this._getJsonDecoder(f.type);
 			lines.push(`      var sub = target.${f.goName};`);
 			lines.push(
-				`      if (!sub) { sub = new ${innerName}(); target.${f.goName} = sub; }`,
+				`      if (!sub) { sub = ${this._newStructExpr(f.type)}; target.${f.goName} = sub; }`,
 			);
 			lines.push(`      var err = ${dec}(val, sub);`);
 			lines.push(`      if (err) return err;`);
