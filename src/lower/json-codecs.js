@@ -175,6 +175,7 @@ export class JsonCodecGen {
 			map: () => `map[${k(t.key)}]${k(t.value)}`,
 			struct: () => this.structKey(t),
 			interface: () => (isEmptyIface(t) ? "any" : `iface:${t.name ?? ""}`),
+			func: () => this.funcString(t, k),
 		};
 		return (byKind[t.kind] ?? (() => `?${t.kind}`))();
 	}
@@ -294,7 +295,11 @@ export class JsonCodecGen {
 				: rs.length === 1
 					? ` ${name(rs[0])}`
 					: ` (${rs.map(name).join(", ")})`;
-		return `func(${t.params.map(name).join(", ")})${res}`;
+		// The signature keeps a variadic parameter's element type.
+		const params = t.params.map((p, i) =>
+			t.variadic && i === t.params.length - 1 ? `...${name(p)}` : name(p),
+		);
+		return `func(${params.join(", ")})${res}`;
 	}
 
 	// A struct's own name in decode errors.

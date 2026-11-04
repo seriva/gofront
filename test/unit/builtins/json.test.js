@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import { HELPER_ERROR, HELPER_JSON } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertJsProgramOutput,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	runJs,
@@ -2585,6 +2587,394 @@ func main() {
 }
 `;
 	await assertProgramOutput(src, '{"N":9223372036854775807}\ntrue\n');
+});
+
+section("encoding/json — decoding on the JS backend");
+
+test("Unmarshal keeps decoding after a type error and reports the first (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type R struct {
+	F  float64
+	B  bool
+	Sl []int
+}
+
+func main() {
+	var r R
+	err := json.Unmarshal([]byte(\`{"F":"x","B":true,"Sl":[1,"y"]}\`), &r)
+	fmt.Println(err, r.B, r.Sl)
+}
+`,
+		`json: cannot unmarshal string into Go struct field R.F of type float64 true [1 0]
+`,
+	);
+});
+
+test("Unmarshal rejects map keys that do not fit the key type (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var m map[int]string
+	err := json.Unmarshal([]byte(\`{"x":"a"}\`), &m)
+	fmt.Println(err, len(m))
+	var ok map[int]string
+	fmt.Println(json.Unmarshal([]byte(\`{"7":"a"}\`), &ok), ok)
+}
+`,
+		`json: cannot unmarshal number x into Go value of type int 0
+<nil> map[7:a]
+`,
+	);
+});
+
+test("Unmarshal into an existing map adds to it (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type H struct{ M map[string]int }
+
+func main() {
+	m := map[string]int{"keep": 1}
+	fmt.Println(json.Unmarshal([]byte(\`{"a":1}\`), &m), m)
+	h := H{M: map[string]int{"keep": 2}}
+	fmt.Println(json.Unmarshal([]byte(\`{"M":{"b":3}}\`), &h), h.M)
+}
+`,
+		`<nil> map[a:1 keep:1]
+<nil> map[b:3 keep:2]
+`,
+	);
+});
+
+test("Unmarshal into RawMessage trims surrounding whitespace (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var rm json.RawMessage
+	fmt.Println(json.Unmarshal([]byte(" 1 "), &rm))
+	fmt.Printf("%q\\n", string(rm))
+}
+`,
+		`<nil>
+"1"
+`,
+	);
+});
+
+section("encoding/json — values in interfaces (js)");
+
+test("values in an interface encode from their static type (js)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func show(v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show([3]byte{1, 2, 3})
+	n := 5
+	show(&n)
+	show(float32(0.1))
+	show(json.Number("12"))
+	rm := json.RawMessage("[1]")
+	show(&rm)
+	show([][2]byte{{1, 2}})
+	show(map[string]*int{"a": &n})
+	show(map[string]any{"k": [2]byte{3, 4}, "f": float32(0.3), "n": json.Number("7")})
+	show([]any{&n, float32(2.5), [1]byte{9}})
+}
+`,
+		`[1,2,3] <nil>
+5 <nil>
+0.1 <nil>
+12 <nil>
+[1] <nil>
+[[1,2]] <nil>
+{"a":5} <nil>
+{"f":0.3,"k":[3,4],"n":7} <nil>
+[5,2.5,[9]] <nil>
+`,
+	);
+});
+
+test("MarshalText encodes values, fields and elements (js)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T string
+
+func (t T) MarshalText() ([]byte, error) { return []byte("t-" + string(t)), nil }
+
+type P struct{ N int }
+
+func (p *P) MarshalText() ([]byte, error) { return []byte(fmt.Sprint("p", p.N)), nil }
+
+type Rec struct {
+	A T
+	B []T
+	C P
+	D *P
+}
+
+func main() {
+	var v any = T("x")
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(T("y"))
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(Rec{"a", []T{"b", "c"}, P{1}, &P{2}})
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(&Rec{"a", nil, P{1}, nil})
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(map[string]T{"k": "v"})
+	fmt.Println(string(b), err)
+}
+`,
+		`"t-x" <nil>
+"t-y" <nil>
+{"A":"t-a","B":["t-b","t-c"],"C":{"N":1},"D":"p2"} <nil>
+{"A":"t-a","B":null,"C":"p1","D":null} <nil>
+{"k":"t-v"} <nil>
+`,
+	);
+});
+
+test("func, chan, complex and unsupported map keys report an unsupported type (js)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Holder struct {
+	Name string
+	F    func()
+}
+
+func show(v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show(func() {})
+	fs := []func(){nil}
+	show(fs)
+	empty := []func(){}
+	show(empty)
+	var nilFns []func()
+	show(nilFns)
+	show(map[bool]int{true: 1})
+	fm := map[string]func(){"a": nil}
+	show(fm)
+	show(Holder{Name: "h"})
+	show(&Holder{Name: "h"})
+	show(struct{ M map[bool]int }{})
+	show(func(a int, b ...string) (int, error) { return 0, nil })
+	b, err := json.Marshal(func() {})
+	fmt.Println(string(b), err)
+	var c complex128 = complex(1, 2)
+	b, err = json.Marshal(c)
+	fmt.Println(string(b), err)
+	show(c)
+	b, err = json.MarshalIndent(map[int8]bool{3: true}, "", " ")
+	fmt.Println(string(b), err)
+}
+`,
+		` json: unsupported type: func()
+ json: unsupported type: func()
+[] <nil>
+null <nil>
+ json: unsupported type: map[bool]int
+ json: unsupported type: func()
+ json: unsupported type: func()
+ json: unsupported type: func()
+ json: unsupported type: map[bool]int
+ json: unsupported type: func(int, ...string) (int, error)
+ json: unsupported type: func()
+ json: unsupported type: complex128
+ json: unsupported type: complex128
+{
+ "3": true
+} <nil>
+`,
+	);
+});
+
+section("encoding/json — anonymous struct types");
+
+test("anonymous struct types encode, decode and report errors like Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct {
+	Nest struct{ X int }
+}
+
+type Outer struct {
+	In   struct{ A, B int }
+	List []struct{ N string }
+	M    map[string]struct{ V float64 }
+}
+
+func main() {
+	var t T
+	fmt.Println(json.Unmarshal([]byte(\`{"Nest":{"X":"s"}}\`), &t))
+	b, _ := json.Marshal(struct {
+		A int \`json:"a"\`
+	}{1})
+	fmt.Println(string(b))
+	var t2 struct{ Nest struct{ X int } }
+	fmt.Println(json.Unmarshal([]byte(\`{"Nest":{"X":3}}\`), &t2), t2)
+	var t3 struct{ Nest struct{ X int } }
+	fmt.Println(json.Unmarshal([]byte(\`{"Nest":{"X":"q"}}\`), &t3), t3)
+	var v any = struct {
+		A int \`json:"a"\`
+		B []struct{ Z bool }
+	}{2, []struct{ Z bool }{{true}}}
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	x1, _ := json.Marshal(struct{ A *int }{})
+	x2, _ := json.Marshal(struct{ S int }{1})
+	fmt.Println(string(x1), string(x2))
+	var o Outer
+	err = json.Unmarshal([]byte(\`{"In":{"A":1,"B":2},"List":[{"N":"a"},{"N":"b"}],"M":{"k":{"V":1.5}}}\`), &o)
+	fmt.Println(err, o)
+	b, _ = json.Marshal(o)
+	fmt.Println(string(b))
+	var s []struct{ K int }
+	fmt.Println(json.Unmarshal([]byte(\`[{"K":1},{"K":"x"}]\`), &s), s)
+}
+`,
+		`json: cannot unmarshal string into Go struct field .Nest.X of type int
+{"a":1}
+<nil> {{3}}
+json: cannot unmarshal string into Go struct field .Nest.X of type int {{0}}
+{"a":2,"B":[{"Z":true}]} <nil>
+{"A":null} {"S":1}
+<nil> {{1 2} [{a} {b}] map[k:{1.5}]}
+{"In":{"A":1,"B":2},"List":[{"N":"a"},{"N":"b"}],"M":{"k":{"V":1.5}}}
+json: cannot unmarshal string into Go struct field .K of type int [{1} {0}]
+`,
+	);
+});
+
+test("a field of a pointer to an anonymous struct keeps its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g(q *struct{ X int }) { q.X = 5 }
+
+func f(p *struct{ Nest struct{ X int } }) { g(&p.Nest) }
+
+func main() {
+	var t struct{ Nest struct{ X int } }
+	f(&t)
+	fmt.Println(t)
+}
+`,
+		`{{5}}
+`,
+	);
+});
+
+section("encoding/json — error messages");
+
+test("invalid Number literal and Unmarshal argument errors match Go on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Item struct{ A int }
+
+func viaParam(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+func main() {
+	var n json.Number
+	fmt.Println(json.Unmarshal([]byte(\`"x"\`), &n))
+	var rs struct{ N json.Number }
+	fmt.Println(json.Unmarshal([]byte(\`{"N":"x"}\`), &rs))
+	fmt.Println(json.Unmarshal([]byte(\`1\`), any(5)))
+	fmt.Println(json.Unmarshal([]byte(\`1\`), any("s")))
+	fmt.Println(json.Unmarshal([]byte(\`1\`), any(2.5)))
+	var ip *Item
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), any(ip)))
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), ip))
+	fmt.Println(viaParam([]byte(\`{}\`), ip))
+	fmt.Println(viaParam([]byte(\`1\`), 7))
+	fmt.Println(viaParam([]byte(\`1\`), "s"))
+	fmt.Println(viaParam([]byte(\`1\`), []int{1}))
+	fmt.Println(viaParam([]byte(\`1\`), nil))
+	fmt.Println(json.NewDecoder(strings.NewReader(\`1\`)).Decode(any(5)))
+	fmt.Println(json.NewDecoder(strings.NewReader(\`{}\`)).Decode(any(ip)))
+}
+`,
+		`json: invalid number literal, trying to unmarshal "\\"x\\"" into Number
+json: invalid number literal, trying to unmarshal "\\"x\\"" into Number
+json: Unmarshal(non-pointer int)
+json: Unmarshal(non-pointer string)
+json: Unmarshal(non-pointer float64)
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(non-pointer int)
+json: Unmarshal(non-pointer string)
+json: Unmarshal(non-pointer []int)
+json: Unmarshal(nil)
+json: Unmarshal(non-pointer int)
+json: Unmarshal(nil *main.Item)
+`,
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

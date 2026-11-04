@@ -1697,8 +1697,18 @@ var __json_err = __json_err || function(msg, valKind, targetType) {
   }
   e.Error = function() { return fullMsg; };
   e._msg = fullMsg;
+  e.__soft = true;
   e.__struct = "UnmarshalTypeError$$internal$jsonrt";
   return e;
+};
+// A type error does not stop a decode: Go records the first one, leaves the
+// value alone and keeps going. Returns null for such an error (after recording
+// it) and the error itself when it must abort the decode.
+var __json_saved = __json_saved || null;
+var __json_softerr = __json_softerr || function(e) {
+  if (!e || e.__soft !== true) return e;
+  if (__json_saved === null) __json_saved = e;
+  return null;
 };
 // Decode error context, as in Go: innermost struct being decoded plus the path
 // of JSON field names from the root. Reset by every __json_unmarshal call.
@@ -1733,7 +1743,11 @@ var __json_number_decode = __json_number_decode || function(v, ctxType, raw) {
   }
   if (typeof v === "string") {
     if (!__json_is_valid_number(v)) {
-      return __json_err("invalid number literal, trying to unmarshal " + JSON.stringify(v) + " into Number");
+      // Go quotes the whole JSON literal and stops decoding.
+      var lit = raw !== undefined && raw !== null ? String(raw).trim() : JSON.stringify(v);
+      var bad = __json_err("invalid number literal, trying to unmarshal " + JSON.stringify(lit) + " into Number");
+      bad.__soft = false;
+      return bad;
     }
     return v;
   }
@@ -1742,7 +1756,7 @@ var __json_number_decode = __json_number_decode || function(v, ctxType, raw) {
 var __json_dec_number = __json_dec_number || function(parsed, target, box, rawData, rawStr) {
   if (parsed === null) return null;
   var nv = __json_number_decode(parsed, "json.Number", rawStr);
-  if (nv && nv._msg) return nv;
+  if (nv && nv._msg) return __json_softerr(nv);
   if (box) box.value = nv;
   return null;
 };
@@ -1759,7 +1773,11 @@ var __json_bytes_decode = __json_bytes_decode || function(v) {
     var u8 = new Uint8Array(v.length);
     for (var i = 0; i < v.length; i++) {
       var b = __json_int_decode(v[i], "uint8", "uint8", __json_raw_child(v, i));
-      if (b && b._msg) return b;
+      if (b && b._msg) {
+        var hard = __json_softerr(b);
+        if (hard) return hard;
+        b = 0;
+      }
       u8[i] = b;
     }
     return u8;
@@ -1825,19 +1843,46 @@ var __json_unsupported_value = __json_unsupported_value || function(str) {
   e.__struct = "UnsupportedValueError$$internal$jsonrt";
   return e;
 };
+var __json_unsupported_type = __json_unsupported_type || function(name) {
+  var e;
+  if (typeof UnsupportedTypeError$$internal$jsonrt === "function") {
+    e = new UnsupportedTypeError$$internal$jsonrt(name);
+    if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+    e.__struct = "UnsupportedTypeError$$internal$jsonrt";
+  } else {
+    e = new Error("json: unsupported type: " + name);
+  }
+  throw e;
+};
+var __json_marshal_error = __json_marshal_error || function(typeName, err, source) {
+  var merr;
+  if (typeof MarshalerError$$internal$jsonrt === "function") {
+    merr = new MarshalerError$$internal$jsonrt(typeName, err, source);
+    if (merr.__p !== true && Object.isExtensible(merr)) Object.defineProperty(merr, "__p", { value: true, configurable: true, writable: true });
+    merr.__struct = "MarshalerError$$internal$jsonrt";
+  } else {
+    merr = new Error("json: error calling " + source + " for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
+  }
+  return merr;
+};
+// MarshalText output is a JSON string of the text.
+var __json_text_out = __json_text_out || function(res, typeName) {
+  var err = res && res[1];
+  if (err) throw __json_marshal_error(typeName, err, "MarshalText");
+  var b = res ? res[0] : null;
+  return __json_esc(b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b)));
+};
+// Gives a value entering an interface the encoder of its static type, which a
+// number, array or pointer cannot be told from at run time. A boxed named
+// value (unbox) passes its raw value to the encoder.
+var __jt = __jt || function(x, enc, unbox) {
+  if (x !== null && x !== undefined && (typeof x === "object" || typeof x === "function") && Object.isExtensible(x))
+    Object.defineProperty(x, "__je", { value: unbox ? function(b) { return enc(b.__gfUnbox()); } : enc, configurable: true, writable: true });
+  return x;
+};
 var __json_marshaler_out = __json_marshaler_out || function(res, typeName) {
   var err = res && res[1];
-  if (err) {
-    var merr;
-    if (typeof MarshalerError$$internal$jsonrt === "function") {
-      merr = new MarshalerError$$internal$jsonrt(typeName, err, "MarshalJSON");
-      if (merr.__p !== true && Object.isExtensible(merr)) Object.defineProperty(merr, "__p", { value: true, configurable: true, writable: true });
-      merr.__struct = "MarshalerError$$internal$jsonrt";
-    } else {
-      merr = new Error("json: error calling MarshalJSON for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
-    }
-    throw merr;
-  }
+  if (err) throw __json_marshal_error(typeName, err, "MarshalJSON");
   var b = res ? res[0] : null;
   var s = b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b));
   var c = __json_compact(s);
@@ -1856,8 +1901,11 @@ var __json_unquote = __json_unquote || function(val, kind, typeStr) {
   if (typeof val !== "string" || val.endsWith("__bigint")) {
     return __json_err("invalid use of ,string struct tag, trying to unmarshal unquoted value into " + typeStr);
   }
+  // Go returns this error from the field (it ends the decode) instead of recording it.
   var invalid = function() {
-    return __json_err("invalid use of ,string struct tag, trying to unmarshal " + JSON.stringify(val) + " into " + typeStr);
+    var e = __json_err("invalid use of ,string struct tag, trying to unmarshal " + JSON.stringify(val) + " into " + typeStr);
+    e.__soft = false;
+    return e;
   };
   var inner;
   try { inner = JSON.parse(__json_preserve_int64(val)); } catch (e) {
@@ -2032,13 +2080,26 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
   }
   return fail();
 };
+// A JSON object key decoded into an integer map key (strconv.ParseInt): the
+// canonical key text, or a type error.
+var __json_key_int = __json_key_int || function(k, typeName, ctxType) {
+  if (/^[+-]?[0-9]+$/.test(k)) {
+    var n = BigInt(k);
+    var signed = typeName.charAt(0) !== "u";
+    var bits = { int8: 8, uint8: 8, byte: 8, int16: 16, uint16: 16, int32: 32, uint32: 32, rune: 32 }[typeName] || 64;
+    var min = signed ? -(1n << BigInt(bits - 1)) : 0n;
+    var max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
+    if (n >= min && n <= max) return n.toString();
+  }
+  return __json_err("cannot unmarshal number " + k + " into " + __json_ctx(ctxType));
+};
 var __json_b64 = __json_b64 || function(u8) {
   if (u8 === null || u8 === undefined) return "null";
   return '"' + EncodeBytes$$internal$jsonrt(u8) + '"';
 };
 var __json_b64_dec = __json_b64_dec || function(str) {
   var res = DecodeBytes$$internal$jsonrt(str);
-  if (res[1]) return { _msg: res[1].Error(), __userErr: res[1] };
+  if (res[1]) return { _msg: res[1].Error(), __userErr: res[1], __soft: true };
   return res[0];
 };
 var __json_is_zero = __json_is_zero || function(val, isStruct, isMap) {
@@ -2077,10 +2138,14 @@ var __json_enc_raw = __json_enc_raw || function(v) {
 };
 var __json_enc_any = __json_enc_any || function(v) {
   if (v === null || v === undefined || v.__nilp === true) return "null";
+  if (typeof v.__je === "function") return v.__je(v);
   var t = typeof v;
   if (t === "boolean") return v ? "true" : "false";
   if (t === "number") {
     if (!isFinite(v)) throw __json_unsupported_value(String(v));
+    // A float32 is a plain number once it is an interface value: one that is
+    // exactly a float32 with a shorter float32 spelling encodes as such.
+    if (!Number.isInteger(v) && Math.fround(v) === v) return __json_float32(v);
     return Object.is(v, -0) ? "-0" : String(v);
   }
   if (t === "bigint") return v.toString();
@@ -2265,6 +2330,18 @@ var __json_valid = __json_valid || function(data) {
 // The static type of the target decides the argument errors, as in Go:
 // targetKind is "ptr" (a pointer), "val" (neither pointer nor interface) or
 // empty (an interface, judged by the dynamic value).
+// The Go type name of an interface Unmarshal target, from its run-time shape.
+var __json_dyn_type = __json_dyn_type || function(v, pkg) {
+  var t = typeof v;
+  if (t === "number") return Number.isInteger(v) ? "int" : "float64";
+  if (t === "bigint") return "int64";
+  if (t === "string") return "string";
+  if (t === "boolean") return "bool";
+  if (v && typeof v.__t === "string") return v.__t;
+  var cls = v && v.constructor && v.constructor.name;
+  if (cls && cls !== "Object") return (v.__nilp === true ? "*" : "") + (pkg ? pkg + "." : "") + cls;
+  return t;
+};
 var __json_invalid_target = __json_invalid_target || function(name, isPtr) {
   if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
     var e = new InvalidUnmarshalError$$internal$jsonrt(name, isPtr);
@@ -2275,7 +2352,8 @@ var __json_invalid_target = __json_invalid_target || function(name, isPtr) {
   var msg = name === "" ? "json: Unmarshal(nil)" : (isPtr ? "json: Unmarshal(nil " + name + ")" : "json: Unmarshal(non-pointer " + name + ")");
   return typeof __error === "function" ? __error(msg) : new Error(msg);
 };
-var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName, targetKind) {
+var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName, targetKind, pkg) {
+  var typedNil = target?.__nilp === true ? __json_dyn_type(target, pkg) : "";
   if (target?.__nilp === true) target = null;
   __json_structs.length = 0;
   __json_path.length = 0;
@@ -2295,11 +2373,13 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTyp
   }
   if (targetKind === "val") return __json_invalid_target(targetTypeName, false);
   if (target === null || target === undefined) {
-    return targetKind === "ptr" ? __json_invalid_target(targetTypeName, true) : __json_invalid_target("", false);
+    if (targetKind === "ptr") return __json_invalid_target(targetTypeName, true);
+    return typedNil ? __json_invalid_target(typedNil, true) : __json_invalid_target("", false);
   }
-  if (typeof target !== "object" || target.__v === true) {
-    var tname = targetTypeName || (target && target.constructor && target.constructor.name && target.constructor.name !== "Object" ? target.constructor.name : typeof target);
-    return __json_invalid_target(tname, false);
+  // A slice or map held in an interface is not a pointer; its tag is the type.
+  var plainValue = typeof target === "object" && typeof target.__t === "string" && target.__t[0] !== "*";
+  if (typeof target !== "object" || target.__v === true || plainValue) {
+    return __json_invalid_target(targetTypeName || __json_dyn_type(target, pkg), false);
   }
   var str;
   try {
@@ -2319,9 +2399,17 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTyp
   __json_current_offset = str.length;
   var isBox = target && typeof target === "object" && (Object.prototype.hasOwnProperty.call(target, "value") || typeof target.__gfUnbox === "function");
   var dest = isBox ? target.value : target;
-  var err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
+  var prevSaved = __json_saved;
+  __json_saved = null;
+  var err, saved;
+  try {
+    err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
+    saved = __json_saved;
+  } finally {
+    __json_saved = prevSaved;
+  }
   if (err) return err.__userErr || err;
-  return null;
+  return saved ? saved.__userErr || saved : null;
 };
 var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   var e = enc?.value ?? enc;
@@ -2349,8 +2437,7 @@ var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   }
   return null;
 };
-var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName, targetKind) {
-  if (target?.__nilp === true) target = null;
+var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName, targetKind, pkg) {
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];
@@ -2361,7 +2448,7 @@ var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target
   OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
   var uerr;
   try {
-    uerr = __json_unmarshal(decFn, data, target, targetTypeName, targetKind);
+    uerr = __json_unmarshal(decFn, data, target, targetTypeName, targetKind, pkg);
   } finally {
     OptUseNumber$$internal$jsonrt = false;
     OptDisallowUnknownFields$$internal$jsonrt = false;
