@@ -105,6 +105,22 @@ const VALUE_TARGET_KINDS = new Set([
 ]);
 
 const COMPOSITE_KINDS = new Set(["slice", "array", "map"]);
+// Integer kinds a JSON object key can decode into.
+const INT_KEY_KINDS = new Set([
+	"int",
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"uintptr",
+	"byte",
+	"rune",
+]);
 const COMPOSITE_DECODERS = {
 	slice: "_getSliceDecoder",
 	array: "_getArrayDecoder",
@@ -690,8 +706,8 @@ export const jsonMethods = {
 					fnName,
 					declareCodec(
 						fnName,
-						"parsed, target, box, rawData",
-						`  var u8 = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData);\n  u8.__raw = true;\n  if (box) box.value = u8;\n  return null;`,
+						"parsed, target, box, rawData, rawStr",
+						`  var u8 = __json_raw_bytes(rawStr);\n  u8.__raw = true;\n  if (box) box.value = u8;\n  return null;`,
 					),
 				);
 			}
@@ -706,7 +722,7 @@ export const jsonMethods = {
 					declareCodec(
 						fnName,
 						"parsed, target, box",
-						`  if (parsed === null) { if (box) box.value = null; return null; }\n  var u8 = __json_bytes_decode(parsed);\n  if (u8 && u8._msg) return u8;\n  if (box) box.value = u8;\n  return null;`,
+						`  if (parsed === null) { if (box) box.value = null; return null; }\n  var u8 = __json_bytes_decode(parsed);\n  if (u8 && u8._msg) return __json_softerr(u8);\n  if (box) box.value = u8;\n  return null;`,
 					),
 				);
 			}
@@ -750,7 +766,7 @@ export const jsonMethods = {
 				declareCodec(
 					fnName,
 					"parsed, target, box",
-					`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (!Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display}));\n  var out = ${initOut};\n  for (var i = 0; i < parsed.length; i++) {\n    var item = ${elemDec("parsed[i]", "__json_raw_child(parsed, i)")};\n    if (item && item._msg) return item;\n    ${setElem}\n  }\n  if (box) box.value = out;\n  return null;`,
+					`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (!Array.isArray(parsed)) return __json_softerr(__json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display})));\n  var out = ${initOut};\n  for (var i = 0; i < parsed.length; i++) {\n    var item = ${elemDec("parsed[i]", "__json_raw_child(parsed, i)")};\n    ${this._softElem(base.elem)}\n    ${setElem}\n  }\n  if (box) box.value = out;\n  return null;`,
 				),
 			);
 		}
@@ -785,24 +801,52 @@ export const jsonMethods = {
 		const fill = typedCtor
 			? ""
 			: `\n  for (var z = parsed.length; z < ${base.size}; z++) out[z] = ${zero};`;
-		return `  if (parsed === null) return null;\n  if (!Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display}));\n  var out = ${init};\n  for (var i = 0; i < parsed.length && i < ${base.size}; i++) {\n    var item = ${elemDec("parsed[i]", "__json_raw_child(parsed, i)")};\n    if (item && item._msg) return item;\n    out[i] = item;\n  }${fill}\n  if (box) box.value = out;\n  return null;`;
+		return `  if (parsed === null) return null;\n  if (!Array.isArray(parsed)) return __json_softerr(__json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display})));\n  var out = ${init};\n  for (var i = 0; i < parsed.length && i < ${base.size}; i++) {\n    var item = ${elemDec("parsed[i]", "__json_raw_child(parsed, i)")};\n    ${this._softElem(base.elem)}\n    out[i] = item;\n  }${fill}\n  if (box) box.value = out;\n  return null;`;
+	},
+
+	// Statement for the decoded element `item`: a type error is recorded and
+	// the element stays zero; a hard error aborts.
+	_softElem(elemType) {
+		const zero = this.zeroValueForType(elemType);
+		return `if (item && item._msg) { var h = __json_softerr(item); if (h) return h; item = ${zero}; }`;
+	},
+
+	// How JSON object keys decode into a map keyed by `keyType`: "string",
+	// an integer kind's name, or "other" (a key type Go cannot decode into).
+	_jsonMapKeyKind(keyType) {
+		if (
+			this._jsonUnmarshalerInfo(keyType) ||
+			lookupMethod(keyType, "UnmarshalText")
+		)
+			return "string";
+		const base = unwrapNamed(keyType);
+		if (base?.kind !== "basic") return "other";
+		if (base.name === "string") return "string";
+		return INT_KEY_KINDS.has(base.name) ? base.name : "other";
 	},
 
 	_getMapDecoder(base) {
 		const valType = base.value ?? base.elem;
 		const valTypeName = typeCodecName(valType, "val");
-		const fnName = `__json_dec_map_${safeIdent(valTypeName.split(".").pop())}`;
+		const keyKind = this._jsonMapKeyKind(base.key);
+		const display = this._jsonDisplayType(base);
+		const keyTypeName = safeIdent(this._jsonDisplayType(base.key));
+		const fnName = `__json_dec_map_${keyTypeName}_${safeIdent(valTypeName.split(".").pop())}`;
 		if (!this._jsonCodecs.has(fnName)) {
 			const valDec = this._genElemDecoder(valType);
-			const display = JSON.stringify(
-				`map[string]${this._jsonDisplayType(valType)}`,
-			);
+			const mismatch = `__json_softerr(__json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${JSON.stringify(display)})))`;
+			const unsupported = `__json_softerr(__json_err("cannot unmarshal object into " + __json_ctx(${JSON.stringify(display)})))`;
+			const keyLine =
+				keyKind === "string"
+					? ""
+					: `      var key = __json_key_int(k, ${JSON.stringify(keyKind)}, ${JSON.stringify(this._jsonDisplayType(base.key))});\n      if (key && key._msg) { var kh = __json_softerr(key); if (kh) return kh; continue; }\n`;
+			const keyExpr = keyKind === "string" ? "k" : "key";
 			this._jsonCodecs.set(
 				fnName,
 				declareCodec(
 					fnName,
 					"parsed, target, box",
-					`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (typeof parsed !== "object" || Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display}));\n  var out = __json_newmap();\n  for (var k in parsed) {\n    if (Object.prototype.hasOwnProperty.call(parsed, k)) {\n      var item = ${valDec("parsed[k]", "__json_raw_child(parsed, k)")};\n      if (item && item._msg) return item;\n      out[k] = item;\n    }\n  }\n  if (box) box.value = out;\n  return null;`,
+					`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (typeof parsed !== "object" || Array.isArray(parsed)) return ${mismatch};\n${keyKind === "other" ? `  return ${unsupported};` : `  var out = target && typeof target === "object" && !__json_nilmap(target) ? target : __json_newmap();\n  for (var k in parsed) {\n    if (Object.prototype.hasOwnProperty.call(parsed, k)) {\n${keyLine}      var item = ${valDec("parsed[k]", "__json_raw_child(parsed, k)")};\n      ${this._softElem(valType)}\n      out[${keyExpr}] = item;\n    }\n  }\n  if (box) box.value = out;\n  return null;`}`,
 				),
 			);
 		}
@@ -818,7 +862,7 @@ export const jsonMethods = {
 				declareCodec(
 					fnName,
 					"parsed, target, box, rawData, rawStr",
-					`  if (parsed === null) return null;\n  var dv = ${this._jsonScalarDecodeExpr(base.name, display, "parsed", "rawStr")};\n  if (dv && dv._msg) return dv;\n  if (box) box.value = dv;\n  return null;`,
+					`  if (parsed === null) return null;\n  var dv = ${this._jsonScalarDecodeExpr(base.name, display, "parsed", "rawStr")};\n  if (dv && dv._msg) return __json_softerr(dv);\n  if (box) box.value = dv;\n  return null;`,
 				),
 			);
 		}
@@ -911,6 +955,12 @@ export const jsonMethods = {
 			`(() => { var b = { value: null }; var err = ${dec}(${v}, null, b); return err || b.value; })()`;
 	},
 
+	// Statement for a decoded scalar `v` that may be a type error: record it
+	// and skip the field (Go leaves it alone), or abort on a hard error.
+	_softSkip(v) {
+		return `if (${v} && ${v}._msg) { var h = __json_softerr(${v}); if (h) return h; break __f; }`;
+	},
+
 	_buildStructDecoder(structType, fnName) {
 		const underlying = unwrapNamed(structType);
 		const fields = this.checker?.resolveJsonFields(underlying) ?? [];
@@ -924,7 +974,7 @@ export const jsonMethods = {
 		);
 		lines.push(`  if (typeof parsed !== "object" || Array.isArray(parsed)) {`);
 		lines.push(
-			`    return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${JSON.stringify(this._jsonDisplayType(structType))}));`,
+			`    return __json_softerr(__json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${JSON.stringify(this._jsonDisplayType(structType))})));`,
 		);
 		lines.push(`  }`);
 		const knownKeys = fields.flatMap((f) => [f.jsonKey, f.goName]);
@@ -943,7 +993,7 @@ export const jsonMethods = {
 				`  { var fieldKey = __json_match_field(parsed, ${key}, ${goName}); if (fieldKey !== null) {`,
 			);
 			lines.push(`    __json_path.push(${key});`);
-			lines.push(`    try {`);
+			lines.push(`    __f: try {`);
 			lines.push(`    var val = parsed[fieldKey];`);
 			lines.push(`    var raw = __json_raw_child(parsed, fieldKey);`);
 			lines.push(
@@ -954,7 +1004,7 @@ export const jsonMethods = {
 				const valueType = f.type?.kind === "pointer" ? f.type.base : f.type;
 				const typeStr = this._jsonDisplayType(valueType);
 				lines.push(
-					`    var q = __json_unquote(val, ${JSON.stringify(quotedKind)}, ${JSON.stringify(typeStr)}); if (q && q._msg) return q; val = q.v; raw = q.lit;`,
+					`    var q = __json_unquote(val, ${JSON.stringify(quotedKind)}, ${JSON.stringify(typeStr)}); ${this._softSkip("q")} val = q.v; raw = q.lit;`,
 				);
 			}
 			lines.push(`    if (val !== null) {`);
@@ -1010,7 +1060,7 @@ export const jsonMethods = {
 
 	_emitNumberFieldDecoder(f, lines, rawExpr) {
 		lines.push(
-			`      var nv = __json_number_decode(val, "json.Number", ${rawExpr}); if (nv && nv._msg) return nv;`,
+			`      var nv = __json_number_decode(val, "json.Number", ${rawExpr}); ${this._softSkip("nv")}`,
 		);
 		const val = f.type?.kind === "pointer" ? "{ value: nv }" : "nv";
 		this._emitAssign(f, val, lines);
@@ -1035,7 +1085,7 @@ export const jsonMethods = {
 		}
 		if (isByteSliceType(f.type)) {
 			lines.push(`      var u8v = __json_bytes_decode(val);`);
-			lines.push(`      if (u8v && u8v._msg) return u8v;`);
+			lines.push(`      ${this._softSkip("u8v")}`);
 			this._emitAssign(f, "u8v", lines);
 			return;
 		}
@@ -1090,10 +1140,14 @@ export const jsonMethods = {
 
 		if (COMPOSITE_KINDS.has(base?.kind)) {
 			const dec = this._getJsonDecoder(f.type);
-			lines.push(`      var box = { value: null };`);
-			lines.push(`      var err = ${dec}(val, null, box);`);
+			// Maps decode into the existing value; a mismatch leaves it alone.
+			lines.push(`      var cur = target.${f.goName};`);
+			lines.push(`      var box = { value: cur };`);
+			lines.push(`      var err = ${dec}(val, cur, box);`);
 			lines.push(`      if (err) return err;`);
+			lines.push(`      if (box.value !== cur) {`);
 			this._emitAssign(f, "box.value", lines);
+			lines.push(`      }`);
 			return;
 		}
 
@@ -1110,7 +1164,7 @@ export const jsonMethods = {
 		lines.push(
 			`      var dv = ${this._jsonScalarDecodeExpr(basicName, display, "val", "raw")};`,
 		);
-		lines.push(`      if (dv && dv._msg) return dv;`);
+		lines.push(`      ${this._softSkip("dv")}`);
 		this._emitAssign(f, "{ value: dv, __p: true }", lines);
 	},
 
@@ -1123,7 +1177,7 @@ export const jsonMethods = {
 		lines.push(
 			`      var dv = ${this._jsonScalarDecodeExpr(basicName, display, "val", "raw")};`,
 		);
-		lines.push(`      if (dv && dv._msg) return dv;`);
+		lines.push(`      ${this._softSkip("dv")}`);
 		this._emitAssign(f, "dv", lines);
 	},
 

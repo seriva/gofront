@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { HELPER_ERROR, HELPER_JSON } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertJsProgramOutput,
@@ -2585,6 +2586,102 @@ func main() {
 }
 `;
 	await assertProgramOutput(src, '{"N":9223372036854775807}\ntrue\n');
+});
+
+section("encoding/json — decoding on the JS backend");
+
+test("Unmarshal keeps decoding after a type error and reports the first (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type R struct {
+	F  float64
+	B  bool
+	Sl []int
+}
+
+func main() {
+	var r R
+	err := json.Unmarshal([]byte(\`{"F":"x","B":true,"Sl":[1,"y"]}\`), &r)
+	fmt.Println(err, r.B, r.Sl)
+}
+`,
+		`json: cannot unmarshal string into Go struct field R.F of type float64 true [1 0]
+`,
+	);
+});
+
+test("Unmarshal rejects map keys that do not fit the key type (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var m map[int]string
+	err := json.Unmarshal([]byte(\`{"x":"a"}\`), &m)
+	fmt.Println(err, len(m))
+	var ok map[int]string
+	fmt.Println(json.Unmarshal([]byte(\`{"7":"a"}\`), &ok), ok)
+}
+`,
+		`json: cannot unmarshal number x into Go value of type int 0
+<nil> map[7:a]
+`,
+	);
+});
+
+test("Unmarshal into an existing map adds to it (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type H struct{ M map[string]int }
+
+func main() {
+	m := map[string]int{"keep": 1}
+	fmt.Println(json.Unmarshal([]byte(\`{"a":1}\`), &m), m)
+	h := H{M: map[string]int{"keep": 2}}
+	fmt.Println(json.Unmarshal([]byte(\`{"M":{"b":3}}\`), &h), h.M)
+}
+`,
+		`<nil> map[a:1 keep:1]
+<nil> map[b:3 keep:2]
+`,
+	);
+});
+
+test("Unmarshal into RawMessage trims surrounding whitespace (js)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var rm json.RawMessage
+	fmt.Println(json.Unmarshal([]byte(" 1 "), &rm))
+	fmt.Printf("%q\\n", string(rm))
+}
+`,
+		`<nil>
+"1"
+`,
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

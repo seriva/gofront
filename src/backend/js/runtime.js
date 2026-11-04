@@ -1697,8 +1697,18 @@ var __json_err = __json_err || function(msg, valKind, targetType) {
   }
   e.Error = function() { return fullMsg; };
   e._msg = fullMsg;
+  e.__soft = true;
   e.__struct = "UnmarshalTypeError$$internal$jsonrt";
   return e;
+};
+// A type error does not stop a decode: Go records the first one, leaves the
+// value alone and keeps going. Returns null for such an error (after recording
+// it) and the error itself when it must abort the decode.
+var __json_saved = __json_saved || null;
+var __json_softerr = __json_softerr || function(e) {
+  if (!e || e.__soft !== true) return e;
+  if (__json_saved === null) __json_saved = e;
+  return null;
 };
 // Decode error context, as in Go: innermost struct being decoded plus the path
 // of JSON field names from the root. Reset by every __json_unmarshal call.
@@ -1742,7 +1752,7 @@ var __json_number_decode = __json_number_decode || function(v, ctxType, raw) {
 var __json_dec_number = __json_dec_number || function(parsed, target, box, rawData, rawStr) {
   if (parsed === null) return null;
   var nv = __json_number_decode(parsed, "json.Number", rawStr);
-  if (nv && nv._msg) return nv;
+  if (nv && nv._msg) return __json_softerr(nv);
   if (box) box.value = nv;
   return null;
 };
@@ -1759,7 +1769,11 @@ var __json_bytes_decode = __json_bytes_decode || function(v) {
     var u8 = new Uint8Array(v.length);
     for (var i = 0; i < v.length; i++) {
       var b = __json_int_decode(v[i], "uint8", "uint8", __json_raw_child(v, i));
-      if (b && b._msg) return b;
+      if (b && b._msg) {
+        var hard = __json_softerr(b);
+        if (hard) return hard;
+        b = 0;
+      }
       u8[i] = b;
     }
     return u8;
@@ -1856,8 +1870,11 @@ var __json_unquote = __json_unquote || function(val, kind, typeStr) {
   if (typeof val !== "string" || val.endsWith("__bigint")) {
     return __json_err("invalid use of ,string struct tag, trying to unmarshal unquoted value into " + typeStr);
   }
+  // Go returns this error from the field (it ends the decode) instead of recording it.
   var invalid = function() {
-    return __json_err("invalid use of ,string struct tag, trying to unmarshal " + JSON.stringify(val) + " into " + typeStr);
+    var e = __json_err("invalid use of ,string struct tag, trying to unmarshal " + JSON.stringify(val) + " into " + typeStr);
+    e.__soft = false;
+    return e;
   };
   var inner;
   try { inner = JSON.parse(__json_preserve_int64(val)); } catch (e) {
@@ -2032,13 +2049,26 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
   }
   return fail();
 };
+// A JSON object key decoded into an integer map key (strconv.ParseInt): the
+// canonical key text, or a type error.
+var __json_key_int = __json_key_int || function(k, typeName, ctxType) {
+  if (/^[+-]?[0-9]+$/.test(k)) {
+    var n = BigInt(k);
+    var signed = typeName.charAt(0) !== "u";
+    var bits = { int8: 8, uint8: 8, byte: 8, int16: 16, uint16: 16, int32: 32, uint32: 32, rune: 32 }[typeName] || 64;
+    var min = signed ? -(1n << BigInt(bits - 1)) : 0n;
+    var max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
+    if (n >= min && n <= max) return n.toString();
+  }
+  return __json_err("cannot unmarshal number " + k + " into " + __json_ctx(ctxType));
+};
 var __json_b64 = __json_b64 || function(u8) {
   if (u8 === null || u8 === undefined) return "null";
   return '"' + EncodeBytes$$internal$jsonrt(u8) + '"';
 };
 var __json_b64_dec = __json_b64_dec || function(str) {
   var res = DecodeBytes$$internal$jsonrt(str);
-  if (res[1]) return { _msg: res[1].Error(), __userErr: res[1] };
+  if (res[1]) return { _msg: res[1].Error(), __userErr: res[1], __soft: true };
   return res[0];
 };
 var __json_is_zero = __json_is_zero || function(val, isStruct, isMap) {
@@ -2319,9 +2349,17 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTyp
   __json_current_offset = str.length;
   var isBox = target && typeof target === "object" && (Object.prototype.hasOwnProperty.call(target, "value") || typeof target.__gfUnbox === "function");
   var dest = isBox ? target.value : target;
-  var err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
+  var prevSaved = __json_saved;
+  __json_saved = null;
+  var err, saved;
+  try {
+    err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
+    saved = __json_saved;
+  } finally {
+    __json_saved = prevSaved;
+  }
   if (err) return err.__userErr || err;
-  return null;
+  return saved ? saved.__userErr || saved : null;
 };
 var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   var e = enc?.value ?? enc;
