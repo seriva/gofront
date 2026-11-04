@@ -514,7 +514,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 19: JSON on the JS Backend
 
-- [ ] Task 19.1: Decoding continues past type errors; map keys and reuse
+- [x] Task 19.1: Decoding continues past type errors; map keys and reuse
   - Files: `src/backend/js/stdlib/json.js`, `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: L145 → `… R.F of type float64 true [1 0]`; L146 → `json: cannot unmarshal number x into Go value of type int 0`; L161 → `map[a:1 keep:1]`; L162 → `"1"`.
   - Done when: four repros match Go on js/both.
