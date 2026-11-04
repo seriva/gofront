@@ -2728,8 +2728,8 @@ func main() {
 	);
 });
 
-test("MarshalText encodes values, fields and elements (js)", async () => {
-	await assertJsTargetsOutput(
+test("MarshalText encodes values, fields and elements (every target)", async () => {
+	await assertAllTargetsOutput(
 		`package main
 
 import (
@@ -2973,6 +2973,94 @@ json: Unmarshal(non-pointer []int)
 json: Unmarshal(nil)
 json: Unmarshal(non-pointer int)
 json: Unmarshal(nil *main.Item)
+`,
+	);
+});
+
+section("encoding/json — generics and nested pointers");
+
+test("generic struct instances and generic decode targets encode and decode on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Box[T any] struct {
+	V T
+	L []T
+}
+
+func Dec[P any](p P) error {
+	return json.NewDecoder(strings.NewReader("1")).Decode(p)
+}
+
+func Enc[T any](v T) string {
+	b, err := json.Marshal(v)
+	return fmt.Sprint(string(b), err)
+}
+
+func Load[T any](s string) (T, error) {
+	var v T
+	err := json.Unmarshal([]byte(s), &v)
+	return v, err
+}
+
+func main() {
+	b, err := json.Marshal(Box[int]{2, []int{1}})
+	fmt.Println(string(b), err)
+	var x int
+	fmt.Println(Dec(&x), x)
+	fmt.Println(Enc(3), Enc("s"), Enc([]bool{true}))
+	n, e1 := Load[int]("5")
+	bx, e2 := Load[Box[string]](\`{"V":"x","L":["a","b"]}\`)
+	fmt.Println(n, e1, bx, e2)
+}
+`,
+		`{"V":2,"L":[1]} <nil>
+<nil> 1
+3<nil> "s"<nil> [true]<nil>
+5 <nil> {x [a b]} <nil>
+`,
+	);
+});
+
+test("pointer-to-pointer struct fields decode on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type In struct{ N int }
+
+type S struct {
+	P  **int
+	Q  ***string
+	R  **In
+	Z  **int
+	Pp *int
+}
+
+func main() {
+	var s S
+	err := json.Unmarshal([]byte(\`{"P":1,"Q":"x","R":{"N":4},"Z":null,"Pp":3}\`), &s)
+	fmt.Println(err, **s.P, ***s.Q, (**s.R).N, s.Z == nil, *s.Pp)
+	var t S
+	err = json.Unmarshal([]byte(\`{"P":"bad"}\`), &t)
+	fmt.Println(err)
+	b, err := json.Marshal(s)
+	fmt.Println(string(b), err)
+}
+`,
+		`<nil> 1 x 4 true 3
+json: cannot unmarshal string into Go struct field S.P of type int
+{"P":1,"Q":"x","R":{"N":4},"Z":null,"Pp":3} <nil>
 `,
 	);
 });

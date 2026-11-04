@@ -544,6 +544,39 @@ export function isSliceType(goType, checker = null) {
 	return goType.kind === "slice" || goType.kind === "SliceType";
 }
 
+// Element kinds whose slices share one WebAssembly representation (a slice of
+// i32), so `[]bool`, `[]byte` and `[]rune` cannot be told apart by `ref.test`.
+const TAGGED_SLICE_ELEMS = new Set([
+	"bool",
+	"int8",
+	"int16",
+	"int32",
+	"uint8",
+	"uint16",
+	"uint32",
+	"byte",
+	"rune",
+]);
+
+// True for a slice of booleans or integers of at most 32 bits.  In an
+// interface such a value carries a per-Go-type tag (see getTaggedSliceType).
+export function isTaggedSliceType(goType, checker = null) {
+	if (!isSliceType(goType, checker)) return false;
+	let elem = getSliceElemType(goType, checker);
+	// A source-level element (`uint8` in a case list) is a TypeName node.
+	for (let i = 0; i < 16 && elem; i++) {
+		if (elem.kind === "named")
+			elem = elem.underlying ?? checker?.types?.get(elem.name);
+		else if (elem.kind === "TypeName" || elem.kind === "Ident")
+			elem = checker?.types?.get(elem.name) ?? {
+				kind: "basic",
+				name: elem.name,
+			};
+		else break;
+	}
+	return elem?.kind === "basic" && TAGGED_SLICE_ELEMS.has(elem.name);
+}
+
 export function getSliceElemType(t, checker = null) {
 	if (!t) return null;
 	if (t.elem) return t.elem;
