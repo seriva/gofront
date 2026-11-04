@@ -163,10 +163,11 @@ Notable members and behaviour per package, including GoFront's own packages:
 | Feature | Status |
 |---|---|
 | `templ Name(params) { <html/> }` components | ✓ — compile to direct `createElement` calls; return a `gom.Node` |
-| `{ expr }` interpolation, `attr={ expr }`, `attr?={ bool }` | ✓ |
+| `{ expr }` interpolation, `attr={ expr }`, `attr?={ bool }` | ✓ — `attr?=` needs a `bool` |
 | `@Component(args)`, `@templ.Raw(html)` | ✓ |
-| `if` / `else if` / `else`, `switch` inside bodies | ✓ |
-| `for` inside bodies | ✓ — `for i, v := range slice`, `for _, v := range slice` and condition loops; index-only loops (`for i := range slice`, `for i, _ := range slice`), ranging over a map, string or integer, and three-clause loops are not supported yet |
+| `{ name... }` for a variadic `gom.Node` parameter (`children ...gom.Node` or any other name) | ✓ — a nil spread mounts nothing |
+| `if` / `else if` / `else`, `switch` inside bodies | ✓ — including a `switch` without a tag, whose cases are conditions |
+| `for` inside bodies | ✓ — every Go form: three-clause and condition loops, `for range x`, and `range` over slices, arrays, maps, strings and integers, with or without index and value variables |
 | Type checking | ✓ — Go expressions in templ bodies are checked like Go code (undefined names, mismatched types, unused loop variables); a malformed expression or `for` header fails the build |
 | `css Name() { … }` scoped styles | ✓ — class `gfc_<name>_<hash>`, injected into `<head>` once; nested `&`, media queries and keyframes supported |
 | `ref="name"` element capture | ✓ — stripped from output; populated into the `refs` map passed to `gom.Mount`/`gom.MountTo`; forwarded through nested `@Component()` calls |

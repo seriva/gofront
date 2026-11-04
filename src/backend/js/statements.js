@@ -140,6 +140,7 @@ const STMT_GEN_DELEGATE = {
 	SwitchStmt: "genSwitch",
 	TypeSwitchStmt: "genTypeSwitch",
 	BranchStmt: "_genBranchStmt",
+	TemplMount: "_genTemplMountStmt",
 };
 
 /** @type {ThisType<CodeGen>} */
