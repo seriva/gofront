@@ -3,6 +3,7 @@
 
 import { someChild } from "../../../lower/walk.js";
 import {
+	defaultType,
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../../typechecker/types.js";
@@ -149,7 +150,7 @@ export const jsonMethods = {
 		if (fn === "Unmarshal") {
 			const targetType = expr.args[1]?._type;
 			const dec = this._getJsonDecoder(targetType);
-			return `__json_unmarshal(${dec}, ${args[0]}, ${args[1]}, ${this._jsonTargetArgs(targetType)})`;
+			return `__json_unmarshal(${dec}, ${args[0]}, ${args[1]}, ${this._jsonTargetArgs(this._jsonTargetType(expr.args[1]))})`;
 		}
 		if (fn === "Valid") {
 			return `__json_valid(${args[0]})`;
@@ -168,13 +169,30 @@ export const jsonMethods = {
 	// Name and static kind of an Unmarshal/Decode target, for the argument
 	// errors Go reports from the type alone ("ptr", "val" or none for interfaces).
 	_jsonTargetArgs(targetType) {
+		targetType = defaultType(targetType);
 		const base = unwrapNamed(targetType);
 		const key = base?.kind === "basic" ? base.name : base?.kind;
-		if (!targetType || key === "nil") return '"", ""';
+		const pkg = JSON.stringify(this.checker?.pkgName ?? "");
+		if (!targetType || key === "nil") return `"", "", ${pkg}`;
 		const isValue =
 			base?.kind === "basic" ? key !== "any" : VALUE_TARGET_KINDS.has(key);
 		const kind = TARGET_KIND[key] ?? (isValue ? "val" : "");
-		return `${JSON.stringify(this._jsonDisplayType(targetType))}, ${JSON.stringify(kind)}`;
+		// An interface target is judged by its dynamic value at run time.
+		const name =
+			key === "any" || key === "interface"
+				? ""
+				: this._jsonDisplayType(targetType);
+		return `${JSON.stringify(name)}, ${JSON.stringify(kind)}, ${pkg}`;
+	},
+
+	// The static type that decides an Unmarshal/Decode target's argument
+	// errors: an explicit `any(x)` conversion is judged by the type of x.
+	_jsonTargetType(arg) {
+		const inner =
+			arg?.kind === "CallExpr" && arg.args?.length === 1 ? arg.args[0] : null;
+		return inner?._ifaceSrc && this._isIfaceType(arg._type)
+			? inner._ifaceSrc
+			: arg?._type;
 	},
 
 	// Identifier part naming the codecs of a (possibly unnamed) type.

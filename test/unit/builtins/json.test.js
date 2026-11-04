@@ -2923,6 +2923,60 @@ func main() {
 	);
 });
 
+section("encoding/json — error messages");
+
+test("invalid Number literal and Unmarshal argument errors match Go on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Item struct{ A int }
+
+func viaParam(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+func main() {
+	var n json.Number
+	fmt.Println(json.Unmarshal([]byte(\`"x"\`), &n))
+	var rs struct{ N json.Number }
+	fmt.Println(json.Unmarshal([]byte(\`{"N":"x"}\`), &rs))
+	fmt.Println(json.Unmarshal([]byte(\`1\`), any(5)))
+	fmt.Println(json.Unmarshal([]byte(\`1\`), any("s")))
+	fmt.Println(json.Unmarshal([]byte(\`1\`), any(2.5)))
+	var ip *Item
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), any(ip)))
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), ip))
+	fmt.Println(viaParam([]byte(\`{}\`), ip))
+	fmt.Println(viaParam([]byte(\`1\`), 7))
+	fmt.Println(viaParam([]byte(\`1\`), "s"))
+	fmt.Println(viaParam([]byte(\`1\`), []int{1}))
+	fmt.Println(viaParam([]byte(\`1\`), nil))
+	fmt.Println(json.NewDecoder(strings.NewReader(\`1\`)).Decode(any(5)))
+	fmt.Println(json.NewDecoder(strings.NewReader(\`{}\`)).Decode(any(ip)))
+}
+`,
+		`json: invalid number literal, trying to unmarshal "\\"x\\"" into Number
+json: invalid number literal, trying to unmarshal "\\"x\\"" into Number
+json: Unmarshal(non-pointer int)
+json: Unmarshal(non-pointer string)
+json: Unmarshal(non-pointer float64)
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(non-pointer int)
+json: Unmarshal(non-pointer string)
+json: Unmarshal(non-pointer []int)
+json: Unmarshal(nil)
+json: Unmarshal(non-pointer int)
+json: Unmarshal(nil *main.Item)
+`,
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

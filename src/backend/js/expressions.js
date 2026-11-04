@@ -1906,7 +1906,7 @@ export const expressionGenMethods = {
 			const targetType = expr.args[0]?._type;
 			const codec = this._getJsonDecoder(targetType);
 			const arg = this.genExpr(expr.args[0]);
-			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${this._jsonTargetArgs(targetType)})`;
+			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${this._jsonTargetArgs(this._jsonTargetType(expr.args[0]))})`;
 		}
 		return undefined;
 	},
