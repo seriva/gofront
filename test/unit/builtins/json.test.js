@@ -8,6 +8,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertJsProgramOutput,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	runJs,
@@ -2680,6 +2681,160 @@ func main() {
 `,
 		`<nil>
 "1"
+`,
+	);
+});
+
+section("encoding/json — values in interfaces (js)");
+
+test("values in an interface encode from their static type (js)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func show(v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show([3]byte{1, 2, 3})
+	n := 5
+	show(&n)
+	show(float32(0.1))
+	show(json.Number("12"))
+	rm := json.RawMessage("[1]")
+	show(&rm)
+	show([][2]byte{{1, 2}})
+	show(map[string]*int{"a": &n})
+	show(map[string]any{"k": [2]byte{3, 4}, "f": float32(0.3), "n": json.Number("7")})
+	show([]any{&n, float32(2.5), [1]byte{9}})
+}
+`,
+		`[1,2,3] <nil>
+5 <nil>
+0.1 <nil>
+12 <nil>
+[1] <nil>
+[[1,2]] <nil>
+{"a":5} <nil>
+{"f":0.3,"k":[3,4],"n":7} <nil>
+[5,2.5,[9]] <nil>
+`,
+	);
+});
+
+test("MarshalText encodes values, fields and elements (js)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T string
+
+func (t T) MarshalText() ([]byte, error) { return []byte("t-" + string(t)), nil }
+
+type P struct{ N int }
+
+func (p *P) MarshalText() ([]byte, error) { return []byte(fmt.Sprint("p", p.N)), nil }
+
+type Rec struct {
+	A T
+	B []T
+	C P
+	D *P
+}
+
+func main() {
+	var v any = T("x")
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(T("y"))
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(Rec{"a", []T{"b", "c"}, P{1}, &P{2}})
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(&Rec{"a", nil, P{1}, nil})
+	fmt.Println(string(b), err)
+	b, err = json.Marshal(map[string]T{"k": "v"})
+	fmt.Println(string(b), err)
+}
+`,
+		`"t-x" <nil>
+"t-y" <nil>
+{"A":"t-a","B":["t-b","t-c"],"C":{"N":1},"D":"p2"} <nil>
+{"A":"t-a","B":null,"C":"p1","D":null} <nil>
+{"k":"t-v"} <nil>
+`,
+	);
+});
+
+test("func, chan, complex and unsupported map keys report an unsupported type (js)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Holder struct {
+	Name string
+	F    func()
+}
+
+func show(v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show(func() {})
+	fs := []func(){nil}
+	show(fs)
+	empty := []func(){}
+	show(empty)
+	var nilFns []func()
+	show(nilFns)
+	show(map[bool]int{true: 1})
+	fm := map[string]func(){"a": nil}
+	show(fm)
+	show(Holder{Name: "h"})
+	show(&Holder{Name: "h"})
+	show(struct{ M map[bool]int }{})
+	show(func(a int, b ...string) (int, error) { return 0, nil })
+	b, err := json.Marshal(func() {})
+	fmt.Println(string(b), err)
+	var c complex128 = complex(1, 2)
+	b, err = json.Marshal(c)
+	fmt.Println(string(b), err)
+	show(c)
+	b, err = json.MarshalIndent(map[int8]bool{3: true}, "", " ")
+	fmt.Println(string(b), err)
+}
+`,
+		` json: unsupported type: func()
+ json: unsupported type: func()
+[] <nil>
+null <nil>
+ json: unsupported type: map[bool]int
+ json: unsupported type: func()
+ json: unsupported type: func()
+ json: unsupported type: func()
+ json: unsupported type: map[bool]int
+ json: unsupported type: func(int, ...string) (int, error)
+ json: unsupported type: func()
+ json: unsupported type: complex128
+ json: unsupported type: complex128
+{
+ "3": true
+} <nil>
 `,
 	);
 });

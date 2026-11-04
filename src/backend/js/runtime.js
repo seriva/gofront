@@ -1839,19 +1839,46 @@ var __json_unsupported_value = __json_unsupported_value || function(str) {
   e.__struct = "UnsupportedValueError$$internal$jsonrt";
   return e;
 };
+var __json_unsupported_type = __json_unsupported_type || function(name) {
+  var e;
+  if (typeof UnsupportedTypeError$$internal$jsonrt === "function") {
+    e = new UnsupportedTypeError$$internal$jsonrt(name);
+    if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+    e.__struct = "UnsupportedTypeError$$internal$jsonrt";
+  } else {
+    e = new Error("json: unsupported type: " + name);
+  }
+  throw e;
+};
+var __json_marshal_error = __json_marshal_error || function(typeName, err, source) {
+  var merr;
+  if (typeof MarshalerError$$internal$jsonrt === "function") {
+    merr = new MarshalerError$$internal$jsonrt(typeName, err, source);
+    if (merr.__p !== true && Object.isExtensible(merr)) Object.defineProperty(merr, "__p", { value: true, configurable: true, writable: true });
+    merr.__struct = "MarshalerError$$internal$jsonrt";
+  } else {
+    merr = new Error("json: error calling " + source + " for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
+  }
+  return merr;
+};
+// MarshalText output is a JSON string of the text.
+var __json_text_out = __json_text_out || function(res, typeName) {
+  var err = res && res[1];
+  if (err) throw __json_marshal_error(typeName, err, "MarshalText");
+  var b = res ? res[0] : null;
+  return __json_esc(b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b)));
+};
+// Gives a value entering an interface the encoder of its static type, which a
+// number, array or pointer cannot be told from at run time. A boxed named
+// value (unbox) passes its raw value to the encoder.
+var __jt = __jt || function(x, enc, unbox) {
+  if (x !== null && x !== undefined && (typeof x === "object" || typeof x === "function") && Object.isExtensible(x))
+    Object.defineProperty(x, "__je", { value: unbox ? function(b) { return enc(b.__gfUnbox()); } : enc, configurable: true, writable: true });
+  return x;
+};
 var __json_marshaler_out = __json_marshaler_out || function(res, typeName) {
   var err = res && res[1];
-  if (err) {
-    var merr;
-    if (typeof MarshalerError$$internal$jsonrt === "function") {
-      merr = new MarshalerError$$internal$jsonrt(typeName, err, "MarshalJSON");
-      if (merr.__p !== true && Object.isExtensible(merr)) Object.defineProperty(merr, "__p", { value: true, configurable: true, writable: true });
-      merr.__struct = "MarshalerError$$internal$jsonrt";
-    } else {
-      merr = new Error("json: error calling MarshalJSON for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
-    }
-    throw merr;
-  }
+  if (err) throw __json_marshal_error(typeName, err, "MarshalJSON");
   var b = res ? res[0] : null;
   var s = b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b));
   var c = __json_compact(s);
@@ -2107,10 +2134,14 @@ var __json_enc_raw = __json_enc_raw || function(v) {
 };
 var __json_enc_any = __json_enc_any || function(v) {
   if (v === null || v === undefined || v.__nilp === true) return "null";
+  if (typeof v.__je === "function") return v.__je(v);
   var t = typeof v;
   if (t === "boolean") return v ? "true" : "false";
   if (t === "number") {
     if (!isFinite(v)) throw __json_unsupported_value(String(v));
+    // A float32 is a plain number once it is an interface value: one that is
+    // exactly a float32 with a shorter float32 spelling encodes as such.
+    if (!Number.isInteger(v) && Math.fround(v) === v) return __json_float32(v);
     return Object.is(v, -0) ? "-0" : String(v);
   }
   if (t === "bigint") return v.toString();

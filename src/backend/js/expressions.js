@@ -612,6 +612,17 @@ export const expressionGenMethods = {
 				expr._mapKeying = false;
 			}
 		}
+		if (expr._ifaceSrc && !expr._jsonTagging && this._jsonAnyUsed) {
+			const tag = this._jsonAnyTag(expr);
+			if (tag) {
+				expr._jsonTagging = true;
+				try {
+					return `__jt(${this.genExpr(expr)}, ${tag.enc}${tag.unbox ? ", true" : ""})`;
+				} finally {
+					expr._jsonTagging = false;
+				}
+			}
+		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
 		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
 			const tag = this._dynTypeTag(expr._ifaceSrc);

@@ -518,7 +518,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/backend/js/stdlib/json.js`, `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: L145 → `… R.F of type float64 true [1 0]`; L146 → `json: cannot unmarshal number x into Go value of type int 0`; L161 → `map[a:1 keep:1]`; L162 → `"1"`.
   - Done when: four repros match Go on js/both.
-- [ ] Task 19.2: Encoding values in `any` from their static type
+- [x] Task 19.2: Encoding values in `any` from their static type
   - Files: `src/lower/json-codecs.js`, `src/backend/js/stdlib/json.js`, `test/unit/builtins/json.test.js`
   - Test: L149a → `[1,2,3]`; L149b → `5`; L149c → `0.1`; L163a → `12`; L163b → `[1]`; L152 → `"t-x"`; L167a/b → `json: unsupported type: func()`; L168 → `json: unsupported type: map[bool]int`.
   - Done when: repros match Go on js/both.
