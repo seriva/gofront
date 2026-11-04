@@ -503,11 +503,11 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 18: WASM Facade
 
-- [ ] Task 18.1: Qualified stdlib types in facade identifiers
+- [x] Task 18.1: Qualified stdlib types in facade identifiers
   - Files: `src/backend/wasm/boundary.js`, `test/unit/wasm/boundary.test.js`
   - Test: L16 exported struct with a `strings.Builder` (and `*strings.Reader`) field → `2` from a js main (`compileHybridProject`).
   - Done when: facade parses and runs.
-- [ ] Task 18.2: Generic instances in the facade
+- [x] Task 18.2: Generic instances in the facade
   - Files: `src/backend/wasm/boundary.js`, `src/backend/wasm/module-emitter.js`, `test/unit/wasm/boundary.test.js`
   - Test: L121 js main `g.Take(g.Box[int]{V: 4})` → `4`; L135a `Mp() map[string]G[TB]` → `2`; L135b embedded `G[int]` → `e.Get()` = `5`.
   - Done when: three hybrid repros run.
