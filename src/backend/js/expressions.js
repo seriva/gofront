@@ -455,7 +455,7 @@ const BUILTIN_GEN = {
 	// `print` writes without a trailing newline (Go semantics); the wasm glue
 	// buffers the same way, so output parity holds across backends.
 	print: (s, e) =>
-		`((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))([${e.args.map((a) => s.genExpr(a)).join(", ")}].map(String).join(" "))`,
+		`((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))([${e.args.map((a) => s.genExpr(a)).join(", ")}].map(String).join(""))`,
 	println: (s, e) =>
 		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
 	panic: (s, e) => `(() => { throw new Error(${s.genExpr(e.args[0])}); })()`,

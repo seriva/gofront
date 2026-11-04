@@ -7,7 +7,6 @@ import {
 	anonIfaceName,
 	getMapKeyValTypes,
 	isArrayType,
-	isBoolGoType,
 	isComplex,
 	isComplex64,
 	isMapType,
@@ -18,6 +17,7 @@ import {
 	isStringType,
 	isStructType,
 	isTestingT,
+	printOperandKind,
 	toWasmType,
 } from "./types.js";
 
@@ -760,13 +760,21 @@ export class BuiltinsEmitter {
 		for (let i = 0; i < args.length; i++) {
 			const arg = args[i];
 			const isLast = i === args.length - 1 && isPrintln;
-			const isBool =
-				isBoolGoType(arg._type) ||
-				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
-			const wType = toWasmType(arg._type, this.mod.checker);
-			this.emitExpr(arg, wType);
+			const { wType, isBool, widen } = printOperandKind(arg, this.mod.checker);
+			this.emitExpr(
+				arg,
+				widen ? "i32" : toWasmType(arg._type, this.mod.checker),
+			);
+			if (widen) this.pushInstruction("i64.extend_i32_u");
 			const logFuncIdx = this.mod.getLogImportIndex(wType, isLast, isBool);
 			this.pushInstruction({ op: "call", funcIndex: logFuncIdx });
+			// `print` never separates operands; `println` always does.
+			if (!isPrintln) {
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getPrintResetIndex(),
+				});
+			}
 		}
 	}
 
