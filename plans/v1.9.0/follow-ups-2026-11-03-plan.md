@@ -486,18 +486,20 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 17: WASM Printing and Imports
 
-- [ ] Task 17.1: Interface values inside containers print their dynamic value
-  - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/fmt-any.test.js`
+- [x] Task 17.1: Interface values inside containers print their dynamic value
+  - Files: `src/backend/wasm/prescan.js`, `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: L71 `[]any{A{1}}` → `[{1}]`; L76 → `[er:x] [vs] [vs]`; L79 `[]any{&a}` → `[ps]`.
   - Done when: three repros match Go on wasm.
-- [ ] Task 17.2: Builtin `print`/`println` follow the spec
-  - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/js/expressions.js`, `test/unit/wasm/scalars.test.js`
+- [x] Task 17.2: Builtin `print`/`println` follow the spec
+  - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/types.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/prescan.js`, `src/backend/wasm/boundary.js`, `src/backend/js/expressions.js`, `test/unit/wasm/scalars.test.js`
   - Test: L81 `println(uint32(4000000000))` → `4000000000`; L88 `print("a","b",1,2)` → `ab12` (all targets).
   - Done when: both repros match Go on all targets.
-- [ ] Task 17.3: Import `fmt_box_u64` only when a 64-bit unsigned value reaches `any`
+  - Also: a `uint64` prints unsigned (`println_u64`); `print` ends each operand with `print_reset` so a following `println` keeps its own spacing.
+- [x] Task 17.3: Import `fmt_box_u64` only when a 64-bit unsigned value reaches `any`
   - Files: `src/backend/wasm/prescan.js`, `test/unit/wasm/golden.test.js`
   - Test: L92 `func g(x any){}; g(1)` → module imports exclude `fmt_box_u64`; `g(uint64(1))` still imports it and prints correctly.
   - Done when: import list assertion passes.
+  - Note: the scan keys on any expression whose static type holds a 64-bit unsigned integer, not on call arguments, so function trampolines with `any` parameters no longer trigger the import.
 
 ### Phase 18: WASM Facade
 

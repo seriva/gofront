@@ -7,6 +7,7 @@ import {
 	assertWasmProgramOutput,
 	compileHybrid,
 	compileWasm,
+	instantiateWasm,
 	runWasm,
 	section,
 	test,
@@ -810,4 +811,54 @@ func main() {
 (3+0i) 4
 `,
 	);
+});
+
+section("WASM Scalars — builtin print and println");
+
+test("println prints a uint32 above the int32 range unsigned", () => {
+	const o = compileHybrid(`package main
+func Main() { println(uint32(4000000000)) }`).run("Main").output;
+	assertEqual(o, "4000000000");
+});
+
+test("println prints narrow unsigned operands and mixed operands with spaces", () => {
+	const o = compileHybrid(`package main
+func Main() {
+	var b uint8 = 200
+	var s uint16 = 65535
+	println(b, s, uint32(4294967295), "x", true)
+}`).run("Main").output;
+	assertEqual(o, "200 65535 4294967295 x true");
+});
+
+test("println prints a uint64 above the int64 range unsigned", () => {
+	const src = `package main
+func Main() { println(uint64(18446744073709551615)) }`;
+	const { wasm, stringTable } = compileWasm(src);
+	const lines = [];
+	const { exports } = instantiateWasm(wasm, {
+		stringTable,
+		stdout: (m) => lines.push(m),
+	});
+	exports.Main();
+	assertEqual(lines.join("\n"), "18446744073709551615");
+});
+
+test("print writes its operands without separators", () => {
+	const o = compileHybrid(`package main
+func Main() {
+	print("a", "b", 1, 2)
+	println()
+}`).run("Main").output;
+	assertEqual(o, "ab12");
+});
+
+test("print followed by println keeps the println spacing", () => {
+	const o = compileHybrid(`package main
+func Main() {
+	print("a", "b")
+	println("c", 1)
+	println("d", "e")
+}`).run("Main").output;
+	assertEqual(o, "abc 1\nd e");
 });

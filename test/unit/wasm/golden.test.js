@@ -8,6 +8,7 @@ import { join } from "node:path";
 import {
 	assert,
 	assertEqual,
+	compileHybrid,
 	compileWasm,
 	FIXTURES,
 	section,
@@ -104,5 +105,54 @@ test("golden program stays within budget", () => {
 	assert(
 		wasm.length <= BUDGET,
 		`golden module is ${wasm.length} bytes, budget ${BUDGET}`,
+	);
+});
+
+section("WASM — conditional imports");
+
+function importNames(src) {
+	const { wasm, errors } = compileWasm(src);
+	assertEqual(errors?.length ?? 0, 0);
+	return WebAssembly.Module.imports(new WebAssembly.Module(wasm)).map(
+		(i) => i.name,
+	);
+}
+
+test("an int passed to an any parameter does not import fmt_box_u64", () => {
+	const names = importNames(`package main
+func g(x any) {}
+func Main() { g(1) }
+`);
+	assert(!names.includes("fmt_box_u64"), "unexpected fmt_box_u64 import");
+});
+
+test("a uint64 passed to an any parameter imports fmt_box_u64 and prints", () => {
+	const src = `package main
+import "fmt"
+func g(x any) { fmt.Println(x) }
+func Main() { g(uint64(18446744073709551615)) }
+`;
+	assert(importNames(src).includes("fmt_box_u64"), "missing fmt_box_u64");
+	const o = compileHybrid(src).run("Main").output;
+	assertEqual(o, "18446744073709551615");
+});
+
+test("uint64 values reaching fmt through containers, structs and generics print unsigned", () => {
+	const o = compileHybrid(`package main
+import "fmt"
+type S struct{ N uint64 }
+func show[T any](v T) { fmt.Println(v) }
+const big uint64 = 18446744073709551615
+func Main() {
+	fmt.Println([]any{big}, S{big})
+	var a any = big
+	show(a)
+	show(big)
+	fmt.Println(map[string]any{"k": uint(7)})
+}
+`).run("Main").output;
+	assertEqual(
+		o,
+		"[18446744073709551615] {18446744073709551615}\n18446744073709551615\n18446744073709551615\nmap[k:7]",
 	);
 });

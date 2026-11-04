@@ -1406,6 +1406,12 @@ export class ModuleEmitter {
 		);
 	}
 
+	// `print` ends each operand with this call so the next one is not
+	// separated by a space.
+	getPrintResetIndex() {
+		return this.getOrAddFuncImport("env", "print_reset", [], []);
+	}
+
 	getLogImportIndex(wType, isLast = false, isBool = false) {
 		const prefix = isLast ? "println" : "print";
 		if (isBool) {
@@ -1416,6 +1422,8 @@ export class ModuleEmitter {
 				return this.getOrAddFuncImport("env", `${prefix}_i32`, ["i32"], []);
 			case "i64":
 				return this.getOrAddFuncImport("env", `${prefix}_i64`, ["i64"], []);
+			case "u64":
+				return this.getOrAddFuncImport("env", `${prefix}_u64`, ["i64"], []);
 			case "f32":
 				return this.getOrAddFuncImport("env", `${prefix}_f32`, ["f32"], []);
 			case "f64":
