@@ -125,6 +125,7 @@ export class ModuleEmitter {
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
+		this.taggedSliceTypes = new Map(); // Go slice type key -> tagged info
 		this.mapTypes = new Map(); // wType key -> map info
 		this.mapTypesByIndex = new Map(); // typeIndex -> map info
 		this.mapBucketsType = null; // shared (array (mut i32))
@@ -635,6 +636,9 @@ export class ModuleEmitter {
 		const typeIndex = this._getTotalTypeCount();
 		const typeEntry = {
 			form: "struct",
+			// Slices of 32-bit-or-smaller elements are open: each Go type among them
+			// gets a tagged subtype when it reaches an interface.
+			sub: elemWType === "i32",
 			fields: [
 				{
 					type: {
@@ -679,6 +683,43 @@ export class ModuleEmitter {
 		this.sliceTypes.set(key, sliceInfo);
 		this.sliceTypesByIndex.set(typeIndex, sliceInfo);
 		return sliceInfo;
+	}
+
+	// The subtype of the slice struct a value of Go slice type `sliceGoType`
+	// takes inside an interface.  Slices of booleans and small integers share
+	// one WebAssembly type, so the extra tag field (a nullable ref to a struct
+	// with one immutable i32 field per tag index) is what tells `[]byte` from
+	// `[]bool` and `json.RawMessage` from `[]byte` in a type test.
+	getTaggedSliceType(sliceGoType, elemGoType) {
+		const key = goTypeKey(sliceGoType);
+		const known = this.taggedSliceTypes.get(key);
+		if (known) return known;
+		const base = this.getSliceType(elemGoType);
+		const tagIndex = this.taggedSliceTypes.size + 1;
+		const tagTypeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			fields: Array.from({ length: tagIndex }, () => ({
+				type: "i32",
+				mutable: false,
+			})),
+		});
+		const typeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			sub: true,
+			superTypeIndex: base.typeIndex,
+			fields: [
+				...base.typeEntry.fields,
+				{
+					type: { kind: "ref", nullable: true, typeIndex: tagTypeIndex },
+					mutable: false,
+				},
+			],
+		});
+		const info = { key, typeIndex, tagTypeIndex, base };
+		this.taggedSliceTypes.set(key, info);
+		return info;
 	}
 
 	getSliceTypeByIndex(typeIndex) {

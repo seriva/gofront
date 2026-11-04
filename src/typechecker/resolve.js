@@ -157,7 +157,11 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
-			_structFields: type._structFields,
+			// The JSON codecs read the field types from here.
+			_structFields: type._structFields?.map((f) => ({
+				...f,
+				type: s.substituteType(f.type, map),
+			})),
 		};
 	},
 	interface: (s, type, map) => {

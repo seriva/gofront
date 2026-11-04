@@ -1148,3 +1148,47 @@ func main() {
 		"a\n",
 	);
 });
+
+test("Type switches tell apart slices of small integers, arrays of different lengths and a named string", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type Name string
+
+func kind(v any) string {
+	switch x := v.(type) {
+	case []byte:
+		return fmt.Sprint("bytes", len(x))
+	case []bool:
+		return fmt.Sprint("bools", len(x))
+	case []rune:
+		return fmt.Sprint("runes", len(x))
+	case []uint32:
+		return fmt.Sprint("u32s", len(x))
+	case [3]int:
+		return fmt.Sprint("a3", x[2])
+	case [2]int:
+		return fmt.Sprint("a2", x[1])
+	case Name:
+		return "name:" + string(x)
+	}
+	return "other"
+}
+
+func main() {
+	var a any = []bool{true, false}
+	_, isBytes := a.([]byte)
+	b, isBools := a.([]bool)
+	fmt.Println(kind([]byte("hi")), kind(a), kind([]rune("héé")), kind([]uint32{7}))
+	fmt.Println(kind([3]int{1, 2, 3}), kind([2]int{4, 5}), kind(Name("n")), kind(1))
+	fmt.Println(isBytes, isBools, len(b))
+}
+`,
+		`bytes2 bools2 runes3 u32s1
+a33 a25 name:n other
+false true 2
+`,
+	);
+});

@@ -533,15 +533,15 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 20: JSON on the WASM Backend
 
-- [ ] Task 20.1: Dynamic types in `any`
+- [x] Task 20.1: Dynamic types in `any`
   - Files: `src/lower/json-codecs.js`, `stdlib/internal/jsonrt`, `test/unit/wasm/json.test.js`
   - Test: L150a → `[1]`; L150b → `1`; L163a → `12`; L151a → `"AQ==" [true]`; L151b → `[97,98]`; L152 → `"t-x"`; L159 → `[1,2,3] [4,5]`.
   - Done when: seven repros match Go on wasm.
-- [ ] Task 20.2: Generic structs and generic decode targets
+- [x] Task 20.2: Generic structs and generic decode targets
   - Files: `src/lower/json-codecs.js`, `test/unit/wasm/json.test.js`
   - Test: L153 `Marshal(Box[int]{2})` in a both/wasm package → `{"V":2}`; L166 `Dec(&x)` → `<nil> 1`.
   - Done when: both repros match Go on all targets.
-- [ ] Task 20.3: `**T` struct fields; docs
+- [x] Task 20.3: `**T` struct fields; docs
   - Files: `src/lower/json-codecs.js`, `docs/go-compatibility.md`, `test/unit/wasm/json.test.js`
   - Test: L160 `S{P **int}` ← `{"P":1}` → `<nil> 1` (all targets).
   - Done when: repro matches Go; the JSON row of `docs/go-compatibility.md` drops every limitation fixed in Phases 19–20.

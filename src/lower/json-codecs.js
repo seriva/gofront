@@ -128,6 +128,14 @@ function marshalerOf(t) {
 	return m;
 }
 
+// MarshalText() ([]byte, error), used when the type has no MarshalJSON.
+function textMarshalerOf(t) {
+	if (isRaw(t) || marshalerOf(t)) return null;
+	const m = methodOf(t, "MarshalText");
+	if (m?.params?.length !== 0 || results(m).length !== 2) return null;
+	return m;
+}
+
 // UnmarshalJSON([]byte) error
 function unmarshalerOf(t) {
 	if (isRaw(t)) return null;
@@ -314,7 +322,7 @@ export class JsonCodecGen {
 	needsAddr(t, seen = new Set()) {
 		if (!t || seen.has(t)) return false;
 		seen.add(t);
-		const m = marshalerOf(t);
+		const m = marshalerOf(t) ?? textMarshalerOf(t);
 		if (m) return Boolean(m._ptrRecv);
 		const u = under(t);
 		if (u?.kind === "struct")
@@ -351,7 +359,13 @@ export class JsonCodecGen {
 		return [`${this.encFn(t, addr)}(e, ${x})`];
 	}
 
-	marshalCall(x, t) {
+	// `mt` is the type that declares the method (the pointee for a pointer).
+	marshalCall(x, t, mt = t) {
+		if (!marshalerOf(mt) && textMarshalerOf(mt))
+			return [
+				`out, err := ${x}.MarshalText()`,
+				`e.TextMarshaled(out, err, ${q(this.refl(t))})`,
+			];
 		return [
 			`out, err := ${x}.MarshalJSON()`,
 			`e.Marshaled(out, err, ${q(this.refl(t))})`,
@@ -362,7 +376,7 @@ export class JsonCodecGen {
 	encSpecial(t, addr) {
 		if (isRaw(t)) return ["e.Raw([]byte(v))"];
 		if (isNumber(t)) return ["e.Number(string(v))"];
-		const m = marshalerOf(t);
+		const m = marshalerOf(t) ?? textMarshalerOf(t);
 		if (m && (!m._ptrRecv || addr)) return this.marshalCall("v", t);
 		if (isBytes(t)) return ["e.Bytes([]byte(v))"];
 		if (isInterface(t)) {
@@ -390,7 +404,8 @@ export class JsonCodecGen {
 
 	encPointer(t, u) {
 		const lines = ["if v == nil {", "\te.Null()", "\treturn", "}"];
-		if (marshalerOf(u.base)) lines.push(...this.marshalCall("v", t));
+		if (marshalerOf(u.base) || textMarshalerOf(u.base))
+			lines.push(...this.marshalCall("v", t, u.base));
 		else lines.push(...this.encValue(u.base, "*v", true));
 		return lines;
 	}
@@ -637,7 +652,7 @@ export class JsonCodecGen {
 		if (u.kind === "basic" && !isEmptyIface(t))
 			return this.decScalar(t, u, typ);
 		const byKind = {
-			pointer: () => this.decPointer(u, typ),
+			pointer: () => this.decPointer(u),
 			slice: () => this.decSlice(u, t, typ),
 			array: () => this.decArray(u, typ),
 			map: () => this.decMap(u, t, typ),
@@ -712,7 +727,7 @@ export class JsonCodecGen {
 		];
 	}
 
-	decPointer(u, typ) {
+	decPointer(u) {
 		const base = u.base;
 		const lines = [
 			"if d.Null() {",
@@ -722,9 +737,7 @@ export class JsonCodecGen {
 			`\tcur = new(${this.spell(base)})`,
 			"}",
 		];
-		if (under(base)?.kind === "pointer") {
-			lines.push(`d.Mismatch(${typ})`);
-		} else if (this.decInPlace(base)) {
+		if (this.decInPlace(base)) {
 			lines.push(`${this.decFn(base)}(d, cur)`);
 		} else {
 			lines.push(`*cur = ${this.decFn(base)}(d, *cur)`);
@@ -1153,6 +1166,7 @@ export class JsonCodecGen {
 			if (t?.kind !== "named" || name.includes(".") || name.includes("$$"))
 				continue;
 			if (t.name !== name || t.typeArgs?.length || t._genericOf) continue;
+			if (mentionsTypeParam(t)) continue;
 			const u = under(t);
 			if (!u || u.kind === "interface" || u.kind === "func") continue;
 			this.encFn(t, false);
@@ -1167,9 +1181,10 @@ export class JsonCodecGen {
 		const byKind = {
 			basic: () => t.name !== "void" && t.name !== "nil",
 			named: () =>
-				!t.name.includes("$$") &&
-				!t.name.includes("[") &&
-				(t.typeArgs ?? []).every(ok),
+				isJsonValue(t) ||
+				(!t.name.includes("$$") &&
+					!t.name.includes("[") &&
+					(t.typeArgs ?? []).every(ok)),
 			pointer: () => ok(t.base),
 			slice: () => ok(t.elem),
 			array: () => ok(t.elem),
@@ -1181,17 +1196,34 @@ export class JsonCodecGen {
 		return byKind[t.kind]?.() ?? false;
 	}
 
+	addTypeArg(found, a) {
+		const t = defaultType(a);
+		if (!t || mentionsTypeParam(t) || !this.spellable(t) || isInterface(t))
+			return;
+		// An array or map of small integers would shadow its look-alikes in the
+		// type switch (see SHARED_REPR).
+		const ambiguous = !isCompositeType(t) && hasSharedRepr(t);
+		if (holdsFunc(t) || ambiguous) return;
+		found.set(this.key(t), t);
+		const p = { kind: "pointer", base: t };
+		found.set(this.key(p), p);
+	}
+
 	// Types the program builds with composite literals, `&T{}`, make and new:
 	// candidates for a value stored in an interface (an `any` map value, say).
 	programTypes() {
 		const found = new Map();
 		for (const p of this.programs) {
 			walkNodes(p.decls, (node) => {
+				// A generic call's type arguments are what its body encodes and
+				// decodes through `T` and `&v`.
+				for (const a of node._typeArgs ?? []) this.addTypeArg(found, a);
 				if (!node._type) return;
 				const t = defaultType(node._type);
 				// Slices, arrays and maps reach an interface from any expression
 				// (a function result, a variable), not only from a literal
-				if (!buildsValue(node) && !isCompositeType(t)) return;
+				if (!buildsValue(node) && !isCompositeType(t) && !isJsonValue(t))
+					return;
 				if (this.spellable(t) && under(t)?.kind !== "interface")
 					found.set(this.key(t), t);
 			});
@@ -1242,9 +1274,10 @@ function walkNodes(root, fn) {
 	forEachChild(root, (c) => walkNodes(c, fn));
 }
 
-// Slices and maps of these share one WebAssembly representation (and so one
-// type-switch case), so only literals may register them: a `[]byte` conversion
-// must not shadow a `[]int32` that is stored in an interface.
+// Arrays and maps of these share one WebAssembly representation (and so one
+// type-switch case), so only literals may register them: a `[2]byte` conversion
+// must not shadow a `[2]int32` that is stored in an interface.  A slice of
+// them is tagged with its Go type in an interface and registers like any other.
 const SHARED_REPR = new Set([
 	"bool",
 	"int8",
@@ -1257,12 +1290,21 @@ const SHARED_REPR = new Set([
 	"rune",
 ]);
 
+// A slice of booleans or small integers carries a tag of its Go type inside an
+// interface, so it never shadows another slice type in the type switch.
+const isTaggedSlice = (t) =>
+	under(t)?.kind === "slice" && isBasic(under(t).elem, SHARED_REPR);
+
+// json.RawMessage and json.Number values can reach an interface from any
+// expression (a conversion, a field read).
+const isJsonValue = (t) => isRaw(t) || isNumber(t);
+
 const isCompositeType = (t) => {
 	const k = under(t)?.kind;
 	return (
 		(k === "slice" || k === "array" || k === "map") &&
 		!holdsFunc(t) &&
-		!hasSharedRepr(t)
+		(isTaggedSlice(t) || !hasSharedRepr(t))
 	);
 };
 
@@ -1298,6 +1340,31 @@ function buildsValue(node) {
 		node.func?.kind === "Ident" &&
 		(node.func.name === "make" || node.func.name === "new")
 	);
+}
+
+// True when `t` mentions a type parameter (a generic declaration, or a type
+// built from one inside a generic function).
+function mentionsTypeParam(t, seen = new Set()) {
+	if (!t || seen.has(t)) return false;
+	seen.add(t);
+	const m = (x) => mentionsTypeParam(x, seen);
+	switch (t.kind) {
+		case "typeParam":
+			return true;
+		case "named":
+			return (t.typeArgs ?? []).some(m) || m(t.underlying);
+		case "pointer":
+			return m(t.base);
+		case "slice":
+		case "array":
+			return m(t.elem);
+		case "map":
+			return m(t.key) || m(t.value);
+		case "struct":
+			return (t._structFields ?? []).some((f) => m(f.type));
+		default:
+			return false;
+	}
 }
 
 // The names the file imports `encoding/json` as.
@@ -1372,7 +1439,12 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 	const pending = [];
 	const diagnostics = [];
 	for (const { call, fn, program } of sites) {
-		const argType = (i) => defaultType(call.args[i]?._type);
+		// A site inside a generic function is shared by every instance, so a type
+		// that mentions a type parameter takes the dynamic entry.
+		const argType = (i) => {
+			const t = defaultType(call.args[i]?._type);
+			return mentionsTypeParam(t) ? null : t;
+		};
 		if (fn === "Unmarshal" && argType(1)?.base?.kind === "pointer")
 			diagnostics.push({
 				program,
