@@ -2,7 +2,11 @@
 // CodeGen for Go encoding/json package with compile-time static encoders and decoders.
 
 import { someChild } from "../../../lower/walk.js";
-import { typedArrayConstructorForElem } from "../../../typechecker/types.js";
+import {
+	typedArrayConstructorForElem,
+	typeStr,
+} from "../../../typechecker/types.js";
+import { mentionsTypeParam } from "../expressions.js";
 
 function safeIdent(name) {
 	return String(name || "").replace(/[^a-zA-Z0-9_$]/g, "_");
@@ -21,7 +25,10 @@ function typeCodecName(t, fallback = "val") {
 	if (t.kind === "slice") return `slice_${typeCodecName(t.elem, "elem")}`;
 	if (t.kind === "map")
 		return `map_${typeCodecName(t.value ?? t.elem, "elem")}`;
-	return fallback;
+	if (t.kind === "array")
+		return `array${t.size}_${typeCodecName(t.elem, "elem")}`;
+	// Other unnamed types (func, chan, anonymous struct) are told apart by spelling.
+	return typeStr(t) ? safeIdent(typeStr(t)) : fallback;
 }
 
 function unwrapNamed(t) {
@@ -204,8 +211,16 @@ export const jsonMethods = {
 		if (marshaler && (!marshaler.ptrRecv || addr)) {
 			return this._getMarshalerEncoder(type, marshaler);
 		}
+		const text = marshaler ? null : this._jsonTextMarshalerInfo(type);
+		if (text && (!text.ptrRecv || addr)) {
+			return this._getMarshalerEncoder(type, text, "MarshalText");
+		}
 
 		const base = unwrapNamed(type);
+		const unsupported = this._jsonUnsupportedName(type);
+		if (unsupported) {
+			return `((_v) => __json_unsupported_type(${JSON.stringify(unsupported)}))`;
+		}
 		if (isByteSliceType(type)) return "__json_b64";
 
 		if (base?.kind === "struct") {
@@ -301,6 +316,33 @@ export const jsonMethods = {
 		if (!isStruct || generic || /[.$[]/.test(name) || type.name !== name)
 			return false;
 		return !this._jsonMarshalerInfo(type) && this.structNames?.has(name);
+	},
+
+	// The encoder tag for `expr`, a value of static type `_ifaceSrc` entering an
+	// interface, or null when its run-time shape already encodes correctly:
+	// numbers, strings and structs (which carry their own hook) need none.
+	_jsonAnyTag(expr) {
+		const src = this.checker?.resolveType?.(expr._ifaceSrc) ?? expr._ifaceSrc;
+		if (!src || mentionsTypeParam(src)) return null;
+		const unbox = this._isNamedBoxKind(expr);
+		const base = unwrapNamed(this.checker?.resolveType?.(src) ?? src);
+		const kind = base?.kind;
+		const tagged =
+			unbox ||
+			(src.kind !== "named" && kind === "func") ||
+			["slice", "array", "map", "chan", "func"].includes(kind) ||
+			(kind === "struct" && src.kind !== "named") ||
+			(kind === "basic" && this._jsonUnsupportedName(src) !== null) ||
+			(kind === "pointer" &&
+				unwrapNamed(this.checker?.resolveType?.(base.base) ?? base.base)
+					?.kind !== "struct");
+		if (!tagged) return null;
+		this.useHelper("json");
+		this.useHelper("error");
+		const type = expr._ifaceNamedType ?? src;
+		const enc = this._getJsonEncoder(unbox ? type : src, false);
+		if (enc === "__json_enc_any") return null;
+		return { enc, unbox };
 	},
 
 	_markJsonAnyEncoders() {
@@ -413,6 +455,31 @@ export const jsonMethods = {
 		return this._jsonMethodInfo(type, "UnmarshalJSON");
 	},
 
+	// MarshalText applies to values with no MarshalJSON method.
+	_jsonTextMarshalerInfo(type) {
+		return this._jsonMethodInfo(type, "MarshalText");
+	},
+
+	// Go's name for a type it cannot encode (func, chan, complex, and maps
+	// whose keys are not strings, integers or text marshalers), else null.
+	_jsonUnsupportedName(type) {
+		const base = unwrapNamed(type);
+		if (base?.kind === "func" || base?.kind === "chan")
+			return this._jsonDisplayType(type);
+		if (base?.kind === "basic" && /^complex/.test(base.name))
+			return this._jsonDisplayType(type);
+		if (base?.kind === "untyped" && /^complex/.test(base.base))
+			return "complex128";
+		if (base?.kind !== "map") return null;
+		const key = base.key;
+		if (this._jsonTextMarshalerInfo(key)) return null;
+		const keyBase = unwrapNamed(key);
+		const ok =
+			keyBase?.kind === "basic" &&
+			(keyBase.name === "string" || INT_KEY_KINDS.has(keyBase.name));
+		return ok ? null : this._jsonDisplayType(type);
+	},
+
 	// UnmarshalJSON call for a target reachable through `addrExpr`: the struct
 	// instance for struct types, a { value } box otherwise.
 	_jsonUnmarshalCall(info, addrExpr, bytesExpr) {
@@ -426,7 +493,8 @@ export const jsonMethods = {
 	_jsonNeedsAddr(type, seen = new Set()) {
 		if (!type || seen.has(type)) return false;
 		seen.add(type);
-		const marshaler = this._jsonMarshalerInfo(type);
+		const marshaler =
+			this._jsonMarshalerInfo(type) ?? this._jsonTextMarshalerInfo(type);
 		if (marshaler) return marshaler.ptrRecv;
 		const base = unwrapNamed(type);
 		if (base?.kind !== "struct") return false;
@@ -434,22 +502,25 @@ export const jsonMethods = {
 		return fields.some((f) => this._jsonNeedsAddr(f.type, seen));
 	},
 
-	_getMarshalerEncoder(type, info) {
-		const fnName = `__json_enc_${safeIdent(info.cls)}_marshal`;
+	// Encoder calling MarshalJSON, or MarshalText (its result is a JSON string).
+	_getMarshalerEncoder(type, info, method = "MarshalJSON") {
+		const isText = method === "MarshalText";
+		const fnName = `__json_enc_${safeIdent(info.cls)}_${isText ? "marshal_text" : "marshal"}`;
 		if (!this._jsonCodecs.has(fnName)) {
 			let call;
 			if (info.isStruct) {
-				call = `  if (v === null || v === undefined) return "null";\n  var res = v.MarshalJSON();`;
+				call = `  if (v === null || v === undefined) return "null";\n  var res = v.${method}();`;
 			} else {
 				const recv = info.ptrRecv ? "{ value: v }" : "v";
-				call = `  var res = ${info.cls}.$MarshalJSON(${recv});`;
+				call = `  var res = ${info.cls}.$${method}(${recv});`;
 			}
+			const out = isText ? "__json_text_out" : "__json_marshaler_out";
 			this._jsonCodecs.set(
 				fnName,
 				declareCodec(
 					fnName,
 					"v",
-					`${call}\n  return __json_marshaler_out(res, ${JSON.stringify(this._jsonTypeName(type))});`,
+					`${call}\n  return ${out}(res, ${JSON.stringify(this._jsonTypeName(type))});`,
 				),
 			);
 		}
@@ -566,7 +637,9 @@ export const jsonMethods = {
 
 			this._emitFieldEncoderAccess(f, lines, (valName) => {
 				const encoded = encodeVal(valName);
-				if (f.omitempty) {
+				// Go's omitempty never drops a func or chan (it reports the type).
+				const never = ["func", "chan"].includes(unwrapNamed(f.type)?.kind);
+				if (f.omitempty && !never) {
 					return `if (!__json_is_zero(${valName}, ${isStruct}, ${isMap})) parts.push(${keyLiteral} + ${encoded});`;
 				}
 				return `parts.push(${keyLiteral} + ${encoded});`;
@@ -625,10 +698,13 @@ export const jsonMethods = {
 		if (isRawMessageType(f.type)) {
 			return (v) => `__json_enc_raw(${v})`;
 		}
-		// Marshalers and pointers go through the shared encoders.
+		// Marshalers, pointers and unsupported types go through the shared encoders.
 		const special =
 			f.type?.kind === "pointer" ||
-			(f.type?.kind === "named" && this._jsonMarshalerInfo(f.type));
+			this._jsonUnsupportedName(f.type) ||
+			(f.type?.kind === "named" &&
+				(this._jsonMarshalerInfo(f.type) ||
+					this._jsonTextMarshalerInfo(f.type)));
 		if (special) {
 			const enc = this._getJsonEncoder(f.type, addr);
 			return (v) => `${enc}(${v})`;
@@ -872,7 +948,27 @@ export const jsonMethods = {
 	// Go-style display of a type in decode error messages (reflect's Type.String()).
 	_jsonDisplayType(t) {
 		const show = (x) => this._jsonDisplayType(x);
+		const funcSig = () => {
+			const params = (t.params ?? []).map((p, i, all) =>
+				t.variadic && i === all.length - 1 ? `...${show(p)}` : show(p),
+			);
+			const all = (t.returns ?? []).filter(
+				(r) => !(r?.kind === "basic" && r.name === "void"),
+			);
+			const rets =
+				all.length === 1 && all[0]?.kind === "tuple" ? all[0].types : all;
+			const out =
+				rets.length === 0
+					? ""
+					: rets.length === 1
+						? ` ${show(rets[0])}`
+						: ` (${rets.map(show).join(", ")})`;
+			return `func(${params.join(", ")})${out}`;
+		};
 		const byKind = {
+			func: funcSig,
+			chan: () => `chan ${show(t.elem)}`,
+			interface: () => t.name || "interface {}",
 			pointer: () => `*${show(t.base)}`,
 			named: () => this._jsonTypeName(t),
 			basic: () => BASIC_DISPLAY[t.name] ?? t.name,
