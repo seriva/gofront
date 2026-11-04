@@ -389,12 +389,14 @@ func (d *Dec) Number(typ string) (string, bool) {
 		return "", false
 	}
 	if d.peek() == '"' {
+		start := d.pos
 		s, ok := d.String(typ)
 		if !ok {
 			return "", false
 		}
 		if !isValidNumber(s) {
-			d.Save(fmt.Errorf("json: invalid number literal, trying to unmarshal %q into Number", s))
+			// Go quotes the whole JSON literal and stops decoding.
+			d.Fatal(fmt.Errorf("json: invalid number literal, trying to unmarshal %q into Number", string(d.data[start:d.pos])))
 			return "", false
 		}
 		return s, true

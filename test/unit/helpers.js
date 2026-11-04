@@ -633,6 +633,30 @@ export async function assertJsProgramOutput(source, expected) {
 	}
 }
 
+// Runs `source` as a `js` package and as the JS side of a `both` package;
+// both must print `expected` (the text real Go printed).
+export async function assertJsTargetsOutput(source, expected) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		for (const target of ["js", "both"]) {
+			const res = compileFiles([goPath], { forceTarget: target });
+			const out = await runProgramModule(res.js, res.wasm ?? null);
+			if (out === expected) continue;
+			const w = expected.split("\n");
+			const g = out.split("\n");
+			let i = 0;
+			while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
+			throw new Error(
+				`${target} output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
+			);
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 // Same as assertProgramOutput for a program only the WASM backend can run
 // the way Go does (the JS representation cannot tell the cases apart).
 export async function assertWasmProgramOutput(source, expected) {

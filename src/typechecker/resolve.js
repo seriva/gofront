@@ -855,7 +855,7 @@ export const resolveMethods = {
 		return (
 			baseType.kind === "pointer" &&
 			field !== "value" &&
-			baseType.base?.kind === "named"
+			(baseType.base?.kind === "named" || baseType.base?.kind === "struct")
 		);
 	},
 

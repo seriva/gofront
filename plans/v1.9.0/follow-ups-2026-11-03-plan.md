@@ -514,19 +514,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 19: JSON on the JS Backend
 
-- [ ] Task 19.1: Decoding continues past type errors; map keys and reuse
+- [x] Task 19.1: Decoding continues past type errors; map keys and reuse
   - Files: `src/backend/js/stdlib/json.js`, `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: L145 → `… R.F of type float64 true [1 0]`; L146 → `json: cannot unmarshal number x into Go value of type int 0`; L161 → `map[a:1 keep:1]`; L162 → `"1"`.
   - Done when: four repros match Go on js/both.
-- [ ] Task 19.2: Encoding values in `any` from their static type
+- [x] Task 19.2: Encoding values in `any` from their static type
   - Files: `src/lower/json-codecs.js`, `src/backend/js/stdlib/json.js`, `test/unit/builtins/json.test.js`
   - Test: L149a → `[1,2,3]`; L149b → `5`; L149c → `0.1`; L163a → `12`; L163b → `[1]`; L152 → `"t-x"`; L167a/b → `json: unsupported type: func()`; L168 → `json: unsupported type: map[bool]int`.
   - Done when: repros match Go on js/both.
-- [ ] Task 19.3: Codecs for anonymous and function-local struct types
+- [x] Task 19.3: Codecs for anonymous and function-local struct types (same-named function-local types deferred to plans/follow-ups.md)
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: L148a → `Go struct field .Nest.X`; L148b → `{"a":1}`; L148c → the type error on all targets (no "please report"); L158 → `{"X":1} {"Y":"y"}`; L169 → `{"A":null} {"S":1}`.
   - Done when: repros match Go on all targets; WASM validates.
-- [ ] Task 19.4: Error messages match Go
+- [x] Task 19.4: Error messages match Go
   - Files: `src/backend/js/stdlib/json.js`, `stdlib/internal/jsonrt`, `test/unit/builtins/json.test.js`
   - Test: L147 → `…unmarshal "\"x\"" into Number`; L156 → `non-pointer int`; L157 → `json: Unmarshal(nil *main.Item)` (all targets).
   - Done when: three repros match Go on all targets.
