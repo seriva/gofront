@@ -526,7 +526,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: L148a → `Go struct field .Nest.X`; L148b → `{"a":1}`; L148c → the type error on all targets (no "please report"); L158 → `{"X":1} {"Y":"y"}`; L169 → `{"A":null} {"S":1}`.
   - Done when: repros match Go on all targets; WASM validates.
-- [ ] Task 19.4: Error messages match Go
+- [x] Task 19.4: Error messages match Go
   - Files: `src/backend/js/stdlib/json.js`, `stdlib/internal/jsonrt`, `test/unit/builtins/json.test.js`
   - Test: L147 → `…unmarshal "\"x\"" into Number`; L156 → `non-pointer int`; L157 → `json: Unmarshal(nil *main.Item)` (all targets).
   - Done when: three repros match Go on all targets.

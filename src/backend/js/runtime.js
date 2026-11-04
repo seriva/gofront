@@ -1743,7 +1743,11 @@ var __json_number_decode = __json_number_decode || function(v, ctxType, raw) {
   }
   if (typeof v === "string") {
     if (!__json_is_valid_number(v)) {
-      return __json_err("invalid number literal, trying to unmarshal " + JSON.stringify(v) + " into Number");
+      // Go quotes the whole JSON literal and stops decoding.
+      var lit = raw !== undefined && raw !== null ? String(raw).trim() : JSON.stringify(v);
+      var bad = __json_err("invalid number literal, trying to unmarshal " + JSON.stringify(lit) + " into Number");
+      bad.__soft = false;
+      return bad;
     }
     return v;
   }
@@ -2326,6 +2330,18 @@ var __json_valid = __json_valid || function(data) {
 // The static type of the target decides the argument errors, as in Go:
 // targetKind is "ptr" (a pointer), "val" (neither pointer nor interface) or
 // empty (an interface, judged by the dynamic value).
+// The Go type name of an interface Unmarshal target, from its run-time shape.
+var __json_dyn_type = __json_dyn_type || function(v, pkg) {
+  var t = typeof v;
+  if (t === "number") return Number.isInteger(v) ? "int" : "float64";
+  if (t === "bigint") return "int64";
+  if (t === "string") return "string";
+  if (t === "boolean") return "bool";
+  if (v && typeof v.__t === "string") return v.__t;
+  var cls = v && v.constructor && v.constructor.name;
+  if (cls && cls !== "Object") return (v.__nilp === true ? "*" : "") + (pkg ? pkg + "." : "") + cls;
+  return t;
+};
 var __json_invalid_target = __json_invalid_target || function(name, isPtr) {
   if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
     var e = new InvalidUnmarshalError$$internal$jsonrt(name, isPtr);
@@ -2336,7 +2352,8 @@ var __json_invalid_target = __json_invalid_target || function(name, isPtr) {
   var msg = name === "" ? "json: Unmarshal(nil)" : (isPtr ? "json: Unmarshal(nil " + name + ")" : "json: Unmarshal(non-pointer " + name + ")");
   return typeof __error === "function" ? __error(msg) : new Error(msg);
 };
-var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName, targetKind) {
+var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName, targetKind, pkg) {
+  var typedNil = target?.__nilp === true ? __json_dyn_type(target, pkg) : "";
   if (target?.__nilp === true) target = null;
   __json_structs.length = 0;
   __json_path.length = 0;
@@ -2356,11 +2373,13 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTyp
   }
   if (targetKind === "val") return __json_invalid_target(targetTypeName, false);
   if (target === null || target === undefined) {
-    return targetKind === "ptr" ? __json_invalid_target(targetTypeName, true) : __json_invalid_target("", false);
+    if (targetKind === "ptr") return __json_invalid_target(targetTypeName, true);
+    return typedNil ? __json_invalid_target(typedNil, true) : __json_invalid_target("", false);
   }
-  if (typeof target !== "object" || target.__v === true) {
-    var tname = targetTypeName || (target && target.constructor && target.constructor.name && target.constructor.name !== "Object" ? target.constructor.name : typeof target);
-    return __json_invalid_target(tname, false);
+  // A slice or map held in an interface is not a pointer; its tag is the type.
+  var plainValue = typeof target === "object" && typeof target.__t === "string" && target.__t[0] !== "*";
+  if (typeof target !== "object" || target.__v === true || plainValue) {
+    return __json_invalid_target(targetTypeName || __json_dyn_type(target, pkg), false);
   }
   var str;
   try {
@@ -2418,8 +2437,7 @@ var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   }
   return null;
 };
-var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName, targetKind) {
-  if (target?.__nilp === true) target = null;
+var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName, targetKind, pkg) {
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];
@@ -2430,7 +2448,7 @@ var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target
   OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
   var uerr;
   try {
-    uerr = __json_unmarshal(decFn, data, target, targetTypeName, targetKind);
+    uerr = __json_unmarshal(decFn, data, target, targetTypeName, targetKind, pkg);
   } finally {
     OptUseNumber$$internal$jsonrt = false;
     OptDisallowUnknownFields$$internal$jsonrt = false;
