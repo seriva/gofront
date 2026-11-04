@@ -903,7 +903,7 @@ templ Other(a int) {
 		assertEqual(r.code, 1);
 		assertEqual(
 			r.stderr,
-			"gofront: ERROR\n  Parse error at 1:10: Unexpected token in expression: ')' (got ) \")\")\n",
+			"gofront: ERROR\n  Parse error at 3:12: Unexpected token in expression: ')' (got ) \")\")\n",
 		);
 	}
 });
@@ -1272,6 +1272,193 @@ test("example/templ checks clean", () => {
 	const r = cli(["check", join(ROOT, "example", "templ")]);
 	assertEqual(r.code, 0);
 	assert(!r.stderr.includes("ERROR"), r.stderr);
+});
+
+// ── Go `for` forms, tagless switch, positions and variadic slots ─────
+
+section("templ — every Go for form");
+
+// Compiles `templ V(<params>) { <body> }` and returns the HTML of `<call>`.
+function renderV(params, body, call, extra = "") {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", ${call})
+}`,
+		"v.templ": `package main
+${extra}
+templ V(${params}) {
+${body}
+}`,
+	});
+	return runInDom(js, '<div id="app"></div>').document.querySelector("#app")
+		.innerHTML;
+}
+
+for (const [name, params, body, call, want] of [
+	[
+		"range over a map",
+		"m map[string]int",
+		"for k := range m {\n<b>{ k }</b>\n}",
+		'V(map[string]int{"a": 1})',
+		"<b>a</b>",
+	],
+	[
+		"three-clause loop",
+		"n int",
+		"for i := 0; i < n; i++ {\n<p>{ i }</p>\n}",
+		"V(3)",
+		"<p>0</p><p>1</p><p>2</p>",
+	],
+	[
+		"a composite literal in the header",
+		"",
+		"for _, x := range []int{1} {\n<p>{ x }</p>\n}",
+		"V()",
+		"<p>1</p>",
+	],
+	[
+		"a map literal in the header",
+		"",
+		'for k, v := range map[string][]int{"a": {2}} {\n<p>{ k }{ v[0] }</p>\n}',
+		"V()",
+		"<p>a2</p>",
+	],
+	[
+		"a slice expression in the header",
+		"xs []int",
+		"for _, x := range xs[1:] {\n<p>{ x }</p>\n}",
+		"V([]int{1, 2})",
+		"<p>2</p>",
+	],
+	[
+		"range without variables",
+		"xs []string",
+		"for range xs {\n<p>x</p>\n}",
+		'V([]string{"a", "b"})',
+		"<p>x</p><p>x</p>",
+	],
+	[
+		"range over an int",
+		"n int",
+		"for i := range n {\n<p>{ i }</p>\n}",
+		"V(3)",
+		"<p>0</p><p>1</p><p>2</p>",
+	],
+	[
+		"range over an int that is not positive",
+		"n int",
+		"for i := range n {\n<p>{ i }</p>\n}",
+		"V(0)",
+		"",
+	],
+	[
+		"range over a string",
+		"s string",
+		"for i, r := range s {\n<p>{ i }:{ r }</p>\n}",
+		'V("aé")',
+		"<p>0:97</p><p>1:233</p>",
+	],
+	[
+		"range with the index only",
+		"xs []string",
+		"for i := range xs {\n<p>{ i }</p>\n}",
+		'V([]string{"a", "b"})',
+		"<p>0</p><p>1</p>",
+	],
+	[
+		"range with a blank value",
+		"xs []string",
+		"for i, _ := range xs {\n<p>{ i + 1 }</p>\n}",
+		'V([]string{"a", "b"})',
+		"<p>1</p><p>2</p>",
+	],
+	[
+		"a loop variable does not leak into the next loop",
+		"xs []string",
+		"for range xs {\n<p>x</p>\n}\nfor i := range xs {\n<i>{ i }</i>\n}",
+		'V([]string{"a"})',
+		"<p>x</p><i>0</i>",
+	],
+]) {
+	test(`for: ${name}`, () => {
+		assertEqual(renderV(params, body, call), want);
+	});
+}
+
+section("templ — tagless switch and conditional attributes");
+
+test("tagless switch picks the first true case", () => {
+	const body = "switch {\ncase n > 3:\n<p>big</p>\ndefault:\n<p>small</p>\n}";
+	assertEqual(renderV("n int", body, "V(5)"), "<p>big</p>");
+	assertEqual(renderV("n int", body, "V(1)"), "<p>small</p>");
+});
+
+test("a conditional attribute needs a bool", () => {
+	assertThrows(
+		() => renderV("name string", "<p hidden?={ name }>x</p>", 'V("a")'),
+		"must be bool",
+	);
+	assertEqual(
+		renderV("on bool", "<p hidden?={ on }>x</p>", "V(true)"),
+		'<p hidden="">x</p>',
+	);
+});
+
+section("templ — expression positions and trailing tokens");
+
+test("a type error reports its line in the .templ file", () => {
+	assertThrows(
+		() => renderV("name string", "<p>{ name + undefinedVar }</p>", 'V("a")'),
+		"v.templ at line 4:",
+	);
+});
+
+test("tokens after an expression are a parse error", () => {
+	assertThrows(
+		() => renderV("name string", "<p>{ name ) }</p>", 'V("a")'),
+		"unexpected ')' after expression",
+	);
+});
+
+section("templ — variadic slots");
+
+const SLOT_EXTRA = `templ I() {
+	<i>x</i>
+}
+templ W(items ...gom.Node) {
+	<div>{ items... }</div>
+}
+templ C(children ...gom.Node) {
+	<div>{ children... }</div>
+}`;
+
+test("a variadic slot spread with nil mounts nothing", () => {
+	assertEqual(
+		renderV("ns []gom.Node", "@C(ns...)", "V(nil)", SLOT_EXTRA),
+		"<div></div>",
+	);
+});
+
+test("a Go call spreading a nil slice mounts nothing", () => {
+	assertEqual(
+		renderV("", "<span>s</span>", "C(nil...)", SLOT_EXTRA),
+		"<div></div>",
+	);
+});
+
+test("a variadic slot may have any name", () => {
+	assertEqual(
+		renderV("", "@W(I(), I())", "V()", SLOT_EXTRA),
+		"<div><i>x</i><i>x</i></div>",
+	);
+});
+
+test("a slot that names no parameter is an error", () => {
+	assertThrows(
+		() => renderV("", "<div>{ nope... }</div>", "V()"),
+		"Undefined: 'nope'",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

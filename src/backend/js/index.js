@@ -456,6 +456,7 @@ export class CodeGen {
 		FuncLit: "_renameSignature",
 		TemplDecl: "_renameSignature",
 		TemplExpr: "_renameTemplExprNode",
+		TemplChildren: "_renameTemplExprNode",
 		TemplComponent: "_renameTemplExprNode",
 		TemplIf: "_renameTemplExprNode",
 		TemplSwitch: "_renameTemplExprNode",

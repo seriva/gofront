@@ -41,6 +41,7 @@ import {
 const TEMPL_NODE_CHECKS = {
 	TemplElement: "_checkTemplElement",
 	TemplExpr: "_checkTemplLeaf",
+	TemplChildren: "_checkTemplChildren",
 	TemplComponent: "_checkTemplLeaf",
 	TemplIf: "_checkTemplIf",
 	TemplFor: "_checkTemplFor",
@@ -1096,10 +1097,24 @@ export class TypeChecker {
 
 	_checkTemplElement(n, scope) {
 		for (const a of n.attrs ?? []) {
-			if (a.kind === "expr" || a.kind === "cond-bool")
-				this._checkTemplExpr(a, a.tokens, scope);
+			if (a.kind === "expr") this._checkTemplExpr(a, a.tokens, scope);
+			else if (a.kind === "cond-bool") this._checkTemplCondAttr(a, scope);
 		}
 		this._checkTemplNodes(n.children, scope);
+	}
+
+	// `name?={ cond }` sets the attribute when `cond` is true.
+	_checkTemplCondAttr(a, scope) {
+		const t = this._checkTemplExpr(a, a.tokens, scope);
+		if (t && !isBool(t) && !isAny(t))
+			this.err(`Conditional attribute '${a.name}' must be bool`, a.expr);
+	}
+
+	// `{ name... }` names a variadic parameter. A templ without a `children`
+	// parameter may still write `{ children... }` (it mounts nothing).
+	_checkTemplChildren(n, scope) {
+		if (n.name === "children" && !scope.lookup("children")) return;
+		this._checkTemplExpr(n, [], scope);
 	}
 
 	_checkTemplLeaf(n, scope) {
