@@ -77,8 +77,16 @@ function toRef(info) {
 	return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
 }
 
+// The facade and its wasm export names build identifiers from a struct's name,
+// so the dot of a stdlib type (`strings.Builder`) becomes `$`.
 function structDesc(info, ptr) {
-	return { k: "struct", name: info.name, ptr, info, wType: toRef(info) };
+	return {
+		k: "struct",
+		name: info.name.replaceAll(".", "$"),
+		ptr,
+		info,
+		wType: toRef(info),
+	};
 }
 
 function funcSigFromAst(t) {
@@ -2475,9 +2483,11 @@ export function generateFacade(
 		if (info.pkgTarget === "both") genBothStruct(out, name, fields);
 		else {
 			const methods = meta.structByName.get(name)?.methods ?? [];
-			genHandleStruct(out, name, fields, methods);
+			const promoted = promotedMethods(info, fields, methods, meta);
+			genHandleStruct(out, name, fields, methods, promoted);
 		}
 	}
+	genGenericClasses(out, needs, meta._mod);
 
 	for (const [name, desc] of needs.anonStructs) {
 		out.push(`function ${P}to_${name}(o) {
@@ -2559,6 +2569,15 @@ function ${P}slview_${key}(s) {
 } `);
 	}
 
+	if (needs.maps.size > 0) {
+		// GoFront JS code reads a map as a plain object (`m["a"]`, `len(m)`), so
+		// each entry is also an own property of the returned Map unless that name
+		// is one the Map already has.
+		out.push(`function ${P}mapprop(m, k, v) {
+	const p = String(k);
+	if (!(p in m)) m[p] = v;
+}`);
+	}
 	for (const [key, desc] of needs.maps) {
 		out.push(`function ${P}mapin_${key}(m) {
 	if (m == null) return null;
@@ -2578,6 +2597,7 @@ function ${P}mapout_${key}(m) {
 	if (ks) {
 		for (let i = 0; i < ks.length; i++) {
 			out.set(ks[i], vs[i]);
+			${P}mapprop(out, ks[i], vs[i]);
 		}
 	}
 	return out;
@@ -2890,7 +2910,81 @@ function ${P}ifin_${key}(v) {
 }`);
 }
 
-function genHandleStruct(out, name, fields, methods) {
+// Methods a struct gets from its embedded structs, shallowest first (a name
+// found twice at one depth is ambiguous and left out).  Each is forwarded
+// through the embedded field's getter: `{ name, via, params, variadic }`.
+function promotedMethods(info, fields, methods, meta) {
+	const taken = new Set([
+		...methods.map((m) => m.name),
+		...fields.map((f) => f.name),
+	]);
+	const promoted = [];
+	const seen = new Set([info]);
+	let level = [{ info, via: "" }];
+	while (level.length > 0) {
+		const next = [];
+		const found = new Map();
+		for (const { info: owner, via } of level) {
+			for (const e of owner.embeds ?? []) {
+				const typeName = e.typeName ?? e.name;
+				const path = `${via}.${e.name}`;
+				const inner = meta._mod.getStructType(typeName);
+				const innerMethods =
+					meta.structByName.get(typeName.replaceAll(".", "$"))?.methods ?? [];
+				for (const m of innerMethods) {
+					if (!found.has(m.name)) found.set(m.name, []);
+					found.get(m.name).push({
+						name: m.name,
+						via: path,
+						params: m.params,
+						variadic: m.variadic,
+					});
+				}
+				if (inner && !seen.has(inner)) {
+					seen.add(inner);
+					next.push({ info: inner, via: path });
+				}
+			}
+		}
+		for (const [n, c] of found) {
+			if (!taken.has(n) && c.length === 1) promoted.push(c[0]);
+			taken.add(n);
+		}
+		level = next;
+	}
+	return promoted;
+}
+
+// A generic struct is built in a js main as `new Box(V, [...zeroFactories,
+// "int"])`; the facade only has the instances (`Box$int`).  `Box` picks the
+// instance named by the last type-argument entry (the printed type arguments).
+function genGenericClasses(out, needs, mod) {
+	const groups = new Map();
+	for (const [name, { info }] of needs.structs) {
+		if (info.pkgTarget === "both") continue;
+		const goName = mod?.checker?.types?.get(info.name)?._goName;
+		const m = goName ? /^([^[]+)\[(.*)\]$/s.exec(goName) : null;
+		if (!m) continue;
+		if (!groups.has(m[1])) groups.set(m[1], new Map());
+		groups.get(m[1]).set(m[2].replaceAll(" ", ""), name);
+	}
+	for (const [base, instances] of groups) {
+		const table = [...instances]
+			.map(([id, cls]) => `${JSON.stringify(id)}: ${cls}`)
+			.join(", ");
+		out.push(`class ${facadeName(base)} {
+	constructor(...a) {
+		const tz = a.at(-1);
+		const id = Array.isArray(tz) && typeof tz.at(-1) === "string" ? tz.at(-1).replaceAll(" ", "") : undefined;
+		const C = { ${table} }[id] ?? ${instances.size === 1 ? `${[...instances.values()][0]}` : "undefined"};
+		if (!C) throw new TypeError("GoFront: no ${base} instance for the type arguments " + id + " in the wasm package");
+		return new C(...(Array.isArray(tz) ? a.slice(0, -1) : a));
+	}
+}`);
+	}
+}
+
+function genHandleStruct(out, name, fields, methods, promoted = []) {
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
@@ -2939,6 +3033,12 @@ class ${name} {
 		);
 		lines.push(
 			`\t${m.name}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
+		);
+	}
+	for (const m of promoted) {
+		const names = m.params.map((_, i) => `a${i}`);
+		lines.push(
+			`\t${m.name}(${restParams(names, m.variadic)}) { return this${m.via}.${m.name}(${restParams(names, m.variadic)}); }`,
 		);
 	}
 	lines.push("}");

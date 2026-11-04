@@ -2051,3 +2051,174 @@ func main() {
 	});
 	assertEqual(res.lines.join("\n"), "4 6 3");
 });
+
+test("an exported struct with strings.Builder and *strings.Reader fields gets a valid facade", async () => {
+	const res = await compileHybridProject({
+		"s/s.go": `//gofront:target wasm
+package s
+
+import "strings"
+
+type S struct {
+	sb strings.Builder
+	rd *strings.Reader
+}
+
+func New() *S {
+	s := &S{rd: strings.NewReader("ab")}
+	s.sb.WriteString("xy")
+	return s
+}
+
+func (s *S) N() int { return s.sb.Len() }
+`,
+		"main.go": `package main
+
+import "./s"
+
+func main() { println(s.New().N()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "2");
+});
+
+test("a js main uses an exported generic struct and function instantiation", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type Box[T any] struct{ V T }
+
+func Take(b Box[int]) int { return b.V }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() { println(g.Take(g.Box[int]{V: 4})) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "4");
+});
+
+test("an exported func returning map[string]G[T] works from a js main", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type G[T any] struct{ v T }
+
+type TB struct{ n int }
+
+func Mp() map[string]G[TB] {
+	return map[string]G[TB]{"a": {v: TB{1}}, "b": {v: TB{2}}}
+}
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() { println(len(g.Mp())) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "2");
+});
+
+test("a struct embedding a generic instance exposes the promoted methods", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type G[T any] struct{ v T }
+
+func (g G[T]) Get() T { return g.v }
+
+type Emb struct{ G[int] }
+
+func MkEmb() Emb { return Emb{G[int]{v: 5}} }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	e := g.MkEmb()
+	println(e.Get())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "5");
+});
+
+test("embedded structs forward value and pointer methods through the facade", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type Base struct{ v int }
+
+func (b Base) Get() int { return b.v }
+func (b *Base) Add(n int, more ...int) {
+	b.v += n
+	for _, m := range more {
+		b.v += m
+	}
+}
+
+type Mid struct{ Base }
+
+func (m Mid) Get() int { return -1 }
+
+type Top struct{ *Mid }
+
+func MkTop() Top { return Top{&Mid{Base{5}}} }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	t := g.MkTop()
+	t.Add(1, 2, 3)
+	println(t.Get(), t.Mid.Base.Get())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "-1 11");
+});
+
+test("generic instances with several type arguments and map values read from a js main", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type Box[T any] struct{ V T }
+
+type P[K comparable, V any] struct {
+	K K
+	V V
+}
+
+func (p P[K, V]) Val() V { return p.V }
+
+type G[T any] struct{ v T }
+
+func (g G[T]) Get() T { return g.v }
+
+func Mp() map[string]G[int] { return map[string]G[int]{"a": {v: 7}, "b": {v: 8}} }
+func Sum(p P[string, Box[int]]) int { return p.V.V }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	p := g.P[string, g.Box[int]]{K: "k", V: g.Box[int]{V: 9}}
+	println(g.Sum(p), p.Val().V)
+	m := g.Mp()
+	println(len(m), m["b"].Get())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "9 9\n2 8");
+});
