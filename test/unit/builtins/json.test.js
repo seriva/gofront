@@ -2839,6 +2839,90 @@ null <nil>
 	);
 });
 
+section("encoding/json — anonymous struct types");
+
+test("anonymous struct types encode, decode and report errors like Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct {
+	Nest struct{ X int }
+}
+
+type Outer struct {
+	In   struct{ A, B int }
+	List []struct{ N string }
+	M    map[string]struct{ V float64 }
+}
+
+func main() {
+	var t T
+	fmt.Println(json.Unmarshal([]byte(\`{"Nest":{"X":"s"}}\`), &t))
+	b, _ := json.Marshal(struct {
+		A int \`json:"a"\`
+	}{1})
+	fmt.Println(string(b))
+	var t2 struct{ Nest struct{ X int } }
+	fmt.Println(json.Unmarshal([]byte(\`{"Nest":{"X":3}}\`), &t2), t2)
+	var t3 struct{ Nest struct{ X int } }
+	fmt.Println(json.Unmarshal([]byte(\`{"Nest":{"X":"q"}}\`), &t3), t3)
+	var v any = struct {
+		A int \`json:"a"\`
+		B []struct{ Z bool }
+	}{2, []struct{ Z bool }{{true}}}
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	x1, _ := json.Marshal(struct{ A *int }{})
+	x2, _ := json.Marshal(struct{ S int }{1})
+	fmt.Println(string(x1), string(x2))
+	var o Outer
+	err = json.Unmarshal([]byte(\`{"In":{"A":1,"B":2},"List":[{"N":"a"},{"N":"b"}],"M":{"k":{"V":1.5}}}\`), &o)
+	fmt.Println(err, o)
+	b, _ = json.Marshal(o)
+	fmt.Println(string(b))
+	var s []struct{ K int }
+	fmt.Println(json.Unmarshal([]byte(\`[{"K":1},{"K":"x"}]\`), &s), s)
+}
+`,
+		`json: cannot unmarshal string into Go struct field .Nest.X of type int
+{"a":1}
+<nil> {{3}}
+json: cannot unmarshal string into Go struct field .Nest.X of type int {{0}}
+{"a":2,"B":[{"Z":true}]} <nil>
+{"A":null} {"S":1}
+<nil> {{1 2} [{a} {b}] map[k:{1.5}]}
+{"In":{"A":1,"B":2},"List":[{"N":"a"},{"N":"b"}],"M":{"k":{"V":1.5}}}
+json: cannot unmarshal string into Go struct field .K of type int [{1} {0}]
+`,
+	);
+});
+
+test("a field of a pointer to an anonymous struct keeps its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g(q *struct{ X int }) { q.X = 5 }
+
+func f(p *struct{ Nest struct{ X int } }) { g(&p.Nest) }
+
+func main() {
+	var t struct{ Nest struct{ X int } }
+	f(&t)
+	fmt.Println(t)
+}
+`,
+		`{{5}}
+`,
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
