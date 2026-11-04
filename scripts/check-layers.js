@@ -165,9 +165,21 @@ function walk(dir, ext, out = []) {
 	return out;
 }
 
+// The rules file path as the user typed the root.
+function rulesPath(root) {
+	const shown = process.argv[2] ?? root;
+	return `${shown.replace(/[\\/]+$/, "")}/.sentrux/rules.toml`;
+}
+
 function main(root = REPO_ROOT) {
 	const rel = (p) => relative(root, p).split("\\").join("/");
-	const rules = readFileSync(join(root, ".sentrux/rules.toml"), "utf8");
+	let rules;
+	try {
+		rules = readFileSync(join(root, ".sentrux/rules.toml"), "utf8");
+	} catch {
+		console.error(`check-layers: cannot read ${rulesPath(root)}`);
+		process.exit(1);
+	}
 	const files = [
 		...walk(join(root, "src"), ".js"),
 		...walk(join(root, "stdlib"), ".go"),

@@ -10,7 +10,7 @@
 //   TemplText   { kind, value }
 //   TemplExpr   { kind, tokens }          ← raw Go token array
 //   TemplComponent { kind, tokens }       ← raw Go token array for call
-//   TemplChildren  { kind }
+//   TemplChildren  { kind, name }         ← `{ name... }`, name of a variadic slot
 //   TemplIf     { kind, condTokens, then: TemplNode[], else_: TemplNode[] | null }
 //   TemplFor    { kind, stmtTokens, body: TemplNode[] }
 //   TemplSwitch { kind, exprTokens, cases: TemplCase[] }
@@ -71,7 +71,12 @@ function parseExprTokens(tokens, allowEmpty = true) {
 	if (allowEmpty && (!tokens || tokens.length === 0)) return { expr: null };
 	try {
 		const eofTok = new Token(T.EOF, "", 1, 1);
-		return { expr: new Parser([...tokens, eofTok]).parseExpr() };
+		const p = new Parser([...tokens, eofTok]);
+		const expr = p.parseExpr();
+		while (p.check(T.SEMICOLON)) p.advance();
+		if (!p.check(T.EOF))
+			p.err(`unexpected '${p.peek().value}' after expression`);
+		return { expr };
 	} catch (exprError) {
 		return { expr: null, exprError };
 	}
@@ -220,7 +225,10 @@ export class TemplParser extends Parser {
 				return this.templComponent(t.value);
 			case TT.TEMPL_CHILDREN:
 				this.advance();
-				return { kind: "TemplChildren" };
+				return attach(
+					{ kind: "TemplChildren", name: t.value },
+					parseExprTokens([new Token(T.IDENT, t.value, t.line, t.col)]),
+				);
 			case TT.TEMPL_IF: {
 				this.advance();
 				return this.parseTemplIf(t);
@@ -243,7 +251,9 @@ export class TemplParser extends Parser {
 	// `@templ.Raw(arg)` parses `arg`; any other component parses the whole call.
 	templComponent(tokens) {
 		const raw = isTemplRaw(tokens);
-		const parsed = parseExprTokens(raw ? tokens.slice(4, -1) : tokens);
+		const parsed = parseExprTokens(
+			raw ? trimSemicolons(tokens).slice(4, -1) : tokens,
+		);
 		return attach({ kind: "TemplComponent", tokens }, { raw, ...parsed });
 	}
 

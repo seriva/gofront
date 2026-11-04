@@ -13,6 +13,8 @@ export const templGenMethods = {
 			)
 			.join(", ");
 		this.line(`function ${decl.name}(${params}) {`);
+		const prevBoxed = this._boxedVars;
+		this._boxedVars = new Set(this._boxedGlobals);
 		this.indented(() => {
 			// `@W(xs...)` passes `{ __sp: xs }` like any Go variadic call.
 			const last = decl.params[decl.params.length - 1];
@@ -26,6 +28,7 @@ export const templGenMethods = {
 			});
 			this.line(`}};`);
 		});
+		this._boxedVars = prevBoxed;
 		this.line("}");
 	},
 
@@ -86,11 +89,17 @@ export const templGenMethods = {
 				);
 			case "TemplComponent":
 				return this._genTemplComponentMount(node, p);
-			case "TemplChildren":
-				// children is a variadic gom.Node param — mount each child
+			case "TemplChildren": {
+				// `{ name... }`: mount each node of a variadic gom.Node parameter
+				// (nil mounts nothing). `children` may also be absent altogether.
+				const slot =
+					node.name === "children"
+						? `(typeof children!=="undefined"?children:null)`
+						: this._genTemplExpr(node, "null");
 				return this.line(
-					`if(typeof children!=="undefined")(Array.isArray(children)?children:[...children]).forEach(___c=>___c?.Mount?.(${p}));`,
+					`for (const ___c of ${slot} ?? []) ___c?.Mount?.(${p});`,
 				);
+			}
 			case "TemplIf":
 				return this._genTemplIf(node, p);
 			case "TemplFor":
@@ -200,7 +209,8 @@ export const templGenMethods = {
 	_genTemplSwitch(node, p) {
 		const { cases } = node;
 		if (cases.length === 0) return;
-		const exprJs = this._genTemplExpr(node, '""');
+		// `switch { case cond: }` compares each condition with `true`.
+		const exprJs = this._genTemplExpr(node, "true");
 		this.line(`switch (${exprJs}) {`);
 		this.indented(() => {
 			for (const c of cases) {
@@ -216,48 +226,23 @@ export const templGenMethods = {
 		this.line(`}`);
 	},
 
+	// The header is a parsed Go `for` statement, so it goes through the regular
+	// loop generator; its body is a statement that mounts the templ nodes.
 	_genTemplFor(node, p) {
 		if (node.forError) throw node.forError;
 		if (!node.forStmt)
 			throw new Error("templ for header was not parsed by TemplParser");
-		this._genTemplRangeFor(node.forStmt, node.body, p);
+		const mount = { kind: "TemplMount", parent: p };
+		// Hidden from the generic AST walkers: they know no templ node kinds.
+		Object.defineProperty(mount, "nodes", { value: node.body });
+		this.genFor({
+			...node.forStmt,
+			body: { kind: "Block", stmts: [mount] },
+		});
 	},
 
-	_genTemplRangeFor(forStmt, templBody, mountParent) {
-		const init = forStmt.init;
-		if (init?.rhs?.[0]?.kind !== "RangeExpr") {
-			// Plain for loop (cond-only or three-clause)
-			const condJs = forStmt.cond ? this.genExpr(forStmt.cond) : "true";
-			this.line(`while (${condJs}) {`);
-			this.indented(() => this._genTemplNodes(templBody, mountParent));
-			this.line("}");
-			return;
-		}
-		// Range for: for key, val := range iter
-		const range = init.rhs[0];
-		const iterJs = this.genExpr(range.expr);
-		const lhs = init.lhs.map((e) => e.name ?? "_");
-		const keyName = lhs[0] ?? "_";
-		const valName = lhs[1] ?? null;
-
-		const loopHeader = this._genTemplRangeHeader(keyName, valName, iterJs);
-		this.line(loopHeader);
-		this.indented(() => this._genTemplNodes(templBody, mountParent));
-		this.line("}");
-	},
-
-	_genTemplRangeHeader(keyName, valName, iterJs) {
-		if (valName === null || valName === undefined) {
-			return `for (const ${keyName === "_" ? "_$" : keyName} of ${iterJs}) {`;
-		}
-		if (keyName === "_" && valName === "_")
-			return `for (const _$ of ${iterJs}) {`;
-		if (keyName === "_") return `for (const ${valName} of ${iterJs}) {`;
-		if (valName === "_")
-			return `for (const [${keyName}] of Object.entries(${iterJs})) {`;
-		// Default to .entries() for arrays, Object.entries for objects
-		this.useHelper("sliceGuard");
-		return `for (const [${keyName}, ${valName}] of __s(${iterJs}).entries()) {`;
+	_genTemplMountStmt(stmt) {
+		this._genTemplNodes(stmt.nodes, stmt.parent);
 	},
 
 	// Emit JS for the Go expression TemplParser parsed onto `node`. `emptyJs` is
