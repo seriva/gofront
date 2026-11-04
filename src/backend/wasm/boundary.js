@@ -2966,7 +2966,10 @@ function genGenericClasses(out, needs, mod) {
 		const m = goName ? /^([^[]+)\[(.*)\]$/s.exec(goName) : null;
 		if (!m) continue;
 		if (!groups.has(m[1])) groups.set(m[1], new Map());
-		groups.get(m[1]).set(m[2].replaceAll(" ", ""), name);
+		// The js caller keys instances by the unqualified printed arguments.
+		groups
+			.get(m[1])
+			.set(m[2].replaceAll(" ", "").replace(/(?<![\w.])main\./g, ""), name);
 	}
 	for (const [base, instances] of groups) {
 		const table = [...instances]
@@ -2976,7 +2979,7 @@ function genGenericClasses(out, needs, mod) {
 	constructor(...a) {
 		const tz = a.at(-1);
 		const id = Array.isArray(tz) && typeof tz.at(-1) === "string" ? tz.at(-1).replaceAll(" ", "") : undefined;
-		const C = { ${table} }[id] ?? ${instances.size === 1 ? `${[...instances.values()][0]}` : "undefined"};
+		const C = id === undefined ? ${instances.size === 1 ? `${[...instances.values()][0]}` : "undefined"} : { ${table} }[id];
 		if (!C) throw new TypeError("GoFront: no ${base} instance for the type arguments " + id + " in the wasm package");
 		return new C(...(Array.isArray(tz) ? a.slice(0, -1) : a));
 	}

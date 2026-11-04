@@ -2222,3 +2222,58 @@ func main() {
 	});
 	assertEqual(res.lines.join("\n"), "9 9\n2 8");
 });
+
+test("several instances of a generic struct with a local type argument resolve from a js main", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type Box[T any] struct{ V T }
+
+type P[K comparable, V any] struct {
+	K K
+	V V
+}
+
+func Sum(p P[string, Box[int]]) int { return p.V.V }
+func Pair(p P[int, int]) int { return p.K + p.V }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	p := g.P[string, g.Box[int]]{K: "k", V: g.Box[int]{V: 9}}
+	q := g.P[int, int]{K: 1, V: 2}
+	println(g.Sum(p), g.Pair(q))
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "9 3");
+});
+
+test("an explicit unmatched generic instance throws instead of using the sole instance", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type Box[T any] struct{ V T }
+
+func Take(b Box[int]) int { return b.V }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	b := g.Box[string]{V: "hello"}
+	println(b.V)
+}
+`,
+	}).catch((e) => ({ error: e }));
+	const msg = String(res.error?.message ?? res.lines?.join("\n") ?? "");
+	assert(
+		msg.includes("no Box instance for the type arguments string"),
+		`expected unmatched-instance error, got: ${msg}`,
+	);
+});
