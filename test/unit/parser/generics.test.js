@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -159,6 +160,25 @@ func main() {
 }
 `,
 		"0\n7\n1 2 3\n0\n",
+	);
+});
+
+test("generic instantiation with a lone pointer type argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Id[T any](x T) T { return x }
+
+func main() {
+	x := 4
+	f := Id[*int]
+	fmt.Println(*f(&x))
+	fmt.Println(*Id[*int](&x))
+}
+`,
+		"4\n4\n",
 	);
 });
 

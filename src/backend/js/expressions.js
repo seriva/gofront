@@ -1777,7 +1777,8 @@ export const expressionGenMethods = {
 				(elem === "byte" || elem === "uint8") &&
 				this._isStringExprType(expr.args[0]?._type)
 			) {
-				const enc = `new TextEncoder().encode(${arg})`;
+				this.useHelper("u8enc");
+				const enc = `__u8enc(${arg})`;
 				return isRaw ? `((u) => { u.__raw = true; return u; })(${enc})` : enc;
 			}
 			if (isRaw) {
@@ -2082,9 +2083,9 @@ export const expressionGenMethods = {
 	// contributes its UTF-8 bytes.
 	_genSliceSource(node) {
 		const js = this.genExpr(node);
-		return this._isStringExprType(node._type)
-			? `new TextEncoder().encode(${js})`
-			: js;
+		if (!this._isStringExprType(node._type)) return js;
+		this.useHelper("u8enc");
+		return `__u8enc(${js})`;
 	},
 
 	genAppend(expr) {
@@ -3283,10 +3284,14 @@ export const expressionGenMethods = {
 		if (this._isNilLiteral(expr.expr)) return "null";
 		const elem = t.elem?.name;
 		if (elem === "byte" || elem === "uint8") {
-			if (this._isStringExprType(expr.expr._type))
-				return `new TextEncoder().encode(${inner})`;
-			if (isAny(expr.expr._type) || !expr.expr._type)
-				return `(typeof ${inner} === "string" ? new TextEncoder().encode(${inner}) : new Uint8Array(${inner}))`;
+			if (this._isStringExprType(expr.expr._type)) {
+				this.useHelper("u8enc");
+				return `__u8enc(${inner})`;
+			}
+			if (isAny(expr.expr._type) || !expr.expr._type) {
+				this.useHelper("u8enc");
+				return `(typeof ${inner} === "string" ? __u8enc(${inner}) : new Uint8Array(${inner}))`;
+			}
 			return `new Uint8Array(${inner})`;
 		}
 		const typedCtor = typedArrayConstructorForElem(
