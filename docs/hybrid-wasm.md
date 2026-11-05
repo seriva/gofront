@@ -170,8 +170,8 @@ Notable members per package:
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 
-Any other import, or JS-only API (`regexp`, `time.Sleep`), reports a targeted diagnostic
-(e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
+Any other import, or JS-only API (`regexp`, `gom`, `time.Sleep`, `time.AfterFunc`, `time.Timer`), reports a targeted diagnostic
+(e.g. `'time.Sleep' is only available in js packages` or `package 'gom' is not available in wasm packages`).
 `math` follows Go's results in every package. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs` and `Copysign` compile to single WASM instructions, `Round` rounds half away from zero, and `Min`, `Max` and `Pow` handle Go's special cases such as `Pow(1, NaN)`. Functions without a WASM instruction (`Sin`, `Cos`, `Atan2`, `Mod`, `Hypot`, `Cbrt`, …) are imported from the JavaScript host's `Math`; `Mod` keeps the sign of the dividend.
 
 Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised

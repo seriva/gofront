@@ -187,12 +187,6 @@ function resolveImports(
 							"js: imports are not allowed in wasm packages",
 							impNode,
 						);
-					} else if (path === "gom") {
-						checker.recordBlocker("gom usage", "gom");
-						checker.err(
-							"package 'gom' is not available in wasm packages",
-							impNode,
-						);
 					} else if (path === "gofront/shared" && pkgTarget === "both") {
 						checker.err(
 							"'gofront/shared' requires a wasm-only package (//gofront:target wasm): a both package has no linear memory on the JS side",

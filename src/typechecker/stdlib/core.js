@@ -1,13 +1,10 @@
-// Core standard library type definitions — browser globals, fmt, strings, bytes,
-// strconv, math, time, html, io.
+// Core standard library type definitions — browser globals and fmt.
 
 import {
 	ANY,
-	BOOL,
 	BROWSER_GLOBALS,
 	ERROR,
 	INT,
-	INT64,
 	STRING,
 	UINT8,
 	VOID,
@@ -101,60 +98,6 @@ export function setupCoreGlobals(globals, types) {
 			},
 		},
 	});
-
-	// The type declared by Go source loaded after these definitions: looked
-	// up when first used, `fallback` while the package is not imported.
-	const late = (name, fallback) => types.get(name) ?? fallback;
-	// time.Timer: the JavaScript-only part of the package.
-	const TIMER_T = {
-		kind: "named",
-		name: "time.Timer",
-		underlying: { kind: "struct", fields: new Map(), methods: new Map() },
-	};
-	const TIMER_PTR_T = { kind: "pointer", base: TIMER_T };
-	TIMER_T.underlying.methods = new Map([
-		["Stop", { kind: "func", params: [], returns: [BOOL], _ptrRecv: true }],
-		[
-			"Reset",
-			{
-				kind: "func",
-				get params() {
-					return [late("time.Duration", INT64)];
-				},
-				returns: [BOOL],
-				_ptrRecv: true,
-			},
-		],
-	]);
-	TIMER_T.methods = TIMER_T.underlying.methods;
-
-	// The Go source of the time package declares everything but these.
-	globals.define("time", {
-		kind: "namespace",
-		name: "time",
-		members: {
-			Sleep: {
-				kind: "func",
-				get params() {
-					return [late("time.Duration", INT64)];
-				},
-				returns: [VOID],
-				async: true,
-			},
-			AfterFunc: {
-				kind: "func",
-				get params() {
-					return [
-						late("time.Duration", INT64),
-						{ kind: "func", params: [], returns: [VOID] },
-					];
-				},
-				returns: [TIMER_PTR_T],
-			},
-			Timer: TIMER_T,
-		},
-	});
-	types.set("time.Timer", TIMER_T);
 
 	types.set("fmt.Stringer", FMT_STRINGER);
 }

@@ -221,11 +221,11 @@ export const resolveMethods = {
 				}
 				const named = this.types.get(node.name);
 				if (named) {
-					const wasmErr = this._checkWasmStdlibTypeMember(node, named);
-					if (wasmErr) return wasmErr;
 					this._useQualifiedTypeName(node, named);
 					return named;
 				}
+				const jsOnly = this._jsOnlyMember(node.name);
+				if (jsOnly) return this._errJsOnly(jsOnly, node);
 				if (EXCLUDED_STDLIB_MEMBERS.has(node.name)) {
 					return this.err(
 						`${node.name} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(node.name)}`,
@@ -304,25 +304,23 @@ export const resolveMethods = {
 		}
 	},
 
-	_checkWasmStdlibTypeMember(node, named) {
+	// `pkg.Name` when `pkg` is a Go-source package whose `js` files declare
+	// Name and this package is wasm or both (those files are not loaded).
+	_jsOnlyMember(qualified) {
 		if (this.target !== "wasm" && this.target !== "both") return null;
-		// Types of Go-source packages are compiled for both targets.
-		if (named?.name?.includes("$$")) return null;
-		const dot = node.name.indexOf(".");
-		if (dot === -1) return null;
-		const pkg = node.name.slice(0, dot);
-		if (pkg !== "time") return null;
-		const field = node.name.slice(dot + 1);
-		const allowed = WASM_STDLIB_MEMBERS.get(pkg);
-		if (allowed && !allowed.has(field)) {
-			this.recordBlocker("unsupported stdlib member", node.name);
-			return this.err(
-				`'${node.name}' is not yet available in wasm packages`,
-				node,
-				"move this call to a JS package, or use a supported alternative",
-			);
-		}
-		return null;
+		const dot = qualified.indexOf(".");
+		if (dot < 0) return null;
+		const ns = this.globals.lookup(qualified.slice(0, dot));
+		return ns?._jsOnly?.has(qualified.slice(dot + 1)) ? qualified : null;
+	},
+
+	_errJsOnly(qualified, node) {
+		this.recordBlocker("unsupported stdlib member", qualified);
+		return this.err(
+			`'${qualified}' is only available in js packages`,
+			node,
+			"move this call to a JS package",
+		);
 	},
 
 	// `pkg.T` in a type position counts as using the import; a Go-source
@@ -1013,12 +1011,23 @@ export const resolveMethods = {
 		return ANY;
 	},
 
-	_fieldTypeNamespace(base, field, node) {
+	// An error for `field` when the namespace cannot offer it to this package:
+	// an unexported name, or a member of a `js` file in a wasm or both package.
+	_namespaceMemberError(base, field, node) {
 		if (base._gofront && field.length > 0 && field[0] >= "a" && field[0] <= "z")
 			return this.err(
 				`cannot refer to unexported name ${base.name}.${field}`,
 				node,
 			);
+		const wasm = this.target === "wasm" || this.target === "both";
+		return wasm && base._jsOnly?.has(field)
+			? this._errJsOnly(`${base.name}.${field}`, node)
+			: null;
+	},
+
+	_fieldTypeNamespace(base, field, node) {
+		const bad = this._namespaceMemberError(base, field, node);
+		if (bad) return bad;
 		// Go-source stdlib member: backends emit the mangled top-level name.
 		const mangled = base._mangle?.get(field);
 		if (mangled) {
