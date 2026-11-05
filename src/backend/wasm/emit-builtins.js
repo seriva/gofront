@@ -1104,16 +1104,9 @@ export class BuiltinsEmitter {
 			return false;
 		const pkgName = func.expr?.name;
 		switch (pkgName) {
-			case "math":
-				this.emitMathCall(func.field, args);
-				return true;
 			case "fmt":
 				if (func.field.startsWith("Fprint")) {
 					this.emitFprintCall(func.field, call, targetWasmType);
-					return true;
-				}
-				if (func.field.startsWith("Sscan")) {
-					this.emitSscanCall(func.field, call, targetWasmType);
 					return true;
 				}
 				this.emitFmtCall(func.field, args);
@@ -1129,9 +1122,6 @@ export class BuiltinsEmitter {
 				return true;
 			case "rand":
 				this.emitRandCall(func.field, args, targetWasmType);
-				return true;
-			case "binary":
-				this.emitBinaryCall(func.field, call, targetWasmType);
 				return true;
 			case "simd":
 				this.emitSimdPackageCall(func.field, args, targetWasmType);
@@ -1168,21 +1158,6 @@ export class BuiltinsEmitter {
 					recvType?.underlying?.simd === "Mask32x4" ||
 					recvType?.simd === "Mask32x4",
 			);
-		}
-		if (
-			this._emitStdlibReceiverMethod(
-				recvTypeName,
-				func.field,
-				func.expr,
-				args,
-				targetWasmType,
-			)
-		) {
-			return true;
-		}
-		if (recvTypeName === "strings.Builder") {
-			this.emitBuilderMethodCall(func.field, func.expr, args);
-			return true;
 		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
 			const ifaceName = recvTypeName ?? anonIfaceName(recvType);
@@ -1275,20 +1250,6 @@ export class BuiltinsEmitter {
 			operand: func.expr,
 			_type: { kind: "pointer", base: t },
 		};
-	}
-
-	_emitStdlibReceiverMethod(
-		recvTypeName,
-		field,
-		expr,
-		args,
-		targetWasmType = null,
-	) {
-		if (recvTypeName === "strings.Builder") {
-			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		return false;
 	}
 
 	// The embedded struct (possibly several levels down) that declares or

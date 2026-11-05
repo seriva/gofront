@@ -8,7 +8,6 @@ import {
 	isSimpleIntRange,
 	isStringRangeType,
 	loopVarsCapturedInLoop,
-	nodeAssigns,
 	someChild,
 } from "../../lower/index.js";
 import {
@@ -318,8 +317,11 @@ export const statementGenMethods = {
 					: null;
 		switch (stmt.kind) {
 			case "TypeDecl":
-				this.genTypeDeclWithMethods(stmt, []);
-				this._noteLocalTypeDecl(stmt);
+				{
+					const start = this.out.length;
+					this.genTypeDeclWithMethods(stmt, []);
+					this._hoistLocalClass(stmt, start);
+				}
 				break;
 			case "IncDecStmt": {
 				this._markIndexLvalues([stmt.expr]);
@@ -1551,11 +1553,6 @@ export const statementGenMethods = {
 		});
 		this.line("}");
 		this._loopDepth--;
-	},
-
-	// True when `node` contains an assignment or ++/-- targeting identifier `name`.
-	_nodeAssigns(node, name) {
-		return nodeAssigns(node, name);
 	},
 
 	_genStringRangeFor(stmt, iteree, isAssign) {

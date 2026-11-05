@@ -20,7 +20,6 @@
 import {
 	computeEmbeddedStubs,
 	hasDirectRecover,
-	isReferenceType,
 	markInBoundsIndexes,
 	markRedundantNilChecks,
 	normalizeDefers,
@@ -36,7 +35,6 @@ import {
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
-	HELPER_BINARY,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
@@ -51,7 +49,7 @@ import {
 	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
 	HELPER_IO_EOF,
-	HELPER_JSON,
+	HELPER_JSONRT,
 	HELPER_LEN,
 	HELPER_MKLEN,
 	HELPER_NIL_CALL,
@@ -60,6 +58,7 @@ import {
 	HELPER_OS,
 	HELPER_PANIC,
 	HELPER_PTREQ,
+	HELPER_PUSHS,
 	HELPER_RUNESTR,
 	HELPER_S,
 	HELPER_SCLONE,
@@ -142,6 +141,7 @@ const HELPER_MAP = [
 	["runestr", HELPER_RUNESTR],
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
+	["pushs", HELPER_PUSHS],
 	["sclone", HELPER_SCLONE],
 	["va", HELPER_VA],
 	["vclone", HELPER_VCLONE],
@@ -171,8 +171,7 @@ const HELPER_MAP = [
 	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
-	["binary", HELPER_BINARY],
-	["json", HELPER_JSON],
+	["jsonrt", HELPER_JSONRT],
 	["simd", HELPER_SIMD],
 ];
 
@@ -184,6 +183,41 @@ const JS_INTRINSICS = {
 		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
 	time_zone_offset: ([unix]) =>
 		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
+	math_float64bits: ([f]) =>
+		`const $b = new ArrayBuffer(8); new Float64Array($b)[0] = ${f}; return new BigUint64Array($b)[0];`,
+	math_float64frombits: ([u]) =>
+		`const $b = new ArrayBuffer(8); new BigUint64Array($b)[0] = BigInt(${u}); return new Float64Array($b)[0];`,
+	math_float32bits: ([f]) =>
+		`const $b = new ArrayBuffer(4); new Float32Array($b)[0] = ${f}; return new Uint32Array($b)[0];`,
+	math_float32frombits: ([u]) =>
+		`const $b = new ArrayBuffer(4); new Uint32Array($b)[0] = ${u} >>> 0; return new Float32Array($b)[0];`,
+	math_mod: ([x, y]) => `return ${x} % ${y};`,
+	...Object.fromEntries(
+		[
+			"sin",
+			"cos",
+			"tan",
+			"asin",
+			"acos",
+			"atan",
+			"sinh",
+			"cosh",
+			"tanh",
+			"exp",
+			"expm1",
+			"log",
+			"log1p",
+			"log2",
+			"log10",
+			"cbrt",
+		].map((f) => [`math_${f}`, ([x]) => `return Math.${f}(${x});`]),
+	),
+	...Object.fromEntries(
+		["atan2", "pow", "hypot"].map((f) => [
+			`math_${f}`,
+			([x, y]) => `return Math.${f}(${x}, ${y});`,
+		]),
+	),
 };
 
 export class CodeGen {
@@ -215,9 +249,9 @@ export class CodeGen {
 		this._srcMappings = []; // { genLine, srcLine, srcFileIdx } for source map
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
-		this._jsonCodecs = new Map(); // memoized JSON encoders and decoders
-		this._localTypeNames = new Set(); // function-local type declarations
-		this._jsonAnyUsed = false; // program calls json.Marshal / Encoder.Encode
+		this._hoistedLocals = new Set(); // function-local classes the json codecs name
+		this._hasJsonCodecs = false;
+		this._jsonCodecFileIdx = -1;
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -341,13 +375,16 @@ export class CodeGen {
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
-		this._jsonAnyUsed = this._usesJsonAnyMarshal(program.decls);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
+		// Package variable initialisers may call functions that declare local
+		// structs, so the hoisted classes are declared before them.
+		const hoistedAt = this.out.length;
+		if (this._hasJsonCodecs) this.line("");
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
-		this._emitJsonCodecs();
+		this._emitHoistedLocals(hoistedAt);
 		this._callInitAndMain(initNames, program, isTest);
 		const prependedLines = this._prependHelpers(isTest);
 		return this._finalizeOutput(prependedLines);
@@ -574,10 +611,6 @@ export class CodeGen {
 		if (name === "append") this.useHelper("slice");
 		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
-		if (name === "binary") {
-			this.useHelper("ioEOF");
-			this._helpers.add("error");
-		}
 	}
 
 	_prependHelpers(isTest = false) {
@@ -603,6 +636,8 @@ export class CodeGen {
 	// Annotates each decl with its source file index before merging.
 	generateAll(programs, options = {}) {
 		this._srcFileNames = programs.map((p) => p._filename ?? null);
+		this._jsonCodecFileIdx = programs.findIndex((p) => p._jsonCodecs);
+		this._hasJsonCodecs = this._jsonCodecFileIdx >= 0;
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
 				decl._srcFileIdx = i;
@@ -636,14 +671,6 @@ export class CodeGen {
 
 	getMappings() {
 		return this._srcMappings;
-	}
-
-	// Returns a source map JSON string for the last generate() call.
-	// sources: string[] of source filenames (relative to the output file).
-	// sourcesContent: string[] of original file contents (embedded for DevTools breakpoints).
-	getSourceMap(sources, sourcesContent) {
-		const srcArray = Array.isArray(sources) ? sources : [sources];
-		return buildSourceMap(srcArray, this._srcMappings, sourcesContent);
 	}
 
 	// ── Type declarations ────────────────────────────────────────
@@ -975,13 +1002,28 @@ export class CodeGen {
 			);
 	}
 
-	_emitJsonCodecs() {
-		this._emitJsonAnyHooks();
-		if (!this._jsonCodecs || this._jsonCodecs.size === 0) return;
-		for (const [, code] of this._jsonCodecs) {
-			this.line(code);
-			this.blank();
-		}
+	// The generated json codecs live at package level and name function-local
+	// struct classes: those are declared once at module level and assigned
+	// where the Go source declares them.
+	_hoistLocalClass(stmt, start) {
+		if (!this._hasJsonCodecs || stmt.type.kind !== "StructType") return;
+		const open = this.out.findIndex(
+			(l, i) => i >= start && l.trimStart().startsWith(`class ${stmt.name} `),
+		);
+		if (open < 0) return;
+		const indent = this.out[open].match(/^\s*/)[0];
+		const close = this.out.findIndex((l, i) => i > open && l === `${indent}}`);
+		if (close < 0) return;
+		this.out[open] =
+			`${indent}${stmt.name} = ${stmt.name}.__ph ? ${this.out[open].trimStart()}`;
+		this.out[close] = `${indent}} : ${stmt.name};`;
+		this._hoistedLocals.add(stmt.name);
+	}
+
+	_emitHoistedLocals(at) {
+		if (this._hoistedLocals.size > 0 && this._hasJsonCodecs)
+			this.out[at] =
+				`var ${[...this._hoistedLocals].map((n) => `${n} = class { static __ph = true; }`).join(", ")};`;
 	}
 
 	// A promoted method runs on the embedded value (`this.In`), so it and the
@@ -999,19 +1041,6 @@ export class CodeGen {
 			? `this.${field}.${method}(...__a)`
 			: `${embedName}.prototype.${method}.call(this, ...__a)`;
 		return `${method}(...__a) { return ${call}; }`;
-	}
-
-	_genSingleEmbedStubs(embed, declared) {
-		const embedName = embed.kind === "named" ? embed.name : null;
-		if (!embedName) return;
-		const embedBase = embed.kind === "named" ? embed.underlying : embed;
-		if (embedBase?.kind !== "struct" || !embedBase.methods) return;
-		for (const [mName] of embedBase.methods.entries()) {
-			if (!declared.has(mName)) {
-				this.blank();
-				this.line(this._embedStub(mName, embedName));
-			}
-		}
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {
@@ -1288,10 +1317,6 @@ export class CodeGen {
 	_namedPtrMethodOn(type, method) {
 		const info = this._namedBoxInfo(type);
 		return Boolean(info?.methods.get(method)?._ptrRecv);
-	}
-
-	_isReferenceType(t) {
-		return isReferenceType(t);
 	}
 
 	// ── Variable / const declarations ────────────────────────────

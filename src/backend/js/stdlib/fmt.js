@@ -12,18 +12,6 @@ import {
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
-const _SSCAN_LOOP =
-	`let n = 0, err = null; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
-	`const item = tokens[i]; const t = typeof item === "object" && item !== null ? item.t : item; const verb = item?.verb; const p = ptrs[i]; ` +
-	`if (verb === "%c") { p.value = t.codePointAt ? t.codePointAt(0) : t; } ` +
-	`else if (verb === "%x" || verb === "%X") { const clean = t.replace(/^0[xX]/, ""); const v = parseInt(clean, 16); if (isNaN(v)) { err = __error("expected hex number"); break; } p.value = typeof p.value === "bigint" ? BigInt("0x" + clean) : v; } ` +
-	`else if (verb === "%o") { const clean = t.replace(/^0[oO]?/, ""); const v = parseInt(clean, 8); if (isNaN(v)) { err = __error("expected octal number"); break; } p.value = typeof p.value === "bigint" ? BigInt("0o" + clean) : v; } ` +
-	`else if (verb === "%b") { const clean = t.replace(/^0[bB]/, ""); const v = parseInt(clean, 2); if (isNaN(v)) { err = __error("expected binary number"); break; } p.value = typeof p.value === "bigint" ? BigInt("0b" + clean) : v; } ` +
-	`else if (typeof p.value === "number") { const v = Number(t); if (Number.isNaN(v) || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(t)) { err = __error("expected number"); break; } p.value = v; } ` +
-	`else if (typeof p.value === "bigint") { try { if (!/^[+-]?\\d+$/.test(t)) throw 1; p.value = BigInt(t); } catch { err = __error("expected integer"); break; } } ` +
-	`else if (typeof p.value === "boolean") { const tl = String(t).toLowerCase(); if (tl === "true" || tl === "1" || tl === "t") p.value = true; else if (tl === "false" || tl === "0" || tl === "f") p.value = false; else { err = __error("expected boolean"); break; } } ` +
-	`else p.value = t; n++; }`;
-
 const FMT_METHODS = ["Error", "String"];
 const isExportedName = (n) => /^\p{Lu}/u.test(n);
 // Descriptor of a struct value whose class has a pointer-receiver Error/String:
@@ -418,74 +406,6 @@ export const fmtMethods = {
 			case "Fprintln":
 			case "Fprint":
 				return this._genFmtFprint(fn, expr);
-			case "Sscan": {
-				this.useHelper("error");
-				const strArg = this.genExpr(expr.args[0]);
-				const restArgs = expr.args
-					.slice(1)
-					.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)))
-					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, err ? err : (n < ptrs.length ? __error("unexpected EOF") : null)]; })(${strArg}, ${restArgs})`;
-			}
-			case "Sscanln": {
-				this.useHelper("error");
-				const strArg = this.genExpr(expr.args[0]);
-				const restArgs = expr.args
-					.slice(1)
-					.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)))
-					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, err ? err : (n < ptrs.length ? __error("unexpected EOF") : null)]; })(${strArg}, ${restArgs})`;
-			}
-			case "Sscanf": {
-				this.useHelper("error");
-				const strArg = this.genExpr(expr.args[0]);
-				const fmtArg = this.genExpr(expr.args[1]);
-				const restArgs = expr.args
-					.slice(2)
-					.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)))
-					.join(", ");
-				return (
-					`((str, fmt, ...ptrs) => { ` +
-					`const s = String(str); const f = String(fmt); ` +
-					`let si = 0, fi = 0; const tokens = []; let parseErr = null; ` +
-					`while (fi < f.length) { ` +
-					`if (/\\s/.test(f[fi])) { ` +
-					`while (fi < f.length && /\\s/.test(f[fi])) fi++; ` +
-					`while (si < s.length && /\\s/.test(s[si])) si++; ` +
-					`continue; ` +
-					`} ` +
-					`if (f[fi] === "%") { ` +
-					`if (fi + 1 < f.length && f[fi + 1] === "%") { ` +
-					`if (s[si] !== "%") { parseErr = __error("input does not match format"); break; } ` +
-					`si++; fi += 2; continue; ` +
-					`} ` +
-					`const vm = f.slice(fi).match(/^%[vdsfqtxXbcoeEfFgG]/); ` +
-					`if (vm) { ` +
-					`const verb = vm[0]; fi += verb.length; ` +
-					`if (verb !== "%c") { while (si < s.length && /\\s/.test(s[si])) si++; } ` +
-					`if (si >= s.length) break; ` +
-					`let tokRe = /^\\S+/; ` +
-					`if (verb === "%d" || verb === "%i") tokRe = /^[+-]?\\d+/; ` +
-					`else if (verb === "%o") tokRe = /^[+-]?(?:0[oO])?[0-7]+/; ` +
-					`else if (verb === "%b") tokRe = /^[+-]?(?:0[bB])?[01]+/; ` +
-					`else if (verb === "%f" || verb === "%F" || verb === "%e" || verb === "%E" || verb === "%g" || verb === "%G") tokRe = /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/; ` +
-					`else if (verb === "%t") tokRe = /^(?:true|false|1|0|t|f|T|F|TRUE|FALSE)/; ` +
-					`else if (verb === "%x" || verb === "%X") tokRe = /^[+-]?(?:0x)?[0-9a-fA-F]+/; ` +
-					`else if (verb === "%c") tokRe = /^[\\s\\S]/; ` +
-					`const m = s.slice(si).match(tokRe); ` +
-					`if (!m) { parseErr = __error("input does not match format"); break; } ` +
-					`tokens.push({ t: m[0], verb }); si += m[0].length; continue; ` +
-					`} ` +
-					`} ` +
-					`if (si >= s.length) break; ` +
-					`if (s[si] !== f[fi]) { parseErr = __error("input does not match format"); break; } ` +
-					`si++; fi++; ` +
-					`} ` +
-					`${_SSCAN_LOOP} ` +
-					`return [n, parseErr || err || (n < ptrs.length ? __error("unexpected EOF") : null)]; ` +
-					`})(${strArg}, ${fmtArg}, ${restArgs})`
-				);
-			}
 			default:
 				return undefined;
 		}
@@ -502,16 +422,7 @@ export const fmtMethods = {
 				? this._fmtFormatArgsJs(rest, 0)
 				: rest.map((e) => this._fmtArgJs(e))
 		).join(", ");
-		const writerType = writerArg._type;
-		const targetTypeName =
-			writerType?.name ??
-			(writerType?.kind === "pointer" ? writerType.base?.name : null);
 		const sprintfCall = this._buildFprintSprintfCall(fn, rest.length, restJs);
-		if (targetTypeName === "strings.Builder") {
-			const w = this.genExpr(writerArg);
-			const base = this._unboxWriter(w);
-			return `((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall})`;
-		}
 		// Any other io.Writer: Fprint* calls Write with the UTF-8 bytes.
 		const w = this.genExpr(writerArg);
 		return `((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
@@ -525,14 +436,6 @@ export const fmtMethods = {
 			parts.length,
 			parts.join(", "),
 		);
-		const writerType = call._type.types[0];
-		const targetTypeName =
-			writerType?.name ??
-			(writerType?.kind === "pointer" ? writerType.base?.name : null);
-		if (targetTypeName === "strings.Builder") {
-			const base = this._unboxWriter("__t[0]");
-			return `((__t) => ((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall}))(${this.genExpr(call)})`;
-		}
 		return `((__t) => ((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(__t[0], ${sprintfCall}))(${this.genExpr(call)})`;
 	},
 

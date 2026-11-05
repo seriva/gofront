@@ -40,6 +40,16 @@ const JS_ONLY = new Set([
 	"strings.Join",
 	"strings.Repeat",
 	"strings.Fields",
+	// The encoder's buffer writes: the Go bodies serve WASM.
+	"jsonrt.putString",
+	"jsonrt.putInt",
+	"jsonrt.putUint",
+	"jsonrt.putFloat",
+	"jsonrt.putQuoted",
+	"jsonrt.readStr",
+	"jsonrt.readNum",
+	"jsonrt.CheckValid",
+	"jsonrt.LooksFloat32",
 ]);
 // math/bits natives that only the WASM instructions serve: JS declines the
 // 64-bit and `uint` widths (BigInt and imprecise Numbers) and runs the Go body.

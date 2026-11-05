@@ -1,12 +1,12 @@
 // GoFront test suite — encoding/json package
 
 import { fileURLToPath } from "node:url";
-import { HELPER_ERROR, HELPER_JSON } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
+	assertFourWay,
 	assertJsProgramOutput,
 	assertJsTargetsOutput,
 	assertProgramOutput,
@@ -2388,6 +2388,62 @@ func main() {
 	);
 });
 
+test("a package variable initialised by a function with a local struct marshals", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+var x = helper()
+
+func helper() string {
+	type Local struct {
+		A int \`json:"a"\`
+	}
+	b, _ := json.Marshal(Local{A: 42})
+	return string(b)
+}
+
+func main() { fmt.Println(x) }
+`,
+		'{"a":42}\n',
+	);
+});
+
+test("same-named local structs in different functions marshal", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func f1() {
+	type Config struct {
+		A int \`json:"a"\`
+	}
+	b, _ := json.Marshal(Config{A: 1})
+	fmt.Println(string(b))
+}
+
+func f2() {
+	type Config struct {
+		A int \`json:"a"\`
+	}
+	b, _ := json.Marshal(Config{A: 2})
+	fmt.Println(string(b))
+}
+
+func main() { f1(); f2() }
+`,
+		'{"a":1}\n{"a":2}\n',
+	);
+});
+
 test("function-local structs add no lines to programs that do not marshal", () => {
 	const { js, errors } = compile(`package main
 
@@ -2512,54 +2568,38 @@ func main() {
 	);
 });
 
-section("encoding/json BigInt helpers (Task 1.2)");
+test("Unmarshal into a pointer to a pointer works in a js package", () => {
+	const { js, errors } = compile(`package main
 
-test("BigInt JSON encoding writes exact digits", () => {
-	const code = `
-${HELPER_ERROR};
-${HELPER_JSON};
-return {
-  max64: __json_enc_any(9223372036854775807n),
-  min64: __json_enc_any(-9223372036854775808n),
-  umax64: __json_enc_any(18446744073709551615n),
-};`;
-	const res = new Function(code)();
-	assertEqual(res.max64, "9223372036854775807");
-	assertEqual(res.min64, "-9223372036854775808");
-	assertEqual(res.umax64, "18446744073709551615");
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A int }
+
+func main() {
+	var p *T
+	err := json.Unmarshal([]byte(\`{"A":3}\`), &p)
+	fmt.Println(p.A, err)
+	var n *int
+	err = json.Unmarshal([]byte("7"), &n)
+	fmt.Println(*n, err)
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3 <nil>\n7 <nil>");
 });
 
-test("__json_int_decode with BigInt and 64-bit integer range checks", () => {
-	const code = `
-${HELPER_ERROR};
-${HELPER_JSON};
-return {
-  decMax: __json_int_decode(9223372036854775807n, "int64", "int64"),
-  decMin: __json_int_decode(-9223372036854775808n, "int64", "int64"),
-  decRaw: __json_int_decode("9223372036854775807__bigint", "int64", "int64"),
-  decUint: __json_int_decode(18446744073709551615n, "uint64", "uint64"),
-  decUintNeg: __json_int_decode(-1n, "uint64", "uint64")?._msg,
-  decIntOverflow: __json_int_decode(9223372036854775808n, "int64", "int64")?._msg,
-  decNarrow: __json_int_decode(42n, "int32", "int32"),
-  decNarrowOverflow: __json_int_decode(3000000000n, "int32", "int32")?._msg,
-};`;
-	const res = new Function(code)();
-	assertEqual(res.decMax, 9223372036854775807n);
-	assertEqual(res.decMin, -9223372036854775808n);
-	assertEqual(res.decRaw, 9223372036854775807n);
-	assertEqual(res.decUint, 18446744073709551615n);
-	assertContains(
-		res.decUintNeg,
-		"cannot unmarshal number -1 into Go value of type uint64",
-	);
-	assertContains(
-		res.decIntOverflow,
-		"cannot unmarshal number 9223372036854775808 into Go value of type int64",
-	);
-	assertEqual(res.decNarrow, 42);
-	assertContains(
-		res.decNarrowOverflow,
-		"cannot unmarshal number 3000000000 into Go value of type int32",
+section("encoding/json — host fast paths");
+
+// The encoder's buffer writes and the decoder's string, number and validity
+// reads have JS natives; with natives off they run their Go bodies.  Both
+// must print what real Go printed, on the JS and WASM backends.
+test("JSON strings, numbers, floats and errors agree with Go with natives on and off", async () => {
+	await assertFourWay(
+		'package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n\t"math"\n\t"strings"\n)\n\ntype Rec struct {\n\tS   string            `json:"s"`\n\tI   int64             `json:"i"`\n\tU   uint64            `json:"u"`\n\tF   float64           `json:"f"`\n\tG   float32           `json:"g"`\n\tB   bool              `json:"b"`\n\tL   []string          `json:"l"`\n\tM   map[string]float64 `json:"m"`\n\tSub *Rec              `json:"sub,omitempty"`\n}\n\nfunc main() {\n\tstrs := []string{"plain", "a\\"b\\\\c", "<tag>&amp;", "line\\nbreak\\ttab\\r\\b\\f", "\\x01\\x1f", "caf\u00e9 \u4e16\u754c", "emoji \\U0001F600", "sep\u2028\u2029", ""}\n\tfor _, s := range strs {\n\t\tb, err := json.Marshal(s)\n\t\tfmt.Println(string(b), err)\n\t\tvar back string\n\t\terr = json.Unmarshal(b, &back)\n\t\tfmt.Println(back == s, err)\n\t}\n\tnums := []float64{0, 1, -1, 0.1, 0.5, 1.5e-7, 1e-6, 123456789012345680000, 1e21, 1.7976931348623157e308, 5e-324, math.Copysign(0, -1), 100, 12345.6789}\n\tfor _, f := range nums {\n\t\tb, err := json.Marshal(f)\n\t\tfmt.Println(string(b), err)\n\t}\n\tfor _, f := range []float32{0.1, 1.0 / 3, 3.4e38, 1e-8, 16777216, 0.3} {\n\t\tb, _ := json.Marshal(f)\n\t\tfmt.Println(string(b))\n\t}\n\tb, _ := json.Marshal([]any{int64(math.MinInt64), uint64(math.MaxUint64), int8(-5), uint16(7), 2.5})\n\tfmt.Println(string(b))\n\tr := Rec{S: "x<y", I: math.MaxInt64, U: math.MaxUint64, F: 1e21, G: 0.1, B: true, L: []string{"a", "b\\n"}, M: map[string]float64{"k": 2.5, "a": 1e-7}, Sub: &Rec{S: "inner"}}\n\tb, _ = json.Marshal(r)\n\tfmt.Println(string(b))\n\tvar r2 Rec\n\terr := json.Unmarshal(b, &r2)\n\tfmt.Println(err, r2.S, r2.I, r2.U, r2.F, r2.G, r2.B, r2.L, r2.M, r2.Sub.S)\n\tvar r3 Rec\n\terr = json.Unmarshal([]byte(` { "s" : "\u00e9\ud83d\ude00\\n\\/" , "i" : -9223372036854775808 , "f" : 1E2 , "l" : [ ] } `), &r3)\n\tfmt.Printf("%v %q %d %v %v\\n", err, r3.S, r3.I, r3.F, r3.L == nil)\n\tbad := []string{``, `{`, `{"s":}`, `[1,]`, `{"s":"a" "b"}`, `{"a":1}x`, `tru`, `"\\x"`, `{"i":1.5}`, `{"i":99999999999999999999}`, `{"s":1}`, `{"g":1e40}`}\n\tfor _, s := range bad {\n\t\tvar x Rec\n\t\terr := json.Unmarshal([]byte(s), &x)\n\t\tfmt.Println(err, json.Valid([]byte(s)))\n\t}\n\tdeep := strings.Repeat("[", 10001) + strings.Repeat("]", 10001)\n\tvar d any\n\tfmt.Println(json.Unmarshal([]byte(deep), &d), json.Valid([]byte(deep)))\n\tok := strings.Repeat("[", 10000) + strings.Repeat("]", 10000)\n\tfmt.Println(json.Valid([]byte(ok)))\n\te := json.NewEncoder(&strings.Builder{})\n\te.SetEscapeHTML(false)\n\tvar sb strings.Builder\n\te = json.NewEncoder(&sb)\n\te.SetEscapeHTML(false)\n\te.Encode("<&>")\n\te.Encode(map[string]string{"<k>": "\u2028"})\n\tfmt.Print(sb.String())\n}\n',
+		'"plain" <nil>\ntrue <nil>\n"a\\"b\\\\c" <nil>\ntrue <nil>\n"\\u003ctag\\u003e\\u0026amp;" <nil>\ntrue <nil>\n"line\\nbreak\\ttab\\r\\b\\f" <nil>\ntrue <nil>\n"\\u0001\\u001f" <nil>\ntrue <nil>\n"caf\u00e9 \u4e16\u754c" <nil>\ntrue <nil>\n"emoji \ud83d\ude00" <nil>\ntrue <nil>\n"sep\\u2028\\u2029" <nil>\ntrue <nil>\n"" <nil>\ntrue <nil>\n0 <nil>\n1 <nil>\n-1 <nil>\n0.1 <nil>\n0.5 <nil>\n1.5e-7 <nil>\n0.000001 <nil>\n123456789012345680000 <nil>\n1e+21 <nil>\n1.7976931348623157e+308 <nil>\n5e-324 <nil>\n-0 <nil>\n100 <nil>\n12345.6789 <nil>\n0.1\n0.33333334\n3.4e+38\n1e-8\n16777216\n0.3\n[-9223372036854775808,18446744073709551615,-5,7,2.5]\n{"s":"x\\u003cy","i":9223372036854775807,"u":18446744073709551615,"f":1e+21,"g":0.1,"b":true,"l":["a","b\\n"],"m":{"a":1e-7,"k":2.5},"sub":{"s":"inner","i":0,"u":0,"f":0,"g":0,"b":false,"l":null,"m":null}}\n<nil> x<y 9223372036854775807 18446744073709551615 1e+21 0.1 true [a b\n] map[a:1e-07 k:2.5] inner\n<nil> "\u00e9\ud83d\ude00\\n/" -9223372036854775808 100 false\nunexpected end of JSON input false\nunexpected end of JSON input false\ninvalid character \'}\' looking for beginning of value false\ninvalid character \']\' looking for beginning of value false\ninvalid character \'"\' after object key:value pair false\ninvalid character \'x\' after top-level value false\ninvalid character \' \' in literal true (expecting \'e\') false\ninvalid character \'x\' in string escape code false\njson: cannot unmarshal number 1.5 into Go struct field Rec.i of type int64 true\njson: cannot unmarshal number 99999999999999999999 into Go struct field Rec.i of type int64 true\njson: cannot unmarshal number into Go struct field Rec.s of type string true\njson: cannot unmarshal number 1e40 into Go struct field Rec.g of type float32 true\ninvalid character \'[\' exceeded max depth false\ntrue\n"<&>"\n{"<k>":"\\u2028"}\n',
 	);
 });
 

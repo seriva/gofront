@@ -3,7 +3,6 @@
 
 import { wTypeKey } from "./boundary.js";
 import { hasErrorUsage, importsAnyOf } from "./prescan.js";
-import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
 import {
 	ERROR_STRUCT,
 	getFuncSignature,
@@ -48,7 +47,7 @@ const STDLIB_ENV_PKGS = new Set([
 // locked before function bodies are emitted.
 // Emitter-backed types whose interface methods are registered as synthetic
 // functions (see _registerIoSyntheticMethods in index.js).
-const SYNTHETIC_METHOD_TYPES = new Set(["strings.Builder", "os.File"]);
+const SYNTHETIC_METHOD_TYPES = new Set(["os.File"]);
 
 const S = "externref";
 const STDLIB_IMPORTS = [
@@ -59,14 +58,6 @@ const STDLIB_IMPORTS = [
 	["fmt_print", ["i32"], []],
 	["fmt_print_raw", [S], []],
 	["fmt_format_v", [S], [S]],
-	["fmt_sscan_init", [S, "i32"], ["i32"]],
-	["fmt_sscanf_init", [S, S], ["i32"]],
-	["fmt_sscan_has_err", [], ["i32"]],
-	["fmt_sscan_err_msg", [], [S]],
-	["fmt_sscan_token_str", ["i32"], [S]],
-	["fmt_sscan_token_i64", ["i32"], ["i64"]],
-	["fmt_sscan_token_f64", ["i32"], ["f64"]],
-	["fmt_sscan_token_bool", ["i32"], ["i32"]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
 	["testing_cleanup", [S, "anyref"], []],
@@ -827,10 +818,6 @@ export class ModuleEmitter {
 		return mapInfo;
 	}
 
-	getMapTypeByIndex(typeIndex) {
-		return this.mapTypesByIndex?.get(typeIndex) ?? null;
-	}
-
 	getClosureType(goType) {
 		const sig = getFuncSignature(goType, this.checker);
 		const paramWTypes = sig.params
@@ -991,30 +978,6 @@ export class ModuleEmitter {
 		}
 		this.getLogImportIndex("i32", false, true); // env.print_bool
 		this.getLogImportIndex("i32", true, true); // env.println_bool
-
-		// Math built-ins
-		const unaryMath = [
-			"sin",
-			"cos",
-			"tan",
-			"asin",
-			"acos",
-			"atan",
-			"exp",
-			"log",
-			"log2",
-			"log10",
-			"round",
-			"cbrt",
-			"log1p",
-			"expm1",
-		];
-		for (const m of unaryMath) {
-			this.getMathImportIndex(m, false);
-		}
-		for (const m of BINARY_MATH_IMPORTS) {
-			this.getMathImportIndex(m, true);
-		}
 	}
 
 	_initPanicTag() {
@@ -1635,10 +1598,6 @@ export class ModuleEmitter {
 		const idx = this.importCache.get(`env.${name}`);
 		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
 		return idx;
-	}
-
-	getTimezoneOffsetImportIndex() {
-		return this.getStdlibImportIndex("time_timezone_offset");
 	}
 
 	// Closure type of `func(*testing.T)` (the t.Run body).
