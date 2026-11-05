@@ -1624,8 +1624,8 @@ var __binary_read = __binary_read || function(r, order, data, sz, typeTag) {
     else if (typeTag === "uint16") target.value = view.getUint16(0, isLe);
     else if (typeTag === "int32" || typeTag === "rune") target.value = view.getInt32(0, isLe);
     else if (typeTag === "uint32") target.value = view.getUint32(0, isLe);
-    else if (typeTag === "int64") target.value = Number(view.getBigInt64(0, isLe));
-    else if (typeTag === "uint64") target.value = Number(view.getBigUint64(0, isLe));
+    else if (typeTag === "int64") target.value = view.getBigInt64(0, isLe);
+    else if (typeTag === "uint64") target.value = view.getBigUint64(0, isLe);
     else if (s === 1) target.value = buf[0];
     else if (s === 2) target.value = view.getUint16(0, isLe);
     else if (s === 4) target.value = view.getUint32(0, isLe);

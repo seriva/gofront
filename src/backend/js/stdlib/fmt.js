@@ -559,6 +559,10 @@ export const fmtMethods = {
 	_buildFprintSprintfCall(fn, argc, restJs) {
 		if (fn === "Fprintf") return `__sprintf(${restJs})`;
 		if (argc === 0) return fn === "Fprintln" ? '"\\n"' : '""';
+		if (fn === "Fprint") {
+			this.useHelper("sprint");
+			return `__sprint(false, ${restJs})`;
+		}
 		const sep = fn === "Fprintln" ? " " : "";
 		const suffix = fn === "Fprintln" ? "\\n" : "";
 		const fmt = Array(argc).fill("%v").join(sep) + suffix;

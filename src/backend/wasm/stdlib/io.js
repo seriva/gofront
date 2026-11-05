@@ -274,6 +274,14 @@ export class IoEmitter {
 			});
 			return;
 		}
+		if (fn === "Fprint") {
+			// Sprint's spacing rule: a space only between two non-strings.
+			const temps = this._emitArgBuffer(restArgs, true);
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this._callStdlib("fmt_sprint");
+			this._releaseArgBuffer(temps);
+			return;
+		}
 		const sep = fn === "Fprintln" ? " " : "";
 		const suffix = fn === "Fprintln" ? "\n" : "";
 		const fmt = Array(argc).fill("%v").join(sep) + suffix;

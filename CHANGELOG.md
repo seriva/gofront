@@ -14,7 +14,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
 
 ### Fixed
-- **Valid Go that failed to compile now works**: many Go programs that failed to compile, built an invalid WebAssembly module, or behaved differently on JavaScript and WebAssembly now behave like Go, including runtime panics that `recover` as `error` values and rune conversions such as `rune(-1)` to a string. Templ components also accept every Go `for` form and a `switch` without a tag.
+- **Valid Go that failed to compile now works**: many Go programs that failed to compile, built an invalid WebAssembly module, or behaved differently on JavaScript and WebAssembly now behave like Go, including runtime panics that `recover` as `error` values and rune conversions such as `rune(-1)` to a string, `fmt.Fprint` spacing, `%#v` with `GoString`, `errors.As` over `errors.Join` trees and `binary.Read` into 64-bit integers. Templ components also accept every Go `for` form and a `switch` without a tag.
 
 ### Changed
 - **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable to an `int`, a `switch` case whose constant does not fit the tag's type, and constants or package variables that depend on themselves. Convert explicitly, for example `int(y)`, or fix the case value or the circular definition.

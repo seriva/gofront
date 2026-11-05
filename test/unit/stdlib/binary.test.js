@@ -132,3 +132,34 @@ EOF
 `,
 	);
 });
+
+test("Read into 64-bit integers and Size of named structs match Go", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+)
+
+type Point struct{ X, Y int32 }
+
+func main() {
+	buf := bytes.NewReader([]byte{252, 255, 255, 255, 255, 255, 255, 255})
+	var a int64
+	binary.Read(buf, binary.LittleEndian, &a)
+	fmt.Println(a + 1)
+	buf = bytes.NewReader([]byte{252, 255, 255, 255, 255, 255, 255, 255})
+	var u uint64
+	binary.Read(buf, binary.LittleEndian, &u)
+	fmt.Println(u + 1)
+	fmt.Println(binary.Size(Point{}))
+}
+`,
+		`-3
+18446744073709551613
+8
+`,
+	);
+});
