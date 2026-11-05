@@ -1,5 +1,5 @@
 // Core standard library type definitions — browser globals, fmt, strings, bytes,
-// strconv, math, errors, time, unicode, os, html, io.
+// strconv, math, time, unicode, os, html, io.
 
 import {
 	ANY,
@@ -99,14 +99,6 @@ export function setupCoreGlobals(globals, types) {
 				returns: [INT, ERROR],
 				variadic: true,
 			},
-		},
-	});
-
-	globals.define("errors", {
-		kind: "namespace",
-		name: "errors",
-		members: {
-			As: { kind: "func", params: [ERROR, ANY], returns: [BOOL] },
 		},
 	});
 

@@ -150,25 +150,25 @@ func Run() string {
 test("an overlay that redeclares an emitter member is rejected", () => {
 	withTempDir(
 		{
-			"stdlib/errors/overlay.go": `//go:build gofront
+			"stdlib/unicode/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package errors
+package unicode
 
-func As(err error, target any) bool { return false }
+func IsLetter(r rune) bool { return false }
 `,
 			"app/main.go": `package main
 
-import "errors"
+import "unicode"
 
-func main() { println(errors.As(nil, nil)) }
+func main() { println(unicode.IsLetter('x')) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares errors.As",
+				"overlay redeclares unicode.IsLetter",
 			);
 		},
 	);
@@ -374,12 +374,12 @@ func main() { println(u.C(1, 2), w.Run()) }
 test("an aliased overlay import is rejected at the import", () => {
 	withTempDir(
 		{
-			"main.go": `package main\n\nimport e "errors"\n\nfunc main() { println(e.New("x").Error()) }\n`,
+			"main.go": `package main\n\nimport u "unicode"\n\nfunc main() { println(u.IsLetter('x')) }\n`,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(dir),
-				"import alias for 'errors' is not supported",
+				"import alias for 'unicode' is not supported",
 			);
 		},
 	);

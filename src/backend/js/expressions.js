@@ -1780,13 +1780,13 @@ export const expressionGenMethods = {
 	// (see src/lower/json-codecs.js); a stream method takes its receiver first.
 	_jsonEntryCall(expr) {
 		const sel = expr.func;
-		const func = { kind: "Ident", name: sel._jsonGen, _type: sel._type };
+		const func = { kind: "Ident", name: sel._genEntry, _type: sel._type };
 		const args = sel._jsonStream ? [sel.expr, ...expr.args] : expr.args;
 		return { ...expr, func, args };
 	},
 
 	genCall(expr) {
-		if (expr.func._jsonGen) return this.genCall(this._jsonEntryCall(expr));
+		if (expr.func._genEntry) return this.genCall(this._jsonEntryCall(expr));
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
 
 		const native = this._genNativeCall(expr);

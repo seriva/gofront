@@ -9,9 +9,10 @@
 // Package errors implements functions to manipulate errors.
 //
 // New, Unwrap, Is, Join and ErrUnsupported are written in Go over the
-// real package's algorithms. As is the one emitter member: it stores
-// through a pointer target whose type the backend knows, which Go source
-// cannot express without reflection.
+// real package's algorithms. As stores through a pointer target whose type
+// only the compiler knows, which Go source cannot express without
+// reflection: every call is rewritten to a function generated for its
+// target type (src/lower/errors-as.js).
 //
 // Is does not check that target is comparable before comparing, as Go
 // does with reflection: an error whose dynamic type is a slice, map or
@@ -141,23 +142,12 @@ func (e *joinError) Unwrap() []error {
 	return e.errs
 }
 
-// flatten lists err and then, depth first, every error in its tree. The
-// emitter-backed As walks this list instead of recursing.
-func flatten(err error) []error {
-	var out []error
-	for err != nil {
-		out = append(out, err)
-		switch x := err.(type) {
-		case interface{ Unwrap() error }:
-			err = x.Unwrap()
-		case interface{ Unwrap() []error }:
-			for _, e := range x.Unwrap() {
-				out = append(out, flatten(e)...)
-			}
-			return out
-		default:
-			return out
-		}
-	}
-	return out
+// As finds the first error in err's tree that matches target, and if one is
+// found, sets target to that error value and returns true.
+//
+// The compiler replaces every call with a generated function for the static
+// type of target, so this body runs only when As is used as a value, which
+// the compiler rejects.
+func As(err error, target any) bool {
+	panic("errors.As: call sites are rewritten by the compiler")
 }

@@ -41,7 +41,6 @@ import {
 	HELPER_CRYPTO_RAND,
 	HELPER_EQUAL,
 	HELPER_ERROR,
-	HELPER_ERROR_AS,
 	HELPER_GENERICS,
 	HELPER_GEQ,
 	HELPER_IFACE_BOX,
@@ -165,7 +164,6 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
-	["errorAs", HELPER_ERROR_AS],
 	["ioEOF", HELPER_IO_EOF],
 	["os", HELPER_OS],
 	["timer", HELPER_TIMER],
@@ -636,7 +634,7 @@ export class CodeGen {
 	// Annotates each decl with its source file index before merging.
 	generateAll(programs, options = {}) {
 		this._srcFileNames = programs.map((p) => p._filename ?? null);
-		this._jsonCodecFileIdx = programs.findIndex((p) => p._jsonCodecs);
+		this._jsonCodecFileIdx = programs.findIndex((p) => p._generated);
 		this._hasJsonCodecs = this._jsonCodecFileIdx >= 0;
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
