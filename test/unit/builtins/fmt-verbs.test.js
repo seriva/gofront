@@ -1518,6 +1518,38 @@ test("%#v of a struct holding a map prints the map type", () => {
 	);
 });
 
+test("Print family keeps the type of statically typed numbers", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Level int8
+type Mask uint8
+type Ratio float32
+
+func main() {
+	fmt.Println(3.0, float32(2), int8(-3), uint8(200), uint64(1<<63), 'x', byte('y'), uint16(7))
+	fmt.Println(1e6, float32(1e6), 100000.0, float32(16777216), 1e-7, float32(0.1))
+	fmt.Println(Level(-2), Mask(255), Ratio(1.5), []Level{1, -1}, [2]Mask{1, 2}, map[Level]Ratio{2: 0.5, -1: 2})
+	fmt.Println(int64(1)<<62, uint64(1)<<63, -1<<62)
+	fmt.Println(fmt.Sprint(3.0, 3.0), fmt.Sprint(float32(3), "x", 2), fmt.Sprintln(uint8(1), uint8(2)))
+	var i8 int8 = -128
+	var u32 uint32 = 1 << 31
+	fmt.Println(i8, u32, uintptr(9), complex64(1+2i), complex(float32(1), 2))
+}
+`,
+		`3 2 -3 200 9223372036854775808 120 121 7
+1e+06 1e+06 100000 1.6777216e+07 1e-07 0.1
+-2 255 1.5 [1 -1] [1 2] map[-1:2 2:0.5]
+4611686018427387904 9223372036854775808 -4611686018427387904
+3 3 3x2 1 2
+
+-128 2147483648 9 (1+2i) (1+2i)
+`,
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

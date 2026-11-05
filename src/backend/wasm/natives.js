@@ -126,6 +126,25 @@ const WASM_INTRINSICS = {
 				),
 			}),
 	},
+	// fmt: the host's identity number for a reference held in an `any`.
+	fmt_ptr_id: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "fmt_ptr_id", [EXT], ["i32"]),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction("extern.convert_any");
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"fmt_ptr_id",
+					[EXT],
+					["i32"],
+				),
+			});
+			e.pushInstruction("i64.extend_i32_u");
+		},
+	},
 	// math: IEEE-754 bit casts of the parameter.
 	math_float64bits: reinterpret("i64.reinterpret_f64"),
 	math_float64frombits: reinterpret("f64.reinterpret_i64"),

@@ -1337,10 +1337,21 @@ export const expressionGenMethods = {
 		return expr.args.map((a, i) =>
 			a._spread
 				? this._genSpreadArg(expr, a)
-				: this._callerCopiesArg(expr, i)
-					? this.genValueExpr(a)
-					: this.genExpr(a),
+				: a._boxTypeParam
+					? this._genTypeParamBox(a)
+					: this._callerCopiesArg(expr, i)
+						? this.genValueExpr(a)
+						: this.genExpr(a),
 		);
+	},
+
+	// A type parameter operand of a Print-family fmt call (see
+	// src/lower/fmt-formatters.js): a JS value does not know its Go type, so
+	// the type argument boxes it as converting it to an `any` does.
+	_genTypeParamBox(a) {
+		const js = this.genExpr(a);
+		const tpf = this._typeParamZeroFactory(a._type.name);
+		return tpf ? `(${tpf}.b ?? ${tpf}.fb ?? ((__v) => __v))(${js})` : js;
 	},
 
 	// A direct call of a `//gofront:native` function: host code from the
@@ -1360,6 +1371,9 @@ export const expressionGenMethods = {
 	// marker (its prologue unwraps it); other callees get a JS spread.
 	_genSpreadArg(call, arg) {
 		const js = this.genExpr(arg);
+		// A variadic function of a Go-source package (`fmt.Println`): a nil
+		// slice spreads to no operands.
+		if (call.func._stdName) return `...(${js} ?? [])`;
 		return this._calleeIsGoVariadic(call) ? `{ __sp: ${js} }` : `...${js}`;
 	},
 

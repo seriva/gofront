@@ -37,6 +37,9 @@ const dispatchMethods = {
 	_genStdlibCall(ns, fn, expr) {
 		const method = STDLIB_METHOD_MAP[ns];
 		if (!method) return undefined;
+		// A member written in Go (fmt.Println) is an ordinary call of its
+		// mangled name.
+		if (expr.func?._stdName) return undefined;
 		// Stdlib shims take raw values; only fmt uses the interface box
 		// of a named value (Error() dispatch).
 		const isNamespace = expr.func?.expr?._type?.kind === "namespace";

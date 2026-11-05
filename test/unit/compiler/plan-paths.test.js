@@ -46,9 +46,9 @@ const PLANS = [
 		file: "plans/v1.9.0/overlays-to-go-plan.md",
 		exempt: [
 			// The Go sources, generator and tests the plan's tasks add.
-			"src/lower/{fmt-formatters,stdlib-refs}.js",
-			"stdlib/{context,fmt,testing}{,/,/*.go}",
-			"stdlib/internal/fmtrt/{,fmtrt.go}",
+			"src/lower/stdlib-refs.js",
+			"stdlib/{context,testing}{,/,/*.go}",
+			"stdlib/fmt/errors.go",
 			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom}.js",
 			"src/backend/wasm/stdlib/pure.js",
 			"test/unit/stdlib/testing.test.js",

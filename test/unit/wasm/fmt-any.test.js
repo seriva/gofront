@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertWasmProgramOutput,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	instantiateWasm,
 	section,
@@ -303,8 +304,6 @@ type L struct{ S string; N int }`,
 	);
 });
 
-summarize();
-
 test("fmt prints a struct whose field has a named slice or array type", () => {
 	const src = `
 package main
@@ -529,3 +528,42 @@ test("a struct with a slice of any or an uint64 field printed with an any field"
 	);
 	assertEqual(o, "{[1 b] 5 9}");
 });
+
+section("fmt: types of another package held in an any");
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a struct built in a package without fmt prints through an any (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}
+package lib
+
+type Inner struct{ N int }
+
+type T struct {
+	A     int
+	b     string
+	Inner Inner
+	P     *Inner
+}
+
+func New() T { return T{1, "x", Inner{2}, nil} }
+func NewPtr() *T { return &T{3, "y", Inner{4}, nil} }
+`,
+			"main.go": `//gofront:target ${target}
+package main
+import ("fmt"; "./lib")
+func main() {
+	var a any = lib.New()
+	fmt.Println(a, any(lib.NewPtr()))
+	fmt.Println([]any{lib.New()})
+}
+`,
+		});
+		assertEqual(
+			lines.join("\n"),
+			"{1 x {2} <nil>} &{3 y {4} <nil>}\n[{1 x {2} <nil>}]",
+		);
+	});
+}
+
+summarize();

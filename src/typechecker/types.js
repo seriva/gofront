@@ -170,6 +170,8 @@ export const INTRINSICS = new Map([
 	["unicode_to_lower", "func(int32) int32"],
 	// crypto/rand: four random bytes from the host's secure source.
 	["crypto_rand_u32", "func() uint32"],
+	// fmt: a stable number for a pointer, function or other reference.
+	["fmt_ptr_id", "func(any) uint64"],
 	// math: IEEE-754 bit casts, and the host's `Math.*` (`%` for Mod).
 	["math_float64bits", "func(float64) uint64"],
 	["math_float64frombits", "func(uint64) float64"],
@@ -197,6 +199,19 @@ export const INTRINSICS = new Map([
 		`math_${f}`,
 		"func(float64, float64) float64",
 	]),
+]);
+
+// The fmt functions whose calls the compiler wraps with a generated function
+// (src/lower/fmt-formatters.js); a wrapped call may forward `f()`'s results.
+export const FMT_PRINT_FUNCS = new Set([
+	"Sprint",
+	"Sprintln",
+	"Print",
+	"Println",
+	"Fprint",
+	"Fprintln",
+	"Append",
+	"Appendln",
 ]);
 
 // Names a standard-library function may carry in `//gofront:native <name>`:

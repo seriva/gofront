@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { CodeGen } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
 import { generateErrorsAs } from "../lower/errors-as.js";
+import { generateFmtFormatters } from "../lower/fmt-formatters.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
@@ -632,7 +633,11 @@ function bindStdlibImport(checker, p, spec, pkg) {
 // The generators behind the package's `gofront_gen.go`: each scans the
 // checked programs for its call sites, marks them with `_genEntry` and returns
 // null (no sites) or { body, imports, diagnostics }.
-const GENERATORS = [generateJsonCodecs, generateErrorsAs];
+const GENERATORS = [
+	generateJsonCodecs,
+	generateErrorsAs,
+	generateFmtFormatters,
+];
 
 // Generates, imports and checks the package's generated Go (json codecs,
 // `errors.As` functions) as one more file.  Returns the generated programs:
@@ -735,7 +740,7 @@ function importImpliedTime(
 // has always allowed: a program that selects from the identifier (or, for
 // `gom`, declares a templ component, typed as `gom.Node`) without declaring
 // or importing it gets the import.
-const IMPLICIT_PACKAGES = ["gom", "regexp"];
+const IMPLICIT_PACKAGES = ["fmt", "gom", "regexp"];
 
 function implicitImports(programs) {
 	const declared = (name) =>

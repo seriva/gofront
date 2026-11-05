@@ -40,8 +40,6 @@ const STDLIB_IMPORTS = [
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
-	["fmt_sprint", ["i32"], [S]],
-	["fmt_print", ["i32"], []],
 	["fmt_format_v", [S], [S]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],

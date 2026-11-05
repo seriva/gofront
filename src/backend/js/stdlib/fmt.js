@@ -356,24 +356,10 @@ export const fmtMethods = {
 			case "Sprintf":
 				this.useHelper("sprintf");
 				return `__sprintf(${fmtArgs})`;
-			case "Sprint":
-			case "Sprintln":
-				this.useHelper("sprint");
-				return `__sprint(${fn === "Sprintln"}${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`;
-			case "Append":
-			case "Appendln":
 			case "Appendf": {
-				this.useHelper("sprint");
 				const [dst, ...rest] = expr.args;
-				const restJs = (
-					fn === "Appendf"
-						? this._fmtFormatArgsJs(rest, 0)
-						: rest.map((e) => this._fmtArgJs(e))
-				).join(", ");
-				const str =
-					fn === "Appendf"
-						? `__sprintf(${restJs})`
-						: `__sprint(${fn === "Appendln"}${restJs ? `, ${restJs}` : ""})`;
+				this.useHelper("sprintf");
+				const str = `__sprintf(${this._fmtFormatArgsJs(rest, 0).join(", ")})`;
 				// Like append: write in place only when the whole result fits in
 				// dst's spare capacity, otherwise copy into one fresh array and
 				// leave dst's backing array untouched (never chunk the write).
@@ -397,79 +383,29 @@ export const fmtMethods = {
 			case "Printf":
 				this.useHelper("sprintf");
 				return stdoutWrite(`__sprintf(${fmtArgs})`);
-			case "Print":
-				this.useHelper("sprintf");
-				this.useHelper("sprint");
-				return stdoutWrite(
-					`__sprint(false${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`,
-				);
-			case "Println":
-				this.useHelper("sprintf");
-				// console.log supplies the trailing newline.
-				return `console.log(${this._genPrintOperands(expr, " ", "")})`;
 			case "Fprintf":
-			case "Fprintln":
-			case "Fprint":
-				return this._genFmtFprint(fn, expr);
+				return this._genFmtFprint(expr);
 			default:
 				return undefined;
 		}
 	},
 
-	_genFmtFprint(fn, expr) {
+	_genFmtFprint(expr) {
 		this.useHelper("sprintf");
 		if (expr.args.length === 1 && expr.args[0]._type?.kind === "tuple")
-			return this._genFmtFprintTuple(fn, expr.args[0]);
+			return this._genFmtFprintTuple(expr.args[0]);
 		const writerArg = expr.args[0];
 		const rest = expr.args.slice(1);
-		const restJs = (
-			fn === "Fprintf"
-				? this._fmtFormatArgsJs(rest, 0)
-				: rest.map((e) => this._fmtArgJs(e))
-		).join(", ");
-		const sprintfCall = this._buildFprintSprintfCall(fn, rest.length, restJs);
-		// Any other io.Writer: Fprint* calls Write with the UTF-8 bytes.
+		const sprintfCall = `__sprintf(${this._fmtFormatArgsJs(rest, 0).join(", ")})`;
+		// Any io.Writer: Fprintf calls Write with the UTF-8 bytes.
 		const w = this.genExpr(writerArg);
 		return `((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
 	},
 
-	// `Fprint(f())`: the call supplies the writer and the operands.
-	_genFmtFprintTuple(fn, call) {
+	// `Fprintf(f())`: the call supplies the writer and the operands.
+	_genFmtFprintTuple(call) {
 		const parts = this._fmtTupleParts(call, 1);
-		const sprintfCall = this._buildFprintSprintfCall(
-			fn,
-			parts.length,
-			parts.join(", "),
-		);
+		const sprintfCall = `__sprintf(${parts.join(", ")})`;
 		return `((__t) => ((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(__t[0], ${sprintfCall}))(${this.genExpr(call)})`;
-	},
-
-	// Formats Print/Println operands with %v so the first operand is never
-	// mistaken for a format string.
-	_genPrintOperands(expr, sep, suffix) {
-		const argc = expr.args.length;
-		if (argc === 0) return JSON.stringify(suffix);
-		if (expr.args.some((e) => e._spread || e._type?.kind === "tuple")) {
-			// The operand count is only known at run time: join with Sprint's rules.
-			this.useHelper("sprint");
-			const joined = `__sprint(${sep === " "}, ${expr.args.map((e) => this._fmtArgJs(e)).join(", ")})`;
-			return sep === " " ? `${joined}.slice(0, -1)` : joined;
-		}
-		const fmt = Array(argc).fill("%v").join(sep) + suffix;
-		const args = expr.args.map((e) => this._fmtArgJs(e)).join(", ");
-		return `__sprintf(${JSON.stringify(fmt)}, ${args})`;
-	},
-
-	_buildFprintSprintfCall(fn, argc, restJs) {
-		if (fn === "Fprintf") return `__sprintf(${restJs})`;
-		if (argc === 0) return fn === "Fprintln" ? '"\\n"' : '""';
-		if (fn === "Fprint") {
-			this.useHelper("sprint");
-			return `__sprint(false, ${restJs})`;
-		}
-		const sep = fn === "Fprintln" ? " " : "";
-		const suffix = fn === "Fprintln" ? "\\n" : "";
-		const fmt = Array(argc).fill("%v").join(sep) + suffix;
-		return `__sprintf("${fmt}", ${restJs})`;
 	},
 };
