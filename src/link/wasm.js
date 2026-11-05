@@ -287,6 +287,9 @@ export function lowerStdlibRefs(node) {
 		for (const n of node) lowerStdlibRefs(n);
 		return;
 	}
+	// A generated entry replaces the stdlib declaration the checker resolved
+	// (errors.As) the call to.
+	if (node._genEntry && node._stdName) delete node._stdName;
 	if (node._stdName) {
 		if (node.kind === "SelectorExpr") {
 			delete node.expr;
@@ -297,19 +300,19 @@ export function lowerStdlibRefs(node) {
 		delete node._stdName;
 	}
 	if (node.kind === "CallExpr" && node.func?._jsonStream) {
-		const entry = node.func._jsonGen;
+		const entry = node.func._genEntry;
 		node.args.unshift(node.func.expr);
 		delete node.func.expr;
 		delete node.func.field;
 		delete node.func._jsonStream;
-		delete node.func._jsonGen;
+		delete node.func._genEntry;
 		node.func.kind = "Ident";
 		node.func.name = entry;
-	} else if (node._jsonGen && node.kind === "SelectorExpr") {
+	} else if (node._genEntry && node.kind === "SelectorExpr") {
 		delete node.expr;
 		delete node.field;
 		node.kind = "Ident";
-		node.name = node._jsonGen;
+		node.name = node._genEntry;
 	}
 	forEachChild(node, lowerStdlibRefs);
 }

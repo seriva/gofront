@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { CodeGen } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
+import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
@@ -554,27 +555,55 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		checker.trackImport(name, importNode(spec), p._filename, p._source);
 }
 
-// Generates, imports and checks the codecs for the package's `encoding/json`
-// calls as one more file.  Returns the generated programs: none for a
-// package with errors or one that makes no json calls.
-export function checkJsonCodecs(programs, checker, preambles, options, deps) {
+// The generators behind the package's `gofront_gen.go`: each scans the
+// checked programs for its call sites, marks them with `_genEntry` and returns
+// null (no sites) or { body, imports, diagnostics }.
+const GENERATORS = [generateJsonCodecs, generateErrorsAs];
+
+// Generates, imports and checks the package's generated Go (json codecs,
+// `errors.As` functions) as one more file.  Returns the generated programs:
+// none for a package with errors or one with no generated call sites.
+export function checkGeneratedGo(
+	programs,
+	checker,
+	preambles,
+	options,
+	deps,
+	generators = GENERATORS,
+) {
 	if (checker.errors.length > 0) return [];
-	const gen = generateJsonCodecs(programs, checker, checker.pkgName);
-	if (!gen) return [];
-	for (const { program, node, message, hint } of gen.diagnostics) {
-		checker._setCurrentFile(program);
-		checker.recordBlocker("unsupported stdlib member", message);
-		checker.err(message, node, hint);
-	}
-	if (gen.diagnostics.length > 0) return [];
-	const filename = "json_codecs.go";
+	const parts = generators
+		.map((gen) => gen(programs, checker, checker.pkgName))
+		.filter(Boolean);
+	if (parts.length === 0) return [];
+	let failed = false;
+	for (const { diagnostics } of parts)
+		for (const { program, node, message, hint } of diagnostics) {
+			failed = true;
+			checker._setCurrentFile(program);
+			checker.recordBlocker("unsupported stdlib member", message);
+			checker.err(message, node, hint);
+		}
+	if (failed) return [];
+	const imports = [...new Set(parts.flatMap((p) => p.imports))];
+	const source = [
+		`package ${checker.pkgName}`,
+		...(imports.length > 0
+			? [
+					`import (\n${imports.map((p) => `\t${JSON.stringify(p)}`).join("\n")}\n)`,
+				]
+			: []),
+		...parts.map((p) => p.body),
+		"",
+	].join("\n\n");
+	const filename = "gofront_gen.go";
 	const ast = new Parser(
-		new Lexer(gen.source, filename).tokenize(),
+		new Lexer(source, filename).tokenize(),
 		filename,
-		gen.source,
+		source,
 	).parse();
-	ast._source = gen.source;
-	ast._jsonCodecs = true;
+	ast._source = source;
+	ast._generated = true;
 	ast._path = join(dirname(programs[0]._path ?? "."), filename);
 	ast.target = checker.target;
 	importStdlibPackages(
@@ -593,9 +622,10 @@ export function checkJsonCodecs(programs, checker, preambles, options, deps) {
 			.map((e) => e.message)
 			.join("\n");
 		throw new Error(
-			`internal error in the generated encoding/json codecs; please report\n${detail}`,
+			`internal error in the generated Go; please report\n${detail}`,
 		);
 	}
+	for (const { link } of parts) link?.(checker);
 	return [ast];
 }
 

@@ -162,15 +162,15 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 
 ### Phase 1: Generated-Go spine & `errors.As`
 
-- [ ] Task 1.1: Generalise the generated-file hook and register the plan with the path guard
-  - Files: `src/link/stdlib.js`, `src/lower/stdlib-refs.js`, `test/unit/compiler/plan-paths.test.js`
+- [x] Task 1.1: Generalise the generated-file hook and register the plan with the path guard
+  - Files: `src/link/stdlib.js`, `src/link/wasm.js`, `src/lower/gen-types.js`, `src/lower/json-codecs.js`, `test/unit/compiler/plan-paths.test.js`
   - Test: `test/unit/compiler/link.test.js` (generated file named `gofront_gen.go`, json fragments unchanged, `_genEntry` rewrite of a selector into an `Ident` call), `test/unit/compiler/plan-paths.test.js` (this plan and `compiler-shrinking-plan.md` listed in `PLANS` with their created/deleted paths as exemptions)
   - Done when: `checkGeneratedGo` accepts a generator list, `test/unit/builtins/json.test.js` and `test/unit/wasm/json.test.js` pass unchanged, and `plan-paths.test.js` guards both v1.9.0 plans.
-- [ ] Task 1.2: Generate `errors.As` per target type
+- [x] Task 1.2: Generate `errors.As` per target type
   - Files: `src/lower/errors-as.js`, `src/link/stdlib.js`, `stdlib/errors/errors.go`
   - Test: `test/unit/stdlib/errors.test.js` (new four-way cases: custom `As` method, interface target, struct-value target, typed-nil, `Join` tree, nil target panic, non-pointer target compile error)
   - Done when: every `errors.As` call site is rewritten to `gfe_<pkg>_as_<n>`, the P16 program (all six target shapes) and the custom-`As` probe print their Go output on all four ways, and `flatten` is gone from `errors.go`.
-- [ ] Task 1.3: Delete the `errors.As` emitters, runtime helper and overlay
+- [x] Task 1.3: Delete the `errors.As` emitters, runtime helper and overlay
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/js/stdlib/errors.js` (delete), `src/backend/js/runtime.js`, `src/backend/js/stdlib/index.js`, `src/backend/wasm/emit-builtins.js`, `src/typechecker/stdlib/core.js`, `src/typechecker/types.js`, `src/lower/reachability.js`
   - Test: `test/unit/stdlib/errors.test.js`, `test/unit/wasm/stdlib.test.js`, `test/unit/compiler/semantics.test.js`
   - Done when: `_emitErrorsAs*`, `_errorsAs*`, `emitErrorsCall`, `HELPER_ERROR_AS` and the `errors` overlay are deleted (≈ 370 lines), `errors` is absent from `STDLIB_PACKAGES`/`WASM_STDLIB_MEMBERS`, and `npm test` passes.

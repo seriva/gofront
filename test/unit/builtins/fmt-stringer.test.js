@@ -313,7 +313,7 @@ fmt.Println(&r)`,
 	err  error
 	errs []error
 }`,
-		'"fmt"; "errors"',
+		'"fmt"',
 	);
 	assertEqual(
 		out,
