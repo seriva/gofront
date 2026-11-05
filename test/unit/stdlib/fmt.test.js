@@ -89,3 +89,29 @@ b2c[both]
 `,
 	);
 });
+
+test("Fprint spaces non-string operands and %#v calls GoString", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+type T struct{}
+
+func (T) GoString() string { return "pkg.T" }
+
+func main() {
+	var sb strings.Builder
+	n, _ := fmt.Fprint(&sb, "b", 2, 3, "c")
+	fmt.Println(n, sb.String())
+	fmt.Printf("%#v\\n", T{})
+}
+`,
+		`5 b2 3c
+pkg.T
+`,
+	);
+});
