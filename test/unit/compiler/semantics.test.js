@@ -148,7 +148,6 @@ func main() {
 // Missing helper dependencies in useHelper
 test("Registered helpers on error paths", () => {
 	const code = `package main
-import "errors"
 import (
 	"encoding/base64"
 	"encoding/hex"

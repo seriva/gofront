@@ -32,7 +32,7 @@ import {
 	WASM_MAP_URL,
 } from "./link/sourcemap.js";
 import {
-	checkJsonCodecs,
+	checkGeneratedGo,
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
@@ -608,7 +608,7 @@ export function compileFiles(files, options = {}) {
 
 	// ── 3. Type-check ─────────────────────────────────────────────
 	const errors = checker.checkAll(programs);
-	const codecs = checkJsonCodecs(
+	const codecs = checkGeneratedGo(
 		programs,
 		checker,
 		preambles,

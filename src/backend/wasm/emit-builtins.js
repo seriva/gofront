@@ -1111,9 +1111,6 @@ export class BuiltinsEmitter {
 				}
 				this.emitFmtCall(func.field, args);
 				return true;
-			case "errors":
-				this.emitErrorsCall(func.field, args);
-				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;
