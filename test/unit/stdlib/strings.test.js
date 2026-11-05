@@ -449,3 +449,68 @@ func main() {
 `,
 	);
 });
+
+test("Builder writes, grows, resets and rejects copies like Go", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func main() {
+	var b strings.Builder
+	fmt.Println(b.Len(), b.Cap(), b.String() == "")
+	n, err := b.WriteString("世界")
+	fmt.Println(n, err, b.Len())
+	fmt.Println(b.WriteByte('!'))
+	r, _ := b.WriteRune('é')
+	fmt.Println(r, b.String(), b.Len())
+	b.Grow(100)
+	fmt.Println(b.Cap()-b.Len() >= 100)
+	m, _ := b.Write([]byte("xy"))
+	fmt.Println(m, b.String())
+	fmt.Fprintf(&b, "%d-%s", 7, "z")
+	fmt.Println(b.String())
+	b.Reset()
+	fmt.Println(b.Len(), b.String() == "")
+
+	var z strings.Builder
+	z2 := z
+	z2.WriteString("ok")
+	fmt.Println(z2.String())
+
+	var c1 strings.Builder
+	c1.WriteString("a")
+	c2 := c1
+	func() {
+		defer func() { fmt.Println("recovered:", recover()) }()
+		c2.WriteString("b")
+	}()
+	c2.Reset()
+	c2.WriteString("ok2")
+	fmt.Println(c2.String())
+
+	func() {
+		defer func() { fmt.Println("recovered:", recover()) }()
+		var g strings.Builder
+		g.Grow(-1)
+	}()
+}
+`,
+		`0 0 true
+6 <nil> 6
+<nil>
+2 世界!é 9
+true
+2 世界!éxy
+世界!éxy7-z
+0 true
+ok
+recovered: strings: illegal use of non-zero Builder copied by value
+ok2
+recovered: strings.Builder.Grow: negative count
+`,
+	);
+});

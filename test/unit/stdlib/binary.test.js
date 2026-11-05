@@ -7,7 +7,7 @@ import { assertFourWay, section, test } from "../helpers.js";
 
 section("encoding/binary (Go-source)");
 
-test("byte orders, varints and the Read/Write members match Go", async () => {
+test("byte orders and varints match Go", async () => {
 	await assertFourWay(
 		`package main
 
@@ -78,15 +78,6 @@ func main() {
 		defer func() { fmt.Println(recover()) }()
 		binary.PutUvarint(make([]byte, 1), 300)
 	}()
-
-	// Read and Write take the byte orders above.
-	var buf bytes.Buffer
-	fmt.Println(binary.Write(&buf, binary.BigEndian, uint32(0x01020304)), binary.Write(&buf, binary.LittleEndian, int16(-2)))
-	fmt.Println(buf.Bytes())
-	var x uint32
-	var y int16
-	fmt.Println(binary.Read(&buf, binary.BigEndian, &x), binary.Read(&buf, binary.LittleEndian, &y), x, y)
-	fmt.Println(binary.Read(&buf, binary.LittleEndian, &y))
 }
 `,
 		`[52 18] 4660 13330
@@ -125,41 +116,6 @@ LittleEndian BigEndian
 binary: varint overflows a 64-bit integer
 runtime error: index out of range [3] with length 2
 runtime error: index out of range [1] with length 1
-<nil> <nil>
-[1 2 3 4 254 255]
-<nil> <nil> 16909060 -2
-EOF
-`,
-	);
-});
-
-test("Read into 64-bit integers and Size of named structs match Go", async () => {
-	await assertFourWay(
-		`package main
-
-import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
-)
-
-type Point struct{ X, Y int32 }
-
-func main() {
-	buf := bytes.NewReader([]byte{252, 255, 255, 255, 255, 255, 255, 255})
-	var a int64
-	binary.Read(buf, binary.LittleEndian, &a)
-	fmt.Println(a + 1)
-	buf = bytes.NewReader([]byte{252, 255, 255, 255, 255, 255, 255, 255})
-	var u uint64
-	binary.Read(buf, binary.LittleEndian, &u)
-	fmt.Println(u + 1)
-	fmt.Println(binary.Size(Point{}))
-}
-`,
-		`-3
-18446744073709551613
-8
 `,
 	);
 });

@@ -2,7 +2,6 @@ import {
 	closureMutates,
 	fnMutates,
 	nodeMutatesVar,
-	nodeWritesVar,
 	rootIdentName,
 	someChild,
 } from "../../lower/index.js";
@@ -13,7 +12,6 @@ import {
 	ERROR,
 	embeddedFieldName,
 	is64BitInt,
-	is64BitSigned,
 	is64BitUnsigned,
 	isAny,
 	isComplex,
@@ -21,7 +19,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
-import { jsNativeCall } from "./natives.js";
+import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
 // pointer-receiver method that does so is meant to run on a nil receiver.
@@ -146,7 +144,6 @@ function collectFunctionLabels(node, labels = new Set()) {
 }
 
 const NAMED_ZERO_TABLE = {
-	"strings.Builder": [null, '{ _buf: "" }'],
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
 	"simd.Mask32x4": [null, "Object.freeze([false, false, false, false])"],
@@ -228,38 +225,6 @@ function splitLastAccess(js) {
 
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
-	math: {
-		Pi: "Math.PI",
-		E: "Math.E",
-		Phi: "1.618033988749895",
-		Sqrt2: "Math.SQRT2",
-		SqrtE: "1.6487212707001282",
-		SqrtPi: "1.7724538509055159",
-		SqrtPhi: "1.272019649514069",
-		Ln2: "Math.LN2",
-		Log2E: "Math.LOG2E",
-		Ln10: "Math.LN10",
-		Log10E: "Math.LOG10E",
-		MaxFloat32: "3.4028234663852886e38",
-		SmallestNonzeroFloat32: "1.401298464324817e-45",
-		MaxFloat64: "Number.MAX_VALUE",
-		SmallestNonzeroFloat64: "Number.MIN_VALUE",
-		MaxInt: "Number.MAX_SAFE_INTEGER",
-		MinInt: "Number.MIN_SAFE_INTEGER",
-		MaxInt8: "127",
-		MinInt8: "-128",
-		MaxInt16: "32767",
-		MinInt16: "-32768",
-		MaxInt32: "2147483647",
-		MinInt32: "-2147483648",
-		MaxInt64: "9223372036854775807n",
-		MinInt64: "-9223372036854775808n",
-		MaxUint8: "255",
-		MaxUint16: "65535",
-		MaxUint32: "4294967295",
-		MaxUint: "18446744073709551615",
-		MaxUint64: "18446744073709551615n",
-	},
 	rand: {
 		Reader: "__crypto_rand_reader",
 	},
@@ -618,15 +583,19 @@ export const expressionGenMethods = {
 				expr._mapKeying = false;
 			}
 		}
-		if (expr._ifaceSrc && !expr._jsonTagging && this._jsonAnyUsed) {
-			const tag = this._jsonAnyTag(expr);
-			if (tag) {
-				expr._jsonTagging = true;
-				try {
-					return `__jt(${this.genExpr(expr)}, ${tag.enc}${tag.unbox ? ", true" : ""})`;
-				} finally {
-					expr._jsonTagging = false;
-				}
+		if (
+			expr._ifaceSrc?.kind === "pointer" &&
+			expr._ifaceSrc.base?.kind === "typeParam" &&
+			!expr._pbsWrapping
+		) {
+			// `&v` of a type parameter's variable is a box; a struct behind it
+			// is its own pointer.
+			expr._pbsWrapping = true;
+			try {
+				this.useHelper("ifaceBox");
+				return `__pbs(${this.genExpr(expr)})`;
+			} finally {
+				expr._pbsWrapping = false;
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
@@ -955,11 +924,6 @@ export const expressionGenMethods = {
 		return rootIdentName(e);
 	},
 
-	// True when `node` itself (not its children) writes to variable `name`.
-	_nodeWritesVar(node, name) {
-		return nodeWritesVar(node, name);
-	},
-
 	// True when `node` may modify (or take the address of) the value held by variable `name`.
 	_nodeMutatesVar(node, name, addrOnly = false) {
 		return nodeMutatesVar(node, name, addrOnly);
@@ -1143,7 +1107,15 @@ export const expressionGenMethods = {
 
 	_genSelectorExpr(expr) {
 		// Go-source stdlib member: bundled under its mangled top-level name.
-		if (expr._stdName) return expr._stdName;
+		if (expr._stdName) {
+			// An untyped constant used as an int64 operand: its declaration
+			// holds a Number, so emit the exact BigInt (as for an Ident).
+			const lit64 =
+				expr._is64Bit && expr._type?.kind === "untyped" && expr._const
+					? this._gen64BitFoldedConst(expr, expr._const)
+					: null;
+			return lit64 ?? expr._stdName;
+		}
 		if (this._isStdlibFuncValue(expr)) return this._genStdlibFuncValue(expr);
 		if (expr._isMethodExpr) {
 			const namedExpr = this._namedMethodExprInfo(expr);
@@ -1392,7 +1364,10 @@ export const expressionGenMethods = {
 		if (!this.natives || !expr._native) return null;
 		if (expr._multiForward || expr.args.some((a) => a._spread)) return null;
 		const typeArgs = expr._typeArgs ?? expr.func._typeArgs ?? [];
-		return jsNativeCall(expr._native, this._genCallArgList(expr), typeArgs);
+		const js = jsNativeCall(expr._native, this._genCallArgList(expr), typeArgs);
+		if (js !== null && NATIVE_HELPERS.has(expr._native))
+			this.useHelper(NATIVE_HELPERS.get(expr._native));
+		return js;
 	},
 
 	// `f(xs...)`: a Go-compiled variadic callee receives the slice itself in a
@@ -1625,9 +1600,19 @@ export const expressionGenMethods = {
 		const factory = this._typeParamZeroFactory(typeName);
 		if (factory) return `(${factory}?.is?.(${val}) ?? true)`;
 		const name = this._qualifiedStructName(typeName);
-		if (name === "int64" || name === "uint64")
-			return `typeof ${val} === "bigint"`;
+		// int64 and uint64 share the BigInt: a value out of int64's range can
+		// only be a uint64.
+		if (name === "int64")
+			return `(typeof ${val} === "bigint" && ${val} >= -9223372036854775808n && ${val} <= 9223372036854775807n)`;
+		if (name === "uint64")
+			return `(typeof ${val} === "bigint" && ${val} >= 0n)`;
+		// Integer types share the JS number with the floats: only a whole
+		// number is one, so a fraction or -0 in an `any` falls through to float64.
+		if (INT_TYPE_NAMES.has(name))
+			return `(Number.isSafeInteger(${val}) && !Object.is(${val}, -0))`;
 		if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
+		if (name === "complex128" || name === "complex64")
+			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.re === "number" && typeof ${val}.im === "number")`;
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
@@ -1647,6 +1632,10 @@ export const expressionGenMethods = {
 				[...named.underlying.methods.keys()],
 				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
 			);
+		if (this._isNamedComposite(named)) {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
+		}
 		return "true"; // unknown type — can't check at runtime
 	},
 
@@ -1760,9 +1749,6 @@ export const expressionGenMethods = {
 			arg,
 		);
 		if (structConv) return structConv;
-		const isRaw =
-			targetType?.name === "json.RawMessage" ||
-			targetType?.name === "encoding/json.RawMessage";
 		const base =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
 		if (base?.kind === "map" && this._isNilLiteral(expr.args[0]))
@@ -1784,17 +1770,23 @@ export const expressionGenMethods = {
 				this._isStringExprType(expr.args[0]?._type)
 			) {
 				this.useHelper("u8enc");
-				const enc = `__u8enc(${arg})`;
-				return isRaw ? `((u) => { u.__raw = true; return u; })(${enc})` : enc;
-			}
-			if (isRaw) {
-				return `((u) => { u.__raw = true; return u; })(${arg})`;
+				return `__u8enc(${arg})`;
 			}
 		}
 		return arg;
 	},
 
+	// `json.Marshal(v)` / `enc.Encode(v)` call the generated codec entry
+	// (see src/lower/json-codecs.js); a stream method takes its receiver first.
+	_jsonEntryCall(expr) {
+		const sel = expr.func;
+		const func = { kind: "Ident", name: sel._jsonGen, _type: sel._type };
+		const args = sel._jsonStream ? [sel.expr, ...expr.args] : expr.args;
+		return { ...expr, func, args };
+	},
+
 	genCall(expr) {
+		if (expr.func._jsonGen) return this.genCall(this._jsonEntryCall(expr));
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
 
 		const native = this._genNativeCall(expr);
@@ -1900,37 +1892,7 @@ export const expressionGenMethods = {
 		return recvType?.name ?? recvType?.base?.name;
 	},
 
-	_genJsonStreamCall(recvName, expr) {
-		const isEnc = this._isJsonEncoderName(recvName);
-		if (isEnc && expr.func.field === "Encode") {
-			this.useHelper("json");
-			const enc = this.genExpr(expr.func.expr);
-			this._markJsonAnyEncoders();
-			const argType = expr.args[0]?._type;
-			const codec = this._getJsonEncoder(argType);
-			const arg = this.genExpr(expr.args[0]);
-			return `__json_encoder_encode(${enc}, ${codec}, ${arg})`;
-		}
-		const isDec =
-			recvName === "json.Decoder" ||
-			recvName === "encoding/json.Decoder" ||
-			recvName?.startsWith("Decoder$$");
-		if (isDec && expr.func.field === "Decode") {
-			this.useHelper("json");
-			const dec = this.genExpr(expr.func.expr);
-			const targetType = expr.args[0]?._type;
-			const codec = this._getJsonDecoder(targetType);
-			const arg = this.genExpr(expr.args[0]);
-			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${this._jsonTargetArgs(this._jsonTargetType(expr.args[0]))})`;
-		}
-		return undefined;
-	},
-
 	_genReceiverTypeCall(recvName, expr) {
-		const jsonStream = this._genJsonStreamCall(recvName, expr);
-		if (jsonStream !== undefined) return jsonStream;
-		if (recvName === "strings.Builder")
-			return this._genBuilderCall(recvName, expr.func.field, expr);
 		if (recvName === "regexp.Regexp")
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Timer") {
@@ -2151,6 +2113,17 @@ export const expressionGenMethods = {
 			: null;
 		if (typedCtor)
 			return `__append((${slice}) ?? __tn(${typedCtor}), ${elems.join(", ")})`;
+		// A json codec grows a slice it has just made and no one else holds:
+		// pushing in place is O(1), where __append copies the whole slice.
+		if (
+			this._inJsonCodecFile() &&
+			expr.args.length === 2 &&
+			expr.args[0].kind === "Ident" &&
+			!expr.args[1]._spread
+		) {
+			this.useHelper("pushs");
+			return `__pushs(${slice}, ${elems[0]})`;
+		}
 		return `__append(${slice}, ${elems.join(", ")})`;
 	},
 
@@ -2217,24 +2190,18 @@ export const expressionGenMethods = {
 			}
 			return withCap((k) => `new Array(${k}).fill(${zero})`);
 		}
-		// map or fallback
+		// map or fallback.  The json codecs' maps hold decoded keys, among them
+		// "__proto__": without a prototype that is an ordinary key.
+		if (
+			this._inJsonCodecFile() &&
+			(resolvedKind === "map" || typeNode.kind === "MapType")
+		)
+			return "Object.create(null)";
 		return "{}";
 	},
 
-	// Render struct elements as a JS field list string.
-	// Handles positional (_positionalField), embedded-spread (_isEmbedInit), and keyed (KeyValueExpr).
-	_genStructFields(elems) {
-		return elems
-			.map((e) => {
-				if (e._positionalField) {
-					return `${e._positionalField}: ${this.genExpr(e)}`;
-				}
-				if (e.kind !== "KeyValueExpr") return null;
-				if (e._isEmbedInit) return `...${this.genExpr(e.value)}`;
-				return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
-			})
-			.filter((s) => s !== null)
-			.join(", ");
+	_inJsonCodecFile() {
+		return this._jsonCodecFileIdx === (this._currentSrcFileIdx ?? 0);
 	},
 
 	_isSliceOrArrayType(t) {
@@ -2494,8 +2461,6 @@ export const expressionGenMethods = {
 		const t = expr.typeExpr;
 		if (t === null) return this._genImplicitCompositeLit(expr);
 		const typeName = this.getTypeName(t);
-		if (typeName === "strings.Builder" || typeName === "Builder")
-			return '{ _buf: "" }';
 		if (typeName === "simd.Mask32x4" || typeName === "Mask32x4")
 			return "Object.freeze([false, false, false, false])";
 		if (typeName === "simd.F32x4" || typeName === "F32x4") {
@@ -3310,6 +3275,16 @@ export const expressionGenMethods = {
 		// `[]T(nil)` is the nil slice, not a copy of anything.
 		if (this._isNilLiteral(expr.expr)) return "null";
 		const elem = t.elem?.name;
+		// Converting a nil slice yields a nil slice.
+		const src = this._underlyingOf(expr.expr._type);
+		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
+			this._sliceConvNilSafe = true;
+			try {
+				return `((__s) => __s == null ? null : ${this._genSliceTypeConversion(expr, "__s", t)})(${inner})`;
+			} finally {
+				this._sliceConvNilSafe = false;
+			}
+		}
 		if (elem === "byte" || elem === "uint8") {
 			if (this._isStringExprType(expr.expr._type)) {
 				this.useHelper("u8enc");
@@ -3434,10 +3409,6 @@ export const expressionGenMethods = {
 			this._typeName(t) === "float32" ||
 			(t?.kind === "typeParam" && this._typeParamZeroFactory(t.name) != null)
 		);
-	},
-
-	_is64BitSigned(t) {
-		return is64BitSigned(t);
 	},
 
 	_is64BitUnsigned(t) {

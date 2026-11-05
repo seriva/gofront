@@ -71,7 +71,9 @@ type scanner struct {
 	endTop bool
 
 	// Stack of what we're in the middle of - array values, object keys, object values.
-	parseState []int
+	// Only the first parseStateLen entries are live; the rest is reused room.
+	parseState    []int
+	parseStateLen int
 
 	// Error that happened, if any.
 	err error
@@ -130,7 +132,7 @@ const maxNestingDepth = 10000
 // It must be called before calling s.step.
 func (s *scanner) reset() {
 	s.step = stateBeginValue
-	s.parseState = s.parseState[0:0]
+	s.parseStateLen = 0
 	s.err = nil
 	s.endTop = false
 }
@@ -157,8 +159,13 @@ func (s *scanner) eof() int {
 // pushParseState pushes a new parse state newParseState onto the parse stack.
 // an error state is returned if maxNestingDepth was exceeded, otherwise successState is returned.
 func (s *scanner) pushParseState(c byte, newParseState int, successState int) int {
-	s.parseState = append(s.parseState, newParseState)
-	if len(s.parseState) <= maxNestingDepth {
+	if s.parseStateLen < len(s.parseState) {
+		s.parseState[s.parseStateLen] = newParseState
+	} else {
+		s.parseState = append(s.parseState, newParseState)
+	}
+	s.parseStateLen++
+	if s.parseStateLen <= maxNestingDepth {
 		return successState
 	}
 	return s.error(c, "exceeded max depth")
@@ -167,8 +174,8 @@ func (s *scanner) pushParseState(c byte, newParseState int, successState int) in
 // popParseState pops a parse state (already obtained) off the stack
 // and updates s.step accordingly.
 func (s *scanner) popParseState() {
-	n := len(s.parseState) - 1
-	s.parseState = s.parseState[0:n]
+	s.parseStateLen--
+	n := s.parseStateLen
 	if n == 0 {
 		s.step = stateEndTop
 		s.endTop = true
@@ -236,7 +243,7 @@ func stateBeginStringOrEmpty(s *scanner, c byte) int {
 		return scanSkipSpace
 	}
 	if c == '}' {
-		n := len(s.parseState)
+		n := s.parseStateLen
 		s.parseState[n-1] = parseObjectValue
 		return stateEndValue(s, c)
 	}
@@ -258,7 +265,7 @@ func stateBeginString(s *scanner, c byte) int {
 // stateEndValue is the state after completing a value,
 // such as after reading `{}` or `true` or `["x"`.
 func stateEndValue(s *scanner, c byte) int {
-	n := len(s.parseState)
+	n := s.parseStateLen
 	if n == 0 {
 		// Completed top-level before the current byte.
 		s.step = stateEndTop
@@ -592,6 +599,8 @@ func quoteChar(c byte) string {
 
 // CheckValid returns nil when data is one valid JSON value, else the
 // *SyntaxError describing the first problem.
+//
+//gofront:native jsonrt.CheckValid
 func CheckValid(data []byte) error {
 	return checkValid(data, newScanner())
 }

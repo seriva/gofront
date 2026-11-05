@@ -59,10 +59,12 @@ Walks the typed AST and emits clean, readable JavaScript. No intermediate repres
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
 `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
-`__sclone`, `__ifv`, `__ifp`, the `__json_*` encoding/json runtime and the `__simd_*` `gofront/simd`
-fallback) are tree-shaken: only emitted when actually used. `encoding/json` additionally emits
-one memoized encoder/decoder per reachable type, derived from the struct tags preserved by the
-parser and the field sets resolved by the type checker. Optional inline source maps are supported
+`__sclone`, `__ifv`, `__ifp` and the `__simd_*` `gofront/simd` fallback) are tree-shaken: only
+emitted when actually used. `encoding/json` has no JavaScript emitter of its own: its calls compile
+to the same generated Go codecs as on WebAssembly (`src/lower/json-codecs.js`, on top of
+`stdlib/internal/jsonrt/`), and the JavaScript backend emits those like any other package code,
+with host fast paths for the encoder's buffer writes and the decoder's string, number and
+validity reads. Optional inline source maps are supported
 via VLQ-encoded mappings.
 
 ### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`)
@@ -120,16 +122,16 @@ Function bodies in these packages are type-checked only when the program reaches
 Two markers connect Go source to the backends:
 
 - `//gofront:native <name>` keeps the Go body as the specification and lets a backend replace calls with a faster host primitive (`indexOf` for `strings.Index`, `Math.clz32` or a WASM instruction for `math/bits`). A native may decline an instantiation, in which case the call runs the Go body. Names form a closed set in `src/typechecker/types.js`; implementations live in `src/backend/js/natives.js` and `src/backend/wasm/natives.js`. `test/unit/compiler/natives.test.js` fails when a name is missing from a registry (outside a short single-target list) or when a registry entry has no Go declaration.
-- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset).
+- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, IEEE-754 bit casts and the host `Math.*` functions behind `math`).
 
 | Package | Where it lives |
 |---|---|
 | `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
-| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math/bits`, `strconv`, `math/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
-| `encoding/binary` | Go in `stdlib/encoding/binary/`; `Read`, `Write` and `Size` are emitters |
-| `errors.As`, `strings.Builder` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
+| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
+| `encoding/binary` | Go in `stdlib/encoding/binary/` |
+| `errors.As` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
 | `time.Sleep`, `time.AfterFunc`, `time.Timer` | JS-only emitter (`src/backend/js/stdlib/time.js`) |
-| `fmt`, `math`, `unicode` (`Is*`, `To*`), `os`, `testing`, `regexp`, `crypto/rand`, `gom`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
+| `fmt`, `unicode` (`Is*`, `To*`), `os`, `testing`, `regexp`, `crypto/rand`, `gom`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
 | `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |
 
 ---

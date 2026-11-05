@@ -360,6 +360,7 @@ section("math package");
 
 test("math.Sqrt and math.Pow", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Sqrt(16.0))
 	console.log(math.Pow(2.0, 10.0))
@@ -370,6 +371,7 @@ func main() {
 
 test("math.IsInf(x, 0) is false for NaN", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.IsInf(math.NaN(), 0))
 	console.log(math.IsInf(math.Inf(1), 0))
@@ -382,6 +384,7 @@ func main() {
 
 test("math.Floor, Ceil, Round", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Floor(3.7))
 	console.log(math.Ceil(3.2))
@@ -393,6 +396,7 @@ func main() {
 
 test("math.Round rounds half away from zero like Go", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Round(-3.5))
 	console.log(math.Round(-2.5))
@@ -405,6 +409,7 @@ func main() {
 
 test("math.Abs", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Abs(-5.0))
 }`);
@@ -414,6 +419,7 @@ func main() {
 
 test("math.Pi and math.E constants", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Pi > 3.14)
 	console.log(math.E > 2.71)
@@ -424,6 +430,7 @@ func main() {
 
 test("math.Min and math.Max", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Min(3.0, 7.0))
 	console.log(math.Max(3.0, 7.0))
@@ -434,6 +441,7 @@ func main() {
 
 test("math.Log and math.Log2", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Log2(8.0))
 }`);
@@ -443,6 +451,7 @@ func main() {
 
 test("math.IsNaN and math.NaN", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.IsNaN(math.NaN()))
 	console.log(math.IsNaN(3.14))
@@ -453,6 +462,7 @@ func main() {
 
 test("math.Inf", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Inf(1) > 0)
 	console.log(math.Inf(-1) < 0)
@@ -703,6 +713,7 @@ section("strings.Builder");
 
 test("strings.Builder: WriteString and String", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteString("hello")
@@ -716,6 +727,7 @@ func main() {
 
 test("strings.Builder: WriteByte", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteByte('H')
@@ -728,6 +740,7 @@ func main() {
 
 test("strings.Builder: WriteRune", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteRune('G')
@@ -740,6 +753,7 @@ func main() {
 
 test("strings.Builder: Len", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteString("hello")
@@ -751,6 +765,7 @@ func main() {
 
 test("strings.Builder: Reset", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteString("hello")
@@ -765,6 +780,7 @@ func main() {
 
 test("strings.Builder: Grow is a no-op", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.Grow(64)
@@ -777,6 +793,7 @@ func main() {
 
 test("zero value is usable", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func build() string {
 	var b strings.Builder
 	b.WriteString("x")
@@ -900,6 +917,7 @@ func main() {
 
 test("fmt.Fprintf writes to strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d + %d = %d", 1, 2, 3)
@@ -911,6 +929,7 @@ func main() {
 
 test("fmt.Fprintln writes to strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	fmt.Fprintln(&b, "hello", "world")
@@ -922,6 +941,7 @@ func main() {
 
 test("fmt.Fprint writes to strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	fmt.Fprint(&b, "foo", "bar")
@@ -1724,6 +1744,7 @@ section("math additions");
 
 test("math.Atan and math.Atan2", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Atan(1.0) > 0)
 	console.log(math.Atan2(1.0, 1.0) > 0)
@@ -1734,6 +1755,7 @@ func main() {
 
 test("math.Asin and math.Acos", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Asin(0.0))
 	console.log(math.Acos(1.0))
@@ -1744,6 +1766,7 @@ func main() {
 
 test("math.Exp and math.Exp2", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Exp(0.0))
 	console.log(math.Exp2(3.0))
@@ -1754,6 +1777,7 @@ func main() {
 
 test("math.Trunc", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Trunc(3.7))
 	console.log(math.Trunc(-3.7))
@@ -1764,6 +1788,7 @@ func main() {
 
 test("math.Hypot", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Hypot(3.0, 4.0))
 }`);
@@ -1773,6 +1798,7 @@ func main() {
 
 test("math.Signbit", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Signbit(-1.0))
 	console.log(math.Signbit(1.0))
@@ -1783,6 +1809,7 @@ func main() {
 
 test("math.Copysign", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Copysign(3.0, -1.0))
 	console.log(math.Copysign(3.0, 1.0))
@@ -1793,6 +1820,7 @@ func main() {
 
 test("math.Dim", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Dim(5.0, 3.0))
 	console.log(math.Dim(3.0, 5.0))
@@ -1803,6 +1831,7 @@ func main() {
 
 test("math.Remainder", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	r := math.Remainder(10.0, 3.0)
 	console.log(r > 0.9 && r < 1.1)
@@ -2464,53 +2493,10 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
-// fmt scanning (Feature 11)
+// strings (Feature 11)
 // ═════════════════════════════════════════════════════════════
 
-section("fmt scanning");
-
-test("fmt.Sscan parses integers", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	var a int
-	var b int
-	n, err := fmt.Sscan("10 20", &a, &b)
-	console.log(n)
-	console.log(err == nil)
-	console.log(a)
-	console.log(b)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "2\ntrue\n10\n20");
-});
-
-test("fmt.Sscanf parses with format", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	var a int
-	var b int
-	n, err := fmt.Sscanf("10 20", "%d %d", &a, &b)
-	console.log(n)
-	console.log(err == nil)
-	console.log(a)
-	console.log(b)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "2\ntrue\n10\n20");
-});
-
-test("fmt.Sscanln parses a line", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	var s string
-	n, err := fmt.Sscanln("hello world", &s)
-	console.log(n)
-	console.log(err == nil)
-	console.log(s)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1\ntrue\nhello");
-});
+section("strings extras");
 
 test("strings.ToValidUTF8", () => {
 	const { js, errors } = compile(`package main

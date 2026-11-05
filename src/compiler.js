@@ -641,7 +641,7 @@ export function compileFiles(files, options = {}) {
 	const mainJs =
 		emitTarget === "wasm"
 			? wasmMarker(pkgName)
-			: codegen.generateAll(programs, {
+			: codegen.generateAll([...programs, ...codecs], {
 					isTest: options.isTest ?? false,
 				});
 	logWarnings(codegen.warnings);
@@ -654,7 +654,7 @@ export function compileFiles(files, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	finishStdlibJs(merged, options, programs, emitTarget);
+	finishStdlibJs(merged, options, [...programs, ...codecs], emitTarget);
 	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
 		options,
 		merged,

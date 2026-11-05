@@ -1,14 +1,10 @@
 // CodeGen stdlib call generation — installed as a mixin on CodeGen.prototype.
 // One file per Go package under ./stdlib/. This index merges them.
 
-import { binaryMethods } from "./binary.js";
-import { builderMethods } from "./builder.js";
 import { randMethods } from "./cryptorand.js";
 import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
-import { jsonMethods } from "./json.js";
-import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
 import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
@@ -23,7 +19,6 @@ import { unicodeMethods } from "./unicode.js";
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
-	math: "_genMath",
 	unicode: "_genUnicode",
 	os: "_genOs",
 	errors: "_genErrors",
@@ -32,8 +27,6 @@ const STDLIB_METHOD_MAP = {
 	rand: "_genRand",
 	testing: "_genTesting",
 	shared: "_genShared",
-	binary: "_genBinary",
-	json: "_genJson",
 	simd: "_genSimd",
 };
 
@@ -75,11 +68,9 @@ const dispatchMethods = {
 
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
-	...builderMethods,
 	...errorsMethods,
 	...fmtMethods,
 	...gomMethods,
-	...mathMethods,
 	...osMethods,
 	...randMethods,
 	...regexpMethods,
@@ -88,7 +79,5 @@ export const stdlibGenMethods = {
 	...timeMethods,
 	...unicodeMethods,
 	...testingMethods,
-	...binaryMethods,
-	...jsonMethods,
 	...dispatchMethods,
 };

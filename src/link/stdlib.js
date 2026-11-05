@@ -271,11 +271,20 @@ function installLazyBodies(info, programs, checker, overlay) {
 function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
 	const members = overlay ? { ...overlay.members } : {};
 	const mangle = new Map();
+	const consts = new Map();
 	for (const name of [...values, ...types]) {
 		const t = checker.globals.symbols.get(name + suffix);
 		if (!/^[A-Z]/.test(name) || t === undefined) continue;
 		members[name] = t;
 		mangle.set(name, name + suffix);
+		// An exported constant's folded value, so importers fold `pkg.Name`.
+		if (checker.globals._consts.has(name + suffix)) {
+			const v = checker._constValue(
+				{ kind: "Ident", name: name + suffix },
+				checker.globals,
+			);
+			if (v) consts.set(name, v);
+		}
 	}
 	return {
 		...(overlay ?? {}),
@@ -285,6 +294,7 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
 		_gofront: !overlay,
 		_target: "both",
 		_mangle: mangle,
+		_consts: consts,
 	};
 }
 
@@ -545,11 +555,10 @@ function bindStdlibImport(checker, p, spec, pkg) {
 }
 
 // Generates, imports and checks the codecs for the package's `encoding/json`
-// calls as one more (wasm-only) file.  Returns the generated programs: none
-// for a js package, a package with errors, or one that makes no json calls.
+// calls as one more file.  Returns the generated programs: none for a
+// package with errors or one that makes no json calls.
 export function checkJsonCodecs(programs, checker, preambles, options, deps) {
-	const wasm = checker.target === "wasm" || checker.target === "both";
-	if (!wasm || checker.errors.length > 0) return [];
+	if (checker.errors.length > 0) return [];
 	const gen = generateJsonCodecs(programs, checker, checker.pkgName);
 	if (!gen) return [];
 	for (const { program, node, message, hint } of gen.diagnostics) {
@@ -565,6 +574,7 @@ export function checkJsonCodecs(programs, checker, preambles, options, deps) {
 		gen.source,
 	).parse();
 	ast._source = gen.source;
+	ast._jsonCodecs = true;
 	ast._path = join(dirname(programs[0]._path ?? "."), filename);
 	ast.target = checker.target;
 	importStdlibPackages(

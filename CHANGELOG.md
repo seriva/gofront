@@ -15,6 +15,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 - **Go programs behave like Go on every target**: many programs that failed to compile, built an invalid WebAssembly module, or printed different results on JavaScript and WebAssembly now match Go, including nil pointers in interfaces, map keys, runtime panics recovered as `error` values, `fmt` verbs (`%p` now prints a stable id such as `0x1`), `encoding/json` values stored in `any`, and generic types exported from WebAssembly packages. Templ components accept every Go `for` form, a `switch` without a tag and a `{ children... }` spread under any parameter name ([details](docs/go-compatibility.md)).
+- **`strings.Builder`, `math` and `encoding/json` match Go on every target**: a `strings.Builder` can now be a field of an exported WebAssembly struct, `math` follows Go's special cases such as `math.Pow(1, NaN)` and `math.Round`, and `encoding/json` gives the same results and error messages in JavaScript and WebAssembly while encoding and decoding about twice as fast in JavaScript.
 
 ### Changed
 - **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable to an `int`, a `switch` case whose constant does not fit the tag's type, and constants or package variables that depend on themselves. Convert explicitly, for example `int(y)`, or fix the case value or the circular definition.
@@ -23,6 +24,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Breaking:** In `.templ` files a conditional attribute `name?={ expr }` must be a `bool`, and tokens left after a `{ }` expression (as in `{ name ) }`) are a parse error. Fix the expression.
 - **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
 - **Breaking:** `maps.Delete` and the top-level `binary.AppendUint16`, `AppendUint32` and `AppendUint64` are removed because Go has no such functions. Use the built-in `delete` and `binary.LittleEndian.AppendUint16` (or `binary.BigEndian`).
+- **Breaking:** `binary.Read`, `binary.Write` and `binary.Size` are removed and report a compile error. Use the `binary.LittleEndian` or `binary.BigEndian` methods to encode and decode bytes.
+- **Breaking:** `fmt.Sscan`, `fmt.Sscanf` and `fmt.Sscanln` are removed and report a compile error. Split the text with `strings.Fields` and parse each part with `strconv`.
+- **Breaking:** Copying a `strings.Builder` that has been written to and then writing to the copy now panics, as in Go. Pass the builder by pointer instead of copying it.
 - **Breaking:** `sort.Slice`, `slices.SortFunc` and similar sorts now order equal elements as Go does, which can change output that depended on the old order. Use `sort.SliceStable` or `slices.SortStableFunc` when equal elements must keep their input order.
 - **Breaking:** `errors.New` values with equal text no longer match each other under `errors.Is`; compare against the same error value instead.
 - **Breaking:** Locking a locked `sync.Mutex`, or calling `WaitGroup.Wait` with a positive counter, now panics instead of carrying on. Fix the lock or counter logic that the program was silently skipping.

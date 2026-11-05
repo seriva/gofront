@@ -68,23 +68,14 @@ func Ldexp(frac float64, exp int) float64 {
 	return m * Float64frombits(x)
 }
 
-func Modf(f float64) (int float64, frac float64) {
-	if IsInf(f, 0) {
-		return f, NaN()
-	}
-	if IsNaN(f) {
-		return NaN(), NaN()
-	}
-	int = Trunc(f)
-	frac = Copysign(f-int, f)
-	return
-}
-
 func RoundToEven(x float64) float64 {
 	b := Float64bits(x)
 	e := uint(b>>shift) & mask
 	if e >= bias {
 		e -= bias
+		if e >= shift {
+			return x
+		}
 		b += (halfMinusULP + (b>>(shift-e))&1) >> e
 		b = b &^ (fracMask >> e)
 	} else if e == bias-1 && b&fracMask != 0 {
@@ -143,14 +134,25 @@ func fmaNonzero(x uint64) uint64 {
 	return 0
 }
 
+// fmaShl and fmaShr shift the 128-bit value (u1, u2) by n < 128.  Each branch
+// keeps every shift count non-negative: a uint subtraction that would wrap
+// does not on the JavaScript target.
 func fmaShl(u1, u2 uint64, n uint) (r1 uint64, r2 uint64) {
-	r1 = u1<<n | u2>>(64-n) | u2<<(n-64)
+	if n < 64 {
+		r1 = u1<<n | u2>>(64-n)
+	} else {
+		r1 = u2 << (n - 64)
+	}
 	r2 = u2 << n
 	return
 }
 
 func fmaShr(u1, u2 uint64, n uint) (r1 uint64, r2 uint64) {
-	r2 = u2>>n | u1<<(64-n) | u1>>(n-64)
+	if n < 64 {
+		r2 = u2>>n | u1<<(64-n)
+	} else {
+		r2 = u1 >> (n - 64)
+	}
 	r1 = u1 >> n
 	return
 }

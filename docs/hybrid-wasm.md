@@ -133,11 +133,11 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
 | `crypto/sha256` | js, wasm, both | `Sum256`, `Sum224`, `New`, `New224`, `Size`, `Size224`, `BlockSize` |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings, `NewEncoding`, `WithPadding`, `Encode*`, `Decode*`, `Append*` |
-| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` (`ByteOrder`, `AppendByteOrder`), varints, `Read`, `Write`, `Size` |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` (`ByteOrder`, `AppendByteOrder`), varints |
 | `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `Append*`, `EncodedLen`, `DecodedLen`, `ErrLength`, `InvalidByteError` |
 | `encoding/json` | js, wasm, both | Struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
-| `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
+| `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append |
 | `hash` | js, wasm, both | `Hash`, `Hash32`, `Hash64` interfaces |
 | `html` | js, wasm, both | `EscapeString`, `UnescapeString` |
 | `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
@@ -156,7 +156,7 @@ Notable members per package:
 - `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand`
 - `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`)
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints an id for pointers and funcs as in `js` packages)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints an id for pointers and funcs as in `js` packages)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `IsPrint`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
@@ -166,15 +166,13 @@ Notable members per package:
 - `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `time.Sleep` stays JS-only)
 - `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`)
 - `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256` (`Sum256`, `Sum224`, `New`, `New224`)
-- `encoding/binary` (`LittleEndian`, `BigEndian`, varints, `Read`, `Write`, `Size`), `encoding/hex`, `encoding/base64`
+- `encoding/binary` (`LittleEndian`, `BigEndian`, varints), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 
 Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
-The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
-`Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
-from zero; `Mod` keeps the sign of the dividend).
+`math` follows Go's results in every package. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs` and `Copysign` compile to single WASM instructions, `Round` rounds half away from zero, and `Min`, `Max` and `Pow` handle Go's special cases such as `Pow(1, NaN)`. Functions without a WASM instruction (`Sin`, `Cos`, `Atan2`, `Mod`, `Hypot`, `Cbrt`, …) are imported from the JavaScript host's `Math`; `Mod` keeps the sign of the dividend.
 
 Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised
 from a WASM `start` function, so they are ready before any export is called.

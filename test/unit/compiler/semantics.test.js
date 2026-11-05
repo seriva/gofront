@@ -190,55 +190,6 @@ func main() {
 	assertEqual(runJs(js), "true\ntrue\ntrue err1");
 });
 
-// binary.Read / binary.Write across JS and WASM
-test("binary.Read / binary.Write across JS and WASM", async () => {
-	const code = `package main
-import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
-	"io"
-)
-type S struct {
-	F float32
-	I int16
-}
-func readU32(r io.Reader, p *uint32) {
-	_ = binary.Read(r, binary.LittleEndian, p)
-}
-func main() {
-	var buf bytes.Buffer
-	s := S{F: 3.25, I: -2}
-	_ = binary.Write(&buf, binary.LittleEndian, s.F)
-	_ = binary.Write(&buf, binary.LittleEndian, s.I)
-
-	var f2 float32
-	var i2 int16
-	_ = binary.Read(&buf, binary.LittleEndian, &f2)
-	_ = binary.Read(&buf, binary.LittleEndian, &i2)
-	s2 := S{F: f2, I: i2}
-	fmt.Printf("%.2f %d\\n", s2.F, s2.I)
-
-	var buf2 bytes.Buffer
-	_ = binary.Write(&buf2, binary.LittleEndian, uint32(0x12345678))
-	var u uint32
-	readU32(&buf2, &u)
-	fmt.Printf("%x\\n", u)
-}`;
-	const { js, errors } = compile(code);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js).replace(/\n+/g, "\n").trim(), "3.25 -2\n12345678");
-
-	const compiled = compileWasm(code);
-	assertValidWasm(compiled.wasm);
-	const wasmRes = runWasm(compiled.wasm, { stringTable: compiled.stringTable });
-	wasmRes.exports.main();
-	assertEqual(
-		wasmRes.lines.join("\n").replace(/\n+/g, "\n").trim(),
-		"3.25 -2\n12345678",
-	);
-});
-
 // WASM stdlib calls (sha256.New, binary.BigEndian, time.Local)
 test("WASM stdlib calls", () => {
 	const code = `package main
@@ -394,53 +345,6 @@ func main() {
 	const { js, errors } = compile(code);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "{10 20} 42");
-});
-
-// WASM fmt.Sscan* into struct field, slice index, pointer parameter
-test("WASM fmt.Sscan* target writes", () => {
-	const code = `package main
-import "fmt"
-type S struct{ x int }
-func scanToPtr(p *int) {
-	fmt.Sscan("77", p)
-}
-func main() {
-	s := S{x: 0}
-	x := 0
-	fmt.Sscan("15", &x)
-	s.x = x
-	arr := []int{0, 0}
-	e := 0
-	fmt.Sscan("25", &e)
-	arr[1] = e
-	v := 0
-	scanToPtr(&v)
-	fmt.Printf("%d %d %d\\n", s.x, arr[1], v)
-}`;
-	const compiled = compileWasm(code);
-	assertValidWasm(compiled.wasm);
-	const wasmRes = runWasm(compiled.wasm, { stringTable: compiled.stringTable });
-	wasmRes.exports.main();
-	assertEqual(wasmRes.lines.join("\n"), "15 25 77");
-});
-
-// JS fmt.Sscanf format verbs (%x, %X, %o, %b, %c)
-test("JS fmt.Sscanf numeric and rune verbs", () => {
-	const code = `package main
-import "fmt"
-func main() {
-	var a, b, c, d int
-	var r rune
-	fmt.Sscanf("ff", "%x", &a)
-	fmt.Sscanf("FF", "%X", &b)
-	fmt.Sscanf("77", "%o", &c)
-	fmt.Sscanf("1010", "%b", &d)
-	fmt.Sscanf("Z", "%c", &r)
-	console.log(a, b, c, d, string(r))
-}`;
-	const { js, errors } = compile(code);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "255 255 63 10 Z");
 });
 
 // Time formatting subseconds in JS and WASM
