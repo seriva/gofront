@@ -27,6 +27,7 @@ function errorsAliases(program) {
 const isAsRef = (node, aliases) =>
 	node.kind === "SelectorExpr" &&
 	node.expr?.kind === "Ident" &&
+	node.expr._type?.kind === "namespace" &&
 	aliases.has(node.expr.name) &&
 	node.field === "As";
 

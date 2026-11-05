@@ -395,6 +395,38 @@ func main() {
 	assertErrorContains(errs, "errors.As cannot be used as a value");
 });
 
+test("a local named errors is not the errors package", () => {
+	const { errors: errs } = compile(
+		`package main
+
+import "errors"
+
+type Config struct{ As int }
+
+type Runner struct{}
+
+func (Runner) As(n int) bool { return n > 0 }
+
+func main() {
+	var errors Config
+	_ = errors.As
+	var r Runner
+	errors2 := r
+	_ = errors2.As(1)
+	{
+		errors := Runner{}
+		_ = errors.As(1)
+	}
+	_ = errors
+}
+
+var _ = errors.New
+`,
+		{ target: "both" },
+	);
+	if (errs.length > 0) throw new Error(errs.map((e) => e.message).join("; "));
+});
+
 test("errors.As rejects an anonymous interface target", () => {
 	const { errors: errs } = compile(
 		`package main
