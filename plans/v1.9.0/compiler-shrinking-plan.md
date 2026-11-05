@@ -169,15 +169,15 @@ Finish shrinking the Node.js compiler (`src/`) before the self-hosted Go port (`
 
 ### Phase 3: Move `math` to `stdlib/math/math.go`
 
-- [ ] Task 3.1: Add IEEE-754 bitcast and host-math intrinsics and implement `stdlib/math/math.go`
+- [x] Task 3.1: Add IEEE-754 bitcast and host-math intrinsics and implement `stdlib/math/math.go`
   - Files: `stdlib/math/math.go`, `stdlib/math/extra.go`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/stdlib/math-bits-rand.test.js`
   - Done when: `stdlib/math/math.go` defines all 32 `math` constants and 40 remaining `math` functions with IEEE-754 bitcast intrinsics (`Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits`), pure-Go IEEE-754 bodies for `IsNaN`, `IsInf`, `Inf`, `NaN`, `Signbit`, `Copysign`, `Abs`, `Min`, `Max`, `Dim`, `Floor`, `Ceil`, `Trunc`, `Round`, and `Remainder`, and host-math intrinsic calls for transcendental functions.
-- [ ] Task 3.2: Register `//gofront:native` fast paths for `math` in JS and WASM backends
+- [x] Task 3.2: Register `//gofront:native` fast paths for `math` in JS and WASM backends
   - Files: `src/backend/js/natives.js`, `src/backend/wasm/natives.js`, `test/unit/compiler/natives.test.js`
   - Test: `test/unit/compiler/natives.test.js`, `test/unit/stdlib/math-bits-rand.test.js`
   - Done when: `Abs`, `Floor`, `Ceil`, `Trunc`, `Round`, `Sqrt`, `Min`, `Max`, `Copysign`, `Signbit`, `IsNaN`, `IsInf`, `Inf`, and `NaN` emit inline JS `Math.*` / IEEE expressions and single WASM instructions (`f64.abs`, `f64.floor`, `f64.ceil`, `f64.trunc`, `f64.nearest`, `f64.sqrt`, `f64.min`, `f64.max`, `f64.copysign`, `f64.ne`) when `natives: true`, and pass `assertFourWay` against their pure-Go bodies when `natives: false`.
-- [ ] Task 3.3: Delete legacy `math` emitters and typechecker overlay
+- [x] Task 3.3: Delete legacy `math` emitters and typechecker overlay
   - Files: `src/backend/js/stdlib/math.js` (delete), `src/backend/js/stdlib/index.js`, `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/emit-builtins.js`, `src/typechecker/stdlib/core.js`, `src/typechecker/types.js`
   - Test: `test/unit/stdlib/math-bits-rand.test.js`, `test/unit/compiler/natives.test.js`
   - Done when: `src/backend/js/stdlib/math.js`, `MATH_CONSTS`/`emitMathConst`/`emitMathCall` in `src/backend/wasm/stdlib/core.js`, and the `math` overlay in `src/typechecker/stdlib/core.js` and `STDLIB_PACKAGES` are deleted (~550 lines), and all `math` unit and perf tests pass.

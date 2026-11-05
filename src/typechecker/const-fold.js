@@ -45,24 +45,6 @@ export const INT_RANGES = {
 
 const FLOAT_TYPES = new Set(["float32", "float64"]);
 
-// Untyped integer constants of package `math` (Go declares them untyped).
-// `MaxInt`, `MinInt` and `MaxUint` are left out: the JS backend maps them to
-// the safe-integer range on purpose.
-export const MATH_INT_CONSTS = {
-	MaxInt8: 2n ** 7n - 1n,
-	MinInt8: -(2n ** 7n),
-	MaxInt16: 2n ** 15n - 1n,
-	MinInt16: -(2n ** 15n),
-	MaxInt32: 2n ** 31n - 1n,
-	MinInt32: -(2n ** 31n),
-	MaxInt64: 2n ** 63n - 1n,
-	MinInt64: -(2n ** 63n),
-	MaxUint8: 2n ** 8n - 1n,
-	MaxUint16: 2n ** 16n - 1n,
-	MaxUint32: 2n ** 32n - 1n,
-	MaxUint64: 2n ** 64n - 1n,
-};
-
 export const intConst = (v) => ({ k: INT, v });
 
 // Exact integer value of a decimal float literal (`1e18`, `2.50e1`), or null.

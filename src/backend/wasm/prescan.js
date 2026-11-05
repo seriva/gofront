@@ -3,7 +3,6 @@
 // and interface dispatchers a module needs before emission starts.
 
 import { prepareWasmNative } from "./natives.js";
-import { BINARY_MATH_IMPORTS } from "./stdlib/core.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -236,38 +235,6 @@ export function _scanImportsInBody(node, mod) {
 				const { wType, isBool } = printOperandKind(args[i], mod.checker);
 				mod.getLogImportIndex(wType, isLast, isBool);
 				if (!isPrintln) mod.getPrintResetIndex();
-			}
-		} else if (
-			func.kind === "SelectorExpr" &&
-			func.expr?.name === "math" &&
-			func.field
-		) {
-			const jsMathMap = {
-				Sin: "sin",
-				Cos: "cos",
-				Tan: "tan",
-				Asin: "asin",
-				Acos: "acos",
-				Atan: "atan",
-				Atan2: "atan2",
-				Pow: "pow",
-				Mod: "mod",
-				Hypot: "hypot",
-				Cbrt: "cbrt",
-				Exp: "exp",
-				Log: "log",
-				Log1p: "log1p",
-				Log2: "log2",
-				Log10: "log10",
-				Expm1: "expm1",
-				Round: "round",
-				Sinh: "sinh",
-				Cosh: "cosh",
-				Tanh: "tanh",
-			};
-			if (jsMathMap[func.field]) {
-				const isBinary = BINARY_MATH_IMPORTS.has(jsMathMap[func.field]);
-				mod.getMathImportIndex(jsMathMap[func.field], isBinary);
 			}
 		} else if (
 			func.kind === "SelectorExpr" &&

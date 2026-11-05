@@ -360,6 +360,7 @@ section("math package");
 
 test("math.Sqrt and math.Pow", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Sqrt(16.0))
 	console.log(math.Pow(2.0, 10.0))
@@ -370,6 +371,7 @@ func main() {
 
 test("math.IsInf(x, 0) is false for NaN", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.IsInf(math.NaN(), 0))
 	console.log(math.IsInf(math.Inf(1), 0))
@@ -382,6 +384,7 @@ func main() {
 
 test("math.Floor, Ceil, Round", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Floor(3.7))
 	console.log(math.Ceil(3.2))
@@ -393,6 +396,7 @@ func main() {
 
 test("math.Round rounds half away from zero like Go", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Round(-3.5))
 	console.log(math.Round(-2.5))
@@ -405,6 +409,7 @@ func main() {
 
 test("math.Abs", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Abs(-5.0))
 }`);
@@ -414,6 +419,7 @@ func main() {
 
 test("math.Pi and math.E constants", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Pi > 3.14)
 	console.log(math.E > 2.71)
@@ -424,6 +430,7 @@ func main() {
 
 test("math.Min and math.Max", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Min(3.0, 7.0))
 	console.log(math.Max(3.0, 7.0))
@@ -434,6 +441,7 @@ func main() {
 
 test("math.Log and math.Log2", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Log2(8.0))
 }`);
@@ -443,6 +451,7 @@ func main() {
 
 test("math.IsNaN and math.NaN", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.IsNaN(math.NaN()))
 	console.log(math.IsNaN(3.14))
@@ -453,6 +462,7 @@ func main() {
 
 test("math.Inf", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Inf(1) > 0)
 	console.log(math.Inf(-1) < 0)
@@ -1734,6 +1744,7 @@ section("math additions");
 
 test("math.Atan and math.Atan2", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Atan(1.0) > 0)
 	console.log(math.Atan2(1.0, 1.0) > 0)
@@ -1744,6 +1755,7 @@ func main() {
 
 test("math.Asin and math.Acos", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Asin(0.0))
 	console.log(math.Acos(1.0))
@@ -1754,6 +1766,7 @@ func main() {
 
 test("math.Exp and math.Exp2", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Exp(0.0))
 	console.log(math.Exp2(3.0))
@@ -1764,6 +1777,7 @@ func main() {
 
 test("math.Trunc", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Trunc(3.7))
 	console.log(math.Trunc(-3.7))
@@ -1774,6 +1788,7 @@ func main() {
 
 test("math.Hypot", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Hypot(3.0, 4.0))
 }`);
@@ -1783,6 +1798,7 @@ func main() {
 
 test("math.Signbit", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Signbit(-1.0))
 	console.log(math.Signbit(1.0))
@@ -1793,6 +1809,7 @@ func main() {
 
 test("math.Copysign", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Copysign(3.0, -1.0))
 	console.log(math.Copysign(3.0, 1.0))
@@ -1803,6 +1820,7 @@ func main() {
 
 test("math.Dim", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	console.log(math.Dim(5.0, 3.0))
 	console.log(math.Dim(3.0, 5.0))
@@ -1813,6 +1831,7 @@ func main() {
 
 test("math.Remainder", () => {
 	const { js, errors } = compile(`package main
+import "math"
 func main() {
 	r := math.Remainder(10.0, 3.0)
 	console.log(r > 0.9 && r < 1.1)
