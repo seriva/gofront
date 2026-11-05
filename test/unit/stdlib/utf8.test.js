@@ -3,7 +3,12 @@
 // Every case runs four ways (JS and WASM, natives on and off) and must print
 // what the real Go toolchain printed for the same program.
 
-import { assertFourWay, section, test } from "../helpers.js";
+import {
+	assertAllTargetsOutput,
+	assertFourWay,
+	section,
+	test,
+} from "../helpers.js";
 
 section("unicode/utf8 (Go-source)");
 
@@ -82,6 +87,28 @@ func main() {
 1114112 -1 false 3 [239 191 189] [120 239 191 189]
 true false true
 30028:3 19990:3 99:1 98:1 97:1 
+`,
+	);
+});
+
+test("string(rune) of an invalid rune is U+FFFD", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	x := rune(-1)
+	y := rune(0x110000)
+	z := rune(0xD800)
+	fmt.Println(string(x) == "\\ufffd", string(y) == "\\ufffd", string(z) == "\\ufffd")
+	fmt.Println(string(rune(0x1F600)) == "\\U0001F600", string(rune('a')))
+	fmt.Println(len([]byte(string(x))), len([]byte(string(z))))
+}
+`,
+		`true true true
+true a
+3 3
 `,
 	);
 });
