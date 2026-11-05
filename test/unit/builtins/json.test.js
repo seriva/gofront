@@ -2388,6 +2388,62 @@ func main() {
 	);
 });
 
+test("a package variable initialised by a function with a local struct marshals", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+var x = helper()
+
+func helper() string {
+	type Local struct {
+		A int \`json:"a"\`
+	}
+	b, _ := json.Marshal(Local{A: 42})
+	return string(b)
+}
+
+func main() { fmt.Println(x) }
+`,
+		'{"a":42}\n',
+	);
+});
+
+test("same-named local structs in different functions marshal", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func f1() {
+	type Config struct {
+		A int \`json:"a"\`
+	}
+	b, _ := json.Marshal(Config{A: 1})
+	fmt.Println(string(b))
+}
+
+func f2() {
+	type Config struct {
+		A int \`json:"a"\`
+	}
+	b, _ := json.Marshal(Config{A: 2})
+	fmt.Println(string(b))
+}
+
+func main() { f1(); f2() }
+`,
+		'{"a":1}\n{"a":2}\n',
+	);
+});
+
 test("function-local structs add no lines to programs that do not marshal", () => {
 	const { js, errors } = compile(`package main
 
