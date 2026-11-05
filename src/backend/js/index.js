@@ -20,7 +20,6 @@
 import {
 	computeEmbeddedStubs,
 	hasDirectRecover,
-	isReferenceType,
 	markInBoundsIndexes,
 	markRedundantNilChecks,
 	normalizeDefers,
@@ -36,7 +35,6 @@ import {
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
-	HELPER_BINARY,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
@@ -171,7 +169,6 @@ const HELPER_MAP = [
 	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
-	["binary", HELPER_BINARY],
 	["json", HELPER_JSON],
 	["simd", HELPER_SIMD],
 ];
@@ -574,10 +571,6 @@ export class CodeGen {
 		if (name === "append") this.useHelper("slice");
 		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
-		if (name === "binary") {
-			this.useHelper("ioEOF");
-			this._helpers.add("error");
-		}
 	}
 
 	_prependHelpers(isTest = false) {
@@ -636,14 +629,6 @@ export class CodeGen {
 
 	getMappings() {
 		return this._srcMappings;
-	}
-
-	// Returns a source map JSON string for the last generate() call.
-	// sources: string[] of source filenames (relative to the output file).
-	// sourcesContent: string[] of original file contents (embedded for DevTools breakpoints).
-	getSourceMap(sources, sourcesContent) {
-		const srcArray = Array.isArray(sources) ? sources : [sources];
-		return buildSourceMap(srcArray, this._srcMappings, sourcesContent);
 	}
 
 	// ── Type declarations ────────────────────────────────────────
@@ -1001,19 +986,6 @@ export class CodeGen {
 		return `${method}(...__a) { return ${call}; }`;
 	}
 
-	_genSingleEmbedStubs(embed, declared) {
-		const embedName = embed.kind === "named" ? embed.name : null;
-		if (!embedName) return;
-		const embedBase = embed.kind === "named" ? embed.underlying : embed;
-		if (embedBase?.kind !== "struct" || !embedBase.methods) return;
-		for (const [mName] of embedBase.methods.entries()) {
-			if (!declared.has(mName)) {
-				this.blank();
-				this.line(this._embedStub(mName, embedName));
-			}
-		}
-	}
-
 	_genEmbeddedMethodStubs(name, methodDecls) {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		for (const stub of stubs) {
@@ -1288,10 +1260,6 @@ export class CodeGen {
 	_namedPtrMethodOn(type, method) {
 		const info = this._namedBoxInfo(type);
 		return Boolean(info?.methods.get(method)?._ptrRecv);
-	}
-
-	_isReferenceType(t) {
-		return isReferenceType(t);
 	}
 
 	// ── Variable / const declarations ────────────────────────────

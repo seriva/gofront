@@ -59,14 +59,6 @@ const STDLIB_IMPORTS = [
 	["fmt_print", ["i32"], []],
 	["fmt_print_raw", [S], []],
 	["fmt_format_v", [S], [S]],
-	["fmt_sscan_init", [S, "i32"], ["i32"]],
-	["fmt_sscanf_init", [S, S], ["i32"]],
-	["fmt_sscan_has_err", [], ["i32"]],
-	["fmt_sscan_err_msg", [], [S]],
-	["fmt_sscan_token_str", ["i32"], [S]],
-	["fmt_sscan_token_i64", ["i32"], ["i64"]],
-	["fmt_sscan_token_f64", ["i32"], ["f64"]],
-	["fmt_sscan_token_bool", ["i32"], ["i32"]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
 	["testing_cleanup", [S, "anyref"], []],
@@ -825,10 +817,6 @@ export class ModuleEmitter {
 		this.mapTypes.set(key, mapInfo);
 		this.mapTypesByIndex.set(mapTypeIndex, mapInfo);
 		return mapInfo;
-	}
-
-	getMapTypeByIndex(typeIndex) {
-		return this.mapTypesByIndex?.get(typeIndex) ?? null;
 	}
 
 	getClosureType(goType) {
@@ -1635,10 +1623,6 @@ export class ModuleEmitter {
 		const idx = this.importCache.get(`env.${name}`);
 		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
 		return idx;
-	}
-
-	getTimezoneOffsetImportIndex() {
-		return this.getStdlibImportIndex("time_timezone_offset");
 	}
 
 	// Closure type of `func(*testing.T)` (the t.Run body).

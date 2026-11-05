@@ -185,13 +185,6 @@ export class OwnershipContext {
 	constructor(body) {
 		this.body = body;
 		this.mut = new Map();
-		this.owned = new Set();
-		this.borrowed = new Set();
-	}
-
-	markOwnership(name, owned) {
-		if (!name || name === "_") return;
-		(owned ? this.owned : this.borrowed).add(name);
 	}
 
 	fnMutates(name, addrOnly = false) {
