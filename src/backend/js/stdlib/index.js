@@ -6,7 +6,6 @@ import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
 import { jsonMethods } from "./json.js";
-import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
 import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
@@ -21,7 +20,6 @@ import { unicodeMethods } from "./unicode.js";
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
-	math: "_genMath",
 	unicode: "_genUnicode",
 	os: "_genOs",
 	errors: "_genErrors",
@@ -75,7 +73,6 @@ export const stdlibGenMethods = {
 	...errorsMethods,
 	...fmtMethods,
 	...gomMethods,
-	...mathMethods,
 	...osMethods,
 	...randMethods,
 	...regexpMethods,

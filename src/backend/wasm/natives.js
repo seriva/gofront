@@ -55,7 +55,61 @@ const WASM_INTRINSICS = {
 			e.pushInstruction("i64.extend_i32_s");
 		},
 	},
+	// math: IEEE-754 bit casts of the parameter.
+	math_float64bits: reinterpret("i64.reinterpret_f64"),
+	math_float64frombits: reinterpret("f64.reinterpret_i64"),
+	math_float32bits: reinterpret("i32.reinterpret_f32"),
+	math_float32frombits: reinterpret("f32.reinterpret_i32"),
+	// math: the host's `Math.*` (`mod` is `%`); the import table is locked
+	// before bodies are emitted, so `prepare` registers each.
+	...Object.fromEntries(
+		[
+			["sin"],
+			["cos"],
+			["tan"],
+			["asin"],
+			["acos"],
+			["atan"],
+			["sinh"],
+			["cosh"],
+			["tanh"],
+			["exp"],
+			["expm1"],
+			["log"],
+			["log1p"],
+			["log2"],
+			["log10"],
+			["cbrt"],
+			["atan2", true],
+			["pow", true],
+			["hypot", true],
+			["mod", true],
+		].map(([f, binary]) => [`math_${f}`, hostMath(f, binary)]),
+	),
 };
+
+function reinterpret(op) {
+	return {
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction(op);
+		},
+	};
+}
+
+function hostMath(name, binary = false) {
+	return {
+		prepare: (mod) => mod.getMathImportIndex(name, binary),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			if (binary) e.pushInstruction({ op: "local.get", index: 1 });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getMathImportIndex(name, binary),
+			});
+		},
+	};
+}
 
 function wasmIntrinsic(fn) {
 	const entry = WASM_INTRINSICS[fn.intrinsic];
@@ -226,3 +280,157 @@ for (const family of ["Len", "LeadingZeros", "TrailingZeros", "OnesCount"]) {
 	])
 		WASM_NATIVES.set(`bits.${family}${suffix}`, bitsNative(family, width));
 }
+
+// ── math ──────────────────────────────────────────────────────
+//
+// One f64 instruction where it gives Go's answer.  `Round` rounds half away
+// from zero (`f64.nearest` rounds half to even) and `Min`/`Max` return an
+// infinity even beside a NaN (`f64.min`/`f64.max` return the NaN), so those
+// three add the fix-up around the instruction.
+
+const f64Unary = (op) => ({
+	emit(e, call) {
+		e.emitExpr(call.args[0], "f64");
+		e.pushInstruction(op);
+		return true;
+	},
+});
+WASM_NATIVES.set("math.Abs", f64Unary("f64.abs"));
+WASM_NATIVES.set("math.Floor", f64Unary("f64.floor"));
+WASM_NATIVES.set("math.Ceil", f64Unary("f64.ceil"));
+WASM_NATIVES.set("math.Trunc", f64Unary("f64.trunc"));
+WASM_NATIVES.set("math.Sqrt", f64Unary("f64.sqrt"));
+WASM_NATIVES.set("math.Copysign", {
+	emit(e, call) {
+		e.emitExpr(call.args[0], "f64");
+		e.emitExpr(call.args[1], "f64");
+		e.pushInstruction("f64.copysign");
+		return true;
+	},
+});
+
+// min/max of two f64, except that `inf` wins over a NaN.
+function infWins(op, inf) {
+	return {
+		emit(e, call) {
+			const a = e.acquireTemp("f64");
+			const b = e.acquireTemp("f64");
+			e.emitExpr(call.args[0], "f64");
+			e.pushInstruction({ op: "local.set", index: a });
+			e.emitExpr(call.args[1], "f64");
+			e.pushInstruction({ op: "local.set", index: b });
+			e.pushInstruction({ op: "f64.const", value: inf });
+			e.pushInstruction({ op: "local.get", index: a });
+			e.pushInstruction({ op: "local.get", index: b });
+			e.pushInstruction(op);
+			for (const t of [a, b]) {
+				e.pushInstruction({ op: "local.get", index: t });
+				e.pushInstruction({ op: "f64.const", value: inf });
+				e.pushInstruction("f64.eq");
+			}
+			e.pushInstruction("i32.or");
+			e.pushInstruction("select");
+			e.releaseTemp(b, "f64");
+			e.releaseTemp(a, "f64");
+			return true;
+		},
+	};
+}
+WASM_NATIVES.set("math.Max", infWins("f64.max", Infinity));
+WASM_NATIVES.set("math.Min", infWins("f64.min", -Infinity));
+
+WASM_NATIVES.set("math.Round", {
+	emit(e, call) {
+		const x = e.acquireTemp("f64");
+		const t = e.acquireTemp("f64");
+		const get = (i) => e.pushInstruction({ op: "local.get", index: i });
+		e.emitExpr(call.args[0], "f64");
+		e.pushInstruction({ op: "local.set", index: x });
+		get(x);
+		e.pushInstruction("f64.trunc");
+		e.pushInstruction({ op: "local.set", index: t });
+		// t + copysign(1, x) when |x - t| >= 0.5, else t
+		get(t);
+		e.pushInstruction({ op: "f64.const", value: 1 });
+		get(x);
+		e.pushInstruction("f64.copysign");
+		e.pushInstruction("f64.add");
+		get(t);
+		get(x);
+		get(t);
+		e.pushInstruction("f64.sub");
+		e.pushInstruction("f64.abs");
+		e.pushInstruction({ op: "f64.const", value: 0.5 });
+		e.pushInstruction("f64.ge");
+		e.pushInstruction("select");
+		e.releaseTemp(t, "f64");
+		e.releaseTemp(x, "f64");
+		return true;
+	},
+});
+
+WASM_NATIVES.set("math.IsNaN", {
+	emit(e, call) {
+		const x = e.acquireTemp("f64");
+		e.emitExpr(call.args[0], "f64");
+		e.pushInstruction({ op: "local.tee", index: x });
+		e.pushInstruction({ op: "local.get", index: x });
+		e.pushInstruction("f64.ne");
+		e.releaseTemp(x, "f64");
+		return true;
+	},
+});
+
+// IsInf(f, sign): (sign >= 0 && f == +Inf) || (sign <= 0 && f == -Inf)
+WASM_NATIVES.set("math.IsInf", {
+	emit(e, call) {
+		const f = e.acquireTemp("f64");
+		const s = e.acquireTemp("i64");
+		e.emitExpr(call.args[0], "f64");
+		e.pushInstruction({ op: "local.set", index: f });
+		e.emitExpr(call.args[1], "i64");
+		e.pushInstruction({ op: "local.set", index: s });
+		for (const [cmp, inf] of [
+			["i64.ge_s", Infinity],
+			["i64.le_s", -Infinity],
+		]) {
+			e.pushInstruction({ op: "local.get", index: s });
+			e.pushInstruction({ op: "i64.const", value: 0n });
+			e.pushInstruction(cmp);
+			e.pushInstruction({ op: "local.get", index: f });
+			e.pushInstruction({ op: "f64.const", value: inf });
+			e.pushInstruction("f64.eq");
+			e.pushInstruction("i32.and");
+		}
+		e.pushInstruction("i32.or");
+		e.releaseTemp(s, "i64");
+		e.releaseTemp(f, "f64");
+		return true;
+	},
+});
+
+// Inf(sign): +Inf copysigned with the sign (0 converts to +0.0).
+WASM_NATIVES.set("math.Inf", {
+	emit(e, call) {
+		e.pushInstruction({ op: "f64.const", value: Infinity });
+		e.emitExpr(call.args[0], "i64");
+		e.pushInstruction("f64.convert_i64_s");
+		e.pushInstruction("f64.copysign");
+		return true;
+	},
+});
+WASM_NATIVES.set("math.NaN", {
+	emit(e) {
+		e.pushInstruction({ op: "f64.const", value: NaN });
+		return true;
+	},
+});
+WASM_NATIVES.set("math.Signbit", {
+	emit(e, call) {
+		e.emitExpr(call.args[0], "f64");
+		e.pushInstruction("i64.reinterpret_f64");
+		e.pushInstruction({ op: "i64.const", value: 0n });
+		e.pushInstruction("i64.lt_s");
+		return true;
+	},
+});

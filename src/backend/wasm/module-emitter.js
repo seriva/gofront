@@ -3,7 +3,6 @@
 
 import { wTypeKey } from "./boundary.js";
 import { hasErrorUsage, importsAnyOf } from "./prescan.js";
-import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
 import {
 	ERROR_STRUCT,
 	getFuncSignature,
@@ -979,30 +978,6 @@ export class ModuleEmitter {
 		}
 		this.getLogImportIndex("i32", false, true); // env.print_bool
 		this.getLogImportIndex("i32", true, true); // env.println_bool
-
-		// Math built-ins
-		const unaryMath = [
-			"sin",
-			"cos",
-			"tan",
-			"asin",
-			"acos",
-			"atan",
-			"exp",
-			"log",
-			"log2",
-			"log10",
-			"round",
-			"cbrt",
-			"log1p",
-			"expm1",
-		];
-		for (const m of unaryMath) {
-			this.getMathImportIndex(m, false);
-		}
-		for (const m of BINARY_MATH_IMPORTS) {
-			this.getMathImportIndex(m, true);
-		}
 	}
 
 	_initPanicTag() {

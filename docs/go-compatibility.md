@@ -55,7 +55,7 @@ Most packages (`slices`, `sort`, `maps`, `errors`, `io`, `strings`, `bytes`, `st
 - **Errors:** `strconv` parse failures are `*strconv.NumError` values wrapping `strconv.ErrSyntax` or `strconv.ErrRange`, so use `errors.Is` or `errors.As` instead of comparing text. `base64` reports Go's error positions, and `time` formats and parses every layout.
 - **Numbers:** `strconv.FormatFloat` and `ParseFloat` round exactly as Go does for bit sizes 32 and 64, including `-0`, hexadecimal floats and `1e39` as `float32`. `strconv.Atoi` and `strconv.Itoa` use `int`, which is exact up to 2⁵³ in JavaScript output; `ParseInt` and `ParseUint` return exact `int64` and `uint64`.
 - **Host fast paths:** Searching, sorting primitive slices, trimming and case conversion in `strings`, `bytes`, `slices` and `sort`, and the digit conversion in `strconv.FormatFloat` and `ParseFloat`, call the host (`indexOf`, `toExponential`, `Number`) where it gives Go's result. The Go body runs for every other case. Pass `--no-natives` when compiling an input (`gofront <input> -o out.js --no-natives`) to run the Go bodies everywhere, for example to compare results.
-- **Still provided by the compiler:** `errors.As` is the only member of the Go-source packages that the backends implement directly; `fmt`, `encoding/json`, `regexp`, `os`, `testing` and `math` also keep compiler support.
+- **Still provided by the compiler:** `errors.As` is the only member of the Go-source packages that the backends implement directly; `fmt`, `encoding/json`, `regexp`, `os` and `testing` also keep compiler support.
 
 ### String semantics (both backends)
 

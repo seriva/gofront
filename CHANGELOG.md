@@ -15,6 +15,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 - **Go programs behave like Go on every target**: many programs that failed to compile, built an invalid WebAssembly module, or printed different results on JavaScript and WebAssembly now match Go, including nil pointers in interfaces, map keys, runtime panics recovered as `error` values, `fmt` verbs (`%p` now prints a stable id such as `0x1`), `encoding/json` values stored in `any`, and generic types exported from WebAssembly packages. Templ components accept every Go `for` form, a `switch` without a tag and a `{ children... }` spread under any parameter name ([details](docs/go-compatibility.md)).
+- **`math` follows Go's special cases**: `math.Pow(1, NaN)`, `math.Max(Inf, NaN)`, `math.Round`, `math.Remainder` and `math.MaxInt64` now give the same results as Go on JavaScript and WebAssembly, and `math.FMA` is exact on JavaScript.
 - **`strings.Builder` is an ordinary Go struct**: it can be a field of an exported WebAssembly struct, panics when a used builder is copied by value, and behaves the same on JavaScript and WebAssembly.
 
 ### Changed
