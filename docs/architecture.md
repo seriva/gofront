@@ -59,10 +59,12 @@ Walks the typed AST and emits clean, readable JavaScript. No intermediate repres
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
 `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
-`__sclone`, `__ifv`, `__ifp`, the `__json_*` encoding/json runtime and the `__simd_*` `gofront/simd`
-fallback) are tree-shaken: only emitted when actually used. `encoding/json` additionally emits
-one memoized encoder/decoder per reachable type, derived from the struct tags preserved by the
-parser and the field sets resolved by the type checker. Optional inline source maps are supported
+`__sclone`, `__ifv`, `__ifp` and the `__simd_*` `gofront/simd` fallback) are tree-shaken: only
+emitted when actually used. `encoding/json` has no JavaScript emitter of its own: its calls compile
+to the same generated Go codecs as on WebAssembly (`src/lower/json-codecs.js`, on top of
+`stdlib/internal/jsonrt/`), and the JavaScript backend emits those like any other package code,
+with host fast paths for the encoder's buffer writes and the decoder's string, number and
+validity reads. Optional inline source maps are supported
 via VLQ-encoded mappings.
 
 ### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`)

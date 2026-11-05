@@ -463,6 +463,7 @@ export const statementCheckMethods = {
 			kind === "MapType" ||
 			kind === "PointerType" ||
 			kind === "FuncType" ||
+			kind === "StructType" ||
 			kind === "GenericTypeName"
 		)
 			node._assertType = resolved;

@@ -6,16 +6,10 @@ import {
 	BOOL,
 	BROWSER_GLOBALS,
 	ERROR,
-	FLOAT32,
-	FLOAT64,
 	INT,
 	INT64,
 	STRING,
-	UINT,
 	UINT8,
-	UINT32,
-	UINT64,
-	UNTYPED_INT,
 	VOID,
 } from "../types.js";
 

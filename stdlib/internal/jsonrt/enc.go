@@ -56,15 +56,19 @@ func (e *MarshalerError) Unwrap() error { return e.Err }
 
 // Enc is the state of one Marshal call: the output so far and the first
 // error. After an error every method does nothing.
+//
+// The output is buf[:n]; the rest of buf is room to grow into, so appending
+// a byte is an index write rather than a new slice header.
 type Enc struct {
-	B          []byte
+	buf        []byte
+	n          int
 	Err        error
 	EscapeHTML bool
 }
 
 // NewEnc returns an encoder that escapes <, > and & like json.Marshal.
 func NewEnc() *Enc {
-	return &Enc{EscapeHTML: OptEscapeHTML}
+	return &Enc{buf: make([]byte, 256), EscapeHTML: OptEscapeHTML}
 }
 
 // Result returns the encoded bytes, or the first error.
@@ -72,7 +76,114 @@ func (e *Enc) Result() ([]byte, error) {
 	if e.Err != nil {
 		return nil, e.Err
 	}
-	return e.B, nil
+	return e.buf[:e.n], nil
+}
+
+// room makes sure k more bytes fit after the output.
+func (e *Enc) room(k int) {
+	if e.n+k <= len(e.buf) {
+		return
+	}
+	nb := make([]byte, 2*len(e.buf)+k)
+	copy(nb, e.buf[:e.n])
+	e.buf = nb
+}
+
+// putBytes appends b to the output.
+func (e *Enc) putBytes(b []byte) {
+	e.room(len(b))
+	copy(e.buf[e.n:], b)
+	e.n += len(b)
+}
+
+// putString appends the bytes of s to the output.
+//
+//gofront:native jsonrt.putString
+func putString(e *Enc, s string) {
+	n := len(s)
+	e.room(n)
+	for i := 0; i < n; i++ {
+		e.buf[e.n+i] = s[i]
+	}
+	e.n += n
+}
+
+// putInt appends the decimal form of v.
+//
+//gofront:native jsonrt.putInt
+func putInt(e *Enc, v int64) {
+	if v < 0 {
+		e.Byte('-')
+		putUint(e, uint64(-v))
+		return
+	}
+	putUint(e, uint64(v))
+}
+
+// putUint appends the decimal form of v.
+//
+//gofront:native jsonrt.putUint
+func putUint(e *Enc, v uint64) {
+	n := 1
+	for t := v; t >= 10; t /= 10 {
+		n++
+	}
+	e.room(n)
+	for i := e.n + n - 1; i >= e.n; i-- {
+		e.buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	e.n += n
+}
+
+// putFloat appends a finite f in the format encoding/json uses: shortest
+// digits that read back as a float of the given size, as if by ES6 number to
+// string conversion (an exponent only below 1e-6 and from 1e21).
+//
+//gofront:native jsonrt.putFloat
+func putFloat(e *Enc, f float64, bits int) {
+	var tmp [64]byte
+	b := tmp[:0]
+	format := floatFormat(f, bits)
+	if bits == 32 {
+		f = shortest32(f)
+	}
+	b = strconv.AppendFloat(b, f, format, -1, 64)
+	if format == 'e' {
+		b = cleanExponent(b)
+	}
+	e.putBytes(b)
+}
+
+// LooksFloat32 reports whether f, found in an interface, is more likely a
+// float32 than a float64. Where a float32 and a float64 share one run-time
+// representation (JavaScript numbers) a float64 that a float32 holds exactly
+// is taken for one; elsewhere the interface tells them apart.
+//
+//gofront:native jsonrt.LooksFloat32
+func LooksFloat32(f float64) bool {
+	return false
+}
+
+// putQuoted appends s as a quoted JSON string.
+//
+//gofront:native jsonrt.putQuoted
+func putQuoted(e *Enc, s string) {
+	n := len(s)
+	for i := 0; i < n; i++ {
+		c := s[i]
+		if c < 0x20 || c >= utf8.RuneSelf || c == '"' || c == '\\' || (e.EscapeHTML && (c == '<' || c == '>' || c == '&')) {
+			e.putBytes(AppendString(nil, []byte(s), e.EscapeHTML))
+			return
+		}
+	}
+	e.room(n + 2)
+	e.buf[e.n] = '"'
+	for i := 0; i < n; i++ {
+		e.buf[e.n+1+i] = s[i]
+	}
+	e.buf[e.n+n+1] = '"'
+	e.n += n + 2
 }
 
 // Fail records the first error.
@@ -89,17 +200,21 @@ func (e *Enc) FailType(typ string) {
 
 // Lit appends s, which is already valid JSON text.
 func (e *Enc) Lit(s string) {
-	e.B = appendStr(e.B, s)
+	putString(e, s)
 }
 
 // Byte appends one byte of JSON punctuation.
 func (e *Enc) Byte(c byte) {
-	e.B = append(e.B, c)
+	if e.n == len(e.buf) {
+		e.room(1)
+	}
+	e.buf[e.n] = c
+	e.n++
 }
 
 // Null appends null.
 func (e *Enc) Null() {
-	e.B = appendStr(e.B, "null")
+	putString(e, "null")
 }
 
 // Number appends the literal representation of a Number.
@@ -108,14 +223,14 @@ func (e *Enc) Number(v string) {
 		return
 	}
 	if v == "" {
-		e.B = append(e.B, '0')
+		e.Byte('0')
 		return
 	}
 	if !isValidNumber(v) {
 		e.Fail(fmt.Errorf("json: invalid number literal %q", v))
 		return
 	}
-	e.B = appendStr(e.B, v)
+	putString(e, v)
 }
 
 func isValidNumber(s string) bool {
@@ -132,20 +247,20 @@ func isValidNumber(s string) bool {
 // Bool appends true or false.
 func (e *Enc) Bool(v bool) {
 	if v {
-		e.B = appendStr(e.B, "true")
+		putString(e, "true")
 	} else {
-		e.B = appendStr(e.B, "false")
+		putString(e, "false")
 	}
 }
 
 // Int appends a signed integer.
 func (e *Enc) Int(v int64) {
-	e.B = strconv.AppendInt(e.B, v, 10)
+	putInt(e, v)
 }
 
 // Uint appends an unsigned integer.
 func (e *Enc) Uint(v uint64) {
-	e.B = strconv.AppendUint(e.B, v, 10)
+	putUint(e, v)
 }
 
 // Float appends a floating-point number in the format encoding/json uses.
@@ -158,17 +273,10 @@ func (e *Enc) Float(f float64, bits int) {
 		return
 	}
 	if f == 0 && math.Signbit(f) {
-		e.B = append(e.B, "-0"...)
+		putString(e, "-0")
 		return
 	}
-	format := floatFormat(f, bits)
-	if bits == 32 {
-		f = shortest32(f)
-	}
-	e.B = strconv.AppendFloat(e.B, f, format, -1, 64)
-	if format == 'e' {
-		e.B = cleanExponent(e.B)
-	}
+	putFloat(e, f, bits)
 }
 
 // floatFormat picks 'e' or 'f' as if by ES6 number to string conversion.
@@ -210,34 +318,35 @@ func shortest32(f float64) float64 {
 
 // Str appends a quoted, escaped string.
 func (e *Enc) Str(s string) {
-	e.B = AppendString(e.B, []byte(s), e.EscapeHTML)
+	putQuoted(e, s)
 }
 
 // QStr appends a string for the ,string tag option: the quoted form of the
 // quoted form.
 func (e *Enc) QStr(s string) {
 	inner := AppendString(nil, []byte(s), e.EscapeHTML)
-	e.B = AppendString(e.B, inner, false)
+	e.putBytes(AppendString(nil, inner, false))
 }
 
 // Key appends the separator for member n of an object (a comma when n > 0)
 // and the member name, a plain name that needs no escaping.
 func (e *Enc) Key(n int, name string) {
 	if n > 0 {
-		e.B = append(e.B, ',')
+		e.Byte(',')
 	}
-	e.B = append(e.B, '"')
-	e.B = appendStr(e.B, name)
-	e.B = append(e.B, '"', ':')
+	e.Byte('"')
+	putString(e, name)
+	e.Byte('"')
+	e.Byte(':')
 }
 
 // KeyStr is Key for a member name that may need escaping.
 func (e *Enc) KeyStr(n int, name string) {
 	if n > 0 {
-		e.B = append(e.B, ',')
+		e.Byte(',')
 	}
-	e.B = AppendString(e.B, []byte(name), e.EscapeHTML)
-	e.B = append(e.B, ':')
+	putQuoted(e, name)
+	e.Byte(':')
 }
 
 // Bytes appends a []byte as a base64 string, or null for a nil slice.
@@ -246,9 +355,9 @@ func (e *Enc) Bytes(v []byte) {
 		e.Null()
 		return
 	}
-	e.B = append(e.B, '"')
-	e.B = appendStr(e.B, base64.StdEncoding.EncodeToString(v))
-	e.B = append(e.B, '"')
+	e.Byte('"')
+	putString(e, base64.StdEncoding.EncodeToString(v))
+	e.Byte('"')
 }
 
 // EncodeBytes returns the standard base64 text of v; the JavaScript JSON codec
@@ -274,9 +383,9 @@ func (e *Enc) Marshaled(out []byte, err error, typ string) {
 	}
 	if err == nil {
 		var b []byte
-		b, err = AppendCompact(e.B, out, e.EscapeHTML)
+		b, err = AppendCompact(nil, out, e.EscapeHTML)
 		if err == nil {
-			e.B = b
+			e.putBytes(b)
 			return
 		}
 	}

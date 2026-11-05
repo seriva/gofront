@@ -207,7 +207,7 @@ export class JsonCodecGen {
 			array: () => `[${t.size}]${sp(t.elem)}`,
 			map: () => `map[${sp(t.key)}]${sp(t.value)}`,
 			struct: () => this.spellStruct(t),
-			interface: () => "any",
+			interface: () => (t.name === "error" ? "error" : "any"),
 			func: () => this.funcString(t, sp),
 		};
 		if (!byKind[t.kind])
@@ -287,7 +287,7 @@ export class JsonCodecGen {
 			case "map":
 				return `map[${this.refl(t.key)}]${this.refl(t.value)}`;
 			case "interface":
-				return "interface {}";
+				return t.name === "error" ? "error" : "interface {}";
 			case "func":
 				return this.funcString(t, (x) => this.refl(x));
 			default:
@@ -578,12 +578,24 @@ export class JsonCodecGen {
 	genEncAny() {
 		const cases = [];
 		const seen = new Set();
+		const f32 = this.enc.get("float32")?.name;
 		for (const [key, e] of this.enc) {
 			if (e.addr || seen.has(key)) continue;
 			seen.add(key);
 			if (isInterface(e.t)) continue;
-			cases.push(`\tcase ${this.spell(e.t)}:\n\t\t${e.name}(e, x)`);
+			// Where one run-time shape serves both float sizes, a float64 that a
+			// float32 holds exactly encodes as the float32 it most likely is.
+			const body =
+				f32 && e.t.kind === "basic" && e.t.name === "float64"
+					? `\t\tif jsonrt.LooksFloat32(x) {\n\t\t\t${f32}(e, float32(x))\n\t\t} else {\n\t\t\t${e.name}(e, x)\n\t\t}`
+					: `\t\t${e.name}(e, x)`;
+			cases.push({ t: e.t, src: `\tcase ${this.spell(e.t)}:\n${body}` });
 		}
+		// JS numbers do not tell an int from a float64 or float32: whole numbers
+		// take the int cases, then float64, then float32.
+		const rank = ({ t }) =>
+			t.name === "float64" ? 1 : t.name === "float32" ? 2 : 0;
+		cases.sort((a, b) => rank(a) - rank(b));
 		this.out.push(
 			[
 				`func ${this.prefix}encAny(e *jsonrt.Enc, v any) {`,
@@ -592,7 +604,7 @@ export class JsonCodecGen {
 				"\t\treturn",
 				"\t}",
 				"\tswitch x := v.(type) {",
-				...cases,
+				...cases.map((c) => c.src),
 				"\tdefault:",
 				"\t\t_ = x",
 				'\t\te.FailType("unsupported dynamic type")',
@@ -1121,7 +1133,13 @@ export class JsonCodecGen {
 			(t) =>
 				t.kind === "pointer" && (isEmptyIface(t.base) || !isInterface(t.base)),
 		);
-		for (const pt of [...this.decTargets, ...pointers]) {
+		// A pointer to a type parameter's variable names no type in JavaScript:
+		// it decodes by its pointee's shape (see __isty), so these always exist.
+		const shapes = ["any", "float64", "string", "bool", "int64"].map((n) => ({
+			kind: "pointer",
+			base: { kind: "basic", name: n },
+		}));
+		for (const pt of [...this.decTargets, ...pointers, ...shapes]) {
 			const k = this.key(pt);
 			if (seen.has(k)) continue;
 			seen.add(k);
@@ -1220,6 +1238,11 @@ export class JsonCodecGen {
 				for (const a of node._typeArgs ?? []) this.addTypeArg(found, a);
 				if (!node._type) return;
 				const t = defaultType(node._type);
+				// A func literal in an interface reports its own type.
+				if (node.kind === "FuncLit" && this.spellable(t)) {
+					found.set(this.key(t), t);
+					return;
+				}
 				// Slices, arrays and maps reach an interface from any expression
 				// (a function result, a variable), not only from a literal
 				if (!buildsValue(node) && !isCompositeType(t) && !isJsonValue(t))
@@ -1445,7 +1468,11 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 			const t = defaultType(call.args[i]?._type);
 			return mentionsTypeParam(t) ? null : t;
 		};
-		if (fn === "Unmarshal" && argType(1)?.base?.kind === "pointer")
+		if (
+			fn === "Unmarshal" &&
+			checker.target !== "js" &&
+			argType(1)?.base?.kind === "pointer"
+		)
 			diagnostics.push({
 				program,
 				node: call.func.expr,
