@@ -1715,6 +1715,53 @@ func main() {
 	);
 });
 
+section("String indexing and cap on maps");
+
+test("string indexing yields byte on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func cp(b byte) bool { return b == 46 }
+func f(s string) bool { return cp(s[0]) }
+
+func main() {
+	var c byte = "."[0]
+	fmt.Println(f("."), c)
+}
+`,
+		"true 46\n",
+	);
+});
+
+test("cap on a map is rejected", () => {
+	const { errors } = compile(
+		`package main
+func main() {
+	var m map[string]int
+	_ = cap(m)
+}`,
+	);
+	assertErrorContains(
+		errors,
+		"invalid argument: m (variable of type map[string]int) for cap",
+	);
+});
+
+test("len on a map and cap on a slice stay valid", () => {
+	const { errors } = compile(
+		`package main
+func main() {
+	m := map[string]int{}
+	s := []int{1}
+	_ = len(m)
+	_ = cap(s)
+}`,
+	);
+	assertEqual(errors.length, 0);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

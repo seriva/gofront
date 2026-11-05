@@ -593,19 +593,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 23: Typechecker Rules for Strings, Maps and Type Parameters
 
-- [ ] Task 23.1: String indexing yields `byte` (`uint8`)
+- [x] Task 23.1: String indexing yields `byte` (`uint8`)
   - Files: `src/typechecker/expressions.js`, `test/unit/types/checks.test.js`
   - Test: S29 `func cp(b byte) bool { return b == 46 }; func f(s string) bool { return cp(s[0]) }; var c byte = "."[0]; fmt.Println(f("."), c)` → `true 46` on all targets.
   - Done when: repro compiles and runs on all targets; `npm test` and `npm run check` stay green.
-- [ ] Task 23.2: Reject `cap(m)` on maps
+- [x] Task 23.2: Reject `cap(m)` on maps
   - Files: `src/typechecker/expressions.js`, `test/unit/types/checks.test.js`
   - Test: S05 `var m map[string]int; _ = cap(m)` → `assertErrorContains(errors, "invalid argument: m (variable of type map[string]int) for cap")`; `len(m)` and `cap(s)` on slices/arrays stay valid.
   - Done when: `cap(m)` is rejected on all targets with Go's message.
-- [ ] Task 23.3: Type-parameter constraints referencing later type parameters in the same list
+- [x] Task 23.3: Type-parameter constraints referencing later type parameters in the same list
   - Files: `src/typechecker/resolve.js`, `src/typechecker/expressions.js`, `test/unit/types/generics.test.js`
   - Test: S04 `type SliceIface[E any] interface { ~[]E }; func F[S SliceIface[E], E any](s S) E { return s[0] }; fmt.Println(F([]int{7}))` → `7` on all targets.
   - Done when: repro compiles, infers `E`, and runs on js/both/wasm.
-- [ ] Task 23.4: 64-bit untyped constant map keys (`1 << 60`)
+- [x] Task 23.4: 64-bit untyped constant map keys (`1 << 60`)
   - Files: `src/typechecker/const-fold.js`, `src/backend/js/expressions.js`, `test/unit/wasm/maps.test.js`
   - Test: S02 `m := map[int64]string{1 << 60: "hello"}; fmt.Println(m[1<<60])` → `hello` on all targets (also `map[uint64]int{1 << 63: 9}`).
   - Done when: both map-key repros match Go on js/both/wasm.

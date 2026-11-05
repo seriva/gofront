@@ -28,6 +28,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Breaking:** `strconv.FormatFloat` takes its format as a `byte`, so pass `'f'` rather than an `int` variable.
 - **Breaking:** In JavaScript, `time.Time` is a struct rather than a plain object, and across the WebAssembly boundary `_d` is a read-only `Date`. Read fields through `Time` methods or `_d` instead of building or mutating the object by hand.
 - **Breaking:** `math/bits` functions on a `uint` are exact only below 2⁵³ in JavaScript. Convert to `uint64` and use the `*64` forms for wider values.
+- **Breaking:** Like Go, indexing a string (`s[i]`) now gives a `byte` rather than an `int`, `strings.Builder.WriteByte` takes a `byte`, and `cap` on a map is rejected. Convert with `int(s[i])` where an `int` is needed and use `len` for maps.
 - **Breaking:** Exported JavaScript functions and the WebAssembly facade now take and return `BigInt` for `int64` and `uint64`, including `time.Duration`. Pass `BigInt(n)` from hand-written JavaScript and convert results with `Number(…)` where a plain number is needed.
 
 ## [1.8.0] - 2026-10-30
