@@ -422,16 +422,7 @@ export const fmtMethods = {
 				? this._fmtFormatArgsJs(rest, 0)
 				: rest.map((e) => this._fmtArgJs(e))
 		).join(", ");
-		const writerType = writerArg._type;
-		const targetTypeName =
-			writerType?.name ??
-			(writerType?.kind === "pointer" ? writerType.base?.name : null);
 		const sprintfCall = this._buildFprintSprintfCall(fn, rest.length, restJs);
-		if (targetTypeName === "strings.Builder") {
-			const w = this.genExpr(writerArg);
-			const base = this._unboxWriter(w);
-			return `((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall})`;
-		}
 		// Any other io.Writer: Fprint* calls Write with the UTF-8 bytes.
 		const w = this.genExpr(writerArg);
 		return `((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
@@ -445,14 +436,6 @@ export const fmtMethods = {
 			parts.length,
 			parts.join(", "),
 		);
-		const writerType = call._type.types[0];
-		const targetTypeName =
-			writerType?.name ??
-			(writerType?.kind === "pointer" ? writerType.base?.name : null);
-		if (targetTypeName === "strings.Builder") {
-			const base = this._unboxWriter("__t[0]");
-			return `((__t) => ((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall}))(${this.genExpr(call)})`;
-		}
 		return `((__t) => ((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(__t[0], ${sprintfCall}))(${this.genExpr(call)})`;
 	},
 

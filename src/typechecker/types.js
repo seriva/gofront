@@ -109,7 +109,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"math",
 	"errors",
 	"fmt",
-	"strings",
 	"unicode",
 	"time",
 	"testing",
@@ -228,7 +227,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Stringer",
 		]),
 	],
-	["strings", new Set(["Builder"])],
 	[
 		"unicode",
 		new Set([

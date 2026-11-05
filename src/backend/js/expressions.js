@@ -144,7 +144,6 @@ function collectFunctionLabels(node, labels = new Set()) {
 }
 
 const NAMED_ZERO_TABLE = {
-	"strings.Builder": [null, '{ _buf: "" }'],
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
 	"simd.Mask32x4": [null, "Object.freeze([false, false, false, false])"],
@@ -1922,8 +1921,6 @@ export const expressionGenMethods = {
 	_genReceiverTypeCall(recvName, expr) {
 		const jsonStream = this._genJsonStreamCall(recvName, expr);
 		if (jsonStream !== undefined) return jsonStream;
-		if (recvName === "strings.Builder")
-			return this._genBuilderCall(recvName, expr.func.field, expr);
 		if (recvName === "regexp.Regexp")
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Timer") {
@@ -2471,8 +2468,6 @@ export const expressionGenMethods = {
 		const t = expr.typeExpr;
 		if (t === null) return this._genImplicitCompositeLit(expr);
 		const typeName = this.getTypeName(t);
-		if (typeName === "strings.Builder" || typeName === "Builder")
-			return '{ _buf: "" }';
 		if (typeName === "simd.Mask32x4" || typeName === "Mask32x4")
 			return "Object.freeze([false, false, false, false])";
 		if (typeName === "simd.F32x4" || typeName === "F32x4") {
