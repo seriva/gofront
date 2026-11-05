@@ -130,3 +130,25 @@ syntax error in pattern
 `,
 	);
 });
+
+test("Match keeps Go's results for inverted ranges and / in classes", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"path"
+)
+
+func main() {
+	ok, err := path.Match("[z-a]", "b")
+	fmt.Println(ok, err == path.ErrBadPattern)
+	ok, err = path.Match("[/]", "/")
+	fmt.Println(ok, err)
+}
+`,
+		`false false
+true <nil>
+`,
+	);
+});
