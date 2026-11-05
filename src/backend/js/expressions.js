@@ -1879,15 +1879,6 @@ export const expressionGenMethods = {
 	},
 
 	_genReceiverTypeCall(recvName, expr) {
-		if (recvName === "regexp.Regexp")
-			return this._genRegexpMethodCall(expr.func.field, expr);
-		if (recvName === "time.Timer") {
-			const recv = this.genExpr(expr.func.expr);
-			if (expr.func.field === "Stop")
-				return `(${recv} ? ${recv}.Stop() : false)`;
-			if (expr.func.field === "Reset")
-				return `(${recv} ? ${recv}.Reset(${this.genExpr(expr.args[0])}) : false)`;
-		}
 		if (
 			recvName === "testing.T" ||
 			recvName === "testing.B" ||

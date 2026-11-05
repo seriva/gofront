@@ -1163,38 +1163,6 @@ export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return e;
 };`;
 
-export const HELPER_TIMER = `var __timeAfterFunc = __timeAfterFunc || function(d, f) {
-  var timer = {
-    _id: null,
-    _active: true,
-    _f: f,
-    Stop: function() {
-      var act = this._active;
-      if (act) {
-        clearTimeout(this._id);
-        this._active = false;
-      }
-      return act;
-    },
-    Reset: function(newD) {
-      var act = this._active;
-      if (act) clearTimeout(this._id);
-      var self = this;
-      this._active = true;
-      this._id = setTimeout(function() {
-        self._active = false;
-        self._f();
-      }, Math.round(Number(newD) / 1000000));
-      return act;
-    }
-  };
-  timer._id = setTimeout(function() {
-    timer._active = false;
-    timer._f();
-  }, Math.round(Number(d) / 1000000));
-  return timer;
-};`;
-
 export const HELPER_TESTING = `var __GoFront_FailNow = __GoFront_FailNow || class extends Error {
   constructor() { super("FailNow"); this.name = "__GoFront_FailNow"; }
 };
