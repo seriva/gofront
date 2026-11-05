@@ -114,7 +114,7 @@ func AppendBool(dst []byte, b bool) []byte {
 // c is either that lower-case letter or the equivalent upper-case letter.
 // Instead of writing c == 'x' || c == 'X' one can write lower(c) == 'x'.
 // Note that lower of non-letters can produce other non-letters.
-func lowerS(c int) int {
+func lowerS(c byte) byte {
 	return c | ('x' - 'X')
 }
 

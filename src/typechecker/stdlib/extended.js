@@ -4,6 +4,7 @@
 import {
 	ANY,
 	BOOL,
+	BYTE,
 	ERROR,
 	FLOAT64,
 	INT,
@@ -218,7 +219,7 @@ export function setupExtendedGlobals(globals, types) {
 	const BYTE_SLICE_T = { kind: "slice", elem: UINT8 };
 	const _builderBase = [
 		["WriteString", { kind: "func", params: [STRING], returns: [INT, ERROR] }],
-		["WriteByte", { kind: "func", params: [INT], returns: [ERROR] }],
+		["WriteByte", { kind: "func", params: [BYTE], returns: [ERROR] }],
 		["Write", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
 		["String", { kind: "func", params: [], returns: [STRING] }],
 		["Len", { kind: "func", params: [], returns: [INT] }],
