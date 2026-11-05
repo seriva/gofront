@@ -1874,7 +1874,9 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			} catch {
 				str = "[panic object]";
 			}
-			throw new Error(str);
+			const err = new Error(str);
+			err.__gfp = true;
+			throw err;
 		},
 		"str": (i) => stringTable[i] ?? "",
 		"str_len": (s) => (s ? s.length : 0),
@@ -1887,7 +1889,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_ge": (a, b) => ((a ?? "") >= (b ?? "") ? 1 : 0),
 		"str_get": (s, i) => (s ? s.charCodeAt(i) : 0),
 		"str_slice": (s, a, b) => (s ? s.slice(a, b) : ""),
-		"str_from_code_point": (c) => String.fromCodePoint(c),
+		"str_from_code_point": (c) => String.fromCodePoint(c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c <= 0xdfff) ? c : 0xfffd),
 		"str_code_point_at": (s, i) => (s ? s.codePointAt(i) : 0),
 		"str_hash": (s) => {
 			if (!s) return 0;
@@ -2073,6 +2075,27 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		}));
 	}
 	Object.assign(env, extraEnv);
+	// A host import that throws raises a Go panic: the module's panic stack
+	// gets the message (as env.panic does through __push_panic) before the
+	// error unwinds, so recover() in a calling frame sees it.  Errors already
+	// pushed (env.panic, nested calls into the module) are marked and pass
+	// through; traps and wasm exceptions are not host panics.
+	const hostPanic = (e) => {
+		if (e !== null && typeof e === "object") {
+			if (e.__gfp === true) return;
+			if (typeof WebAssembly !== "undefined" && (e instanceof WebAssembly.Exception || e instanceof WebAssembly.RuntimeError)) return;
+			try { e.__gfp = true; } catch {}
+		}
+		const push = late.exports && late.exports.__push_panic;
+		if (push) push(String(e !== null && typeof e === "object" && e.message !== undefined ? e.message : e));
+	};
+	for (const k of Object.keys(env)) {
+		const fn = env[k];
+		if (typeof fn !== "function" || k === "panic" || k === "panicTag") continue;
+		env[k] = function () {
+			try { return fn.apply(this, arguments); } catch (e) { hostPanic(e); throw e; }
+		};
+	}
 	const m = {};
 	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh", "log1p", "expm1"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
@@ -2487,7 +2510,7 @@ export function generateFacade(
 		}
 		const sig = ["fn", ...names].join(", ");
 		out.push(
-			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic) __w.__push_panic(__e.message ?? String(__e)); throw __e; } };`,
+			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic && !(__e && __e.__gfp === true)) { __w.__push_panic(__e.message ?? String(__e)); try { __e.__gfp = true; } catch {} } throw __e; } };`,
 		);
 	}
 	out.push(

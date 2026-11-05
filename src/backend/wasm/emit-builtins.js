@@ -256,15 +256,18 @@ export class BuiltinsEmitter {
 				this.pushInstruction({ op: "local.set", index: capTmp });
 			}
 
+			// Go: a negative len is a len panic; otherwise cap < len is a cap panic.
 			this.pushInstruction({ op: "local.get", index: lenTmp });
-			this.pushInstruction({ op: "local.get", index: capTmp });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "local.get", index: capTmp });
 			this.pushInstruction({ op: "i32.const", value: 0 });
 			this.pushInstruction("i32.lt_s");
-			this.pushInstruction("i32.or");
 			this.pushInstruction({ op: "if", blockType: "void" });
 			this.emitPanic("runtime error: makeslice: len out of range");
+			this.pushInstruction("end");
+			this.pushInstruction({ op: "local.get", index: capTmp });
+			this.pushInstruction({ op: "local.get", index: lenTmp });
+			this.pushInstruction("i32.lt_s");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.emitPanic("runtime error: makeslice: cap out of range");
 			this.pushInstruction("end");
 
 			if (

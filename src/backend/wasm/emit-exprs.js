@@ -2655,7 +2655,14 @@ export class ExprsEmitter {
 	}
 
 	emitDivRem(op, left, right, targetWasmType = null) {
-		const goType = left._type;
+		// An untyped constant left operand takes the type of the typed right
+		// one (`(1<<31) % uint32(n)` divides unsigned).
+		const goType =
+			left._type?.kind === "untyped" &&
+			right._type &&
+			right._type.kind !== "untyped"
+				? right._type
+				: left._type;
 		const wType = targetWasmType ?? toWasmType(goType, this.mod.checker);
 
 		if (wType === "f32" || wType === "f64") {

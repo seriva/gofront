@@ -413,6 +413,39 @@ test("a TypeError that is not a null access keeps its own message", () => {
 	);
 });
 
+section("Strict panics — make with a negative length or capacity");
+
+test("make([]T, n) with negative n panics with Go's message", () => {
+	assertEqual(
+		panicMessage("n := -1; _ = make([]int, n)"),
+		"runtime error: makeslice: len out of range",
+	);
+	assertEqual(
+		panicMessage("n := -1; _ = make([]P, n)"),
+		"runtime error: makeslice: len out of range",
+	);
+});
+
+test("make([]T, 0, n) with negative n panics with Go's cap message", () => {
+	assertEqual(
+		panicMessage("n := -1; _ = make([]int, 0, n)"),
+		"runtime error: makeslice: cap out of range",
+	);
+	assertEqual(
+		panicMessage("n := 3; c := 1; _ = make([]int, n, c)"),
+		"runtime error: makeslice: cap out of range",
+	);
+});
+
+test("make with valid lengths is unchanged", () => {
+	assertEqual(
+		panicMessage(
+			'n := 2; xs := make([]int, n, n+1); if len(xs) != 2 || cap(xs) != 3 { return "bad" }',
+		),
+		"nopanic",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

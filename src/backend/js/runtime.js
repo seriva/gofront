@@ -214,6 +214,22 @@ var __mkslice = __mkslice || function(n, b) {
   return __slice(b, 0, n);
 };`;
 
+// `make([]T, n, cap)` argument checks with Go's messages: a negative length is
+// a len panic, a negative capacity (or one below the length) a cap panic.
+export const HELPER_MKLEN = `var __mkn = __mkn || function(n) {
+  if (!(n >= 0)) throw new Error("runtime error: makeslice: len out of range");
+  return n;
+};
+var __mkc = __mkc || function(c) {
+  if (!(c >= 0)) throw new Error("runtime error: makeslice: cap out of range");
+  return c;
+};`;
+
+// string(rune): an out-of-range rune or a surrogate is U+FFFD.
+export const HELPER_RUNESTR = `var __rstr = __rstr || function(c) {
+  return String.fromCodePoint(c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c <= 0xdfff) ? c : 0xfffd);
+};`;
+
 export const HELPER_APPEND = `var __tn = __tn || function(c) {
   return Object.hasOwn(c, "__tnil") ? c.__tnil : Object.defineProperty(c, "__tnil", { value: Object.defineProperty(new c(0), "__nilt", { value: true }) }).__tnil;
 };
@@ -803,6 +819,9 @@ export const HELPER_PTREQ = `var __ptreq = __ptreq || function __ptreq(a, b) {
 // currently running its defers; `armed` is set right before a deferred
 // function is invoked and consumed by that function's prologue, so recover()
 // only takes effect when called directly by the deferred function (Go spec).
+// panic(v): a string panics with that message; any other value is kept in
+// the thrown error's pv field so recover() returns it unchanged (an error's
+// message is its Error()).
 export const HELPER_PANIC = `var __gopanic = __gopanic || { stack: [], armed: false };
 var __runDefers = __runDefers || function(defers, frame) {
   for (let i = defers.length - 1; i >= 0; i--) {
@@ -819,6 +838,14 @@ var __runDefers = __runDefers || function(defers, frame) {
     if (!frame.pn.recovered) throw frame.pn.err;
   }
 };
+var __gopanicv = __gopanicv || function(v) {
+  if (typeof v === "string") throw new Error(v);
+  let msg;
+  try { msg = typeof v?.Error === "function" ? v.Error() : String(v); } catch { msg = String(v); }
+  const e = new Error(msg);
+  e.pv = { v };
+  throw e;
+};
 var __recover = __recover || function(ok) {
   if (!ok) return null;
   const s = __gopanic.stack;
@@ -826,6 +853,7 @@ var __recover = __recover || function(ok) {
   if (top === null || top.recovered) return null;
   top.recovered = true;
   const e = top.err;
+  if (e && e.pv) return e.pv.v;
   // A JS TypeError from using null as a pointer is Go's nil dereference.
   if (e && e.name === "TypeError" && /of null|undefined or null/.test(e.message))
     return __error("runtime error: invalid memory address or nil pointer dereference");

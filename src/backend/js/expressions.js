@@ -458,7 +458,13 @@ const BUILTIN_GEN = {
 		`((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))([${e.args.map((a) => s.genExpr(a)).join(", ")}].map(String).join(""))`,
 	println: (s, e) =>
 		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
-	panic: (s, e) => `(() => { throw new Error(${s.genExpr(e.args[0])}); })()`,
+	panic: (s, e) => {
+		const arg = s.genExpr(e.args[0]);
+		if (s._isStringExprType(e.args[0]?._type))
+			return `(() => { throw new Error(${arg}); })()`;
+		s.useHelper("panicRt");
+		return `__gopanicv(${arg})`;
+	},
 	recover: (s) => {
 		s.useHelper("panicRt");
 		return `__recover(${s._recoverOkInScope ? "__recoverOk" : "false"})`;
@@ -2148,6 +2154,14 @@ export const expressionGenMethods = {
 		return `__append(${slice}, ${elems.join(", ")})`;
 	},
 
+	// A `make` length or capacity expression wrapped in its negative-value
+	// check (a literal needs none).
+	_guardMakeSize(code, guard) {
+		if (/^\d+$/.test(code)) return code;
+		this.useHelper("mklen");
+		return `${guard}(${code})`;
+	},
+
 	genMake(expr) {
 		// make([]T, n) or make([]T, n, cap) → new Array(n).fill(zero)
 		// make(map[K]V) → {}
@@ -2164,6 +2178,8 @@ export const expressionGenMethods = {
 			let n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
 			if (expr.args[1] && this._is64BitInt(expr.args[1]._type))
 				n = `Number(${n})`;
+			// A negative length or capacity panics with Go's message.
+			n = this._guardMakeSize(n, "__mkn");
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
 			const elemResolved = madeType?.kind === "slice" ? madeType.elem : null;
 			const typedCtor =
@@ -2179,7 +2195,10 @@ export const expressionGenMethods = {
 			let capArg = expr.args[2] ? this.genExpr(expr.args[2]) : null;
 			if (capArg && expr.args[2] && this._is64BitInt(expr.args[2]._type))
 				capArg = `Number(${capArg})`;
-			if (capArg) this.useHelper("slice");
+			if (capArg) {
+				this.useHelper("slice");
+				capArg = this._guardMakeSize(capArg, "__mkc");
+			}
 			const withCap = (alloc) =>
 				capArg ? `__mkslice(${n}, ${alloc(capArg)})` : alloc(n);
 			if (typedCtor) {
@@ -3318,13 +3337,18 @@ export const expressionGenMethods = {
 
 	_genStringConversion(srcType, inner) {
 		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
-		if (base && this.isIntType(base)) return `String.fromCodePoint(${inner})`;
+		if (base && this.isIntType(base)) {
+			this.useHelper("runestr");
+			return `__rstr(${inner})`;
+		}
 		if (base?.kind === "slice") {
 			const elem = base.elem?.name;
 			if (elem === "byte" || elem === "uint8")
 				return `new TextDecoder().decode(new Uint8Array(${inner}))`;
-			if (elem === "rune" || elem === "int" || elem === "int32")
-				return `Array.from(${inner}, c => String.fromCodePoint(c)).join("")`;
+			if (elem === "rune" || elem === "int" || elem === "int32") {
+				this.useHelper("runestr");
+				return `Array.from(${inner}, c => __rstr(c)).join("")`;
+			}
 		}
 		return `String(${inner})`;
 	},

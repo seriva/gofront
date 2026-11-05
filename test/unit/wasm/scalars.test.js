@@ -862,3 +862,20 @@ func Main() {
 }`).run("Main").output;
 	assertEqual(o, "abc 1\nd e");
 });
+
+test("untyped constant / and % with an unsigned right operand divide unsigned", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := int32(10)
+	fmt.Println((1<<31)%uint32(n), (1<<31)/uint32(n))
+	m := int64(10)
+	fmt.Println((1<<63)%uint64(m), (1<<63)/uint64(m))
+}
+`,
+		"8 214748364\n8 922337203685477580\n",
+	);
+});

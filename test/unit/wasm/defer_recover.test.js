@@ -2,9 +2,12 @@
 // Tests for Task H4.4: Defer & Recover in WASM backend and JS-strict parity.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compileHybrid,
+	compileWasm,
+	runWasm,
 	section,
 	test,
 } from "../helpers.js";
@@ -711,4 +714,68 @@ func main() {
 `,
 		"deferred2 1\ndeferred zero\n",
 	);
+});
+
+section("Non-string panic values");
+
+test("panic and recover preserve error values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type rt string
+
+func (e rt) Error() string { return "boom" }
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Println(r)
+		e, ok := r.(rt)
+		fmt.Println(ok, string(e))
+	}()
+	panic(error(rt("q")))
+}
+`,
+		"boom\ntrue q\n",
+	);
+});
+
+section("Host imports that throw");
+
+test("a host import that throws is recoverable and returns the message", () => {
+	const src = `package main
+
+func Main() (res string) {
+	defer func() {
+		r := recover()
+		if s, ok := r.(string); ok {
+			res = s
+		} else {
+			res = "other"
+		}
+	}()
+	s := "abc"
+	n := 0
+	if s+s == "x" {
+		n = 1
+	}
+	if n == 0 {
+		return "no panic"
+	}
+	return "x"
+}`;
+	const { wasm, stringTable } = compileWasm(src);
+	const { exports } = runWasm(wasm, {
+		stringTable,
+		extraImports: {
+			env: {
+				str_concat: () => {
+					throw new Error("host boom");
+				},
+			},
+		},
+	});
+	assertEqual(exports.Main(), "host boom");
 });
