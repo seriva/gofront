@@ -69,7 +69,7 @@ order = 10
 
 [[layers]]
 name  = "stdlib-mid"
-paths = ["stdlib/io/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*"]
+paths = ["stdlib/io/**", "stdlib/os/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*"]
 order = 11
 
 [[layers]]

@@ -1,4 +1,4 @@
-// Extended standard library type definitions — gom, maps, regexp, rand, utf8,
+// Extended standard library type definitions — gom, maps, regexp, utf8,
 // path, and built-in functions.
 
 import {
@@ -226,33 +226,6 @@ export function setupExtendedGlobals(globals, types) {
 			],
 		]),
 	};
-
-	// crypto/rand; math/rand is Go source (stdlib/math/rand).
-	globals.define("rand", {
-		kind: "namespace",
-		name: "rand",
-		members: {
-			Read: {
-				kind: "func",
-				params: [{ kind: "slice", elem: UINT8 }],
-				returns: [INT, ERROR],
-			},
-			Reader: {
-				kind: "interface",
-				name: "io.Reader",
-				methods: new Map([
-					[
-						"Read",
-						{
-							kind: "func",
-							params: [{ kind: "slice", elem: UINT8 }],
-							returns: [INT, ERROR],
-						},
-					],
-				]),
-			},
-		},
-	});
 
 	// Time and Duration are declared by the Go source of the time package,
 	// loaded after these definitions: they are looked up when first used

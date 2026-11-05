@@ -1163,40 +1163,6 @@ export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return e;
 };`;
 
-export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
-
-export const HELPER_OS = `var __os_buf = "";
-var __os_write = __os_write || function(s, isErr) {
-  if (typeof process !== "undefined" && process?.stdout?.write) {
-    process.stdout.write(s);
-    return [s.length, null];
-  }
-  __os_buf += s;
-  const nl = __os_buf.lastIndexOf(String.fromCharCode(10));
-  if (nl >= 0) {
-    const fn = (isErr && typeof console.error === "function") ? console.error : console.log;
-    fn(__os_buf.slice(0, nl));
-    __os_buf = __os_buf.slice(nl + 1);
-  }
-  return [s.length, null];
-};
-var __os_file = __os_file || class {
-  constructor(fd) { this.fd = fd; }
-  WriteString(s) { return __os_write(s, this.fd === 2); }
-  Write(b) {
-    const s = typeof b === "string" ? b : new TextDecoder().decode(b);
-    __os_write(s, this.fd === 2);
-    const n = typeof b === "string" ? s.length : (b?.byteLength ?? b?.length ?? s.length);
-    return [n, null];
-  }
-  Read(b) { return [0, typeof __io_eof !== "undefined" ? __io_eof : __error("EOF")]; }
-  Close() { return null; }
-};
-var __os_stdout = __os_stdout || new __os_file(1);
-var __os_stderr = __os_stderr || new __os_file(2);
-var __os_stdin = __os_stdin || new __os_file(0);
-`;
-
 export const HELPER_TIMER = `var __timeAfterFunc = __timeAfterFunc || function(d, f) {
   var timer = {
     _id: null,
@@ -1546,28 +1512,6 @@ export const HELPER_INJECT_STYLES = `var __injectStyles = __injectStyles || func
     document.head.appendChild(s);
   }
   s.textContent += "\\n" + css;
-};`;
-
-export const HELPER_CRYPTO_RAND = `var __crypto_rand_read = __crypto_rand_read || function(b) {
-  if (!b || b.length === 0) return [0, null];
-  const u8 = ArrayBuffer.isView(b) ? b : new Uint8Array(b.length);
-  const c = typeof crypto !== "undefined" ? crypto : (typeof globalThis !== "undefined" ? globalThis.crypto : null);
-  const CHUNK = 65536;
-  if (c && typeof c.getRandomValues === "function") {
-    for (let offset = 0; offset < u8.length; offset += CHUNK) {
-      const slice = u8.subarray(offset, Math.min(offset + CHUNK, u8.length));
-      c.getRandomValues(slice);
-    }
-  } else {
-    for (let i = 0; i < u8.length; i++) u8[i] = Math.floor(Math.random() * 256);
-  }
-  if (!ArrayBuffer.isView(b)) {
-    for (let i = 0; i < u8.length; i++) b[i] = u8[i];
-  }
-  return [b.length, null];
-};
-var __crypto_rand_reader = __crypto_rand_reader || {
-  Read: function(b) { return __crypto_rand_read(b); }
 };`;
 
 // internal/jsonrt's encoder writes into `e.buf[0:e.n]`; these helpers append

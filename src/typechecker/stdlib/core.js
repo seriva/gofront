@@ -1,5 +1,5 @@
 // Core standard library type definitions — browser globals, fmt, strings, bytes,
-// strconv, math, time, unicode, os, html, io.
+// strconv, math, time, html, io.
 
 import {
 	ANY,
@@ -155,90 +155,6 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 	types.set("time.Timer", TIMER_T);
-
-	const runeToStr = { kind: "func", params: [INT], returns: [BOOL] };
-	const runeTrans = { kind: "func", params: [INT], returns: [INT] };
-	globals.define("unicode", {
-		kind: "namespace",
-		name: "unicode",
-		members: {
-			IsLetter: runeToStr,
-			IsDigit: runeToStr,
-			IsSpace: runeToStr,
-			IsUpper: runeToStr,
-			IsLower: runeToStr,
-			IsPunct: runeToStr,
-			IsControl: runeToStr,
-			IsPrint: runeToStr,
-			IsGraphic: runeToStr,
-			ToUpper: runeTrans,
-			ToLower: runeTrans,
-		},
-	});
-
-	const BYTE_SLICE_IO = { kind: "slice", elem: UINT8 };
-	const OS_FILE = {
-		kind: "named",
-		name: "os.File",
-		underlying: {
-			kind: "struct",
-			fields: new Map([["fd", INT]]),
-			methods: new Map([
-				[
-					"Write",
-					{
-						kind: "func",
-						params: [BYTE_SLICE_IO],
-						returns: [INT, ERROR],
-						_ptrRecv: true,
-					},
-				],
-				[
-					"WriteString",
-					{
-						kind: "func",
-						params: [STRING],
-						returns: [INT, ERROR],
-						_ptrRecv: true,
-					},
-				],
-				[
-					"Read",
-					{
-						kind: "func",
-						params: [BYTE_SLICE_IO],
-						returns: [INT, ERROR],
-						_ptrRecv: true,
-					},
-				],
-				[
-					"Close",
-					{
-						kind: "func",
-						params: [],
-						returns: [ERROR],
-						_ptrRecv: true,
-					},
-				],
-			]),
-		},
-	};
-	const OS_FILE_PTR = { kind: "pointer", base: OS_FILE };
-	types.set("os.File", OS_FILE);
-
-	globals.define("os", {
-		kind: "namespace",
-		name: "os",
-		members: {
-			File: OS_FILE,
-			Exit: { kind: "func", params: [INT], returns: [VOID] },
-			Args: { kind: "slice", elem: STRING },
-			Getenv: { kind: "func", params: [STRING], returns: [STRING] },
-			Stdout: OS_FILE_PTR,
-			Stderr: OS_FILE_PTR,
-			Stdin: OS_FILE_PTR,
-		},
-	});
 
 	types.set("fmt.Stringer", FMT_STRINGER);
 }

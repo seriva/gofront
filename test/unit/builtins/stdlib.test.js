@@ -603,6 +603,7 @@ section("unicode package");
 
 test("unicode.IsLetter recognizes letters", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.IsLetter(65))
   println(unicode.IsLetter(49))
@@ -613,6 +614,7 @@ func main() {
 
 test("unicode.IsDigit recognizes digits", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.IsDigit(49))
   println(unicode.IsDigit(65))
@@ -623,6 +625,7 @@ func main() {
 
 test("unicode.ToUpper converts lowercase rune", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.ToUpper(97))
 }`);
@@ -632,6 +635,7 @@ func main() {
 
 test("unicode.ToLower converts uppercase rune", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.ToLower(65))
 }`);
@@ -645,6 +649,7 @@ section("os package");
 
 test("os.Getenv compiles without error", () => {
 	const { errors } = compile(`package main
+import "os"
 func main() {
   v := os.Getenv("HOME")
   println(v)
@@ -654,6 +659,7 @@ func main() {
 
 test("os.Exit compiles without error", () => {
 	const { errors } = compile(`package main
+import "os"
 func main() {
   os.Exit(0)
 }`);

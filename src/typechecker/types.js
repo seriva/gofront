@@ -107,13 +107,10 @@ export const BROWSER_GLOBALS = new Set([
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
 	"fmt",
-	"unicode",
 	"time",
 	"testing",
 	"gofront/shared",
 	"gofront/simd",
-	"crypto/rand",
-	"os",
 	"encoding/json",
 ]);
 
@@ -127,7 +124,6 @@ export const STDLIB_PACKAGES = new Set([
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
-	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
 	[
 		"fmt",
 		new Set([
@@ -147,23 +143,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Stringer",
 		]),
 	],
-	[
-		"unicode",
-		new Set([
-			"IsLetter",
-			"IsDigit",
-			"IsSpace",
-			"IsUpper",
-			"IsLower",
-			"IsPunct",
-			"IsControl",
-			"IsPrint",
-			"IsGraphic",
-			"ToUpper",
-			"ToLower",
-		]),
-	],
-	["rand", new Set(["Read", "Reader"])],
 	// Go source declares the package; only the JS-only Sleep, AfterFunc and
 	// Timer are emitter members.
 	["time", new Set()],
@@ -183,6 +162,19 @@ export const INTRINSICS = new Map([
 	// seconds east of UTC of the host's time zone at a Unix time (time).
 	["time_now", "func() int64"],
 	["time_zone_offset", "func(int64) int"],
+	// os: write a string to a file descriptor (0 stdin, 1 stdout, 2 stderr),
+	// exit the process, and read and set environment variables.
+	["os_write", "func(int, string) void"],
+	["os_exit", "func(int) void"],
+	["os_getenv", "func(string) string"],
+	["os_setenv", "func(string, string) void"],
+	// unicode: the host's answer for runes above ASCII, by class (the
+	// constants of stdlib/unicode), and its case mappings.
+	["unicode_is", "func(int32, int) bool"],
+	["unicode_to_upper", "func(int32) int32"],
+	["unicode_to_lower", "func(int32) int32"],
+	// crypto/rand: four random bytes from the host's secure source.
+	["crypto_rand_u32", "func() uint32"],
 	// math: IEEE-754 bit casts, and the host's `Math.*` (`%` for Mod).
 	["math_float64bits", "func(float64) uint64"],
 	["math_float64frombits", "func(uint64) float64"],

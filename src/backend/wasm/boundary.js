@@ -37,6 +37,11 @@
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
 import { HELPER_ERROR, HELPER_SPRINT, HELPER_SPRINTF } from "../js/runtime.js";
 import {
+	unicodeIsJs,
+	unicodeToLowerJs,
+	unicodeToUpperJs,
+} from "../shared/host-unicode.js";
+import {
 	anonIfaceName,
 	getInterfaceMethodList,
 	getSharedInfo,
@@ -1926,6 +1931,25 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_contains": (s, sub) => ((s ?? "").includes(sub ?? "") ? 1 : 0),
 		"str_has_prefix": (s, pre) => ((s ?? "").startsWith(pre ?? "") ? 1 : 0),
 		"str_has_suffix": (s, suf) => ((s ?? "").endsWith(suf ?? "") ? 1 : 0),
+		"os_write": (fd, s) => {
+			lineBuf += s ?? "";
+			const nl = lineBuf.lastIndexOf("\\n");
+			if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
+		},
+		"os_exit": (code) => {
+			if (lineBuf !== "") { write(lineBuf); lineBuf = ""; }
+			if (typeof process !== "undefined" && process.exit) process.exit(code);
+			throw new Error("os.Exit(" + code + ")");
+		},
+		"os_getenv": (k) => (typeof process !== "undefined" && process.env ? process.env : (globalThis.__os_env ??= {}))[k ?? ""] ?? "",
+		"os_setenv": (k, v) => { (typeof process !== "undefined" && process.env ? process.env : (globalThis.__os_env ??= {}))[k ?? ""] = v ?? ""; },
+		"unicode_is": (r, k) => { ${unicodeIsJs("r", "k")} },
+		"unicode_to_upper": (r) => { ${unicodeToUpperJs("r")} },
+		"unicode_to_lower": (r) => { ${unicodeToLowerJs("r")} },
+		"crypto_rand_u32": () => {
+			const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto;
+			return c?.getRandomValues ? c.getRandomValues(new Uint32Array(1))[0] | 0 : (Math.random() * 4294967296) | 0;
+		},
 		"strconv_shortest": (f) => f.toExponential(),
 		"strconv_parse_decimal": (s) => Number((s ?? "").replaceAll("_", "")),
 		"str_index": (s, sub) => (s ?? "").indexOf(sub ?? ""),
@@ -2204,31 +2228,12 @@ function ${P}stdlib_fmt(stringTable, io) {
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
 		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
 		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
-		"fmt_print_raw": (s) => { io.printf(s ?? ""); },
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
 		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 	};
 }
-function ${P}stdlib_str(stringTable, io) {
-	return {
-		// unicode
-		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
-		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
-		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]/.test(c)) ? 1 : 0; },
-		"unicode_is_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Lu}/u.test(c)) ? 1 : 0; },
-		"unicode_is_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Ll}/u.test(c)) ? 1 : 0; },
-		"unicode_is_punct": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{P}/u.test(c)) ? 1 : 0; },
-		"unicode_is_control": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_is_print": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; if (!c) return r; const m = c.toUpperCase(); const u = m.codePointAt(0); return m.length > (u > 0xffff ? 2 : 1) ? r : u; },
-		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
-	};
-}
 function ${P}stdlib_sys(stringTable, io) {
 	let trimStart = 0, trimEnd = 0;
-	let rawBytes = new Uint8Array(0);
-	let rawPos = 0;
 	return {
 		// bytes trim
 		"bytes_trim": (s, cutset, left, right) => {
@@ -2246,36 +2251,12 @@ function ${P}stdlib_sys(stringTable, io) {
 		// time
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
 		"time_timezone_offset": (ms) => (-new Date(ms).getTimezoneOffset() * 60) | 0,
-		"raw_bytes_init": (len) => {
-			rawBytes = new Uint8Array(len);
-			rawPos = 0;
-		},
-		"raw_bytes_push": (b) => {
-			if (rawPos < rawBytes.length) {
-				rawBytes[rawPos++] = b & 0xff;
-			}
-		},
-		"raw_bytes_len": () => rawBytes.length,
-		"raw_bytes_get": (i) => rawBytes[i] ?? 0,
-		"crypto_rand_fill": (len) => {
-			rawBytes = new Uint8Array(len);
-			if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-				const CHUNK = 65536;
-				for (let offset = 0; offset < len; offset += CHUNK) {
-					crypto.getRandomValues(rawBytes.subarray(offset, Math.min(offset + CHUNK, len)));
-				}
-			} else {
-				for (let i = 0; i < len; i++) rawBytes[i] = Math.floor(Math.random() * 256);
-			}
-			return len;
-		},
 	};
 }
 function ${P}stdlib(stringTable, io) {
 	return Object.assign(
 		{},
 		${P}stdlib_fmt(stringTable, io),
-		${P}stdlib_str(stringTable, io),
 		${P}stdlib_sys(stringTable, io),
 	);
 }`;

@@ -1,16 +1,13 @@
 // CodeGen stdlib call generation — installed as a mixin on CodeGen.prototype.
 // One file per Go package under ./stdlib/. This index merges them.
 
-import { randMethods } from "./cryptorand.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
-import { osMethods } from "./os.js";
 import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
 import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
-import { unicodeMethods } from "./unicode.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
@@ -18,11 +15,8 @@ import { unicodeMethods } from "./unicode.js";
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
-	unicode: "_genUnicode",
-	os: "_genOs",
 	time: "_genTime",
 	regexp: "_genRegexp",
-	rand: "_genRand",
 	testing: "_genTesting",
 	shared: "_genShared",
 	simd: "_genSimd",
@@ -68,13 +62,10 @@ const dispatchMethods = {
 export const stdlibGenMethods = {
 	...fmtMethods,
 	...gomMethods,
-	...osMethods,
-	...randMethods,
 	...regexpMethods,
 	...sharedMethods,
 	...simdMethods,
 	...timeMethods,
-	...unicodeMethods,
 	...testingMethods,
 	...dispatchMethods,
 };
