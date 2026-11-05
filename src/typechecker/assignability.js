@@ -217,6 +217,29 @@ export const assignabilityMethods = {
 		}
 	},
 
+	// `var m uint64 = (1 << k) - 1`: a non-constant shift whose left operand is
+	// an untyped constant takes the type its context gives it, so codegen
+	// computes it in that type (BigInt for 64-bit integers).
+	_retypeUntypedShift(target, source, valueNode) {
+		if (!isUntyped(source) || !isInteger(target)) return;
+		this._retypeShiftTree(valueNode, target);
+	},
+
+	_retypeShiftTree(e, target) {
+		if (!e || typeof e !== "object" || e._type?.kind !== "untyped") return;
+		if (e.kind === "ParenExpr") this._retypeShiftTree(e.expr, target);
+		else if (e.kind === "UnaryExpr") this._retypeShiftTree(e.operand, target);
+		else if (e.kind === "BinaryExpr" && !this._constValue(e)) {
+			const isShift = e.op === "<<" || e.op === ">>";
+			this._retypeShiftTree(e.left, target);
+			if (isShift && e.left._type?.kind === "untyped") e.left._type = target;
+			else if (!isShift) this._retypeShiftTree(e.right, target);
+		} else return;
+		if (this._constValue(e)) return;
+		e._type = target;
+		if (is64BitInt(target)) e._is64Bit = true;
+	},
+
 	// An untyped real constant flowing into a complex type becomes a complex
 	// value in codegen.
 	_tagComplexConst(target, source, valueNode) {
@@ -238,6 +261,7 @@ export const assignabilityMethods = {
 		target = this.resolveType(target);
 		source = this.resolveType(source);
 		this._tag64BitNode(target, node);
+		this._retypeUntypedShift(target, source, operand ?? node);
 		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);

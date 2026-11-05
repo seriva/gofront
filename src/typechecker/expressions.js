@@ -246,6 +246,10 @@ export const expressionCheckMethods = {
 				this._checkConstOperands(expr.op, lt, rt, expr);
 				this._markTypeParamMapNil(expr, lt, rt, scope);
 				const res = this.binaryResultType(expr.op, lt, rt, expr);
+				if (expr.op !== "<<" && expr.op !== ">>") {
+					this._retypeUntypedShift(lt, rt, expr.right);
+					this._retypeUntypedShift(rt, lt, expr.left);
+				}
 				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 					expr.right._is64Bit = true;
 				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
