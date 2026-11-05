@@ -48,7 +48,7 @@ const STDLIB_ENV_PKGS = new Set([
 // locked before function bodies are emitted.
 // Emitter-backed types whose interface methods are registered as synthetic
 // functions (see _registerIoSyntheticMethods in index.js).
-const SYNTHETIC_METHOD_TYPES = new Set(["strings.Builder", "os.File"]);
+const SYNTHETIC_METHOD_TYPES = new Set(["os.File"]);
 
 const S = "externref";
 const STDLIB_IMPORTS = [
