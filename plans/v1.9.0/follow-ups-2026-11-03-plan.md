@@ -635,23 +635,23 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 25: Runtime Panics, Rune Conversions and WASM Unsigned Division
 
-- [ ] Task 25.1: Invalid rune-to-string conversion yields `U+FFFD`
+- [x] Task 25.1: Invalid rune-to-string conversion yields `U+FFFD`
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/boundary.js`, `test/unit/stdlib/utf8.test.js`
   - Test: S10 `x := rune(-1); fmt.Println(string(x) == "\ufffd")` and `string(rune(0x110000)) == "\ufffd"` and surrogate `string(rune(0xD800)) == "\ufffd"` → `true` on js/both/wasm.
   - Done when: out-of-range and surrogate runes convert to `"\ufffd"` without throwing on all targets.
-- [ ] Task 25.2: `make([]T, n)` with negative `n` panics with Go's message in JS
+- [x] Task 25.2: `make([]T, n)` with negative `n` panics with Go's message in JS
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/compiler/strict-panics.test.js`
   - Test: S26 `func f(n int) []int { return make([]int, n) }` with `f(-1)` and `make([]int, 0, -1)` recovered → `runtime error: makeslice: len out of range` / `cap out of range` on js/both/wasm.
   - Done when: both negative `len` and `cap` panic with Go's message on js/both.
-- [ ] Task 25.3: `panic` and `recover` preserve non-string error values in JS
+- [x] Task 25.3: `panic` and `recover` preserve non-string error values in JS
   - Files: `src/backend/js/statements.js`, `src/backend/js/runtime.js`, `test/unit/wasm/defer_recover.test.js`
   - Test: S27 `type rt string; func (e rt) Error() string { return "boom" }; defer func() { fmt.Println(recover()) }(); panic(error(rt("q")))` → `boom` on js/both/wasm; `recover().(rt)` is `rt("q")`.
   - Done when: non-string error values survive `panic`/`recover` on js/both.
-- [ ] Task 25.4: WASM untyped constant `/` and `%` with unsigned right operand divide unsigned
+- [x] Task 25.4: WASM untyped constant `/` and `%` with unsigned right operand divide unsigned
   - Files: `src/backend/wasm/emit-exprs.js`, `test/unit/wasm/scalars.test.js`
   - Test: S25 `n := int32(10); fmt.Println((1<<31)%uint32(n), (1<<31)/uint32(n))` → `8 214748364` on js/both/wasm (also `uint64`).
   - Done when: repro matches Go on wasm.
-- [ ] Task 25.5: WASM host imports raise recoverable Go panics
+- [x] Task 25.5: WASM host imports raise recoverable Go panics
   - Files: `src/backend/wasm/boundary.js`, `src/backend/wasm/glue.js`, `test/unit/wasm/defer_recover.test.js`
   - Test: S20 a host import throwing inside a `defer` + `recover()` frame in a `wasm` package is caught by `recover()` and returns the error message.
   - Done when: test passes on wasm.
