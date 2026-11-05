@@ -1416,25 +1416,6 @@ export class StdlibCoreEmitter {
 		return temps;
 	}
 
-	// Operands the per-argument Println imports cannot print: spreads, a bare
-	// nil, floats (static type), and unsigned 32/64-bit integers, whose
-	// signedness only the argument buffer preserves.
-	_fmtOperandNeedsBuffer(arg) {
-		arg = fmtPeelAny(arg);
-		if (arg._spread || this._fmtOperandHasFloat(arg)) return true;
-		const goType = arg._type ?? this._resolveExprGoType(arg);
-		if (
-			(arg.kind === "Ident" && arg.name === "nil") ||
-			goType?.name === "nil" ||
-			goType?.kind === "nil"
-		) {
-			return true;
-		}
-		if (isSigned(goType)) return false;
-		const valW = toWasmType(goType, this.mod.checker, this.mod);
-		return valW === "i64" || (valW === "i32" && _isUint32(goType));
-	}
-
 	// Whether the operand's static type mentions a float: those travel with
 	// their type so the host prints float32 and Go's %v exponent forms.
 	_fmtOperandHasFloat(arg) {
@@ -1801,99 +1782,21 @@ export class StdlibCoreEmitter {
 
 	emitFmtCall(name, args) {
 		args = this._expandTupleFmtArgs(args);
-		if (name === "Print" || name === "Sprint" || name === "Sprintln") {
-			// Operands travel through the argument buffer; the host joins them
-			// with Go's spacing rule (a space only between two non-strings).
-			const temps = this._emitArgBuffer(args, true);
-			this.pushInstruction({
-				op: "i32.const",
-				value: name === "Sprintln" ? 1 : 0,
-			});
-			this._callStdlib(name === "Print" ? "fmt_print" : "fmt_sprint");
-			this._releaseArgBuffer(temps);
-			return;
-		}
-		if (name === "Append" || name === "Appendln" || name === "Appendf") {
+		if (name === "Appendf") {
 			const [dst, ...rest] = args;
 			const strTmp = this.acquireTemp("externref");
-			if (name === "Appendf") {
-				const [format, ...operands] = rest;
-				const temps = this._emitArgBuffer(
-					operands,
-					false,
-					this._fmtNeedsTypes(format, operands),
-				);
-				this.emitExpr(format, "externref");
-				this._callStdlib("fmt_sprintf");
-				this._releaseArgBuffer(temps);
-			} else {
-				const temps = this._emitArgBuffer(rest, true);
-				this.pushInstruction({
-					op: "i32.const",
-					value: name === "Appendln" ? 1 : 0,
-				});
-				this._callStdlib("fmt_sprint");
-				this._releaseArgBuffer(temps);
-			}
+			const [format, ...operands] = rest;
+			const temps = this._emitArgBuffer(
+				operands,
+				false,
+				this._fmtNeedsTypes(format, operands),
+			);
+			this.emitExpr(format, "externref");
+			this._callStdlib("fmt_sprintf");
+			this._releaseArgBuffer(temps);
 			this.pushInstruction({ op: "local.set", index: strTmp });
 			this._emitAppendStringToByteSlice(dst, strTmp);
 			this.releaseTemp(strTmp, "externref");
-			return;
-		}
-		if (name === "Println") {
-			const isPrintln = true;
-			if (args.length === 0 && isPrintln) {
-				const logIdx = this.mod.getPrintlnEmptyIndex();
-				this.pushInstruction({ op: "call", funcIndex: logIdx });
-				return;
-			}
-			// Float operands need their static type (float32, Go's exponent
-			// forms), which only the argument buffer carries.
-			// A later operand with side effects must run before anything prints,
-			// so those calls also take the buffered path.
-			if (
-				args.some((a) => this._fmtOperandNeedsBuffer(a)) ||
-				args.slice(1).some(_fmtArgHasEffects)
-			) {
-				const temps = this._emitArgBuffer(args, true);
-				this.pushInstruction({ op: "i32.const", value: 1 });
-				this._callStdlib("fmt_print");
-				this._releaseArgBuffer(temps);
-				return;
-			}
-			for (let i = 0; i < args.length; i++) {
-				const arg = args[i];
-				const isLast = i === args.length - 1 && isPrintln;
-				const goType = arg._type ?? this._resolveExprGoType(arg);
-				const isBool =
-					isBoolGoType(goType) ||
-					(arg.kind === "BasicLit" && arg.litKind === "BOOL");
-				if (isErrorType(goType) && this.mod.hasErrorType) {
-					this.emitExpr(arg, "anyref");
-					this.pushInstruction({
-						op: "call",
-						funcIndex: this.mod.resolveFuncIndex("__error_str"),
-					});
-					this.pushInstruction({
-						op: "call",
-						funcIndex: this.mod.getLogImportIndex("externref", isLast, false),
-					});
-					continue;
-				}
-				if (this._isFmtExternOperand(goType)) {
-					this._emitOperandExternref(arg, goType);
-					this._callStdlib("fmt_format_v");
-					this.pushInstruction({
-						op: "call",
-						funcIndex: this.mod.getLogImportIndex("externref", isLast, false),
-					});
-					continue;
-				}
-				const wType = toWasmType(goType, this.mod.checker);
-				this.emitExpr(arg, wType);
-				const logFuncIdx = this.mod.getLogImportIndex(wType, isLast, isBool);
-				this.pushInstruction({ op: "call", funcIndex: logFuncIdx });
-			}
 			return;
 		}
 		if (name === "Sprintf" || name === "Printf" || name === "Errorf") {
@@ -2331,10 +2234,14 @@ export class StdlibCoreEmitter {
 					);
 					this.pushInstruction("end");
 				};
+				// A slice type first built from source syntax (a `TypeName`) names
+				// its element as written.
+				const spelled = (t) =>
+					t?.kind === "TypeName" ? { kind: "basic", name: t.name } : t;
 				for (const sliceInfo of this.mod.sliceTypes.values())
 					checkUnhashable(sliceInfo.typeIndex, {
 						kind: "slice",
-						elem: sliceInfo.elemGoType,
+						elem: spelled(sliceInfo.elemGoType),
 					});
 				for (const mapInfo of this.mod.mapTypes.values())
 					checkUnhashable(mapInfo.typeIndex, {

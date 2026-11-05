@@ -1220,7 +1220,7 @@ const isTaggedSlice = (t) =>
 // expression (a conversion, a field read).
 const isJsonValue = (t) => isRaw(t) || isNumber(t);
 
-const isCompositeType = (t) => {
+export const isCompositeType = (t) => {
 	const k = under(t)?.kind;
 	return (
 		(k === "slice" || k === "array" || k === "map") &&
@@ -1229,7 +1229,7 @@ const isCompositeType = (t) => {
 	);
 };
 
-function hasSharedRepr(t, depth = 0) {
+export function hasSharedRepr(t, depth = 0) {
 	if (!t || depth > 8) return false;
 	const u = under(t);
 	if (u?.kind === "basic") return SHARED_REPR.has(u.name);
@@ -1241,7 +1241,7 @@ function hasSharedRepr(t, depth = 0) {
 }
 
 // Func values are not JSON-encodable, and `case []func():` does not parse.
-function holdsFunc(t, depth = 0) {
+export function holdsFunc(t, depth = 0) {
 	if (!t || depth > 8) return false;
 	const u = under(t);
 	if (u?.kind === "func") return true;

@@ -19,6 +19,7 @@ import {
 	embeddedFieldName,
 	FLOAT32,
 	FLOAT64,
+	FMT_PRINT_FUNCS,
 	INT,
 	is64BitInt,
 	isAny,
@@ -210,7 +211,7 @@ export const expressionCheckMethods = {
 					}
 					return this.err(`Undefined: '${expr.name}'`, expr);
 				}
-				if (this.types.has(expr.name) || t.kind === "typeParam")
+				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
 					expr._isTypeRef = true;
 				// A Go declaration that shadows a browser global: JS output renames
 				// it so generated code keeps reaching the real global.  Package
@@ -681,6 +682,16 @@ export const expressionCheckMethods = {
 		if (baseType.kind === "pointer")
 			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
 		else this._markPtrRecvAddress(expr, base, ft, scope);
+	},
+
+	// Whether the identifier `name`, which resolved to `t`, names a type.  A
+	// local variable or parameter that shares its name with a type of the
+	// build (the type table spans packages) is a value.
+	_namesType(name, t, scope) {
+		if (!this.types.has(name)) return false;
+		return (
+			scope.lookupScope(name) === this.globals || this.types.get(name) === t
+		);
 	},
 
 	_checkSelectorExpr(expr, scope) {
@@ -1770,6 +1781,9 @@ export const expressionCheckMethods = {
 			!ns._gofront &&
 			!ns._mangle?.has(expr.func.field);
 		if (emitterBacked) return;
+		// The generated wrapper of a Print-family call takes the results as
+		// separate parameters (src/lower/fmt-formatters.js).
+		if (ns?.name === "fmt" && FMT_PRINT_FUNCS.has(expr.func.field)) return;
 		this.err(
 			"passing multiple return values to a variadic function is not supported in wasm packages; assign them to variables first",
 			expr,

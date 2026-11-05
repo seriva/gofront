@@ -220,6 +220,17 @@ export const typeInfoGenMethods = {
 	// A function giving a plain value of type `t` the type information fmt
 	// needs once it is an `any` operand (see _fmtDesc); null when it needs none.
 	_fmtBoxFor(t) {
+		const base = this._fmtBoxBase(t);
+		// An unnamed slice, map or pointer also carries its type tag, as
+		// converting it to an `any` gives it, so a type switch tells it apart.
+		const tag = this._dynTypeTag(t);
+		if (!tag) return base;
+		this.useHelper("ifaceBox");
+		const ptr = t.kind === "pointer" ? ", true" : "";
+		return `(__v) => __ity(${base ? `(${base})(__v)` : "__v"}, ${JSON.stringify(tag)}${ptr})`;
+	},
+
+	_fmtBoxBase(t) {
 		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
 		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
 		const u = this._underlyingOf(t);

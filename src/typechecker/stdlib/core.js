@@ -10,7 +10,7 @@ import {
 	VOID,
 } from "../types.js";
 
-export function setupCoreGlobals(globals, types) {
+export function setupCoreGlobals(globals, _types) {
 	for (const g of BROWSER_GLOBALS) globals.define(g, ANY);
 
 	const fmtVariadic = (ret) => ({
@@ -20,19 +20,6 @@ export function setupCoreGlobals(globals, types) {
 		variadic: true,
 	});
 	const FMT_BYTES = { kind: "slice", elem: UINT8 };
-	const fmtPrintVariadic = (ret) => ({
-		kind: "func",
-		params: [ANY],
-		returns: [ret],
-		variadic: true,
-	});
-	const FMT_STRINGER = {
-		kind: "interface",
-		name: "fmt.Stringer",
-		methods: new Map([
-			["String", { kind: "func", params: [], returns: [STRING] }],
-		]),
-	};
 	// The writer of Fprint*: any value with Write([]byte) (int, error), as io.Writer.
 	const FMT_WRITER = {
 		kind: "interface",
@@ -52,52 +39,21 @@ export function setupCoreGlobals(globals, types) {
 		kind: "namespace",
 		name: "fmt",
 		members: {
-			Stringer: FMT_STRINGER,
 			Sprintf: fmtVariadic(STRING),
-			Sprint: fmtPrintVariadic(STRING),
-			Sprintln: fmtPrintVariadic(STRING),
-			Append: {
-				kind: "func",
-				params: [FMT_BYTES, ANY],
-				returns: [FMT_BYTES],
-				variadic: true,
-			},
 			Appendf: {
 				kind: "func",
 				params: [FMT_BYTES, STRING, ANY],
 				returns: [FMT_BYTES],
 				variadic: true,
 			},
-			Appendln: {
-				kind: "func",
-				params: [FMT_BYTES, ANY],
-				returns: [FMT_BYTES],
-				variadic: true,
-			},
 			Errorf: fmtVariadic(ERROR),
 			Printf: fmtVariadic(VOID),
-			Println: fmtPrintVariadic(VOID),
-			Print: fmtPrintVariadic(VOID),
 			Fprintf: {
 				kind: "func",
 				params: [FMT_WRITER, STRING, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
-			Fprintln: {
-				kind: "func",
-				params: [FMT_WRITER, ANY],
-				returns: [INT, ERROR],
-				variadic: true,
-			},
-			Fprint: {
-				kind: "func",
-				params: [FMT_WRITER, ANY],
-				returns: [INT, ERROR],
-				variadic: true,
-			},
 		},
 	});
-
-	types.set("fmt.Stringer", FMT_STRINGER);
 }

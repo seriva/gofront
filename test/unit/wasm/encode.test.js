@@ -531,12 +531,12 @@ function checkedProgram(src) {
 	return { funcDecls, mod: { checker } };
 }
 
-test("_usesFmtAny is true for fmt.Println(any(x))", () => {
+test("_usesFmtAny is true for fmt.Printf(any(x))", () => {
 	const { funcDecls, mod } = checkedProgram(`package main
 import "fmt"
 func main() {
 	x := 1
-	fmt.Println(any(x))
+	fmt.Printf("%v", any(x))
 }
 `);
 	assertEqual(_usesFmtAny(funcDecls, mod), true);
@@ -547,7 +547,7 @@ test("_usesFmtAny is false for scalar-only fmt calls", () => {
 import "fmt"
 func main() {
 	x := 1
-	fmt.Println(x)
+	fmt.Printf("%v", x)
 }
 `);
 	assertEqual(_usesFmtAny(funcDecls, mod), false);
