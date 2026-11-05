@@ -64,8 +64,9 @@ type Dec struct {
 	pos                   int
 	Err                   error
 	fatal                 bool
-	structs               []string
-	fields                []string
+	structs               []string // stack of struct names, depth entries live
+	fields                []string // stack of field names, depth entries live
+	depth                 int
 	key                   string
 	UseNumber             bool
 	DisallowUnknownFields bool
@@ -117,15 +118,21 @@ func (d *Dec) Failed() bool {
 }
 
 // Enter and Leave track the struct field being decoded for error messages.
+// The stacks keep their entries and move an index, so no slice is resliced
+// or copied per struct.
 func (d *Dec) Enter(structName, field string) {
-	d.structs = append(d.structs, structName)
-	d.fields = append(d.fields, field)
+	if d.depth < len(d.fields) {
+		d.structs[d.depth] = structName
+		d.fields[d.depth] = field
+	} else {
+		d.structs = append(d.structs, structName)
+		d.fields = append(d.fields, field)
+	}
+	d.depth++
 }
 
 func (d *Dec) Leave() {
-	n := len(d.fields) - 1
-	d.structs = d.structs[:n]
-	d.fields = d.fields[:n]
+	d.depth--
 }
 
 func (d *Dec) ws() {
@@ -169,9 +176,9 @@ func (d *Dec) typeErr(value, typ string) {
 		return
 	}
 	e := &UnmarshalTypeError{Value: value, Type: typ, Offset: int64(d.pos)}
-	if len(d.fields) > 0 {
-		e.Struct = d.structs[len(d.structs)-1]
-		e.Field = strings.Join(d.fields, ".")
+	if d.depth > 0 {
+		e.Struct = d.structs[d.depth-1]
+		e.Field = strings.Join(d.fields[:d.depth], ".")
 	}
 	d.Err = e
 }
@@ -245,12 +252,18 @@ func (d *Dec) Unquote(typ, kind string) *Dec {
 		d.Skip()
 		return nil
 	}
-	s := d.readString()
+	s := readStr(d)
 	b := []byte(s)
 	if s == "null" {
 		return nil
 	}
 	ok := len(b) > 0 && CheckValid(b) == nil
+	// A number that starts like one but is not valid fails like any other
+	// malformed number.
+	if !ok && kind == "number" && len(b) > 0 && (b[0] == '-' || (b[0] >= '0' && b[0] <= '9')) {
+		d.typeErr("number "+s, typ)
+		return nil
+	}
 	if ok {
 		c := b[0]
 		switch kind {
@@ -266,7 +279,7 @@ func (d *Dec) Unquote(typ, kind string) *Dec {
 		d.Save(errors.New("json: invalid use of ,string struct tag, trying to unmarshal " + strconv.Quote(s) + " into " + typ))
 		return nil
 	}
-	return &Dec{data: b, structs: d.structs, fields: d.fields}
+	return &Dec{data: b, structs: d.structs, fields: d.fields, depth: d.depth}
 }
 
 // Merge takes over the first error of a decoder made by Unquote.
@@ -370,7 +383,10 @@ func (d *Dec) Offset() int {
 	return d.pos
 }
 
-func (d *Dec) readNumber() string {
+// readNum consumes the number literal at the current position.
+//
+//gofront:native jsonrt.readNum
+func readNum(d *Dec) string {
 	start := d.pos
 	for d.pos < len(d.data) {
 		c := d.data[d.pos]
@@ -402,7 +418,7 @@ func (d *Dec) Number(typ string) (string, bool) {
 		return s, true
 	}
 	if d.kind() == "number" {
-		return d.readNumber(), true
+		return readNum(d), true
 	}
 	d.Mismatch(typ)
 	return "", false
@@ -440,7 +456,119 @@ func (d *Dec) String(typ string) (v string, ok bool) {
 		d.typeErr(k, typ)
 		return "", false
 	}
-	return d.readString(), true
+	return readStr(d), true
+}
+
+// plainInt consumes a decimal integer of at most 15 digits, with no fraction
+// or exponent, that fits in bits bits (and is not negative unless signed), and
+// returns it. It leaves the input alone and reports false for anything else,
+// which the caller then parses and reports from its text. The value stays in
+// an int, which is a plain number in JavaScript.
+func (d *Dec) plainInt(bits int, signed bool) (int, bool) {
+	data := d.data
+	end := len(data)
+	i := d.pos
+	neg := false
+	if i < end && data[i] == '-' {
+		if !signed {
+			return 0, false
+		}
+		neg = true
+		i++
+	}
+	start := i
+	v := 0
+	for i < end {
+		c := data[i]
+		if c < '0' || c > '9' {
+			break
+		}
+		if i-start == 15 {
+			return 0, false
+		}
+		v = v*10 + int(c-'0')
+		i++
+	}
+	if i == start {
+		return 0, false
+	}
+	if i < end {
+		if c := data[i]; c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-' {
+			return 0, false
+		}
+	}
+	if neg {
+		v = -v
+	}
+	if bits < 53 {
+		lim := 1 << (bits - 1)
+		if !signed {
+			lim = 1 << bits
+			if v >= lim {
+				return 0, false
+			}
+		} else if v >= lim || v < -lim {
+			return 0, false
+		}
+	}
+	d.pos = i
+	return v, true
+}
+
+var pow10 = [...]float64{1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15}
+
+// plainFloat consumes a decimal number of at most 15 digits with no exponent.
+// Such a number is a mantissa that a float64 holds exactly divided by a power
+// of ten that it holds exactly, so one division rounds it correctly. It
+// leaves the input alone and reports false for anything else.
+func (d *Dec) plainFloat() (float64, bool) {
+	data := d.data
+	end := len(data)
+	i := d.pos
+	neg := false
+	if i < end && data[i] == '-' {
+		neg = true
+		i++
+	}
+	start := i
+	digits := 0
+	frac := 0
+	v := 0
+	seenDot := false
+	for i < end {
+		c := data[i]
+		if c == '.' && !seenDot {
+			seenDot = true
+			i++
+			continue
+		}
+		if c < '0' || c > '9' {
+			break
+		}
+		if digits == 15 {
+			return 0, false
+		}
+		v = v*10 + int(c-'0')
+		digits++
+		if seenDot {
+			frac++
+		}
+		i++
+	}
+	if digits == 0 || i-start == 0 {
+		return 0, false
+	}
+	if i < end {
+		if c := data[i]; c == 'e' || c == 'E' || c == '+' || c == '-' {
+			return 0, false
+		}
+	}
+	f := float64(v) / pow10[frac]
+	if neg {
+		f = -f
+	}
+	d.pos = i
+	return f, true
 }
 
 // Int decodes an integer that must fit in bits bits.
@@ -448,13 +576,16 @@ func (d *Dec) Int(bits int, typ string) (v int64, ok bool) {
 	if d.fatal || d.Null() {
 		return 0, false
 	}
-	if d.peek() == '"' || d.peek() == '{' || d.peek() == '[' || d.peek() == 't' || d.peek() == 'f' {
+	if c := d.peek(); c == '"' || c == '{' || c == '[' || c == 't' || c == 'f' {
 		k := d.kind()
 		d.Skip()
 		d.typeErr(k, typ)
 		return 0, false
 	}
-	s := d.readNumber()
+	if n, ok := d.plainInt(bits, true); ok {
+		return int64(n), true
+	}
+	s := readNum(d)
 	n, err := strconv.ParseInt(s, 10, bits)
 	if err != nil {
 		d.typeErr("number "+s, typ)
@@ -468,13 +599,16 @@ func (d *Dec) Uint(bits int, typ string) (v uint64, ok bool) {
 	if d.fatal || d.Null() {
 		return 0, false
 	}
-	if d.peek() == '"' || d.peek() == '{' || d.peek() == '[' || d.peek() == 't' || d.peek() == 'f' {
+	if c := d.peek(); c == '"' || c == '{' || c == '[' || c == 't' || c == 'f' {
 		k := d.kind()
 		d.Skip()
 		d.typeErr(k, typ)
 		return 0, false
 	}
-	s := d.readNumber()
+	if n, ok := d.plainInt(bits, false); ok {
+		return uint64(n), true
+	}
+	s := readNum(d)
 	n, err := strconv.ParseUint(s, 10, bits)
 	if err != nil {
 		d.typeErr("number "+s, typ)
@@ -488,13 +622,18 @@ func (d *Dec) Float(bits int, typ string) (v float64, ok bool) {
 	if d.fatal || d.Null() {
 		return 0, false
 	}
-	if d.peek() == '"' || d.peek() == '{' || d.peek() == '[' || d.peek() == 't' || d.peek() == 'f' {
+	if c := d.peek(); c == '"' || c == '{' || c == '[' || c == 't' || c == 'f' {
 		k := d.kind()
 		d.Skip()
 		d.typeErr(k, typ)
 		return 0, false
 	}
-	s := d.readNumber()
+	if bits == 64 {
+		if f, ok := d.plainFloat(); ok {
+			return f, true
+		}
+	}
+	s := readNum(d)
 	n, err := strconv.ParseFloat(s, bits)
 	if bits == 32 {
 		// Round to float32 here: the number may be out of float32 range.
@@ -538,7 +677,7 @@ func (d *Dec) NextKey() bool {
 		d.pos++
 	}
 	d.ws()
-	d.key = d.readString()
+	d.key = readStr(d)
 	d.ws()
 	d.pos++ // the colon
 	return true
@@ -585,8 +724,10 @@ func EqualFold(a, b string) bool {
 	return strings.EqualFold(a, b)
 }
 
-// readString consumes the string at the current position.
-func (d *Dec) readString() string {
+// readStr consumes the string at the current position.
+//
+//gofront:native jsonrt.readStr
+func readStr(d *Dec) string {
 	d.pos++ // opening quote
 	start := d.pos
 	plain := true
@@ -722,7 +863,7 @@ func (d *Dec) Any() any {
 		}
 		return a
 	case '"':
-		return d.readString()
+		return readStr(d)
 	case 't':
 		d.pos += 4
 		return true
@@ -733,7 +874,7 @@ func (d *Dec) Any() any {
 		d.pos += 4
 		return nil
 	}
-	s := d.readNumber()
+	s := readNum(d)
 	if d.UseNumber {
 		return Number(s)
 	}

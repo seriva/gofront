@@ -13,6 +13,9 @@
 
 export const JS_NATIVES = new Map();
 
+// Runtime helper (a HELPER_MAP key) a native's template calls.
+export const NATIVE_HELPERS = new Map();
+
 // Marks an argument position inside a template.
 const MARK = (i) => `\u00ab${i}\u00bb`;
 const MARK_RE = /\u00ab(\d+)\u00bb/g;
@@ -339,3 +342,39 @@ JS_NATIVES.set(
 	(a) =>
 		`(Math.abs(${a[0]}) * (${a[1]} < 0 || Object.is(${a[1]}, -0) ? -1 : 1))`,
 );
+
+// ── internal/jsonrt ───────────────────────────────────────────
+//
+// The encoder writes into a byte buffer it owns (`buf`, `n`); these calls
+// append to it without the per-write slice headers Go's append would make.
+
+const JSONRT_CALLS = {
+	putString: "__jput",
+	putInt: "__jint",
+	putUint: "__jint",
+	putFloat: "__jfloat",
+	putQuoted: "__jquote",
+};
+for (const [name, helper] of Object.entries(JSONRT_CALLS)) {
+	JS_NATIVES.set(`jsonrt.${name}`, (a) => `${helper}(${a.join(", ")})`);
+	NATIVE_HELPERS.set(`jsonrt.${name}`, "jsonrt");
+}
+
+// The decoder reads straight from its input bytes (`data`, `pos`); a string
+// with escapes goes to the Go `unquote`, and input the host's JSON parser
+// rejects goes to the Go scanner, which words the error.
+JS_NATIVES.set(
+	"jsonrt.readStr",
+	(a) => `__jrstr(${a[0]}, unquote$$internal$jsonrt)`,
+);
+JS_NATIVES.set("jsonrt.readNum", (a) => `__jrnum(${a[0]})`);
+JS_NATIVES.set(
+	"jsonrt.CheckValid",
+	(a) => `(__jvalid(${a[0]}) ? null : CheckValid$$internal$jsonrt(${a[0]}))`,
+);
+JS_NATIVES.set(
+	"jsonrt.LooksFloat32",
+	(a) => `(Math.fround(${a[0]}) === ${a[0]})`,
+);
+for (const n of ["readStr", "readNum", "CheckValid"])
+	NATIVE_HELPERS.set(`jsonrt.${n}`, "jsonrt");

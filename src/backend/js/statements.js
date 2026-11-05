@@ -317,8 +317,11 @@ export const statementGenMethods = {
 					: null;
 		switch (stmt.kind) {
 			case "TypeDecl":
-				this.genTypeDeclWithMethods(stmt, []);
-				this._noteLocalTypeDecl(stmt);
+				{
+					const start = this.out.length;
+					this.genTypeDeclWithMethods(stmt, []);
+					this._hoistLocalClass(stmt, start);
+				}
 				break;
 			case "IncDecStmt": {
 				this._markIndexLvalues([stmt.expr]);

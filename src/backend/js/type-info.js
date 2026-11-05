@@ -244,9 +244,18 @@ export const typeInfoGenMethods = {
 	// `*string`, and a nil `*int` from the nil interface.
 	_dynTypeTag(t) {
 		if (!t || mentionsTypeParam(t)) return null;
-		if (t.kind === "slice" || t.kind === "map") return this._dynTypeName(t);
+		if (
+			t.kind === "slice" ||
+			t.kind === "map" ||
+			t.kind === "array" ||
+			t.kind === "struct" ||
+			t.kind === "func"
+		)
+			return this._dynTypeName(t);
+		if (this._isNamedComposite(t)) return t.name;
 		if (t.kind === "pointer") {
 			const base = t.base;
+			if (base?.kind === "struct" && !base.name) return this._dynTypeName(t);
 			if (this._underlyingOf(base)?.kind === "struct") return null;
 			if (this._boxesInInterface(t)) return null;
 			return this._dynTypeName(t);
@@ -254,13 +263,47 @@ export const typeInfoGenMethods = {
 		return null;
 	},
 
+	// A named slice, array or map type: its values are plain JS arrays and
+	// objects, told apart in an interface by a tag carrying the type's name.
+	_isNamedComposite(t) {
+		if (t?.kind !== "named" || this._namedBoxInfo(t)) return false;
+		const kind = this._underlyingOf(t)?.kind;
+		return kind === "slice" || kind === "array" || kind === "map";
+	},
+
 	// `typeStr` with the spellings of identical types unified.
 	_dynTypeName(t) {
-		return typeStr(t)
+		return this._dynTypeStr(t)
 			.replace(/\bbyte\b/g, "uint8")
 			.replace(/\brune\b/g, "int32")
 			.replace(/\bany\b/g, "interface {}")
 			.replace(/interface\{\.\.\.\}/g, "interface {}");
+	},
+
+	// `typeStr`, but an unnamed struct lists its fields, so two anonymous
+	// structs do not share a tag.
+	_dynTypeStr(t) {
+		const s = (x) => this._dynTypeStr(x);
+		switch (t?.kind) {
+			case "slice":
+				return `[]${s(t.elem)}`;
+			case "array":
+				return `[${t.size?.value ?? t.size ?? "..."}]${s(t.elem)}`;
+			case "map":
+				return `map[${s(t.key)}]${s(t.value)}`;
+			case "pointer":
+				return `*${s(t.base)}`;
+			case "struct":
+				if (t.name || !t._structFields) return typeStr(t);
+				return `struct{${t._structFields
+					.map(
+						(f) =>
+							`${(f.names ?? []).join(",")} ${s(f.type)}${f.tag ? ` ${JSON.stringify(f.tag)}` : ""}${f.embedded ? " embedded" : ""}`,
+					)
+					.join("; ")}}`;
+			default:
+				return typeStr(t);
+		}
 	},
 
 	// Run-time test that `val` holds a value of the unnamed composite type
@@ -278,6 +321,7 @@ export const typeInfoGenMethods = {
 		if (u?.kind === "func") return args("func");
 		if (t.kind === "named") return null;
 		if (u?.kind === "map") return args("map");
+		if (u?.kind === "struct") return args("struct");
 		if (u?.kind === "array")
 			return args("array", "null", String(u.size?.value ?? u.size ?? 0));
 		if (u?.kind === "slice") {
@@ -287,6 +331,7 @@ export const typeInfoGenMethods = {
 			return args("slice", ctor ?? "null");
 		}
 		if (u?.kind === "pointer") {
+			if (u.base?.kind === "struct" && !u.base.name) return args("struct");
 			if (this._underlyingOf(u.base)?.kind === "struct") return null;
 			if (this._boxesInInterface(u)) return null;
 			return args("ptr");

@@ -19,7 +19,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
-import { jsNativeCall } from "./natives.js";
+import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
 // pointer-receiver method that does so is meant to run on a nil receiver.
@@ -583,15 +583,19 @@ export const expressionGenMethods = {
 				expr._mapKeying = false;
 			}
 		}
-		if (expr._ifaceSrc && !expr._jsonTagging && this._jsonAnyUsed) {
-			const tag = this._jsonAnyTag(expr);
-			if (tag) {
-				expr._jsonTagging = true;
-				try {
-					return `__jt(${this.genExpr(expr)}, ${tag.enc}${tag.unbox ? ", true" : ""})`;
-				} finally {
-					expr._jsonTagging = false;
-				}
+		if (
+			expr._ifaceSrc?.kind === "pointer" &&
+			expr._ifaceSrc.base?.kind === "typeParam" &&
+			!expr._pbsWrapping
+		) {
+			// `&v` of a type parameter's variable is a box; a struct behind it
+			// is its own pointer.
+			expr._pbsWrapping = true;
+			try {
+				this.useHelper("ifaceBox");
+				return `__pbs(${this.genExpr(expr)})`;
+			} finally {
+				expr._pbsWrapping = false;
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
@@ -1360,7 +1364,10 @@ export const expressionGenMethods = {
 		if (!this.natives || !expr._native) return null;
 		if (expr._multiForward || expr.args.some((a) => a._spread)) return null;
 		const typeArgs = expr._typeArgs ?? expr.func._typeArgs ?? [];
-		return jsNativeCall(expr._native, this._genCallArgList(expr), typeArgs);
+		const js = jsNativeCall(expr._native, this._genCallArgList(expr), typeArgs);
+		if (js !== null && NATIVE_HELPERS.has(expr._native))
+			this.useHelper(NATIVE_HELPERS.get(expr._native));
+		return js;
 	},
 
 	// `f(xs...)`: a Go-compiled variadic callee receives the slice itself in a
@@ -1593,9 +1600,19 @@ export const expressionGenMethods = {
 		const factory = this._typeParamZeroFactory(typeName);
 		if (factory) return `(${factory}?.is?.(${val}) ?? true)`;
 		const name = this._qualifiedStructName(typeName);
-		if (name === "int64" || name === "uint64")
-			return `typeof ${val} === "bigint"`;
+		// int64 and uint64 share the BigInt: a value out of int64's range can
+		// only be a uint64.
+		if (name === "int64")
+			return `(typeof ${val} === "bigint" && ${val} >= -9223372036854775808n && ${val} <= 9223372036854775807n)`;
+		if (name === "uint64")
+			return `(typeof ${val} === "bigint" && ${val} >= 0n)`;
+		// Integer types share the JS number with the floats: only a whole
+		// number is one, so a fraction or -0 in an `any` falls through to float64.
+		if (INT_TYPE_NAMES.has(name))
+			return `(Number.isSafeInteger(${val}) && !Object.is(${val}, -0))`;
 		if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
+		if (name === "complex128" || name === "complex64")
+			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.re === "number" && typeof ${val}.im === "number")`;
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
@@ -1615,6 +1632,10 @@ export const expressionGenMethods = {
 				[...named.underlying.methods.keys()],
 				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
 			);
+		if (this._isNamedComposite(named)) {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
+		}
 		return "true"; // unknown type — can't check at runtime
 	},
 
@@ -1728,9 +1749,6 @@ export const expressionGenMethods = {
 			arg,
 		);
 		if (structConv) return structConv;
-		const isRaw =
-			targetType?.name === "json.RawMessage" ||
-			targetType?.name === "encoding/json.RawMessage";
 		const base =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
 		if (base?.kind === "map" && this._isNilLiteral(expr.args[0]))
@@ -1752,17 +1770,23 @@ export const expressionGenMethods = {
 				this._isStringExprType(expr.args[0]?._type)
 			) {
 				this.useHelper("u8enc");
-				const enc = `__u8enc(${arg})`;
-				return isRaw ? `((u) => { u.__raw = true; return u; })(${enc})` : enc;
-			}
-			if (isRaw) {
-				return `((u) => { u.__raw = true; return u; })(${arg})`;
+				return `__u8enc(${arg})`;
 			}
 		}
 		return arg;
 	},
 
+	// `json.Marshal(v)` / `enc.Encode(v)` call the generated codec entry
+	// (see src/lower/json-codecs.js); a stream method takes its receiver first.
+	_jsonEntryCall(expr) {
+		const sel = expr.func;
+		const func = { kind: "Ident", name: sel._jsonGen, _type: sel._type };
+		const args = sel._jsonStream ? [sel.expr, ...expr.args] : expr.args;
+		return { ...expr, func, args };
+	},
+
 	genCall(expr) {
+		if (expr.func._jsonGen) return this.genCall(this._jsonEntryCall(expr));
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
 
 		const native = this._genNativeCall(expr);
@@ -1868,35 +1892,7 @@ export const expressionGenMethods = {
 		return recvType?.name ?? recvType?.base?.name;
 	},
 
-	_genJsonStreamCall(recvName, expr) {
-		const isEnc = this._isJsonEncoderName(recvName);
-		if (isEnc && expr.func.field === "Encode") {
-			this.useHelper("json");
-			const enc = this.genExpr(expr.func.expr);
-			this._markJsonAnyEncoders();
-			const argType = expr.args[0]?._type;
-			const codec = this._getJsonEncoder(argType);
-			const arg = this.genExpr(expr.args[0]);
-			return `__json_encoder_encode(${enc}, ${codec}, ${arg})`;
-		}
-		const isDec =
-			recvName === "json.Decoder" ||
-			recvName === "encoding/json.Decoder" ||
-			recvName?.startsWith("Decoder$$");
-		if (isDec && expr.func.field === "Decode") {
-			this.useHelper("json");
-			const dec = this.genExpr(expr.func.expr);
-			const targetType = expr.args[0]?._type;
-			const codec = this._getJsonDecoder(targetType);
-			const arg = this.genExpr(expr.args[0]);
-			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${this._jsonTargetArgs(this._jsonTargetType(expr.args[0]))})`;
-		}
-		return undefined;
-	},
-
 	_genReceiverTypeCall(recvName, expr) {
-		const jsonStream = this._genJsonStreamCall(recvName, expr);
-		if (jsonStream !== undefined) return jsonStream;
 		if (recvName === "regexp.Regexp")
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Timer") {
@@ -2117,6 +2113,17 @@ export const expressionGenMethods = {
 			: null;
 		if (typedCtor)
 			return `__append((${slice}) ?? __tn(${typedCtor}), ${elems.join(", ")})`;
+		// A json codec grows a slice it has just made and no one else holds:
+		// pushing in place is O(1), where __append copies the whole slice.
+		if (
+			this._inJsonCodecFile() &&
+			expr.args.length === 2 &&
+			expr.args[0].kind === "Ident" &&
+			!expr.args[1]._spread
+		) {
+			this.useHelper("pushs");
+			return `__pushs(${slice}, ${elems[0]})`;
+		}
 		return `__append(${slice}, ${elems.join(", ")})`;
 	},
 
@@ -2183,8 +2190,18 @@ export const expressionGenMethods = {
 			}
 			return withCap((k) => `new Array(${k}).fill(${zero})`);
 		}
-		// map or fallback
+		// map or fallback.  The json codecs' maps hold decoded keys, among them
+		// "__proto__": without a prototype that is an ordinary key.
+		if (
+			this._inJsonCodecFile() &&
+			(resolvedKind === "map" || typeNode.kind === "MapType")
+		)
+			return "Object.create(null)";
 		return "{}";
+	},
+
+	_inJsonCodecFile() {
+		return this._jsonCodecFileIdx === (this._currentSrcFileIdx ?? 0);
 	},
 
 	_isSliceOrArrayType(t) {
@@ -3258,6 +3275,16 @@ export const expressionGenMethods = {
 		// `[]T(nil)` is the nil slice, not a copy of anything.
 		if (this._isNilLiteral(expr.expr)) return "null";
 		const elem = t.elem?.name;
+		// Converting a nil slice yields a nil slice.
+		const src = this._underlyingOf(expr.expr._type);
+		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
+			this._sliceConvNilSafe = true;
+			try {
+				return `((__s) => __s == null ? null : ${this._genSliceTypeConversion(expr, "__s", t)})(${inner})`;
+			} finally {
+				this._sliceConvNilSafe = false;
+			}
+		}
 		if (elem === "byte" || elem === "uint8") {
 			if (this._isStringExprType(expr.expr._type)) {
 				this.useHelper("u8enc");
