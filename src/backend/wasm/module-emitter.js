@@ -827,10 +827,6 @@ export class ModuleEmitter {
 		return mapInfo;
 	}
 
-	getMapTypeByIndex(typeIndex) {
-		return this.mapTypesByIndex?.get(typeIndex) ?? null;
-	}
-
 	getClosureType(goType) {
 		const sig = getFuncSignature(goType, this.checker);
 		const paramWTypes = sig.params
@@ -1635,10 +1631,6 @@ export class ModuleEmitter {
 		const idx = this.importCache.get(`env.${name}`);
 		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
 		return idx;
-	}
-
-	getTimezoneOffsetImportIndex() {
-		return this.getStdlibImportIndex("time_timezone_offset");
 	}
 
 	// Closure type of `func(*testing.T)` (the t.Run body).

@@ -1553,11 +1553,6 @@ export const statementGenMethods = {
 		this._loopDepth--;
 	},
 
-	// True when `node` contains an assignment or ++/-- targeting identifier `name`.
-	_nodeAssigns(node, name) {
-		return nodeAssigns(node, name);
-	},
-
 	_genStringRangeFor(stmt, iteree, isAssign) {
 		this._loopDepth = this._loopDepth ?? 0;
 		const d = this._loopDepth++;

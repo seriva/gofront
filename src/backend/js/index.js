@@ -638,14 +638,6 @@ export class CodeGen {
 		return this._srcMappings;
 	}
 
-	// Returns a source map JSON string for the last generate() call.
-	// sources: string[] of source filenames (relative to the output file).
-	// sourcesContent: string[] of original file contents (embedded for DevTools breakpoints).
-	getSourceMap(sources, sourcesContent) {
-		const srcArray = Array.isArray(sources) ? sources : [sources];
-		return buildSourceMap(srcArray, this._srcMappings, sourcesContent);
-	}
-
 	// ── Type declarations ────────────────────────────────────────
 
 	// `type S Base` with Base a struct declared in this package: the struct
@@ -1001,19 +993,6 @@ export class CodeGen {
 		return `${method}(...__a) { return ${call}; }`;
 	}
 
-	_genSingleEmbedStubs(embed, declared) {
-		const embedName = embed.kind === "named" ? embed.name : null;
-		if (!embedName) return;
-		const embedBase = embed.kind === "named" ? embed.underlying : embed;
-		if (embedBase?.kind !== "struct" || !embedBase.methods) return;
-		for (const [mName] of embedBase.methods.entries()) {
-			if (!declared.has(mName)) {
-				this.blank();
-				this.line(this._embedStub(mName, embedName));
-			}
-		}
-	}
-
 	_genEmbeddedMethodStubs(name, methodDecls) {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		for (const stub of stubs) {
@@ -1288,10 +1267,6 @@ export class CodeGen {
 	_namedPtrMethodOn(type, method) {
 		const info = this._namedBoxInfo(type);
 		return Boolean(info?.methods.get(method)?._ptrRecv);
-	}
-
-	_isReferenceType(t) {
-		return isReferenceType(t);
 	}
 
 	// ── Variable / const declarations ────────────────────────────

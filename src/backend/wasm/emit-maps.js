@@ -421,44 +421,6 @@ export class MapsEmitter {
 		this.pushInstruction("ref.eq");
 	}
 
-	emitElemLt(v1Loc, v2Loc, elemGoType) {
-		if (isStringType(elemGoType, this.mod.checker)) {
-			this.pushInstruction({ op: "local.get", index: v1Loc });
-			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringCmpImportIndex("<"),
-			});
-			return;
-		}
-		const wType = toWasmType(elemGoType, this.mod.checker, this.mod);
-		if (wType === "i64") {
-			this.pushInstruction({ op: "local.get", index: v1Loc });
-			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction(isSigned(elemGoType) ? "i64.lt_s" : "i64.lt_u");
-			return;
-		}
-		if (wType === "i32") {
-			this.pushInstruction({ op: "local.get", index: v1Loc });
-			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction(isSigned(elemGoType) ? "i32.lt_s" : "i32.lt_u");
-			return;
-		}
-		if (wType === "f32") {
-			this.pushInstruction({ op: "local.get", index: v1Loc });
-			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction("f32.lt");
-			return;
-		}
-		if (wType === "f64") {
-			this.pushInstruction({ op: "local.get", index: v1Loc });
-			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction("f64.lt");
-			return;
-		}
-		this.pushInstruction({ op: "i32.const", value: 0 });
-	}
-
 	emitMapMake(mapInfo) {
 		const nBucketsLoc = this.allocLocal(null, "i32");
 		const cLoc = this.allocLocal(null, "i32");
