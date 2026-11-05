@@ -26,6 +26,7 @@ import {
 	scanAddressTaken,
 	takesElementAddress,
 } from "../../lower/index.js";
+import { forEachChild } from "../../lower/walk.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
 	BROWSER_GLOBALS,
@@ -49,7 +50,7 @@ import {
 	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
 	HELPER_IO_EOF,
-	HELPER_JSON,
+	HELPER_JSONRT,
 	HELPER_LEN,
 	HELPER_MKLEN,
 	HELPER_NIL_CALL,
@@ -58,6 +59,7 @@ import {
 	HELPER_OS,
 	HELPER_PANIC,
 	HELPER_PTREQ,
+	HELPER_PUSHS,
 	HELPER_RUNESTR,
 	HELPER_S,
 	HELPER_SCLONE,
@@ -140,6 +142,7 @@ const HELPER_MAP = [
 	["runestr", HELPER_RUNESTR],
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
+	["pushs", HELPER_PUSHS],
 	["sclone", HELPER_SCLONE],
 	["va", HELPER_VA],
 	["vclone", HELPER_VCLONE],
@@ -169,7 +172,7 @@ const HELPER_MAP = [
 	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
-	["json", HELPER_JSON],
+	["jsonrt", HELPER_JSONRT],
 	["simd", HELPER_SIMD],
 ];
 
@@ -218,6 +221,18 @@ const JS_INTRINSICS = {
 	),
 };
 
+// Counts every `type` declaration by name, function-local ones included.
+function countTypeDecls(node, counts) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) countTypeDecls(n, counts);
+		return;
+	}
+	if (node.kind === "TypeDecl")
+		counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
+	forEachChild(node, (child) => countTypeDecls(child, counts));
+}
+
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
 	// bundledPackages: Set<string>               — GoFront package names bundled inline;
@@ -247,9 +262,10 @@ export class CodeGen {
 		this._srcMappings = []; // { genLine, srcLine, srcFileIdx } for source map
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
-		this._jsonCodecs = new Map(); // memoized JSON encoders and decoders
-		this._localTypeNames = new Set(); // function-local type declarations
-		this._jsonAnyUsed = false; // program calls json.Marshal / Encoder.Encode
+		this._hoistedLocals = new Set(); // function-local classes the json codecs name
+		this._hasJsonCodecs = false;
+		this._jsonCodecFileIdx = -1;
+		this._typeDeclCounts = new Map();
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -373,13 +389,15 @@ export class CodeGen {
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
-		this._jsonAnyUsed = this._usesJsonAnyMarshal(program.decls);
+		this._typeDeclCounts = new Map();
+		if (this._hasJsonCodecs)
+			countTypeDecls(program.decls, this._typeDeclCounts);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
-		this._emitJsonCodecs();
+		this._emitHoistedLocals();
 		this._callInitAndMain(initNames, program, isTest);
 		const prependedLines = this._prependHelpers(isTest);
 		return this._finalizeOutput(prependedLines);
@@ -631,6 +649,8 @@ export class CodeGen {
 	// Annotates each decl with its source file index before merging.
 	generateAll(programs, options = {}) {
 		this._srcFileNames = programs.map((p) => p._filename ?? null);
+		this._jsonCodecFileIdx = programs.findIndex((p) => p._jsonCodecs);
+		this._hasJsonCodecs = this._jsonCodecFileIdx >= 0;
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
 				decl._srcFileIdx = i;
@@ -995,13 +1015,30 @@ export class CodeGen {
 			);
 	}
 
-	_emitJsonCodecs() {
-		this._emitJsonAnyHooks();
-		if (!this._jsonCodecs || this._jsonCodecs.size === 0) return;
-		for (const [, code] of this._jsonCodecs) {
-			this.line(code);
-			this.blank();
-		}
+	// The generated json codecs live at package level and name function-local
+	// struct classes: those are declared once at module level and assigned
+	// where the Go source declares them.
+	_hoistLocalClass(stmt, start) {
+		if (!this._hasJsonCodecs || stmt.type.kind !== "StructType") return;
+		if (this._typeDeclCounts.get(stmt.name) !== 1) return;
+		const open = this.out.findIndex(
+			(l, i) => i >= start && l.trimStart().startsWith(`class ${stmt.name} `),
+		);
+		if (open < 0) return;
+		const indent = this.out[open].match(/^\s*/)[0];
+		const close = this.out.findIndex((l, i) => i > open && l === `${indent}}`);
+		if (close < 0) return;
+		this.out[open] =
+			`${indent}${stmt.name} = ${stmt.name}.__ph ? ${this.out[open].trimStart()}`;
+		this.out[close] = `${indent}} : ${stmt.name};`;
+		this._hoistedLocals.add(stmt.name);
+	}
+
+	_emitHoistedLocals() {
+		if (this._hoistedLocals.size > 0)
+			this.line(
+				`var ${[...this._hoistedLocals].map((n) => `${n} = class { static __ph = true; }`).join(", ")};`,
+			);
 	}
 
 	// A promoted method runs on the embedded value (`this.In`), so it and the

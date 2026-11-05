@@ -258,6 +258,16 @@ export const NATIVES = new Set([
 	"strings.TrimSuffix",
 	"strconv.shortest",
 	"strconv.parseDecimal",
+	// internal/jsonrt: the encoder's writes into its output buffer.
+	"jsonrt.putString",
+	"jsonrt.putInt",
+	"jsonrt.putUint",
+	"jsonrt.putFloat",
+	"jsonrt.putQuoted",
+	"jsonrt.readStr",
+	"jsonrt.readNum",
+	"jsonrt.CheckValid",
+	"jsonrt.LooksFloat32",
 	// math: the functions with a single host expression or instruction.
 	"math.IsNaN",
 	"math.IsInf",
