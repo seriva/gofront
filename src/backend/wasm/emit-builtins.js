@@ -1104,9 +1104,6 @@ export class BuiltinsEmitter {
 			return false;
 		const pkgName = func.expr?.name;
 		switch (pkgName) {
-			case "math":
-				this.emitMathCall(func.field, args);
-				return true;
 			case "fmt":
 				if (func.field.startsWith("Fprint")) {
 					this.emitFprintCall(func.field, call, targetWasmType);

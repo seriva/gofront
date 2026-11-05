@@ -296,3 +296,46 @@ for (const n of [8, 16, 32]) {
 			`((v) => { v -= (v >>> 1) & 0x55555555; v = (v & 0x33333333) + ((v >>> 2) & 0x33333333); return Math.imul((v + (v >>> 4)) & 0x0f0f0f0f, 0x01010101) >>> 24; })(${a[0]})`,
 	);
 }
+
+// ── math ──────────────────────────────────────────────────────
+//
+// Host `Math.*` where it agrees with Go.  An infinity beats a NaN in Go's
+// `Max` and `Min`; `Math.round` rounds half toward +Inf where Go rounds half
+// away from zero; the sign of a NaN is not observed.
+
+JS_NATIVES.set("math.Abs", (a) => `Math.abs(${a[0]})`);
+JS_NATIVES.set("math.Floor", (a) => `Math.floor(${a[0]})`);
+JS_NATIVES.set("math.Ceil", (a) => `Math.ceil(${a[0]})`);
+JS_NATIVES.set("math.Trunc", (a) => `Math.trunc(${a[0]})`);
+JS_NATIVES.set("math.Sqrt", (a) => `Math.sqrt(${a[0]})`);
+JS_NATIVES.set(
+	"math.Round",
+	(a) => `(Math.sign(${a[0]}) * Math.round(Math.abs(${a[0]})))`,
+);
+JS_NATIVES.set(
+	"math.Max",
+	(a) =>
+		`(${a[0]} === Infinity || ${a[1]} === Infinity ? Infinity : Math.max(${a[0]}, ${a[1]}))`,
+);
+JS_NATIVES.set(
+	"math.Min",
+	(a) =>
+		`(${a[0]} === -Infinity || ${a[1]} === -Infinity ? -Infinity : Math.min(${a[0]}, ${a[1]}))`,
+);
+JS_NATIVES.set("math.IsNaN", (a) => `Number.isNaN(${a[0]})`);
+JS_NATIVES.set(
+	"math.IsInf",
+	(a) =>
+		`(${a[1]} > 0 ? ${a[0]} === Infinity : ${a[1]} < 0 ? ${a[0]} === -Infinity : Math.abs(${a[0]}) === Infinity)`,
+);
+JS_NATIVES.set("math.Inf", (a) => `(${a[0]} >= 0 ? Infinity : -Infinity)`);
+JS_NATIVES.set("math.NaN", () => "NaN");
+JS_NATIVES.set(
+	"math.Signbit",
+	(a) => `(${a[0]} < 0 || Object.is(${a[0]}, -0))`,
+);
+JS_NATIVES.set(
+	"math.Copysign",
+	(a) =>
+		`(Math.abs(${a[0]}) * (${a[1]} < 0 || Object.is(${a[1]}, -0) ? -1 : 1))`,
+);

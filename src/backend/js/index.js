@@ -181,6 +181,41 @@ const JS_INTRINSICS = {
 		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
 	time_zone_offset: ([unix]) =>
 		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
+	math_float64bits: ([f]) =>
+		`const $b = new ArrayBuffer(8); new Float64Array($b)[0] = ${f}; return new BigUint64Array($b)[0];`,
+	math_float64frombits: ([u]) =>
+		`const $b = new ArrayBuffer(8); new BigUint64Array($b)[0] = BigInt(${u}); return new Float64Array($b)[0];`,
+	math_float32bits: ([f]) =>
+		`const $b = new ArrayBuffer(4); new Float32Array($b)[0] = ${f}; return new Uint32Array($b)[0];`,
+	math_float32frombits: ([u]) =>
+		`const $b = new ArrayBuffer(4); new Uint32Array($b)[0] = ${u} >>> 0; return new Float32Array($b)[0];`,
+	math_mod: ([x, y]) => `return ${x} % ${y};`,
+	...Object.fromEntries(
+		[
+			"sin",
+			"cos",
+			"tan",
+			"asin",
+			"acos",
+			"atan",
+			"sinh",
+			"cosh",
+			"tanh",
+			"exp",
+			"expm1",
+			"log",
+			"log1p",
+			"log2",
+			"log10",
+			"cbrt",
+		].map((f) => [`math_${f}`, ([x]) => `return Math.${f}(${x});`]),
+	),
+	...Object.fromEntries(
+		["atan2", "pow", "hypot"].map((f) => [
+			`math_${f}`,
+			([x, y]) => `return Math.${f}(${x}, ${y});`,
+		]),
+	),
 };
 
 export class CodeGen {
