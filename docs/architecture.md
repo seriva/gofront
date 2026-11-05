@@ -124,7 +124,7 @@ Function bodies in these packages are type-checked only when the program reaches
 Two markers connect Go source to the backends:
 
 - `//gofront:native <name>` keeps the Go body as the specification and lets a backend replace calls with a faster host primitive (`indexOf` for `strings.Index`, `Math.clz32` or a WASM instruction for `math/bits`). A native may decline an instantiation, in which case the call runs the Go body. Names form a closed set in `src/typechecker/types.js`; implementations live in `src/backend/js/natives.js` and `src/backend/wasm/natives.js`. `test/unit/compiler/natives.test.js` fails when a name is missing from a registry (outside a short single-target list) or when a registry entry has no Go declaration.
-- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, standard streams, exit and environment, Unicode tables, the timer behind `time.Sleep`, IEEE-754 bit casts and the host `Math.*` functions behind `math`).
+- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, standard streams, exit and environment, Unicode tables, IEEE-754 bit casts and the host `Math.*` functions behind `math`; target-specific intrinsics such as `time_sleep` provide host timers on JavaScript).
 
 | Package | Where it lives |
 |---|---|
