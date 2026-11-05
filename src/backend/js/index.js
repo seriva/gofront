@@ -66,7 +66,6 @@ import {
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
-	HELPER_SPRINT,
 	HELPER_SPRINTF,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
@@ -163,7 +162,6 @@ const HELPER_MAP = [
 	["structKey", HELPER_STRUCT_KEY],
 	["generics", HELPER_GENERICS],
 	["sprintf", HELPER_SPRINTF],
-	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
 	["testing", HELPER_TESTING],
 	["jsonrt", HELPER_JSONRT],
@@ -195,6 +193,9 @@ const JS_INTRINSICS = {
 	unicode_to_lower: ([r]) => unicodeToLowerJs(r),
 	crypto_rand_u32: () =>
 		'const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto; if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0]; return Math.floor(Math.random() * 4294967296);',
+	// A number per object for the whole run, from 1 (pointers print as 0x<id>).
+	fmt_ptr_id: ([v]) =>
+		`if (${v} === null || ${v} === undefined || (typeof ${v} !== "object" && typeof ${v} !== "function")) return 0n; const t = (globalThis.__fmtptr ??= { m: new WeakMap(), n: 1 }); let id = t.m.get(${v}); if (!id) { id = t.n++; t.m.set(${v}, id); } return BigInt(id);`,
 	math_float64bits: ([f]) =>
 		`const $b = new ArrayBuffer(8); new Float64Array($b)[0] = ${f}; return new BigUint64Array($b)[0];`,
 	math_float64frombits: ([u]) =>
@@ -617,7 +618,6 @@ export class CodeGen {
 		}
 		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
-		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
 	}
 

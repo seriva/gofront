@@ -35,7 +35,7 @@
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
-import { HELPER_ERROR, HELPER_SPRINT, HELPER_SPRINTF } from "../js/runtime.js";
+import { HELPER_ERROR, HELPER_SPRINTF } from "../js/runtime.js";
 import {
 	unicodeIsJs,
 	unicodeToLowerJs,
@@ -1848,6 +1848,8 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
 	let fmtStructMap = new WeakMap();
+	// Numbers for the references fmt_ptr_id is asked about.
+	const fmtIds = { m: new WeakMap(), n: 1 };
 	// A value whose type has String()/Error(): the method already ran in WASM.
 	// __gfUnbox hands fmt the raw value for the other verbs.
 	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
@@ -1946,6 +1948,14 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"unicode_is": (r, k) => { ${unicodeIsJs("r", "k")} },
 		"unicode_to_upper": (r) => { ${unicodeToUpperJs("r")} },
 		"unicode_to_lower": (r) => { ${unicodeToLowerJs("r")} },
+		"fmt_ptr_id": (o) => {
+			if (o === null || o === undefined || (typeof o !== "object" && typeof o !== "function")) return 0;
+			// The numbering Printf's %p uses, when this module has it.
+			if (typeof __fmtid === "function") return __fmtid(o);
+			let id = fmtIds.m.get(o);
+			if (!id) { id = fmtIds.n++; fmtIds.m.set(o, id); }
+			return id;
+		},
 		"crypto_rand_u32": () => {
 			const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto;
 			return c?.getRandomValues ? c.getRandomValues(new Uint32Array(1))[0] | 0 : (Math.random() * 4294967296) | 0;
@@ -2216,7 +2226,6 @@ function ${P}replace(s, o, w, n) {
 // module imports one of the packages that use it.
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
-${HELPER_SPRINT}
 function ${P}stdlib_fmt(stringTable, io) {
 	return {
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
@@ -2226,8 +2235,6 @@ function ${P}stdlib_fmt(stringTable, io) {
 		"testing_context": (t) => t.Context(),
 		"testing_output": (t) => t.Output(),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
-		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
-		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
 		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 	};

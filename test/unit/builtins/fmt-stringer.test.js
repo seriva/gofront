@@ -475,7 +475,9 @@ ${body}
 		`//gofront:target both\n${src}\nfunc main() { fmt.Print(Main()) }`,
 	);
 	assertEqual(both.errors.length, 0, both.errors.join("\n"));
-	assertEqual(runJs(both.js), jsRes);
+	// fmt.Print writes through os.Stdout, which a captured console sees as
+	// whole lines: a final newline is the line end.
+	assertEqual(runJs(both.js), jsRes.replace(/\n$/, ""));
 	return jsRes;
 }
 
@@ -851,6 +853,51 @@ F! U!S!
 COL COL
 1.5 2
 C<5>
+`,
+	);
+});
+
+section("fmt Stringer: package-level initialisers and registered types");
+
+test("a package-level initialiser prints values held in interfaces", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func (p *P) String() string { return "P*" }
+
+type Celsius float64
+
+func (c Celsius) String() string { return fmt.Sprintf("%.1f°C", float64(c)) }
+
+type V struct{ N int }
+
+func (v V) String() string { return "V" }
+
+type Q struct{ A, B int }
+
+var s = fmt.Sprint(P{1}, &P{2}, V{3}, &V{4}, []Celsius{1, 2})
+var t = fmt.Sprint(any(P{5}), any(&P{6}), any(Q{7, 8}), any([]Celsius{3}))
+
+func show(v any) string { return fmt.Sprint(v) }
+
+var u = show(Q{9, 10}) + show(&Q{1, 2}) + show(map[string]Q{"k": {1, 2}})
+
+func main() {
+	fmt.Println(s)
+	fmt.Println(t)
+	fmt.Println(u)
+	var c Celsius = 36.6
+	fmt.Println(c, &c, []*Celsius{&c}[0] == &c)
+}
+`,
+		`{1} P* V V [1.0°C 2.0°C]
+{5} P* {7 8} [3.0°C]
+{9 10}&{1 2}map[k:{1 2}]
+36.6°C 36.6°C true
 `,
 	);
 });

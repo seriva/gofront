@@ -6,6 +6,7 @@ import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
 import { NATIVES } from "../../../src/typechecker/types.js";
 import {
 	assertEqual,
+	assertErrorContains,
 	assertThrows,
 	compileHybrid,
 	compileHybridProject,
@@ -1988,9 +1989,7 @@ func Main() string {
 });
 
 test("a stdlib member that cannot be a value names itself in the error", () => {
-	assertThrows(
-		() =>
-			compileWasm(`
+	const { errors } = compileWasm(`
 package main
 
 import "fmt"
@@ -2000,9 +1999,8 @@ func Main() int {
 	_ = f
 	return 1
 }
-`),
-		"fmt.Fprintf cannot be used as a value",
-	);
+`);
+	assertErrorContains(errors, "fmt.Fprintf cannot be used as a value");
 });
 
 section("WASM stdlib — native call sites");

@@ -2460,9 +2460,8 @@ func main() {
 		l.includes('Object.defineProperty(Local.prototype, "value"'),
 	);
 	assert(at >= 0, "local struct class emitted");
-	assertEqual(
-		lines[at + 1],
-		'  console.log(__sprintf("%v", __ifv(new Local(1))));',
+	assert(
+		/^ {2}gff_main_Println_\d+\(new Local\(1\)\);$/.test(lines[at + 1]),
 		"the statement after the local struct follows directly",
 	);
 	assert(!js.includes("__json_enc"), "no json hook without encoding/json");

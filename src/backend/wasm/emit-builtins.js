@@ -1301,6 +1301,12 @@ export class BuiltinsEmitter {
 			if (targetFuncIdx !== null) {
 				const paramTypes = this.mod.getFuncParamTypes(func.name);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(func.name);
+				if (call._multiForward) {
+					// `f(g())`: g's results are f's arguments as they come.
+					this.emitExpr(args[0], null);
+					this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
+					return true;
+				}
 				for (let i = 0; i < args.length; i++) {
 					const arg = args[i];
 					const pType = paramTypes[i] ?? null;
