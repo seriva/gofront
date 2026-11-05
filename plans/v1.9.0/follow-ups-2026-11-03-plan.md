@@ -673,11 +673,11 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 27: Go-Source Stdlib Fixes and WASM Import Pruning
 
-- [ ] Task 27.1: `path.Match` rejects inverted character ranges and `/` inside character classes
+- [x] Task 27.1: `path.Match` rejects inverted character ranges and `/` inside character classes
   - Files: `stdlib/path/path.go`, `test/unit/stdlib/path.test.js`
   - Test: S12 `ok, err := path.Match("[z-a]", "b"); fmt.Println(ok, err == path.ErrBadPattern)` → `false true`; S13 `ok, err := path.Match("[/]", "/"); fmt.Println(ok, err)` → `false syntax error in pattern` on all targets.
   - Done when: both repros pass four ways (`assertFourWay`).
-  - BLOCKED: real Go 1.26 prints `false false` for S12 and `true <nil>` for S13 (no inverted-range or `/` class check in `path.Match`), so the stated want contradicts Go and the four-way tests; needs a plan decision before implementing.
+  - Dropped: real Go 1.26 gives `false false` for S12 and `true <nil>` for S13, so the stated wants were wrong; `path.Match` keeps Go's behaviour and the tests pin it.
 - [x] Task 27.2: `strconv.Unquote` preserves UTF-8 bytes in raw backtick strings with `\r`
   - Files: `stdlib/strconv/quote.go`, `test/unit/stdlib/strconv.test.js`
   - Test: S34 ``strconv.Unquote("`\ré`")`` → `"é" <nil>` on all targets (`assertFourWay`).
