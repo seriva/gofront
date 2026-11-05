@@ -1139,7 +1139,6 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 
 function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 	const progs = Array.isArray(programs) ? programs : [programs];
-	const hasStrings = importsAnyOf(progs, ["strings"]);
 
 	const BYTE_SLICE_T = {
 		kind: "slice",
@@ -1159,42 +1158,6 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 		...extra,
 	});
 
-	if (hasStrings && mod.structTypes.has("strings.Builder")) {
-		const bPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "strings.Builder" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"strings.Builder.Write",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"builder_write",
-				{
-					_isMethod: true,
-					_recvTypeName: "strings.Builder",
-					_methodName: "Write",
-				},
-			),
-			ioHelper(
-				"strings.Builder.WriteString",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "s", type: strType },
-				],
-				INT_ERR_RET,
-				"builder_write_string",
-				{
-					_isMethod: true,
-					_recvTypeName: "strings.Builder",
-					_methodName: "WriteString",
-				},
-			),
-		);
-	}
 	const hasOs = importsAnyOf(progs, ["os"]);
 	if (hasOs && mod.structTypes.has("os.File")) {
 		const fPtr = {

@@ -243,9 +243,13 @@ var __append = __append || function(a, ...b) {
       if (c > r.length) __tcap.set(r, c);
       return r;
     }
-    const res = new a.constructor(a.length + b.length);
+    // Grow with spare capacity so repeated appends cost O(1) amortized.
+    const n = a.length + b.length;
+    const cap = Math.max(n, a.length * 2);
+    const res = new a.constructor(new a.constructor(cap).buffer, 0, n);
     res.set(a);
     res.set(b, a.length);
+    __tcap.set(res, cap);
     return res;
   }
   const s = a ? a[__sv] : undefined;
@@ -336,25 +340,8 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   }
   return c;
 };
-var __builder_proto = __builder_proto || {
-  Write(d) {
-    this._buf += new TextDecoder().decode(new Uint8Array(d));
-    return [d.length, null];
-  },
-  WriteString(s) {
-    this._buf += s;
-    return [new TextEncoder().encode(s).length, null];
-  },
-  String() {
-    return this._buf;
-  },
-  Reset() {
-    this._buf = "";
-  }
-};
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
-  if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
   if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {

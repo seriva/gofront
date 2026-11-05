@@ -154,15 +154,15 @@ Finish shrinking the Node.js compiler (`src/`) before the self-hosted Go port (`
 
 ### Phase 2: Move `strings.Builder` to `stdlib/strings/builder.go`
 
-- [ ] Task 2.1: Amortize `Uint8Array` growth in JS `HELPER_APPEND` and implement `strings.Builder` in `stdlib/strings/builder.go`
+- [x] Task 2.1: Amortize `Uint8Array` growth in JS `HELPER_APPEND` and implement `strings.Builder` in `stdlib/strings/builder.go`
   - Files: `src/backend/js/runtime.js`, `stdlib/strings/builder.go`, `test/unit/stdlib/strings-bytes.test.js`
   - Test: `test/unit/stdlib/strings-bytes.test.js`
   - Done when: `stdlib/strings/builder.go` implements `Builder` (`Write`, `WriteByte`, `WriteRune`, `WriteString`, `String`, `Len`, `Cap`, `Grow`, `Reset`, and `copyCheck()` panic on copy-by-value) and `HELPER_APPEND` amortizes `Uint8Array` growth via `__tcap`.
-- [ ] Task 2.2: Remove JS `strings.Builder` emitter shim and runtime prototype
+- [x] Task 2.2: Remove JS `strings.Builder` emitter shim and runtime prototype
   - Files: `src/backend/js/stdlib/builder.js` (delete), `src/backend/js/stdlib/index.js`, `src/backend/js/stdlib/fmt.js`, `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `src/backend/js/index.js`
   - Test: `test/unit/stdlib/strings-bytes.test.js`, `test/unit/stdlib/fmt.test.js`
   - Done when: `src/backend/js/stdlib/builder.js` and `__builder_proto` are deleted and all JS `strings.Builder` and `fmt.Fprint(&builder, ...)` tests compile through `stdlib/strings/builder.go`.
-- [ ] Task 2.3: Remove WASM `strings.Builder` emitters, synthetic methods, and `strings` typechecker overlay
+- [x] Task 2.3: Remove WASM `strings.Builder` emitters, synthetic methods, and `strings` typechecker overlay
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/stdlib/io.js`, `src/backend/wasm/index.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/types.js`, `src/backend/wasm/module-emitter.js`, `src/typechecker/stdlib/core.js`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `test/unit/compiler/natives.test.js`
   - Test: `test/unit/stdlib/strings-bytes.test.js`, `test/unit/compiler/natives.test.js`
   - Done when: All WASM `strings.Builder` special cases (~680 lines) and the `"strings"` overlay entry in `STDLIB_PACKAGES` / `WASM_STDLIB_MEMBERS` are deleted, and `strings.Builder` passes `assertFourWay` in `test/unit/compiler/natives.test.js` and `test/unit/stdlib/strings-bytes.test.js` (including exported structs containing a `strings.Builder` field across the WASM boundary).

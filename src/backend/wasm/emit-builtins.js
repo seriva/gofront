@@ -1162,21 +1162,6 @@ export class BuiltinsEmitter {
 					recvType?.simd === "Mask32x4",
 			);
 		}
-		if (
-			this._emitStdlibReceiverMethod(
-				recvTypeName,
-				func.field,
-				func.expr,
-				args,
-				targetWasmType,
-			)
-		) {
-			return true;
-		}
-		if (recvTypeName === "strings.Builder") {
-			this.emitBuilderMethodCall(func.field, func.expr, args);
-			return true;
-		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
 			const ifaceName = recvTypeName ?? anonIfaceName(recvType);
 			const dispatchName = `__dispatch_${ifaceName}_${func.field}`;
@@ -1268,20 +1253,6 @@ export class BuiltinsEmitter {
 			operand: func.expr,
 			_type: { kind: "pointer", base: t },
 		};
-	}
-
-	_emitStdlibReceiverMethod(
-		recvTypeName,
-		field,
-		expr,
-		args,
-		targetWasmType = null,
-	) {
-		if (recvTypeName === "strings.Builder") {
-			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		return false;
 	}
 
 	// The embedded struct (possibly several levels down) that declares or

@@ -1,10 +1,9 @@
 // Extended standard library type definitions — gom, maps, regexp, rand, utf8,
-// path, strings.Builder type, and built-in functions.
+// path, and built-in functions.
 
 import {
 	ANY,
 	BOOL,
-	BYTE,
 	ERROR,
 	FLOAT64,
 	INT,
@@ -217,34 +216,6 @@ export function setupExtendedGlobals(globals, types) {
 	});
 
 	const BYTE_SLICE_T = { kind: "slice", elem: UINT8 };
-	const _builderBase = [
-		["WriteString", { kind: "func", params: [STRING], returns: [INT, ERROR] }],
-		["WriteByte", { kind: "func", params: [BYTE], returns: [ERROR] }],
-		["Write", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
-		["String", { kind: "func", params: [], returns: [STRING] }],
-		["Len", { kind: "func", params: [], returns: [INT] }],
-		["Cap", { kind: "func", params: [], returns: [INT] }],
-		["Reset", { kind: "func", params: [], returns: [VOID] }],
-		["Grow", { kind: "func", params: [INT], returns: [VOID] }],
-	];
-	const STR_SLICE_T = { kind: "slice", elem: STRING };
-	const _makeBuilderType = (name, extra = []) => ({
-		kind: "named",
-		name,
-		underlying: {
-			kind: "struct",
-			fields: new Map(
-				name === "strings.Builder"
-					? [
-							["_buf", STR_SLICE_T],
-							["_len", INT],
-							["_self", ANY],
-						]
-					: [],
-			),
-			methods: new Map([..._builderBase, ...extra]),
-		},
-	});
 	const IO_WRITER = {
 		kind: "interface",
 		name: "io.Writer",
@@ -256,12 +227,6 @@ export function setupExtendedGlobals(globals, types) {
 		]),
 	};
 
-	types.set(
-		"strings.Builder",
-		_makeBuilderType("strings.Builder", [
-			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
-		]),
-	);
 	// crypto/rand; math/rand is Go source (stdlib/math/rand).
 	globals.define("rand", {
 		kind: "namespace",
