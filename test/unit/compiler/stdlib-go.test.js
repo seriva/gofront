@@ -150,25 +150,25 @@ func Run() string {
 test("an overlay that redeclares an emitter member is rejected", () => {
 	withTempDir(
 		{
-			"stdlib/unicode/overlay.go": `//go:build gofront
+			"stdlib/time/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package unicode
+package time
 
-func IsLetter(r rune) bool { return false }
+func Sleep(d Duration) {}
 `,
 			"app/main.go": `package main
 
-import "unicode"
+import "time"
 
-func main() { println(unicode.IsLetter('x')) }
+func main() { time.Sleep(0) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares unicode.IsLetter",
+				"overlay redeclares time.Sleep",
 			);
 		},
 	);
@@ -374,12 +374,12 @@ func main() { println(u.C(1, 2), w.Run()) }
 test("an aliased overlay import is rejected at the import", () => {
 	withTempDir(
 		{
-			"main.go": `package main\n\nimport u "unicode"\n\nfunc main() { println(u.IsLetter('x')) }\n`,
+			"main.go": `package main\n\nimport t "time"\n\nfunc main() { println(t.Now().Year()) }\n`,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(dir),
-				"import alias for 'unicode' is not supported",
+				"import alias for 'time' is not supported",
 			);
 		},
 	);

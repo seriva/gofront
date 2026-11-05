@@ -19,6 +19,11 @@ const isExportedName = (n) => /^\p{Lu}/u.test(n);
 // &x tagged the same object (see isPointer in __sprintf).
 const FMT_STRUCT_VALUE = "{ sv: 1 }";
 
+// Print and Printf write the formatted text without a trailing newline.
+function stdoutWrite(strJs) {
+	return `((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))(${strJs})`;
+}
+
 /** @type {ThisType<CodeGen>} */
 export const fmtMethods = {
 	// ── Stringer/error dispatch metadata (read by __sprintf) ─────────────
@@ -391,11 +396,11 @@ export const fmtMethods = {
 			}
 			case "Printf":
 				this.useHelper("sprintf");
-				return this._genStdoutWrite(`__sprintf(${fmtArgs})`);
+				return stdoutWrite(`__sprintf(${fmtArgs})`);
 			case "Print":
 				this.useHelper("sprintf");
 				this.useHelper("sprint");
-				return this._genStdoutWrite(
+				return stdoutWrite(
 					`__sprint(false${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`,
 				);
 			case "Println":
@@ -437,10 +442,6 @@ export const fmtMethods = {
 			parts.join(", "),
 		);
 		return `((__t) => ((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(__t[0], ${sprintfCall}))(${this.genExpr(call)})`;
-	},
-
-	_genStdoutWrite(strJs) {
-		return `((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))(${strJs})`;
 	},
 
 	// Formats Print/Println operands with %v so the first operand is never

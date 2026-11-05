@@ -32,13 +32,17 @@ import {
 	isComplex,
 	isNumeric,
 } from "../../typechecker/types.js";
+import {
+	unicodeIsJs,
+	unicodeToLowerJs,
+	unicodeToUpperJs,
+} from "../shared/host-unicode.js";
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
-	HELPER_CRYPTO_RAND,
 	HELPER_EQUAL,
 	HELPER_ERROR,
 	HELPER_GENERICS,
@@ -47,14 +51,12 @@ import {
 	HELPER_IFD,
 	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
-	HELPER_IO_EOF,
 	HELPER_JSONRT,
 	HELPER_LEN,
 	HELPER_MKLEN,
 	HELPER_NIL_CALL,
 	HELPER_NIL_MAP,
 	HELPER_NM,
-	HELPER_OS,
 	HELPER_PANIC,
 	HELPER_PTREQ,
 	HELPER_PUSHS,
@@ -164,11 +166,8 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
-	["ioEOF", HELPER_IO_EOF],
-	["os", HELPER_OS],
 	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
-	["cryptoRand", HELPER_CRYPTO_RAND],
 	["jsonrt", HELPER_JSONRT],
 	["simd", HELPER_SIMD],
 ];
@@ -181,6 +180,21 @@ const JS_INTRINSICS = {
 		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
 	time_zone_offset: ([unix]) =>
 		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
+	// os: node writes straight to the stream; other hosts print whole lines
+	// (console.log adds the newline), buffering the partial line.
+	os_write: ([fd, s]) =>
+		`if (typeof process !== "undefined" && process?.stdout?.write) { process.stdout.write(${s}); return; } let b = (globalThis.__os_buf ?? "") + ${s}; const nl = b.lastIndexOf("\\n"); if (nl >= 0) { (${fd} === 2 && typeof console.error === "function" ? console.error : console.log)(b.slice(0, nl)); b = b.slice(nl + 1); } globalThis.__os_buf = b;`,
+	os_exit: ([code]) =>
+		`if (typeof process !== "undefined" && process?.exit) process.exit(${code}); throw new Error("os.Exit(" + ${code} + ")");`,
+	os_getenv: ([key]) =>
+		`return (typeof process !== "undefined" && process?.env ? process.env : (globalThis.__os_env ??= {}))[${key}] ?? "";`,
+	os_setenv: ([key, value]) =>
+		`(typeof process !== "undefined" && process?.env ? process.env : (globalThis.__os_env ??= {}))[${key}] = ${value};`,
+	unicode_is: ([r, class_]) => unicodeIsJs(r, class_),
+	unicode_to_upper: ([r]) => unicodeToUpperJs(r),
+	unicode_to_lower: ([r]) => unicodeToLowerJs(r),
+	crypto_rand_u32: () =>
+		'const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto; if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0]; return Math.floor(Math.random() * 4294967296);',
 	math_float64bits: ([f]) =>
 		`const $b = new ArrayBuffer(8); new Float64Array($b)[0] = ${f}; return new BigUint64Array($b)[0];`,
 	math_float64frombits: ([u]) =>
@@ -598,11 +612,7 @@ export class CodeGen {
 		this._helpers.add(name);
 		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
 		if (name === "geq") this._helpers.add("ifeq");
-		if (name === "ioEOF" || name === "json") {
-			this._helpers.add("error");
-		}
-		if (name === "os") {
-			this.useHelper("ioEOF");
+		if (name === "json") {
 			this._helpers.add("error");
 		}
 		if (name === "panicRt") this._helpers.add("error");

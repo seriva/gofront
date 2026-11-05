@@ -100,7 +100,7 @@ Coverage of the Go standard library, per package. Anything not listed here is no
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
 | `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
 | `math/rand` | js, wasm, both | Top-level functions draw from the host; `New(NewSource(seed))` repeats for a seed but not in Go's sequence |
-| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
+| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`, `Exit`, `Getenv`, `Setenv`, `Args` (always empty) |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
 | `regexp` | js | Backed by the JS `RegExp` engine |
 | `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
@@ -132,7 +132,7 @@ Notable members and behaviour per package, including GoFront's own packages:
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
 | `unicode`, `utf8` | `unicode`: `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower`, `ToTitle`, `SimpleFold`. Range tables (`RangeTable`, `unicode.Is`, `unicode.In`, the category tables) are not supported. `unicode/utf8`: `RuneCount*`, `RuneLen`, `RuneStart`, `Valid*`, `DecodeRune*`, `DecodeLastRune*`, `EncodeRune`, `AppendRune`, `FullRune*`, constants. The `*InString` functions decode code points but report widths in UTF-16 code units, so `s = s[size:]` walks a string; byte widths come from the `[]byte` functions. |
 | `path`, `path/filepath` | `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` |
-| `os` | `Stdout`, `Stderr`, `Stdin` (`both` and `wasm` packages); `Exit`, `Args`, `Getenv` (`js` packages) |
+| `os` | `File` (`Write`, `WriteString`, `Read`, `Close`), `Stdout`, `Stderr`, `Stdin`, `Exit`, `Getenv`, `Setenv`, `Args` (always empty); `Stdin` is always at end of input |
 | `io` | `Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadCloser`, `WriteCloser`, `ReadWriteCloser`, `Seeker`, `ReadSeeker`, `WriteSeeker`, `ReadWriteSeeker`, `ReaderFrom`, `WriterTo`, `ReaderAt`, `WriterAt`, `ByteReader`, `ByteScanner`, `ByteWriter`, `RuneReader`, `RuneScanner`, `StringWriter`; `ReadAll`, `ReadFull`, `ReadAtLeast`, `WriteString`, `Copy`, `CopyN`, `CopyBuffer`, `LimitReader`, `NewSectionReader`, `TeeReader`, `MultiReader`, `MultiWriter`, `NopCloser`, `Discard`, `EOF`, `ErrUnexpectedEOF`, `ErrShortWrite`, `ErrShortBuffer`, `ErrNoProgress`, `SeekStart`, `SeekCurrent`, `SeekEnd`; `LimitedReader`, `SectionReader`. `fmt.Fprint*` accepts any value with a `Write([]byte) (int, error)` method. |
 | `sync` | `Locker`, `Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`; no `sync.Cond` |
 | `hash`, `crypto/*` | `hash`: `Hash`, `Hash32`, `Hash64`. `crypto/rand`: `Reader`, `Read`. `crypto/sha256`: `New`, `New224`, `Sum256`, `Sum224`, `Size`, `Size224`, `BlockSize`; the digest is a `hash.Hash` |

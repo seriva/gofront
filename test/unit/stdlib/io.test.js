@@ -187,3 +187,76 @@ import "io"
 func main() { var r io.Reader = 5; _ = r }`);
 	assertErrorContains(errors, "does not implement io.Reader");
 });
+
+section("os (Go-source)");
+
+test("File writes report bytes and dispatch through io.Writer", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func main() {
+	n, err := os.Stdout.WriteString("é\\n")
+	fmt.Println(n, err)
+	n, err = os.Stdout.Write([]byte("héllo\\n"))
+	fmt.Println(n, err)
+	var w io.Writer = os.Stdout
+	n, err = w.Write([]byte("w\\n"))
+	fmt.Println(n, err)
+	fmt.Fprintf(os.Stdout, "%d-%s\\n", 7, "x")
+	n, err = os.Stdin.Read(make([]byte, 4))
+	fmt.Println(n, err == io.EOF)
+	os.Setenv("GF_TEST_VAR", "42")
+	fmt.Println(os.Getenv("GF_TEST_VAR"), os.Getenv("GF_UNSET_VAR") == "")
+	os.Setenv("GF_TEST_VAR", "")
+	fmt.Println(os.Getenv("GF_TEST_VAR") == "")
+	io.WriteString(os.Stdout, "ws\\n")
+}
+`,
+		`é
+3 <nil>
+héllo
+7 <nil>
+w
+2 <nil>
+7-x
+0 true
+42 true
+true
+ws
+`,
+	);
+});
+
+test("os.Stderr is an io.WriteCloser and Args is empty", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+func main() {
+	var w io.WriteCloser = os.Stderr
+	n, err := w.Write(nil)
+	fmt.Println(n, err)
+	n, err = os.Stderr.WriteString("")
+	fmt.Println(n, err)
+	fmt.Println(w.Close())
+	fmt.Println(len(os.Args))
+}
+`,
+		`0 <nil>
+0 <nil>
+<nil>
+0
+`,
+	);
+});

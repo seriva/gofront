@@ -29,26 +29,12 @@ const ERROR_PRODUCING_PKGS = new Set([
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
 // declare the imports and ship that JS block.
-const STDLIB_ENV_PKGS = new Set([
-	"strings",
-	"fmt",
-	"testing",
-	"unicode",
-	"io",
-	"os",
-	"time",
-	"crypto/rand",
-	"rand",
-]);
+const STDLIB_ENV_PKGS = new Set(["strings", "fmt", "testing", "io", "time"]);
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
 // side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
 // (when any STDLIB_ENV_PKGS package is imported) because the import table is
 // locked before function bodies are emitted.
-// Emitter-backed types whose interface methods are registered as synthetic
-// functions (see _registerIoSyntheticMethods in index.js).
-const SYNTHETIC_METHOD_TYPES = new Set(["os.File"]);
-
 const S = "externref";
 const STDLIB_IMPORTS = [
 	// fmt (arguments travel through the testing_arg_* buffer)
@@ -56,7 +42,6 @@ const STDLIB_IMPORTS = [
 	["fmt_printf", [S], []],
 	["fmt_sprint", ["i32"], [S]],
 	["fmt_print", ["i32"], []],
-	["fmt_print_raw", [S], []],
 	["fmt_format_v", [S], [S]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
@@ -65,31 +50,12 @@ const STDLIB_IMPORTS = [
 	["testing_elapsed", [S], ["i64"]],
 	["testing_context", [S], [S]],
 	["testing_output", [S], [S]],
-	// unicode
-	["unicode_is_letter", ["i32"], ["i32"]],
-	["unicode_is_digit", ["i32"], ["i32"]],
-	["unicode_is_space", ["i32"], ["i32"]],
-	["unicode_is_upper", ["i32"], ["i32"]],
-	["unicode_is_lower", ["i32"], ["i32"]],
-	["unicode_is_punct", ["i32"], ["i32"]],
-	["unicode_is_control", ["i32"], ["i32"]],
-	["unicode_is_print", ["i32"], ["i32"]],
-	["unicode_is_graphic", ["i32"], ["i32"]],
-	["unicode_to_upper", ["i32"], ["i32"]],
-	["unicode_to_lower", ["i32"], ["i32"]],
 	["bytes_trim", [S, S, "i32", "i32"], []],
 	["bytes_trim_start", [], ["i32"]],
 	["bytes_trim_end", [], ["i32"]],
 	// time
 	["time_now_ms", [], ["f64"]],
 	["time_timezone_offset", ["f64"], ["i32"]],
-	// raw binary buffer for crypto/rand
-	["raw_bytes_init", ["i32"], []],
-	["raw_bytes_push", ["i32"], []],
-	["raw_bytes_len", [], ["i32"]],
-	["raw_bytes_get", ["i32"], ["i32"]],
-	// crypto/rand
-	["crypto_rand_fill", ["i32"], ["i32"]],
 ];
 
 export class ModuleEmitter {
@@ -1074,19 +1040,6 @@ export class ModuleEmitter {
 		return gIdx;
 	}
 
-	getOsGlobalIndex(field) {
-		this.osGlobals ??= new Map();
-		if (this.osGlobals.has(field)) return this.osGlobals.get(field);
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.osGlobals.set(field, gIdx);
-		return gIdx;
-	}
-
 	getDeferNodeTypeIndex() {
 		if (this.deferNodeTypeIndex !== undefined) {
 			return this.deferNodeTypeIndex;
@@ -1911,16 +1864,6 @@ export class ModuleEmitter {
 		});
 	}
 
-	// An emitter-backed type declares more methods than it dispatches: only
-	// those with a synthetic method implement an interface.
-	_structsDispatching(iface) {
-		const dispatches = (sName) =>
-			!SYNTHETIC_METHOD_TYPES.has(sName) ||
-			!iface?.methods ||
-			[...iface.methods.keys()].every((m) => this.funcMap.has(`${sName}.${m}`));
-		return [...this.structTypes.entries()].filter(([n]) => dispatches(n));
-	}
-
 	getTypesImplementingInterface(ifaceType) {
 		const candidates = [];
 		const seen = new Set();
@@ -1930,7 +1873,7 @@ export class ModuleEmitter {
 			) ?? ifaceType;
 
 		// 1. Struct types
-		for (const [sName, sInfo] of this._structsDispatching(ifaceResolved)) {
+		for (const [sName, sInfo] of this.structTypes.entries()) {
 			const namedType = this.checker?.types?.get(sName) ?? {
 				kind: "named",
 				name: sName,

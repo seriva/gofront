@@ -13,6 +13,144 @@ const (
 	Version         = "15.0.0"
 )
 
+// Classes of unicode_is, the host's answer for runes above ASCII.
+const (
+	classLetter = iota
+	classDigit
+	classSpace
+	classUpper
+	classLower
+	classPunct
+	classControl
+	classPrint
+	classGraphic
+)
+
+// hostIs reports whether the host's Unicode tables place r in the class.
+//
+//gofront:intrinsic unicode_is
+func hostIs(r rune, class int) bool
+
+// hostToUpper is the host's upper case mapping of r; a letter whose upper
+// case spans several code points stays as it is.
+//
+//gofront:intrinsic unicode_to_upper
+func hostToUpper(r rune) rune
+
+// hostToLower is the host's lower case mapping of r.
+//
+//gofront:intrinsic unicode_to_lower
+func hostToLower(r rune) rune
+
+func isValid(r rune) bool { return r >= 0 && r <= MaxRune }
+
+// IsLetter reports whether the rune is a letter (category L).
+func IsLetter(r rune) bool {
+	if r < 0x80 {
+		return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z'
+	}
+	return isValid(r) && hostIs(r, classLetter)
+}
+
+// IsDigit reports whether the rune is a decimal digit.
+func IsDigit(r rune) bool {
+	if r < 0x80 {
+		return '0' <= r && r <= '9'
+	}
+	return isValid(r) && hostIs(r, classDigit)
+}
+
+// IsSpace reports whether the rune is a space character as defined by
+// Unicode's White Space property.
+func IsSpace(r rune) bool {
+	if r < 0x80 {
+		return r == ' ' || '\t' <= r && r <= '\r'
+	}
+	return isValid(r) && hostIs(r, classSpace)
+}
+
+// IsUpper reports whether the rune is an upper case letter.
+func IsUpper(r rune) bool {
+	if r < 0x80 {
+		return 'A' <= r && r <= 'Z'
+	}
+	return isValid(r) && hostIs(r, classUpper)
+}
+
+// IsLower reports whether the rune is a lower case letter.
+func IsLower(r rune) bool {
+	if r < 0x80 {
+		return 'a' <= r && r <= 'z'
+	}
+	return isValid(r) && hostIs(r, classLower)
+}
+
+// IsPunct reports whether the rune is a Unicode punctuation character
+// (category P).
+func IsPunct(r rune) bool {
+	if r < 0x80 {
+		switch r {
+		case '!', '"', '#', '%', '&', '\'', '(', ')', '*', ',', '-', '.', '/',
+			':', ';', '?', '@', '[', '\\', ']', '_', '{', '}':
+			return true
+		}
+		return false
+	}
+	return isValid(r) && hostIs(r, classPunct)
+}
+
+// IsControl reports whether the rune is a control character.
+func IsControl(r rune) bool {
+	if r < 0x80 {
+		return r >= 0 && r < ' ' || r == 0x7F
+	}
+	return isValid(r) && hostIs(r, classControl)
+}
+
+// IsPrint reports whether the rune is printable.
+func IsPrint(r rune) bool {
+	if r < 0x80 {
+		return ' ' <= r && r <= '~'
+	}
+	return isValid(r) && hostIs(r, classPrint)
+}
+
+// IsGraphic reports whether the rune is a graphic character.
+func IsGraphic(r rune) bool {
+	if r < 0x80 {
+		return ' ' <= r && r <= '~'
+	}
+	return isValid(r) && hostIs(r, classGraphic)
+}
+
+// ToUpper maps the rune to upper case.
+func ToUpper(r rune) rune {
+	if r < 0x80 {
+		if 'a' <= r && r <= 'z' {
+			return r - ('a' - 'A')
+		}
+		return r
+	}
+	if !isValid(r) {
+		return r
+	}
+	return hostToUpper(r)
+}
+
+// ToLower maps the rune to lower case.
+func ToLower(r rune) rune {
+	if r < 0x80 {
+		if 'A' <= r && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}
+	if !isValid(r) {
+		return r
+	}
+	return hostToLower(r)
+}
+
 // ToTitle maps the rune to title case.
 func ToTitle(r rune) rune {
 	if r <= MaxASCII {
@@ -34,7 +172,7 @@ func ToTitle(r rune) rune {
 	if 0x10D0 <= r && r <= 0x10FF {
 		return r
 	}
-	return rune(ToUpper(int(r)))
+	return ToUpper(r)
 }
 
 type foldPair struct {
@@ -105,8 +243,8 @@ func SimpleFold(r rune) rune {
 	if lo < len(caseOrbit) && rune(caseOrbit[lo].From) == r {
 		return rune(caseOrbit[lo].To)
 	}
-	if l := rune(ToLower(int(r))); l != r {
+	if l := ToLower(r); l != r {
 		return l
 	}
-	return rune(ToUpper(int(r)))
+	return ToUpper(r)
 }
