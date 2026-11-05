@@ -2137,7 +2137,12 @@ function ${P}u8enc(s) {
 // the host's mapping, as unicode.ToUpper/ToLower do; ASCII text maps whole.
 function ${P}mapCase(s, method) {
 	if (/^[\\x00-\\x7f]*$/.test(s)) return s[method]();
-	return Array.from(s, (c) => String.fromCodePoint(c[method]().codePointAt(0))).join("");
+	return Array.from(s, (c) => {
+		const m = c[method]();
+		const r = String.fromCodePoint(m.codePointAt(0));
+		// A letter whose upper case spans several code points (ß) stays as is.
+		return method === "toUpperCase" && m.length > r.length ? c : r;
+	}).join("");
 }
 // Code-point-aware Trim/TrimLeft/TrimRight of strings.
 function ${P}trim(s, cutset, left, right) {
@@ -2326,7 +2331,7 @@ function ${P}stdlib_str(stringTable, io) {
 		"unicode_is_control": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Cc}/u.test(c)) ? 1 : 0; },
 		"unicode_is_print": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
 		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toUpperCase().codePointAt(0) ?? r) : r; },
+		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; if (!c) return r; const m = c.toUpperCase(); const u = m.codePointAt(0); return m.length > (u > 0xffff ? 2 : 1) ? r : u; },
 		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
 	};
 }
