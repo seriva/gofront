@@ -677,15 +677,16 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `stdlib/path/path.go`, `test/unit/stdlib/path.test.js`
   - Test: S12 `ok, err := path.Match("[z-a]", "b"); fmt.Println(ok, err == path.ErrBadPattern)` → `false true`; S13 `ok, err := path.Match("[/]", "/"); fmt.Println(ok, err)` → `false syntax error in pattern` on all targets.
   - Done when: both repros pass four ways (`assertFourWay`).
-- [ ] Task 27.2: `strconv.Unquote` preserves UTF-8 bytes in raw backtick strings with `\r`
+  - BLOCKED: real Go 1.26 prints `false false` for S12 and `true <nil>` for S13 (no inverted-range or `/` class check in `path.Match`), so the stated want contradicts Go and the four-way tests; needs a plan decision before implementing.
+- [x] Task 27.2: `strconv.Unquote` preserves UTF-8 bytes in raw backtick strings with `\r`
   - Files: `stdlib/strconv/quote.go`, `test/unit/stdlib/strconv.test.js`
   - Test: S34 ``strconv.Unquote("`\ré`")`` → `"é" <nil>` on all targets (`assertFourWay`).
   - Done when: repro passes four ways.
-- [ ] Task 27.3: `unicode.ToUpper`/`ToLower` and `strings.ToUpper`/`ToLower` preserve single-rune behavior on `ß`
+- [x] Task 27.3: `unicode.ToUpper`/`ToLower` and `strings.ToUpper`/`ToLower` preserve single-rune behavior on `ß`
   - Files: `src/backend/js/natives.js`, `src/backend/wasm/boundary.js`, `test/unit/stdlib/strings.test.js`
   - Test: S18 `fmt.Println(strings.ToUpper("ß"))` → `ß` and `unicode.ToUpper('ß')` → `'ß'` on all targets (`assertFourWay`).
   - Done when: repro passes four ways.
-- [ ] Task 27.4: Prune unreachable stdlib `env.*` imports in WASM modules (`bytes.Buffer` size <= 4,500 B)
+- [x] Task 27.4: Prune unreachable stdlib `env.*` imports in WASM modules (`bytes.Buffer` size <= 4,500 B)
   - Files: `src/backend/wasm/prescan.js`, `src/backend/wasm/module-emitter.js`, `test/unit/stdlib/bytes.test.js`
   - Test: S17 `compileWasm` of `package main; import "bytes"; func main() { var b bytes.Buffer; b.WriteString("hi"); _ = b.Len() }` produces `wasm.length <= 4500`.
   - Done when: `wasm.length <= 4500` and all WASM stdlib tests pass.

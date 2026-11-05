@@ -36,6 +36,7 @@ import {
 	_usesTestingRun,
 	importsAnyOf,
 } from "./prescan.js";
+import { pruneUnusedFuncs } from "./prune-funcs.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
@@ -1028,6 +1029,7 @@ export function compileWasmModule(
 		sourceMappingURL: options.sourceMappingURL ?? null,
 	};
 
+	pruneUnusedFuncs(moduleIR);
 	const wasmBytes = encodeModule(moduleIR);
 	const watText = options.emitWat ? emitWat(moduleIR) : null;
 
