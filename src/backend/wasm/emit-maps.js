@@ -8,7 +8,6 @@ import {
 	isComplex64,
 	isInterfaceType,
 	isPointerToStruct,
-	isSigned,
 	isStringType,
 	toWasmType,
 } from "./types.js";

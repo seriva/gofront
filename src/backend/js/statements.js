@@ -8,7 +8,6 @@ import {
 	isSimpleIntRange,
 	isStringRangeType,
 	loopVarsCapturedInLoop,
-	nodeAssigns,
 	someChild,
 } from "../../lower/index.js";
 import {
