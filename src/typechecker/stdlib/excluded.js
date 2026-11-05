@@ -155,7 +155,7 @@ const TRIMMED_UNICODE_TABLES =
 const TRIMMED_UNICODE_CASE =
 	"removed in v1.8.0; case ranges are not supported, use ToUpper, ToLower or ToTitle";
 const TRIMMED_FSCAN =
-	"removed in v1.8.0; scanning from an io.Reader is not supported, use fmt.Sscan on the text";
+	"removed in v1.8.0; scanning from an io.Reader is not supported, parse the text with strings and strconv";
 
 // reason -> package path -> excluded member names
 const EXCLUDED_MEMBER_GROUPS = {
@@ -188,6 +188,14 @@ const EXCLUDED_MEMBER_GROUPS = {
 	[TRIMMED_FSCAN]: {
 		fmt: ["Fscan", "Fscanf", "Fscanln"],
 	},
+	"removed in v1.9.0; reflection-based binary encoding is not supported, use binary.LittleEndian or binary.BigEndian methods (Uint32, PutUint32, AppendUint32, ...)":
+		{
+			"encoding/binary": ["Read", "Write", "Size"],
+		},
+	"removed in v1.9.0; format-string scanning is not supported, use strings.Fields with strconv.Atoi, ParseFloat or ParseBool":
+		{
+			fmt: ["Sscan", "Sscanf", "Sscanln"],
+		},
 	"removed in v1.8.0; this function is not supported": {
 		math: ["Gamma", "Erf"],
 	},

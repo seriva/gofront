@@ -105,24 +105,6 @@ export function setupCoreGlobals(globals, types) {
 				returns: [INT, ERROR],
 				variadic: true,
 			},
-			Sscan: {
-				kind: "func",
-				params: [STRING, ANY],
-				returns: [INT, ERROR],
-				variadic: true,
-			},
-			Sscanln: {
-				kind: "func",
-				params: [STRING, ANY],
-				returns: [INT, ERROR],
-				variadic: true,
-			},
-			Sscanf: {
-				kind: "func",
-				params: [STRING, STRING, ANY],
-				returns: [INT, ERROR],
-				variadic: true,
-			},
 		},
 	});
 

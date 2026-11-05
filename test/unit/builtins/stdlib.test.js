@@ -2464,53 +2464,10 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
-// fmt scanning (Feature 11)
+// strings (Feature 11)
 // ═════════════════════════════════════════════════════════════
 
-section("fmt scanning");
-
-test("fmt.Sscan parses integers", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	var a int
-	var b int
-	n, err := fmt.Sscan("10 20", &a, &b)
-	console.log(n)
-	console.log(err == nil)
-	console.log(a)
-	console.log(b)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "2\ntrue\n10\n20");
-});
-
-test("fmt.Sscanf parses with format", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	var a int
-	var b int
-	n, err := fmt.Sscanf("10 20", "%d %d", &a, &b)
-	console.log(n)
-	console.log(err == nil)
-	console.log(a)
-	console.log(b)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "2\ntrue\n10\n20");
-});
-
-test("fmt.Sscanln parses a line", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	var s string
-	n, err := fmt.Sscanln("hello world", &s)
-	console.log(n)
-	console.log(err == nil)
-	console.log(s)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1\ntrue\nhello");
-});
+section("strings extras");
 
 test("strings.ToValidUTF8", () => {
 	const { js, errors } = compile(`package main

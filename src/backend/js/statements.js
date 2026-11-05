@@ -8,7 +8,6 @@ import {
 	isSimpleIntRange,
 	isStringRangeType,
 	loopVarsCapturedInLoop,
-	nodeAssigns,
 	someChild,
 } from "../../lower/index.js";
 import {
@@ -1551,11 +1550,6 @@ export const statementGenMethods = {
 		});
 		this.line("}");
 		this._loopDepth--;
-	},
-
-	// True when `node` contains an assignment or ++/-- targeting identifier `name`.
-	_nodeAssigns(node, name) {
-		return nodeAssigns(node, name);
 	},
 
 	_genStringRangeFor(stmt, iteree, isAssign) {
