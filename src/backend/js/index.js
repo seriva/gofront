@@ -22,8 +22,10 @@ import {
 	hasDirectRecover,
 	isReferenceType,
 	markInBoundsIndexes,
+	markRedundantNilChecks,
 	normalizeDefers,
 	scanAddressTaken,
+	takesElementAddress,
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
@@ -51,12 +53,14 @@ import {
 	HELPER_IO_EOF,
 	HELPER_JSON,
 	HELPER_LEN,
+	HELPER_MKLEN,
 	HELPER_NIL_CALL,
 	HELPER_NIL_MAP,
 	HELPER_NM,
 	HELPER_OS,
 	HELPER_PANIC,
 	HELPER_PTREQ,
+	HELPER_RUNESTR,
 	HELPER_S,
 	HELPER_SCLONE,
 	HELPER_SHIFT,
@@ -69,6 +73,7 @@ import {
 	HELPER_TESTING,
 	HELPER_TIMER,
 	HELPER_TO64,
+	HELPER_U8ENC,
 	HELPER_VA,
 	HELPER_VCLONE,
 } from "./runtime.js";
@@ -130,8 +135,11 @@ const jsBindingName = (n) =>
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
 const HELPER_MAP = [
 	["len", HELPER_LEN],
+	["u8enc", HELPER_U8ENC],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
+	["mklen", HELPER_MKLEN],
+	["runestr", HELPER_RUNESTR],
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
 	["sclone", HELPER_SCLONE],
@@ -314,7 +322,10 @@ export class CodeGen {
 		// `lower()`, the JS path here.
 		normalizeDefers(program);
 		// Strict mode: index checks the loop shape proves unnecessary are elided.
-		if (this.strict) markInBoundsIndexes(program);
+		if (this.strict) {
+			markInBoundsIndexes(program);
+			markRedundantNilChecks(program, (d) => comparesToNil(d.body, d.recvName));
+		}
 		if (program._filename) this._srcFileNames = [program._filename];
 		// Ensure _pkgName is set on all decls (generateAll sets it for
 		// multi-file; for single-file compiles we derive it from the AST).
@@ -326,6 +337,7 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
+		this._elemAddrTaken = takesElementAddress(program.decls);
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
@@ -450,6 +462,7 @@ export class CodeGen {
 		FuncLit: "_renameSignature",
 		TemplDecl: "_renameSignature",
 		TemplExpr: "_renameTemplExprNode",
+		TemplChildren: "_renameTemplExprNode",
 		TemplComponent: "_renameTemplExprNode",
 		TemplIf: "_renameTemplExprNode",
 		TemplSwitch: "_renameTemplExprNode",
@@ -557,6 +570,7 @@ export class CodeGen {
 			this.useHelper("ioEOF");
 			this._helpers.add("error");
 		}
+		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
 		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
@@ -605,8 +619,13 @@ export class CodeGen {
 	// Records a non-fatal diagnostic at `node` ("main.go at line 3:5: msg").
 	_warn(msg, node) {
 		const file = this._srcFileNames[this._currentSrcFileIdx ?? 0];
-		const line = node?.line ?? node?._line;
-		const at = line ? `at line ${line}:${node.col ?? node._col ?? 1}` : "";
+		// Binary and unary expressions carry no position of their own: use the
+		// leftmost operand that does.
+		let pos = node;
+		while (pos && !(pos.line ?? pos._line))
+			pos = pos.left ?? pos.operand ?? pos.expr;
+		const line = pos?.line ?? pos?._line;
+		const at = line ? `at line ${line}:${pos.col ?? pos._col ?? 1}` : "";
 		const loc = [file, at].filter(Boolean).join(" ");
 		this.warnings.push(loc ? `${loc}: ${msg}` : msg);
 	}
@@ -638,9 +657,12 @@ export class CodeGen {
 		let t = decl.type;
 		for (let depth = 0; depth < 16 && t; depth++) {
 			if (t.kind === "StructType") return t;
+			// `type S Base[int]`: the fields come from the checked type.
+			if (t.kind === "GenericTypeName" || t.kind === "InstantiationExpr")
+				return { kind: "StructType", fields: [] };
 			if (t.kind !== "TypeName" && t.kind !== "Ident") return null;
 			const next = this._typeDeclsByName?.get(t.name);
-			if (!next || next.isAlias) return null;
+			if (!next) return null;
 			t = next.type;
 		}
 		return null;
@@ -688,6 +710,7 @@ export class CodeGen {
 					);
 				}
 			}
+			this._tagMultiUnwrap(methodDecls);
 		});
 		this.line("}");
 		// Box for *T in an interface. It also proxies `.value` to the pointer, so
@@ -705,8 +728,18 @@ export class CodeGen {
 					`${m.name}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
 				);
 			}
+			this._tagMultiUnwrap(methodDecls);
 		});
 		this.line("}");
+	}
+
+	// `Unwrap() []error` on a box class is told apart from `Unwrap() error`
+	// in type tests, as on struct classes.
+	_tagMultiUnwrap(methodDecls) {
+		const unwrap = methodDecls.find(
+			(m) => m.name === "Unwrap" && m.returnType?.kind === "SliceType",
+		);
+		if (unwrap) this.line("static { this.prototype.Unwrap.__multi = true; }");
 	}
 
 	_namedBoxField(underlying) {
@@ -921,7 +954,25 @@ export class CodeGen {
 				`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
 			);
 		}
+		this._genValueMethodMeta(name, methodDecls);
 		this._genFmtClassMeta(name, methodDecls);
+	}
+
+	// Names of the value-receiver methods: a typed nil pointer in an interface
+	// panics when one is called (see __mknil).
+	_genValueMethodMeta(name, methodDecls) {
+		const vm = methodDecls.filter((m) => !m.recvPointer).map((m) => m.name);
+		if (vm.length > 0)
+			this.line(
+				`Object.defineProperty(${name}, "__vm", { value: ${JSON.stringify(vm)} });`,
+			);
+		// Pointer-receiver methods are outside the method set of a struct value
+		// held in an interface (see _ifaceMethodCheck).
+		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
+		if (pm.length > 0)
+			this.line(
+				`Object.defineProperty(${name}, "__pm", { value: ${JSON.stringify(pm)} });`,
+			);
 	}
 
 	_emitJsonCodecs() {
@@ -936,10 +987,10 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(method, embedName, valueEmbed = false) {
+	_embedStub(method, embedName, valueEmbed = false, fieldName = null) {
 		// The field is named after the type without its package suffix
-		// (`Mutex$$sync` is the field `Mutex`).
-		const field = embedName.replace(/\$\$.*$/, "");
+		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
+		const field = fieldName || embedName.replace(/\$\$.*$/, "");
 		// A named non-struct type is boxed: its methods are static, taking
 		// the value as the receiver.
 		if (valueEmbed)
@@ -968,7 +1019,12 @@ export class CodeGen {
 		for (const stub of stubs) {
 			this.blank();
 			this.line(
-				this._embedStub(stub.methodName, stub.embedName, stub.valueEmbed),
+				this._embedStub(
+					stub.methodName,
+					stub.embedName,
+					stub.valueEmbed,
+					stub.fieldName,
+				),
 			);
 		}
 	}
@@ -1242,46 +1298,59 @@ export class CodeGen {
 
 	genVarDecl(decl) {
 		for (const spec of decl.decls) {
-			if (spec.value) {
-				const paired = spec.value.length === spec.names.length;
-				const vals = spec.value.map((v, i) => {
-					const js = paired
-						? this._genDeclValue(spec.names[i], v)
-						: this.genExpr(v);
-					// Wrap numeric values assigned to complex-typed vars
-					if (
-						spec.type?.name === "complex128" ||
-						spec.type?.name === "complex64"
-					) {
-						if (
-							!isComplex(v._type) &&
-							(isNumeric(v._type) || v._type?.kind === "untyped")
-						) {
-							return `{ re: ${js}, im: 0 }`;
-						}
-					}
-					if (spec.type?.name === "int64" || spec.type?.name === "uint64") {
-						if (
-							v._type?.kind === "untyped" &&
-							!js.endsWith("n") &&
-							/^-?\d+$/.test(js)
-						) {
-							return `${js}n`;
-						}
-					}
-					return js;
-				});
-				this._emitVarBindings(spec.names, vals, paired);
-			} else {
-				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
-				for (const name of spec.names) {
-					if (name === "_") continue;
-					this._markOwnership(name, true);
-					const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
-					this.line(`let ${name} = ${val};`);
+			if (spec._commaOk) this._genDefineStmt(this._varSpecAsDefine(spec));
+			else if (spec.value) this._genVarSpecValues(spec);
+			else this._genVarSpecZero(spec);
+		}
+	}
+
+	_genVarSpecValues(spec) {
+		const paired = spec.value.length === spec.names.length;
+		const vals = spec.value.map((v, i) => {
+			const js = paired
+				? this._genDeclValue(spec.names[i], v)
+				: this.genExpr(v);
+			// Wrap numeric values assigned to complex-typed vars
+			if (spec.type?.name === "complex128" || spec.type?.name === "complex64") {
+				if (
+					!isComplex(v._type) &&
+					!v._asComplex &&
+					(isNumeric(v._type) || v._type?.kind === "untyped")
+				) {
+					return `{ re: ${js}, im: 0 }`;
 				}
 			}
+			if (spec.type?.name === "int64" || spec.type?.name === "uint64") {
+				if (
+					v._type?.kind === "untyped" &&
+					!js.endsWith("n") &&
+					/^-?\d+$/.test(js)
+				) {
+					return `${js}n`;
+				}
+			}
+			return js;
+		});
+		this._emitVarBindings(spec.names, vals, paired);
+	}
+
+	_genVarSpecZero(spec) {
+		const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
+		for (const name of spec.names) {
+			if (name === "_") continue;
+			this._markOwnership(name, true);
+			const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
+			this.line(`let ${name} = ${val};`);
 		}
+	}
+
+	// `var v, ok = m[k]` generates like `v, ok := m[k]`.
+	_varSpecAsDefine(spec) {
+		return {
+			kind: "DefineStmt",
+			lhs: spec.names.map((name) => ({ kind: "Ident", name })),
+			rhs: spec.value,
+		};
 	}
 
 	// `var a = v` / `var a, b = v1, v2` / `var a, b = f()`, boxing address-taken names.

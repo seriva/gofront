@@ -71,6 +71,30 @@ function typeSize(t) {
 	}
 }
 
+// Whether `t` mentions one of the type parameters `params` below its root.
+function nestsTypeParam(t, params) {
+	const mentions = (u) => {
+		switch (u?.kind) {
+			case "typeParam":
+				return params.includes(u);
+			case "pointer":
+				return mentions(u.base);
+			case "slice":
+			case "array":
+				return mentions(u.elem);
+			case "map":
+				return mentions(u.key) || mentions(u.value);
+			case "func":
+				return [...(u.params ?? []), ...(u.returns ?? [])].some(mentions);
+			case "named":
+				return (u.typeArgs ?? []).some(mentions);
+			default:
+				return false;
+		}
+	};
+	return t?.kind !== "typeParam" && mentions(t);
+}
+
 function instanceKey(t) {
 	switch (t?.kind) {
 		case "named":
@@ -133,13 +157,34 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
-			_structFields: type._structFields,
+			// The JSON codecs read the field types from here.
+			_structFields: type._structFields?.map((f) => ({
+				...f,
+				type: s.substituteType(f.type, map),
+			})),
 		};
 	},
 	interface: (s, type, map) => {
 		const methods = new Map();
 		for (const [k, v] of type.methods) methods.set(k, s.substituteType(v, map));
-		return { kind: "interface", name: type.name, methods };
+		const out = { kind: "interface", name: type.name, methods };
+		// The type set follows the substitution (`interface{ ~[]E }` with E=int).
+		if (type.unionConstraint)
+			out.unionConstraint = {
+				...type.unionConstraint,
+				terms: type.unionConstraint.terms.map((term) => ({
+					...term,
+					resolved: s.substituteType(
+						term.resolved ?? s.resolveTypeNode(term.type, type._unionScope),
+						map,
+					),
+				})),
+			};
+		if (type._typeSetEmbeds)
+			out._typeSetEmbeds = type._typeSetEmbeds.map((e) =>
+				s.substituteType(e, map),
+			);
+		return out;
 	},
 	named: (s, type, map) => {
 		// An instance of a generic type: re-instantiate with the substituted
@@ -218,6 +263,13 @@ export const resolveMethods = {
 				return this._resolveStructType(node, scope);
 			case "InterfaceType":
 				return this._resolveInterfaceType(node, scope);
+			case "UnaryExpr":
+				// `new(*T)`: the parser reads the pointer type as a dereference.
+				if (node.op !== "*") return ANY;
+				return {
+					kind: "pointer",
+					base: this.resolveTypeNode(node.operand, scope),
+				};
 			case "Ident":
 				return this.resolveTypeNode(
 					{ kind: "TypeName", name: node.name },
@@ -339,8 +391,11 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-		if (qualified) this.globals.lookup(sel.expr.name);
-		else if (name)
+		if (qualified) {
+			this.globals.lookup(sel.expr.name);
+			// `iter.Seq[int](f)`: the selector names the mangled stdlib type.
+			this._useQualifiedTypeName(sel, base);
+		} else if (name)
 			this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
@@ -454,7 +509,10 @@ export const resolveMethods = {
 			}
 		}
 		const result = { kind: "interface", methods };
-		if (node.unionConstraint) result.unionConstraint = node.unionConstraint;
+		if (node.unionConstraint) {
+			result.unionConstraint = node.unionConstraint;
+			result._unionScope = scope;
+		}
 		if (typeSetEmbeds.length > 0) result._typeSetEmbeds = typeSetEmbeds;
 		return result;
 	},
@@ -503,8 +561,15 @@ export const resolveMethods = {
 		// settles (`T[X]` containing `T[[]X]`), and doubling forms such as
 		// `T[Pair[X, X]]` blow up long before a depth limit is reached.
 		const top = generic._buildSizes[generic._buildSizes.length - 1];
+		// Inside a method of `G[T]`, `G[[]T]` makes every instance ask for a
+		// larger one, even if the method is never called.
+		const growsReceiver =
+			this._recvGeneric === generic &&
+			typeArgs.some((a) => nestsTypeParam(a, generic.typeParams));
 		if (
+			growsReceiver ||
 			building.length >= MAX_INSTANTIATION_DEPTH ||
+			(generic._syncDepth ?? 0) >= MAX_INSTANTIATION_DEPTH ||
 			(top !== undefined && size > top)
 		) {
 			if (!generic._cycleReported) {
@@ -559,13 +624,20 @@ export const resolveMethods = {
 		const methods = named.methods;
 		if (!methods || !named._instMap || named._syncing) return;
 		// A method signature that names the instance reaches this again.
+		// `func (s Stack[T]) Wrap() Stack[[]T]` makes every instance's methods
+		// ask for a larger instance: count the nesting to diagnose it.
 		named._syncing = true;
-		for (const [mName, mType] of generic.methods ?? [])
-			if (!methods.has(mName))
-				methods.set(mName, this.substituteType(mType, named._instMap));
-		// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
-		this._promoteEmbeddedInto(named.underlying);
-		named._syncing = false;
+		generic._syncDepth = (generic._syncDepth ?? 0) + 1;
+		try {
+			for (const [mName, mType] of generic.methods ?? [])
+				if (!methods.has(mName))
+					methods.set(mName, this.substituteType(mType, named._instMap));
+			// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
+			this._promoteEmbeddedInto(named.underlying);
+		} finally {
+			generic._syncDepth--;
+			named._syncing = false;
+		}
 	},
 
 	// A[X] for `type A[P any] = T`: resolve T with each P bound to the
@@ -658,6 +730,8 @@ export const resolveMethods = {
 	_inferFromStructuredPair(paramType, argType, map) {
 		if (paramType.kind === "slice" && argType.kind === "slice")
 			this._inferFromPair(paramType.elem, argType.elem, map);
+		if (paramType.kind === "pointer" && argType.kind === "pointer")
+			this._inferFromPair(paramType.base, argType.base, map);
 		if (paramType.kind === "map" && argType.kind === "map") {
 			this._inferFromPair(paramType.key, argType.key, map);
 			this._inferFromPair(paramType.value, argType.value, map);
@@ -711,7 +785,8 @@ export const resolveMethods = {
 	_checkUnionConstraint(typeArg, constraint, node) {
 		for (const term of constraint.terms) {
 			if (term.approx) return;
-			const termType = this.resolveTypeNode(term.type, this.globals);
+			const termType =
+				term.resolved ?? this.resolveTypeNode(term.type, this.globals);
 			if (typeStr(typeArg) === typeStr(termType)) return;
 		}
 		this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
@@ -805,7 +880,7 @@ export const resolveMethods = {
 		return (
 			baseType.kind === "pointer" &&
 			field !== "value" &&
-			baseType.base?.kind === "named"
+			(baseType.base?.kind === "named" || baseType.base?.kind === "struct")
 		);
 	},
 

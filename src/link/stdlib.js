@@ -20,6 +20,8 @@ import {
 } from "../resolver.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
+export { mangleCollidingTypes, withOriginalTypeNames } from "./type-names.js";
+
 // ── Go-source stdlib ──────────────────────────────────────────
 //
 // Packages under stdlib/<path>/ are GoFront Go.  Each is type-checked

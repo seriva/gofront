@@ -5,6 +5,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	compileWasm,
@@ -985,3 +986,162 @@ parity(
 	4,
 	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
 );
+
+section("WASM Closures — Shadowing and Captured Locals");
+
+test("closure local shadowing a captured name reads the outer value first", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func f(x int) int { return x + 1 }
+
+func main() {
+	m := 7
+	func() {
+		m := f(m)
+		m++
+		fmt.Print(m, " ")
+	}()
+	fmt.Println(m)
+}
+`,
+		"9 7\n",
+	);
+});
+
+test("package var initializer closure captures a local of the same name", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+var cl = func() func() int {
+	cl := 9
+	return func() int { return cl }
+}()
+
+func main() { fmt.Println(cl()) }
+`,
+		"9\n",
+	);
+});
+
+test("closure captures a multi-value define target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func add(a, b int) (int, error) { return a + b, nil }
+
+func main() {
+	k, e := add(1, 1)
+	g := func() int { return k }
+	if e != nil {
+		return
+	}
+	fmt.Println(g(), 0)
+}
+`,
+		"2 0\n",
+	);
+});
+
+test("type switch binding shadows an outer variable", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type MyInt int
+
+func main() {
+	var x MyInt = 3
+	var v any = 3
+	switch x := v.(type) {
+	case int:
+		fmt.Println(x + 1)
+	}
+	switch x := any(x).(type) {
+	case MyInt:
+		fmt.Println(x + 1)
+	}
+	fmt.Println(x)
+}
+`,
+		"4\n4\n3\n",
+	);
+});
+
+test("type switch binding shadows a captured and address-taken variable", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type MyInt int
+
+func main() {
+	var x MyInt = 3
+	inc := func() { x++ }
+	inc()
+	p := &x
+	*p += 1
+	var v any = 3
+	switch x := v.(type) {
+	case int:
+		fmt.Println(x + 1)
+	}
+	fmt.Println(x)
+}
+`,
+		"4\n5\n",
+	);
+});
+
+test("type switch binding reassigned and captured", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var v any = 1
+	switch x := v.(type) {
+	case int:
+		x += 2
+		g := func() int { return x }
+		fmt.Println(g())
+	}
+}
+`,
+		"3\n",
+	);
+});
+
+test("type switch binding whose address is taken", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	x := 3
+	p := &x
+	*p = 5
+	var v any = 3
+	switch x := v.(type) {
+	case int:
+		x++
+		g := &x
+		*g += 1
+		fmt.Println(x + 1)
+	}
+	fmt.Println(x)
+}
+`,
+		"6\n5\n",
+	);
+});

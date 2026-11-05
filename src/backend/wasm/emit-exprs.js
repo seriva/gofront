@@ -27,6 +27,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	isTaggedSliceType,
 	isTestingT,
 	toWasmType,
 } from "./types.js";
@@ -102,6 +103,15 @@ export class ExprsEmitter {
 				return;
 			}
 
+			// A defined func or map type with methods is boxed to keep its identity,
+			// so interface dispatch can tell it from the plain func or map type.
+			if (this._isMethodNamedRef(goType)) {
+				const box = this.mod.getIfaceBoxType(this._resolveTestTarget(goType));
+				this._emitRawExpr(expr, box.wType);
+				this._emitBoxValue(box);
+				return;
+			}
+
 			if (
 				isSliceType(goType, this.mod.checker) ||
 				isArrayType(goType, this.mod.checker) ||
@@ -113,6 +123,8 @@ export class ExprsEmitter {
 				// An array stored in an interface is a copy.
 				if (isArrayType(goType, this.mod.checker))
 					this._emitCopyIfValue(expr, goType, refWType);
+				if (isTaggedSliceType(goType, this.mod.checker))
+					this._emitTagSlice(goType, refWType);
 				if (
 					isFuncType(goType, this.mod.checker) ||
 					isMapType(goType, this.mod.checker)
@@ -130,6 +142,40 @@ export class ExprsEmitter {
 		}
 
 		this._emitRawExpr(expr, targetWasmType);
+	}
+
+	// The slice on the stack becomes the tagged subtype of its Go type, so a
+	// type test can tell `[]byte` from `[]bool` (see getTaggedSliceType).  The
+	// copy shares the backing array; slice headers are immutable.
+	_emitTagSlice(goType, refWType) {
+		const tagged = this.mod.getTaggedSliceType(
+			goType,
+			this._getSliceElemType(goType),
+		);
+		const base = tagged.base;
+		const tmp = this.acquireTemp(refWType);
+		this.pushInstruction({ op: "local.tee", index: tmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({
+			op: "if",
+			blockType: { kind: "ref", nullable: true, typeIndex: base.typeIndex },
+		});
+		this.pushInstruction({ op: "global.get", index: base.emptyGlobalIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: tmp });
+		for (let i = 0; i < 4; i++) {
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: base.typeIndex,
+				fieldIndex: i,
+			});
+		}
+		this.pushInstruction({ op: "ref.null", heapType: tagged.tagTypeIndex });
+		this.pushInstruction({ op: "struct.new", typeIndex: tagged.typeIndex });
+		this.releaseTemp(tmp, refWType);
 	}
 
 	// The nullable ref on the stack becomes an interface value: a nil map, func
@@ -318,7 +364,7 @@ export class ExprsEmitter {
 		if (capturedNames.length === 0) {
 			this.pushInstruction({ op: "ref.null", heapType: "any" });
 		} else {
-			const envFields = this._buildEnvFields(capturedNames);
+			const envFields = this._buildEnvFields(capturedNames, funcLit);
 			const envInfo = this.mod.getEnvType(envFields);
 
 			for (const field of envFields) {
@@ -1274,12 +1320,14 @@ export class ExprsEmitter {
 			constIdx < arrayLen
 		) {
 			this.emitExpr(baseNode, arrWType);
+			this._emitNilCheck(rawBaseType);
 			this.pushInstruction({ op: "i32.const", value: constIdx });
 			return;
 		}
 
 		const arrTmp = this.acquireTemp(arrWType);
 		this.emitExpr(baseNode, arrWType);
+		this._emitNilCheck(rawBaseType);
 		this.pushInstruction({ op: "local.tee", index: arrTmp });
 		this._emitCheckedIndex(indexNode, () => {
 			this.pushInstruction({ op: "local.get", index: arrTmp });
@@ -1775,6 +1823,7 @@ export class ExprsEmitter {
 		if (!isScalarType(baseGoType, this.mod.checker, this.mod)) {
 			const baseWType = this.toWasmType(baseGoType);
 			this.emitExpr(operand, baseWType);
+			this._emitNilCheck(operandGoType);
 			return;
 		}
 		const box = this.mod.getBoxType(baseGoType);
@@ -2577,6 +2626,8 @@ export class ExprsEmitter {
 	emitNarrowIntWrap(goType) {
 		if (!goType) return;
 		if (goType.kind === "TypeName" || goType.kind === "Ident") {
+			const declared = this.mod.checker?.types?.get(goType.name);
+			if (declared?.kind === "named") return this.emitNarrowIntWrap(declared);
 			return this.emitNarrowIntWrap({ kind: "basic", name: goType.name });
 		}
 		if (goType.kind === "named" && goType.underlying) {
@@ -2604,7 +2655,14 @@ export class ExprsEmitter {
 	}
 
 	emitDivRem(op, left, right, targetWasmType = null) {
-		const goType = left._type;
+		// An untyped constant left operand takes the type of the typed right
+		// one (`(1<<31) % uint32(n)` divides unsigned).
+		const goType =
+			left._type?.kind === "untyped" &&
+			right._type &&
+			right._type.kind !== "untyped"
+				? right._type
+				: left._type;
 		const wType = targetWasmType ?? toWasmType(goType, this.mod.checker);
 
 		if (wType === "f32" || wType === "f64") {

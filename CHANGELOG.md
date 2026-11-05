@@ -13,7 +13,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Generic code over named slice and map types**: type parameters such as `[S ~[]E, E any]` and `[M ~map[K]V, K comparable, V any]` support indexing, slicing, `range`, `len`, `append` and `make`, and type arguments can be written as `[]int`, `map[K]V` or `func(…)`.
 - **`--no-natives` flag**: runs the Go code of standard library functions instead of host fast paths, which helps when comparing results.
 
+### Fixed
+- **Go programs behave like Go on every target**: many programs that failed to compile, built an invalid WebAssembly module, or printed different results on JavaScript and WebAssembly now match Go, including nil pointers in interfaces, map keys, runtime panics recovered as `error` values, `fmt` verbs (`%p` now prints a stable id such as `0x1`), `encoding/json` values stored in `any`, and generic types exported from WebAssembly packages. Templ components accept every Go `for` form, a `switch` without a tag and a `{ children... }` spread under any parameter name ([details](docs/go-compatibility.md)).
+
 ### Changed
+- **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable to an `int`, a `switch` case whose constant does not fit the tag's type, and constants or package variables that depend on themselves. Convert explicitly, for example `int(y)`, or fix the case value or the circular definition.
+- **Breaking:** Like Go, indexing a string (`s[i]`) gives a `byte` rather than an `int`, `strings.Builder.WriteByte` takes a `byte`, and `cap` on a map is rejected. Convert with `int(s[i])` where an `int` is needed and use `len` for maps.
+- **Breaking:** `\xNN` and octal escapes in string literals are now raw bytes as in Go, so `"\xe9"` is one byte rather than `é`. Write the character itself or a `\u` escape such as `"\u00e9"` when you mean text.
+- **Breaking:** In `.templ` files a conditional attribute `name?={ expr }` must be a `bool`, and tokens left after a `{ }` expression (as in `{ name ) }`) are a parse error. Fix the expression.
 - **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
 - **Breaking:** `maps.Delete` and the top-level `binary.AppendUint16`, `AppendUint32` and `AppendUint64` are removed because Go has no such functions. Use the built-in `delete` and `binary.LittleEndian.AppendUint16` (or `binary.BigEndian`).
 - **Breaking:** `sort.Slice`, `slices.SortFunc` and similar sorts now order equal elements as Go does, which can change output that depended on the old order. Use `sort.SliceStable` or `slices.SortStableFunc` when equal elements must keep their input order.

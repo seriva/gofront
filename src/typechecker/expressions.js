@@ -1,9 +1,14 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
-import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
+import { exprText, operandKind } from "./operand-text.js";
+import {
+	EXCLUDED_STDLIB_MEMBERS,
+	EXCLUDED_STDLIB_PACKAGES,
+} from "./stdlib/excluded.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	BASIC_TYPES,
 	BOOL,
 	BROWSER_GLOBALS,
 	COMPLEX64,
@@ -11,6 +16,7 @@ import {
 	compositeLitMaxIndex,
 	displayTypeName,
 	ERROR,
+	embeddedFieldName,
 	FLOAT32,
 	FLOAT64,
 	INT,
@@ -22,6 +28,7 @@ import {
 	isComplex64,
 	isComplexOrNumeric,
 	isInteger,
+	isNil,
 	isNumeric,
 	isString,
 	NIL,
@@ -31,6 +38,7 @@ import {
 	STRING,
 	TAINTED_ANY,
 	typeStr,
+	UINT8,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
@@ -38,6 +46,15 @@ import {
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
+
+const NILABLE_KINDS = new Set([
+	"slice",
+	"map",
+	"pointer",
+	"func",
+	"interface",
+	"chan",
+]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
@@ -165,7 +182,21 @@ export const expressionCheckMethods = {
 				return UNTYPED_COMPLEX;
 			case "Ident": {
 				const t = scope.lookup(expr.name);
-				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
+				// `(*int)(nil)`: a predeclared type named where a type may stand.
+				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
+					expr._isTypeRef = true;
+					return BASIC_TYPES[expr.name];
+				}
+				if (!t) {
+					// The import of an excluded package already reported; its
+					// uses are not a second root cause.
+					const imported = this._fileImports
+						?.get(this._currentFile)
+						?.get(expr.name);
+					if (imported && EXCLUDED_STDLIB_PACKAGES.has(imported))
+						return TAINTED_ANY;
+					return this.err(`Undefined: '${expr.name}'`, expr);
+				}
 				if (this.types.has(expr.name) || t.kind === "typeParam")
 					expr._isTypeRef = true;
 				// A Go declaration that shadows a browser global: JS output renames
@@ -215,6 +246,10 @@ export const expressionCheckMethods = {
 				this._checkConstOperands(expr.op, lt, rt, expr);
 				this._markTypeParamMapNil(expr, lt, rt, scope);
 				const res = this.binaryResultType(expr.op, lt, rt, expr);
+				if (expr.op !== "<<" && expr.op !== ">>") {
+					this._retypeUntypedShift(lt, rt, expr.right);
+					this._retypeUntypedShift(rt, lt, expr.left);
+				}
 				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 					expr.right._is64Bit = true;
 				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
@@ -301,7 +336,13 @@ export const expressionCheckMethods = {
 		if (!c || seen.has(c)) return null;
 		seen.add(c);
 		// Receiver type parameters keep their constraint as an AST node.
-		if (c.kind === "TypeName" || c.kind === "InterfaceType")
+		if (
+			c.kind === "TypeName" ||
+			c.kind === "InterfaceType" ||
+			c.kind === "GenericTypeName" ||
+			c.kind === "InstantiationExpr" ||
+			c.kind === "IndexExpr"
+		)
 			return this._constraintTerms(this.resolveTypeNode(c, scope), seen, scope);
 		if (c.kind === "named")
 			return this._constraintTerms(c.underlying, seen, scope);
@@ -311,7 +352,7 @@ export const expressionCheckMethods = {
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
 		const out = [];
 		for (const term of c.terms) {
-			const t = this.resolveTypeNode(term.type, scope);
+			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
 			const inner =
 				t?.kind === "named" && t.underlying?.kind === "interface"
 					? this._constraintTerms(t, seen, scope)
@@ -625,6 +666,11 @@ export const expressionCheckMethods = {
 		const base = this.resolveType(
 			recvT?.kind === "named" ? recvT.underlying : recvT,
 		);
+		if (base?.kind === "interface" && base.methods?.has(expr.field)) {
+			// `i.M` binds the interface value; the call dispatches when it runs.
+			expr._isMethodValue = true;
+			return;
+		}
 		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
 		expr._isMethodValue = true;
 		if (baseType.kind === "pointer")
@@ -745,6 +791,17 @@ export const expressionCheckMethods = {
 		return t?.kind === "named" ? t.underlying : t;
 	},
 
+	_markCompositeKey(key, kb, node, srcType) {
+		if (!node || !srcType || isAny(key) || kb?.kind === "interface")
+			return false;
+		// Arrays, anonymous structs and pointers are not JS property names: the
+		// backend encodes them by value (`sk`) or by identity (`pk`).
+		if (kb?.kind === "pointer") node._mapKeyEnc = "pk";
+		else if (kb?.kind === "array" || (key?.kind === "struct" && kb === key))
+			node._mapKeyEnc = "sk";
+		return true;
+	},
+
 	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
 	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
 	// A named basic value is boxed first, exactly as in any interface
@@ -762,8 +819,10 @@ export const expressionCheckMethods = {
 			}
 			return;
 		}
+		if (this._markCompositeKey(key, kb, node, srcType)) return;
 		if (!node || !srcType || (!isAny(key) && kb?.kind !== "interface")) return;
 		node._ifaceKey = true;
+		node._ifaceKeyType = src;
 		this._markIfaceBox(key, this.resolveType(srcType), node);
 		if (node._ifaceBox === "named" || node._ifaceBox === "named_ptr") return;
 		node._ifaceBox = undefined;
@@ -793,6 +852,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
+			this.assertAssignable(btu.key, indexType, expr.index);
 			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
@@ -803,7 +863,7 @@ export const expressionCheckMethods = {
 				this.err(`invalid index ${idx} (index must not be negative)`, expr);
 			return btu.elem;
 		}
-		if (isString(bt)) return INT;
+		if (isString(bt)) return UINT8;
 		return this.err(`Cannot index type ${typeStr(bt)}`, expr);
 	},
 
@@ -813,6 +873,12 @@ export const expressionCheckMethods = {
 	_genericFuncValueAsInstantiation(expr) {
 		const toTypeNode = (n) => {
 			if (n?.kind === "TypeExpr") return n.type;
+			// `Id[*int]`: the parser sees a dereference; on a generic function
+			// it is a pointer type argument.
+			if (n?.kind === "UnaryExpr" && n.op === "*") {
+				const base = toTypeNode(n.operand);
+				return base && { kind: "PointerType", base, _line: n._line };
+			}
 			const parts = [];
 			let cur = n;
 			while (cur?.kind === "SelectorExpr") {
@@ -919,9 +985,12 @@ export const expressionCheckMethods = {
 		const ret = expr.returnType
 			? this.resolveTypeNode(expr.returnType, scope)
 			: VOID;
+		const bodyRet = this._injectNamedReturns(expr.returnType, inner)
+			? { ...ret, _hasNamedReturns: true }
+			: ret;
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;
-		this.checkBlock(expr.body, inner, ret);
+		this.checkBlock(expr.body, inner, bodyRet);
 		this._reportUnused(inner, expr);
 		if (this._deferCount > 0) expr.body._hasDefer = true;
 		this._deferCount = savedDefer;
@@ -980,6 +1049,7 @@ export const expressionCheckMethods = {
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
+		this._rejectNilConversion(srcType, targetType, expr);
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1021,11 +1091,41 @@ export const expressionCheckMethods = {
 		return targetType;
 	},
 
+	// `int(nil)`: only a type with a nil value converts from `nil`.
+	_rejectNilConversion(srcType, targetType, expr) {
+		if (!isNil(srcType) || !targetType || isAny(targetType)) return;
+		if (targetType.kind === "typeParam") return;
+		const kind = this._deepUnderlying(targetType)?.kind;
+		if (!kind || NILABLE_KINDS.has(kind)) return;
+		this.err(`cannot convert nil to ${typeStr(targetType)}`, expr);
+	},
+
+	// Pointers convert when their base types share an underlying type.
+	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr) {
+		const sBase = this._deepUnderlying(srcPtr.base);
+		const tBase = this._deepUnderlying(tgtPtr.base);
+		if (typeStr(sBase) === typeStr(tBase)) return true;
+		if (!this._sameStructFields(sBase, tBase)) return false;
+		// WebAssembly struct types are nominal: the two pointers could not
+		// share one object.
+		if (this.target === "wasm" || this.target === "both") {
+			this.recordBlocker("pointer conversion between struct types");
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} in a wasm package: pointers to distinct struct types cannot share storage; keep this code in a js package`,
+				expr,
+			);
+		}
+		return true;
+	},
+
 	_checkConversionValidity(srcType, targetType, expr) {
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
 		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
 			targetType.kind === "named" ? targetType.underlying : targetType;
+
+		// `nil` converts to any type that has a nil value.
+		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
 
 		if (isNumeric(targetType) && isComplex(srcType)) {
 			this.err(
@@ -1089,17 +1189,18 @@ export const expressionCheckMethods = {
 						srcResolved.elem?.name === "int32")))
 		)
 			return;
-		if (srcResolved?.kind === "pointer" && tgtResolved?.kind === "pointer") {
-			const sBase =
-				srcResolved.base?.kind === "named"
-					? srcResolved.base.underlying
-					: srcResolved.base;
-			const tBase =
-				tgtResolved.base?.kind === "named"
-					? tgtResolved.base.underlying
-					: tgtResolved.base;
-			if (typeStr(sBase) === typeStr(tBase)) return;
-		}
+		if (
+			srcResolved?.kind === "pointer" &&
+			tgtResolved?.kind === "pointer" &&
+			this._pointerConversionOk(
+				srcResolved,
+				tgtResolved,
+				srcType,
+				targetType,
+				expr,
+			)
+		)
+			return;
 		this.err(
 			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
 			expr,
@@ -1109,6 +1210,7 @@ export const expressionCheckMethods = {
 	_checkTypeAssertExpr(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.type, scope);
+		this._markDynamicType(expr.type, targetType);
 
 		// In Go, the source of a type assertion must be an interface type.
 		// We allow `any` (which is GoFront's basic any) and interface types.
@@ -1178,7 +1280,10 @@ export const expressionCheckMethods = {
 			) {
 				const tp = baseType.typeParams[i];
 				const constraint = tp.constraint
-					? this.resolveTypeNode(tp.constraint, scope)
+					? this.resolveTypeNode(
+							tp.constraint,
+							this._typeArgScope(baseType.typeParams, typeArgs, scope),
+						)
 					: null;
 				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 			}
@@ -1409,7 +1514,10 @@ export const expressionCheckMethods = {
 			}
 			return tp;
 		}
-		if (isNumeric(argTypes[0]) && !this._constraintHasTypeSet(tp.constraint))
+		if (
+			isNumeric(argTypes[0]) &&
+			!this._constraintHasTypeSet(tp.constraint, scope)
+		)
 			return this.err(
 				`cannot convert ${typeStr(argTypes[0])} to type ${typeStr(tp)}: ${typeStr(tp)} is not constrained to a set of convertible types`,
 				expr,
@@ -1429,15 +1537,20 @@ export const expressionCheckMethods = {
 	// A conversion to a type parameter needs a constraint that lists types
 	// (`~int | ~float64`, or an interface embedding such a union); `any`,
 	// `comparable` and method-only constraints allow every type argument.
-	_constraintHasTypeSet(constraint) {
+	_constraintHasTypeSet(constraint, scope = this.globals) {
 		if (!constraint) return true;
 		if (constraint.kind === "UnionConstraint") return true;
-		const c = this.resolveType(constraint);
+		// Receiver type parameters keep their constraint as an AST node.
+		const c = this.resolveType(
+			constraint.kind === "TypeName" || constraint.kind === "InterfaceType"
+				? this.resolveTypeNode(constraint, scope)
+				: constraint,
+		);
 		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
 		if (base?.kind !== "interface") return false;
 		if (base.unionConstraint) return true;
 		return (base._typeSetEmbeds ?? []).some((e) =>
-			this._constraintHasTypeSet(e),
+			this._constraintHasTypeSet(e, scope),
 		);
 	},
 
@@ -1490,7 +1603,12 @@ export const expressionCheckMethods = {
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.
-		if (fnType.kind === "named" && expr.func._isTypeRef) {
+		if (
+			(fnType.kind === "named" ||
+				fnType.kind === "pointer" ||
+				fnType.kind === "basic") &&
+			expr.func._isTypeRef
+		) {
 			expr._isTypeConversion = true;
 			expr._conversionTargetType = fnType;
 			if (expr.args.length !== 1) {
@@ -1575,6 +1693,17 @@ export const expressionCheckMethods = {
 		});
 	},
 
+	// Scope where each type parameter name stands for its type argument, so a
+	// constraint that mentions another parameter (`S ~[]E`) resolves.
+	_typeArgScope(typeParams, typeArgs, scope) {
+		const out = new Scope(scope);
+		typeParams.forEach((tp, i) => {
+			if (typeArgs[i])
+				out.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
+		});
+		return out;
+	},
+
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
 		const typeArgs = this.inferTypeArgs(
 			fnType,
@@ -1593,7 +1722,10 @@ export const expressionCheckMethods = {
 		for (let i = 0; i < fnType.typeParams.length && i < typeArgs.length; i++) {
 			const tp = fnType.typeParams[i];
 			const constraint = tp.constraint
-				? this.resolveTypeNode(tp.constraint, scope)
+				? this.resolveTypeNode(
+						tp.constraint,
+						this._typeArgScope(fnType.typeParams, typeArgs, scope),
+					)
 				: null;
 			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 		}
@@ -1730,6 +1862,11 @@ export const expressionCheckMethods = {
 		if (name === "len") {
 			const size = this._constLenFromType(argTypes[0]);
 			if (size != null) expr._constLen = size;
+		} else if ((argTypes[0]?.underlying ?? argTypes[0])?.kind === "map") {
+			this.err(
+				`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
+				expr,
+			);
 		} else if (sharedInfo(argTypes[0])) {
 			this.err(
 				`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
@@ -1849,18 +1986,7 @@ export const expressionCheckMethods = {
 	_checkStructPositionalElems(expr, scope, t, base) {
 		const fieldNames = base._structFields
 			? base._structFields.flatMap((f) =>
-					f.embedded
-						? [
-								(
-									(f.type?.kind === "pointer"
-										? f.type.base?.name
-										: f.type?.name) ?? ""
-								)
-									.split(".")
-									.pop()
-									.replace(/\$\$.*$/, ""),
-							]
-						: f.names,
+					f.embedded ? [embeddedFieldName(f)] : f.names,
 				)
 			: [...(base.fields?.keys() ?? [])];
 		for (let i = 0; i < expr.elems.length; i++) {
@@ -1882,17 +2008,9 @@ export const expressionCheckMethods = {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				const keyName = elem.key.name;
-				const embed = base._embeds?.find((e) => {
-					const inner = e.kind === "pointer" ? e.base : e;
-					const name =
-						inner.kind === "named"
-							? inner.name
-									.split(".")
-									.pop()
-									.replace(/\$\$.*$/, "")
-							: null;
-					return name === keyName;
-				});
+				const embed = base._structFields?.find(
+					(f) => f.embedded && embeddedFieldName(f) === keyName,
+				)?.type;
 				if (embed) elem._isEmbedInit = true;
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {

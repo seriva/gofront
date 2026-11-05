@@ -7,6 +7,7 @@ import {
 } from "../../../src/parser/struct-tag.js";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertProgramOutput,
@@ -312,7 +313,8 @@ test("string and rune escapes decode every Go form", () => {
 			.find((t) => t.type === T.STRING)?.value;
 	assertEqual(str('"\\a\\b\\f\\v"'), "\x07\x08\x0c\x0b");
 	assertEqual(str('"\\x41\\101\\u00e9\\U0001F600"'), "AA\u00e9\u{1F600}");
-	assertEqual(str('"\\xc3"'), "\u00c3");
+	assertEqual(str(`"\\xc3"`), "\udcc3"); // a lone invalid byte stays a raw-byte surrogate
+	assertEqual(str(`"\\xc3\\xa9"`), "\u00e9");
 });
 
 test("invalid numeric escapes are lex errors", () => {
@@ -1097,6 +1099,166 @@ test("lexer: lone dot still errors", () => {
 	);
 });
 
+test("lexer: trailing-dot float and leading-dot imaginary run on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	z := 1.
+	fmt.Println(z)
+	e := 1.e2
+	fmt.Println(e)
+	c := .5i
+	fmt.Println(c)
+	d := 2.i
+	fmt.Println(d)
+}
+`,
+		"1\n100\n(0+0.5i)\n(0+2i)\n",
+	);
+});
+
+test("lexer: a dot after an integer stays a separate token before selectors and ranges", () => {
+	const kinds = (src) =>
+		new Lexer(src, "t.go")
+			.tokenize()
+			.map((t) => t.type)
+			.filter((t) => t !== T.EOF && t !== T.SEMICOLON);
+	assertEqual(kinds("1.x").join(","), [T.INT, T.DOT, T.IDENT].join(","));
+	assertEqual(kinds("1..").join(","), [T.INT, T.DOT, T.DOT].join(","));
+	assertEqual(kinds("1.").join(","), [T.FLOAT].join(","));
+	assertEqual(kinds("1.5i").join(","), [T.IMAG].join(","));
+	assertEqual(kinds(".5i").join(","), [T.IMAG].join(","));
+});
+
+section("Parser: &^= compound assignment");
+
+test("&^= clears bits on every target and &^ is unchanged", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f uint8 }
+
+func main() {
+	x := 7
+	x &^= 4
+	fmt.Println(x, 7&^4)
+	var u uint8 = 255
+	u &^= 15
+	fmt.Println(u)
+	var a uint32 = 0xFFFFFFFF
+	a &^= 0xF0
+	fmt.Println(a)
+	var b uint64 = 1<<63 | 7
+	b &^= 2
+	fmt.Println(b)
+	s := &S{f: 0xff}
+	s.f &^= 0x0f
+	fmt.Println(s.f)
+	xs := []int{15}
+	xs[0] &^= 5
+	fmt.Println(xs[0])
+	m := map[string]int{"k": 15}
+	m["k"] &^= 3
+	fmt.Println(m["k"])
+	n := 0
+	for i := 15; i > 0; i &^= i & -i {
+		n++
+	}
+	fmt.Println(n)
+}
+`,
+		"3 3\n240\n4294967055\n9223372036854775813\n240\n10\n12\n4\n",
+	);
+});
+
+test("lexer: &^= is one token and &^ then = stays two", () => {
+	const types = (src) =>
+		new Lexer(src, "t.go")
+			.tokenize()
+			.map((t) => t.type)
+			.filter((t) => t !== T.EOF && t !== T.SEMICOLON);
+	assertEqual(
+		types("x &^= 1").join(","),
+		[T.IDENT, T.AND_NOT_ASSIGN, T.INT].join(","),
+	);
+	assertEqual(types("x &^ 1").join(","), [T.IDENT, T.AND_NOT, T.INT].join(","));
+});
+
+section(
+	"Parser: conversions, func types and type assertions in expression position",
+);
+
+test("a conversion call argument can be compared, spread or selected from", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+
+func main() {
+	fmt.Println([]int(nil) == nil)
+	fmt.Println(map[string]int(nil) == nil, []int([]int{1}) == nil)
+	b := []byte("a")
+	b = append(b, []byte("bc")...)
+	fmt.Println(string(b))
+	fmt.Println(len([]int([]int{1, 2})), [2]int([2]int{3, 4})[1])
+}
+`,
+		"true\ntrue false\nabc\n2 4\n",
+	);
+});
+
+test("an index whose operand is a type assertion is an index, not generic arguments", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[int]string{1: "a"}
+	var k any = 1
+	fmt.Println(m[k.(int)])
+	var s any = "x"
+	fmt.Println(len(m[1]), m[k.(int)] + s.(string))
+}
+`,
+		"a\n1 ax\n",
+	);
+});
+
+test("a type-switch case can name a func type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func kind(x any) string {
+	switch x.(type) {
+	case int:
+		return "i"
+	case func():
+		return "f"
+	case func(int) string, func(a, b int) (int, error):
+		return "g"
+	default:
+		return "d"
+	}
+}
+
+func main() {
+	fmt.Println(kind(1), kind(func() {}))
+}
+`,
+		"i f\n",
+	);
+});
+
 section("Parser: predeclared names as identifiers, empty labeled statements");
 
 test("parser: new and other predeclared names work as parameter and result names", async () => {
@@ -1150,6 +1312,92 @@ func main() {
 `,
 		"ok\n",
 	);
+});
+
+// ── Astral rune literals and raw-byte string escapes ──────────
+
+test("lexer: astral rune literal is one code point on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	r := '😀'
+	fmt.Println(r)
+}
+`,
+		"128512\n",
+	);
+});
+
+test("lexer: \\xNN string escapes are raw bytes in []byte conversions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+	"unicode/utf8"
+)
+
+func main() {
+	b := []byte("a\\xffb")
+	fmt.Println(len(b), bytes.IndexRune(b, utf8.RuneError))
+	c := []byte("\\xc3\\xa9")
+	fmt.Println(len(c), c[0], c[1])
+}
+`,
+		"3 1\n2 195 169\n",
+	);
+});
+
+test("lexer: byte escapes that form UTF-8 decode as their rune", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	for _, r := range "\\xc3\\xa9\\xe2\\x82\\xac" {
+		fmt.Println(r)
+	}
+}
+`,
+		"233\n8364\n",
+	);
+});
+
+// ── Parser: conversion-led index in call arguments ────────────
+
+test("parser: conversion of an index expression as a call argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const digits = "0123456789"
+
+func f(b byte) byte { return b }
+
+func main() {
+	u := uint(3)
+	m := uint(7)
+	fmt.Println(f(byte(digits[uint(u)&m])))
+}
+`,
+		"51\n",
+	);
+});
+
+test("parser: //gofront:native survives a doc comment before func", () => {
+	const ast = new Parser(
+		new Lexer(
+			"package main\n//gofront:native str.Index\n// Index doc.\nfunc Index(s, sub string) int { return 0 }\n",
+		).tokenize(),
+	).parse();
+	const fn = ast.decls.find((d) => d.kind === "FuncDecl");
+	assertEqual(fn.native, "str.Index");
 });
 
 // ── Entry point ───────────────────────────────────────────────

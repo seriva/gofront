@@ -2,11 +2,11 @@
 // FunctionEmitter mixin: panic/recover, Go builtins (len, append, make, …) and
 // call expression dispatch (static, method, closure, package).
 
+import { hasCallOrReceive } from "../../lower/walk.js";
 import {
 	anonIfaceName,
 	getMapKeyValTypes,
 	isArrayType,
-	isBoolGoType,
 	isComplex,
 	isComplex64,
 	isMapType,
@@ -17,6 +17,7 @@ import {
 	isStringType,
 	isStructType,
 	isTestingT,
+	printOperandKind,
 	toWasmType,
 } from "./types.js";
 
@@ -26,13 +27,33 @@ export class BuiltinsEmitter {
 		const funcIdx = this.mod.getStringImportIndex();
 		this.pushInstruction({ op: "i32.const", value: strIdx });
 		this.pushInstruction({ op: "call", funcIndex: funcIdx });
-		this.pushInstruction("any.convert_extern");
-		this.emitPanicThrow();
+		this.emitRuntimePanicThrow();
 	}
 
-	// Consumes the anyref message on the stack, pushes a PanicNode, and raises the panic via
-	// `env.panic`; `unreachable` tells the validator control never returns.
-	emitPanicThrow() {
+	// Raises a Go runtime error from the externref message on the stack.  A
+	// program that uses `error` recovers it as an `error` value (as Go's
+	// `runtime.Error`); the host still reports the message text.
+	emitRuntimePanicThrow() {
+		if (!this.mod.hasErrorType) {
+			this.pushInstruction("any.convert_extern");
+			this.emitPanicThrow();
+			return;
+		}
+		const msgTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.tee", index: msgTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.emitPanicThrow(msgTmp);
+		this.releaseTemp(msgTmp, "externref");
+	}
+
+	// Consumes the anyref value on the stack, pushes a PanicNode, and raises the
+	// panic via `env.panic` (with the value, or the externref message in
+	// `hostMsgTmp`); `unreachable` tells the validator control never returns.
+	emitPanicThrow(hostMsgTmp = null) {
 		const panicNodeTypeIndex = this.mod.getPanicNodeTypeIndex();
 		const panicGlobal = this.mod.getPanicGlobalIndex();
 		const tmpVal = this.acquireTemp("anyref");
@@ -49,8 +70,12 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "global.set", index: panicGlobal });
 
 		// Prepare externref for env.panic
-		this.pushInstruction({ op: "local.get", index: tmpVal });
-		this.pushInstruction("extern.convert_any");
+		if (hostMsgTmp !== null) {
+			this.pushInstruction({ op: "local.get", index: hostMsgTmp });
+		} else {
+			this.pushInstruction({ op: "local.get", index: tmpVal });
+			this.pushInstruction("extern.convert_any");
+		}
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getPanicImportIndex(),
@@ -74,6 +99,14 @@ export class BuiltinsEmitter {
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
+		// `len` of an array (or a pointer to one) is a constant, and the
+		// operand is not evaluated unless it contains a call or a receive.
+		if (call._constLen != null && !hasCallOrReceive(arg)) {
+			this.pushInstruction({ op: "i32.const", value: call._constLen });
+			if ((targetWasmType ?? "i64") === "i64")
+				this.pushInstruction("i64.extend_i32_u");
+			return;
+		}
 		if (this._sharedInfo(argType)) {
 			this.emitSharedLen(arg, targetWasmType);
 			return;
@@ -223,15 +256,18 @@ export class BuiltinsEmitter {
 				this.pushInstruction({ op: "local.set", index: capTmp });
 			}
 
+			// Go: a negative len is a len panic; otherwise cap < len is a cap panic.
 			this.pushInstruction({ op: "local.get", index: lenTmp });
-			this.pushInstruction({ op: "local.get", index: capTmp });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "local.get", index: capTmp });
 			this.pushInstruction({ op: "i32.const", value: 0 });
 			this.pushInstruction("i32.lt_s");
-			this.pushInstruction("i32.or");
 			this.pushInstruction({ op: "if", blockType: "void" });
 			this.emitPanic("runtime error: makeslice: len out of range");
+			this.pushInstruction("end");
+			this.pushInstruction({ op: "local.get", index: capTmp });
+			this.pushInstruction({ op: "local.get", index: lenTmp });
+			this.pushInstruction("i32.lt_s");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.emitPanic("runtime error: makeslice: cap out of range");
 			this.pushInstruction("end");
 
 			if (
@@ -294,11 +330,9 @@ export class BuiltinsEmitter {
 					typeIndex: arrInfo.typeIndex,
 				});
 			} else {
-				this.pushInstruction({ op: "local.get", index: capTmp });
-				this.pushInstruction({
-					op: "array.new_default",
-					typeIndex: arrInfo.typeIndex,
-				});
+				this._emitNewArray(elemGoType, arrInfo, () =>
+					this.pushInstruction({ op: "local.get", index: capTmp }),
+				);
 				this.pushInstruction({ op: "i32.const", value: 0 });
 				this.pushInstruction({ op: "local.get", index: lenTmp });
 				this.pushInstruction({ op: "local.get", index: capTmp });
@@ -397,11 +431,9 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "local.set", index: newCapTmp });
 		this.pushInstruction("end");
 
-		this.pushInstruction({ op: "local.get", index: newCapTmp });
-		this.pushInstruction({
-			op: "array.new_default",
-			typeIndex: arrInfo.typeIndex,
-		});
+		this._emitNewArray(elemGoType, arrInfo, () =>
+			this.pushInstruction({ op: "local.get", index: newCapTmp }),
+		);
 		this.pushInstruction({ op: "local.set", index: newArrTmp });
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: newOffTmp });
@@ -731,13 +763,21 @@ export class BuiltinsEmitter {
 		for (let i = 0; i < args.length; i++) {
 			const arg = args[i];
 			const isLast = i === args.length - 1 && isPrintln;
-			const isBool =
-				isBoolGoType(arg._type) ||
-				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
-			const wType = toWasmType(arg._type, this.mod.checker);
-			this.emitExpr(arg, wType);
+			const { wType, isBool, widen } = printOperandKind(arg, this.mod.checker);
+			this.emitExpr(
+				arg,
+				widen ? "i32" : toWasmType(arg._type, this.mod.checker),
+			);
+			if (widen) this.pushInstruction("i64.extend_i32_u");
 			const logFuncIdx = this.mod.getLogImportIndex(wType, isLast, isBool);
 			this.pushInstruction({ op: "call", funcIndex: logFuncIdx });
+			// `print` never separates operands; `println` always does.
+			if (!isPrintln) {
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getPrintResetIndex(),
+				});
+			}
 		}
 	}
 
@@ -1251,33 +1291,52 @@ export class BuiltinsEmitter {
 		return false;
 	}
 
+	// The embedded struct (possibly several levels down) that declares or
+	// forwards `method`: the chain of embeds to follow and the method's name.
+	_findEmbeddedMethod(structInfo, method, seen = new Set()) {
+		if (seen.has(structInfo)) return null;
+		seen.add(structInfo);
+		for (const embed of structInfo.embeds ?? []) {
+			const typeName = embed.typeName ?? embed.name;
+			const methodName = `${typeName}.${method}`;
+			if (this.mod.resolveFuncIndex(methodName) !== null)
+				return { chain: [{ structInfo, embed }], methodName };
+			const inner = this.mod.getStructType(typeName);
+			const deeper = inner && this._findEmbeddedMethod(inner, method, seen);
+			if (deeper)
+				return {
+					chain: [{ structInfo, embed }, ...deeper.chain],
+					methodName: deeper.methodName,
+				};
+		}
+		return null;
+	}
+
 	_emitEmbeddedMethodCall(recvTypeName, func, args, recvType) {
 		const structInfo = this.mod.getStructType(recvTypeName);
 		if (!structInfo) return false;
-		for (const embed of structInfo.embeds) {
-			const embedMethodName = `${embed.typeName ?? embed.name}.${func.field}`;
-			const subIdx = this.mod.resolveFuncIndex(embedMethodName);
-			if (subIdx !== null) {
-				const targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
-				const baseWType = this.toWasmType(recvType);
-				this.emitExpr(func.expr, baseWType);
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: structInfo.typeIndex,
-					fieldIndex: embed.fieldIndex,
-				});
-				for (let i = 0; i < args.length; i++) {
-					const pType = targetParamTypes[i + 1] ?? null;
-					this.emitExpr(args[i], pType);
-				}
-				this.pushInstruction({
-					op: "call",
-					funcIndex: subIdx,
-				});
-				return true;
-			}
+		const found = this._findEmbeddedMethod(structInfo, func.field);
+		if (!found) return false;
+		const { chain, methodName } = found;
+		const subIdx = this.mod.resolveFuncIndex(methodName);
+		const targetParamTypes = this.mod.getFuncParamTypes(methodName);
+		this.emitExpr(func.expr, this.toWasmType(recvType));
+		for (const { structInfo: owner, embed } of chain) {
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: owner.typeIndex,
+				fieldIndex: embed.fieldIndex,
+			});
 		}
-		return false;
+		for (let i = 0; i < args.length; i++) {
+			const pType = targetParamTypes[i + 1] ?? null;
+			this.emitExpr(args[i], pType);
+		}
+		this.pushInstruction({
+			op: "call",
+			funcIndex: subIdx,
+		});
+		return true;
 	}
 
 	_emitStaticCall(call) {

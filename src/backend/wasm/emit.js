@@ -782,6 +782,14 @@ export class FunctionEmitter {
 	// operand raises Go's panic through the `nil` block.
 	_isNilTrapSite(node) {
 		if (node.kind === "CallExpr") return this._isFuncValueCall(node);
+		// A pointer to an array: indexing, slicing and ranging with a value
+		// read the array.
+		if (
+			node.kind === "IndexExpr" ||
+			node.kind === "SliceExpr" ||
+			node.kind === "RangeExpr"
+		)
+			return node.expr?._type?.kind === "pointer";
 		const star =
 			(node.kind === "UnaryExpr" && node.op === "*") ||
 			node.kind === "StarExpr";
@@ -893,11 +901,12 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	_buildEnvFields(capturedNames) {
+	_buildEnvFields(capturedNames, funcLit) {
 		const envFields = [];
+		const types = this.captureAnalysis?.captureTypes?.get(funcLit);
 		for (const name of capturedNames) {
 			const isBoxed = this.mutatedCaptures.has(name);
-			const goType = this._findCapturedVarGoType(name);
+			const goType = types?.get(name) ?? this._findCapturedVarGoType(name);
 			const boxInfo = isBoxed ? this.mod.getBoxType(goType) : null;
 			envFields.push({
 				name,
@@ -913,7 +922,10 @@ export class FunctionEmitter {
 	}
 
 	_unpackClosureEnv() {
-		const envFields = this._buildEnvFields(this.capturedNames);
+		const envFields = this._buildEnvFields(
+			this.capturedNames,
+			this.funcDecl._funcLit,
+		);
 		const envInfo = this.mod.getEnvType(envFields);
 		this.envInfo = envInfo;
 		this.envFields = envFields;
@@ -1381,6 +1393,7 @@ export class FunctionEmitter {
 
 		// 2. Iterate candidates
 		for (const cand of candidates) {
+			this._emitNilPtrCandidate(cand, fn, recvLocal);
 			this.pushInstruction({ op: "block", blockType: "void" });
 			this.pushInstruction({ op: "local.get", index: recvLocal });
 			this.pushInstruction({ op: "ref.test", typeIndex: cand.testTypeIndex });
@@ -1443,6 +1456,36 @@ export class FunctionEmitter {
 		}
 
 		emitMiss("interface conversion: nil or unmatched type for method call");
+	}
+
+	// A typed nil `*S` inside the interface is a marker object (see
+	// getNilBoxType): a pointer-receiver method runs with a nil receiver, as in
+	// Go; a value-receiver or promoted method must read through the nil pointer.
+	_emitNilPtrCandidate(cand, fn, recvLocal) {
+		if (cand.isBoxedValue || !cand.structInfo) return;
+		if (cand.testTypeIndex !== cand.structInfo.typeIndex) return;
+		const nilBox = this.mod.getNilBoxType({
+			kind: "pointer",
+			base: { kind: "named", name: cand.recvTypeName },
+		});
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: recvLocal });
+		this.pushInstruction({ op: "ref.test", typeIndex: nilBox.typeIndex });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+		if (cand.needsValueDeref || cand.embedPath) {
+			this.emitPanic(
+				"runtime error: invalid memory address or nil pointer dereference",
+			);
+		} else {
+			this.pushInstruction({ op: "ref.null", heapType: cand.testTypeIndex });
+			for (let p = 1; p < fn.params.length; p++) {
+				this.pushInstruction({ op: "local.get", index: p });
+			}
+			this.pushInstruction({ op: "call", funcIndex: cand.funcIndex });
+			this.pushInstruction("return");
+		}
+		this.pushInstruction("end");
 	}
 
 	// A value-receiver method reached through a pointer box reads the pointee
@@ -1570,11 +1613,9 @@ export class FunctionEmitter {
 						size,
 					});
 				} else {
-					this.pushInstruction({ op: "i32.const", value: size });
-					this.pushInstruction({
-						op: "array.new_default",
-						typeIndex: arrInfo.typeIndex,
-					});
+					this._emitNewArray(elemType, arrInfo, () =>
+						this.pushInstruction({ op: "i32.const", value: size }),
+					);
 				}
 				return;
 			}
@@ -1614,6 +1655,26 @@ export class FunctionEmitter {
 		} else {
 			this.pushInstruction({ op: "ref.null", heapType: "any" });
 		}
+	}
+
+	// Pushes a new array of `arrInfo` with the length `emitLen` pushes.  Elements
+	// start at their zero value: strings are the empty string, not a null
+	// reference, so the array reads, compares and prints like Go's.
+	_emitNewArray(elemType, arrInfo, emitLen) {
+		if (
+			arrInfo.elemWType === "externref" &&
+			isStringType(elemType, this.mod.checker)
+		) {
+			this.emitZeroValue(elemType, "externref");
+			emitLen();
+			this.pushInstruction({ op: "array.new", typeIndex: arrInfo.typeIndex });
+			return;
+		}
+		emitLen();
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
 	}
 
 	allocTemp(wasmType) {
@@ -1798,9 +1859,8 @@ export class FunctionEmitter {
 
 			case "LabeledStmt":
 				if (stmt.body) {
-					if (stmt.body.kind === "ForStmt") {
-						stmt.body.label = stmt.label;
-					}
+					// Stacked labels (`a: b: for`) keep the inner label.
+					if (stmt.body.kind !== "LabeledStmt") stmt.body.label = stmt.label;
 					this.emitStmt(stmt.body);
 				}
 				break;

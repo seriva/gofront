@@ -169,6 +169,17 @@ function _zeroArrayConst(goType, mod, depth = 0) {
 	return out;
 }
 
+// Types of the names in `var a, b = f()` / `var v, ok = m[k]`: one value fills
+// every name.
+function _spreadValueTypes(spec, value) {
+	if (spec._commaOk)
+		return [
+			value._mapValueType ?? value._type,
+			{ kind: "basic", name: "bool" },
+		];
+	return value?._type?.types ?? [];
+}
+
 export function _collectPackageGlobals(progs, mod, checker) {
 	const pending = []; // non-constant initializers, run by the start function
 	const pendingConsts = []; // unfoldable consts; they run before any var
@@ -183,11 +194,12 @@ export function _collectPackageGlobals(progs, mod, checker) {
 					const name = names[i];
 					// Foldable consts live in `constCache`, not in a global.
 					if (isConst && !mod.isNonLiteralConst(name)) continue;
+					const spreadTypes =
+						values.length === 1 && names.length > 1
+							? _spreadValueTypes(spec, values[0])
+							: null;
 					const rawType =
-						spec.type ??
-						(values.length === 1 && names.length > 1
-							? values[0]?._type?.types?.[i]
-							: values[i]?._type);
+						spec.type ?? (spreadTypes ? spreadTypes[i] : values[i]?._type);
 					const wType = toWasmType(rawType, checker, mod);
 					const gIdx = mod.globals.length;
 					let needsRuntimeZero = false;
@@ -302,7 +314,7 @@ export function _collectPackageGlobals(progs, mod, checker) {
 					if (needsRuntimeZero) pending.push({ name, zeroType: rawType });
 					if (!isConst && i === 0 && values.length === 1 && names.length > 1) {
 						// `var q, r = pair()`: one call fills every name.
-						pending.push({ name, names, expr: values[0] });
+						pending.push({ name, names, expr: values[0], types: spreadTypes });
 					}
 					if (values[i] && !isConstInit && names.length === values.length) {
 						(isConst ? pendingConsts : pending).push({
@@ -355,7 +367,7 @@ export function _orderConstInits(entries) {
 // initializer in declaration order and invoking package `init()` functions;
 // registered as the module start function.
 export function _makeGlobalInitFunc(pending, initNames = []) {
-	const stmts = pending.map(({ name, names, expr, zeroType }) =>
+	const stmts = pending.map(({ name, names, expr, types, zeroType }) =>
 		zeroType
 			? { kind: "GlobalZeroInit", name, goType: zeroType }
 			: {
@@ -364,7 +376,7 @@ export function _makeGlobalInitFunc(pending, initNames = []) {
 						? names.map((n, i) => ({
 								kind: "Ident",
 								name: n,
-								_type: expr._type?.types?.[i],
+								_type: types?.[i] ?? expr._type?.types?.[i],
 							}))
 						: [{ kind: "Ident", name, _type: expr._type }],
 					op: "=",

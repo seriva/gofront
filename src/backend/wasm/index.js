@@ -36,6 +36,7 @@ import {
 	_usesTestingRun,
 	importsAnyOf,
 } from "./prescan.js";
+import { pruneUnusedFuncs } from "./prune-funcs.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
@@ -86,8 +87,7 @@ function emitIndexPanicBody(mod, emitter) {
 	concat();
 	emitter.pushInstruction("end");
 	concat();
-	emitter.pushInstruction("any.convert_extern");
-	emitter.emitPanicThrow();
+	emitter.emitRuntimePanicThrow();
 }
 
 function peepholeOptimize(instructions) {
@@ -839,6 +839,12 @@ export function compileWasmModule(
 	if (_usesFmtAny(funcDecls, mod)) {
 		funcDecls.push(
 			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
+			helper(
+				"__any_fmt_key",
+				[{ name: "a", type: ANY_T }],
+				STR_T,
+				"any_fmt_key",
+			),
 		);
 	}
 
@@ -943,8 +949,7 @@ export function compileWasmModule(
 			const funcIdx = mod.getStringImportIndex();
 			emitter.pushInstruction({ op: "i32.const", value: strIdx });
 			emitter.pushInstruction({ op: "call", funcIndex: funcIdx });
-			emitter.pushInstruction("any.convert_extern");
-			emitter.emitPanicThrow();
+			emitter.emitRuntimePanicThrow();
 		} else if (fn._isPushPanic) {
 			const panicNodeTypeIndex = mod.getPanicNodeTypeIndex();
 			const panicGlobal = mod.getPanicGlobalIndex();
@@ -1024,6 +1029,7 @@ export function compileWasmModule(
 		sourceMappingURL: options.sourceMappingURL ?? null,
 	};
 
+	pruneUnusedFuncs(moduleIR);
 	const wasmBytes = encodeModule(moduleIR);
 	const watText = options.emitWat ? emitWat(moduleIR) : null;
 

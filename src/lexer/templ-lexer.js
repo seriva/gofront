@@ -196,7 +196,7 @@ export class TemplLexer {
 		}
 
 		const chunk = this.src.slice(start, this.pos);
-		for (const t of this._goTokens(chunk)) this.tokens.push(t);
+		for (const t of this._goTokens(chunk, start)) this.tokens.push(t);
 	}
 
 	// ── Templ / CSS declaration lexing ───────────────────────────
@@ -221,7 +221,7 @@ export class TemplLexer {
 		const paramStart = this.pos;
 		this._skipBalanced("(", ")");
 		const paramSrc = this.src.slice(paramStart, this.pos);
-		for (const t of this._goTokens(paramSrc)) this.tokens.push(t);
+		for (const t of this._goTokens(paramSrc, paramStart)) this.tokens.push(t);
 
 		this.skipWhitespace();
 
@@ -492,7 +492,7 @@ export class TemplLexer {
 	// ── Expression / control flow inside HTML ─────────────────────
 
 	_lexBraceExprOrControl() {
-		// { children... }  →  TEMPL_CHILDREN
+		// { name... }      →  TEMPL_CHILDREN
 		// { goExpr }       →  TEMPL_EXPR
 		const saveLine = this.line;
 		const saveCol = this.col;
@@ -500,12 +500,12 @@ export class TemplLexer {
 		this.advance(); // {
 		this.skipWhitespace();
 
-		// Check for children...
-		if (this.src.startsWith("children...", this.pos)) {
-			this.pos += "children...".length;
-			this.skipWhitespace();
-			if (this.peek() === "}") this.advance();
-			this.tokens.push(new Token(TT.TEMPL_CHILDREN, null, saveLine, saveCol));
+		// `{ name... }` mounts a variadic slot; the token holds the name.
+		const slot = /^([A-Za-z_]\w*)\.\.\.\s*\}/.exec(this.src.slice(this.pos));
+		if (slot) {
+			const { line, col } = this;
+			for (let i = 0; i < slot[0].length; i++) this.advance();
+			this.tokens.push(new Token(TT.TEMPL_CHILDREN, slot[1], line, col));
 			return;
 		}
 
@@ -532,7 +532,7 @@ export class TemplLexer {
 		this._skipBalanced("(", ")");
 		const argsSrc = name + this.src.slice(argsStart, this.pos);
 
-		const callTokens = this._goTokens(argsSrc);
+		const callTokens = this._goTokens(argsSrc, nameStart);
 		this.tokens.push(new Token(TT.TEMPL_COMP, callTokens, line, col));
 	}
 
@@ -604,7 +604,7 @@ export class TemplLexer {
 				}
 				const caseExprSrc = this.src.slice(caseExprStart, this.pos).trimEnd();
 				if (this.peek() === ":") this.advance(); // :
-				const caseTokens = this._goTokens(caseExprSrc);
+				const caseTokens = this._goTokens(caseExprSrc, caseExprStart);
 				this.tokens.push(
 					new Token(TT.TEMPL_CASE, caseTokens, caseLine, this.col),
 				);
@@ -651,10 +651,20 @@ export class TemplLexer {
 
 	// ── Helpers ───────────────────────────────────────────────────
 
-	_goTokens(src) {
-		return new Lexer(src, this.filename)
+	// Lexes `src`, which starts at offset `offset` of the templ source, so the
+	// tokens carry their position in the .templ file.
+	_goTokens(src, offset) {
+		const before = this.src.slice(0, offset);
+		const lineShift = before.split("\n").length - 1;
+		const colShift = offset - (before.lastIndexOf("\n") + 1);
+		const tokens = new Lexer(src, this.filename)
 			.tokenize()
 			.filter((t) => t.type !== T.EOF);
+		for (const t of tokens) {
+			if (t.line === 1) t.col += colShift;
+			t.line += lineShift;
+		}
+		return tokens;
 	}
 
 	// Consume text up to the opening `{`, advance past it, and return Go tokens.
@@ -663,7 +673,7 @@ export class TemplLexer {
 		this._skipToOpenBrace();
 		const src = this.src.slice(start, this.pos).trimEnd();
 		this.advance(); // consume {
-		return src ? this._goTokens(src) : [];
+		return src ? this._goTokens(src, start) : [];
 	}
 
 	// Read Go expression tokens until the closing }
@@ -690,10 +700,11 @@ export class TemplLexer {
 			}
 			this.advance();
 		}
-		const exprSrc = this.src.slice(start, this.pos).trim();
+		const raw = this.src.slice(start, this.pos);
+		const exprSrc = raw.trim();
 		if (this.peek() === "}") this.advance(); // consume }
 		if (!exprSrc) return [];
-		return this._goTokens(exprSrc);
+		return this._goTokens(exprSrc, start + raw.length - raw.trimStart().length);
 	}
 
 	_readHtmlName() {
@@ -727,8 +738,18 @@ export class TemplLexer {
 		return this.src.slice(start, this.pos);
 	}
 
+	// True when the `{` at the current position opens a composite literal of a
+	// slice, array or map type (`[]int{1}`, `map[string]int{}`) rather than a
+	// body. Go allows these in a header without parentheses; a literal of a
+	// bare type name is not (`T{}` needs them), so it still ends the header.
+	_atCompositeLiteral(start) {
+		const before = this.src.slice(start, this.pos);
+		return /(?:^|[^\w\])])(?:map)?\[[^\]]*\][\w.*[\]]*$/.test(before);
+	}
+
 	_skipToOpenBrace() {
 		// Skip text until we hit an unbalanced {, tracking parens/brackets
+		const start = this.pos;
 		let paren = 0,
 			bracket = 0;
 		while (!this.eof()) {
@@ -737,8 +758,11 @@ export class TemplLexer {
 			else if (c === ")") paren--;
 			else if (c === "[") bracket++;
 			else if (c === "]") bracket--;
-			else if (c === "{" && paren === 0 && bracket === 0) return;
-			else if (c === '"' || c === "'") {
+			else if (c === "{" && paren === 0 && bracket === 0) {
+				if (!this._atCompositeLiteral(start)) return;
+				this._skipBalanced("{", "}");
+				continue;
+			} else if (c === '"' || c === "'") {
 				this._skipGoString(c);
 				continue;
 			} else if (c === "`") {

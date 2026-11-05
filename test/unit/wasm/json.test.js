@@ -2661,6 +2661,73 @@ func Run() string {
 	assertEqual(await runLib(src), '{"A":-0}-0[-0,1]');
 });
 
+for (const target of ["wasm", "both"]) {
+	test(`RawMessage, Number, rune and text-marshaler values in any encode in a ${target} package`, async () => {
+		const src = `//gofront:target ${target}
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T string
+
+func (t T) MarshalText() ([]byte, error) { return []byte("t-" + string(t)), nil }
+
+func show(v any) string {
+	b, err := json.Marshal(v)
+	return fmt.Sprint(string(b), " ", err)
+}
+
+func Run() string {
+	out := ""
+	out += show(json.RawMessage("[1]")) + ";"
+	out += show(json.Number("1")) + ";"
+	out += show(json.Number("12")) + ";"
+	out += show([]rune("ab")) + ";"
+	out += show(T("x")) + ";"
+	out += show(map[string]any{"n": json.Number("3"), "r": json.RawMessage("{}")})
+	return out
+}
+`;
+		assertEqual(
+			await runLib(src),
+			'[1] <nil>;1 <nil>;12 <nil>;[97,98] <nil>;"t-x" <nil>;{"n":3,"r":{}} <nil>',
+		);
+	});
+
+	test(`Slices and arrays that share a representation encode by their own type in any in a ${target} package`, async () => {
+		const src = `//gofront:target ${target}
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func show(v any) string {
+	b, err := json.Marshal(v)
+	return fmt.Sprint(string(b), " ", err)
+}
+
+func Run() string {
+	out := ""
+	out += show([]byte{1}) + ";"
+	out += show([]bool{true}) + ";"
+	out += show([]int8{1, 2}) + ";"
+	out += show([3]int{1, 2, 3}) + ";"
+	out += show([2]int{4, 5})
+	return out
+}
+`;
+		assertEqual(
+			await runLib(src),
+			'"AQ==" <nil>;[true] <nil>;[1,2] <nil>;[1,2,3] <nil>;[4,5] <nil>',
+		);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

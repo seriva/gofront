@@ -1,6 +1,7 @@
 import {
 	bodyRedeclares,
 	forEachChild,
+	hasCallOrReceive,
 	isIntRangeType,
 	isMapRangeType,
 	isRangeFor,
@@ -128,6 +129,20 @@ const isReusableIndex = (e, vars, boxed) => {
 	}
 };
 
+// Adds the name of every identifier under `n` to `into`.
+const collectIdentNames = (n, into) => {
+	if (Array.isArray(n)) {
+		for (const c of n) collectIdentNames(c, into);
+		return;
+	}
+	if (!n || typeof n !== "object") return;
+	if (n.kind === "Ident") into.add(n.name);
+	someChild(n, (c) => {
+		collectIdentNames(c, into);
+		return false;
+	});
+};
+
 // Method-name dispatch for genStmt — string values add no static call edges.
 const STMT_GEN_DELEGATE = {
 	VarDecl: "genVarDecl",
@@ -139,19 +154,27 @@ const STMT_GEN_DELEGATE = {
 	SwitchStmt: "genSwitch",
 	TypeSwitchStmt: "genTypeSwitch",
 	BranchStmt: "_genBranchStmt",
+	TemplMount: "_genTemplMountStmt",
 };
 
 /** @type {ThisType<CodeGen>} */
 export const statementGenMethods = {
 	genBlock(block) {
 		let nested = 0;
+		const earlier = new Set();
 		for (const stmt of block.stmts) {
 			if (this._definesShadowedRead(stmt)) {
 				this._genShadowingDefine(stmt);
 				nested++;
+			} else if (this._definesAfterOuterUse(stmt, earlier)) {
+				this.line("{");
+				this.indent++;
+				nested++;
+				this.genStmt(stmt);
 			} else {
 				this.genStmt(stmt);
 			}
+			collectIdentNames(stmt, earlier);
 		}
 		for (; nested > 0; nested--) {
 			this.indent--;
@@ -159,11 +182,20 @@ export const statementGenMethods = {
 		}
 	},
 
+	// `err = nil; _, err := g()` where `err` is an outer variable used earlier
+	// in this block: JS `let` would put those uses in its temporal dead zone,
+	// so the rest of the block moves into a nested block.
+	_definesAfterOuterUse(stmt, earlier) {
+		if (stmt.kind !== "DefineStmt" || earlier.size === 0) return false;
+		return stmt.lhs.some(
+			(l) => !l._redecl && l.name !== "_" && earlier.has(l.name),
+		);
+	},
+
 	// `x := f(x)` declaring a new `x` that its own right-hand side reads (the
 	// outer `x`): JS `let` would put the read in its temporal dead zone.
 	_definesShadowedRead(stmt) {
-		if (stmt.kind !== "DefineStmt" || this._isCommaOkMapExpr(stmt, stmt.rhs[0]))
-			return false;
+		if (stmt.kind !== "DefineStmt") return false;
 		const names = new Set(
 			stmt.lhs.filter((l) => !l._redecl && l.name !== "_").map((l) => l.name),
 		);
@@ -177,9 +209,35 @@ export const statementGenMethods = {
 		return stmt.rhs.some(reads);
 	},
 
+	// Emits an `if`/`switch` init statement, then `body`; an init that reads the
+	// name it declares goes through `_genShadowingDefine`.
+	_genScopedInit(init, body) {
+		const shadowing = this._definesShadowedRead(init);
+		if (shadowing) this._genShadowingDefine(init);
+		else this.genStmt(init);
+		body();
+		if (shadowing) {
+			this.indent--;
+			this.line("}");
+		}
+	},
+
 	// Evaluates the right-hand side in the enclosing scope, then opens a nested
 	// block (closed at the end of the enclosing block) that declares the names.
 	_genShadowingDefine(stmt) {
+		if (this._isCommaOkMapExpr(stmt, stmt.rhs[0])) {
+			const node = stmt.rhs[0];
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const m = `__sm${this._tmpCounter}`;
+			const k = `__sk${this._tmpCounter}`;
+			this.line(
+				`const ${m} = ${this.genExpr(node.expr)}, ${k} = ${this.genExpr(node.index)};`,
+			);
+			this.line("{");
+			this.indent++;
+			this._genCommaOkMapIndex(stmt, node, true, { map: m, key: k });
+			return;
+		}
 		const rhs = this._defineRhs(stmt);
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__t${this._tmpCounter}`;
@@ -193,24 +251,38 @@ export const statementGenMethods = {
 		);
 	},
 
+	// `m[k]` of a non-strict comma-ok: a missing key reads as the scalar zero
+	// value, not `undefined`.
+	_nonStrictMapRead(mapExpr, keyExpr, valType, copyVal) {
+		const zero = valType ? this.zeroValueForType(valType) : "";
+		const read = `${mapExpr}[${keyExpr}]`;
+		if (/^(0n?|""|false)$/.test(zero)) return `(${read} ?? ${zero})`;
+		return copyVal(
+			this._aggregateBase(valType) ? `(${read} ?? ${zero})` : read,
+		);
+	},
+
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
-	_genCommaOkMapIndex(stmt, rhsNode, isDefine) {
-		const mapExpr = this.genExpr(rhsNode.expr);
-		const keyExpr = this.genExpr(rhsNode.index);
+	// `pre` carries the map and key already evaluated (a shadowing declaration
+	// reads them before its names exist).
+	_genCommaOkMapIndex(stmt, rhsNode, isDefine, pre = null) {
+		const mapExpr = pre?.map ?? this.genExpr(rhsNode.expr);
+		const keyExpr = pre?.key ?? this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-		const decl = isDefine ? "let " : "";
-		// An array map value is a copy, not the stored array.
+		// A name `:=` reuses is assigned, not declared again.
+		const declOf = (l) => (isDefine && !l._redecl ? "let " : "");
+		const [vDecl, okDecl] = stmt.lhs.map(declOf);
+		// A struct or array map value is a copy, not the stored value.
 		const valType = rhsNode._mapValueType;
 		const copyVal = (js) =>
-			this._aggregateBase(valType)?.kind === "array"
-				? this._cloneJs(valType, js)
-				: js;
+			this._aggregateBase(valType) ? this._cloneJs(valType, js) : js;
 		if (isDefine && !this.strict) {
 			if (vName !== "_") {
-				this.line(`let ${vName} = ${copyVal(`${mapExpr}[${keyExpr}]`)};`);
+				const val = this._nonStrictMapRead(mapExpr, keyExpr, valType, copyVal);
+				this.line(`${vDecl}${vName} = ${val};`);
 			}
 			if (okName !== "_") {
-				this.line(`let ${okName} = (${keyExpr}) in ${mapExpr};`);
+				this.line(`${okDecl}${okName} = (${keyExpr}) in ${mapExpr};`);
 			}
 			return;
 		}
@@ -223,11 +295,13 @@ export const statementGenMethods = {
 		this.line(`const ${mTmp} = ${mapExpr}, ${kTmp} = ${keyExpr};`);
 		if (vName !== "_") {
 			this.line(
-				`${decl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero};`,
+				`${vDecl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero};`,
 			);
 		}
 		if (okName !== "_") {
-			this.line(`${decl}${okName} = Boolean(${mTmp} && (${kTmp} in ${mTmp}));`);
+			this.line(
+				`${okDecl}${okName} = Boolean(${mTmp} && (${kTmp} in ${mTmp}));`,
+			);
 		}
 	},
 
@@ -297,7 +371,7 @@ export const statementGenMethods = {
 				}
 				const is64 = is64BitInt(stmt.expr._type);
 				if (
-					(this.strict || is64) &&
+					(this.strict || is64 || this._isFloat32(stmt.expr._type)) &&
 					this._genStrictCompound(
 						stmt.expr,
 						stmt.op === "++" ? "+" : "-",
@@ -316,14 +390,7 @@ export const statementGenMethods = {
 				if (stmt.init) {
 					this.line("{");
 					this.indented(() => {
-						const shadowing = this._definesShadowedRead(stmt.init);
-						if (shadowing) this._genShadowingDefine(stmt.init);
-						else this.genStmt(stmt.init);
-						this._genIf(stmt);
-						if (shadowing) {
-							this.indent--;
-							this.line("}");
-						}
+						this._genScopedInit(stmt.init, () => this._genIf(stmt));
 					});
 					this.line("}");
 				} else {
@@ -340,8 +407,12 @@ export const statementGenMethods = {
 				if (stmt.body && stmt.body.kind === "ForStmt") {
 					stmt.body.label = stmt.label;
 				}
-				this.line(`${stmt.label}:`);
-				this.genStmt(stmt.body);
+				{
+					const hoisted = this._hoistForInit(stmt.body);
+					this.line(`${stmt.label}:`);
+					this.genStmt(stmt.body);
+					if (hoisted) this._closeHoistedForInit();
+				}
 				break;
 			case "Block":
 				this.line("{");
@@ -721,6 +792,10 @@ export const statementGenMethods = {
 			this._genStableWholeAssign(stmt);
 			return;
 		}
+		if (this._isStableTupleAssign(stmt)) {
+			this._genStableTupleAssign(stmt);
+			return;
+		}
 		const paired = stmt.rhs.length === stmt.lhs.length && stmt.op === "=";
 		const rhs = stmt.rhs.map((e, i) =>
 			paired && stmt.lhs[i].name !== "_"
@@ -767,7 +842,7 @@ export const statementGenMethods = {
 							rhsVal,
 							stmt.lhs[0]._mapValueType,
 						)
-					: `(__m[__k] ?? ${zero}) ${binOp} (${rhsVal})`;
+					: `(__m[__k] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
 				const rhsExprDirect = is64Val
 					? this._gen64BitBinary(
 							binOp,
@@ -775,7 +850,7 @@ export const statementGenMethods = {
 							rhsVal,
 							stmt.lhs[0]._mapValueType,
 						)
-					: `(${base}[${idx}] ?? ${zero}) ${binOp} (${rhsVal})`;
+					: `(${base}[${idx}] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
 				if (
 					this._hasCallExpr(stmt.lhs[0].expr) ||
 					this._hasCallExpr(stmt.lhs[0].index)
@@ -801,14 +876,14 @@ export const statementGenMethods = {
 				rhsVal = `${rhsVal}n`;
 			}
 			if (
-				(this.strict || is64) &&
-				stmt.op !== "=" &&
+				this._needsStrictCompoundStmt(stmt, is64) &&
 				this._genStrictCompound(
 					stmt.lhs[0],
 					stmt.op.slice(0, -1),
 					rhsVal,
 					null,
 					active[0].l,
+					stmt.rhs[0]?._type,
 				)
 			) {
 				return;
@@ -817,7 +892,8 @@ export const statementGenMethods = {
 				active[0].l.startsWith("{") && !active[0].l.startsWith("({")
 					? `(${active[0].l})`
 					: active[0].l;
-			this.line(`${targetL} ${stmt.op} ${rhsVal};`);
+			if (stmt.op === "&^=") this.line(`${targetL} &= ~(${rhsVal});`);
+			else this.line(`${targetL} ${stmt.op} ${rhsVal};`);
 		} else if (hoisted) {
 			this.line("{");
 			this.indented(() => {
@@ -848,23 +924,28 @@ export const statementGenMethods = {
 			((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
 		const lines = [];
 		const undo = [];
-		for (const l of stmt.lhs) {
+		const visit = (l) => {
 			let keys;
 			if (l.kind === "IndexExpr") keys = ["expr", "index"];
 			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
-			else continue;
+			else return;
 			for (const key of keys) {
 				const operand = l[key];
 				if (!mentions(operand)) continue;
-				// A struct or array value names the variable's storage in Go.
-				if (key === "expr" && this._aggregateBase(operand._type)) continue;
+				// A struct or array value names the variable's storage in Go: hoist
+				// the operands inside it (`ps[n].A`) instead of the value.
+				if (key === "expr" && this._aggregateBase(operand._type)) {
+					visit(operand);
+					continue;
+				}
 				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 				const name = `__h${this._tmpCounter}`;
 				lines.push(`const ${name} = ${this.genExpr(operand)};`);
 				undo.push([l, key, operand]);
 				l[key] = { kind: "Ident", name, _type: operand._type };
 			}
-		}
+		};
+		for (const l of stmt.lhs) visit(l);
 		if (lines.length === 0) return null;
 		return {
 			lines,
@@ -890,7 +971,13 @@ export const statementGenMethods = {
 	_isStableWholeAssign(stmt) {
 		if (stmt.op !== "=" || stmt.lhs.length !== 1 || stmt.rhs.length !== 1)
 			return false;
-		const l = stmt.lhs[0];
+		return this._isStableTarget(stmt.lhs[0], stmt.rhs[0]);
+	},
+
+	// `l = rhs` writes into the existing storage of `l` (see above).  When the
+	// program takes `&xs[i]` anywhere, an element of a slice does too: any
+	// callee may hold the pointer.
+	_isStableTarget(l, rhs) {
 		if (l.kind === "IndexExpr" && l._mapValueType) return false;
 		if (
 			l.kind !== "Ident" &&
@@ -899,13 +986,57 @@ export const statementGenMethods = {
 		)
 			return false;
 		if (l.kind === "Ident" && l.name === "_") return false;
-		if (
-			!this._aggregateBase(l._type) ||
-			!this._aggregateBase(stmt.rhs[0]._type)
-		)
+		if (!this._aggregateBase(l._type) || !this._aggregateBase(rhs._type))
 			return false;
+		if (this._elemAddrTaken && this._isSliceElemTarget(l)) return true;
 		const root = this._rootIdentName(l);
 		return root !== null && this._fnMutates(root, true);
+	},
+
+	// `xs[i]` on a plain slice (not a typed array, array or map).
+	_isSliceElemTarget(l) {
+		if (l.kind !== "IndexExpr" || l._mapValueType) return false;
+		const u =
+			l.expr._type?.kind === "named" ? l.expr._type.underlying : l.expr._type;
+		return u?.kind === "slice" && !isTypedArraySlice(l.expr._type);
+	},
+
+	// `a, b = x, y` where a target is stored in place: every right-hand value
+	// is evaluated (and copied) first, then each target is assigned in order.
+	_isStableTupleAssign(stmt) {
+		return (
+			stmt.op === "=" &&
+			stmt.lhs.length > 1 &&
+			stmt.rhs.length === stmt.lhs.length &&
+			stmt.lhs.some((l, i) => this._isStableTarget(l, stmt.rhs[i]))
+		);
+	},
+
+	_genStableTupleAssign(stmt) {
+		const hoisted = this._hoistLhsOperands(stmt);
+		const stable = stmt.lhs.map((l, i) => this._isStableTarget(l, stmt.rhs[i]));
+		this.line("{");
+		this.indented(() => {
+			for (const l of hoisted?.lines ?? []) this.line(l);
+			const base = (this._tmpCounter ?? 0) + 1;
+			this._tmpCounter = base + stmt.lhs.length;
+			const val = (i) => `__s${base + i}`;
+			const dst = (i) => `__d${base + i}`;
+			stmt.rhs.forEach((r, i) => {
+				this.line(`const ${val(i)} = ${this.genValueExpr(r)};`);
+			});
+			stmt.lhs.forEach((l, i) => {
+				if (stable[i])
+					this.line(`const ${dst(i)} = ${this._genAssignLhsExpr(l)};`);
+			});
+			stmt.lhs.forEach((l, i) => {
+				if (stable[i]) this._emitCopyInto(dst(i), val(i), l._type);
+				else if (!(l.kind === "Ident" && l.name === "_"))
+					this.line(`${this._genAssignLhsExpr(l)} = ${val(i)};`);
+			});
+		});
+		this.line("}");
+		hoisted?.restore();
 	},
 
 	_genStableWholeAssign(stmt) {
@@ -1125,7 +1256,12 @@ export const statementGenMethods = {
 			this.line("}");
 			return;
 		}
-		if (elseBody.kind === "IfStmt") {
+		if (elseBody.kind === "IfStmt" && elseBody.init) {
+			// `else if init; cond`: the init runs only when this branch is taken.
+			this.line("} else {");
+			this.indented(() => this.genStmt(elseBody));
+			this.line("}");
+		} else if (elseBody.kind === "IfStmt") {
 			this.line(`} else if (${this.genExpr(elseBody.cond)}) {`);
 			this.indented(() => this.genBlock(elseBody.body));
 			this._genElse(elseBody.elseBody);
@@ -1165,7 +1301,47 @@ export const statementGenMethods = {
 		this.line("}");
 	},
 
+	// `for n := n; ...` declares a loop variable its own initialiser reads: the
+	// initialiser values are evaluated into temporaries ahead of the loop.
+	_hoistForInit(stmt) {
+		const init = stmt.kind === "ForStmt" && stmt.init;
+		if (
+			!init ||
+			stmt._initPre ||
+			init.kind !== "DefineStmt" ||
+			this.isRangeFor(stmt) ||
+			stmt.cond?.kind === "RangeExpr" ||
+			!this._definesShadowedRead(init)
+		)
+			return false;
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const values = this._defineRhs(init);
+		const names = values.map((_, i) => `__fi${this._tmpCounter}_${i}`);
+		this.line("{");
+		this.indent++;
+		this.line(
+			`const ${values.map((v, i) => `${names[i]} = ${v}`).join(", ")};`,
+		);
+		stmt._initPre = names;
+		return true;
+	},
+
+	_closeHoistedForInit() {
+		this.indent--;
+		this.line("}");
+	},
+
 	genFor(stmt) {
+		const hoisted = this._hoistForInit(stmt);
+		try {
+			this._genForLoop(stmt);
+		} finally {
+			delete stmt._initPre;
+		}
+		if (hoisted) this._closeHoistedForInit();
+	},
+
+	_genForLoop(stmt) {
 		const isInner = this._inIteratorBody;
 		if (isInner) {
 			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
@@ -1188,7 +1364,7 @@ export const statementGenMethods = {
 				this._genSimpleWhileFor(stmt);
 				return;
 			}
-			const init = stmt.init ? this.stmtInline(stmt.init) : "";
+			const init = stmt.init ? this.stmtInline(stmt.init, stmt._initPre) : "";
 			const cond = stmt.cond ? this.genExpr(stmt.cond) : "";
 			const post = this._perIterationClones(
 				stmt,
@@ -1420,6 +1596,7 @@ export const statementGenMethods = {
 		const keyDecode = this._structKeyRange(iterType);
 		const paramKey = this._typeParamKeyRange(iterType);
 		const is64Key = this._is64BitMapRange(iterType);
+		const scalarKey = this._scalarKeyRange(iterType);
 		const binding =
 			lhs.length === 1
 				? lhs[0] === "_"
@@ -1435,6 +1612,12 @@ export const statementGenMethods = {
 				this.line(`${lhs[0]} = __kd(${lhs[0]}, true);`);
 			else if (is64Key && lhs[0] !== "_")
 				this.line(`${lhs[0]} = BigInt(${lhs[0]});`);
+			else if (scalarKey && lhs[0] !== "_")
+				this.line(
+					scalarKey === "bool"
+						? `${lhs[0]} = ${lhs[0]} === "true";`
+						: `${lhs[0]} = Number(${lhs[0]});`,
+				);
 			this._cloneMapRangeValue(init, iterType, lhs[1]);
 			this.genBlock(body);
 		});
@@ -1446,6 +1629,19 @@ export const statementGenMethods = {
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const key = base?.kind === "map" ? base.key : null;
 		return is64BitInt(key);
+	},
+
+	// Ranging over a map with plain int, float or bool keys: object property
+	// names are strings, so the key variable is converted back.
+	_scalarKeyRange(iterType) {
+		if (!this._isMapRangeType(iterType)) return null;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const key = base?.kind === "map" ? base.key : null;
+		if (!key || key.kind === "typeParam") return null;
+		const u = this._underlyingOf(key);
+		if (u?.kind !== "basic" || this._is64BitInt(key)) return null;
+		if (u.name === "bool") return "bool";
+		return /^(u?int\d*|uintptr|float(32|64))$/.test(u.name) ? "num" : null;
 	},
 
 	// Ranging over a map whose key type is a type parameter: the key is decoded
@@ -1468,7 +1664,13 @@ export const statementGenMethods = {
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const key = base?.kind === "map" ? base.key : null;
 		const keyBase = key?.kind === "named" ? key.underlying : key;
-		if (keyBase?.kind !== "struct" && !this._isIfaceType(key)) return false;
+		if (
+			keyBase?.kind !== "struct" &&
+			keyBase?.kind !== "array" &&
+			keyBase?.kind !== "pointer" &&
+			!this._isIfaceType(key)
+		)
+			return false;
 		this.useHelper("structKey");
 		return true;
 	},
@@ -1523,9 +1725,22 @@ export const statementGenMethods = {
 			!!valNode &&
 			iterBase?.kind === "slice" &&
 			!isTypedArraySlice(iterType);
+		// Ranging over an array for its indexes only does not evaluate the
+		// array (`range p` on a nil array pointer is valid): the length is the
+		// type's.
+		const arrayLen = this._aggregateBase(iterType)?.size;
+		const indexOnlyArray =
+			(!valNode || valNode.name === "_") &&
+			typeof arrayLen === "number" &&
+			this._aggregateBase(iterType)?.kind === "array" &&
+			!hasCallOrReceive(range.expr);
 		this._genSliceRangeFor(
 			stmt,
-			rangesArrayValue ? this._cloneJs(iterType, iteree) : iteree,
+			indexOnlyArray
+				? `({ length: ${arrayLen} })`
+				: rangesArrayValue
+					? this._cloneJs(iterType, iteree)
+					: iteree,
 			init.kind === "AssignStmt",
 			unwrapView,
 		);
@@ -1702,10 +1917,10 @@ export const statementGenMethods = {
 	},
 
 	// Inline a statement as a for-init/post string (no semicolon)
-	stmtInline(stmt) {
+	stmtInline(stmt, pre = null) {
 		switch (stmt.kind) {
 			case "DefineStmt":
-				return this._inlineDefine(stmt);
+				return this._inlineDefine(stmt, pre);
 			case "AssignStmt":
 				return this._withInlineSyncs(
 					this._resliceSyncs(stmt.lhs, stmt, true),
@@ -1739,14 +1954,14 @@ export const statementGenMethods = {
 		return syncs ? `${js}, ${syncs.join(", ")}` : js;
 	},
 
-	_inlineDefine(stmt) {
+	_inlineDefine(stmt, pre = null) {
 		const boxed =
 			stmt.lhs.length === 1 &&
 			stmt.rhs.length === 1 &&
 			this._boxedVars.has(stmt.lhs[0].name);
 		if (boxed)
-			return `let ${stmt.lhs[0].name} = { value: ${this.genValueExpr(stmt.rhs[0])} }`;
-		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+			return `let ${stmt.lhs[0].name} = { value: ${pre ? pre[0] : this.genValueExpr(stmt.rhs[0])} }`;
+		const rhs = pre ?? stmt.rhs.map((e) => this.genExpr(e));
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		if (lhs.length === 1) return `let ${lhs[0]} = ${rhs[0]}`;
 		// `for i, j := 0, 10`: one declarator per variable.
@@ -1759,6 +1974,37 @@ export const statementGenMethods = {
 			return `let ${decls.join(", ")}`;
 		}
 		return `let [${lhs.map((n) => (n === "_" ? "" : n)).join(", ")}] = ${rhs[0]}`;
+	},
+
+	// Compound assignments that need more than the JS operator: strict
+	// numeric wrapping, 64-bit and float32 arithmetic, and integer `/=`.
+	_needsStrictCompoundStmt(stmt, is64) {
+		if (stmt.op === "=") return false;
+		const t = stmt.lhs[0]._type;
+		return (
+			this.strict ||
+			is64 ||
+			this._isFloat32(t) ||
+			(stmt.op === "/=" && this.isIntType(t))
+		);
+	},
+
+	// The single-expression form of `_genStrictCompound` for `for` post
+	// statements: the emitted statement is lifted back out of the output.
+	_inlineStrictCompound(stmt, rhsJs) {
+		const mark = this.out.length;
+		const handled = this._genStrictCompound(
+			stmt.lhs[0],
+			stmt.op.slice(0, -1),
+			rhsJs,
+			null,
+			null,
+			stmt.rhs[0]?._type,
+		);
+		const emitted = this.out.splice(mark).map((l) => l.trim());
+		if (!handled) return null;
+		const js = emitted.join(" ").replace(/;$/, "");
+		return js.startsWith("{") ? `(() => ${js})()` : js;
 	},
 
 	_inlineAssign(stmt) {
@@ -1778,6 +2024,12 @@ export const statementGenMethods = {
 				const l = this.genExpr(stmt.lhs[0]);
 				return `${l} = ${this._gen64BitBinary(binOp, l, r, stmt.lhs[0]._type)}`;
 			}
+			if (this._needsStrictCompoundStmt(stmt, is64BitInt(stmt.lhs[0]._type))) {
+				const strict = this._inlineStrictCompound(stmt, rhs[0]);
+				if (strict) return strict;
+			}
+			if (stmt.op === "&^=")
+				return `${this.genExpr(stmt.lhs[0])} &= ~(${rhs[0]})`;
 			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
 		}
 		// `i, j = i+1, j-1`: every right-hand side is evaluated first.
@@ -1791,6 +2043,17 @@ export const statementGenMethods = {
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
 		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		if (stmt.tag && this._isStructOrArrayType(stmt.tag._type)) {
+			// Struct and array tags compare by value, not by reference.
+			this.useHelper("equal");
+			this._swCounter = (this._swCounter ?? 0) + 1;
+			const tmp = `__sw${this._swCounter}`;
+			this.line(`const ${tmp} = ${tag};`);
+			return {
+				tag: "true",
+				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
+			};
+		}
 		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
 			return { tag, caseExpr: (e) => this.genExpr(e) };
 		this.useHelper("ifeq");
@@ -1818,7 +2081,7 @@ export const statementGenMethods = {
 					// across sibling cases (JS switch shares one block scope).
 					this.line("{");
 					this.indented(() => {
-						for (const s of c.stmts) this.genStmt(s);
+						this.genBlock(c);
 						// Go doesn't fall through by default — add break unless last stmt is return/break
 						const last = c.stmts[c.stmts.length - 1];
 						if (
@@ -1837,9 +2100,17 @@ export const statementGenMethods = {
 		if (stmt.init) {
 			this.line("{");
 			this.indented(() => {
-				this.genStmt(stmt.init);
-				genBody();
+				this._genScopedInit(stmt.init, genBody);
 			});
+			this.line("}");
+		} else if (
+			stmt.tag &&
+			(this._isStructOrArrayType(stmt.tag._type) ||
+				this._isIfaceType(stmt.tag._type))
+		) {
+			// The tag temporary is a `const`, which cannot directly follow a label.
+			this.line("{");
+			this.indented(genBody);
 			this.line("}");
 		} else {
 			genBody();
@@ -1851,7 +2122,13 @@ export const statementGenMethods = {
 		this.indented(() => {
 			const val = this.genExpr(stmt.expr);
 			this.line(`const __tsw = ${val};`);
-			if (stmt.assign) this.line(`let ${stmt.assign} = __tsw;`);
+			// The binding is declared per clause, after the switch expression
+			// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
+			const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
+			const bind = (valueJs) =>
+				this.line(
+					`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
+				);
 
 			let first = true;
 			let hasDefault = false;
@@ -1866,24 +2143,16 @@ export const statementGenMethods = {
 					.join(" || ");
 				this.line(`${first ? "if" : "else if"} (${cond}) {`);
 				this.indented(() => {
-					// A single named non-struct case binds the unboxed value.
-					if (
-						stmt.assign &&
-						c.types.length === 1 &&
-						this._assertedValueJs(c.types[0], "__tsw") !== "__tsw"
-					)
-						this.line(
-							`const ${stmt.assign} = ${this._assertedValueJs(c.types[0], "__tsw")};`,
-						);
-					// An array case binds a copy of the boxed value.
-					else if (
-						stmt.assign &&
-						c.types.length === 1 &&
-						this._typeFromNode(c.types[0])?.kind === "array"
-					)
-						this.line(
-							`let ${stmt.assign} = ${this._cloneJs(this._typeFromNode(c.types[0]), "__tsw")};`,
-						);
+					if (stmt.assign) {
+						const only = c.types.length === 1 ? c.types[0] : null;
+						// A single named non-struct case binds the unboxed value.
+						if (only && this._assertedValueJs(only, "__tsw") !== "__tsw")
+							bind(this._assertedValueJs(only, "__tsw"));
+						// An array case binds a copy of the boxed value.
+						else if (only && this._typeFromNode(only)?.kind === "array")
+							bind(this._cloneJs(this._typeFromNode(only), "__tsw"));
+						else bind("__tsw");
+					}
 					for (const s of c.stmts) this.genStmt(s);
 				});
 				this.line("}");
@@ -1892,6 +2161,7 @@ export const statementGenMethods = {
 			if (hasDefault) {
 				this.line(first ? "{" : "else {");
 				this.indented(() => {
+					if (stmt.assign) bind("__tsw");
 					for (const s of hasDefault.stmts) this.genStmt(s);
 				});
 				this.line("}");

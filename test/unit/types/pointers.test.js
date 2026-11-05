@@ -1,6 +1,8 @@
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertWasmProgramOutput,
 	compile,
 	compileWasm,
 	runJs,
@@ -245,4 +247,107 @@ func main() {
 	const { js, errors } = compile(src);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "7 6");
+});
+
+section("Parenthesised pointer-type and nil conversions");
+
+test("(*S)(&b) converts between pointer types with identical fields in js", () => {
+	const { js, errors } = compile(`package main
+type Base struct{ n int }
+type S Base
+func main() {
+	b := Base{1}
+	p := (*S)(&b)
+	println(p.n)
+	p.n = 5
+	println(b.n)
+	q := (*Base)(p)
+	println(q.n)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n5\n5");
+});
+
+test("(*S)(&b) between distinct struct types is rejected in wasm packages", () => {
+	const src = `package main
+type Base struct{ n int }
+type S Base
+func main() {
+	b := Base{1}
+	p := (*S)(&b)
+	println(p.n)
+}`;
+	for (const target of ["wasm", "both"])
+		assertErrorContains(
+			compile(src, { target }).errors,
+			"pointers to distinct struct types cannot share storage",
+		);
+});
+
+test("(*S)(&b) still rejects structs with different fields", () => {
+	const { errors } = compile(`package main
+type Base struct{ n int }
+type S struct{ n string }
+func main() {
+	b := Base{1}
+	_ = (*S)(&b)
+}`);
+	assertErrorContains(errors, "cannot convert *Base to *S");
+});
+
+test("(*T)(nil), NS(nil), F(nil), (*int)(nil) and M(nil) run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ n int }
+type NS []int
+type F func()
+type M map[string]int
+type P *int
+
+func main() {
+	var t *T = (*T)(nil)
+	a := NS(nil)
+	b := F(nil)
+	c := (*int)(nil)
+	d := M(nil)
+	e := P(nil)
+	fmt.Println(t == nil, a == nil, b == nil, c == nil, d == nil, e == nil)
+	fmt.Println(len(a), len(d))
+}
+`,
+		"true true true true true true\n0 0\n",
+	);
+});
+
+test("var x I = (*T)(nil) compiles on every target and is non-nil in wasm", async () => {
+	const src = `package main
+
+import "fmt"
+
+type I interface{ M() bool }
+type T struct{}
+
+func (*T) M() bool { return true }
+
+func main() {
+	var x I = (*T)(nil)
+	fmt.Println(x != nil)
+}
+`;
+	assertEqual(compile(src).errors.length, 0);
+	await assertWasmProgramOutput(src, "true\n");
+});
+
+test("int(nil) and string(nil) stay conversion errors", () => {
+	assertErrorContains(
+		compile("package main\nfunc main() { _ = int(nil) }").errors,
+		"cannot convert nil",
+	);
+	assertErrorContains(
+		compile("package main\nfunc main() { _ = (*int)(1) }").errors,
+		"cannot convert",
+	);
 });

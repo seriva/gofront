@@ -23,7 +23,7 @@
 ## 2. Git Standards
 - **No Auto-Commit:** Never run `git commit`, `git push`, or history-rewriting commands unless the user explicitly asks in the current turn. Make changes, run quality gates, report, then wait for the user to commit or instruct. Exception: invoking `/dev-loop` or `/execute-plan` is explicit permission to branch, commit, push, and open/merge PRs exactly as that workflow defines, including for the subagents it spawns.
 - **Branches:** Default branch is releasable; the pre-commit hook is the gate. Commit directly to it. Use a `<type>/<task-slug>` (`feat/` or `fix/`) branch + PR only when the user asks, via `/dev-loop`, or when the change is risky enough to want CI green before merge. Multi-phase plans use epic branch `feat/<plan-slug>` and phase branches `feat/<plan-slug>-phase-<N>`.
-- **Commits & PR Titles:** Conventional Commits (`<type>(<scope>): <summary>`). Subject ≤72 chars, imperative mood. Body explains *why*. One logical change per commit.
+- **Commits & PR Titles:** Conventional Commits (`<type>[(<scope>)]: <summary>`). Use a scope when it names something real: the plan slug for plan work, else a module or area; omit it rather than invent one. Subject ≤72 chars, imperative mood. Body explains *why*. One logical change per commit.
 - **Artifacts:** Never commit temporary agent session files (e.g., scratchpads, tool-specific session state). Official feature plans (including task checklists) should be committed.
 - **Security:** Never commit secrets/API keys. Ensure `.env` is gitignored.
 - **Self-Review:** Review `git diff` before commit. Strip debug logs/stray changes.
@@ -44,6 +44,14 @@ GoFront is a Go-inspired language that compiles to JavaScript and WebAssembly (W
 - **Playwright** — E2E browser tests against compiled example apps
 - **c8** — V8 code coverage for unit tests
 - **No runtime dependencies** — the compiler has zero `dependencies` in package.json
+
+## Commands
+
+- **Test**: `npm test && npm run test:e2e` (or unit only: `npm test`)
+- **Lint**: `npm run check`
+- **Format**: `npm run format`
+- **Build**: `npm run build`
+- **Pre-commit gate**: `lefthook run pre-commit && npm test`
 
 ## Architecture
 

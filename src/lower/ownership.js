@@ -13,6 +13,31 @@ export function rootIdentName(e) {
 	return null;
 }
 
+// True when `e` names an element of a slice or array, possibly through
+// fields (`xs[i]`, `xs[i].f.g`).
+function isElementPath(e) {
+	while (e) {
+		if (e.kind === "IndexExpr") return !e._mapValueType;
+		if (e.kind !== "SelectorExpr" && e.kind !== "ParenExpr") return false;
+		e = e.expr;
+	}
+	return false;
+}
+
+// True when `node` contains `&xs[i]` (or `&xs[i].f`): some code may then hold a
+// pointer to an element, so a whole-element store must write into it.
+export function takesElementAddress(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(takesElementAddress);
+	if (
+		node.kind === "UnaryExpr" &&
+		node.op === "&" &&
+		isElementPath(node.operand)
+	)
+		return true;
+	return someChild(node, takesElementAddress);
+}
+
 // True when `node` itself (not its children) writes to variable `name`.
 export function nodeWritesVar(node, name) {
 	const root = (e) => rootIdentName(e) === name;

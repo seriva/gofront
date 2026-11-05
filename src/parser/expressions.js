@@ -103,6 +103,12 @@ function _opensArgs(after, noCompLit) {
 	return after.type === T.LPAREN || (after.type === T.LBRACE && !noCompLit);
 }
 
+function _isCallParen(src, i, braces) {
+	return (
+		src[i].type === T.LPAREN && braces === 0 && src[i - 1]?.type === T.IDENT
+	);
+}
+
 function _isTypeIntroducerToken(tt) {
 	return (
 		tt === T.STAR ||
@@ -300,6 +306,7 @@ export const expressionParserMethods = {
 		let hasComma = false;
 		let hasTypeKeyword = false;
 		let hasUpperIdent = false;
+		let braces = 0;
 		while (i < src.length && depth > 0) {
 			const tt = src[i].type;
 			if (tt === T.LBRACKET) {
@@ -315,6 +322,13 @@ export const expressionParserMethods = {
 				i++;
 				continue;
 			}
+			// `k.(int)` is a type assertion on a value: an index expression
+			if (tt === T.DOT && src[i + 1]?.type === T.LPAREN) return false;
+			// `uint(u)` / `f(x)`: a call or conversion is a value (a method
+			// signature inside `interface{ M() }` is the only type that has one).
+			if (tt === T.LBRACE) braces++;
+			else if (tt === T.RBRACE) braces--;
+			else if (_isCallParen(src, i, braces)) return false;
 			// Reject literals — it's an index expression
 			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
 			// Reject binary operators that wouldn't appear in type args
@@ -365,17 +379,15 @@ export const expressionParserMethods = {
 					(t.type === T.MAP || isSliceOrArrayType) &&
 					!this.looksLikeCompositeLitArg()
 				) {
+					const start = this.pos;
 					const typeNode = this.parseType();
-					// []byte(s) / []rune(s) used as a call argument — it's a type conversion
+					// `[]byte(s)` / `[]int(nil)` is a conversion: an ordinary
+					// operand that may be compared, spread or selected from.
 					if (this.check(T.LPAREN)) {
-						this.advance();
-						const convExpr = this.parseExpr();
-						this.expect(T.RPAREN);
-						args.push({
-							kind: "TypeConversion",
-							targetType: typeNode,
-							expr: convExpr,
-						});
+						this.pos = start;
+						const arg = this.parseExpr();
+						if (this.match(T.ELLIPSIS)) arg._spread = true;
+						args.push(arg);
 					} else {
 						args.push({ kind: "TypeExpr", type: typeNode });
 					}

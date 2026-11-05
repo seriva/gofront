@@ -66,6 +66,7 @@ export const T = {
 	PERCENT_ASSIGN: "%=",
 	AMP_ASSIGN: "&=",
 	PIPE_ASSIGN: "|=",
+	AND_NOT_ASSIGN: "&^=",
 	CARET_ASSIGN: "^=",
 	LSHIFT_ASSIGN: "<<=",
 	RSHIFT_ASSIGN: ">>=",

@@ -213,9 +213,10 @@ export class IoEmitter {
 	}
 
 	emitFprintCall(fn, call, _targetWasmType) {
-		const wExpr = call.args[0];
+		const args = this._expandTupleFmtArgs(call.args);
+		const wExpr = args[0];
 		const strTmp = this.acquireTemp("externref");
-		this._emitFprintFormatString(fn, call.args.slice(1));
+		this._emitFprintFormatString(fn, args.slice(1));
 		this.pushInstruction({ op: "local.set", index: strTmp });
 
 		const wType = wExpr._type;
@@ -271,6 +272,14 @@ export class IoEmitter {
 				op: "call",
 				funcIndex: this.mod.getStringImportIndex(),
 			});
+			return;
+		}
+		if (fn === "Fprint") {
+			// Sprint's spacing rule: a space only between two non-strings.
+			const temps = this._emitArgBuffer(restArgs, true);
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this._callStdlib("fmt_sprint");
+			this._releaseArgBuffer(temps);
 			return;
 		}
 		const sep = fn === "Fprintln" ? " " : "";

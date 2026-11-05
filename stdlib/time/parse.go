@@ -43,7 +43,7 @@ func match(s1, s2 string) bool {
 	return true
 }
 
-func commaOrPeriod(b int) bool {
+func commaOrPeriod(b byte) bool {
 	return b == '.' || b == ','
 }
 

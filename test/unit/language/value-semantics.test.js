@@ -2,6 +2,7 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -293,5 +294,208 @@ func main() {
 	await assertProgramOutput(
 		src,
 		"1 [5 2]\n1 [10 2 3]\n[2 10 3]\n4 map[1:7]\n{3 4} {3 4}\n",
+	);
+});
+
+test("tuple assignment evaluates the index inside a field target first", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ A int }
+
+func main() {
+	ps := []P{{0}, {0}}
+	n := 0
+	n, ps[n].A = 1, 50
+	fmt.Println(ps, n)
+	var arr [2]P
+	k := 0
+	k, arr[k].A = 1, 7
+	fmt.Println(arr, k)
+}
+`,
+		"[{50} {0}] 1\n[{7} {0}] 1\n",
+	);
+});
+
+// Runs `src` as a `js` package and as the JS half of a `both` package.
+function runJsAndBoth(src) {
+	const outs = [];
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.map((e) => e.message).join("\n"), "");
+		outs.push(runJs(js));
+	}
+	assertEqual(outs[0], outs[1], "js and both disagree");
+	return outs[0];
+}
+
+section("Nil slices stay nil");
+
+test("nil slice elements and struct fields print as []", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type A struct{ S []int }
+func main() {
+	fmt.Println(make([][]int, 2))
+	fmt.Println(A{})
+	fmt.Println(fmt.Sprintf("%+v", []A{{}}))
+}`),
+		"[[] []]\n{[]}\n[{S:[]}]",
+	);
+});
+
+test("append with nothing to add keeps a nil slice nil", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func main() {
+	var ap []int
+	ap = append(ap, ap...)
+	fmt.Println(ap == nil)
+	fmt.Println(append([]int(nil), []int{}...) == nil, append([]byte(nil), ""...) == nil)
+	b := append([]byte(nil), "hi"...)
+	fmt.Println(len(b), b[0])
+}`),
+		"true\ntrue true\n2 104",
+	);
+});
+
+// ── Struct values copied out of maps, range keys and interfaces ──
+
+section("Copies out of maps, range keys and interfaces");
+
+test("a range key assigned to an existing variable is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct {
+	S string
+	N int
+}
+
+func main() {
+	m := map[K]int{{"a", 1}: 2}
+	var k2 K
+	for k2 = range m {
+	}
+	k2.N = 99
+	for k := range m {
+		k.N = 5
+	}
+	fmt.Println(m, k2)
+}
+`,
+		"map[{a 1}:2] {a 99}\n",
+	);
+});
+
+test("range key and value of struct type are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct {
+	S string
+	N int
+}
+
+func main() {
+	m := map[K]K{{"a", 1}: {"b", 2}}
+	var k2, v2 K
+	for k2, v2 = range m {
+	}
+	k2.N = 98
+	v2.N = 97
+	for k, v := range m {
+		k.N = 5
+		v.N = 6
+	}
+	fmt.Println(m, k2, v2)
+}
+`,
+		"map[{a 1}:{b 2}] {a 98} {b 97}\n",
+	);
+});
+
+test("comma-ok map reads of struct and array values are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	m := map[string]P{"a": {1, 1}}
+	pt, _ := m["a"]
+	pt.X = 100
+	fmt.Println(m["a"])
+	q, ok := m["zz"]
+	q.X = 5
+	var r P
+	var ok3 bool
+	r, ok3 = m["a"]
+	r.Y = 7
+	arrm := map[int][2]int{1: {1, 2}}
+	a, _ := arrm[1]
+	a[0] = 9
+	if w, ok := m["a"]; ok {
+		w.X = 3
+	}
+	fmt.Println(m, ok, q, r, ok3, arrm, a)
+}
+`,
+		"{1 1}\nmap[a:{1 1}] false {5 0} {1 7} true map[1:[1 2]] [9 2]\n",
+	);
+});
+
+test("comma-ok type assertions to a struct are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct {
+	S string
+	N int
+}
+
+func main() {
+	var x any = K{"x", 1}
+	y, ok := x.(K)
+	y.N = 50
+	var z K
+	z, ok = x.(K)
+	z.N = 51
+	fmt.Println(x, y, z, ok)
+}
+`,
+		"{x 1} {x 50} {x 51} true\n",
+	);
+});
+
+test("fmt prints the contents a slice holds after later operands run", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	w := make([]byte, 3)
+	p := []byte("abc")
+	fmt.Println(w, copy(w, p))
+	m := map[string]int{}
+	set := func() int { m["k"] = 1; return 2 }
+	fmt.Println(m, set())
+}
+`,
+		"[97 98 99] 3\nmap[k:1] 2\n",
 	);
 });

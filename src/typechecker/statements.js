@@ -15,6 +15,7 @@ const CHECK_STMT_DELEGATE = {
 	BranchStmt: "_checkBranchStmt",
 };
 
+import { exprText, operandKind } from "./operand-text.js";
 import {
 	ANY,
 	BOOL,
@@ -22,9 +23,12 @@ import {
 	is64BitInt,
 	isAny,
 	isBool,
+	isNil,
+	isUntyped,
 	isVoid,
 	iteratorYieldParams,
 	Scope,
+	typeStr,
 } from "./types.js";
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
@@ -68,9 +72,7 @@ export const statementCheckMethods = {
 
 	_checkDefineCommaOkAssert(stmt, rhs, scope) {
 		if (!stmt.rhs[0]?._commaOk) return false;
-		const lhsNames = stmt.lhs.map((e) => e.name ?? e);
-		if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
-		if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
+		this._declareDefineVars(stmt, [rhs[0], BOOL], scope);
 		stmt._rhsTypes = [rhs[0], BOOL];
 		return true;
 	},
@@ -129,7 +131,8 @@ export const statementCheckMethods = {
 		if (this._checkDefineCommaOkAssert(stmt, rhs, scope)) return;
 		if (
 			stmt.rhs[0]?.kind !== "RangeExpr" &&
-			stmt.lhs.length !== rhsFlat.length
+			stmt.lhs.length !== rhsFlat.length &&
+			!rhsFlat.some((t) => t?._tainted)
 		) {
 			const vars =
 				stmt.lhs.length === 1 ? "1 variable" : `${stmt.lhs.length} variables`;
@@ -210,7 +213,13 @@ export const statementCheckMethods = {
 				continue;
 			if (!isAny(lhsTypes[i]) && !isAny(r)) {
 				this._skipIfaceMark = true;
-				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
+				this.assertAssignable(
+					lhsTypes[i],
+					r,
+					stmt.lhs[i],
+					"assignment",
+					stmt.rhs.length === lhsTypes.length ? stmt.rhs[i] : undefined,
+				);
 				this._skipIfaceMark = false;
 			}
 		}
@@ -230,7 +239,8 @@ export const statementCheckMethods = {
 			if (
 				!stmt.rhs[0]?._commaOk &&
 				stmt.rhs[0]?.kind !== "RangeExpr" &&
-				stmt.lhs.length !== rhsFlat.length
+				stmt.lhs.length !== rhsFlat.length &&
+				!rhsFlat.some((t) => t?._tainted)
 			) {
 				const vars =
 					stmt.lhs.length === 1 ? "1 variable" : `${stmt.lhs.length} variables`;
@@ -367,6 +377,7 @@ export const statementCheckMethods = {
 			if (c.list) {
 				for (const e of c.list) {
 					this.checkExpr(e, caseScope);
+					this._checkCaseValue(stmt.tag, e);
 					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
 				}
 			}
@@ -375,6 +386,57 @@ export const statementCheckMethods = {
 		}
 		this._switchDepth--;
 		this._reportUnused(inner, stmt);
+	},
+
+	// `case e:` compares `tag == e`, so `e` must convert to the tag's type
+	// (or the other way round for typed values).
+	_checkCaseValue(tag, e) {
+		if (!tag) return;
+		const tagType = this.resolveType(tag._type);
+		const caseType = this.resolveType(e._type);
+		if (this._caseValueUnchecked(tagType, caseType)) return;
+		if (isUntyped(caseType)) {
+			if (this._isUntypedAssignable(tagType, caseType)) return;
+			this.err(
+				`cannot convert ${exprText(e)} (${operandKind(e, caseType.base, true)}) to type ${typeStr(tagType)}`,
+				e,
+			);
+			return;
+		}
+		if (
+			this._assignableQuietly(tagType, caseType) ||
+			this._assignableQuietly(caseType, tagType)
+		)
+			return;
+		this.err(
+			`invalid case ${exprText(e)} in switch on ${exprText(tag)} (mismatched types ${typeStr(caseType)} and ${typeStr(tagType)})`,
+			e,
+		);
+	},
+
+	// Operands whose comparison the checker cannot (or need not) judge: unknown
+	// or recovered types, `any`/interface tags, nil cases, type parameters.
+	_caseValueUnchecked(tagType, caseType) {
+		if (!tagType || !caseType || tagType._tainted || caseType._tainted)
+			return true;
+		if (isAny(tagType) || isAny(caseType) || isNil(caseType)) return true;
+		if (isUntyped(tagType) || tagType.kind === "typeParam") return true;
+		return (
+			this.resolveType(tagType.underlying ?? tagType)?.kind === "interface"
+		);
+	},
+
+	// Whether assertAssignable(target, source) reports nothing.
+	_assignableQuietly(target, source) {
+		const saved = this.errors;
+		const savedSkip = this._skipIfaceMark;
+		this.errors = [];
+		this._skipIfaceMark = true;
+		this.assertAssignable(target, source, null);
+		const ok = this.errors.length === 0;
+		this.errors = saved;
+		this._skipIfaceMark = savedSkip;
+		return ok;
 	},
 
 	// A case naming an interface (literal or declared) records the resolved
@@ -390,6 +452,22 @@ export const statementCheckMethods = {
 		if (u?.kind === "interface") t._type = resolved;
 	},
 
+	// Records the resolved type of a composite type node used as an assertion
+	// or type-switch target (`[]int`, `map[string]any`, `*int`, `iter.Seq[int]`)
+	// so the backend can match it against the dynamic type of an interface value.
+	_markDynamicType(node, resolved) {
+		const kind = node?.kind;
+		if (
+			kind === "SliceType" ||
+			kind === "ArrayType" ||
+			kind === "MapType" ||
+			kind === "PointerType" ||
+			kind === "FuncType" ||
+			kind === "GenericTypeName"
+		)
+			node._assertType = resolved;
+	},
+
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
@@ -403,6 +481,8 @@ export const statementCheckMethods = {
 				const base = t?.kind === "PointerType" ? t.base : t;
 				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
 				this._markInterfaceCaseType(t, inner);
+				if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
+					this._markDynamicType(t, this.resolveTypeNode(t, inner));
 			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or any for multi/default.

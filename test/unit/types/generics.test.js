@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertJsProgramOutput,
@@ -1605,6 +1606,244 @@ test("a[foo, bar] on a non-generic value is an error, not an instantiation", () 
 				"package main\nfunc Main() int { var a int = 42; return a[foo, bar] }",
 			),
 		"expected ']'",
+	);
+});
+
+section(
+	"Generics — instantiation cycles, T(n) conversions, embedded promotion",
+);
+
+const cycleDecl = `package main
+type Stack[T any] struct{ items []T }
+func (s Stack[T]) Wrap() Stack[[]T] { return Stack[[]T]{} }
+func main() {}
+`;
+const cycleBody = `package main
+type Stack[T any] struct{ items []T }
+func (s Stack[T]) Wrap() int {
+	x := Stack[[]T]{}
+	return len(x.items)
+}
+func main() {}
+`;
+
+for (const [name, src] of [
+	["declaration", cycleDecl],
+	["body", cycleBody],
+]) {
+	test(`an instantiation cycle in a method ${name} is diagnosed on js`, () => {
+		const { errors } = compile(src);
+		assertErrorContains(errors, "instantiation cycle");
+	});
+	test(`an instantiation cycle in a method ${name} is diagnosed on wasm`, () => {
+		const { errors } = compile(src, { target: "wasm" });
+		assertErrorContains(errors, "instantiation cycle");
+	});
+}
+
+test("T(n) inside a method of a generic type converts with a numeric constraint", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num interface{ ~int | ~float64 }
+
+type Box[T Num] struct{ v T }
+
+func (b Box[T]) Scaled(n int) T { return T(n) * 2 }
+
+func main() {
+	fmt.Println(Box[float64]{}.Scaled(3))
+}
+`,
+		"6\n",
+	);
+});
+
+test("T(n) in an unconstrained generic function still errors", () => {
+	const { errors } = compile(`package main
+func a[T any](n int) T { return T(n) }
+func main() { _ = a[int](1) }`);
+	assertErrorContains(errors, "cannot convert");
+});
+
+test("methods promote through an embedded generic instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner[T any] struct{ v T }
+
+func (i Inner[T]) Get() T { return i.v }
+
+type W struct{ Inner[int] }
+
+func main() {
+	fmt.Println(W{}.Get())
+}
+`,
+		"0\n",
+	);
+});
+
+test("fields promote through an embedded pointer to a generic instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner[T any] struct{ v T }
+
+type P[T any] struct{ *Inner[T] }
+
+func main() {
+	p := P[string]{&Inner[string]{"x"}}
+	fmt.Println(p.v)
+}
+`,
+		"x\n",
+	);
+});
+
+test("methods promote through two levels of embedding", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+
+func (b Base) Hello() int { return b.n + 1 }
+
+type E struct{ Base }
+
+type Deep struct{ E }
+
+func main() {
+	fmt.Println(Deep{}.Hello())
+}
+`,
+		"1\n",
+	);
+});
+
+test("generic integer arithmetic truncates and wraps for the instantiated type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Int interface {
+	~int | ~int8 | ~uint8 | ~int32 | ~uint32
+}
+
+func Half[T Int](x T) T { return x / 2 }
+
+func Wrap[T Int](x T) T { return x + 1 }
+
+func Gen[T Int](x T) T { return x - 1 }
+
+func Shl[T Int](x T) T { return x << 7 }
+
+func main() {
+	fmt.Println(Half[int](9), Wrap[uint8](255))
+	fmt.Println(Gen(uint8(0)), Gen(int8(-128)), Gen(uint32(0)))
+	fmt.Println(Half(int8(-7)), Wrap(int32(2147483647)), Shl(uint8(3)))
+}
+`,
+		"4 0\n255 127 4294967295\n-3 -2147483648 128\n",
+	);
+});
+
+test("generic compound assignment, increments and 64-bit arithmetic wrap", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Int interface {
+	~int8 | ~uint8 | ~int64 | ~uint64 | ~int
+}
+
+func Acc[T Int](x T) T {
+	x += 100
+	x *= 2
+	x++
+	x >>= 1
+	return x
+}
+
+func Neg[T Int](x T) T { return x - 1 }
+
+func main() {
+	fmt.Println(Acc(int8(60)), Acc(uint8(200)), Acc(int(5)))
+	fmt.Println(Neg(uint64(0)), Neg(int64(-9223372036854775808)))
+}
+`,
+		"32 44 105\n18446744073709551615 9223372036854775807\n",
+	);
+});
+
+test("generic float arithmetic is unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num interface{ ~int | ~float64 }
+
+func Half[T Num](x T) T { return x / 2 }
+
+func main() {
+	fmt.Println(Half(9.0), Half(9))
+}
+`,
+		"4.5 4\n",
+	);
+});
+
+test("a constraint method is callable on named non-struct type arguments", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Color int
+
+func (c Color) String() string { return "col" }
+
+type Cs []int
+
+func (c Cs) String() string { return "cs" }
+
+func S[T fmt.Stringer](x T) string { return x.String() }
+
+func main() {
+	fmt.Println(S(Color(2)), S(Cs{1}))
+}`,
+		"col cs\n",
+	);
+});
+
+section("Generics — constraints referencing later type parameters");
+
+test("a constraint may reference a type parameter declared later", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type SliceIface[E any] interface{ ~[]E }
+
+func F[S SliceIface[E], E any](s S) E { return s[0] }
+
+func main() {
+	fmt.Println(F([]int{7}))
+}
+`,
+		"7\n",
 	);
 });
 

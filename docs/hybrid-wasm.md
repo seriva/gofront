@@ -156,7 +156,7 @@ Notable members per package:
 - `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand`
 - `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`)
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints Go's bad-verb form as in `js` packages)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints an id for pointers and funcs as in `js` packages)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `IsPrint`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
@@ -209,8 +209,9 @@ compile error.
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
 | `shared.Float32`, `shared.Int32`, … (`gofront/shared`) | **Zero-copy** TypedArray view over the module's linear memory in both directions (see below). |
 | `error` | **WASM → JS:** `Error` subclass carrying `.message` and the WASM reference (`__ref`). A nil error is `null`. **JS → WASM:** only WASM-owned error instances are accepted; identity is preserved (`errors.Is`). Non-WASM error throws `TypeError`. |
-| `map[K]V` (K = string, number, bool) | Copied both ways as a fresh JS `Map` in insertion order. Map parameters accept a plain JS object or a `Map`. Mutating the returned JS `Map` does not alter WASM state. |
+| `map[K]V` (K = string, number, bool) | Copied both ways as a fresh JS `Map` in insertion order. Map parameters accept a plain JS object or a `Map`. Mutating the returned JS `Map` does not alter WASM state. Entries are also readable as properties (`m["a"]`, `Object.keys(m)`), which is how GoFront code reads a map, except for keys that are names a `Map` already has, such as `get` or `size`. |
 | Pointers to non-structs (`*float64`, `*int`, …) | Copy-in/copy-out box `{ value }`, written back after the call. Write-back is skipped on panic and the panic propagates. |
+| Generic and embedded types | Generic structs are built from GoFront code as in Go (`g.Box[int]{V: 4}`) and each instance has its own handle class. A struct that embeds another gets the embedded struct's exported methods. |
 | Anonymous structs | Copied as plain JS objects `{ [field]: value }` with the same field names. |
 | Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
 | Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |

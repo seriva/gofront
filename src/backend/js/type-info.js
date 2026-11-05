@@ -7,7 +7,13 @@
 // type's kind, identity and a type test (see `__ti` in HELPER_GENERICS).
 
 import { forEachChild } from "../../lower/index.js";
-import { isAny, typeStr } from "../../typechecker/types.js";
+import {
+	isAny,
+	isTypedArraySlice,
+	typedArrayConstructorForElem,
+	typeStr,
+} from "../../typechecker/types.js";
+import { fmtTypeDesc } from "../shared/fmt-types.js";
 import { mentionsTypeParam } from "./expressions.js";
 
 // True when type node `node` names one of the type parameters `names`.
@@ -68,6 +74,18 @@ export const typeInfoGenMethods = {
 		return found;
 	},
 
+	// `x.M(...)` where x has a type parameter type: a raw value of a named
+	// non-struct type argument must be boxed to reach its methods.
+	_isTypeParamMethodCall(call, names) {
+		const t = call.func?.expr?._type;
+		return (
+			call.func?.kind === "SelectorExpr" &&
+			!call.func._isMethodExpr &&
+			t?.kind === "typeParam" &&
+			(!names || names.has(t.name))
+		);
+	},
+
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
 		switch (node.kind) {
@@ -79,11 +97,23 @@ export const typeInfoGenMethods = {
 				return typeNodeMentions(node.targetType, names);
 			case "BinaryExpr":
 				return (
-					(node.op === "==" || node.op === "!=") &&
-					node.left._type?.kind === "typeParam"
+					((node.op === "==" || node.op === "!=") &&
+						node.left._type?.kind === "typeParam") ||
+					(node._type?.kind === "typeParam" && names.has(node._type.name))
+				);
+			case "AssignStmt":
+				return (
+					node.op !== "=" &&
+					node.lhs?.[0]?._type?.kind === "typeParam" &&
+					names.has(node.lhs[0]._type.name)
+				);
+			case "IncDecStmt":
+				return (
+					node.expr?._type?.kind === "typeParam" &&
+					names.has(node.expr._type.name)
 				);
 			case "CallExpr":
-				return this._callUsesTypeInfo(node);
+				return this._callUsesTypeInfo(node, names);
 			case "CompositeLit":
 			case "GenericTypeName":
 				return typeArgsMention(node);
@@ -92,7 +122,8 @@ export const typeInfoGenMethods = {
 		}
 	},
 
-	_callUsesTypeInfo(call) {
+	_callUsesTypeInfo(call, names) {
+		if (this._isTypeParamMethodCall(call, names)) return true;
 		if (call._isTypeConversion)
 			return call._conversionTargetType?.kind === "typeParam";
 		// A fmt operand of a type parameter type is formatted by its instantiated
@@ -148,12 +179,35 @@ export const typeInfoGenMethods = {
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t);
 		const fmtBox = this._fmtBoxFor(t);
-		const tail = fmtBox
-			? `, ${box ?? "null"}, ${fmtBox}`
-			: box
-				? `, ${box}`
-				: "";
+		// The static type for fmt (`%T` of a type parameter operand).
+		const td = mentionsTypeParam(t)
+			? null
+			: fmtTypeDesc(t, (x) => this.checker?.resolveType?.(x) ?? x);
+		const tdJs = td && td.k !== "i" ? JSON.stringify(td) : null;
+		const tail = tdJs
+			? `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${tdJs}`
+			: fmtBox
+				? `, ${box ?? "null"}, ${fmtBox}`
+				: box
+					? `, ${box}`
+					: "";
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
+	},
+
+	// How `__ik` tells the dynamic type of an interface map key apart where
+	// the JS value cannot: the numeric type name for types sharing a JS
+	// representation with `int`/`float64`/`int64`, `*` for pointers (keyed by
+	// identity) and `!type` for types Go cannot hash.
+	_ifaceKeyTag(t) {
+		if (!t || t.kind === "named" || mentionsTypeParam(t)) return null;
+		if (t.kind === "pointer") return "*";
+		if (t.kind === "slice" || t.kind === "map" || t.kind === "func")
+			return `!${this._dynTypeName(t)}`;
+		if (t.kind !== "basic") return null;
+		const name = this._dynTypeName(t);
+		if (["int", "float64", "int64", "string", "bool"].includes(name))
+			return null;
+		return /^(u?int\d*|uintptr|float32)$/.test(name) ? name : null;
 	},
 
 	// A function boxing a plain value of named basic type `t`, as converting
@@ -182,6 +236,62 @@ export const typeInfoGenMethods = {
 		}
 		if (u?.kind === "slice") return `(__v) => ${tagged("(__v ?? [])")}`;
 		return desc ? `(__v) => ${tagged("__v")}` : null;
+	},
+
+	// The run-time type tag of an unnamed slice, map or non-struct pointer
+	// entering an interface, or null when the value needs none.  The tag lets
+	// assertions and type switches tell `[]int32` from `[]uint8`, `*int` from
+	// `*string`, and a nil `*int` from the nil interface.
+	_dynTypeTag(t) {
+		if (!t || mentionsTypeParam(t)) return null;
+		if (t.kind === "slice" || t.kind === "map") return this._dynTypeName(t);
+		if (t.kind === "pointer") {
+			const base = t.base;
+			if (this._underlyingOf(base)?.kind === "struct") return null;
+			if (this._boxesInInterface(t)) return null;
+			return this._dynTypeName(t);
+		}
+		return null;
+	},
+
+	// `typeStr` with the spellings of identical types unified.
+	_dynTypeName(t) {
+		return typeStr(t)
+			.replace(/\bbyte\b/g, "uint8")
+			.replace(/\brune\b/g, "int32")
+			.replace(/\bany\b/g, "interface {}")
+			.replace(/interface\{\.\.\.\}/g, "interface {}");
+	},
+
+	// Run-time test that `val` holds a value of the unnamed composite type
+	// (or named func type) of assertion target `typeNode`; null when the
+	// checker recorded no type for it.
+	_dynTypeCheck(typeNode, val) {
+		const t = typeNode?._assertType;
+		if (!t) return null;
+		const u = this._underlyingOf(t);
+		const shape = mentionsTypeParam(t);
+		const tag = JSON.stringify(shape ? "" : this._dynTypeName(t));
+		this.useHelper("ifaceBox");
+		const args = (kind, ctor = "null", n = "0") =>
+			`__isty(${val}, ${tag}, "${kind}", ${ctor}, ${n})`;
+		if (u?.kind === "func") return args("func");
+		if (t.kind === "named") return null;
+		if (u?.kind === "map") return args("map");
+		if (u?.kind === "array")
+			return args("array", "null", String(u.size?.value ?? u.size ?? 0));
+		if (u?.kind === "slice") {
+			const ctor = isTypedArraySlice(u)
+				? typedArrayConstructorForElem(u.elem)
+				: null;
+			return args("slice", ctor ?? "null");
+		}
+		if (u?.kind === "pointer") {
+			if (this._underlyingOf(u.base)?.kind === "struct") return null;
+			if (this._boxesInInterface(u)) return null;
+			return args("ptr");
+		}
+		return null;
 	},
 
 	_underlyingOf(t) {

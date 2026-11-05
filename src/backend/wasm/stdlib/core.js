@@ -3,10 +3,13 @@
 // maps, slices, strings, strconv, fmt, errors, sort, unicode/utf8,
 // testing) plus the runtime helper bodies they rely on.
 
+import { typeStr } from "../../../typechecker/types.js";
 import { wrappedErrorfIndices } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
+	fmtDescIsPtr,
 	fmtDescIsSeq,
+	fmtPeelAny,
 	fmtTypeDesc,
 	fmtWantsTypes,
 } from "../../shared/fmt-types.js";
@@ -46,6 +49,20 @@ function _isFmtMethodSig(sig, isPtr) {
 	if (sig._ptrRecv && !isPtr) return false;
 	const ret = sig.returns ?? [];
 	return ret.length === 1 && ret[0]?.name === "string";
+}
+
+// Whether evaluating the expression may run user code or block (a call or a
+// channel receive).  Underscore-prefixed keys hold checker data, not children.
+function _fmtArgHasEffects(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(_fmtArgHasEffects);
+	if (node.kind === "CallExpr") return true;
+	if (node.kind === "UnaryExpr" && node.op === "<-") return true;
+	for (const key of Object.keys(node)) {
+		if (key.startsWith("_")) continue;
+		if (_fmtArgHasEffects(node[key])) return true;
+	}
+	return false;
 }
 
 function _isUint32(goType) {
@@ -511,6 +528,16 @@ export class StdlibCoreEmitter {
 		);
 	}
 
+	// A slice or map prints what it holds when fmt reads it, not what it held
+	// when the operand was evaluated.
+	_isLiveFmtOperand(goType) {
+		return (
+			this._fmtMethodOf(goType) === null &&
+			(isSliceType(goType, this.mod.checker) ||
+				isMapType(goType, this.mod.checker))
+		);
+	}
+
 	_isFmtExternOperand(goType) {
 		return (
 			isFuncType(goType, this.mod.checker) ||
@@ -528,21 +555,23 @@ export class StdlibCoreEmitter {
 			return;
 		}
 		if (isFuncType(goType, this.mod.checker)) {
-			// A func value has no address in WebAssembly: a nil one prints
-			// <nil>, any other prints a fixed address-style text.
+			// A nil func prints <nil>; any other gets a host-side stand-in
+			// (kind 3) whose id is stable per closure object.
+			const fnTmp = this.acquireTemp("anyref");
 			this.emitExpr(arg, toWasmType(goType, this.mod.checker, this.mod));
+			this.pushInstruction({ op: "local.set", index: fnTmp });
+			this.pushInstruction({ op: "local.get", index: fnTmp });
 			this.pushInstruction("ref.is_null");
 			this.pushInstruction({ op: "if", blockType: "externref" });
 			this.pushInstruction({ op: "ref.null", heapType: "extern" });
 			this.pushInstruction("else");
-			this.pushInstruction({
-				op: "i32.const",
-				value: this.mod.internString("0x1"),
-			});
+			this.pushInstruction({ op: "local.get", index: fnTmp });
+			this.pushInstruction({ op: "i32.const", value: 3 });
 			this.pushInstruction({
 				op: "call",
-				funcIndex: this.mod.getStringImportIndex(),
+				funcIndex: this.mod.getFmtNewStructIndex(),
 			});
+			this.releaseTemp(fnTmp, "anyref");
 			this.pushInstruction("end");
 			return;
 		}
@@ -554,7 +583,9 @@ export class StdlibCoreEmitter {
 	// format: strings pass through, scalars are boxed by their dynamic type,
 	// anything else (and nil) becomes a null externref.
 	_emitAnyToExternref() {
-		const helper = this.mod.resolveFuncIndex("__any_fmt");
+		const helper = this.mod.resolveFuncIndex(
+			this._fmtMapKey ? "__any_fmt_key" : "__any_fmt",
+		);
 		if (helper !== null && helper !== undefined) {
 			this.pushInstruction({ op: "call", funcIndex: helper });
 			return;
@@ -1004,7 +1035,9 @@ export class StdlibCoreEmitter {
 			typeIndex: mapInfo.entryTypeIndex,
 			fieldIndex: 0,
 		});
+		this._fmtMapKey = true;
 		this.emitToExternref(keyType, true, nextSeen);
+		this._fmtMapKey = false;
 
 		this.pushInstruction({ op: "local.get", index: entryTmp });
 		this.pushInstruction({
@@ -1315,7 +1348,50 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(valTmp, valW);
 	}
 
+	// The `GoString() string` method fmt's %#v calls on a value of static type
+	// `goType` (value receivers on values, pointer receivers on pointers), or null.
+	_fmtGoStringOf(goType) {
+		if (!goType || isAnyType(goType, this.mod.checker)) return null;
+		const isPtr = _isPointerKind(goType);
+		const named = this._fmtNamed(isPtr ? (goType.base ?? goType.elem) : goType);
+		if (!named) return null;
+		const sig = this._fmtMethodMap(named)?.get("GoString");
+		if (!_isFmtMethodSig(sig, isPtr)) return null;
+		const found = this._fmtMethodFunc(named, "GoString");
+		if (!found || found.valueRecv === isPtr) return null;
+		return found;
+	}
+
 	emitToExternref(
+		goType,
+		isNested = false,
+		seen = new Set(),
+		allowNil = false,
+	) {
+		const gm = this._fmtGoStringOf(goType);
+		if (!gm) {
+			this._emitToExternrefStringer(goType, isNested, seen, allowNil);
+			return;
+		}
+		const valW = toWasmType(goType, this.mod.checker, this.mod);
+		const valTmp = this.acquireTemp(valW);
+		const rawTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.tee", index: valTmp });
+		this._emitToExternrefStringer(goType, isNested, seen, allowNil);
+		this.pushInstruction({ op: "local.set", index: rawTmp });
+		this.pushInstruction({ op: "local.get", index: rawTmp });
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "call", funcIndex: gm.funcIndex });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStringerIndex(),
+		});
+		this.releaseTemp(rawTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitToExternrefStringer(
 		goType,
 		isNested = false,
 		seen = new Set(),
@@ -1509,8 +1585,12 @@ export class StdlibCoreEmitter {
 	// fmtWantsTypes) tags each operand of a concrete static type with that
 	// type through `fmt_arg_type`, so the host can print `%T` and `%#v`.
 	_emitArgBuffer(args, markErrors = false, typed = false) {
+		args = args.map(fmtPeelAny);
 		const temps = [];
-		for (const arg of args) {
+		// Slice and map operands print the contents they hold once every
+		// operand has been evaluated, so a later call (`copy(w, p)`) shows.
+		const deferred = [];
+		for (const [argIdx, arg] of args.entries()) {
 			const goType = arg._type ?? this._resolveExprGoType(arg);
 			const isBool =
 				isBoolGoType(goType) ||
@@ -1535,10 +1615,18 @@ export class StdlibCoreEmitter {
 				const tmp = this.acquireTemp("externref");
 				this.emitExpr(arg, "anyref");
 				this.pushInstruction({ op: "local.tee", index: errTmp });
+				// A nil interface travels as a null operand (fmt prints
+				// %!s(<nil>) for it), not as the text "<nil>".
+				this.pushInstruction("ref.is_null");
+				this.pushInstruction({ op: "if", blockType: "externref" });
+				this.pushInstruction({ op: "ref.null", heapType: "extern" });
+				this.pushInstruction("else");
+				this.pushInstruction({ op: "local.get", index: errTmp });
 				this.pushInstruction({
 					op: "call",
 					funcIndex: this.mod.resolveFuncIndex("__error_str"),
 				});
+				this.pushInstruction("end");
 				this.pushInstruction({ op: "local.set", index: tmp });
 				temps.push({
 					tmp,
@@ -1551,8 +1639,18 @@ export class StdlibCoreEmitter {
 			}
 			if (this._isFmtExternOperand(goType)) {
 				const tmp = this.acquireTemp("externref");
-				this._emitOperandExternref(arg, goType, typed);
-				this.pushInstruction({ op: "local.set", index: tmp });
+				if (
+					this._isLiveFmtOperand(goType) &&
+					args.slice(argIdx + 1).some(_fmtArgHasEffects)
+				) {
+					const rawTmp = this.acquireTemp(valW);
+					this.emitExpr(arg, valW);
+					this.pushInstruction({ op: "local.set", index: rawTmp });
+					deferred.push({ tmp, rawTmp, valW, goType });
+				} else {
+					this._emitOperandExternref(arg, goType, typed);
+					this.pushInstruction({ op: "local.set", index: tmp });
+				}
 				temps.push({ tmp, wType: "externref", isBool: false, errTmp: null });
 				continue;
 			}
@@ -1569,6 +1667,12 @@ export class StdlibCoreEmitter {
 			}
 			this.pushInstruction({ op: "local.set", index: tmp });
 			temps.push({ tmp, wType, isBool, errTmp: null, u64 });
+		}
+		for (const { tmp, rawTmp, valW, goType } of deferred) {
+			this.pushInstruction({ op: "local.get", index: rawTmp });
+			this.emitToExternref(goType, false, new Set(), typed);
+			this.pushInstruction({ op: "local.set", index: tmp });
+			this.releaseTemp(rawTmp, valW);
 		}
 		for (const [i, temp] of temps.entries()) {
 			const { tmp, wType, isBool, markErr, spread, u64 } = temp;
@@ -1588,6 +1692,7 @@ export class StdlibCoreEmitter {
 	// nil, floats (static type), and unsigned 32/64-bit integers, whose
 	// signedness only the argument buffer preserves.
 	_fmtOperandNeedsBuffer(arg) {
+		arg = fmtPeelAny(arg);
 		if (arg._spread || this._fmtOperandHasFloat(arg)) return true;
 		const goType = arg._type ?? this._resolveExprGoType(arg);
 		if (
@@ -1706,6 +1811,7 @@ export class StdlibCoreEmitter {
 	// Whether a Printf-style call's operands need their static types: the
 	// format must be a literal that uses `%T`, `%#v` or has surplus operands.
 	_fmtNeedsTypes(format, operands) {
+		operands = operands.map(fmtPeelAny);
 		if (format?.kind !== "BasicLit") return false;
 		const spread = operands.some((a) => a._spread);
 		const seqArgs = operands.some((a) =>
@@ -1716,7 +1822,20 @@ export class StdlibCoreEmitter {
 				),
 			),
 		);
-		return fmtWantsTypes(format.value, spread ? -1 : operands.length, seqArgs);
+		const ptrArgs = operands.some((a) =>
+			fmtDescIsPtr(
+				fmtTypeDesc(
+					a._type ?? this._resolveExprGoType(a),
+					(t) => this.mod.checker?.resolveType?.(t) ?? t,
+				),
+			),
+		);
+		return fmtWantsTypes(
+			format.value,
+			spread ? -1 : operands.length,
+			seqArgs,
+			ptrArgs,
+		);
 	}
 
 	_releaseArgBuffer(temps) {
@@ -2574,7 +2693,12 @@ export class StdlibCoreEmitter {
 			}
 			// Float operands need their static type (float32, Go's exponent
 			// forms), which only the argument buffer carries.
-			if (args.some((a) => this._fmtOperandNeedsBuffer(a))) {
+			// A later operand with side effects must run before anything prints,
+			// so those calls also take the buffered path.
+			if (
+				args.some((a) => this._fmtOperandNeedsBuffer(a)) ||
+				args.slice(1).some(_fmtArgHasEffects)
+			) {
 				const temps = this._emitArgBuffer(args, true);
 				this.pushInstruction({ op: "i32.const", value: 1 });
 				this._callStdlib("fmt_print");
@@ -2754,7 +2878,45 @@ export class StdlibCoreEmitter {
 						baseGoType?.kind === "named" ? baseGoType : concreteGoType,
 					)
 				: null;
-		return { baseGoType, sInfo, valueBox };
+		return {
+			baseGoType,
+			sInfo,
+			valueBox: valueBox ?? this._errorsAsScalarBox(baseGoType),
+		};
+	}
+
+	// A named non-struct, non-interface target (`type E byte`): a value of it
+	// sits in the interface box of its type.
+	_errorsAsScalarBox(baseGoType) {
+		const named = this._fmtNamed(baseGoType);
+		if (!named) return null;
+		const under =
+			named.underlying ?? this.mod.checker?.types?.get(named.name)?.underlying;
+		if (!under || ["struct", "interface", "pointer"].includes(under.kind))
+			return null;
+		return this.mod.getIfaceBoxType(named);
+	}
+
+	// A typed nil `*T` in the chain (a marker object) matches a `*T` target.
+	_errorsAsNilBox(sInfo, valueBox, baseGoType) {
+		if (!sInfo || valueBox || baseGoType?.kind !== "pointer") return null;
+		return this.mod.getNilBoxType(baseGoType);
+	}
+
+	// Casts the matched error on the stack to the target; the typed-nil marker
+	// becomes a nil pointer.
+	_emitErrorsAsCast(nilBox, baseGoType, matchIndex) {
+		if (nilBox) this._emitRefCastOrNil(baseGoType, matchIndex);
+		else this.pushInstruction({ op: "ref.cast", typeIndex: matchIndex });
+	}
+
+	// With a `ref.test` result on the stack: also true when the value in
+	// `valTmp` is the typed-nil marker `nilBox`.
+	_emitOrTypedNil(nilBox, valTmp) {
+		if (!nilBox) return;
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "ref.test", typeIndex: nilBox.typeIndex });
+		this.pushInstruction("i32.or");
 	}
 
 	_emitErrorsAs(args) {
@@ -2774,9 +2936,11 @@ export class StdlibCoreEmitter {
 
 		const { baseGoType, sInfo, valueBox } = this._errorsAsTarget(args[1]);
 		const matchIndex = valueBox ? valueBox.typeIndex : sInfo?.typeIndex;
+		const hasMatch = matchIndex !== undefined;
+		const nilBox = this._errorsAsNilBox(sInfo, valueBox, baseGoType);
 		const pushMatched = () => {
 			this.pushInstruction({ op: "local.get", index: errTmp });
-			this.pushInstruction({ op: "ref.cast", typeIndex: matchIndex });
+			this._emitErrorsAsCast(nilBox, baseGoType, matchIndex);
 			if (valueBox)
 				this.pushInstruction({
 					op: "struct.get",
@@ -2806,12 +2970,59 @@ export class StdlibCoreEmitter {
 			this.pushInstruction({ op: "br_if", depth: 0 });
 		}
 
-		this.pushInstruction({ op: "loop", blockType: "void" });
+		// The chain is errors.flatten(err): the error, then (depth first) its
+		// Unwrap() error / Unwrap() []error children.
 		this.pushInstruction({ op: "local.get", index: errTmp });
 		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+		const flatInfo = this.mod.getSliceType({
+			kind: "interface",
+			name: "error",
+		});
+		const flatW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: flatInfo.typeIndex,
+		};
+		const arrW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: flatInfo.arrInfo.typeIndex,
+		};
+		const flatTmp = this.acquireTemp(flatW);
+		const arrTmp = this.acquireTemp(arrW);
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const idxTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: errTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("flatten$$errors"),
+		});
+		this.pushInstruction({ op: "local.set", index: flatTmp });
+		this._emitSliceUnpack(flatTmp, flatInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+		});
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: idxTmp });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_u");
 		this.pushInstruction({ op: "br_if", depth: 1 });
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({
+			op: "array.get",
+			typeIndex: flatInfo.arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: errTmp });
 
-		if (!sInfo && isNonEmptyInterface(baseGoType, this.mod.checker)) {
+		if (!hasMatch && isNonEmptyInterface(baseGoType, this.mod.checker)) {
 			this._emitErrorsAsInterface(baseGoType, {
 				targetLocal,
 				targetTmp,
@@ -2820,9 +3031,10 @@ export class StdlibCoreEmitter {
 				resLoc,
 			});
 		}
-		if (sInfo) {
+		if (hasMatch) {
 			this.pushInstruction({ op: "local.get", index: errTmp });
 			this.pushInstruction({ op: "ref.test", typeIndex: matchIndex });
+			this._emitOrTypedNil(nilBox, errTmp);
 			this.pushInstruction({ op: "if", blockType: "void" });
 			if (targetLocal) {
 				if (targetLocal.isBoxed) {
@@ -2853,17 +3065,20 @@ export class StdlibCoreEmitter {
 			this.pushInstruction("end");
 		}
 
-		this.pushInstruction({ op: "local.get", index: errTmp });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__errors_unwrap"),
-		});
-		this.pushInstruction({ op: "local.set", index: errTmp });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: idxTmp });
 		this.pushInstruction({ op: "br", depth: 0 });
 		this.pushInstruction("end");
 		this.pushInstruction("end");
 
 		this.pushInstruction({ op: "local.get", index: resLoc });
+		this.releaseTemp(idxTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, arrW);
+		this.releaseTemp(flatTmp, flatW);
 		this.releaseTemp(resLoc, "i32");
 		if (targetTmp !== null) {
 			this.releaseTemp(targetTmp, "anyref");
@@ -2990,8 +3205,27 @@ export class StdlibCoreEmitter {
 			this.pushInstruction({ op: "struct.get", typeIndex, fieldIndex: 0 });
 		}
 		this.emitToExternref(goType);
+		if (unbox && this._fmtKeyNamed && this._isPlainNamedBasic(goType)) {
+			const tmp = this.acquireTemp("externref");
+			this.pushInstruction({ op: "local.set", index: tmp });
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtNewStringerIndex(),
+			});
+			this.releaseTemp(tmp, "externref");
+		}
 		this.pushInstruction("return");
 		this.pushInstruction("end");
+	}
+
+	// A named type with a basic underlying type and no String/Error method.
+	_isPlainNamedBasic(goType) {
+		if (goType?.kind !== "named") return false;
+		const u = goType.underlying;
+		return u?.kind === "basic" && !this._fmtMethodOf(goType);
 	}
 
 	// errors.New / fmt.Errorf values print their message.
@@ -3205,17 +3439,28 @@ export class StdlibCoreEmitter {
 				this.pushInstruction("end");
 
 				// Check unhashable types
-				const checkUnhashable = (typeIndex) => {
+				const checkUnhashable = (typeIndex, goType) => {
 					this.pushInstruction({ op: "local.get", index: 0 });
 					this.pushInstruction({ op: "ref.test", typeIndex });
 					this.pushInstruction({ op: "if", blockType: "void" });
-					this.emitPanic("runtime error: hash of unhashable type");
+					this.emitPanic(
+						goType
+							? `runtime error: hash of unhashable type ${typeStr(goType)}`
+							: "runtime error: hash of unhashable type",
+					);
 					this.pushInstruction("end");
 				};
 				for (const sliceInfo of this.mod.sliceTypes.values())
-					checkUnhashable(sliceInfo.typeIndex);
+					checkUnhashable(sliceInfo.typeIndex, {
+						kind: "slice",
+						elem: sliceInfo.elemGoType,
+					});
 				for (const mapInfo of this.mod.mapTypes.values())
-					checkUnhashable(mapInfo.typeIndex);
+					checkUnhashable(mapInfo.typeIndex, {
+						kind: "map",
+						key: mapInfo.keyGoType,
+						value: mapInfo.valGoType,
+					});
 				for (const closureInfo of this.mod.closureTypes.values())
 					checkUnhashable(closureInfo.typeIndex);
 				for (const box of this.mod.ifaceBoxTypes.values()) {
@@ -3323,6 +3568,13 @@ export class StdlibCoreEmitter {
 				return;
 			case "any_fmt":
 				this._emitAnyFmtHelper();
+				return;
+			case "any_fmt_key":
+				// Map keys of interface type: a named string or number stays
+				// distinct from its plain value (see _emitAnyFmtArm).
+				this._fmtKeyNamed = true;
+				this._emitAnyFmtHelper();
+				this._fmtKeyNamed = false;
 				return;
 			case "error_str":
 				this.pushInstruction({ op: "local.get", index: 0 });

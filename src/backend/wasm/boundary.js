@@ -77,8 +77,16 @@ function toRef(info) {
 	return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
 }
 
+// The facade and its wasm export names build identifiers from a struct's name,
+// so the dot of a stdlib type (`strings.Builder`) becomes `$`.
 function structDesc(info, ptr) {
-	return { k: "struct", name: info.name, ptr, info, wType: toRef(info) };
+	return {
+		k: "struct",
+		name: info.name.replaceAll(".", "$"),
+		ptr,
+		info,
+		wType: toRef(info),
+	};
 }
 
 function funcSigFromAst(t) {
@@ -1830,6 +1838,8 @@ function indent(text, prefix) {
 // quoted, helpers prefixed with `__`.
 export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
+	// Each instance numbers its pointers and funcs from 1 (see __fmtid).
+	if (typeof __fmtptr !== "undefined") __fmtptr = { m: new WeakMap(), n: 1 };
 	let lineBuf = "";
 	let targs = [];
 	let fmtStructMap = new WeakMap();
@@ -1837,6 +1847,20 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	// __gfUnbox hands fmt the raw value for the other verbs.
 	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
 	class FmtErr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } Error() { return this.s; } }
+	// A value whose type has GoString(): %#v prints it. Wraps the value as the
+	// String/Error layer (if any) left it, so the other verbs are unchanged.
+	class FmtGo {
+		constructor(r, s) {
+			this.r = r;
+			this.s = s;
+			if (r !== null && typeof r === "object") {
+				if (typeof r.String === "function") this.String = () => r.String();
+				if (typeof r.Error === "function") this.Error = () => r.Error();
+			}
+		}
+		__gfUnbox() { return this.r !== null && typeof this.r === "object" && typeof this.r.__gfUnbox === "function" ? this.r.__gfUnbox() : this.r; }
+		GoString() { return this.s; }
+	}
 	const late = { exports: null };
 	// Go separates operands with a space unconditionally, so track whether the
 	// current line already holds an operand (an empty string leaves lineBuf empty).
@@ -1864,7 +1888,9 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			} catch {
 				str = "[panic object]";
 			}
-			throw new Error(str);
+			const err = new Error(str);
+			err.__gfp = true;
+			throw err;
 		},
 		"str": (i) => stringTable[i] ?? "",
 		"str_len": (s) => (s ? s.length : 0),
@@ -1877,7 +1903,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_ge": (a, b) => ((a ?? "") >= (b ?? "") ? 1 : 0),
 		"str_get": (s, i) => (s ? s.charCodeAt(i) : 0),
 		"str_slice": (s, a, b) => (s ? s.slice(a, b) : ""),
-		"str_from_code_point": (c) => String.fromCodePoint(c),
+		"str_from_code_point": (c) => String.fromCodePoint(c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c <= 0xdfff) ? c : 0xfffd),
 		"str_code_point_at": (s, i) => (s ? s.codePointAt(i) : 0),
 		"str_hash": (s) => {
 			if (!s) return 0;
@@ -1957,7 +1983,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"str_to_bytes": (s) => {
-			utf8Encoded = new TextEncoder().encode(s ?? "");
+			utf8Encoded = ${P}u8enc(s ?? "");
 			return utf8Encoded.length;
 		},
 		"str_byte_at": (i) => (utf8Encoded ? (utf8Encoded[i] ?? 0) : 0),
@@ -1977,6 +2003,9 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"print_i32": print, "print_i64": print, "print_f32": print, "print_f64": print,
 		"print_str": print, "print_any": print,
+		"print_u64": (v) => print(BigInt.asUintN(64, v)),
+		"println_u64": (v) => println(BigInt.asUintN(64, v)),
+		"print_reset": () => { started = false; },
 		"print_bool": (b) => print(b !== 0 ? "true" : "false"),
 		"println_i32": println, "println_i64": println, "println_f32": println, "println_f64": println,
 		"println_str": println, "println_any": println,
@@ -1990,11 +2019,17 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			// One object per struct and per kind: a value and a pointer to it
 			// in the same call (fmt.Println(&s, s)) must stay distinct.
 			const slot = isPtr;
+			if (isPtr === 3) {
+				const fn = function () {};
+				Object.defineProperty(fn, "__pid", { value: __fmtid(ref) });
+				return fn;
+			}
 			if (isPtr === 2) {
 				const seenBox = ref !== null && ref !== undefined && typeof ref === "object" ? fmtStructMap.get(ref) : undefined;
 				if (seenBox?.[2]) return seenBox[2];
 				const b = { value: null, __p: true, __box: true };
 				if (ref !== null && ref !== undefined && typeof ref === "object") {
+					Object.defineProperty(b, "__pid", { value: __fmtid(ref) });
 					if (seenBox) seenBox[2] = b;
 					else fmtStructMap.set(ref, [undefined, undefined, b]);
 				}
@@ -2005,7 +2040,10 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			if (seen?.[slot]) return seen[slot];
 			const o = {};
 			Object.defineProperty(o, "__struct", { value: true, configurable: true });
-			if (isPtr !== 0) Object.defineProperty(o, "__p", { value: true, configurable: true });
+			if (isPtr !== 0) {
+				Object.defineProperty(o, "__p", { value: true, configurable: true });
+				if (isRef) Object.defineProperty(o, "__pid", { value: __fmtid(ref) });
+			}
 			if (isRef) {
 				if (seen) seen[slot] = o;
 				else fmtStructMap.set(ref, slot ? [undefined, o] : [o, undefined]);
@@ -2019,7 +2057,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"fmt_box_u64": (v) => { v = BigInt.asUintN(64, v); return v > ${P}MAX ? v : Number(v); },
 		"fmt_box_f64": (v) => v,
 		"fmt_box_bool": (v) => v !== 0,
-		"fmt_new_stringer": (r, s, isErr) => (isErr !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
+		"fmt_new_stringer": (r, s, kind) => (kind === 2 ? new FmtGo(r, s) : kind !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
 		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
 		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
 		"testing_arg_str": targ, "testing_arg_any": targ,
@@ -2028,7 +2066,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_arg_u64": (v) => { v = BigInt.asUintN(64, v); targ(v > ${P}MAX ? v : Number(v)); },
 		"fmt_arg_type": (i) => { if (targs.length > 0) targs[targs.length - 1] = __ft(targs[targs.length - 1], JSON.parse(stringTable[i])); },
 		"testing_arg_spread": (a) => { if (a) for (const v of a) targs.push(v); },
-		"testing_arg_err": (s) => targ({ Error() { return s; } }),
+		"testing_arg_err": (s) => targ(s === null ? null : { Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => Number(t[stringTable[i]]()),
@@ -2051,6 +2089,27 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		}));
 	}
 	Object.assign(env, extraEnv);
+	// A host import that throws raises a Go panic: the module's panic stack
+	// gets the message (as env.panic does through __push_panic) before the
+	// error unwinds, so recover() in a calling frame sees it.  Errors already
+	// pushed (env.panic, nested calls into the module) are marked and pass
+	// through; traps and wasm exceptions are not host panics.
+	const hostPanic = (e) => {
+		if (e !== null && typeof e === "object") {
+			if (e.__gfp === true) return;
+			if (typeof WebAssembly !== "undefined" && (e instanceof WebAssembly.Exception || e instanceof WebAssembly.RuntimeError)) return;
+			try { e.__gfp = true; } catch {}
+		}
+		const push = late.exports && late.exports.__push_panic;
+		if (push) push(String(e !== null && typeof e === "object" && e.message !== undefined ? e.message : e));
+	};
+	for (const k of Object.keys(env)) {
+		const fn = env[k];
+		if (typeof fn !== "function" || k === "panic" || k === "panicTag") continue;
+		env[k] = function () {
+			try { return fn.apply(this, arguments); } catch (e) { hostPanic(e); throw e; }
+		};
+	}
 	const m = {};
 	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh", "log1p", "expm1"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
@@ -2059,11 +2118,31 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	// Exports are needed by imports that call back into the module (t.Run).
 	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
 }
+// string -> bytes: UTF-8, except that a lone surrogate U+DC80-U+DCFF (a raw
+// byte from a \\xNN escape in the source) encodes as that single byte.
+function ${P}u8enc(s) {
+	const e = new TextEncoder();
+	if (s.isWellFormed()) return e.encode(s);
+	const out = [];
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c >= 0xdc80 && c <= 0xdcff && !(i > 0 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800)) { out.push(c - 0xdc00); continue; }
+		const cp = s.codePointAt(i);
+		if (cp > 0xffff) i++;
+		for (const b of e.encode(String.fromCodePoint(cp))) out.push(b);
+	}
+	return Uint8Array.from(out);
+}
 // strings.ToUpper/ToLower: letter by letter through the first code point of
 // the host's mapping, as unicode.ToUpper/ToLower do; ASCII text maps whole.
 function ${P}mapCase(s, method) {
 	if (/^[\\x00-\\x7f]*$/.test(s)) return s[method]();
-	return Array.from(s, (c) => String.fromCodePoint(c[method]().codePointAt(0))).join("");
+	return Array.from(s, (c) => {
+		const m = c[method]();
+		const r = String.fromCodePoint(m.codePointAt(0));
+		// A letter whose upper case spans several code points (ß) stays as is.
+		return method === "toUpperCase" && m.length > r.length ? c : r;
+	}).join("");
 }
 // Code-point-aware Trim/TrimLeft/TrimRight of strings.
 function ${P}trim(s, cutset, left, right) {
@@ -2252,7 +2331,7 @@ function ${P}stdlib_str(stringTable, io) {
 		"unicode_is_control": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Cc}/u.test(c)) ? 1 : 0; },
 		"unicode_is_print": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
 		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toUpperCase().codePointAt(0) ?? r) : r; },
+		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; if (!c) return r; const m = c.toUpperCase(); const u = m.codePointAt(0); return m.length > (u > 0xffff ? 2 : 1) ? r : u; },
 		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
 	};
 }
@@ -2450,7 +2529,7 @@ export function generateFacade(
 		}
 		const sig = ["fn", ...names].join(", ");
 		out.push(
-			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic) __w.__push_panic(__e.message ?? String(__e)); throw __e; } };`,
+			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic && !(__e && __e.__gfp === true)) { __w.__push_panic(__e.message ?? String(__e)); try { __e.__gfp = true; } catch {} } throw __e; } };`,
 		);
 	}
 	out.push(
@@ -2461,9 +2540,11 @@ export function generateFacade(
 		if (info.pkgTarget === "both") genBothStruct(out, name, fields);
 		else {
 			const methods = meta.structByName.get(name)?.methods ?? [];
-			genHandleStruct(out, name, fields, methods);
+			const promoted = promotedMethods(info, fields, methods, meta);
+			genHandleStruct(out, name, fields, methods, promoted);
 		}
 	}
+	genGenericClasses(out, needs, meta._mod);
 
 	for (const [name, desc] of needs.anonStructs) {
 		out.push(`function ${P}to_${name}(o) {
@@ -2545,6 +2626,15 @@ function ${P}slview_${key}(s) {
 } `);
 	}
 
+	if (needs.maps.size > 0) {
+		// GoFront JS code reads a map as a plain object (`m["a"]`, `len(m)`), so
+		// each entry is also an own property of the returned Map unless that name
+		// is one the Map already has.
+		out.push(`function ${P}mapprop(m, k, v) {
+	const p = String(k);
+	if (!(p in m)) m[p] = v;
+}`);
+	}
 	for (const [key, desc] of needs.maps) {
 		out.push(`function ${P}mapin_${key}(m) {
 	if (m == null) return null;
@@ -2564,6 +2654,7 @@ function ${P}mapout_${key}(m) {
 	if (ks) {
 		for (let i = 0; i < ks.length; i++) {
 			out.set(ks[i], vs[i]);
+			${P}mapprop(out, ks[i], vs[i]);
 		}
 	}
 	return out;
@@ -2876,7 +2967,84 @@ function ${P}ifin_${key}(v) {
 }`);
 }
 
-function genHandleStruct(out, name, fields, methods) {
+// Methods a struct gets from its embedded structs, shallowest first (a name
+// found twice at one depth is ambiguous and left out).  Each is forwarded
+// through the embedded field's getter: `{ name, via, params, variadic }`.
+function promotedMethods(info, fields, methods, meta) {
+	const taken = new Set([
+		...methods.map((m) => m.name),
+		...fields.map((f) => f.name),
+	]);
+	const promoted = [];
+	const seen = new Set([info]);
+	let level = [{ info, via: "" }];
+	while (level.length > 0) {
+		const next = [];
+		const found = new Map();
+		for (const { info: owner, via } of level) {
+			for (const e of owner.embeds ?? []) {
+				const typeName = e.typeName ?? e.name;
+				const path = `${via}.${e.name}`;
+				const inner = meta._mod.getStructType(typeName);
+				const innerMethods =
+					meta.structByName.get(typeName.replaceAll(".", "$"))?.methods ?? [];
+				for (const m of innerMethods) {
+					if (!found.has(m.name)) found.set(m.name, []);
+					found.get(m.name).push({
+						name: m.name,
+						via: path,
+						params: m.params,
+						variadic: m.variadic,
+					});
+				}
+				if (inner && !seen.has(inner)) {
+					seen.add(inner);
+					next.push({ info: inner, via: path });
+				}
+			}
+		}
+		for (const [n, c] of found) {
+			if (!taken.has(n) && c.length === 1) promoted.push(c[0]);
+			taken.add(n);
+		}
+		level = next;
+	}
+	return promoted;
+}
+
+// A generic struct is built in a js main as `new Box(V, [...zeroFactories,
+// "int"])`; the facade only has the instances (`Box$int`).  `Box` picks the
+// instance named by the last type-argument entry (the printed type arguments).
+function genGenericClasses(out, needs, mod) {
+	const groups = new Map();
+	for (const [name, { info }] of needs.structs) {
+		if (info.pkgTarget === "both") continue;
+		const goName = mod?.checker?.types?.get(info.name)?._goName;
+		const m = goName ? /^([^[]+)\[(.*)\]$/s.exec(goName) : null;
+		if (!m) continue;
+		if (!groups.has(m[1])) groups.set(m[1], new Map());
+		// The js caller keys instances by the unqualified printed arguments.
+		groups
+			.get(m[1])
+			.set(m[2].replaceAll(" ", "").replace(/(?<![\w.])main\./g, ""), name);
+	}
+	for (const [base, instances] of groups) {
+		const table = [...instances]
+			.map(([id, cls]) => `${JSON.stringify(id)}: ${cls}`)
+			.join(", ");
+		out.push(`class ${facadeName(base)} {
+	constructor(...a) {
+		const tz = a.at(-1);
+		const id = Array.isArray(tz) && typeof tz.at(-1) === "string" ? tz.at(-1).replaceAll(" ", "") : undefined;
+		const C = id === undefined ? ${instances.size === 1 ? `${[...instances.values()][0]}` : "undefined"} : { ${table} }[id];
+		if (!C) throw new TypeError("GoFront: no ${base} instance for the type arguments " + id + " in the wasm package");
+		return new C(...(Array.isArray(tz) ? a.slice(0, -1) : a));
+	}
+}`);
+	}
+}
+
+function genHandleStruct(out, name, fields, methods, promoted = []) {
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
@@ -2925,6 +3093,12 @@ class ${name} {
 		);
 		lines.push(
 			`\t${m.name}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
+		);
+	}
+	for (const m of promoted) {
+		const names = m.params.map((_, i) => `a${i}`);
+		lines.push(
+			`\t${m.name}(${restParams(names, m.variadic)}) { return this${m.via}.${m.name}(${restParams(names, m.variadic)}); }`,
 		);
 	}
 	lines.push("}");

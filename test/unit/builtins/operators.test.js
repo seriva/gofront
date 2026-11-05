@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -547,6 +548,100 @@ func main() {
 	await assertProgramOutput(
 		src,
 		"-9223372036709301616\n1577934245000000001 1\n43290790440 9226231805932350012 13632027486628815208\n18446744073709551610 18446744073709551611\n18446744073709551615\n-9223372036854775808\n20\n5\n9.007199254740992e+15\nruntime error: integer divide by zero\nruntime error: negative shift amount\n",
+	);
+});
+
+// ── Narrow shifts and float32 on js packages ──────────────────
+
+section("Narrow shift panics and float32 rounding");
+
+test("negative shift count panics for narrow integers", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover()) }()
+	f()
+}
+
+func main() {
+	n := -1
+	try("int32", func() { var x int32 = 5; _ = x << n })
+	try("int16", func() { var x int16 = 5; _ = x << n })
+	try("int8", func() { var x int8 = 5; _ = x >> n })
+	try("uint8", func() { var x uint8 = 5; _ = x << n })
+	try("uint16", func() { var x uint16 = 5; _ = x >> n })
+	try("uint32", func() { var x uint32 = 5; _ = x << n })
+}
+`,
+		"int32 runtime error: negative shift amount\nint16 runtime error: negative shift amount\nint8 runtime error: negative shift amount\nuint8 runtime error: negative shift amount\nuint16 runtime error: negative shift amount\nuint32 runtime error: negative shift amount\n",
+	);
+});
+
+test("float32 division rounds in a js package", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := float32(1)
+	b := float32(3)
+	fmt.Println(a / b)
+	c := a / b
+	c += 0.1
+	fmt.Println(c)
+}
+`,
+		"0.33333334\n0.43333334\n",
+	);
+});
+
+test("64-bit / and % evaluate operands once", async () => {
+	for (const t of ["int64", "uint64"]) {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+func main() {
+	count := 0
+	f := func() ${t} { count++; return 2 }
+	_ = ${t}(10) / f()
+	fmt.Println(count)
+	_ = ${t}(10) % f()
+	fmt.Println(count)
+	g := func() ${t} { count++; return 10 }
+	_ = g() / ${t}(3)
+	_ = g() % ${t}(3)
+	fmt.Println(count)
+}
+`,
+			"1\n2\n4\n",
+		);
+	}
+});
+
+test("untyped constant shifted by a variable in 64-bit context", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	k := uint(3)
+	var m uint64 = (1 << k) - 1
+	var n uint64 = 5
+	fmt.Println(n & m)
+	var a int64 = 1 << k
+	fmt.Println(a, int64(1)<<k)
+	var b int64 = (1 << k) + 1
+	fmt.Println(b)
+}
+`,
+		"5\n8 8\n9\n",
 	);
 });
 
