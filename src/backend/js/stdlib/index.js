@@ -5,7 +5,6 @@ import { randMethods } from "./cryptorand.js";
 import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
-import { jsonMethods } from "./json.js";
 import { osMethods } from "./os.js";
 import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
@@ -28,7 +27,6 @@ const STDLIB_METHOD_MAP = {
 	rand: "_genRand",
 	testing: "_genTesting",
 	shared: "_genShared",
-	json: "_genJson",
 	simd: "_genSimd",
 };
 
@@ -81,6 +79,5 @@ export const stdlibGenMethods = {
 	...timeMethods,
 	...unicodeMethods,
 	...testingMethods,
-	...jsonMethods,
 	...dispatchMethods,
 };
