@@ -426,13 +426,17 @@ func unquote(in string, unescape bool) (out, rem string, err error) {
 		default:
 			// Carriage return characters ('\r') inside raw string literals
 			// are discarded from the raw string value.
-			buf := make([]byte, 0, end-len("`")-len("\r")-len("`"))
+			// Built as a string: GoFront strings are indexed by UTF-16 unit, so
+			// a byte buffer would split multi-byte text.
+			out = ""
+			start := len("`")
 			for i := len("`"); i < end-len("`"); i++ {
-				if in[i] != '\r' {
-					buf = append(buf, in[i])
+				if in[i] == '\r' {
+					out += in[start:i]
+					start = i + 1
 				}
 			}
-			out = string(buf)
+			out += in[start : end-len("`")]
 		}
 		// NOTE: Prior implementations did not verify that raw strings consist
 		// of valid UTF-8 characters and we continue to not verify it as such.
