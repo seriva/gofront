@@ -103,6 +103,12 @@ function _opensArgs(after, noCompLit) {
 	return after.type === T.LPAREN || (after.type === T.LBRACE && !noCompLit);
 }
 
+function _isCallParen(src, i, braces) {
+	return (
+		src[i].type === T.LPAREN && braces === 0 && src[i - 1]?.type === T.IDENT
+	);
+}
+
 function _isTypeIntroducerToken(tt) {
 	return (
 		tt === T.STAR ||
@@ -300,6 +306,7 @@ export const expressionParserMethods = {
 		let hasComma = false;
 		let hasTypeKeyword = false;
 		let hasUpperIdent = false;
+		let braces = 0;
 		while (i < src.length && depth > 0) {
 			const tt = src[i].type;
 			if (tt === T.LBRACKET) {
@@ -317,6 +324,11 @@ export const expressionParserMethods = {
 			}
 			// `k.(int)` is a type assertion on a value: an index expression
 			if (tt === T.DOT && src[i + 1]?.type === T.LPAREN) return false;
+			// `uint(u)` / `f(x)`: a call or conversion is a value (a method
+			// signature inside `interface{ M() }` is the only type that has one).
+			if (tt === T.LBRACE) braces++;
+			else if (tt === T.RBRACE) braces--;
+			else if (_isCallParen(src, i, braces)) return false;
 			// Reject literals — it's an index expression
 			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
 			// Reject binary operators that wouldn't appear in type args

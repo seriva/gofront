@@ -7,6 +7,7 @@ import {
 } from "../../../src/parser/struct-tag.js";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertProgramOutput,
@@ -312,7 +313,8 @@ test("string and rune escapes decode every Go form", () => {
 			.find((t) => t.type === T.STRING)?.value;
 	assertEqual(str('"\\a\\b\\f\\v"'), "\x07\x08\x0c\x0b");
 	assertEqual(str('"\\x41\\101\\u00e9\\U0001F600"'), "AA\u00e9\u{1F600}");
-	assertEqual(str('"\\xc3"'), "\u00c3");
+	assertEqual(str(`"\\xc3"`), "\udcc3"); // a lone invalid byte stays a raw-byte surrogate
+	assertEqual(str(`"\\xc3\\xa9"`), "\u00e9");
 });
 
 test("invalid numeric escapes are lex errors", () => {
@@ -1310,6 +1312,92 @@ func main() {
 `,
 		"ok\n",
 	);
+});
+
+// ── Astral rune literals and raw-byte string escapes ──────────
+
+test("lexer: astral rune literal is one code point on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	r := '😀'
+	fmt.Println(r)
+}
+`,
+		"128512\n",
+	);
+});
+
+test("lexer: \\xNN string escapes are raw bytes in []byte conversions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+	"unicode/utf8"
+)
+
+func main() {
+	b := []byte("a\\xffb")
+	fmt.Println(len(b), bytes.IndexRune(b, utf8.RuneError))
+	c := []byte("\\xc3\\xa9")
+	fmt.Println(len(c), c[0], c[1])
+}
+`,
+		"3 1\n2 195 169\n",
+	);
+});
+
+test("lexer: byte escapes that form UTF-8 decode as their rune", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	for _, r := range "\\xc3\\xa9\\xe2\\x82\\xac" {
+		fmt.Println(r)
+	}
+}
+`,
+		"233\n8364\n",
+	);
+});
+
+// ── Parser: conversion-led index in call arguments ────────────
+
+test("parser: conversion of an index expression as a call argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const digits = "0123456789"
+
+func f(b byte) byte { return b }
+
+func main() {
+	u := uint(3)
+	m := uint(7)
+	fmt.Println(f(byte(digits[uint(u)&m])))
+}
+`,
+		"51\n",
+	);
+});
+
+test("parser: //gofront:native survives a doc comment before func", () => {
+	const ast = new Parser(
+		new Lexer(
+			"package main\n//gofront:native str.Index\n// Index doc.\nfunc Index(s, sub string) int { return 0 }\n",
+		).tokenize(),
+	).parse();
+	const fn = ast.decls.find((d) => d.kind === "FuncDecl");
+	assertEqual(fn.native, "str.Index");
 });
 
 // ── Entry point ───────────────────────────────────────────────

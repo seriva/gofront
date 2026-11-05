@@ -9,6 +9,22 @@ export const HELPER_LEN = `var __len = __len || function(a) {
   return a?.length ?? 0;
 };`;
 
+// string -> []byte: UTF-8, except that a lone surrogate U+DC80-U+DCFF (a raw
+// byte from a \xNN escape) encodes as that single byte.
+export const HELPER_U8ENC = `var __u8enc = __u8enc || function(s) {
+  const e = new TextEncoder();
+  if (s.isWellFormed()) return e.encode(s);
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xdc80 && c <= 0xdcff && !(i > 0 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800)) { out.push(c - 0xdc00); continue; }
+    const cp = s.codePointAt(i);
+    if (cp > 0xffff) i++;
+    for (const b of e.encode(String.fromCodePoint(cp))) out.push(b);
+  }
+  return Uint8Array.from(out);
+};`;
+
 // Slice views (Go's `b[lo:hi:max]` shares the backing store).  A view of a
 // plain array is a Proxy over an empty `__SV` array that holds the backing
 // array `b`, offset `o`, length `n` and capacity `c`: Array.isArray, length,

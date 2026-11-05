@@ -1967,7 +1967,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"str_to_bytes": (s) => {
-			utf8Encoded = new TextEncoder().encode(s ?? "");
+			utf8Encoded = ${P}u8enc(s ?? "");
 			return utf8Encoded.length;
 		},
 		"str_byte_at": (i) => (utf8Encoded ? (utf8Encoded[i] ?? 0) : 0),
@@ -2080,6 +2080,21 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
 	// Exports are needed by imports that call back into the module (t.Run).
 	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
+}
+// string -> bytes: UTF-8, except that a lone surrogate U+DC80-U+DCFF (a raw
+// byte from a \\xNN escape in the source) encodes as that single byte.
+function ${P}u8enc(s) {
+	const e = new TextEncoder();
+	if (s.isWellFormed()) return e.encode(s);
+	const out = [];
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c >= 0xdc80 && c <= 0xdcff && !(i > 0 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800)) { out.push(c - 0xdc00); continue; }
+		const cp = s.codePointAt(i);
+		if (cp > 0xffff) i++;
+		for (const b of e.encode(String.fromCodePoint(cp))) out.push(b);
+	}
+	return Uint8Array.from(out);
 }
 // strings.ToUpper/ToLower: letter by letter through the first code point of
 // the host's mapping, as unicode.ToUpper/ToLower do; ASCII text maps whole.

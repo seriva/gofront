@@ -119,6 +119,31 @@ const SIMPLE_ESCAPES = {
 	"\\": 92,
 };
 
+// Decodes the raw bytes of consecutive \xNN / octal escapes in a string
+// literal: valid UTF-8 sequences become their code point, every other byte
+// 0x80-0xff becomes the lone surrogate U+DC00+byte so the runtime can turn it
+// back into that byte when the string is converted to []byte.
+function decodeRawBytes(bytes) {
+	const dec = new TextDecoder("utf-8", { fatal: true });
+	let out = "";
+	for (let i = 0; i < bytes.length; ) {
+		const b = bytes[i];
+		const n = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 0;
+		if (n > 0 && i + n <= bytes.length) {
+			try {
+				out += dec.decode(Uint8Array.from(bytes.slice(i, i + n)));
+				i += n;
+				continue;
+			} catch {
+				// invalid sequence: fall through to the lone-byte case
+			}
+		}
+		out += String.fromCharCode(b < 0x80 ? b : 0xdc00 + b);
+		i++;
+	}
+	return out;
+}
+
 export class Lexer {
 	constructor(source, filename = null) {
 		this.src = source;
@@ -188,6 +213,7 @@ export class Lexer {
 				if (intrinsic) this.intrinsics.set(line, intrinsic[1]);
 				const native = comment.match(/^\/\/gofront:native\s+(\S+)/);
 				if (native) this.natives.set(line, native[1]);
+				if (!intrinsic && !native) this.forwardDirectives(line, start);
 				const match = comment.match(/^\/\/gofront:target\s+(\S+)/);
 				if (match) {
 					this.target = match[1];
@@ -252,7 +278,7 @@ export class Lexer {
 				if (parts === null) parts = [];
 				if (this.pos > start) parts.push(this.src.slice(start, this.pos));
 				this.advance(); // skip \
-				parts.push(String.fromCodePoint(this.readEscape('"')));
+				parts.push(this.readStringEscape());
 				start = this.pos;
 			} else {
 				this.advance();
@@ -261,10 +287,41 @@ export class Lexer {
 		throw new LexError("Unterminated string", l, c, this.filename, this.src);
 	}
 
+	// The escape after a consumed backslash in a string literal.  \xNN and octal
+	// escapes are raw bytes; a run of them is decoded together so "\xc3\xa9" is
+	// "é" and "\xff" is one invalid byte (a lone surrogate, see decodeRawBytes).
+	readStringEscape() {
+		if (!this.isByteEscapeAt(this.pos))
+			return String.fromCodePoint(this.readEscape('"'));
+		const bytes = [this.readEscape('"')];
+		while (this.peek() === "\\" && this.isByteEscapeAt(this.pos + 1)) {
+			this.advance();
+			bytes.push(this.readEscape('"'));
+		}
+		return decodeRawBytes(bytes);
+	}
+
+	// A doc comment between a directive and its func carries the directive down
+	// so the parser still finds it on the line above the func.
+	forwardDirectives(line, start) {
+		const before = this.src.slice(
+			this.src.lastIndexOf("\n", start - 1) + 1,
+			start,
+		);
+		if (!/^[ \t]*$/.test(before)) return;
+		for (const map of [this.intrinsics, this.natives])
+			if (map.has(line - 1)) map.set(line, map.get(line - 1));
+	}
+
+	isByteEscapeAt(i) {
+		const n = this.src[i];
+		return n === "x" || (n >= "0" && n <= "7");
+	}
+
 	// Reads the escape after a consumed backslash and returns its code point.
 	// `quote` is the enclosing delimiter: `\'` is valid only in runes and
-	// `\"` only in strings. `\xNN` and octal escapes give U+0000-U+00FF (see
-	// plan §1.1: strings are JS strings, so \x80-\xff are code points, not raw bytes).
+	// `\"` only in strings. `\xNN` and octal escapes give 0-255 (a code point in
+	// rune literals; string literals decode runs of them as UTF-8 bytes).
 	readEscape(quote) {
 		const l = this.line,
 			c = this.col;
@@ -331,6 +388,7 @@ export class Lexer {
 		} else if (this.peek() !== "'") {
 			code = this.src.codePointAt(this.pos);
 			this.advance();
+			if (code > 0xffff) this.pos++; // astral: skip the low surrogate
 		} else {
 			throw new LexError("Empty rune literal", l, c, this.filename, this.src);
 		}
