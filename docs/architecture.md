@@ -126,8 +126,8 @@ Two markers connect Go source to the backends:
 
 | Package | Where it lives |
 |---|---|
-| `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `os`, `unicode`, `crypto/rand`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
-| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
+| `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
+| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `os`, `unicode`, `crypto/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
 | `encoding/binary` | Go in `stdlib/encoding/binary/` |
 | `errors.As` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
 | `time.Sleep`, `time.AfterFunc`, `time.Timer` | JS-only emitter (`src/backend/js/stdlib/time.js`) |
