@@ -1468,6 +1468,32 @@ func main() {
 	);
 });
 
+test("Fprint* to os.Stdout and os.Stderr write exactly the formatted text", async () => {
+	await assertProgramOutput(
+		`package main
+import (
+	"fmt"
+	"os"
+)
+func main() {
+	fmt.Fprint(os.Stdout, "a", 1, 2, "b")
+	fmt.Fprintln(os.Stdout, " é", 3.5, true)
+	fmt.Fprintf(os.Stdout, "%05.1f|%-4s|%x\\n", 3.14159, "ab", 255)
+	fmt.Fprint(os.Stderr)
+	fmt.Fprintln(os.Stdout)
+	n, err := fmt.Fprintf(os.Stdout, "%s\\n", "é")
+	fmt.Println(n, err)
+}
+`,
+		`a1 2b é 3.5 true
+003.1|ab  |ff
+
+é
+3 <nil>
+`,
+	);
+});
+
 test("Println(f()) of an any result holding a struct prints the struct", () => {
 	assertEqual(
 		parity(

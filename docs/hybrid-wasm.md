@@ -144,7 +144,7 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
 | `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
 | `math/rand` | js, wasm, both | Top-level functions draw from the host; `New(NewSource(seed))` repeats for a seed but not in Go's sequence |
-| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
+| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`, `Exit`, `Getenv`, `Setenv`, `Args` (always empty) |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
 | `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
 | `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
@@ -170,7 +170,7 @@ Notable members per package:
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 
-Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
+Any other import, or JS-only API (`regexp`, `time.Sleep`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
 `math` follows Go's results in every package. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs` and `Copysign` compile to single WASM instructions, `Round` rounds half away from zero, and `Min`, `Max` and `Pow` handle Go's special cases such as `Pow(1, NaN)`. Functions without a WASM instruction (`Sin`, `Cos`, `Atan2`, `Mod`, `Hypot`, `Cbrt`, …) are imported from the JavaScript host's `Math`; `Mod` keeps the sign of the dividend.
 

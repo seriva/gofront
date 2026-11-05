@@ -1114,12 +1114,6 @@ export class BuiltinsEmitter {
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;
-			case "unicode":
-				this.emitUnicodeCall(func.field, args, targetWasmType);
-				return true;
-			case "rand":
-				this.emitRandCall(func.field, args, targetWasmType);
-				return true;
 			case "simd":
 				this.emitSimdPackageCall(func.field, args, targetWasmType);
 				return true;

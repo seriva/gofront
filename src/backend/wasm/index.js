@@ -833,7 +833,6 @@ export function compileWasmModule(
 			),
 		);
 	}
-	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
 	// `__any_fmt` turns an `any` operand of fmt into the host value; its body
 	// is emitted last-but-one so every type registered by user code is seen.
 	if (_usesFmtAny(funcDecls, mod)) {
@@ -909,8 +908,6 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
-				!fn._isIoHelper &&
-				!fn._isPhase7Helper &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -971,8 +968,6 @@ export function compileWasmModule(
 			emitter.emitSharedHelper(fn);
 		} else if (fn._isRuntimeHelper) {
 			emitter.emitRuntimeHelper(fn);
-		} else if (fn._isIoHelper || fn._isPhase7Helper) {
-			emitter.emitIoHelper(fn);
 		} else if (fn.intrinsic) {
 			emitWasmIntrinsic(emitter, fn);
 		} else if (fn.body) {
@@ -1134,78 +1129,5 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 
 	for (const info of interfaceCalls.values()) {
 		funcDecls.push(_makeInterfaceDispatcher(info, checker));
-	}
-}
-
-function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
-	const progs = Array.isArray(programs) ? programs : [programs];
-
-	const BYTE_SLICE_T = {
-		kind: "slice",
-		elem: { kind: "basic", name: "byte" },
-	};
-	const INT_T = { kind: "basic", name: "int" };
-	const ERR_T = { kind: "interface", name: "error" };
-	const INT_ERR_RET = { kind: "tuple", types: [INT_T, ERR_T] };
-	const ioHelper = (name, params, returnType, kind, extra = {}) => ({
-		kind: "FuncDecl",
-		name,
-		params,
-		returnType,
-		body: { kind: "Block", stmts: [], list: [] },
-		_isIoHelper: kind,
-		_rootFuncDecl: null,
-		...extra,
-	});
-
-	const hasOs = importsAnyOf(progs, ["os"]);
-	if (hasOs && mod.structTypes.has("os.File")) {
-		const fPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "os.File" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"os.File.Write",
-				[
-					{ name: "f", type: fPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"os_file_write",
-				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Write" },
-			),
-			ioHelper(
-				"os.File.WriteString",
-				[
-					{ name: "f", type: fPtr },
-					{ name: "s", type: strType },
-				],
-				INT_ERR_RET,
-				"os_file_write_string",
-				{
-					_isMethod: true,
-					_recvTypeName: "os.File",
-					_methodName: "WriteString",
-				},
-			),
-			ioHelper(
-				"os.File.Read",
-				[
-					{ name: "f", type: fPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"os_file_read",
-				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Read" },
-			),
-			ioHelper(
-				"os.File.Close",
-				[{ name: "f", type: fPtr }],
-				ERR_T,
-				"os_file_close",
-				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Close" },
-			),
-		);
 	}
 }

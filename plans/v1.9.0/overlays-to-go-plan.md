@@ -177,19 +177,19 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 
 ### Phase 2: `os`, `unicode`, `crypto/rand` in Go source
 
-- [ ] Task 2.1: `stdlib/os/os.go` with `os_*` intrinsics
+- [x] Task 2.1: `stdlib/os/os.go` with `os_*` intrinsics
   - Files: `stdlib/os/os.go`, `src/typechecker/types.js`, `src/backend/js/index.js`, `src/backend/wasm/natives.js`, `src/backend/wasm/boundary.js`
   - Test: `test/unit/stdlib/io.test.js` (new `os` section: `WriteString("é\n") == 3`, `Write` bytes, `io.Writer` dispatch, `Stderr`, `Read` → `io.EOF`, `Getenv`/`Setenv` round trip)
   - Done when: `os_write`, `os_exit`, `os_getenv`, `os_setenv` have one JS body and one WASM entry each and the new section passes four-way.
-- [ ] Task 2.2: Delete the `os` overlay, JS/WASM emitters and `fmt_print_raw` fast paths
+- [x] Task 2.2: Delete the `os` overlay, JS/WASM emitters and `fmt_print_raw` fast paths
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/os.js` (delete), `src/backend/js/runtime.js`, `src/backend/wasm/stdlib/io.js`, `src/backend/js/stdlib/fmt.js`, `src/backend/wasm/module-emitter.js`
   - Test: `test/unit/stdlib/io.test.js`, `test/unit/builtins/fmt-verbs.test.js` (`Fprint*` to `os.Stdout`/`os.Stderr`), `test/unit/compiler/targets.test.js`
   - Done when: `HELPER_OS`, `emitOsConst`, `_emitHelperOsFile*`, the os branch of `_emitWriterWrite` and `_genStdoutWrite` are deleted, `os` leaves `WASM_STDLIB_MEMBERS`, and `fmt.Println` output is byte-identical on all targets.
-- [ ] Task 2.3: `unicode` predicates in Go with three intrinsics
+- [x] Task 2.3: `unicode` predicates in Go with three intrinsics
   - Files: `stdlib/unicode/unicode.go`, `src/backend/js/index.js`, `src/backend/wasm/natives.js`, `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/unicode.js` (delete), `src/backend/wasm/stdlib/pure.js`, `src/backend/wasm/module-emitter.js`
   - Test: `test/unit/stdlib/unicode.test.js` (new: ASCII and non-ASCII for all 11 members, `IsNumber` still excluded), `test/unit/builtins/stdlib.test.js`, `test/unit/wasm/stdlib.test.js`
   - Done when: the eleven members are Go source, the ten `unicode_*` imports are replaced by `unicode_is`/`unicode_to_upper`/`unicode_to_lower`, and `unicode` has no overlay.
-- [ ] Task 2.4: `crypto/rand.Read` in Go and delete `pure.js`
+- [x] Task 2.4: `crypto/rand.Read` in Go and delete `pure.js`
   - Files: `stdlib/crypto/rand/rand.go`, `src/backend/wasm/stdlib/pure.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/js/stdlib/cryptorand.js` (delete), `src/backend/js/runtime.js`, `src/typechecker/stdlib/extended.js`
   - Test: `test/unit/stdlib/rand.test.js` (`Read` length/err, short buffers, zero length), `test/unit/wasm/stdlib.test.js`
   - Done when: `crypto_rand_u32` is the only host entry, `HELPER_CRYPTO_RAND` and the `rand` overlay are deleted, and `pure.js` no longer exists.
