@@ -25,7 +25,6 @@ import {
 	isErrorType,
 	isFuncType,
 	isMapType,
-	isNonEmptyInterface,
 	isPointerToStruct,
 	isSigned,
 	isSliceType,
