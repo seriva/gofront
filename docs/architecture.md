@@ -127,7 +127,7 @@ Two markers connect Go source to the backends:
 | `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
 | `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math/bits`, `strconv`, `math/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
 | `encoding/binary` | Go in `stdlib/encoding/binary/` |
-| `errors.As`, `strings.Builder` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
+| `errors.As` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
 | `time.Sleep`, `time.AfterFunc`, `time.Timer` | JS-only emitter (`src/backend/js/stdlib/time.js`) |
 | `fmt`, `math`, `unicode` (`Is*`, `To*`), `os`, `testing`, `regexp`, `crypto/rand`, `gom`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
 | `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |

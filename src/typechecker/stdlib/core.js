@@ -108,13 +108,6 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	// The Go source of the strings package declares everything but Builder.
-	globals.define("strings", {
-		kind: "namespace",
-		name: "strings",
-		members: { Builder: ANY },
-	});
-
 	globals.define("math", {
 		kind: "namespace",
 		name: "math",

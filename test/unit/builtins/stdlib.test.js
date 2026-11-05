@@ -703,6 +703,7 @@ section("strings.Builder");
 
 test("strings.Builder: WriteString and String", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteString("hello")
@@ -716,6 +717,7 @@ func main() {
 
 test("strings.Builder: WriteByte", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteByte('H')
@@ -728,6 +730,7 @@ func main() {
 
 test("strings.Builder: WriteRune", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteRune('G')
@@ -740,6 +743,7 @@ func main() {
 
 test("strings.Builder: Len", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteString("hello")
@@ -751,6 +755,7 @@ func main() {
 
 test("strings.Builder: Reset", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.WriteString("hello")
@@ -765,6 +770,7 @@ func main() {
 
 test("strings.Builder: Grow is a no-op", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	b.Grow(64)
@@ -777,6 +783,7 @@ func main() {
 
 test("zero value is usable", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func build() string {
 	var b strings.Builder
 	b.WriteString("x")
@@ -900,6 +907,7 @@ func main() {
 
 test("fmt.Fprintf writes to strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d + %d = %d", 1, 2, 3)
@@ -911,6 +919,7 @@ func main() {
 
 test("fmt.Fprintln writes to strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	fmt.Fprintln(&b, "hello", "world")
@@ -922,6 +931,7 @@ func main() {
 
 test("fmt.Fprint writes to strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	var b strings.Builder
 	fmt.Fprint(&b, "foo", "bar")
