@@ -4,7 +4,14 @@
 // what the real Go toolchain printed for the same program.  Times use UTC and
 // fixed zones, so the results do not depend on the host's time zone.
 
-import { assertFourWay, section, test } from "../helpers.js";
+import vm from "node:vm";
+import {
+	assertEqual,
+	assertFourWay,
+	compile,
+	section,
+	test,
+} from "../helpers.js";
 
 section("time (Go-source)");
 
@@ -365,4 +372,93 @@ true true true
 1700000000 2023-11-14T22:13:20Z true
 `,
 	);
+});
+
+// ── Sleep, AfterFunc and Timer (js packages only) ──────────────
+
+// Runs a js package against a virtual clock: timers fire in due order and
+// the clock jumps to each one once the program has nothing else to do.
+async function runWithFakeTimers(source) {
+	const { js, errors } = compile(source);
+	assertEqual(errors.length, 0);
+	const lines = [];
+	let now = 0;
+	let nextId = 1;
+	const timers = new Map();
+	const ctx = vm.createContext({
+		console: { log: (...a) => lines.push(a.map(String).join(" ")) },
+		setTimeout: (f, ms) => {
+			timers.set(nextId, { f, due: now + Number(ms), id: nextId });
+			return nextId++;
+		},
+		clearTimeout: (id) => timers.delete(id),
+	});
+	vm.runInContext(js.replace(/^import\s[^;]+;\n?/gm, ""), ctx);
+	for (;;) {
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		const next = [...timers.values()].sort(
+			(a, b) => a.due - b.due || a.id - b.id,
+		)[0];
+		if (!next) break;
+		timers.delete(next.id);
+		now = next.due;
+		next.f();
+	}
+	return lines.join("\n");
+}
+
+test("Sleep suspends only the awaiting function", async () => {
+	const out = await runWithFakeTimers(`package main
+
+import "time"
+
+async func worker(name string, d time.Duration) {
+	await time.Sleep(d)
+	console.log(name)
+}
+
+async func main() {
+	worker("slow", 30*time.Millisecond)
+	worker("fast", 10*time.Millisecond)
+	console.log("start")
+	await time.Sleep(50 * time.Millisecond)
+	console.log("end")
+}
+`);
+	assertEqual(out, "start\nfast\nslow\nend");
+});
+
+test("AfterFunc fires once, Stop cancels and Reset reschedules", async () => {
+	const out = await runWithFakeTimers(`package main
+
+import "time"
+
+async func main() {
+	t1 := time.AfterFunc(10*time.Millisecond, func() { console.log("t1") })
+	t2 := time.AfterFunc(10*time.Millisecond, func() { console.log("t2") })
+	console.log(t2.Stop(), t2.Stop())
+	t3 := time.AfterFunc(10*time.Millisecond, func() { console.log("t3") })
+	console.log(t3.Reset(40 * time.Millisecond))
+	await time.Sleep(20 * time.Millisecond)
+	console.log(t1.Stop(), t3.Reset(10*time.Millisecond), t2.Reset(5*time.Millisecond))
+	await time.Sleep(100 * time.Millisecond)
+	console.log("done")
+}
+`);
+	assertEqual(out, "true false\ntrue\nt1\nfalse true false\nt2\nt3\ndone");
+});
+
+test("sub-millisecond durations round to the nearest millisecond", async () => {
+	const out = await runWithFakeTimers(`package main
+
+import "time"
+
+async func main() {
+	time.AfterFunc(1500*time.Microsecond, func() { console.log("a") })
+	time.AfterFunc(400*time.Microsecond, func() { console.log("b") })
+	await time.Sleep(3 * time.Millisecond)
+	console.log("c")
+}
+`);
+	assertEqual(out, "b\na\nc");
 });

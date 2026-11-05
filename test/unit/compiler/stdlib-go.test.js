@@ -150,25 +150,25 @@ func Run() string {
 test("an overlay that redeclares an emitter member is rejected", () => {
 	withTempDir(
 		{
-			"stdlib/time/overlay.go": `//go:build gofront
+			"stdlib/fmt/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package time
+package fmt
 
-func Sleep(d Duration) {}
+func Println(a ...any) {}
 `,
 			"app/main.go": `package main
 
-import "time"
+import "fmt"
 
-func main() { time.Sleep(0) }
+func main() { fmt.Println(0) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares time.Sleep",
+				"overlay redeclares fmt.Println",
 			);
 		},
 	);
@@ -374,12 +374,20 @@ func main() { println(u.C(1, 2), w.Run()) }
 test("an aliased overlay import is rejected at the import", () => {
 	withTempDir(
 		{
-			"main.go": `package main\n\nimport t "time"\n\nfunc main() { println(t.Now().Year()) }\n`,
+			"stdlib/fmt/overlay.go": `//go:build gofront
+
+//gofront:target both
+
+package fmt
+
+func Hello() {}
+`,
+			"app/main.go": `package main\n\nimport f "fmt"\n\nfunc main() { f.Println(1) }\n`,
 		},
 		(dir) => {
 			assertThrows(
-				() => compileDir(dir),
-				"import alias for 'time' is not supported",
+				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
+				"import alias for 'fmt' is not supported",
 			);
 		},
 	);
@@ -1314,4 +1322,167 @@ func main() { println(cmp.Compare(1, "a")) }
 				`Type error in main.go at line 5:38: Cannot assign untyped string to int`,
 			),
 	);
+});
+
+section("Go-source stdlib: per-file targets");
+
+const DUAL_FILES = {
+	"stdlib/dual/dual.go": `//go:build gofront
+
+//gofront:target both
+
+package dual
+
+func Common() int { return 40 }
+`,
+	"stdlib/dual/dual_js.go": `//go:build gofront
+
+//gofront:target js
+
+package dual
+
+type Handle struct{ id any }
+
+var pending = 0
+
+// A js file may use browser globals and async functions.
+async func Sleepish() int {
+	await Promise.resolve(1)
+	pending++
+	return Common() + pending
+}
+
+func Arm(f func()) *Handle { return &Handle{id: setTimeout(f, 0)} }
+`,
+	"stdlib/onlyjs/onlyjs.go": `//go:build gofront
+
+//gofront:target js
+
+package onlyjs
+
+func Name() string { return "js" }
+`,
+};
+
+test("a js importer sees every file of a mixed package", async () => {
+	await withTempDir(DUAL_FILES, async (dir) => {
+		const res = await compileHybridProject(
+			{
+				"main.go": `package main
+
+import "dual"
+
+async func main() {
+	println(dual.Common(), await dual.Sleepish())
+	var h *dual.Handle = dual.Arm(func() { println("armed") })
+	_ = h
+}
+`,
+			},
+			{ stdlibRoot: join(dir, "stdlib") },
+		);
+		assertEqual(res.lines.join("\n"), "40 41");
+	});
+});
+
+test("a wasm or both importer gets the shared files and a diagnostic for the rest", () => {
+	for (const target of ["wasm", "both"]) {
+		withTempDir(
+			{
+				...DUAL_FILES,
+				"app/main.go": `//gofront:target ${target}
+package main
+
+import "dual"
+
+func F() int { return dual.Common() }
+`,
+				"bad/main.go": `//gofront:target ${target}
+package main
+
+import "dual"
+
+func F() { dual.Sleepish() }
+`,
+				"badtype/main.go": `//gofront:target ${target}
+package main
+
+import "dual"
+
+func F(h *dual.Handle) {}
+`,
+			},
+			(dir) => {
+				const stdlibRoot = join(dir, "stdlib");
+				compileDir(join(dir, "app"), { stdlibRoot });
+				assertThrows(
+					() => compileDir(join(dir, "bad"), { stdlibRoot }),
+					"'dual.Sleepish' is only available in js packages",
+				);
+				assertThrows(
+					() => compileDir(join(dir, "badtype"), { stdlibRoot }),
+					"'dual.Handle' is only available in js packages",
+				);
+			},
+		);
+	}
+});
+
+test("a package whose files are all js is rejected at the import of a wasm or both package", () => {
+	for (const target of ["wasm", "both"]) {
+		withTempDir(
+			{
+				...DUAL_FILES,
+				"app/main.go": `//gofront:target ${target}
+package main
+
+import "onlyjs"
+
+func F() string { return onlyjs.Name() }
+`,
+			},
+			(dir) => {
+				let msg = "";
+				try {
+					compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") });
+				} catch (e) {
+					msg = e.message;
+				}
+				assertContains(
+					msg,
+					"package 'onlyjs' is only available in js packages",
+				);
+				assert(!msg.includes("Undefined: 'onlyjs'"), msg);
+			},
+		);
+	}
+});
+
+test("js and wasm importers of one mixed package share a build", async () => {
+	await withTempDir(DUAL_FILES, async (dir) => {
+		const res = await compileHybridProject(
+			{
+				"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "dual"
+
+func Run() int { return dual.Common() }
+`,
+				"main.go": `package main
+
+import (
+	"./lib"
+	"dual"
+)
+
+async func main() {
+	println(lib.Run(), await dual.Sleepish())
+}
+`,
+			},
+			{ stdlibRoot: join(dir, "stdlib") },
+		);
+		assertEqual(res.lines.join("\n"), "40 41");
+	});
 });

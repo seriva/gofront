@@ -2,12 +2,9 @@
 // One file per Go package under ./stdlib/. This index merges them.
 
 import { fmtMethods } from "./fmt.js";
-import { gomMethods } from "./gom.js";
-import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
 import { testingMethods } from "./testing.js";
-import { timeMethods } from "./time.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
@@ -15,8 +12,6 @@ import { timeMethods } from "./time.js";
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
-	time: "_genTime",
-	regexp: "_genRegexp",
 	testing: "_genTesting",
 	shared: "_genShared",
 	simd: "_genSimd",
@@ -40,7 +35,6 @@ const dispatchMethods = {
 	// Dispatch table for stdlib namespace calls (pkg.Func → inline JS).
 	// Returns the generated JS string, or undefined if not handled.
 	_genStdlibCall(ns, fn, expr) {
-		if (ns === "gom") return this._genGom(fn, expr);
 		const method = STDLIB_METHOD_MAP[ns];
 		if (!method) return undefined;
 		// Stdlib shims take raw values; only fmt uses the interface box
@@ -61,11 +55,8 @@ const dispatchMethods = {
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
 	...fmtMethods,
-	...gomMethods,
-	...regexpMethods,
 	...sharedMethods,
 	...simdMethods,
-	...timeMethods,
 	...testingMethods,
 	...dispatchMethods,
 };

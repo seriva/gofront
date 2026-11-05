@@ -71,7 +71,6 @@ import {
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_TESTING,
-	HELPER_TIMER,
 	HELPER_TO64,
 	HELPER_U8ENC,
 	HELPER_VA,
@@ -166,7 +165,6 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
-	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["jsonrt", HELPER_JSONRT],
 	["simd", HELPER_SIMD],
@@ -178,6 +176,8 @@ const JS_INTRINSICS = {
 	rand_source: () => "return Math.random();",
 	time_now: () =>
 		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
+	time_sleep: ([ns]) =>
+		`await new Promise((r) => setTimeout(r, Number(${ns}) / 1000000));`,
 	time_zone_offset: ([unix]) =>
 		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
 	// os: node writes straight to the stream; other hosts print whole lines

@@ -228,7 +228,7 @@ import "regexp"
 func F() bool { return regexp.MustCompile("a").MatchString("a") }
 `;
 	const err = compileTemp({ "m.go": src });
-	assertContains(err, "'regexp' is not yet available in wasm packages");
+	assertContains(err, "package 'regexp' is only available in js packages");
 	assertContains(err, "1 unsupported stdlib import (regexp)");
 });
 
@@ -253,7 +253,7 @@ import "time"
 func F() { time.Sleep(100 * time.Millisecond) }
 `;
 	const err = compileTemp({ "m.go": src });
-	assertContains(err, "'time.Sleep' is not yet available in wasm packages");
+	assertContains(err, "'time.Sleep' is only available in js packages");
 	assertContains(err, "move this call to a JS package");
 });
 
@@ -452,4 +452,69 @@ func Fill(b []byte) int {
 func Quit() { os.Exit(0) }
 `;
 	assertEqual(compileTemp({ "engine.go": src }), "");
+});
+
+test("wasm package may use the shared half of time", () => {
+	const src = `//gofront:target wasm
+package m
+
+import "time"
+
+func F(d time.Duration) int64 { return int64(d / time.Millisecond) }
+`;
+	assertEqual(compileTemp({ "m.go": src }), "");
+});
+
+test("both package rejects time.AfterFunc and time.Timer", () => {
+	const src = `//gofront:target both
+package m
+
+import "time"
+
+func F() { var t *time.Timer; _ = t; time.AfterFunc(time.Second, func() {}) }
+`;
+	const err = compileTemp({ "m.go": src });
+	assertContains(err, "'time.Timer' is only available in js packages");
+	assertContains(err, "'time.AfterFunc' is only available in js packages");
+});
+
+test("wasm package importing regexp reports a diagnostic, not an internal error", () => {
+	const err = compileTemp({
+		"m.go": `//gofront:target wasm
+package m
+
+import "regexp"
+
+func F(s string) string { return regexp.QuoteMeta(s) }
+`,
+	});
+	assertContains(err, "package 'regexp' is only available in js packages");
+	assert(!err.includes("cannot be used as a value"), err);
+});
+
+test("wasm and both packages cannot import gom", () => {
+	for (const target of ["wasm", "both"]) {
+		const err = compileTemp({
+			"m.go": `//gofront:target ${target}
+package m
+
+import "gom"
+
+func F() gom.Node { return gom.Text("x") }
+`,
+		});
+		assertContains(err, "package 'gom' is not available in wasm packages");
+		assertContains(err, "1 gom usage");
+	}
+});
+
+test("wasm package using gom without an import reports the same error", () => {
+	const err = compileTemp({
+		"m.go": `//gofront:target wasm
+package m
+
+func F() { gom.Text("x") }
+`,
+	});
+	assertContains(err, "package 'gom' is not available in wasm packages");
 });

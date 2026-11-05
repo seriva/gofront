@@ -107,18 +107,13 @@ export const BROWSER_GLOBALS = new Set([
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
 	"fmt",
-	"time",
 	"testing",
 	"gofront/shared",
 	"gofront/simd",
 	"encoding/json",
 ]);
 
-export const STDLIB_PACKAGES = new Set([
-	...WASM_SUPPORTED_STDLIB,
-	"gom",
-	"regexp",
-]);
+export const STDLIB_PACKAGES = WASM_SUPPORTED_STDLIB;
 
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
@@ -143,9 +138,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Stringer",
 		]),
 	],
-	// Go source declares the package; only the JS-only Sleep, AfterFunc and
-	// Timer are emitter members.
-	["time", new Set()],
 	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
 ]);
 
@@ -162,6 +154,9 @@ export const INTRINSICS = new Map([
 	// seconds east of UTC of the host's time zone at a Unix time (time).
 	["time_now", "func() int64"],
 	["time_zone_offset", "func(int64) int"],
+	// time (js only): suspend for a number of nanoseconds; the declaration is
+	// `async`.
+	["time_sleep", "func(int64) void"],
 	// os: write a string to a file descriptor (0 stdin, 1 stdout, 2 stderr),
 	// exit the process, and read and set environment variables.
 	["os_write", "func(int, string) void"],

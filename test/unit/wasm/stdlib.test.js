@@ -1993,15 +1993,15 @@ test("a stdlib member that cannot be a value names itself in the error", () => {
 			compileWasm(`
 package main
 
-import "regexp"
+import "fmt"
 
 func Main() int {
-	f := regexp.QuoteMeta
+	f := fmt.Fprintf
 	_ = f
 	return 1
 }
 `),
-		"regexp.QuoteMeta cannot be used as a value",
+		"fmt.Fprintf cannot be used as a value",
 	);
 });
 
