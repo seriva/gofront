@@ -172,11 +172,7 @@ Notable members per package:
 
 Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
-`math` compiles from Go source. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs` and `Copysign` become single WASM
-instructions, while `Round`, `Min` and `Max` emit short sequences to preserve Go's rounding and infinity
-semantics. `Pow` handles Go's special cases (such as `Pow(1, NaN)`) in Go code and calls host `Math.pow` for the
-rest; transcendentals (`Sin`, `Cos`, `Atan2`, `Mod`, `Hypot`, `Cbrt`, …) use host `Math.*` intrinsics (`Mod`
-keeps the sign of the dividend).
+`math` follows Go's results in every package. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs` and `Copysign` compile to single WASM instructions, `Round` rounds half away from zero, and `Min`, `Max` and `Pow` handle Go's special cases such as `Pow(1, NaN)`. Functions without a WASM instruction (`Sin`, `Cos`, `Atan2`, `Mod`, `Hypot`, `Cbrt`, …) are imported from the JavaScript host's `Math`; `Mod` keeps the sign of the dividend.
 
 Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised
 from a WASM `start` function, so they are ready before any export is called.
