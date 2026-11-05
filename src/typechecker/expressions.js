@@ -860,6 +860,12 @@ export const expressionCheckMethods = {
 	_genericFuncValueAsInstantiation(expr) {
 		const toTypeNode = (n) => {
 			if (n?.kind === "TypeExpr") return n.type;
+			// `Id[*int]`: the parser sees a dereference; on a generic function
+			// it is a pointer type argument.
+			if (n?.kind === "UnaryExpr" && n.op === "*") {
+				const base = toTypeNode(n.operand);
+				return base && { kind: "PointerType", base, _line: n._line };
+			}
 			const parts = [];
 			let cur = n;
 			while (cur?.kind === "SelectorExpr") {

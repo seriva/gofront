@@ -8,6 +8,8 @@
 //       Go type until they are converted or assigned
 //   i — for an untyped integral FLOAT, its exact BigInt value, so that
 //       `1e18 + 1` stays exact when it later becomes an integer
+//   r — for an untyped decimal FLOAT, its exact value `{ n, e }` = n * 10^-e
+//       (BigInt n), so `0.2 + 0.1` is exactly 0.3 before it rounds to float64
 //
 // The checker evaluates constant expressions with these helpers and attaches
 // the result to the AST node (`_const`); both backends emit that value.
@@ -22,6 +24,7 @@ const BOOL = "BOOL";
 // Shift counts beyond this are left to the runtime (Go allows larger shifts
 // of untyped constants, but no program needs a 4096-bit intermediate).
 const MAX_SHIFT = 4096n;
+const MAX_DECIMAL_EXP = 400;
 
 // Value ranges of the integer types.
 export const INT_RANGES = {
@@ -76,6 +79,40 @@ function exactIntOfFloatText(text) {
 	return cut > 0 ? BigInt(digits.slice(0, cut)) : 0n;
 }
 
+// Exact decimal value `{ n, e }` (n * 10^-e) of a decimal float literal, or null.
+function exactDecimalOfFloatText(text) {
+	const m = /^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
+	if (!m) return null;
+	const frac = m[2] ?? "";
+	const digits = `${m[1]}${frac}` || "0";
+	const e = frac.length - Number(m[3] ?? 0);
+	if (Math.abs(e) > MAX_DECIMAL_EXP) return null;
+	return e >= 0
+		? { n: BigInt(digits), e }
+		: { n: BigInt(digits) * 10n ** BigInt(-e), e: 0 };
+}
+
+// Exact decimal value of an untyped INT or FLOAT constant, or null.
+function exactDecimal(val) {
+	if (val.t) return null;
+	if (val.r) return val.r;
+	const i = constIntValue(val);
+	return i === null ? null : { n: i, e: 0 };
+}
+
+function decimalToFloat({ n, e }) {
+	return Number(`${n}e-${e}`);
+}
+
+function floatConstFromText(s) {
+	const n = Number(s);
+	if (!Number.isFinite(n)) return null;
+	const i = exactIntOfFloatText(s);
+	const r = exactDecimalOfFloatText(s);
+	const out = i === null ? { k: FLOAT, v: n } : { k: FLOAT, v: n, i };
+	return r === null ? out : { ...out, r };
+}
+
 export function constFromLit(lit) {
 	switch (lit.litKind) {
 		case INT: {
@@ -83,13 +120,8 @@ export function constFromLit(lit) {
 			const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
 			return { k: INT, v: BigInt(clean) };
 		}
-		case FLOAT: {
-			const s = String(lit.value).replaceAll("_", "");
-			const n = Number(s);
-			if (!Number.isFinite(n)) return null;
-			const i = exactIntOfFloatText(s);
-			return i === null ? { k: FLOAT, v: n } : { k: FLOAT, v: n, i };
-		}
+		case FLOAT:
+			return floatConstFromText(String(lit.value).replaceAll("_", ""));
 		case STRING:
 			return { k: STRING, v: String(lit.value ?? "") };
 		case BOOL:
@@ -146,13 +178,19 @@ function typedFloat(v, t) {
 	return t ? { k: FLOAT, v: r, t } : { k: FLOAT, v: r };
 }
 
+function negateFloat(x) {
+	const r = typedFloat(-x.v, x.t);
+	if (r && x.i !== undefined) r.i = -x.i;
+	if (r && x.r && !x.t) r.r = { n: -x.r.n, e: x.r.e };
+	return r;
+}
+
 export function foldUnary(op, x) {
 	if (op === "+" && (x.k === INT || x.k === FLOAT)) return x;
 	if (op === "!" && x.k === BOOL) return { ...x, v: !x.v };
 	if (op === "-" && x.k === INT) return typedInt(-x.v, x.t);
 	if (op === "-" && x.k === FLOAT) {
-		const r = typedFloat(-x.v, x.t);
-		return r && x.i !== undefined ? { ...r, i: -x.i } : r;
+		return negateFloat(x);
 	}
 	if (op === "^" && x.k === INT) {
 		// Unsigned: flip the bits of the type's width; otherwise -x-1.
@@ -211,6 +249,27 @@ function foldInts(op, a, b, t) {
 	}
 }
 
+// `x op y` on exact decimals for + - *.
+function combineDecimals(op, x, y) {
+	if (op === "*") return { n: x.n * y.n, e: x.e + y.e };
+	const e = Math.max(x.e, y.e);
+	const xn = x.n * 10n ** BigInt(e - x.e);
+	const yn = y.n * 10n ** BigInt(e - y.e);
+	return { n: op === "+" ? xn + yn : xn - yn, e };
+}
+
+// Untyped decimal + - * in exact arithmetic, rounded to float64 once at the end.
+function foldExactDecimals(op, a, b) {
+	if (op !== "+" && op !== "-" && op !== "*") return null;
+	const x = exactDecimal(a);
+	const y = exactDecimal(b);
+	if (!x || !y) return null;
+	const r = combineDecimals(op, x, y);
+	if (r.e > MAX_DECIMAL_EXP) return null;
+	const v = decimalToFloat(r);
+	return Number.isFinite(v) ? { k: FLOAT, v, r } : null;
+}
+
 function foldFloats(op, a, b, t) {
 	// Untyped integral operands stay exact for + - * (`1e18 + 1`).
 	const ai = t ? null : constIntValue(a);
@@ -219,6 +278,8 @@ function foldFloats(op, a, b, t) {
 		const i = op === "+" ? ai + bi : op === "-" ? ai - bi : ai * bi;
 		return { k: FLOAT, v: Number(i), i };
 	}
+	const exact = t ? null : foldExactDecimals(op, a, b);
+	if (exact) return exact;
 	const x = asFloat(a);
 	const y = asFloat(b);
 	switch (op) {

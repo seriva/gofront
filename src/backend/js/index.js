@@ -71,6 +71,7 @@ import {
 	HELPER_TESTING,
 	HELPER_TIMER,
 	HELPER_TO64,
+	HELPER_U8ENC,
 	HELPER_VA,
 	HELPER_VCLONE,
 } from "./runtime.js";
@@ -132,6 +133,7 @@ const jsBindingName = (n) =>
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
 const HELPER_MAP = [
 	["len", HELPER_LEN],
+	["u8enc", HELPER_U8ENC],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
 	["append", HELPER_APPEND],

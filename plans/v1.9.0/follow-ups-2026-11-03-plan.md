@@ -574,19 +574,19 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 *Phases 22–27 were scheduled on 2026-11-03 from the 34 review follow-ups logged in [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md) (see Verified Gaps → Review follow-ups from stdlib-in-go).*
 
-- [ ] Task 22.1: Lexer: astral rune literals and raw-byte `\xNN` string escapes
+- [x] Task 22.1: Lexer: astral rune literals and raw-byte `\xNN` string escapes
   - Files: `src/lexer/lexer.js`, `src/backend/js/expressions.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: S19 `r := '😀'; fmt.Println(r)` → `128512` on all targets; S15 `b := []byte("a\xffb"); fmt.Println(len(b), bytes.IndexRune(b, utf8.RuneError))` → `3 1` on all targets; multi-rune literals `'ab'` still error.
   - Done when: both repros match Go on js/both/wasm; negative rune-literal tests stay green.
-- [ ] Task 22.2: Parser: conversion-led index expressions in call arguments and `//gofront:native` before doc comments
+- [x] Task 22.2: Parser: conversion-led index expressions in call arguments and `//gofront:native` before doc comments
   - Files: `src/parser/expressions.js`, `src/parser/declarations.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: S33 `f(byte(digits[uint(u)&m]))` → `51` on all targets; S06 `//gofront:native str.Index` separated from `func Index` by a `//` doc comment sets `decl.native === "str.Index"`.
   - Done when: both repros pass on all targets.
-- [ ] Task 22.3: Parser and typechecker: lone pointer type arguments in generic instantiation (`Id[*int]`)
+- [x] Task 22.3: Parser and typechecker: lone pointer type arguments in generic instantiation (`Id[*int]`)
   - Files: `src/parser/expressions.js`, `src/typechecker/expressions.js`, `test/unit/parser/generics.test.js`
   - Test: S03 `func Id[T any](x T) T { return x }; f := Id[*int]; x := 4; fmt.Println(*f(&x))` → `4` on all targets; `Id[*int](&x)` direct call also works.
   - Done when: both forms compile and run on js/both/wasm.
-- [ ] Task 22.4: Constant folding: exact untyped float addition and subtraction
+- [x] Task 22.4: Constant folding: exact untyped float addition and subtraction
   - Files: `src/typechecker/const-fold.js`, `test/unit/language/constants.test.js`
   - Test: S31 `fmt.Println(0.2 + 0.1)` → `0.3` on all targets; `const c = 0.2 + 0.1; fmt.Println(c == 0.3)` → `true`.
   - Done when: both repros match Go on all targets.
