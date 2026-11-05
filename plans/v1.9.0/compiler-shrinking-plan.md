@@ -1,7 +1,7 @@
 # Compiler Shrinking Pass — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Planned  
+**Status:** In Progress  
 **Base branch:** `main`  
 **Related:** [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md), [`../v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md)  
 **Release note:** `strings.Builder` and `math` now compile from Go source in `stdlib/` with registered native fast paths, `encoding/json` shares one compile-time codec pipeline (`src/lower/json-codecs.js` + `stdlib/internal/jsonrt`) across JavaScript and WebAssembly at ~2× the throughput of the former JS-only emitter, and reflection-style `binary.Read`/`Write`/`Size` and `fmt.Sscan`/`Sscanf`/`Sscanln` are retired in favor of explicit `binary.ByteOrder` / `Append*` / `Put*` methods and `strconv` parsers.
