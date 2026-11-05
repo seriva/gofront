@@ -1827,6 +1827,26 @@ func main() {
 	);
 });
 
+section("Generics — constraints referencing later type parameters");
+
+test("a constraint may reference a type parameter declared later", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type SliceIface[E any] interface{ ~[]E }
+
+func F[S SliceIface[E], E any](s S) E { return s[0] }
+
+func main() {
+	fmt.Println(F([]int{7}))
+}
+`,
+		"7\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

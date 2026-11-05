@@ -467,7 +467,7 @@ func unquote(in string, unescape bool) (out, rem string, err error) {
 		if unescape {
 			buf = make([]byte, 0, 3*end/2) // try to avoid more allocations
 		}
-		for len(in) > 0 && in[0] != int(quote) {
+		for len(in) > 0 && in[0] != quote {
 			// Process the next character,
 			// rejecting any unescaped newline characters which are invalid.
 			r, multibyte, rem, err := UnquoteChar(in, quote)

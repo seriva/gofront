@@ -1,5 +1,6 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { exprText, operandKind } from "./operand-text.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
 	EXCLUDED_STDLIB_PACKAGES,
@@ -37,6 +38,7 @@ import {
 	STRING,
 	TAINTED_ANY,
 	typeStr,
+	UINT8,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
@@ -330,7 +332,13 @@ export const expressionCheckMethods = {
 		if (!c || seen.has(c)) return null;
 		seen.add(c);
 		// Receiver type parameters keep their constraint as an AST node.
-		if (c.kind === "TypeName" || c.kind === "InterfaceType")
+		if (
+			c.kind === "TypeName" ||
+			c.kind === "InterfaceType" ||
+			c.kind === "GenericTypeName" ||
+			c.kind === "InstantiationExpr" ||
+			c.kind === "IndexExpr"
+		)
 			return this._constraintTerms(this.resolveTypeNode(c, scope), seen, scope);
 		if (c.kind === "named")
 			return this._constraintTerms(c.underlying, seen, scope);
@@ -340,7 +348,7 @@ export const expressionCheckMethods = {
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
 		const out = [];
 		for (const term of c.terms) {
-			const t = this.resolveTypeNode(term.type, scope);
+			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
 			const inner =
 				t?.kind === "named" && t.underlying?.kind === "interface"
 					? this._constraintTerms(t, seen, scope)
@@ -840,6 +848,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
+			this.assertAssignable(btu.key, indexType, expr.index);
 			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
@@ -850,7 +859,7 @@ export const expressionCheckMethods = {
 				this.err(`invalid index ${idx} (index must not be negative)`, expr);
 			return btu.elem;
 		}
-		if (isString(bt)) return INT;
+		if (isString(bt)) return UINT8;
 		return this.err(`Cannot index type ${typeStr(bt)}`, expr);
 	},
 
@@ -1267,7 +1276,10 @@ export const expressionCheckMethods = {
 			) {
 				const tp = baseType.typeParams[i];
 				const constraint = tp.constraint
-					? this.resolveTypeNode(tp.constraint, scope)
+					? this.resolveTypeNode(
+							tp.constraint,
+							this._typeArgScope(baseType.typeParams, typeArgs, scope),
+						)
 					: null;
 				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 			}
@@ -1677,6 +1689,17 @@ export const expressionCheckMethods = {
 		});
 	},
 
+	// Scope where each type parameter name stands for its type argument, so a
+	// constraint that mentions another parameter (`S ~[]E`) resolves.
+	_typeArgScope(typeParams, typeArgs, scope) {
+		const out = new Scope(scope);
+		typeParams.forEach((tp, i) => {
+			if (typeArgs[i])
+				out.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
+		});
+		return out;
+	},
+
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
 		const typeArgs = this.inferTypeArgs(
 			fnType,
@@ -1695,7 +1718,10 @@ export const expressionCheckMethods = {
 		for (let i = 0; i < fnType.typeParams.length && i < typeArgs.length; i++) {
 			const tp = fnType.typeParams[i];
 			const constraint = tp.constraint
-				? this.resolveTypeNode(tp.constraint, scope)
+				? this.resolveTypeNode(
+						tp.constraint,
+						this._typeArgScope(fnType.typeParams, typeArgs, scope),
+					)
 				: null;
 			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 		}
@@ -1832,6 +1858,11 @@ export const expressionCheckMethods = {
 		if (name === "len") {
 			const size = this._constLenFromType(argTypes[0]);
 			if (size != null) expr._constLen = size;
+		} else if ((argTypes[0]?.underlying ?? argTypes[0])?.kind === "map") {
+			this.err(
+				`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
+				expr,
+			);
 		} else if (sharedInfo(argTypes[0])) {
 			this.err(
 				`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
