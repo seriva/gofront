@@ -230,11 +230,12 @@ JS_NATIVES.set(
 
 // Case mapping goes letter by letter through the first code point of the
 // host's mapping, as the Go body does through `unicode.ToUpper`; ASCII text
-// takes the whole-string fast path.
+// takes the whole-string fast path. A letter whose upper case spans several
+// code points (ß) stays as it is, as in Go's single-rune tables.
 const caseNative = (method) =>
 	strFn(
 		"s",
-		`/^[\\x00-\\x7f]*$/.test(s) ? s.${method}() : Array.from(s, (c) => String.fromCodePoint(c.${method}().codePointAt(0))).join("")`,
+		`/^[\\x00-\\x7f]*$/.test(s) ? s.${method}() : Array.from(s, (c) => { const m = c.${method}(); const r = String.fromCodePoint(m.codePointAt(0)); return m.length > r.length && "${method}" === "toUpperCase" ? c : r; }).join("")`,
 	);
 JS_NATIVES.set("strings.ToUpper", caseNative("toUpperCase"));
 JS_NATIVES.set("strings.ToLower", caseNative("toLowerCase"));
