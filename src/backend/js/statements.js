@@ -129,6 +129,20 @@ const isReusableIndex = (e, vars, boxed) => {
 	}
 };
 
+// Adds the name of every identifier under `n` to `into`.
+const collectIdentNames = (n, into) => {
+	if (Array.isArray(n)) {
+		for (const c of n) collectIdentNames(c, into);
+		return;
+	}
+	if (!n || typeof n !== "object") return;
+	if (n.kind === "Ident") into.add(n.name);
+	someChild(n, (c) => {
+		collectIdentNames(c, into);
+		return false;
+	});
+};
+
 // Method-name dispatch for genStmt — string values add no static call edges.
 const STMT_GEN_DELEGATE = {
 	VarDecl: "genVarDecl",
@@ -147,18 +161,35 @@ const STMT_GEN_DELEGATE = {
 export const statementGenMethods = {
 	genBlock(block) {
 		let nested = 0;
+		const earlier = new Set();
 		for (const stmt of block.stmts) {
 			if (this._definesShadowedRead(stmt)) {
 				this._genShadowingDefine(stmt);
 				nested++;
+			} else if (this._definesAfterOuterUse(stmt, earlier)) {
+				this.line("{");
+				this.indent++;
+				nested++;
+				this.genStmt(stmt);
 			} else {
 				this.genStmt(stmt);
 			}
+			collectIdentNames(stmt, earlier);
 		}
 		for (; nested > 0; nested--) {
 			this.indent--;
 			this.line("}");
 		}
+	},
+
+	// `err = nil; _, err := g()` where `err` is an outer variable used earlier
+	// in this block: JS `let` would put those uses in its temporal dead zone,
+	// so the rest of the block moves into a nested block.
+	_definesAfterOuterUse(stmt, earlier) {
+		if (stmt.kind !== "DefineStmt" || earlier.size === 0) return false;
+		return stmt.lhs.some(
+			(l) => !l._redecl && l.name !== "_" && earlier.has(l.name),
+		);
 	},
 
 	// `x := f(x)` declaring a new `x` that its own right-hand side reads (the
@@ -845,8 +876,7 @@ export const statementGenMethods = {
 				rhsVal = `${rhsVal}n`;
 			}
 			if (
-				(this.strict || is64 || this._isFloat32(stmt.lhs[0]._type)) &&
-				stmt.op !== "=" &&
+				this._needsStrictCompoundStmt(stmt, is64) &&
 				this._genStrictCompound(
 					stmt.lhs[0],
 					stmt.op.slice(0, -1),
@@ -1946,6 +1976,37 @@ export const statementGenMethods = {
 		return `let [${lhs.map((n) => (n === "_" ? "" : n)).join(", ")}] = ${rhs[0]}`;
 	},
 
+	// Compound assignments that need more than the JS operator: strict
+	// numeric wrapping, 64-bit and float32 arithmetic, and integer `/=`.
+	_needsStrictCompoundStmt(stmt, is64) {
+		if (stmt.op === "=") return false;
+		const t = stmt.lhs[0]._type;
+		return (
+			this.strict ||
+			is64 ||
+			this._isFloat32(t) ||
+			(stmt.op === "/=" && this.isIntType(t))
+		);
+	},
+
+	// The single-expression form of `_genStrictCompound` for `for` post
+	// statements: the emitted statement is lifted back out of the output.
+	_inlineStrictCompound(stmt, rhsJs) {
+		const mark = this.out.length;
+		const handled = this._genStrictCompound(
+			stmt.lhs[0],
+			stmt.op.slice(0, -1),
+			rhsJs,
+			null,
+			null,
+			stmt.rhs[0]?._type,
+		);
+		const emitted = this.out.splice(mark).map((l) => l.trim());
+		if (!handled) return null;
+		const js = emitted.join(" ").replace(/;$/, "");
+		return js.startsWith("{") ? `(() => ${js})()` : js;
+	},
+
 	_inlineAssign(stmt) {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
@@ -1962,6 +2023,10 @@ export const statementGenMethods = {
 				}
 				const l = this.genExpr(stmt.lhs[0]);
 				return `${l} = ${this._gen64BitBinary(binOp, l, r, stmt.lhs[0]._type)}`;
+			}
+			if (this._needsStrictCompoundStmt(stmt, is64BitInt(stmt.lhs[0]._type))) {
+				const strict = this._inlineStrictCompound(stmt, rhs[0]);
+				if (strict) return strict;
 			}
 			if (stmt.op === "&^=")
 				return `${this.genExpr(stmt.lhs[0])} &= ~(${rhs[0]})`;

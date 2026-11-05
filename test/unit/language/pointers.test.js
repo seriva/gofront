@@ -780,6 +780,51 @@ func main() {
 	);
 });
 
+test("multi-value assignment into a dereferenced pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f() (int, error) { return 9, nil }
+
+func main() {
+	var x int
+	var err error
+	p := &x
+	*p, err = f()
+	fmt.Println(x, err)
+}
+`,
+		"9 <nil>\n",
+	);
+});
+
+test("shadowed named result inside a loop", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() (int, error) { return 1, nil }
+
+func f() (err error) {
+	for i := 0; i < 2; i++ {
+		err = nil
+		_, err := g()
+		_ = err
+	}
+	return
+}
+
+func main() {
+	fmt.Println(f())
+}
+`,
+		"<nil>\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

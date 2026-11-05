@@ -599,6 +599,52 @@ func main() {
 	);
 });
 
+test("64-bit / and % evaluate operands once", async () => {
+	for (const t of ["int64", "uint64"]) {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+func main() {
+	count := 0
+	f := func() ${t} { count++; return 2 }
+	_ = ${t}(10) / f()
+	fmt.Println(count)
+	_ = ${t}(10) % f()
+	fmt.Println(count)
+	g := func() ${t} { count++; return 10 }
+	_ = g() / ${t}(3)
+	_ = g() % ${t}(3)
+	fmt.Println(count)
+}
+`,
+			"1\n2\n4\n",
+		);
+	}
+});
+
+test("untyped constant shifted by a variable in 64-bit context", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	k := uint(3)
+	var m uint64 = (1 << k) - 1
+	var n uint64 = 5
+	fmt.Println(n & m)
+	var a int64 = 1 << k
+	fmt.Println(a, int64(1)<<k)
+	var b int64 = (1 << k) + 1
+	fmt.Println(b)
+}
+`,
+		"5\n8 8\n9\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
