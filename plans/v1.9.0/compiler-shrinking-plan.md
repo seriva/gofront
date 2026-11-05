@@ -139,7 +139,7 @@ Finish shrinking the Node.js compiler (`src/`) before the self-hosted Go port (`
 
 ### Phase 1: Dead Method Sweep & Prune `binary.{Read,Write,Size}` and `fmt.Sscan*`
 
-- [ ] Task 1.1: Delete the 15 dead methods across JS codegen, WASM codegen, and ownership lowering
+- [x] Task 1.1: Delete the 15 dead methods across JS codegen, WASM codegen, and ownership lowering
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/stdlib/io.js`, `src/backend/wasm/emit-maps.js`, `src/backend/wasm/emit.js`, `src/backend/wasm/module-emitter.js`, `src/backend/js/expressions.js`, `src/backend/js/index.js`, `src/backend/js/statements.js`, `src/lower/ownership.js`
   - Test: `test/unit/compiler/check-layers.test.js`
   - Done when: All 15 unreferenced methods (`emitSlicesClone`, `_emitAppendSliceBytes`, `_emitNewError`, `emitElemLt`, `_nodeWritesVar`, `_genStructFields`, `_is64BitSigned`, `getSourceMap`, `_genSingleEmbedStubs`, `_isReferenceType`, `_nodeAssigns`, `allocTemp`, `getMapTypeByIndex`, `getTimezoneOffsetImportIndex`, `markOwnership`) are removed (~285 lines) and `npm test` + `npm run check` pass.

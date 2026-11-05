@@ -955,11 +955,6 @@ export const expressionGenMethods = {
 		return rootIdentName(e);
 	},
 
-	// True when `node` itself (not its children) writes to variable `name`.
-	_nodeWritesVar(node, name) {
-		return nodeWritesVar(node, name);
-	},
-
 	// True when `node` may modify (or take the address of) the value held by variable `name`.
 	_nodeMutatesVar(node, name, addrOnly = false) {
 		return nodeMutatesVar(node, name, addrOnly);
@@ -2221,22 +2216,6 @@ export const expressionGenMethods = {
 		return "{}";
 	},
 
-	// Render struct elements as a JS field list string.
-	// Handles positional (_positionalField), embedded-spread (_isEmbedInit), and keyed (KeyValueExpr).
-	_genStructFields(elems) {
-		return elems
-			.map((e) => {
-				if (e._positionalField) {
-					return `${e._positionalField}: ${this.genExpr(e)}`;
-				}
-				if (e.kind !== "KeyValueExpr") return null;
-				if (e._isEmbedInit) return `...${this.genExpr(e.value)}`;
-				return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
-			})
-			.filter((s) => s !== null)
-			.join(", ");
-	},
-
 	_isSliceOrArrayType(t) {
 		return t?.kind === "SliceType" || t?.kind === "ArrayType";
 	},
@@ -3434,10 +3413,6 @@ export const expressionGenMethods = {
 			this._typeName(t) === "float32" ||
 			(t?.kind === "typeParam" && this._typeParamZeroFactory(t.name) != null)
 		);
-	},
-
-	_is64BitSigned(t) {
-		return is64BitSigned(t);
 	},
 
 	_is64BitUnsigned(t) {

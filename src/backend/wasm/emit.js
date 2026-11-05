@@ -1677,10 +1677,6 @@ export class FunctionEmitter {
 		});
 	}
 
-	allocTemp(wasmType) {
-		return this.acquireTemp(wasmType);
-	}
-
 	// Temps are keyed by a canonical string so ref-typed temps (fresh object
 	// literals at every call site) are actually recycled across sites.
 	_tempKey(wasmType) {
