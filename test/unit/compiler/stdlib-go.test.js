@@ -512,41 +512,7 @@ func Run() int {
 	assertEqual(out, "113");
 });
 
-section("Portable Go Phase 3.2 review feedback: io & fmt.Sscan fixes");
-
-test("fmt.Sscan returns n=0 on parse failure (JS and WASM parity)", async () => {
-	const out = await stdParity(`import "fmt"
-
-func Run() string {
-	var a int
-	n, err := fmt.Sscan("xyz", &a)
-	return fmt.Sprintf("n=%d err=%t a=%d", n, err != nil, a)
-}
-`);
-	assertEqual(out, "n=0 err=true a=0");
-});
-
-test("fmt.Sscan with all integer pointer types (JS and WASM parity)", async () => {
-	const out = await stdParity(`import "fmt"
-
-func Run() string {
-	var (
-		i64 int64
-		u   uint
-		u64 uint64
-		u32 uint32
-		u16 uint16
-		u8  uint8
-		i16 int16
-		i8  int8
-	)
-	n, err := fmt.Sscan("10 20 30 40 50 60 70 80", &i64, &u, &u64, &u32, &u16, &u8, &i16, &i8)
-	return fmt.Sprintf("n=%d err=%t vals=%d,%d,%d,%d,%d,%d,%d,%d",
-		n, err != nil, i64, u, u64, u32, u16, u8, i16, i8)
-}
-`);
-	assertEqual(out, "n=8 err=false vals=10,20,30,40,50,60,70,80");
-});
+section("Portable Go Phase 3.2 review feedback: io fixes");
 
 test("io.SectionReader.ReadAt does not leak bytes beyond section limit", async () => {
 	const out = await stdParity(`import (
@@ -864,18 +830,16 @@ func Run() string {
 	frac, exp := math.Frexp(8)
 	ip, fp := math.Modf(3.25)
 	get := sync.OnceValue(func() int { return 7 })
-	var a, b int
-	n, _ := fmt.Sscan("4 5", &a, &b)
 	return fmt.Sprint(
 		strings.EqualFold("σ", "Σ"), " ",
 		strings.ToTitle("héllo"), " ",
 		strconv.Quote("\u00e9"), " ",
 		frac, " ", exp, " ", math.Ldexp(frac, exp), " ", ip, " ", fp, " ",
-		get(), get(), " ", n, a, b,
+		get(), get(),
 	)
 }
 `);
-	assertEqual(out, 'true HÉLLO "é" 0.5 4 8 3 0.25 7 7 2 4 5');
+	assertEqual(out, 'true HÉLLO "é" 0.5 4 8 3 0.25 7 7');
 });
 
 section("Go-source stdlib: //gofront:native");

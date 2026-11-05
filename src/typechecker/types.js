@@ -116,7 +116,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"gofront/shared",
 	"gofront/simd",
 	"crypto/rand",
-	"encoding/binary",
 	"os",
 	"encoding/json",
 ]);
@@ -226,9 +225,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Fprintf",
 			"Fprintln",
 			"Fprint",
-			"Sscan",
-			"Sscanln",
-			"Sscanf",
 			"Stringer",
 		]),
 	],
@@ -254,7 +250,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 	// Timer are emitter members.
 	["time", new Set()],
 	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
-	["binary", new Set(["Read", "Write", "Size"])],
 ]);
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);

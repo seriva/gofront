@@ -1079,7 +1079,7 @@ func Main() {
 	);
 });
 
-section("WASM stdlib — Phase 7: io, readers/writers, fmt.Fprint*, fmt.Sscan*");
+section("WASM stdlib — Phase 7: io, readers/writers, fmt.Fprint*");
 
 test("io.WriteString, io.Discard, and fmt.Fprint* writing to Builder and Buffer", () => {
 	const src = `
@@ -1196,52 +1196,6 @@ func Main() string {
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "3,true|0,true|true,true,true,true");
-	assertEqual(wasmRes, jsRes);
-});
-
-test("fmt.Sscan, fmt.Sscanln, fmt.Sscanf parsing and unexpected EOF parity", () => {
-	const src = `
-package main
-
-import (
-	"fmt"
-)
-
-func Main() string {
-	var a int
-	var b string
-	var c bool
-	n1, err1 := fmt.Sscan("123 hello true", &a, &b, &c)
-
-	var x int
-	var y string
-	n2, err2 := fmt.Sscanln("456 world", &x, &y)
-
-	var id int
-	var name string
-	n3, err3 := fmt.Sscanf("789 Alice", "%d %s", &id, &name)
-
-	var u1 int
-	var u2 string
-	n4, err4 := fmt.Sscanf("10", "%d %s", &u1, &u2)
-	err4Str := ""
-	if err4 != nil {
-		err4Str = err4.Error()
-	}
-
-	return fmt.Sprintf("%d,%d,%s,%t,%t|%d,%d,%s,%t|%d,%d,%s,%t|%d,%d,%s",
-		n1, a, b, c, err1 == nil,
-		n2, x, y, err2 == nil,
-		n3, id, name, err3 == nil,
-		n4, u1, err4Str,
-	)
-}
-`;
-	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(
-		wasmRes,
-		"3,123,hello,true,true|2,456,world,true|2,789,Alice,true|1,10,unexpected EOF",
-	);
 	assertEqual(wasmRes, jsRes);
 });
 
@@ -1862,12 +1816,11 @@ func Main() string {
 
 section("WASM Stdlib — encoding/binary");
 
-test("encoding/binary LittleEndian, BigEndian, Append, Size, Read, Write", () => {
+test("encoding/binary LittleEndian, BigEndian, Append", () => {
 	const src = `
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 )
@@ -1896,23 +1849,10 @@ func Main() string {
 	app = binary.LittleEndian.AppendUint16(app, 0x1234)
 	app = binary.LittleEndian.AppendUint32(app, 0x56789abc)
 
-	sz1 := binary.Size(uint32(0))
-	sz2 := binary.Size(uint64(0))
-
-	var readVal uint32
-	buf := bytes.NewReader([]byte{0x78, 0x56, 0x34, 0x12})
-	errRead := binary.Read(buf, binary.LittleEndian, &readVal)
-
-	var writeBuf bytes.Buffer
-	errWrite := binary.Write(&writeBuf, binary.LittleEndian, uint32(0x12345678))
-
-	return fmt.Sprintf("%x:%x:%x|%x:%x:%x|%x|%d:%d|%x:%v|%x:%v",
+	return fmt.Sprintf("%x:%x:%x|%x:%x:%x|%x",
 		u16, u32, u64,
 		be16, be32, be64,
 		app,
-		sz1, sz2,
-		readVal, errRead == nil,
-		writeBuf.Bytes(), errWrite == nil,
 	)
 }
 `;
@@ -1920,7 +1860,7 @@ func Main() string {
 	assertEqual(wasmRes, jsRes);
 	assertEqual(
 		wasmRes,
-		"1234:12345678:123456789abc|1234:12345678:123456789abc|3412bc9a7856|4:8|12345678:true|78563412:true",
+		"1234:12345678:123456789abc|1234:12345678:123456789abc|3412bc9a7856",
 	);
 });
 
