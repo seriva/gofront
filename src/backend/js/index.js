@@ -26,7 +26,6 @@ import {
 	scanAddressTaken,
 	takesElementAddress,
 } from "../../lower/index.js";
-import { forEachChild } from "../../lower/walk.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
 	BROWSER_GLOBALS,
@@ -221,18 +220,6 @@ const JS_INTRINSICS = {
 	),
 };
 
-// Counts every `type` declaration by name, function-local ones included.
-function countTypeDecls(node, counts) {
-	if (!node || typeof node !== "object") return;
-	if (Array.isArray(node)) {
-		for (const n of node) countTypeDecls(n, counts);
-		return;
-	}
-	if (node.kind === "TypeDecl")
-		counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
-	forEachChild(node, (child) => countTypeDecls(child, counts));
-}
-
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
 	// bundledPackages: Set<string>               — GoFront package names bundled inline;
@@ -265,7 +252,6 @@ export class CodeGen {
 		this._hoistedLocals = new Set(); // function-local classes the json codecs name
 		this._hasJsonCodecs = false;
 		this._jsonCodecFileIdx = -1;
-		this._typeDeclCounts = new Map();
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -389,15 +375,16 @@ export class CodeGen {
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
-		this._typeDeclCounts = new Map();
-		if (this._hasJsonCodecs)
-			countTypeDecls(program.decls, this._typeDeclCounts);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
+		// Package variable initialisers may call functions that declare local
+		// structs, so the hoisted classes are declared before them.
+		const hoistedAt = this.out.length;
+		if (this._hasJsonCodecs) this.line("");
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
-		this._emitHoistedLocals();
+		this._emitHoistedLocals(hoistedAt);
 		this._callInitAndMain(initNames, program, isTest);
 		const prependedLines = this._prependHelpers(isTest);
 		return this._finalizeOutput(prependedLines);
@@ -1020,7 +1007,6 @@ export class CodeGen {
 	// where the Go source declares them.
 	_hoistLocalClass(stmt, start) {
 		if (!this._hasJsonCodecs || stmt.type.kind !== "StructType") return;
-		if (this._typeDeclCounts.get(stmt.name) !== 1) return;
 		const open = this.out.findIndex(
 			(l, i) => i >= start && l.trimStart().startsWith(`class ${stmt.name} `),
 		);
@@ -1034,11 +1020,10 @@ export class CodeGen {
 		this._hoistedLocals.add(stmt.name);
 	}
 
-	_emitHoistedLocals() {
-		if (this._hoistedLocals.size > 0)
-			this.line(
-				`var ${[...this._hoistedLocals].map((n) => `${n} = class { static __ph = true; }`).join(", ")};`,
-			);
+	_emitHoistedLocals(at) {
+		if (this._hoistedLocals.size > 0 && this._hasJsonCodecs)
+			this.out[at] =
+				`var ${[...this._hoistedLocals].map((n) => `${n} = class { static __ph = true; }`).join(", ")};`;
 	}
 
 	// A promoted method runs on the embedded value (`this.In`), so it and the
