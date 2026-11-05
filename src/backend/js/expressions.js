@@ -225,38 +225,6 @@ function splitLastAccess(js) {
 
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
-	math: {
-		Pi: "Math.PI",
-		E: "Math.E",
-		Phi: "1.618033988749895",
-		Sqrt2: "Math.SQRT2",
-		SqrtE: "1.6487212707001282",
-		SqrtPi: "1.7724538509055159",
-		SqrtPhi: "1.272019649514069",
-		Ln2: "Math.LN2",
-		Log2E: "Math.LOG2E",
-		Ln10: "Math.LN10",
-		Log10E: "Math.LOG10E",
-		MaxFloat32: "3.4028234663852886e38",
-		SmallestNonzeroFloat32: "1.401298464324817e-45",
-		MaxFloat64: "Number.MAX_VALUE",
-		SmallestNonzeroFloat64: "Number.MIN_VALUE",
-		MaxInt: "Number.MAX_SAFE_INTEGER",
-		MinInt: "Number.MIN_SAFE_INTEGER",
-		MaxInt8: "127",
-		MinInt8: "-128",
-		MaxInt16: "32767",
-		MinInt16: "-32768",
-		MaxInt32: "2147483647",
-		MinInt32: "-2147483648",
-		MaxInt64: "9223372036854775807n",
-		MinInt64: "-9223372036854775808n",
-		MaxUint8: "255",
-		MaxUint16: "65535",
-		MaxUint32: "4294967295",
-		MaxUint: "18446744073709551615",
-		MaxUint64: "18446744073709551615n",
-	},
 	rand: {
 		Reader: "__crypto_rand_reader",
 	},
@@ -1135,7 +1103,15 @@ export const expressionGenMethods = {
 
 	_genSelectorExpr(expr) {
 		// Go-source stdlib member: bundled under its mangled top-level name.
-		if (expr._stdName) return expr._stdName;
+		if (expr._stdName) {
+			// An untyped constant used as an int64 operand: its declaration
+			// holds a Number, so emit the exact BigInt (as for an Ident).
+			const lit64 =
+				expr._is64Bit && expr._type?.kind === "untyped" && expr._const
+					? this._gen64BitFoldedConst(expr, expr._const)
+					: null;
+			return lit64 ?? expr._stdName;
+		}
 		if (this._isStdlibFuncValue(expr)) return this._genStdlibFuncValue(expr);
 		if (expr._isMethodExpr) {
 			const namedExpr = this._namedMethodExprInfo(expr);

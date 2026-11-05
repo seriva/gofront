@@ -271,11 +271,20 @@ function installLazyBodies(info, programs, checker, overlay) {
 function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
 	const members = overlay ? { ...overlay.members } : {};
 	const mangle = new Map();
+	const consts = new Map();
 	for (const name of [...values, ...types]) {
 		const t = checker.globals.symbols.get(name + suffix);
 		if (!/^[A-Z]/.test(name) || t === undefined) continue;
 		members[name] = t;
 		mangle.set(name, name + suffix);
+		// An exported constant's folded value, so importers fold `pkg.Name`.
+		if (checker.globals._consts.has(name + suffix)) {
+			const v = checker._constValue(
+				{ kind: "Ident", name: name + suffix },
+				checker.globals,
+			);
+			if (v) consts.set(name, v);
+		}
 	}
 	return {
 		...(overlay ?? {}),
@@ -285,6 +294,7 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
 		_gofront: !overlay,
 		_target: "both",
 		_mangle: mangle,
+		_consts: consts,
 	};
 }
 

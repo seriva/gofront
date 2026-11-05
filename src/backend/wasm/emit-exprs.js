@@ -611,10 +611,6 @@ export class ExprsEmitter {
 	}
 
 	_emitPkgConst(expr, targetWasmType) {
-		if (this._isMathConst(expr)) {
-			this.emitMathConst(expr.field, targetWasmType);
-			return true;
-		}
 		if (this._isUtf8Const(expr)) {
 			this.emitUtf8Const(expr.field, targetWasmType);
 			return true;

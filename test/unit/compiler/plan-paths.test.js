@@ -42,7 +42,7 @@ const PLANS = [
 			"src/backend/js/stdlib/strings.js",
 			"stdlib/strings/{extra,iter}.go",
 			"src/backend/js/stdlib/{base64,hex,sha256}.js",
-			"src/backend/js/stdlib/{bits,rand,sync}.js",
+			"src/backend/js/stdlib/{bits,math,rand,sync}.js",
 			"stdlib/sync/extra.go",
 			"src/backend/wasm/stdlib/time.js",
 			"src/backend/js/stdlib/strconv.js",

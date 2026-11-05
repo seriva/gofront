@@ -14,7 +14,6 @@ import {
 	foldUnary,
 	INT_RANGES,
 	intConst,
-	MATH_INT_CONSTS,
 } from "./const-fold.js";
 import { defaultType, isAny, typeStr, VOID } from "./types.js";
 
@@ -142,14 +141,12 @@ export const constantCheckMethods = {
 		return typed?.overflow ? null : typed;
 	},
 
-	// `pkg.K` (an imported GoFront package) and the integer `math` constants.
+	// `pkg.K` of an imported GoFront package.
 	_evalConstSelector(expr, scope) {
 		if (expr.expr?.kind !== "Ident") return null;
 		const ns = scope.lookup(expr.expr.name);
 		if (ns?.kind !== "namespace") return null;
-		if (ns._gofront) return ns._consts?.get(expr.field) ?? null;
-		const m = ns.name === "math" ? MATH_INT_CONSTS[expr.field] : undefined;
-		return m === undefined ? null : intConst(m);
+		return ns._gofront ? (ns._consts?.get(expr.field) ?? null) : null;
 	},
 
 	// Conversions, `len` of a constant string, and `min`/`max` of constants.

@@ -172,9 +172,10 @@ Notable members per package:
 
 Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
-The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
-`Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
-from zero; `Mod` keeps the sign of the dividend).
+`math` compiles from Go source. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs`, `Min`, `Max`, `Copysign` and
+`Round` become single WASM instructions (or a short sequence for `Round`, which rounds half away from
+zero); `Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`, `Cbrt`, … are imported from JS `Math` (`Mod` keeps
+the sign of the dividend).
 
 Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised
 from a WASM `start` function, so they are ready before any export is called.
