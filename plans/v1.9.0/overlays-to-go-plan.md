@@ -1,7 +1,7 @@
 # Stdlib Overlays to Go — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Planned  
+**Status:** In Progress  
 **Base branch:** `main`  
 **Related:** [`compiler-shrinking-plan.md`](compiler-shrinking-plan.md) (prerequisite: its Phase 4 makes per-package generated Go run on every target), [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md), [`../v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md)  
 **Release note:** `fmt`, `testing`, `os`, `unicode`, `regexp`, `crypto/rand`, the timer half of `time` and the `gom` DOM builders now compile from Go source, so WebAssembly packages format values and run their tests inside the module instead of calling back into JavaScript. `errors.As` honours custom `As` methods on both targets, `os.File.WriteString` reports byte counts, and importing a JavaScript-only package such as `regexp` from a WebAssembly package reports a clear error instead of crashing the compiler.
