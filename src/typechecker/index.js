@@ -1341,14 +1341,19 @@ export class TypeChecker {
 		return p.variadic ? { kind: "slice", elem: t } : t;
 	}
 
-	_injectTypeParams(decl, inner, outer) {
+	_injectTypeParams(decl, inner, _outer) {
 		if (!decl.typeParams) return;
-		for (const tp of decl.typeParams) {
-			const constraint = tp.constraint
-				? this.resolveTypeNode(tp.constraint, outer)
-				: ANY;
-			inner.define(tp.name, { kind: "typeParam", name: tp.name, constraint });
-		}
+		// Declare every parameter first so a constraint may mention one that
+		// comes later in the list (`[S ~[]E, E any]`).
+		const params = decl.typeParams.map((tp) => {
+			const t = { kind: "typeParam", name: tp.name, constraint: ANY };
+			inner.define(tp.name, t);
+			return t;
+		});
+		decl.typeParams.forEach((tp, i) => {
+			if (tp.constraint)
+				params[i].constraint = this.resolveTypeNode(tp.constraint, inner);
+		});
 	}
 
 	// Inside a method of `G[T]` the receiver is the instance `G[T]` over the

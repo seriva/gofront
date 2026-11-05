@@ -548,7 +548,7 @@ func ToValidUTF8(s, replacement string) string {
 	invalid := false
 	for i := 0; i < len(s); {
 		_, size := utf8.DecodeRuneInString(s[i:])
-		if size == 1 && s[i] >= 0xD800 && s[i] <= 0xDFFF {
+		if size == 1 && int(s[i]) >= 0xD800 && int(s[i]) <= 0xDFFF {
 			if !invalid {
 				invalid = true
 				b.WriteString(replacement)

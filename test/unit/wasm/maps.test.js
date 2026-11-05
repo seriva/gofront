@@ -892,3 +892,22 @@ test("maps print in Go's key order", async () => {
 		"map[1:3 1:2 1:1]\nmap[B:3 a:2 b:1]\nmap[10:2 9:3 b:1]\n",
 	);
 });
+
+section("64-bit untyped constant map keys");
+
+test("1 << 60 and 1 << 63 work as map keys on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[int64]string{1 << 60: "hello"}
+	fmt.Println(m[1<<60])
+	u := map[uint64]int{1 << 63: 9}
+	fmt.Println(u[1<<63])
+}
+`,
+		"hello\n9\n",
+	);
+});

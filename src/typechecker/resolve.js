@@ -167,7 +167,24 @@ const SUBSTITUTE_DISPATCH = {
 	interface: (s, type, map) => {
 		const methods = new Map();
 		for (const [k, v] of type.methods) methods.set(k, s.substituteType(v, map));
-		return { kind: "interface", name: type.name, methods };
+		const out = { kind: "interface", name: type.name, methods };
+		// The type set follows the substitution (`interface{ ~[]E }` with E=int).
+		if (type.unionConstraint)
+			out.unionConstraint = {
+				...type.unionConstraint,
+				terms: type.unionConstraint.terms.map((term) => ({
+					...term,
+					resolved: s.substituteType(
+						term.resolved ?? s.resolveTypeNode(term.type, type._unionScope),
+						map,
+					),
+				})),
+			};
+		if (type._typeSetEmbeds)
+			out._typeSetEmbeds = type._typeSetEmbeds.map((e) =>
+				s.substituteType(e, map),
+			);
+		return out;
 	},
 	named: (s, type, map) => {
 		// An instance of a generic type: re-instantiate with the substituted
@@ -492,7 +509,10 @@ export const resolveMethods = {
 			}
 		}
 		const result = { kind: "interface", methods };
-		if (node.unionConstraint) result.unionConstraint = node.unionConstraint;
+		if (node.unionConstraint) {
+			result.unionConstraint = node.unionConstraint;
+			result._unionScope = scope;
+		}
 		if (typeSetEmbeds.length > 0) result._typeSetEmbeds = typeSetEmbeds;
 		return result;
 	},
@@ -765,7 +785,8 @@ export const resolveMethods = {
 	_checkUnionConstraint(typeArg, constraint, node) {
 		for (const term of constraint.terms) {
 			if (term.approx) return;
-			const termType = this.resolveTypeNode(term.type, this.globals);
+			const termType =
+				term.resolved ?? this.resolveTypeNode(term.type, this.globals);
 			if (typeStr(typeArg) === typeStr(termType)) return;
 		}
 		this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
