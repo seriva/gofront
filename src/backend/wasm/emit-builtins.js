@@ -1112,10 +1112,6 @@ export class BuiltinsEmitter {
 					this.emitFprintCall(func.field, call, targetWasmType);
 					return true;
 				}
-				if (func.field.startsWith("Sscan")) {
-					this.emitSscanCall(func.field, call, targetWasmType);
-					return true;
-				}
 				this.emitFmtCall(func.field, args);
 				return true;
 			case "errors":
@@ -1129,9 +1125,6 @@ export class BuiltinsEmitter {
 				return true;
 			case "rand":
 				this.emitRandCall(func.field, args, targetWasmType);
-				return true;
-			case "binary":
-				this.emitBinaryCall(func.field, call, targetWasmType);
 				return true;
 			case "simd":
 				this.emitSimdPackageCall(func.field, args, targetWasmType);

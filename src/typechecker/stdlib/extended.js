@@ -608,27 +608,6 @@ export function setupExtendedGlobals(globals, types) {
 
 	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
 
-	// ── encoding/binary ───────────────────────────────────────────
-	// Read, Write and Size walk the fields of an `any`; byte orders and
-	// varints are Go source (stdlib/encoding/binary).
-	globals.define("binary", {
-		kind: "namespace",
-		name: "binary",
-		members: {
-			Read: {
-				kind: "func",
-				params: [ANY, ANY, ANY],
-				returns: [ERROR],
-			},
-			Write: {
-				kind: "func",
-				params: [ANY, ANY, ANY],
-				returns: [ERROR],
-			},
-			Size: { kind: "func", params: [ANY], returns: [INT] },
-		},
-	});
-
 	// ── encoding/json ─────────────────────────────────────────────
 	const RAW_MESSAGE_T = {
 		kind: "named",

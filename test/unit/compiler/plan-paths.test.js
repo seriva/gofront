@@ -46,6 +46,8 @@ const PLANS = [
 			"stdlib/sync/extra.go",
 			"src/backend/wasm/stdlib/time.js",
 			"src/backend/js/stdlib/strconv.js",
+			"src/backend/js/stdlib/binary.js",
+			"src/backend/wasm/stdlib/packages.js",
 		],
 	},
 ];

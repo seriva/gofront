@@ -35,7 +35,6 @@ import {
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
-	HELPER_BINARY,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
@@ -170,7 +169,6 @@ const HELPER_MAP = [
 	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
-	["binary", HELPER_BINARY],
 	["json", HELPER_JSON],
 	["simd", HELPER_SIMD],
 ];
@@ -573,10 +571,6 @@ export class CodeGen {
 		if (name === "append") this.useHelper("slice");
 		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
-		if (name === "binary") {
-			this.useHelper("ioEOF");
-			this._helpers.add("error");
-		}
 	}
 
 	_prependHelpers(isTest = false) {
