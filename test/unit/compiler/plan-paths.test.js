@@ -47,13 +47,12 @@ const PLANS = [
 		exempt: [
 			// The Go sources, generator and tests the plan's tasks add.
 			"src/lower/{fmt-formatters,stdlib-refs}.js",
-			"stdlib/{context,fmt,gom,regexp,testing}{,/,/*.go}",
+			"stdlib/{context,fmt,testing}{,/,/*.go}",
 			"stdlib/internal/fmtrt/{,fmtrt.go}",
-			"stdlib/time/sleep_js.go",
-			"src/backend/js/stdlib/{errors,cryptorand,os,unicode}.js",
+			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom}.js",
 			"src/backend/wasm/stdlib/pure.js",
 			"test/perf/fmt-bench.js",
-			"test/unit/stdlib/{regexp,testing}.test.js",
+			"test/unit/stdlib/testing.test.js",
 		],
 	},
 	{
@@ -62,7 +61,7 @@ const PLANS = [
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			// Files that completed tasks removed (their "Removes" lines still cite them).
-			"src/backend/js/stdlib/{slices,sort}.js",
+			"src/backend/js/stdlib/{slices,sort,time}.js",
 			"stdlib/slices/{extra,iter}.go",
 			"src/backend/js/stdlib/maps.js",
 			"stdlib/maps/iter.go",

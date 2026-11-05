@@ -196,19 +196,19 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 
 ### Phase 3: JS-only stdlib: loader targets, `time`, `regexp`, `gom`
 
-- [ ] Task 3.1: Target-aware stdlib file loading and diagnostics
+- [x] Task 3.1: Target-aware stdlib file loading and diagnostics
   - Files: `src/link/stdlib.js`, `src/typechecker/types.js`, `src/typechecker/index.js`
   - Test: `test/unit/compiler/stdlib-go.test.js` (fixture package via `stdlibRoot` with `both` + `js` files: js importer sees all, wasm importer gets `'X.Sleepish' is only available in js packages`; all-js package → `package 'X' is only available in js packages`), `test/unit/compiler/targets.test.js`
   - Done when: `parseStdlibFiles` honours per-file `//gofront:target`, `checkStdlibPrograms` checks with the importer's target, and `WASM_SUPPORTED_STDLIB` lists no Go-source package.
-- [ ] Task 3.2: `time.Sleep`, `AfterFunc`, `Timer` as a `js` file of `stdlib/time`
+- [x] Task 3.2: `time.Sleep`, `AfterFunc`, `Timer` as a `js` file of `stdlib/time`
   - Files: `stdlib/time/sleep_js.go`, `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/time.js` (delete), `src/backend/js/runtime.js`, `src/backend/js/index.js`
   - Test: `test/unit/stdlib/time.test.js` (`Sleep` ordering with `await`, `AfterFunc` fires/`Stop` cancels/`Reset` reschedules via fake timers in `runJs`), `test/unit/compiler/targets.test.js` (wasm → only-available-in-js text)
   - Done when: the `time` overlay, `time.js` and `HELPER_TIMER` are deleted and `time_sleep` is an async intrinsic with a JS body only.
-- [ ] Task 3.3: `stdlib/regexp` as a `js` package
+- [x] Task 3.3: `stdlib/regexp` as a `js` package
   - Files: `stdlib/regexp/regexp.go`, `src/typechecker/stdlib/extended.js`, `src/backend/js/stdlib/regexp.js` (delete), `src/backend/js/stdlib/index.js`, `src/backend/wasm/emit-exprs.js`
   - Test: `test/unit/stdlib/regexp.test.js` (new: every member, `$1` replacement, `Split` limits, `FindAllString(-1)`), `test/unit/compiler/targets.test.js` (wasm import → diagnostic, no throw)
   - Done when: `regexp` has no overlay, the P8 crash is a diagnostic, and `test/unit/builtins/stdlib.test.js` regexp cases pass unchanged.
-- [ ] Task 3.4: `stdlib/gom` as a `js` package with resolver auto-import
+- [x] Task 3.4: `stdlib/gom` as a `js` package with resolver auto-import
   - Files: `stdlib/gom/gom.go`, `src/link/stdlib.js`, `src/typechecker/stdlib/extended.js`, `src/backend/js/stdlib/gom.js` (delete), `src/backend/js/stdlib/index.js`, `src/compiler.js`, `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/gom.test.js` (31, unchanged: `Map` over `[]string` and `[]int`), `test/unit/compiler/templ.test.js` (67, unchanged: `ref="key"` populates `___refs` through `gom.Mount(sel, node, refs)`), `test/unit/compiler/targets.test.js` (`both` → `package 'gom' is not available in wasm packages`)
   - Done when: `gom.js` and the `gom` overlay are deleted, `Node.Mount(parent any, refs any)` and generic `Map[T]` are as specified in §D, a `js` program using `gom.` without an import compiles, `.templ` components type as `gom.Node`, and `npm run test:e2e` passes for `example/templ` and `example/gom`.

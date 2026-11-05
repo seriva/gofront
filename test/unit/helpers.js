@@ -90,6 +90,8 @@ const GO_MEMBER_RE = /\bbytes\./;
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
 // helpers do not link those; they go through `compileFiles` instead.
 function importsGoSourceStdlib(ast, source = "") {
+	// `gom` and `regexp` need no import in a js package.
+	if (/\b(?:gom|regexp)\./.test(source)) return true;
 	return ast.imports.some((imp) =>
 		imp.imports.some(
 			({ path }) =>

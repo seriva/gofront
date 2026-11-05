@@ -553,9 +553,7 @@ test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, tim
 	);
 	assert(
 		res.errors.some((e) =>
-			e.message?.includes(
-				"'time.AfterFunc' is not yet available in wasm packages",
-			),
+			e.message?.includes("'time.AfterFunc' is only available in js packages"),
 		),
 	);
 	res = compile(
@@ -564,7 +562,7 @@ test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, tim
 	);
 	assert(
 		res.errors.some((e) =>
-			e.message?.includes("'time.Timer' is not yet available in wasm packages"),
+			e.message?.includes("'time.Timer' is only available in js packages"),
 		),
 	);
 	res = compile(
@@ -573,7 +571,7 @@ test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, tim
 	);
 	assert(
 		res.errors.some((e) =>
-			e.message?.includes("'time.Sleep' is not yet available in wasm packages"),
+			e.message?.includes("'time.Sleep' is only available in js packages"),
 		),
 	);
 });

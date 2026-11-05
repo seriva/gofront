@@ -195,6 +195,19 @@ export const expressionCheckMethods = {
 						?.get(expr.name);
 					if (imported && EXCLUDED_STDLIB_PACKAGES.has(imported))
 						return TAINTED_ANY;
+					if (this._unavailableImports?.has(expr.name)) return TAINTED_ANY;
+					// `gom` needs no import in a js package; wasm packages get
+					// the same answer as an `import "gom"`.
+					if (
+						expr.name === "gom" &&
+						(this.target === "wasm" || this.target === "both")
+					) {
+						this.recordBlocker("gom usage", "gom");
+						return this.err(
+							"package 'gom' is not available in wasm packages",
+							expr,
+						);
+					}
 					return this.err(`Undefined: '${expr.name}'`, expr);
 				}
 				if (this.types.has(expr.name) || t.kind === "typeParam")
@@ -226,14 +239,6 @@ export const expressionCheckMethods = {
 						expr,
 						`(package '${this.pkgName}' is //gofront:target ${this.target} — browser globals are only available in js packages)`,
 					);
-				}
-				if (
-					(this.target === "wasm" || this.target === "both") &&
-					expr.name === "gom" &&
-					scope.lookup(expr.name) === this.globals.lookup(expr.name)
-				) {
-					this.recordBlocker("gom usage", "gom");
-					this.err("package 'gom' is not available in wasm packages", expr);
 				}
 				return t;
 			}

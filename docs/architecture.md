@@ -117,12 +117,14 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 Most standard library packages are ordinary GoFront Go under `stdlib/<import path>/`, written with `//gofront:target both` and `//go:build gofront`. The resolver loads them before the built-in namespaces and compiles them into the caller's target (`js`, `wasm` or `both`), so each package is written once and behaves the same on both backends. A package that is also a built-in namespace (`strings`, `time`, `encoding/binary`) is an overlay: its Go declarations extend the namespace and the built-in members stay with the emitters.
 
+A file marked `//gofront:target js` (such as `stdlib/time/sleep_js.go`) is loaded only for `js` packages, where it may use `async`/`await` and browser globals; a `wasm` or `both` package gets the package without those files and reports `'time.Sleep' is only available in js packages` for a name they declare. A package whose files are all `js` (`regexp`, `gom`) is rejected at the import of a `wasm` or `both` package.
+
 Function bodies in these packages are type-checked only when the program reaches them, and only reachable declarations are emitted, so an unused import adds nothing to `app.js` or `app.wasm`.
 
 Two markers connect Go source to the backends:
 
 - `//gofront:native <name>` keeps the Go body as the specification and lets a backend replace calls with a faster host primitive (`indexOf` for `strings.Index`, `Math.clz32` or a WASM instruction for `math/bits`). A native may decline an instantiation, in which case the call runs the Go body. Names form a closed set in `src/typechecker/types.js`; implementations live in `src/backend/js/natives.js` and `src/backend/wasm/natives.js`. `test/unit/compiler/natives.test.js` fails when a name is missing from a registry (outside a short single-target list) or when a registry entry has no Go declaration.
-- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, standard streams, exit and environment, Unicode tables, IEEE-754 bit casts and the host `Math.*` functions behind `math`).
+- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, standard streams, exit and environment, Unicode tables, the timer behind `time.Sleep`, IEEE-754 bit casts and the host `Math.*` functions behind `math`).
 
 | Package | Where it lives |
 |---|---|
@@ -130,8 +132,8 @@ Two markers connect Go source to the backends:
 | `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `os`, `unicode`, `crypto/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
 | `encoding/binary` | Go in `stdlib/encoding/binary/` |
 | `errors.As` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
-| `time.Sleep`, `time.AfterFunc`, `time.Timer` | JS-only emitter (`src/backend/js/stdlib/time.js`) |
-| `fmt`, `testing`, `regexp`, `gom`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
+| `regexp`, `gom`, and `time.Sleep`, `time.AfterFunc`, `time.Timer` | Go marked `//gofront:target js` (`stdlib/regexp/`, `stdlib/gom/`, `stdlib/time/sleep_js.go`); loaded only for `js` packages |
+| `fmt`, `testing`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
 | `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |
 
 ---

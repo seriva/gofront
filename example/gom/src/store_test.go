@@ -163,7 +163,7 @@ func TestGomMountDOM(t *testing.T) {
 	}
 	container := document.createElement("div")
 	node := todoItemNode(Todo{id: 42, text: "Gom DOM task", done: false, priority: PriorityHigh})
-	node.Mount(container)
+	node.Mount(container, nil)
 
 	if container.children.length != 1 {
 		t.Fatalf("expected 1 child in container, got %d", container.children.length)
