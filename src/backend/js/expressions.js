@@ -1847,7 +1847,15 @@ export const expressionGenMethods = {
 		if (t?.kind !== "pointer" || t.base?.kind !== "named") return null;
 		const cls = t.base.name;
 		if (t.base.typeArgs?.length) return null;
-		return this.nilSafeMethods?.has(`${cls}.${func.field}`) ? cls : null;
+		if (this.nilSafeMethods?.has(`${cls}.${func.field}`)) return cls;
+		// A Go-source stdlib type (`Buffer$$bytes`) is declared outside this
+		// package: its method decl tells whether it tests the receiver for nil.
+		const decl = cls.includes("$$")
+			? t.base.methods?.get(func.field)?._methodDecl
+			: null;
+		return decl?.recvPointer && comparesToNil(decl.body, decl.recvName)
+			? cls
+			: null;
 	},
 
 	// The leading zero-value factories of a call to a generic function
@@ -3417,10 +3425,14 @@ export const expressionGenMethods = {
 		const wrap = unsigned ? "BigInt.asUintN" : "BigInt.asIntN";
 		const divZero =
 			'(() => { throw new Error("runtime error: integer divide by zero"); })()';
-		if (op === "/")
-			return `((${r}) === 0n ? ${divZero} : ${wrap}(64, (${l}) / (${r})))`;
-		if (op === "%")
-			return `((${r}) === 0n ? ${divZero} : ${wrap}(64, (${l}) % (${r})))`;
+		if (op === "/" || op === "%") {
+			// The divisor is read twice (zero check, division): bind both
+			// operands once, left first, unless they are plain names or literals.
+			const simple = /^[A-Za-z_$][\w$.]*$|^-?\d+n$/;
+			if ((simple.test(l) && simple.test(r)) || /\b(await|yield)\b/.test(l + r))
+				return `((${r}) === 0n ? ${divZero} : ${wrap}(64, (${l}) ${op} (${r})))`;
+			return `((__a, __b) => __b === 0n ? ${divZero} : ${wrap}(64, __a ${op} __b))(${l}, ${r})`;
+		}
 		if (op === "<<" || op === ">>") {
 			this.useHelper("shift");
 			return op === "<<"

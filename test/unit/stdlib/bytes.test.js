@@ -263,3 +263,21 @@ v 0 q
 `,
 	);
 });
+
+test("method call on a nil *bytes.Buffer", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+func main() {
+	var b *bytes.Buffer
+	fmt.Println(b.String())
+}
+`,
+		"<nil>\n",
+	);
+});

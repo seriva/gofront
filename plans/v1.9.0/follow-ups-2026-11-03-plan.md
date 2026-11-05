@@ -612,23 +612,23 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 24: JS Statements, 64-bit Numerics and Nil Method Calls
 
-- [ ] Task 24.1: Evaluate 64-bit `/` and `%` operands once in JS
+- [x] Task 24.1: Evaluate 64-bit `/` and `%` operands once in JS
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/builtins/operators.test.js`
   - Test: S01 `count := 0; f := func() int64 { count++; return 2 }; _ = int64(10) / f(); _ = int64(10) % f(); fmt.Println(count)` → `2` (1 per op) on js/both/wasm; same for `uint64`.
   - Done when: side-effecting divisors and dividends evaluate once on all targets.
-- [ ] Task 24.2: Untyped constants shifted by a variable in 64-bit context emit BigInt
+- [x] Task 24.2: Untyped constants shifted by a variable in 64-bit context emit BigInt
   - Files: `src/backend/js/expressions.js`, `src/typechecker/expressions.js`, `test/unit/builtins/operators.test.js`
   - Test: S32 `k := uint(3); var m uint64 = (1 << k) - 1; var n uint64 = 5; fmt.Println(n & m)` → `5` on js/both/wasm; `int64(1) << k` and `(1 << k)` assigned to `int64` likewise.
   - Done when: repros run without `Cannot mix BigInt and other types` on js/both.
-- [ ] Task 24.3: Integer compound division `/=` in `for` post statements truncates
+- [x] Task 24.3: Integer compound division `/=` in `for` post statements truncates
   - Files: `src/backend/js/statements.js`, `test/unit/language/loops.test.js`
   - Test: S28 `w := 345; for ; w > 100; w /= 10 {}; fmt.Println(w)` → `34` on js/both/wasm.
   - Done when: repro prints `34` on all targets.
-- [ ] Task 24.4: Multi-value assignment into dereferenced pointers (`*p, err = f()`) and shadowed named results in loops
+- [x] Task 24.4: Multi-value assignment into dereferenced pointers (`*p, err = f()`) and shadowed named results in loops
   - Files: `src/backend/js/statements.js`, `test/unit/language/pointers.test.js`
   - Test: S30 `*p, err = f()` → `9 <nil>` on js/both/wasm; S11 `func f() (err error)` assigning `err = nil` then shadowing `_, err := g()` inside a loop → `<nil>` on js/both/wasm.
   - Done when: both repros compile and match Go on all targets.
-- [ ] Task 24.5: Direct method calls on nil pointers to Go-source struct types in JS
+- [x] Task 24.5: Direct method calls on nil pointers to Go-source struct types in JS
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`, `test/unit/stdlib/bytes.test.js`
   - Test: S16 `var b *bytes.Buffer; fmt.Println(b.String())` → `<nil>` on js/both/wasm.
   - Done when: repro prints `<nil>` on all targets.

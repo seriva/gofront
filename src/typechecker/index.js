@@ -1021,6 +1021,9 @@ export class TypeChecker {
 	}
 
 	_attachNonGenericMethod(decl, funcType) {
+		// Codegen of an importing package reads the body of a Go-source
+		// method (does it accept a nil receiver?).
+		funcType._methodDecl = decl;
 		const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
 		const base = recvType?.underlying ?? recvType;
 		if (base?.kind === "struct") {
