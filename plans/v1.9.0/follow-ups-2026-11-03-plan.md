@@ -673,19 +673,20 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 27: Go-Source Stdlib Fixes and WASM Import Pruning
 
-- [ ] Task 27.1: `path.Match` rejects inverted character ranges and `/` inside character classes
+- [x] Task 27.1: `path.Match` rejects inverted character ranges and `/` inside character classes
   - Files: `stdlib/path/path.go`, `test/unit/stdlib/path.test.js`
   - Test: S12 `ok, err := path.Match("[z-a]", "b"); fmt.Println(ok, err == path.ErrBadPattern)` → `false true`; S13 `ok, err := path.Match("[/]", "/"); fmt.Println(ok, err)` → `false syntax error in pattern` on all targets.
   - Done when: both repros pass four ways (`assertFourWay`).
-- [ ] Task 27.2: `strconv.Unquote` preserves UTF-8 bytes in raw backtick strings with `\r`
+  - Dropped: real Go 1.26 gives `false false` for S12 and `true <nil>` for S13, so the stated wants were wrong; `path.Match` keeps Go's behaviour and the tests pin it.
+- [x] Task 27.2: `strconv.Unquote` preserves UTF-8 bytes in raw backtick strings with `\r`
   - Files: `stdlib/strconv/quote.go`, `test/unit/stdlib/strconv.test.js`
   - Test: S34 ``strconv.Unquote("`\ré`")`` → `"é" <nil>` on all targets (`assertFourWay`).
   - Done when: repro passes four ways.
-- [ ] Task 27.3: `unicode.ToUpper`/`ToLower` and `strings.ToUpper`/`ToLower` preserve single-rune behavior on `ß`
+- [x] Task 27.3: `unicode.ToUpper`/`ToLower` and `strings.ToUpper`/`ToLower` preserve single-rune behavior on `ß`
   - Files: `src/backend/js/natives.js`, `src/backend/wasm/boundary.js`, `test/unit/stdlib/strings.test.js`
   - Test: S18 `fmt.Println(strings.ToUpper("ß"))` → `ß` and `unicode.ToUpper('ß')` → `'ß'` on all targets (`assertFourWay`).
   - Done when: repro passes four ways.
-- [ ] Task 27.4: Prune unreachable stdlib `env.*` imports in WASM modules (`bytes.Buffer` size <= 4,500 B)
+- [x] Task 27.4: Prune unreachable stdlib `env.*` imports in WASM modules (`bytes.Buffer` size <= 4,500 B)
   - Files: `src/backend/wasm/prescan.js`, `src/backend/wasm/module-emitter.js`, `test/unit/stdlib/bytes.test.js`
   - Test: S17 `compileWasm` of `package main; import "bytes"; func main() { var b bytes.Buffer; b.WriteString("hi"); _ = b.Len() }` produces `wasm.length <= 4500`.
   - Done when: `wasm.length <= 4500` and all WASM stdlib tests pass.

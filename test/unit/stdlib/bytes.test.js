@@ -3,7 +3,13 @@
 // Every case runs four ways (JS and WASM, natives on and off) and must print
 // what the real Go toolchain printed for the same program.
 
-import { assertFourWay, section, test } from "../helpers.js";
+import {
+	assert,
+	assertFourWay,
+	compileWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("bytes (Go-source)");
 
@@ -280,4 +286,18 @@ func main() {
 `,
 		"<nil>\n",
 	);
+});
+
+test("a bytes.Buffer module drops the host imports and helpers it never calls", () => {
+	const { wasm } = compileWasm(`package main
+
+import "bytes"
+
+func main() {
+	var b bytes.Buffer
+	b.WriteString("hi")
+	_ = b.Len()
+}
+`);
+	assert(wasm.length <= 4500, `bytes.Buffer module is ${wasm.length} bytes`);
 });

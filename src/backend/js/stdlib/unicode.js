@@ -17,7 +17,8 @@ export const unicodeMethods = {
 			IsControl: `/\\p{Cc}/u.test(${cp})`,
 			IsPrint: `!/\\p{Cc}/u.test(${cp})`,
 			IsGraphic: `!/\\p{Cc}/u.test(${cp})`,
-			ToUpper: `${cp}.toUpperCase().codePointAt(0)`,
+			// A multi-code-point upper case (ß) leaves the rune as it is.
+			ToUpper: `((r) => { const m = String.fromCodePoint(r).toUpperCase(); const u = m.codePointAt(0); return m.length > (u > 0xffff ? 2 : 1) ? r : u; })(${arg})`,
 			ToLower: `${cp}.toLowerCase().codePointAt(0)`,
 		};
 		return UNICODE_TEST[fn] ?? undefined;
