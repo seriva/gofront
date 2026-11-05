@@ -15,7 +15,12 @@
 
 import { resolveJsonFields } from "../typechecker/resolve.js";
 import { defaultType } from "../typechecker/types.js";
-import { forEachChild } from "./walk.js";
+import {
+	mentionsTypeParam,
+	results,
+	TypeSpeller,
+	walkNodes,
+} from "./gen-types.js";
 
 const JSON_PATH = "encoding/json";
 const SITE_FUNCS = new Set(["Marshal", "MarshalIndent", "Unmarshal", "Valid"]);
@@ -112,14 +117,6 @@ function methodOf(t, name) {
 	return t.methods?.get(name) ?? t.underlying?.methods?.get(name) ?? null;
 }
 
-// A method's results; a multi-value result is one tuple type.
-function results(m) {
-	const r = (m.returns ?? []).filter(
-		(t) => !(t?.kind === "basic" && t.name === "void"),
-	);
-	return r.length === 1 && r[0]?.kind === "tuple" ? r[0].types : r;
-}
-
 // MarshalJSON() ([]byte, error)
 function marshalerOf(t) {
 	if (isRaw(t)) return null;
@@ -148,12 +145,10 @@ function isSimpleKey(s) {
 	return /^[A-Za-z0-9_ .-]*$/.test(s);
 }
 
-export class JsonCodecGen {
+export class JsonCodecGen extends TypeSpeller {
 	constructor(checker, pkgName, qualifiers, programs = []) {
-		this.programs = programs;
+		super(pkgName, qualifiers, programs);
 		this.checker = checker;
-		this.pkgName = pkgName;
-		this.qualifiers = qualifiers;
 		this.prefix = `gfj_${String(pkgName).replace(/[^A-Za-z0-9_]/g, "_")}_`;
 		this.enc = new Map(); // key -> { name, t, addr }
 		this.dec = new Map();
@@ -196,69 +191,6 @@ export class JsonCodecGen {
 		return `struct{${fields.join(";")}}`;
 	}
 
-	// Go source for the type.
-	spell(t) {
-		const sp = (x) => this.spell(x);
-		const byKind = {
-			basic: () => t.name,
-			named: () => this.spellNamed(t),
-			pointer: () => `*${sp(t.base)}`,
-			slice: () => `[]${sp(t.elem)}`,
-			array: () => `[${t.size}]${sp(t.elem)}`,
-			map: () => `map[${sp(t.key)}]${sp(t.value)}`,
-			struct: () => this.spellStruct(t),
-			interface: () => (t.name === "error" ? "error" : "any"),
-			func: () => this.funcString(t, sp),
-		};
-		if (!byKind[t.kind])
-			throw new Error(`json: cannot spell type kind ${t.kind}`);
-		return byKind[t.kind]();
-	}
-
-	resolveImportAlias(modPath) {
-		for (const p of this.programs) {
-			for (const imp of p.imports ?? []) {
-				for (const spec of imp.imports) {
-					if (spec.path === modPath) {
-						return spec.alias ?? spec.path.split("/").pop();
-					}
-				}
-			}
-		}
-		return modPath.split("/").pop();
-	}
-
-	spellNamed(t) {
-		let name = t.name;
-		const at = name.indexOf("$$");
-		if (at >= 0) {
-			const orig = name.slice(0, at);
-			const modPath = name.slice(at + 2).replaceAll("$", "/");
-			const alias = this.resolveImportAlias(modPath);
-			this.qualifiers.add(alias);
-			name = `${alias}.${orig}`;
-		}
-		const base = this.qualified(name);
-		return t.typeArgs?.length
-			? `${base}[${t.typeArgs.map((a) => this.spell(a)).join(", ")}]`
-			: base;
-	}
-
-	spellStruct(t) {
-		const fields = (t._structFields ?? []).map((f) => {
-			const tag = f.tag ? ` \`${f.tag}\`` : "";
-			if (f.embedded) return `${this.spell(f.type)}${tag}`;
-			return `${f.names.join(", ")} ${this.spell(f.type)}${tag}`;
-		});
-		return `struct { ${fields.join("; ")} }`;
-	}
-
-	qualified(name) {
-		const dot = name.indexOf(".");
-		if (dot > 0) this.qualifiers.add(name.slice(0, dot));
-		return name;
-	}
-
 	// reflect's Type.String() of the type, for error messages.
 	refl(t) {
 		switch (t.kind) {
@@ -293,21 +225,6 @@ export class JsonCodecGen {
 			default:
 				return "struct {}";
 		}
-	}
-
-	funcString(t, name) {
-		const rs = results(t);
-		const res =
-			rs.length === 0
-				? ""
-				: rs.length === 1
-					? ` ${name(rs[0])}`
-					: ` (${rs.map(name).join(", ")})`;
-		// The signature keeps a variadic parameter's element type.
-		const params = t.params.map((p, i) =>
-			t.variadic && i === t.params.length - 1 ? `...${name(p)}` : name(p),
-		);
-		return `func(${params.join(", ")})${res}`;
 	}
 
 	// A struct's own name in decode errors.
@@ -1272,29 +1189,10 @@ export class JsonCodecGen {
 		}
 	}
 
-	source(pkgName, imports) {
-		const importLines = imports.map((p) => `\t${q(p)}`).join("\n");
-		return [
-			`package ${pkgName}`,
-			"",
-			`import (\n\t"internal/jsonrt"\n${importLines}\n)`,
-			"",
-			...this.entries,
-			...this.out,
-			"",
-		].join("\n\n");
+	// The generated declarations (the spine adds the header and imports).
+	body() {
+		return [...this.entries, ...this.out].join("\n\n");
 	}
-}
-
-// Calls every `fn(node)` for the AST nodes under `root`.
-function walkNodes(root, fn) {
-	if (!root || typeof root !== "object") return;
-	if (Array.isArray(root)) {
-		for (const n of root) walkNodes(n, fn);
-		return;
-	}
-	fn(root);
-	forEachChild(root, (c) => walkNodes(c, fn));
 }
 
 // Arrays and maps of these share one WebAssembly representation (and so one
@@ -1365,31 +1263,6 @@ function buildsValue(node) {
 	);
 }
 
-// True when `t` mentions a type parameter (a generic declaration, or a type
-// built from one inside a generic function).
-function mentionsTypeParam(t, seen = new Set()) {
-	if (!t || seen.has(t)) return false;
-	seen.add(t);
-	const m = (x) => mentionsTypeParam(x, seen);
-	switch (t.kind) {
-		case "typeParam":
-			return true;
-		case "named":
-			return (t.typeArgs ?? []).some(m) || m(t.underlying);
-		case "pointer":
-			return m(t.base);
-		case "slice":
-		case "array":
-			return m(t.elem);
-		case "map":
-			return m(t.key) || m(t.value);
-		case "struct":
-			return (t._structFields ?? []).some((f) => m(f.type));
-		default:
-			return false;
-	}
-}
-
 // The names the file imports `encoding/json` as.
 function jsonAliases(program) {
 	const aliases = new Set();
@@ -1452,8 +1325,8 @@ function selectCodecEntry(gen, fn, argType) {
 }
 
 // Generates the codec file for a package's `json` call sites.  Returns null
-// when it has none; otherwise { source, imports } and marks each call's
-// SelectorExpr with `_jsonGen`, the entry point the WASM link calls instead.
+// when it has none; otherwise { body, imports, diagnostics } and marks each call's
+// SelectorExpr with `_genEntry`, the entry point the WASM link calls instead.
 export function generateJsonCodecs(programs, checker, pkgName) {
 	const sites = findSites(programs);
 	if (sites.length === 0) return null;
@@ -1485,7 +1358,7 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 	}
 	gen.finish();
 	for (const [sel, entry, isStream] of pending) {
-		sel._jsonGen = entry;
+		sel._genEntry = entry;
 		if (isStream) sel._jsonStream = true;
 	}
 	const importPaths = new Map();
@@ -1498,5 +1371,9 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 	const imports = [...qualifiers]
 		.map((qn) => importPaths.get(qn))
 		.filter(Boolean);
-	return { source: gen.source(pkgName, imports), diagnostics };
+	return {
+		body: gen.body(),
+		imports: ["internal/jsonrt", ...imports],
+		diagnostics,
+	};
 }

@@ -1197,34 +1197,6 @@ var __os_stderr = __os_stderr || new __os_file(2);
 var __os_stdin = __os_stdin || new __os_file(0);
 `;
 
-export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, target, matcher, extract) {
-  if (err === null || err === undefined || target === null || typeof target !== "object") return false;
-  let cur = err;
-  while (cur !== null && cur !== undefined) {
-    const unboxed = cur?.value ?? cur;
-    if (typeof cur.As === "function" && cur.As(target)) return true;
-    if (matcher ? matcher(unboxed) : (unboxed !== err && typeof unboxed === "object" && !("_msg" in unboxed && "_cause" in unboxed))) {
-      if ("value" in target) {
-        const found = extract ? extract(unboxed) : unboxed;
-        target.value = found != null && found.__nilp === true ? null : found;
-      } else {
-        Object.assign(target, unboxed);
-      }
-      return true;
-    }
-    if (typeof cur.Unwrap !== "function") return false;
-    const unwrapped = cur.Unwrap();
-    if (Array.isArray(unwrapped)) {
-      for (const sub of unwrapped) {
-        if (__errorAs(sub, target, matcher, extract)) return true;
-      }
-      return false;
-    }
-    cur = unwrapped;
-  }
-  return false;
-};`;
-
 export const HELPER_TIMER = `var __timeAfterFunc = __timeAfterFunc || function(d, f) {
   var timer = {
     _id: null,

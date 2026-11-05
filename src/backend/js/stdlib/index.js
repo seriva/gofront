@@ -2,7 +2,6 @@
 // One file per Go package under ./stdlib/. This index merges them.
 
 import { randMethods } from "./cryptorand.js";
-import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
 import { osMethods } from "./os.js";
@@ -21,7 +20,6 @@ const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
 	unicode: "_genUnicode",
 	os: "_genOs",
-	errors: "_genErrors",
 	time: "_genTime",
 	regexp: "_genRegexp",
 	rand: "_genRand",
@@ -51,15 +49,15 @@ const dispatchMethods = {
 		if (ns === "gom") return this._genGom(fn, expr);
 		const method = STDLIB_METHOD_MAP[ns];
 		if (!method) return undefined;
-		// Stdlib shims take raw values; only fmt and errors use the interface box
-		// of a named value (Error() dispatch, error comparisons).
+		// Stdlib shims take raw values; only fmt uses the interface box
+		// of a named value (Error() dispatch).
 		const isNamespace = expr.func?.expr?._type?.kind === "namespace";
-		if (isNamespace && ns !== "fmt" && ns !== "errors") {
+		if (isNamespace && ns !== "fmt") {
 			for (const e of expr.args) if (e) e._noNamedBox = true;
 		}
 		const a = () => expr.args.map((e) => this.genExpr(e));
 		const res = this[method](fn, a, expr);
-		if (res === undefined && isNamespace && ns !== "fmt" && ns !== "errors") {
+		if (res === undefined && isNamespace && ns !== "fmt") {
 			for (const e of expr.args) if (e) delete e._noNamedBox;
 		}
 		return res;
@@ -68,7 +66,6 @@ const dispatchMethods = {
 
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
-	...errorsMethods,
 	...fmtMethods,
 	...gomMethods,
 	...osMethods,

@@ -106,7 +106,6 @@ export const BROWSER_GLOBALS = new Set([
 // gains support; anything not listed is rejected at import with "not yet available in
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
-	"errors",
 	"fmt",
 	"unicode",
 	"time",
@@ -129,7 +128,6 @@ export const STDLIB_PACKAGES = new Set([
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
 	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
-	["errors", new Set(["As"])],
 	[
 		"fmt",
 		new Set([

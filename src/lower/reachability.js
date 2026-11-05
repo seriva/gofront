@@ -99,8 +99,6 @@ function addExtraRoots(names) {
 			names.add("Duration$$time");
 			break;
 		}
-	// The emitter-backed errors.As walks the list errors.flatten builds.
-	if (names.has("errors")) names.add("flatten$$errors");
 	if (names.has("json")) {
 		for (const n of JSON_NAMES) names.add(n);
 	}
