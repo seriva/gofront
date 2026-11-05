@@ -407,16 +407,11 @@ function stdlibJs(pkg, reached, natives) {
 		decls: p.decls.filter((d) => reached.has(d)),
 	}));
 	if (programs.every((p) => p.decls.length === 0)) return "";
-	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
+	return new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: "both",
 		strict: true,
 		natives,
 	}).generateAll(programs, { isTest: false });
-	// The runtime's own io.EOF producers (os.Stdin) return
-	// `__io_eof`: make it the Go package's value so `err == io.EOF` holds.
-	return pkg.importPath === "io" && js.includes("let EOF$$io")
-		? `${js}\nvar __io_eof = EOF$$io;`
-		: js;
 }
 
 // The API a wasm package exposes to JS through the facade: exported func and

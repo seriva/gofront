@@ -429,3 +429,27 @@ test("exact integer literals stay quiet", () => {
 	);
 	assertEqual(warnings.join("\n"), "");
 });
+
+test("os, unicode and crypto/rand compile in wasm packages", () => {
+	const src = `//gofront:target wasm
+package engine
+
+import (
+	"crypto/rand"
+	"os"
+	"unicode"
+)
+
+func Env(k string) string { return os.Getenv(k) }
+
+func Upper(r rune) rune { return unicode.ToUpper(r) }
+
+func Fill(b []byte) int {
+	n, _ := rand.Read(b)
+	return n
+}
+
+func Quit() { os.Exit(0) }
+`;
+	assertEqual(compileTemp({ "engine.go": src }), "");
+});

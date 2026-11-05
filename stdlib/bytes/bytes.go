@@ -54,10 +54,9 @@ func decodeRune(p []byte) (rune, int) {
 	return rune(r), n
 }
 
-// isSpace is unicode.IsSpace as a func(rune) bool (the checker types the
-// unicode predicates over int).
+// isSpace is unicode.IsSpace as a func(rune) bool.
 func isSpace(r rune) bool {
-	return unicode.IsSpace(int(r))
+	return unicode.IsSpace(r)
 }
 
 // Lines returns an iterator over the newline-terminated lines in the byte slice s.
@@ -431,8 +430,8 @@ func Map(mapping func(r rune) rune, s []byte) []byte {
 	return b
 }
 
-func upperRune(r rune) rune { return rune(unicode.ToUpper(int(r))) }
-func lowerRune(r rune) rune { return rune(unicode.ToLower(int(r))) }
+func upperRune(r rune) rune { return unicode.ToUpper(r) }
+func lowerRune(r rune) rune { return unicode.ToLower(r) }
 
 // ToUpper returns a copy of s with all Unicode letters mapped to their
 // upper case.
@@ -938,10 +937,10 @@ func isSeparator(r rune) bool {
 		}
 		return true
 	}
-	if unicode.IsLetter(int(r)) || unicode.IsDigit(int(r)) {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
 		return false
 	}
-	return unicode.IsSpace(int(r))
+	return unicode.IsSpace(r)
 }
 
 // appendRune appends the UTF-8 encoding of r to p, writing RuneError for a

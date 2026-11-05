@@ -225,15 +225,6 @@ function splitLastAccess(js) {
 
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
-	rand: {
-		Reader: "__crypto_rand_reader",
-	},
-	os: {
-		Args: "process.argv",
-		Stdout: "__os_stdout",
-		Stderr: "__os_stderr",
-		Stdin: "__os_stdin",
-	},
 	time: {
 		Nanosecond: "1n",
 		Microsecond: "1000n",
@@ -1136,11 +1127,6 @@ export const expressionGenMethods = {
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) {
-				if (expr.expr.name === "rand" && expr.field === "Reader") {
-					this.useHelper("cryptoRand");
-				} else if (expr.expr.name === "os") {
-					this.useHelper("os");
-				}
 				return nsConst;
 			}
 		}
