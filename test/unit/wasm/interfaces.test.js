@@ -2,8 +2,10 @@
 // Tests for Phase H4 Task H4.1: Non-empty interfaces in WASM and JS-strict parity.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -765,4 +767,428 @@ func main() {
 }
 `;
 	await assertProgramOutput(src, "int64\nint\n");
+});
+
+section("WASM interfaces: type switches, identity, typed nil and dispatch");
+
+test("a type switch with case nil and an interface case compiles and matches Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func f(err error) string {
+	switch err.(type) {
+	case nil:
+		return "nil"
+	case error:
+		return "error"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(f(nil))
+	fmt.Println(f(fmt.Errorf("x")))
+}
+`,
+		"nil\nerror\n",
+	);
+});
+
+test("case error on an any value matches only errors", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func f(v any) string {
+	switch v.(type) {
+	case error:
+		return "d"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(f(errors.New("x")), f(3), f(nil))
+}
+`,
+		"d other other\n",
+	);
+});
+
+test("a defined string type is distinct from string in a type switch", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type L string
+
+func desc(v any) string {
+	switch v.(type) {
+	case L:
+		return "L"
+	case string:
+		return "string"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(desc(L("a")), desc("a"), desc(3))
+}
+`,
+		"L string other\n",
+	);
+});
+
+test("a defined string type asserts to itself and not to string", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type L string
+
+func desc(v any) string {
+	switch v.(type) {
+	case L:
+		return "L"
+	case string:
+		return "string"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(desc(L("a")), desc("a"))
+	var x any = L("q")
+	_, ok := x.(string)
+	l, ok2 := x.(L)
+	fmt.Println(ok, ok2, l)
+}
+`,
+		"L string\nfalse true q\n",
+	);
+});
+
+test("a type parameter case matches the defined type it is instantiated with", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type Name string
+
+func Kind[T any](v T) string {
+	switch any(v).(type) {
+	case string:
+		return "str"
+	case T:
+		return "T"
+	}
+	return "other"
+}
+
+func Kind2[T any](v T) string {
+	switch any(v).(type) {
+	case T:
+		return "T"
+	case string:
+		return "str"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Kind[Name](Name("a")), Kind2[Name](Name("a")), Kind("a"))
+}
+`,
+		"T T str\n",
+	);
+});
+
+test("converting to a defined int8 type parameter wraps like Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Small int8
+
+func conv[T ~int8 | ~int16 | ~int](n int) T { return T(n) }
+
+func main() {
+	fmt.Println(conv[Small](130), conv[int16](130))
+}
+`,
+		"-126 130\n",
+	);
+});
+
+test("a qualified generic type converts and asserts in a wasm package", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func seq(yield func(int) bool) { yield(1) }
+
+func main() {
+	var a any = iter.Seq[int](seq)
+	_, ok := a.(iter.Seq[int])
+	fmt.Println(ok)
+}
+`,
+		"true\n",
+	);
+});
+
+test("iter.Seq[int] assertion matches an iter.Seq[int] value only", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func seq(yield func(int) bool) { yield(1) }
+
+func main() {
+	var s iter.Seq[int] = seq
+	var a any = s
+	_, ok := a.(iter.Seq[int])
+	fmt.Println(ok)
+	var n any
+	_, ok = n.(iter.Seq[int])
+	fmt.Println(ok)
+}
+`,
+		"true\nfalse\n",
+	);
+});
+
+test("a typed nil pointer in an error interface asserts to error and calls its method", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type E struct{}
+
+func (e *E) Error() string { return "e" }
+
+func main() {
+	var err error = (*E)(nil)
+	_, ok := any(err).(error)
+	fmt.Println(ok, err.Error())
+}
+`,
+		"true e\n",
+	);
+});
+
+test("a pointer-receiver method handles a nil receiver through an interface", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ v int }
+
+func (t *T) PGet() int {
+	if t == nil {
+		return -1
+	}
+	return t.v
+}
+
+type G interface{ PGet() int }
+
+func main() {
+	var p *T
+	var g G = p
+	fmt.Println(g.PGet())
+}
+`,
+		"-1\n",
+	);
+});
+
+test("a value method on a nil pointer through an interface panics catchably", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ v int }
+
+func (s S) Val() int { return s.v }
+
+type V interface{ Val() int }
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var p *S
+	var v V = p
+	fmt.Println(v.Val())
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
+test("nil receivers work through an interface, a method value and a method expression", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type L struct{}
+
+func (l *L) Len() int {
+	if l == nil {
+		return 0
+	}
+	return 1
+}
+
+type Lener interface{ Len() int }
+
+func main() {
+	var nl *L
+	var li Lener = nl
+	f := nl.Len
+	g := (*L).Len
+	fmt.Println(li.Len(), f(), g(nl))
+}
+`,
+		"0 0 0\n",
+	);
+});
+
+test("errors.As finds a typed nil pointer error", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type MyErr struct{}
+
+func (e *MyErr) Error() string { return "my" }
+
+func retTyped() error { return (*MyErr)(nil) }
+
+func main() {
+	var me *MyErr
+	fmt.Println(errors.As(retTyped(), &me))
+}
+`,
+		"true\n",
+	);
+});
+
+test("interface dispatch on defined func and map types", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Getter interface{ Get() int }
+
+type MyFn func() int
+
+func (f MyFn) Get() int { return f() }
+
+type MyMap map[string]int
+
+func (m MyMap) Get() int { return len(m) }
+
+func main() {
+	f := func() int { return 3 }
+	var g Getter = MyFn(f)
+	var h Getter = MyMap{"a": 1}
+	fmt.Println(g.Get(), h.Get())
+}
+`,
+		"3 1\n",
+	);
+});
+
+test("a method value taken from an interface value binds its dynamic method", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type N interface{ Name() string }
+
+type A struct{ s string }
+
+func (a *A) Name() string { return a.s }
+
+func main() {
+	var n N = &A{"a"}
+	f := n.Name
+	fmt.Println(f())
+}
+`,
+		"a\n",
+	);
+});
+
+test("Type switches tell apart slices of small integers, arrays of different lengths and a named string", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type Name string
+
+func kind(v any) string {
+	switch x := v.(type) {
+	case []byte:
+		return fmt.Sprint("bytes", len(x))
+	case []bool:
+		return fmt.Sprint("bools", len(x))
+	case []rune:
+		return fmt.Sprint("runes", len(x))
+	case []uint32:
+		return fmt.Sprint("u32s", len(x))
+	case [3]int:
+		return fmt.Sprint("a3", x[2])
+	case [2]int:
+		return fmt.Sprint("a2", x[1])
+	case Name:
+		return "name:" + string(x)
+	}
+	return "other"
+}
+
+func main() {
+	var a any = []bool{true, false}
+	_, isBytes := a.([]byte)
+	b, isBools := a.([]bool)
+	fmt.Println(kind([]byte("hi")), kind(a), kind([]rune("héé")), kind([]uint32{7}))
+	fmt.Println(kind([3]int{1, 2, 3}), kind([2]int{4, 5}), kind(Name("n")), kind(1))
+	fmt.Println(isBytes, isBools, len(b))
+}
+`,
+		`bytes2 bools2 runes3 u32s1
+a33 a25 name:n other
+false true 2
+`,
+	);
 });

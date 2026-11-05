@@ -858,3 +858,225 @@ float rec: runtime error: invalid memory address or nil pointer dereference
 `,
 	);
 });
+
+section("Go semantics — multi-value assignment targets");
+
+test("var with a blank name takes the later result of a call", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func two() (int, int) { return 1, 2 }
+
+var _, y = two()
+
+func main() { fmt.Println(y) }
+`,
+		"2\n",
+	);
+});
+
+test("comma-ok map index and type assertion into index targets", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	mi := map[string]int{"k": 5}
+	var a any = 3
+	res := make([]int, 2)
+	oks := make([]bool, 2)
+	res[0], oks[0] = mi["k"]
+	res[1], oks[1] = a.(int)
+	fmt.Println(res, oks)
+}
+`,
+		"[5 3] [true true]\n",
+	);
+});
+
+test("multi-value call assigned to interface variables", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func two() (int, string) { return 1, "a" }
+
+func main() {
+	var x, y interface{}
+	x, y = two()
+	fmt.Println(x, y)
+}
+`,
+		"1 a\n",
+	);
+});
+
+section("Go semantics — labeled break/continue through switches");
+
+test("labeled break out of a nested switch leaves the outer switch", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+sw:
+	switch 1 {
+	case 1:
+		switch 2 {
+		case 2:
+			break sw
+		}
+		fmt.Println("unreached")
+	}
+	fmt.Println("end")
+}
+`,
+		"end\n",
+	);
+});
+
+test("labeled continue from a nested switch continues the outer loop", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+outer:
+	for i := 0; i < 4; i++ {
+		switch i {
+		case 1, 3:
+			switch {
+			case true:
+				continue outer
+			}
+		}
+		fmt.Println("i", i)
+	}
+	var v any = 1
+tsw:
+	switch v.(type) {
+	case int:
+		switch 1 {
+		case 1:
+			break tsw
+		}
+		fmt.Println("unreached")
+	}
+	fmt.Println("done")
+}
+`,
+		"i 0\ni 2\ndone\n",
+	);
+});
+
+section("Go semantics — call arguments evaluate before output");
+
+test("Println evaluates every argument before printing", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func h(n int) int {
+	fmt.Print("h", n, ";")
+	return n
+}
+
+func main() {
+	c := 0
+	next := func(s string) string {
+		c++
+		fmt.Print(s)
+		return fmt.Sprint(c)
+	}
+	fmt.Println(h(1), h(3))
+	fmt.Println(next("a"), next("b"))
+}
+`,
+		"h1;h3;1 3\nab1 2\n",
+	);
+});
+
+test("a panicking argument leaves no partial output line", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type G struct{ p *int }
+
+func (g G) Get() int { return *g.p }
+
+func main() {
+	defer func() {
+		recover()
+		fmt.Println("|")
+	}()
+	name := "n"
+	g := G{}
+	fmt.Println(name, g.Get())
+}
+`,
+		"|\n",
+	);
+});
+
+section("Go semantics — labeled switch with value tags and stacked labels");
+
+test("labeled switch with a struct tag can break out", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	p := P{1, 2}
+sw:
+	switch p {
+	case P{1, 2}:
+		if p.X == 1 {
+			break sw
+		}
+		fmt.Println("unreached")
+	}
+	fmt.Println("end")
+}
+`,
+		"end\n",
+	);
+});
+
+test("stacked labels keep the inner label usable", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+outer:
+inner:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				continue inner
+			}
+			if i == 2 {
+				break inner
+			}
+			fmt.Println(i, j)
+		}
+	}
+	fmt.Println("end")
+}
+`,
+		"0 0\n1 0\nend\n",
+	);
+});

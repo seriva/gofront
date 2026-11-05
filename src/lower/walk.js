@@ -23,3 +23,15 @@ export function someChild(node, pred) {
 	}
 	return false;
 }
+
+/**
+ * True when evaluating `node` runs a call or a channel receive (conversions
+ * excluded), the only operands Go still evaluates for a constant `len`.
+ */
+export function hasCallOrReceive(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(hasCallOrReceive);
+	if (node.kind === "CallExpr" && !node._isTypeConversion) return true;
+	if (node.kind === "UnaryExpr" && node.op === "<-") return true;
+	return someChild(node, hasCallOrReceive);
+}

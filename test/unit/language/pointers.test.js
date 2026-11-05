@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
@@ -517,6 +518,311 @@ func main() {
 		assertEqual(errors.length, 0);
 		assertEqual(runJs(js), "6\n7\n11 9");
 	}
+});
+
+// Runs `src` as a `js` package and as the JS half of a `both` package.
+function runJsAndBoth(src) {
+	const outs = [];
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.map((e) => e.message).join("\n"), "");
+		outs.push(runJs(js));
+	}
+	assertEqual(outs[0], outs[1], "js and both disagree");
+	return outs[0];
+}
+
+section(
+	"Nil pointer receivers through interfaces, method values and expressions",
+);
+
+test("nil receiver reached through an interface, a method value and a method expression", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type L struct{ n int }
+func (l *L) Len() int {
+	if l == nil {
+		return 0
+	}
+	return l.n
+}
+type Lener interface{ Len() int }
+func main() {
+	var nl *L
+	var li Lener = nl
+	f := nl.Len
+	g := (*L).Len
+	fmt.Println(li.Len(), f(), g(nl))
+}`),
+		"0 0 0",
+	);
+});
+
+test("a typed nil pointer in an error is not nil and keeps its method set", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type E struct{}
+func (e *E) Error() string { return "e" }
+func main() {
+	var err error = (*E)(nil)
+	_, ok := err.(error)
+	fmt.Println(ok, err.Error(), err != nil)
+}`),
+		"true e true",
+	);
+});
+
+test("a nil-safe pointer method runs through an interface holding a nil pointer", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type T struct{ v int }
+func (t *T) PGet() int {
+	if t == nil {
+		return -1
+	}
+	return t.v
+}
+type G interface{ PGet() int }
+func main() {
+	var t *T
+	var g G = t
+	fmt.Println(g.PGet())
+}`),
+		"-1",
+	);
+});
+
+test("a value method called through an interface holding a nil pointer panics", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type S struct{ v int }
+func (s S) Get() int { return s.v }
+type G interface{ Get() int }
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var s *S
+	var g G = s
+	fmt.Println(g.Get())
+}`),
+		"runtime error: invalid memory address or nil pointer dereference",
+	);
+});
+
+test("asserting a typed nil back to its pointer type gives nil", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+type T struct{ v int }
+func (t *T) M() {}
+func main() {
+	var a any = (*T)(nil)
+	p := a.(*T)
+	q, ok := a.(*T)
+	fmt.Println(a == nil, p == nil, q == nil, ok)
+	switch v := a.(type) {
+	case *T:
+		fmt.Println(v == nil)
+	}
+	fmt.Println(a)
+}`),
+		"false true true true\ntrue\n<nil>",
+	);
+});
+
+section("Dynamic type checks");
+
+test("assertion and type switch on a slice of a type parameter match tagged slices", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func F[T any](x any) bool {
+	_, ok := x.([]T)
+	return ok
+}
+func G[T any](x any) string {
+	switch x.(type) {
+	case []T:
+		return "slice"
+	}
+	return "other"
+}
+func main() {
+	fmt.Println(F[int]([]int{1, 2}), G[int]([]int{1, 2}), G[int](3))
+}`),
+		"true slice other",
+	);
+});
+
+test("any and interface{} spell the same element type in assertions", () => {
+	assertEqual(
+		runJsAndBoth(`package main
+import "fmt"
+func main() {
+	x := []interface{}{}
+	var a any = x
+	_, ok1 := a.([]any)
+	y := []any{}
+	var b any = y
+	_, ok2 := b.([]interface{})
+	m := map[string]interface{}{}
+	var c any = m
+	_, ok3 := c.(map[string]any)
+	fmt.Println(ok1, ok2, ok3)
+}`),
+		"true true true",
+	);
+});
+
+// ── Element pointers survive whole-element stores ──
+
+section("Element pointers and whole-element stores");
+
+test("a pointer into a slice from a callee sees a later element store", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func first(xs []S) *S { return &xs[0] }
+
+func main() {
+	ys := []S{{1}, {2}}
+	q := first(ys)
+	ys[0] = S{9}
+	fmt.Println(q.A)
+}
+`,
+		"9\n",
+	);
+});
+
+test("a tuple assignment into slice elements keeps element pointers", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func main() {
+	xs := []S{{1}, {2}}
+	p := &xs[0]
+	xs[1], xs[0] = S{4}, S{3}
+	fmt.Println(p.A, xs)
+	xs[0], xs[1] = xs[1], xs[0]
+	fmt.Println(p.A, xs)
+}
+`,
+		"3 [{3} {4}]\n4 [{4} {3}]\n",
+	);
+});
+
+test("an element pointer survives a reslice, append and indexed store", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func idx() int { return 0 }
+
+func main() {
+	xs := []S{{1}, {2}, {3}}
+	p := &xs[0]
+	xs = xs[:1]
+	xs = append(xs, S{5})
+	xs[idx()] = S{7}
+	fmt.Println(p.A, xs)
+	var arr [3]S
+	q := &arr[0]
+	arr[idx()] = S{6}
+	fmt.Println(q.A)
+	ys := make([]S, 2)
+	r := &ys[1]
+	ys[idx()+1] = S{8}
+	fmt.Println(r.A)
+}
+`,
+		"7 [{7} {5}]\n6\n8\n",
+	);
+});
+
+test("storing into a slice element beyond the length of a grown slice", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct {
+	A int
+	B [2]int
+}
+
+func main() {
+	xs := make([]S, 0, 4)
+	xs = xs[:2]
+	xs[0] = S{A: 1}
+	ys := xs[:4]
+	ys[3] = S{A: 4, B: [2]int{1, 2}}
+	grid := make([][2]int, 2)
+	grid[1] = [2]int{5, 6}
+	fmt.Println(xs, ys, grid)
+}
+`,
+		"[{1 [0 0]} {0 [0 0]}] [{1 [0 0]} {0 [0 0]} {0 [0 0]} {4 [1 2]}] [[0 0] [5 6]]\n",
+	);
+});
+
+test("multi-value assignment into a dereferenced pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f() (int, error) { return 9, nil }
+
+func main() {
+	var x int
+	var err error
+	p := &x
+	*p, err = f()
+	fmt.Println(x, err)
+}
+`,
+		"9 <nil>\n",
+	);
+});
+
+test("shadowed named result inside a loop", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() (int, error) { return 1, nil }
+
+func f() (err error) {
+	for i := 0; i < 2; i++ {
+		err = nil
+		_, err := g()
+		_ = err
+	}
+	return
+}
+
+func main() {
+	fmt.Println(f())
+}
+`,
+		"<nil>\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

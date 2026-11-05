@@ -2,10 +2,14 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsProgramOutput,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
+	compileWasm,
 	runJs,
 	section,
 	summarize,
@@ -1177,6 +1181,585 @@ type impl struct{}
 func (impl) Do(f func(uint8) int) []any { return nil }
 func main() { var b Bag = impl{}; _ = b }`);
 	assertErrorContains(errors, "does not implement");
+});
+
+section("Named results in function literals");
+
+test("function literals with named results run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var f = func() (res int) { res = 4; return }
+
+func main() {
+	g := func() (xs []int) { xs = []int{1}; return }
+	fmt.Println(g())
+	fmt.Println(f())
+	h := func(n int) (r string) { r = "x"; return r }
+	fmt.Println(h(1))
+	k := func() (a, b int, err error) { a, b = 1, 2; return }
+	fmt.Println(k())
+	d := func() (n int) {
+		defer func() { n *= 2 }()
+		n = 3
+		return
+	}
+	fmt.Println(d())
+	outer := func() (v int) {
+		inner := func() (v string) { v = "in"; return }
+		_ = inner()
+		v = 7
+		return
+	}
+	fmt.Println(outer())
+	z := func() (n int, s string) { return }
+	fmt.Println(z())
+}
+`,
+		"[1]\n4\nx\n1 2 <nil>\n6\n7\n0 \n",
+	);
+});
+
+test("a function literal without named results still needs a return value", () => {
+	const { errors } = compile(`package main
+func main() {
+	f := func() int { return }
+	_ = f
+}`);
+	assertErrorContains(errors, "Missing return value");
+});
+
+section("Comma-ok in var declarations");
+
+test("var v, ok = m[k] and x.(T) run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type st struct{ n int }
+
+func two() (int, string) { return 1, "a" }
+
+var gm = map[string]int{"k": 4}
+var gv, gok = gm["k"]
+var gv2, gok2 = gm["z"]
+var ga, gb = two()
+
+func main() {
+	var w, ok1 = any(st{}).(interface{ M() })
+	fmt.Println(w == nil, ok1)
+	var n, ok2 = any(5).(int)
+	fmt.Println(n, ok2)
+	var s, ok3 = any(5).(string)
+	fmt.Printf("%q %v\\n", s, ok3)
+	m := map[string]int{"k": 3}
+	var v, ok4 = m["k"]
+	fmt.Println(v, ok4)
+	var v2, ok5 = m["z"]
+	_ = v2
+	fmt.Println(ok5)
+	var _, ok6 = m["k"]
+	fmt.Println(ok6)
+	var p, ok7 = any(&st{2}).(*st)
+	fmt.Println(p.n, ok7)
+	var a, b = two()
+	fmt.Println(a, b)
+	_ = gv2
+	fmt.Println(gv, gok, gok2, ga, gb)
+}
+`,
+		'true false\n5 true\n"" false\n3 true\nfalse\ntrue\n2 true\n1 a\n4 true false 1 a\n',
+	);
+});
+
+test("var _, ok = error(many{}).(interface{ Unwrap() []error }) is true in wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type many struct{}
+
+func (many) Error() string   { return "m" }
+func (many) Unwrap() []error { return nil }
+
+func main() {
+	var _, ok = error(many{}).(interface{ Unwrap() []error })
+	fmt.Println(ok)
+}
+`,
+		"true\n",
+	);
+});
+
+test("var v, ok with a non-comma-ok value is still a mismatch", () => {
+	const { errors } = compile(`package main
+func main() {
+	x := 1
+	var v, ok = x
+	_, _ = v, ok
+}`);
+	assertErrorContains(errors, "assignment mismatch: 2 variables but 1 value");
+});
+
+section("Self-referential local types");
+
+test("a type declared inside a function may refer to itself", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type L struct {
+		next *L
+		v    int
+	}
+	a := &L{v: 1}
+	b := &L{next: a, v: 2}
+	fmt.Println(b.v, b.next.v)
+	type Tree struct {
+		kids []Tree
+		n    int
+	}
+	t := Tree{kids: []Tree{{n: 2}, {n: 3}}, n: 1}
+	sum := t.n
+	for _, k := range t.kids {
+		sum += k.n
+	}
+	fmt.Println(sum)
+	type Visit func(*L) int
+	var f Visit = func(p *L) int { return p.v }
+	fmt.Println(f(b))
+	for p := b; p != nil; p = p.next {
+		fmt.Print(p.v, " ")
+	}
+	fmt.Println()
+}
+`,
+		"2 1\n6\n2\n2 1 \n",
+	);
+});
+
+test("an unknown name in a local type is still reported", () => {
+	const { errors } = compile(`package main
+func main() {
+	type L struct{ next *M }
+	_ = L{}
+}`);
+	assertErrorContains(errors, "Unknown type 'M'");
+});
+
+section("Termination analysis follows fallthrough");
+
+test("a switch whose clause falls through into a returning clause terminates", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f(n int) int {
+	switch n {
+	case 0:
+		return 0
+	case 1:
+		fallthrough
+	case 2:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func main() {
+	fmt.Println(f(0), f(1), f(2), f(3))
+}
+`,
+		"0 1 1 2\n",
+	);
+});
+
+test("a switch whose last clause falls off the end is still missing a return", () => {
+	const { errors } = compile(`package main
+func f(n int) int {
+	switch n {
+	case 0:
+		return 0
+	case 1:
+		fallthrough
+	default:
+		n++
+	}
+}
+func main() { _ = f(1) }`);
+	assertErrorContains(errors, "missing return at end of function 'f'");
+});
+
+test("a fallthrough into a clause that falls off the end is still missing a return", () => {
+	const { errors } = compile(`package main
+func f(n int) int {
+	switch n {
+	case 0:
+		fallthrough
+	case 1:
+		n++
+	default:
+		return 2
+	}
+}
+func main() { _ = f(1) }`);
+	assertErrorContains(errors, "missing return at end of function 'f'");
+});
+
+test("a float64 variable is not assignable to int", () => {
+	for (const target of ["js", "both"]) {
+		assertErrorContains(
+			compile(
+				`package main
+func main() {
+	var y float64 = 1
+	var i int = y
+	_ = i
+}`,
+				{ target },
+			).errors,
+			"cannot use y (variable of type float64) as int value",
+		);
+	}
+	assertErrorContains(
+		compileWasm(`package main
+func main() {
+	var y float64 = 1
+	var i int = y
+	_ = i
+}`).errors,
+		"cannot use y (variable of type float64) as int value",
+	);
+});
+
+test("a float64 expression is not assignable to int in assignments, calls and returns", () => {
+	assertErrorContains(
+		compile(`package main
+func main() {
+	y := 1.5
+	i := 0
+	i = y * 2
+	_ = i
+}`).errors,
+		"cannot use y * 2 (value of type float64) as int value in assignment",
+	);
+	assertErrorContains(
+		compile(`package main
+func f(n int) {}
+func main() {
+	y := 1.5
+	f(y)
+}`).errors,
+		"cannot use y (variable of type float64) as int value in argument",
+	);
+	assertErrorContains(
+		compile(`package main
+func f(y float64) int { return y }
+func main() { _ = f(1) }`).errors,
+		"cannot use y (variable of type float64) as int value in return statement",
+	);
+});
+
+test("untyped constants and explicit conversions still reach int", async () => {
+	await assertProgramOutput(
+		`package main
+import "fmt"
+const c = 2.0
+func main() {
+	var i int = 1.0
+	var j int = c
+	y := 2.7
+	k := int(y)
+	var f float64 = 3
+	fmt.Println(i, j, k, f)
+}`,
+		"1 2 2 3\n",
+	);
+});
+
+section("Switch case types");
+
+test("a case value must be convertible to the switch tag type", () => {
+	const prog = (decl, tag, cas) => `package main
+${decl}
+func main() {
+	var v ${tag}
+	switch v {
+	case ${cas}:
+	}
+}`;
+	for (const target of ["js", "both"]) {
+		assertErrorContains(
+			compile(prog("", "string", "5"), { target }).errors,
+			"cannot convert 5 (untyped int constant) to type string",
+		);
+	}
+	assertErrorContains(
+		compileWasm(prog("", "string", "5")).errors,
+		"cannot convert 5 (untyped int constant) to type string",
+	);
+	assertErrorContains(
+		compile(prog("", "int", '"a"')).errors,
+		'cannot convert "a" (untyped string constant) to type int',
+	);
+	assertErrorContains(
+		compile(prog("", "bool", "1")).errors,
+		"cannot convert 1 (untyped int constant) to type bool",
+	);
+});
+
+test("a typed case value must match the switch tag type", () => {
+	assertErrorContains(
+		compile(`package main
+func main() {
+	var v int
+	s := "a"
+	switch v {
+	case s:
+	}
+}`).errors,
+		"invalid case s in switch on v (mismatched types string and int)",
+	);
+});
+
+test("valid switch case types still compile", async () => {
+	await assertProgramOutput(
+		`package main
+import "fmt"
+type Mode string
+type Color int
+const Red Color = 1
+func main() {
+	var m Mode = "x"
+	var c Color = 1
+	var f float64 = 2
+	var r rune = 'a'
+	var e error
+	var a any = 3
+	n := 3
+	switch m {
+	case "x":
+		fmt.Println("mode")
+	}
+	switch c {
+	case Red, 2:
+		fmt.Println("color")
+	}
+	switch f {
+	case 2:
+		fmt.Println("float")
+	}
+	switch r {
+	case 'a':
+		fmt.Println("rune")
+	}
+	switch e {
+	case nil:
+		fmt.Println("nil")
+	}
+	switch a {
+	case 3, "s":
+		fmt.Println("any")
+	}
+	switch n {
+	case n:
+		fmt.Println("same")
+	}
+	switch {
+	case n > 2:
+		fmt.Println("tagless")
+	}
+}`,
+		"mode\ncolor\nfloat\nrune\nnil\nany\nsame\ntagless\n",
+	);
+});
+
+section("JS dynamic types: boxed values keep their type");
+
+test("a nil map or nil pointer in any is not the nil interface", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ x int }
+type many []error
+
+func (m many) Error() string   { return "m" }
+func (m many) Unwrap() []error { return m }
+
+func chk(a any) bool { return a == nil }
+
+func main() {
+	fmt.Println(any(map[string]int(nil)) == nil)
+	var m map[string]int
+	fmt.Println(chk(m), chk(map[int]int(nil)))
+	var a any = (*P)(nil)
+	fmt.Println(a == nil)
+	var i *int
+	fmt.Println(chk(i), chk((*P)(nil)))
+	var e error = many{}
+	_, ok := e.(interface{ Unwrap() []error })
+	fmt.Println(ok)
+	_, ok = error(many{}).(interface{ Unwrap() error })
+	fmt.Println(ok)
+}`,
+		"false\nfalse false\nfalse\nfalse false\ntrue\nfalse\n",
+	);
+});
+
+section("JS dynamic types: assertions and type switches");
+
+test("assertions match Go's type identity", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"iter"
+)
+
+type L string
+type T struct{ n int }
+
+func (t T) Name() string { return "n" }
+func (t *T) Size() int   { return 1 }
+
+type namer interface{ Name() string }
+type sizer interface {
+	Name() string
+	Size() int
+}
+
+func main() {
+	_, ok := any(new(L)).(*string)
+	fmt.Println(ok)
+	var s string
+	_, ok = any(&s).(*string)
+	fmt.Println(ok)
+	_, ok = any(&s).(*int)
+	fmt.Println(ok)
+	var v any = T{4}
+	switch v.(type) {
+	case sizer:
+		fmt.Println("sizer")
+	case namer:
+		fmt.Println("namer")
+	}
+	v = &T{4}
+	switch v.(type) {
+	case sizer:
+		fmt.Println("sizer")
+	case namer:
+		fmt.Println("namer")
+	}
+	var d any
+	json.Unmarshal([]byte(\`{"a":1}\`), &d)
+	switch d.(type) {
+	case []any:
+		fmt.Println("slice")
+	case map[string]any:
+		fmt.Println("map")
+	}
+	switch any([]int32{1}).(type) {
+	case []uint8:
+		fmt.Println("u8")
+	case []int32:
+		fmt.Println("i32")
+	}
+	switch any(map[string]int{}).(type) {
+	case map[string]string:
+		fmt.Println("ss")
+	case map[string]int:
+		fmt.Println("si")
+	}
+	var n any
+	_, ok = n.(iter.Seq[int])
+	fmt.Println(ok)
+}`,
+		"false\ntrue\nfalse\nnamer\nsizer\nmap\ni32\nsi\nfalse\n",
+	);
+});
+
+test("a type parameter case matches before and after a basic case", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import "fmt"
+
+type Name string
+
+func Kind[T any](v any) string {
+	switch v.(type) {
+	case string:
+		return "str"
+	case T:
+		return "T"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Kind[Name](Name("a")), Kind[Name]("a"))
+}`,
+		"T str\n",
+	);
+});
+
+section("String indexing and cap on maps");
+
+test("string indexing yields byte on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func cp(b byte) bool { return b == 46 }
+func f(s string) bool { return cp(s[0]) }
+
+func main() {
+	var c byte = "."[0]
+	fmt.Println(f("."), c)
+}
+`,
+		"true 46\n",
+	);
+});
+
+test("cap on a map is rejected", () => {
+	const { errors } = compile(
+		`package main
+func main() {
+	var m map[string]int
+	_ = cap(m)
+}`,
+	);
+	assertErrorContains(
+		errors,
+		"invalid argument: m (variable of type map[string]int) for cap",
+	);
+});
+
+test("len on a map and cap on a slice stay valid", () => {
+	const { errors } = compile(
+		`package main
+func main() {
+	m := map[string]int{}
+	s := []int{1}
+	_ = len(m)
+	_ = cap(s)
+}`,
+	);
+	assertEqual(errors.length, 0);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

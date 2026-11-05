@@ -244,3 +244,119 @@ test("a promoted method that closes a cycle is reported", () => {
 		"initialization cycle",
 	);
 });
+
+section("Init order — constant cycles and block scoping");
+
+test("constants that refer to each other are an initialization cycle", () => {
+	for (const decls of [
+		"const a = b\nconst b = a",
+		"const a = a + 1",
+		"const a = b\nconst b = c\nconst c = a",
+	]) {
+		for (const target of ["js", "wasm"]) {
+			const { errors } = compile(
+				`//gofront:target ${target}\npackage main\n\n${decls}\n\nfunc main() { println(1) }\n`,
+			);
+			assertErrorContains(errors, "initialization cycle");
+		}
+	}
+});
+
+test("constants declared out of order and iota groups are not cycles", async () => {
+	await assertProgramOutput(
+		prog(
+			`const a = b + 1
+const b = c + 1
+const c = 1
+
+const (
+	x = iota
+	y
+	z
+)`,
+			`fmt.Println(a, b, c, x, y, z)`,
+		),
+		"3 2 1 0 1 2\n",
+	);
+});
+
+test("a name declared in an inner block does not shadow the variable outside it", () => {
+	for (const target of ["js", "wasm"]) {
+		const { errors } = compile(
+			`//gofront:target ${target}\npackage main\n\nvar x = func() int {\n\t{\n\t\tx := 1\n\t\t_ = x\n\t}\n\treturn x\n}()\n\nfunc main() { println(x) }\n`,
+		);
+		assertErrorContains(errors, "initialization cycle: x refers to itself");
+	}
+});
+
+test("a name declared in a block shadows the variable only inside that block", async () => {
+	await assertProgramOutput(
+		prog(
+			`var x = func() int {
+	if true {
+		x := 1
+		return x
+	}
+	return 0
+}()
+var y = func() int {
+	y := 2
+	return y
+}()
+var z = func() int {
+	for z := 0; z < 3; z++ {
+		if z == 2 {
+			return z
+		}
+	}
+	z := 9
+	return z
+}()
+var w = func() int {
+	switch w := 4; w {
+	case 4:
+		w := 5
+		return w
+	}
+	return 0
+}()
+var s = func(v any) int {
+	switch s := v.(type) {
+	case int:
+		return s
+	}
+	return 0
+}(7)`,
+			`fmt.Println(x, y, z, w, s)`,
+		),
+		"1 2 2 5 7\n",
+	);
+});
+
+test("a declaration's initialiser still sees the outer variable", () => {
+	const { errors } = compile(
+		`package main\n\nvar x = func() int {\n\tx := x + 1\n\treturn x\n}()\n\nfunc main() { println(x) }\n`,
+	);
+	assertErrorContains(errors, "initialization cycle: x refers to itself");
+});
+
+section("Init order — statically initialised variables");
+
+test("a call through an interface reads a later variable with a literal initialiser", async () => {
+	await assertProgramOutput(
+		prog(
+			`type G interface{ Get() int }
+
+type impl struct{}
+
+func (impl) Get() int { return later + zero }
+
+var iface G = impl{}
+var viaIface = iface.Get()
+var later = 5
+var zero int`,
+			`fmt.Println(viaIface, later)`,
+		),
+		"5 5\n",
+	);
+});

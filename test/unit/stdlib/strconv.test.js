@@ -516,3 +516,25 @@ abc 0 0 strconv.ParseFloat: parsing "abc": invalid syntax
 `,
 	);
 });
+
+test("Unquote keeps UTF-8 text in raw strings containing a carriage return", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+func main() {
+	s, err := strconv.Unquote("\`\ré\`")
+	fmt.Printf("%q %v\\n", s, err)
+	s, err = strconv.Unquote("\`a\r世\r界\`")
+	fmt.Printf("%q %v\\n", s, err)
+}
+`,
+		`"é" <nil>
+"a世界" <nil>
+`,
+	);
+});

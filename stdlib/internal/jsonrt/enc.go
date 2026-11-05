@@ -283,6 +283,19 @@ func (e *Enc) Marshaled(out []byte, err error, typ string) {
 	e.Fail(&MarshalerError{typ, err, "MarshalJSON"})
 }
 
+// TextMarshaled appends the result of a MarshalText call as a JSON string, or
+// the call's error wrapped like Go does.
+func (e *Enc) TextMarshaled(out []byte, err error, typ string) {
+	if e.Err != nil {
+		return
+	}
+	if err != nil {
+		e.Fail(&MarshalerError{typ, err, "MarshalText"})
+		return
+	}
+	e.Str(string(out))
+}
+
 // SortStrings sorts map keys.
 func SortStrings(a []string) {
 	sort.Strings(a)

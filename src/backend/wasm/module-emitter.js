@@ -125,6 +125,7 @@ export class ModuleEmitter {
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
+		this.taggedSliceTypes = new Map(); // Go slice type key -> tagged info
 		this.mapTypes = new Map(); // wType key -> map info
 		this.mapTypesByIndex = new Map(); // typeIndex -> map info
 		this.mapBucketsType = null; // shared (array (mut i32))
@@ -453,9 +454,11 @@ export class ModuleEmitter {
 		const typeEntry = {
 			form: "struct",
 			name: typeName,
+			// Mutable so the facade's per-field setters for an exported struct
+			// that holds a complex value validate.
 			fields: [
-				{ type: elemWType, mutable: false },
-				{ type: elemWType, mutable: false },
+				{ type: elemWType, mutable: true },
+				{ type: elemWType, mutable: true },
 			],
 		};
 		this._pushType(typeEntry);
@@ -633,6 +636,9 @@ export class ModuleEmitter {
 		const typeIndex = this._getTotalTypeCount();
 		const typeEntry = {
 			form: "struct",
+			// Slices of 32-bit-or-smaller elements are open: each Go type among them
+			// gets a tagged subtype when it reaches an interface.
+			sub: elemWType === "i32",
 			fields: [
 				{
 					type: {
@@ -677,6 +683,43 @@ export class ModuleEmitter {
 		this.sliceTypes.set(key, sliceInfo);
 		this.sliceTypesByIndex.set(typeIndex, sliceInfo);
 		return sliceInfo;
+	}
+
+	// The subtype of the slice struct a value of Go slice type `sliceGoType`
+	// takes inside an interface.  Slices of booleans and small integers share
+	// one WebAssembly type, so the extra tag field (a nullable ref to a struct
+	// with one immutable i32 field per tag index) is what tells `[]byte` from
+	// `[]bool` and `json.RawMessage` from `[]byte` in a type test.
+	getTaggedSliceType(sliceGoType, elemGoType) {
+		const key = goTypeKey(sliceGoType);
+		const known = this.taggedSliceTypes.get(key);
+		if (known) return known;
+		const base = this.getSliceType(elemGoType);
+		const tagIndex = this.taggedSliceTypes.size + 1;
+		const tagTypeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			fields: Array.from({ length: tagIndex }, () => ({
+				type: "i32",
+				mutable: false,
+			})),
+		});
+		const typeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			sub: true,
+			superTypeIndex: base.typeIndex,
+			fields: [
+				...base.typeEntry.fields,
+				{
+					type: { kind: "ref", nullable: true, typeIndex: tagTypeIndex },
+					mutable: false,
+				},
+			],
+		});
+		const info = { key, typeIndex, tagTypeIndex, base };
+		this.taggedSliceTypes.set(key, info);
+		return info;
 	}
 
 	getSliceTypeByIndex(typeIndex) {
@@ -1404,6 +1447,12 @@ export class ModuleEmitter {
 		);
 	}
 
+	// `print` ends each operand with this call so the next one is not
+	// separated by a space.
+	getPrintResetIndex() {
+		return this.getOrAddFuncImport("env", "print_reset", [], []);
+	}
+
 	getLogImportIndex(wType, isLast = false, isBool = false) {
 		const prefix = isLast ? "println" : "print";
 		if (isBool) {
@@ -1414,6 +1463,8 @@ export class ModuleEmitter {
 				return this.getOrAddFuncImport("env", `${prefix}_i32`, ["i32"], []);
 			case "i64":
 				return this.getOrAddFuncImport("env", `${prefix}_i64`, ["i64"], []);
+			case "u64":
+				return this.getOrAddFuncImport("env", `${prefix}_u64`, ["i64"], []);
 			case "f32":
 				return this.getOrAddFuncImport("env", `${prefix}_f32`, ["f32"], []);
 			case "f64":
@@ -1931,7 +1982,12 @@ export class ModuleEmitter {
 			if (this.checker?.implements?.(ptrType, ifaceResolved)) {
 				if (!seen.has(sInfo.typeIndex)) {
 					seen.add(sInfo.typeIndex);
-					candidates.push({ name: `*${sName}`, typeIndex: sInfo.typeIndex });
+					// A typed nil `*S` is a marker object, which also satisfies it.
+					candidates.push({
+						name: `*${sName}`,
+						typeIndex: sInfo.typeIndex,
+						nilTypeIndex: this.getNilBoxType(ptrType).typeIndex,
+					});
 				}
 			}
 

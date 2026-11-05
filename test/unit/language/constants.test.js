@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -453,6 +454,40 @@ const c = 1 << -1
 func main() { _ = c }`);
 	assertEqual(errors.length, 1);
 	assertErrorContains(errors, "is negative");
+});
+
+test("warning: precision warnings fire for integer contexts only, with a position", () => {
+	const fromFile = new URL("../fixtures/main.go", import.meta.url).pathname;
+	const warnings = (decl) =>
+		compile(`package main\n\n${decl}\nfunc main() { println(g) }`, { fromFile })
+			.warnings;
+	assertEqual(warnings("var g float64 = 1<<53 + 1").length, 0);
+	assertEqual(warnings("var g float64 = 9007199254740993").length, 0);
+	const [w] = warnings("var g int = 1<<53 + 1");
+	assertErrorContains([{ message: w }], "main.go at line 3:");
+	assertErrorContains([{ message: w }], "exceeds JS Number precision");
+});
+
+test("untyped float addition and subtraction are exact", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const c = 0.2 + 0.1
+const d = 0.3 - 0.1
+const e = -0.2 + 0.1
+
+func main() {
+	fmt.Println(0.2 + 0.1)
+	fmt.Println(c == 0.3)
+	fmt.Println(d, e)
+	x := 0.2
+	fmt.Println(x + 0.1)
+}
+`,
+		"0.3\ntrue\n0.2 -0.1\n0.30000000000000004\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

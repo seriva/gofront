@@ -428,3 +428,24 @@ F
 `,
 	);
 });
+
+test("ToUpper and ToLower keep single-rune mappings (ß stays ß)", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+func main() {
+	fmt.Println(strings.ToUpper("ß"), strings.ToLower("ẞ"), strings.ToUpper("straße"))
+	fmt.Println(string(unicode.ToUpper('ß')), string(unicode.ToLower('ẞ')), unicode.ToUpper('ß') == 'ß')
+}
+`,
+		`ß ß STRAßE
+ß ß true
+`,
+	);
+});

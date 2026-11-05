@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
@@ -710,6 +711,62 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "3 4");
+});
+
+const ALIAS_BASE = `package main
+
+import "fmt"
+
+type Base struct{ V int }
+
+func (b Base) Get() int { return b.V }
+
+type A = Base
+type W struct{ A }
+`;
+
+test("alias of a struct: positional literal", async () => {
+	await assertAllTargetsOutput(
+		`${ALIAS_BASE}
+func main() { fmt.Println(A{3}) }
+`,
+		"{3}\n",
+	);
+});
+
+test("alias of a struct: keyed literal keeps the methods", async () => {
+	await assertAllTargetsOutput(
+		`${ALIAS_BASE}
+func main() { fmt.Println(A{V: 3}.Get()) }
+`,
+		"3\n",
+	);
+});
+
+test("alias of a struct: copy through the base type", async () => {
+	await assertAllTargetsOutput(
+		`${ALIAS_BASE}
+func main() {
+	var t Base = A{V: 1}
+	u := t
+	u.V = 2
+	fmt.Println(t, u)
+}
+`,
+		"{1} {2}\n",
+	);
+});
+
+test("alias of a struct: embedded under the alias name", async () => {
+	await assertAllTargetsOutput(
+		`${ALIAS_BASE}
+func main() {
+	w := W{A{5}}
+	fmt.Println(w.V, w.A.V, w.Get(), W{A: A{V: 7}}.V)
+}
+`,
+		"5 5 5 7\n",
+	);
 });
 
 // ── Grouped type declarations ─────────────────────────────────

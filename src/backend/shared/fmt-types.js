@@ -17,7 +17,82 @@ const MAX_DEPTH = 4;
 const FLAGS = "#+\\- 0";
 const VERBS = "vTtcdoObxXUeEfFgGsqp";
 
-const qualify = (name) => (name.includes(".") ? name : `main.${name}`);
+const qualify = (name) =>
+	name.split("[")[0].includes(".") ? name : `main.${name}`;
+
+const PREDECLARED = new Set([
+	"bool",
+	"string",
+	"int",
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"uintptr",
+	"float32",
+	"float64",
+	"complex64",
+	"complex128",
+	"byte",
+	"rune",
+	"error",
+]);
+
+/**
+ * Go's `reflect` spelling of a type used as a type argument: `int`,
+ * `main.Foo`, `[]main.Foo`.  Takes checker types and parsed type nodes;
+ * `specialized` maps the names of monomorphised instances to their spelling.
+ * @param {any} t
+ * @param {Map<string, string>} [specialized]
+ * @returns {string}
+ */
+export function goTypeName(t, specialized = null) {
+	const go = (x) => goTypeName(x, specialized);
+	switch (t?.kind) {
+		case "basic":
+			return t.name === "any" ? "interface {}" : t.name;
+		case "untyped":
+			return t.base;
+		case "TypeName":
+		case "Ident":
+			if (specialized?.has(t.name)) return qualify(specialized.get(t.name));
+			if (t.name === "any") return "interface {}";
+			return PREDECLARED.has(t.name) ? t.name : qualify(t.name);
+		case "GenericTypeName":
+			return qualify(`${t.name}[${t.typeArgs.map(go).join(",")}]`);
+		case "named":
+			return qualify(instanceName(t, specialized));
+		case "interface":
+			return t.name ? qualify(t.name) : "interface {}";
+		case "pointer":
+		case "PointerType":
+			return `*${go(t.base)}`;
+		case "slice":
+		case "SliceType":
+			return `[]${go(t.elem)}`;
+		case "array":
+		case "ArrayType":
+			return `[${t.size ?? 0}]${go(t.elem)}`;
+		case "map":
+		case "MapType":
+			return `map[${go(t.key)}]${go(t.value)}`;
+		default:
+			return "interface {}";
+	}
+}
+
+// `Box[int]` for a generic instance: the checker's type arguments on JS, the
+// spelling the monomorphiser recorded on WASM.
+function instanceName(t, specialized = null) {
+	if (t._goName) return t._goName;
+	if (!t.typeArgs?.length) return t.name ?? "";
+	return `${t.name}[${t.typeArgs.map((a) => goTypeName(a, specialized)).join(",")}]`;
+}
 
 /**
  * @param {any} t checker type
@@ -58,7 +133,9 @@ export function fmtTypeDesc(t, resolve = (x) => x, depth = 0) {
 			return {
 				k: "func",
 				p: (t.params ?? []).map(sub),
-				r: (t.returns ?? []).map(sub),
+				r: (t.returns ?? [])
+					.filter((r) => !(r?.kind === "basic" && r.name === "void"))
+					.map(sub),
 				v: Boolean(t.variadic),
 			};
 		case "chan":
@@ -105,7 +182,7 @@ function structDesc(n, st, sub) {
 }
 
 function namedDesc(t, resolve, depth, sub) {
-	const n = qualify(t.name ?? "");
+	const n = qualify(instanceName(t));
 	const u = resolve(t.underlying) ?? t.underlying;
 	if (!u) return { k: "named", n, u: null };
 	if (u.kind === "struct")
@@ -158,6 +235,17 @@ export function fmtDescIsSeq(desc) {
 }
 
 /**
+ * Whether the type is a pointer: a nil one prints `0` under `%d` and the other
+ * integer verbs and <nil> under `%s`, which only the static type can tell from
+ * a nil interface.
+ * @param {any} desc result of fmtTypeDesc
+ * @returns {boolean}
+ */
+export function fmtDescIsPtr(desc) {
+	return desc?.k === "ptr";
+}
+
+/**
  * Whether a call with this literal format string needs operand types: `%T`,
  * `%#v`, an unknown verb (`%!z(int=5)`), or more operands than verbs
  * (`%!(EXTRA int=1)`).
@@ -165,8 +253,10 @@ export function fmtDescIsSeq(desc) {
  * @param {number} nargs operand count, -1 when not known statically
  * @param {boolean} [seqArgs] some operand is a slice or array, whose element
  *   type decides how `%s`, `%q`, `%x` and `%X` read it
+ * @param {boolean} [ptrArgs] some operand is a pointer, whose nil value is told
+ *   from a nil interface by its type
  */
-export function fmtWantsTypes(format, nargs, seqArgs = false) {
+export function fmtWantsTypes(format, nargs, seqArgs = false, ptrArgs = false) {
 	if (typeof format !== "string") return false;
 	const re = new RegExp(
 		`%([${FLAGS}]*)((?:\\[\\d+\\])?(?:\\*|\\d+)?(?:\\.(?:\\[\\d+\\])?(?:\\*|\\d*))?(?:\\[\\d+\\])?)([^]?)`,
@@ -180,9 +270,30 @@ export function fmtWantsTypes(format, nargs, seqArgs = false) {
 		if (verb === "T" || verb === "p") return true;
 		if (verb === "v" && m[1].includes("#")) return true;
 		if (seqArgs && "sqxX".includes(verb)) return true;
+		if (ptrArgs && "bodxXsq".includes(verb)) return true;
 		if (verb !== "" && !VERBS.includes(verb) && verb !== "w") return true;
 		if (/[[*]/.test(m[2])) indexed = true;
 		count++;
 	}
 	return nargs >= 0 && !indexed && nargs > count;
+}
+
+/**
+ * The operand of `any(x)` seen by fmt as `x` with its static type: the
+ * conversion would hide the concrete type from `%T`, `%v` of a float32 and
+ * typed nil pointers.  Conversions to a non-empty interface (`error(e)`) and
+ * of an operand that is already an interface or nil stay as they are.
+ * @param {any} e call operand
+ * @returns {any}
+ */
+export function fmtPeelAny(e) {
+	if (e?.kind !== "TypeConversion" || !e.expr || e._spread) return e;
+	const to = e._type;
+	if (!(to?.kind === "basic" && to.name === "any")) return e;
+	const from = e.expr._type;
+	if (!from || from.kind === "interface" || from.kind === "tuple") return e;
+	if (from.kind === "basic" && (from.name === "any" || from.name === "nil"))
+		return e;
+	if (from.kind === "untyped" && from.base === "nil") return e;
+	return e.expr;
 }

@@ -21,6 +21,7 @@ import { setupGlobals } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
+	BOOL,
 	defaultType,
 	ERROR,
 	INTRINSICS,
@@ -40,6 +41,7 @@ import {
 const TEMPL_NODE_CHECKS = {
 	TemplElement: "_checkTemplElement",
 	TemplExpr: "_checkTemplLeaf",
+	TemplChildren: "_checkTemplChildren",
 	TemplComponent: "_checkTemplLeaf",
 	TemplIf: "_checkTemplIf",
 	TemplFor: "_checkTemplFor",
@@ -106,6 +108,7 @@ export class TypeChecker {
 		this.universe = new Scope();
 		this.globals = new Scope(this.universe);
 		this.errors = [];
+		this._reportedAt = new WeakMap();
 		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
 		this.pkgName = null;
@@ -181,7 +184,9 @@ export class TypeChecker {
 				this._ambiguousImported.add(prior);
 				this._ambiguousImported.add(type);
 			}
-			this.types.set(name, type);
+			// A renamed type (`Pt` declared as `Pt$$b`) keeps a bare name another
+			// package already owns; it is reached as `pkg.Pt`.
+			if (!(prior && type.name !== name)) this.types.set(name, type);
 			this.types.set(`${pkgName}.${name}`, type);
 		}
 	}
@@ -262,6 +267,14 @@ export class TypeChecker {
 	}
 
 	err(msg, node, hint = null) {
+		// One diagnostic per root cause: a node revisited by a later pass (a
+		// signature resolved at declaration and again in the body) reports once.
+		if (node && typeof node === "object") {
+			const seen = this._reportedAt.get(node) ?? new Set();
+			this._reportedAt.set(node, seen);
+			if (seen.has(msg)) return TAINTED_ANY;
+			seen.add(msg);
+		}
 		const e = new TypeCheckError(
 			msg,
 			node,
@@ -709,7 +722,11 @@ export class TypeChecker {
 		const { cycles } = orderPackageInits(programs);
 		for (const c of cycles) {
 			const owner = programs.find((p) =>
-				p.decls?.some((d) => d.kind === "VarDecl" && d.decls?.includes(c.spec)),
+				p.decls?.some(
+					(d) =>
+						(d.kind === "VarDecl" || d.kind === "ConstDecl") &&
+						d.decls?.includes(c.spec),
+				),
 			);
 			if (owner) this._setCurrentFile(owner);
 			this.err(c.message, c.spec);
@@ -766,12 +783,29 @@ export class TypeChecker {
 
 	// ── Shared pass helpers ──────────────────────────────────────
 
+	// Instances made while types were collected (`struct{ Inner[int] }`) have
+	// no methods yet, and a type embedding another embedder (`Deep` over `E`
+	// over `Base`) needs the inner promotion first, so repeat until nothing
+	// new is promoted.
 	_promoteEmbeddedMethods() {
+		const structs = [];
 		for (const type of this.types.values()) {
-			this._promoteEmbeddedInto(type.underlying);
-			for (const inst of type._generic?._instances?.values() ?? [])
-				this._promoteEmbeddedInto(inst.underlying);
+			structs.push(type.underlying);
+			for (const inst of type._generic?._instances?.values() ?? []) {
+				this._syncInstanceMethods(type._generic, inst);
+				structs.push(inst.underlying);
+			}
 		}
+		const count = () =>
+			structs.reduce(
+				(n, st) => n + (st?.methods?.size ?? 0) + (st?.fields?.size ?? 0),
+				0,
+			);
+		let before;
+		do {
+			before = count();
+			for (const st of structs) this._promoteEmbeddedInto(st);
+		} while (count() !== before);
 	}
 
 	_promoteEmbeddedInto(struct) {
@@ -779,6 +813,11 @@ export class TypeChecker {
 		for (const embed of struct._embeds) {
 			const inner = embed.kind === "pointer" ? embed.base : embed;
 			const base = inner.kind === "named" ? inner.underlying : inner;
+			// Fields of an embedded type declared after the embedder were not
+			// there when the embedder's fields were collected.
+			if (base?.kind === "struct" && struct.fields)
+				for (const [k, v] of base.fields)
+					if (!struct.fields.has(k)) struct.fields.set(k, v);
 			// A named non-struct type (`time.Duration`) keeps its methods on
 			// the named type itself.
 			const methods =
@@ -838,6 +877,9 @@ export class TypeChecker {
 			this.globals.define(decl.name, named);
 			return;
 		}
+		// A type declared inside a function is registered before its fields
+		// resolve so `next *L` finds it; package-level types already are.
+		this._registerLocalTypePlaceholder(decl);
 		let underlying = this.resolveTypeNode(decl.type, this.globals);
 		// `type W V` with V a named array: W's underlying type is V's array.
 		if (!decl.isAlias && underlying.kind === "named") {
@@ -871,6 +913,13 @@ export class TypeChecker {
 		}
 		this.types.set(decl.name, named);
 		this.globals.define(decl.name, named);
+	}
+
+	_registerLocalTypePlaceholder(decl) {
+		if (decl.isAlias || this.types.has(decl.name)) return;
+		const placeholder = { kind: "named", name: decl.name, underlying: null };
+		this.types.set(decl.name, placeholder);
+		this.globals.define(decl.name, placeholder);
 	}
 
 	// type A[P any] = T[P] — Go 1.24 generic alias. The declaration is a
@@ -972,6 +1021,9 @@ export class TypeChecker {
 	}
 
 	_attachNonGenericMethod(decl, funcType) {
+		// Codegen of an importing package reads the body of a Go-source
+		// method (does it accept a nil receiver?).
+		funcType._methodDecl = decl;
 		const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
 		const base = recvType?.underlying ?? recvType;
 		if (base?.kind === "struct") {
@@ -1048,10 +1100,24 @@ export class TypeChecker {
 
 	_checkTemplElement(n, scope) {
 		for (const a of n.attrs ?? []) {
-			if (a.kind === "expr" || a.kind === "cond-bool")
-				this._checkTemplExpr(a, a.tokens, scope);
+			if (a.kind === "expr") this._checkTemplExpr(a, a.tokens, scope);
+			else if (a.kind === "cond-bool") this._checkTemplCondAttr(a, scope);
 		}
 		this._checkTemplNodes(n.children, scope);
+	}
+
+	// `name?={ cond }` sets the attribute when `cond` is true.
+	_checkTemplCondAttr(a, scope) {
+		const t = this._checkTemplExpr(a, a.tokens, scope);
+		if (t && !isBool(t) && !isAny(t))
+			this.err(`Conditional attribute '${a.name}' must be bool`, a.expr);
+	}
+
+	// `{ name... }` names a variadic parameter. A templ without a `children`
+	// parameter may still write `{ children... }` (it mounts nothing).
+	_checkTemplChildren(n, scope) {
+		if (n.name === "children" && !scope.lookup("children")) return;
+		this._checkTemplExpr(n, [], scope);
 	}
 
 	_checkTemplLeaf(n, scope) {
@@ -1070,6 +1136,7 @@ export class TypeChecker {
 		this._checkTemplExpr(n, n.exprTokens, scope);
 		for (const c of n.cases ?? []) {
 			this._checkTemplExpr(c, c.caseTokens, scope);
+			if (c.expr) this._checkCaseValue(n.expr, c.expr);
 			this._checkTemplNodes(c.body, scope);
 		}
 	}
@@ -1260,7 +1327,13 @@ export class TypeChecker {
 			inner.define(p.name, this._paramType(p, inner));
 		}
 		const returnType = this._setupFuncReturnType(decl, inner);
-		this._runFuncBody(decl, inner, returnType);
+		const savedRecvGeneric = this._recvGeneric;
+		this._recvGeneric = recvNamedType?._generic;
+		try {
+			this._runFuncBody(decl, inner, returnType);
+		} finally {
+			this._recvGeneric = savedRecvGeneric;
+		}
 		this._checkMissingReturn(decl, returnType, "method");
 	}
 
@@ -1271,14 +1344,19 @@ export class TypeChecker {
 		return p.variadic ? { kind: "slice", elem: t } : t;
 	}
 
-	_injectTypeParams(decl, inner, outer) {
+	_injectTypeParams(decl, inner, _outer) {
 		if (!decl.typeParams) return;
-		for (const tp of decl.typeParams) {
-			const constraint = tp.constraint
-				? this.resolveTypeNode(tp.constraint, outer)
-				: ANY;
-			inner.define(tp.name, { kind: "typeParam", name: tp.name, constraint });
-		}
+		// Declare every parameter first so a constraint may mention one that
+		// comes later in the list (`[S ~[]E, E any]`).
+		const params = decl.typeParams.map((tp) => {
+			const t = { kind: "typeParam", name: tp.name, constraint: ANY };
+			inner.define(tp.name, t);
+			return t;
+		});
+		decl.typeParams.forEach((tp, i) => {
+			if (tp.constraint)
+				params[i].constraint = this.resolveTypeNode(tp.constraint, inner);
+		});
 	}
 
 	// Inside a method of `G[T]` the receiver is the instance `G[T]` over the
@@ -1346,21 +1424,7 @@ export class TypeChecker {
 		for (const spec of decl.decls) {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
 			if (spec.value) {
-				const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
-				const isTuple = valTypes.length === 1 && valTypes[0]?.kind === "tuple";
-				const valTypesFlat = isTuple ? valTypes[0].types : valTypes;
-				if (spec.names.length !== valTypesFlat.length) {
-					const vars =
-						spec.names.length === 1
-							? "1 variable"
-							: `${spec.names.length} variables`;
-					const vals = isTuple
-						? `returns ${valTypesFlat.length} values`
-						: valTypesFlat.length === 1
-							? "1 value"
-							: `${valTypesFlat.length} values`;
-					this.err(`assignment mismatch: ${vars} but ${vals}`, spec);
-				}
+				const valTypesFlat = this._varSpecValueTypes(spec, scope);
 				for (let i = 0; i < spec.names.length; i++) {
 					const vt = valTypesFlat[i] ?? ANY;
 					const varType = type ?? defaultType(vt) ?? ANY;
@@ -1381,6 +1445,45 @@ export class TypeChecker {
 			}
 		}
 		this._sharedAllocOk = savedSharedAlloc;
+	}
+
+	// The type of each value a `var` spec binds (a multi-value call or a
+	// comma-ok form spreads over several names); reports a count mismatch.
+	_varSpecValueTypes(spec, scope) {
+		const commaOk = this._checkVarCommaOk(spec, scope);
+		const valTypes = commaOk ?? spec.value.map((v) => this.checkExpr(v, scope));
+		const isTuple =
+			!commaOk && valTypes.length === 1 && valTypes[0]?.kind === "tuple";
+		const flat = isTuple ? valTypes[0].types : valTypes;
+		if (spec.names.length !== flat.length && !flat.some((t) => t?._tainted))
+			this._reportAssignMismatch(spec.names.length, flat.length, isTuple, spec);
+		return flat;
+	}
+
+	_reportAssignMismatch(nameCount, valueCount, isTuple, node) {
+		const vars = nameCount === 1 ? "1 variable" : `${nameCount} variables`;
+		const vals = isTuple
+			? `returns ${valueCount} values`
+			: valueCount === 1
+				? "1 value"
+				: `${valueCount} values`;
+		this.err(`assignment mismatch: ${vars} but ${vals}`, node);
+	}
+
+	// `var v, ok = m[k]` / `var v, ok = x.(T)`: the comma-ok forms yield the
+	// value and a bool. Returns their types, or null for any other spec.
+	_checkVarCommaOk(spec, scope) {
+		if (spec.names.length !== 2 || spec.value.length !== 1) return null;
+		const value = spec.value[0];
+		if (value.kind === "TypeAssertExpr") {
+			value._commaOk = true;
+			spec._commaOk = true;
+			return [this.checkExpr(value, scope), BOOL];
+		}
+		const stmt = { lhs: spec.names, rhs: spec.value };
+		const types = this._checkAssignCommaOkMap(stmt, scope);
+		if (types) spec._commaOk = true;
+		return types;
 	}
 
 	checkConstDecl(decl, scope) {

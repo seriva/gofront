@@ -5,6 +5,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileWasm,
 	runJs,
@@ -536,6 +537,128 @@ test("goto without a label is a parse error", () => {
 		err = e;
 	}
 	assert(err !== null, "expected a parse error");
+});
+
+section("else-if init statements");
+
+test("else if with an init statement runs the init and scopes its names to the chain", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a, b := 1, 5
+	if a > 5 {
+		fmt.Println("if")
+	} else if b := b + 1; b > 5 {
+		fmt.Println("elif", b)
+	} else {
+		fmt.Println("else", b)
+	}
+	fmt.Println(b)
+	if a > 5 {
+		fmt.Println("if")
+	} else if c := a + 1; c > 5 {
+		fmt.Println("c big")
+	} else if d := c * 10; d > 15 {
+		fmt.Println("d", c, d)
+	} else {
+		fmt.Println("else", c, d)
+	}
+}
+`,
+		"elif 6\n5\nd 2 20\n",
+	);
+});
+
+section("switch case lists");
+
+test("case lists stop evaluating once an expression matches", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g(n int) int {
+	fmt.Println("g", n)
+	return n
+}
+
+func main() {
+	switch g(5) {
+	case g(1), g(5), g(6):
+		fmt.Println("hit")
+	}
+	switch {
+	case g(0) > 1, g(2) > 1, g(3) > 1:
+		fmt.Println("hit2")
+	}
+	switch g(7) {
+	case g(1), g(5):
+	case g(7), g(8):
+		fmt.Println("hit3")
+	}
+}
+`,
+		"g 5\ng 1\ng 5\nhit\ng 0\ng 2\nhit2\ng 7\ng 1\ng 5\ng 7\nhit3\n",
+	);
+});
+
+test("fallthrough switches short-circuit case lists too", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g(n int) int {
+	fmt.Println("g", n)
+	return n
+}
+
+func main() {
+	switch g(5) {
+	case g(1), g(5), g(6):
+		fmt.Println("a")
+		fallthrough
+	case 9:
+		fmt.Println("b")
+	}
+}
+`,
+		"g 5\ng 1\ng 5\na\nb\n",
+	);
+});
+
+test("struct-valued switch tags compare by value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	p := P{1, 2}
+	switch p {
+	case P{0, 0}:
+		fmt.Println("origin")
+	case P{1, 2}:
+		fmt.Println("p12")
+	default:
+		fmt.Println("other")
+	}
+	a := [2]int{3, 4}
+	switch a {
+	case [2]int{3, 4}:
+		fmt.Println("a34")
+	default:
+		fmt.Println("other")
+	}
+}
+`,
+		"p12\na34\n",
+	);
 });
 
 // ═════════════════════════════════════════════════════════════

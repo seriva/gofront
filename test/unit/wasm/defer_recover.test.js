@@ -2,9 +2,12 @@
 // Tests for Task H4.4: Defer & Recover in WASM backend and JS-strict parity.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compileHybrid,
+	compileWasm,
+	runWasm,
 	section,
 	test,
 } from "../helpers.js";
@@ -634,4 +637,145 @@ nil map write recovered: true
 2
 `,
 	);
+});
+
+section("Runtime panics recover as error values");
+
+test("a recovered index-out-of-range panic is an error with the Go message", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		e, ok := r.(error)
+		fmt.Println(ok)
+		if ok {
+			fmt.Println(e.Error())
+		}
+	}()
+	a := []int{1}
+	i := 5
+	fmt.Println(a[i])
+}
+`,
+		"true\nruntime error: index out of range [5] with length 1\n",
+	);
+});
+
+section("WASM Defer — closures in switch clauses");
+
+test("deferred closures capture clause locals of different types", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	for i := 1; i <= 2; i++ {
+		switch i {
+		case 1:
+			s := "zero"
+			defer func() { fmt.Println("deferred", s) }()
+		case 2:
+			s := i
+			defer func() { fmt.Println("deferred2", s-1) }()
+		}
+	}
+}
+`,
+		"deferred2 1\ndeferred zero\n",
+	);
+});
+
+test("deferred closure in a switch clause inside a loop", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	for i := 1; i <= 2; i++ {
+		switch i {
+		case 1, 2:
+			s := i
+			defer func() {
+				if s == 1 {
+					fmt.Println("deferred zero")
+				} else {
+					fmt.Println("deferred2", s-1)
+				}
+			}()
+		}
+	}
+}
+`,
+		"deferred2 1\ndeferred zero\n",
+	);
+});
+
+section("Non-string panic values");
+
+test("panic and recover preserve error values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type rt string
+
+func (e rt) Error() string { return "boom" }
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Println(r)
+		e, ok := r.(rt)
+		fmt.Println(ok, string(e))
+	}()
+	panic(error(rt("q")))
+}
+`,
+		"boom\ntrue q\n",
+	);
+});
+
+section("Host imports that throw");
+
+test("a host import that throws is recoverable and returns the message", () => {
+	const src = `package main
+
+func Main() (res string) {
+	defer func() {
+		r := recover()
+		if s, ok := r.(string); ok {
+			res = s
+		} else {
+			res = "other"
+		}
+	}()
+	s := "abc"
+	n := 0
+	if s+s == "x" {
+		n = 1
+	}
+	if n == 0 {
+		return "no panic"
+	}
+	return "x"
+}`;
+	const { wasm, stringTable } = compileWasm(src);
+	const { exports } = runWasm(wasm, {
+		stringTable,
+		extraImports: {
+			env: {
+				str_concat: () => {
+					throw new Error("host boom");
+				},
+			},
+		},
+	});
+	assertEqual(exports.Main(), "host boom");
 });

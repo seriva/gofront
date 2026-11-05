@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { compileFiles, compileSingleFile } from "../../../src/compiler.js";
@@ -10,6 +10,7 @@ import {
 	assertThrows,
 	compile,
 	compileDir,
+	compileHybridProject,
 	FIXTURES,
 	ROOT,
 	runJs,
@@ -350,7 +351,7 @@ func main() {
 				"should not emit array destructuring for map index",
 			);
 			const output = runJs(js);
-			assertEqual(output, "yes true\nundefined false");
+			assertEqual(output, "yes true\n false");
 		},
 	);
 });
@@ -676,6 +677,98 @@ test("//gofront:target both cannot import wasm package", () => {
 				() => compileDir(dir),
 				/can only import 'both' packages; 'sub' is wasm/,
 			);
+		},
+	);
+});
+
+section("same type name in two local packages");
+
+const PT_PACKAGES = (target) => ({
+	"a/a.go": `//gofront:target ${target}\npackage a\ntype Pt struct{ X int }\nfunc (p Pt) Get() int { return p.X }\n`,
+	"b/b.go": `//gofront:target ${target}\npackage b\ntype Pt struct{ Y string }\nfunc (p Pt) Get() string { return p.Y }\n`,
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a.Pt and b.Pt coexist in one program (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			...PT_PACKAGES(target),
+			"main.go": `//gofront:target ${target}
+package main
+import ("fmt"; "./a"; "./b")
+func main() { fmt.Println(a.Pt{1}, b.Pt{"y"}, a.Pt{4}.Get(), b.Pt{"q"}.Get()) }
+`,
+		});
+		assertEqual(lines.join("\n"), "{1} {y} 4 q");
+	});
+}
+
+test("generic instances over different package types are distinct", () => {
+	withTempDir(
+		{
+			...PT_PACKAGES("js"),
+			"main.go": `//gofront:target js
+package main
+import ("./a"; "./b")
+type Box[T any] struct{ v T }
+func main() {
+	var x Box[a.Pt]
+	x = Box[b.Pt]{}
+	_ = x
+}
+`,
+		},
+		(dir) => {
+			assertThrows(() => compileDir(dir), "Cannot assign Box[b.Pt] to Box[Pt]");
+		},
+	);
+});
+
+// Package b redeclares `Pt`, so its type is renamed; same-spelled values
+// (parameters, locals, composite literal keys) must keep their names.
+const B_BODIES = {
+	"composite literal field key": [
+		`type Container struct{ Pt Pt }\nfunc Make(Pt Pt) Container { return Container{Pt: Pt} }\nfunc (c Container) Y() string { return c.Pt.Y }`,
+		`fmt.Println(b.Make(b.Pt{"k"}).Y())`,
+		"k",
+	],
+	parameter: [
+		`func Foo(Pt int) int { return Pt + 1 }`,
+		`fmt.Println(b.Foo(2))`,
+		"3",
+	],
+	"local variable": [
+		`func Foo() int { var Pt int = 10; return Pt + 1 }`,
+		`fmt.Println(b.Foo())`,
+		"11",
+	],
+};
+
+for (const [what, [body, call, want]] of Object.entries(B_BODIES)) {
+	test(`renamed type does not rename a ${what}`, async () => {
+		const { lines } = await compileHybridProject({
+			"a/a.go": "package a\ntype Pt struct{ X int }\n",
+			"b/b.go": `package b\ntype Pt struct{ Y string }\n${body}\n`,
+			"main.go": `package main\nimport ("fmt"; "./a"; "./b")\nvar _ = a.Pt{}\nfunc main() { ${call} }\n`,
+		});
+		assertEqual(lines.join("\n"), want);
+	});
+}
+
+test("parse cache never serves renamed ASTs to a later build", () => {
+	withTempDir(
+		{
+			"a/a.go": "package a\ntype Pt struct{ X int }\n",
+			"b/b.go": "package b\ntype Pt struct{ Y string }\n",
+			"main.go": `package main\nimport ("./a"; "./b")\nvar _ = a.Pt{}\nvar _ = b.Pt{}\nfunc main() {}\n`,
+		},
+		(dir) => {
+			const rel = (f) => relative(process.cwd(), join(dir, f));
+			const typeOwners = new Map();
+			compileFiles([rel("a/a.go")], { typeOwners });
+			compileFiles([rel("b/b.go")], { typeOwners });
+			const res = compileFiles([rel("b/b.go")]);
+			const decl = res.programs[0].decls.find((d) => d.kind === "TypeDecl");
+			assertEqual(decl.name, "Pt");
 		},
 	);
 });

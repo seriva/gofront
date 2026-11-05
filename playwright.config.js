@@ -7,6 +7,13 @@ export default defineConfig({
 		headless: true,
 		screenshot: "only-on-failure",
 		trace: "retain-on-failure",
+		launchOptions: {
+			args: [
+				"--no-sandbox",
+				"--disable-setuid-sandbox",
+				"--disable-dev-shm-usage",
+			],
+		},
 	},
 	projects: [
 		{

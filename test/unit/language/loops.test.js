@@ -2,6 +2,7 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -242,4 +243,21 @@ func main() {
 `);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "2\n5\n1");
+});
+
+test("integer /= in a for post statement truncates", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	w := 345
+	for ; w > 100; w /= 10 {
+	}
+	fmt.Println(w)
+}
+`,
+		"34\n",
+	);
 });

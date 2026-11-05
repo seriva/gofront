@@ -373,3 +373,16 @@ test("the guard script fails on each fixture and passes on the real tree", () =>
 		);
 	});
 });
+
+test("a missing root reports the rules file and exits 1 without a stack trace", () => {
+	const r = spawnSync(
+		process.execPath,
+		[join(ROOT, "scripts", "check-layers.js"), "no-such-dir"],
+		{ encoding: "utf8" },
+	);
+	assertEqual(r.status, 1);
+	assertEqual(
+		r.stderr.trim(),
+		"check-layers: cannot read no-such-dir/.sentrux/rules.toml",
+	);
+});

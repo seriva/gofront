@@ -893,7 +893,7 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(
 		wasmRes,
-		"&{1 0x2}|&{Val:1 Next:0x2}|{10 0x1}|{Val:10 Next:0x1}|{100 {42}}|{Val:100 In:{N:42}}|&{200 {84}}|&{Val:200 In:{N:84}}",
+		"&{1 0x2}|&{Val:1 Next:0x2}|{10 0x3}|{Val:10 Next:0x3}|{100 {42}}|{Val:100 In:{N:42}}|&{200 {84}}|&{Val:200 In:{N:84}}",
 	);
 	assertEqual(wasmRes, jsRes);
 });

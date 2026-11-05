@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -878,6 +879,48 @@ func main() {
 `);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "9 1\n3");
+});
+
+section("Defined types over generic instances and aliases");
+
+test("type S Base[int] keeps the fields of the instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base[T any] struct{ n T }
+
+type S Base[int]
+
+func (s S) Double() int { return s.n * 2 }
+
+func main() {
+	s := S{n: 3}
+	fmt.Println(s.n, s, s.Double())
+}
+`,
+		"3 {3} 6\n",
+	);
+});
+
+test("type T A over an alias of a struct keeps the fields", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+type A = Base
+type T A
+
+func main() {
+	t := T{n: 3}
+	fmt.Println(t.n, t)
+}
+`,
+		"3 {3}\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

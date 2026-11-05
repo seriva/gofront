@@ -13,6 +13,7 @@ import {
 	isInterfaceType,
 	isNonEmptyInterface,
 	isTestingT,
+	printOperandKind,
 	toWasmType,
 } from "./types.js";
 
@@ -111,6 +112,38 @@ export function _usesAnyEq(funcDecls, mod) {
 	);
 }
 
+// Whether an `any`/interface value is reachable through `t` as a slice or
+// array element, a map key or a map value, or a struct field: such operands
+// are formatted by dynamic type (`__any_fmt`, `__any_fmt_key`).
+function typeHasIfaceInContainer(t, mod, seen = new Set(), depth = 0) {
+	if (!t || typeof t !== "object" || seen.has(t) || depth > 6) return false;
+	seen.add(t);
+	const sub = (x) => typeHasIfaceInContainer(x, mod, seen, depth + 1);
+	const isIface = (x) =>
+		isAnyType(x, mod.checker) || isInterfaceType(x, mod.checker);
+	switch (t.kind) {
+		case "named":
+			return sub(t.underlying);
+		case "pointer":
+			return sub(t.base);
+		case "slice":
+		case "array":
+			return isIface(t.elem) || sub(t.elem);
+		case "map":
+			return isIface(t.key) || isIface(t.value) || sub(t.value);
+		case "struct": {
+			const fields =
+				t.fields instanceof Map ? [...t.fields.values()] : t.fields;
+			return (fields ?? []).some((f) => {
+				const ft = f?.type ?? f;
+				return isIface(ft) || sub(ft);
+			});
+		}
+		default:
+			return false;
+	}
+}
+
 // An `fmt` call with an `any`/interface operand or a `xs...` spread needs
 // `__any_fmt`.  `emitFmtCall` falls back to scalar-only dispatch without it.
 export function _usesFmtAny(funcDecls, mod) {
@@ -122,23 +155,35 @@ export function _usesFmtAny(funcDecls, mod) {
 				n.func?.kind === "SelectorExpr" &&
 				n.func.expr?.kind === "Ident" &&
 				n.func.expr.name === "fmt" &&
-				n.args?.some(
-					(a) =>
-						a._spread ||
-						isAnyType(a._type, mod.checker) ||
-						isInterfaceType(a._type, mod.checker),
+				n.args?.some((a) =>
+					(a._type?.kind === "tuple" ? a._type.types : [a._type]).some(
+						(t) =>
+							a._spread ||
+							isAnyType(t, mod.checker) ||
+							isInterfaceType(t, mod.checker) ||
+							typeHasIfaceInContainer(t, mod),
+					),
 				),
 		),
 	);
 }
 
-// Whether a value of this static type may print a 64-bit unsigned integer
-// (directly, inside a container or struct, or behind `any`/an interface).
-export function typeMayHoldU64(t, mod, seen = new Set(), depth = 0) {
+// Whether a value of this static type may hold a 64-bit unsigned integer
+// (directly, inside a container or struct, or behind `any`/an interface when
+// `viaIface` is set).  Without `viaIface` an `any` holds none: the value that
+// reaches it has its own, more specific static type at its origin.
+export function typeMayHoldU64(
+	t,
+	mod,
+	seen = new Set(),
+	depth = 0,
+	viaIface = true,
+) {
 	if (!t || typeof t !== "object" || seen.has(t) || depth > 8) return false;
 	seen.add(t);
-	if (isAnyType(t, mod.checker) || isInterfaceType(t, mod.checker)) return true;
-	const sub = (x) => typeMayHoldU64(x, mod, seen, depth + 1);
+	if (isAnyType(t, mod.checker) || isInterfaceType(t, mod.checker))
+		return viaIface;
+	const sub = (x) => typeMayHoldU64(x, mod, seen, depth + 1, viaIface);
 	switch (t.kind) {
 		case "basic":
 			return t.name === "uint64" || t.name === "uint" || t.name === "uintptr";
@@ -168,12 +213,16 @@ export function typeMayHoldU64(t, mod, seen = new Set(), depth = 0) {
 export function _scanImportsInBody(node, mod) {
 	if (!node || typeof node !== "object") return;
 
+	// `fmt_box_u64` prints a uint64 that reaches an `any`/interface operand or
+	// a fmt container.  Such a value starts as an expression whose static type
+	// holds a 64-bit unsigned integer, so a program without one skips it.
+	if (node._type && typeMayHoldU64(node._type, mod, new Set(), 0, false)) {
+		mod.getFmtBoxU64Index();
+	}
+
 	if (node.kind === "CallExpr") {
 		const { func, args } = node;
 		prepareWasmNative(mod, node);
-		if ((args ?? []).some((a) => a._spread || typeMayHoldU64(a._type, mod))) {
-			mod.getFmtBoxU64Index();
-		}
 		if (
 			func.kind === "Ident" &&
 			(func.name === "print" || func.name === "println")
@@ -183,13 +232,10 @@ export function _scanImportsInBody(node, mod) {
 				mod.getPrintlnEmptyIndex();
 			}
 			for (let i = 0; i < args.length; i++) {
-				const arg = args[i];
 				const isLast = i === args.length - 1 && isPrintln;
-				const isBool =
-					isBoolGoType(arg._type) ||
-					(arg.kind === "BasicLit" && arg.litKind === "BOOL");
-				const wType = toWasmType(arg._type, mod.checker);
+				const { wType, isBool } = printOperandKind(args[i], mod.checker);
 				mod.getLogImportIndex(wType, isLast, isBool);
+				if (!isPrintln) mod.getPrintResetIndex();
 			}
 		} else if (
 			func.kind === "SelectorExpr" &&

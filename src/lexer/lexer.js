@@ -119,6 +119,31 @@ const SIMPLE_ESCAPES = {
 	"\\": 92,
 };
 
+// Decodes the raw bytes of consecutive \xNN / octal escapes in a string
+// literal: valid UTF-8 sequences become their code point, every other byte
+// 0x80-0xff becomes the lone surrogate U+DC00+byte so the runtime can turn it
+// back into that byte when the string is converted to []byte.
+function decodeRawBytes(bytes) {
+	const dec = new TextDecoder("utf-8", { fatal: true });
+	let out = "";
+	for (let i = 0; i < bytes.length; ) {
+		const b = bytes[i];
+		const n = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 0;
+		if (n > 0 && i + n <= bytes.length) {
+			try {
+				out += dec.decode(Uint8Array.from(bytes.slice(i, i + n)));
+				i += n;
+				continue;
+			} catch {
+				// invalid sequence: fall through to the lone-byte case
+			}
+		}
+		out += String.fromCharCode(b < 0x80 ? b : 0xdc00 + b);
+		i++;
+	}
+	return out;
+}
+
 export class Lexer {
 	constructor(source, filename = null) {
 		this.src = source;
@@ -188,6 +213,7 @@ export class Lexer {
 				if (intrinsic) this.intrinsics.set(line, intrinsic[1]);
 				const native = comment.match(/^\/\/gofront:native\s+(\S+)/);
 				if (native) this.natives.set(line, native[1]);
+				if (!intrinsic && !native) this.forwardDirectives(line, start);
 				const match = comment.match(/^\/\/gofront:target\s+(\S+)/);
 				if (match) {
 					this.target = match[1];
@@ -252,7 +278,7 @@ export class Lexer {
 				if (parts === null) parts = [];
 				if (this.pos > start) parts.push(this.src.slice(start, this.pos));
 				this.advance(); // skip \
-				parts.push(String.fromCodePoint(this.readEscape('"')));
+				parts.push(this.readStringEscape());
 				start = this.pos;
 			} else {
 				this.advance();
@@ -261,10 +287,41 @@ export class Lexer {
 		throw new LexError("Unterminated string", l, c, this.filename, this.src);
 	}
 
+	// The escape after a consumed backslash in a string literal.  \xNN and octal
+	// escapes are raw bytes; a run of them is decoded together so "\xc3\xa9" is
+	// "é" and "\xff" is one invalid byte (a lone surrogate, see decodeRawBytes).
+	readStringEscape() {
+		if (!this.isByteEscapeAt(this.pos))
+			return String.fromCodePoint(this.readEscape('"'));
+		const bytes = [this.readEscape('"')];
+		while (this.peek() === "\\" && this.isByteEscapeAt(this.pos + 1)) {
+			this.advance();
+			bytes.push(this.readEscape('"'));
+		}
+		return decodeRawBytes(bytes);
+	}
+
+	// A doc comment between a directive and its func carries the directive down
+	// so the parser still finds it on the line above the func.
+	forwardDirectives(line, start) {
+		const before = this.src.slice(
+			this.src.lastIndexOf("\n", start - 1) + 1,
+			start,
+		);
+		if (!/^[ \t]*$/.test(before)) return;
+		for (const map of [this.intrinsics, this.natives])
+			if (map.has(line - 1)) map.set(line, map.get(line - 1));
+	}
+
+	isByteEscapeAt(i) {
+		const n = this.src[i];
+		return n === "x" || (n >= "0" && n <= "7");
+	}
+
 	// Reads the escape after a consumed backslash and returns its code point.
 	// `quote` is the enclosing delimiter: `\'` is valid only in runes and
-	// `\"` only in strings. `\xNN` and octal escapes give U+0000-U+00FF (see
-	// plan §1.1: strings are JS strings, so \x80-\xff are code points, not raw bytes).
+	// `\"` only in strings. `\xNN` and octal escapes give 0-255 (a code point in
+	// rune literals; string literals decode runs of them as UTF-8 bytes).
 	readEscape(quote) {
 		const l = this.line,
 			c = this.col;
@@ -331,6 +388,7 @@ export class Lexer {
 		} else if (this.peek() !== "'") {
 			code = this.src.codePointAt(this.pos);
 			this.advance();
+			if (code > 0xffff) this.pos++; // astral: skip the low surrogate
 		} else {
 			throw new LexError("Empty rune literal", l, c, this.filename, this.src);
 		}
@@ -454,12 +512,10 @@ export class Lexer {
 				break;
 			}
 		}
-		if (
-			this.pos + 1 < this.src.length &&
-			this.src.charCodeAt(this.pos) === 46
-		) {
+		if (this.src.charCodeAt(this.pos) === 46) {
+			// `1.` is a float literal; `1..` and `1.x` keep the dot separate.
 			const next = this.src.charCodeAt(this.pos + 1);
-			if (next >= 48 && next <= 57) {
+			if (this._dotContinuesNumber(next)) {
 				isFloat = true;
 				n += this.advance();
 				while (this.pos < this.src.length) {
@@ -472,6 +528,7 @@ export class Lexer {
 						break;
 					}
 				}
+				if (n.endsWith(".")) n += "0";
 			}
 		}
 		if (this.pos < this.src.length) {
@@ -482,6 +539,32 @@ export class Lexer {
 			}
 		}
 		return { n, isFloat };
+	}
+
+	// Whether the "." at the cursor belongs to the decimal literal before it.
+	// `next` is the code after the dot: a digit, an exponent (`1.e3`), an
+	// imaginary suffix (`1.i`) or anything that cannot start a selector or a
+	// range-style `..` makes `1.` a float; `1.x` and `1..` keep the dot apart.
+	_dotContinuesNumber(next) {
+		if (Number.isNaN(next)) return true;
+		if (next >= 48 && next <= 57) return true;
+		if (next === 46) return false;
+		const after = this.src.charCodeAt(this.pos + 2);
+		const identAfter =
+			(after >= 97 && after <= 122) ||
+			(after >= 65 && after <= 90) ||
+			after === 95 ||
+			(after >= 48 && after <= 57);
+		if (next === 101 || next === 69) {
+			return (after >= 48 && after <= 57) || after === 43 || after === 45;
+		}
+		if (next === 105) return !identAfter;
+		return !(
+			(next >= 97 && next <= 122) ||
+			(next >= 65 && next <= 90) ||
+			next === 95 ||
+			next > 127
+		);
 	}
 
 	_startsUnicodeIdent() {
@@ -621,8 +704,10 @@ export class Lexer {
 
 	_readAmpOp(l, c) {
 		if (this.match("&")) this.push(T.AND, "&&", l, c);
-		else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
-		else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
+		else if (this.match("^")) {
+			if (this.match("=")) this.push(T.AND_NOT_ASSIGN, "&^=", l, c);
+			else this.push(T.AND_NOT, "&^", l, c);
+		} else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
 		else this.push(T.AMP, "&", l, c);
 	}
 
@@ -664,7 +749,12 @@ export class Lexer {
 			case ".":
 				if (/[0-9]/.test(this.peek() ?? "")) {
 					const { n } = this._readLeadingDotFloat();
-					this.push(T.FLOAT, n, l, c);
+					if (this.src[this.pos] === "i") {
+						this.advance();
+						this.push(T.IMAG, n, l, c);
+					} else {
+						this.push(T.FLOAT, n, l, c);
+					}
 				} else if (this.peek() === "." && this.peek(1) === ".") {
 					this.advance();
 					this.advance();
