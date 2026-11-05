@@ -640,6 +640,10 @@ export const HELPER_FMT_LOOP = String.raw`
         const bt0 = U.baseOf(t);
         v = bt0?.k === "slice" ? [] : v;
       }
+      if (sharp && v !== null && typeof v === "object" && typeof v.GoString === "function") {
+        out += U.pad(String(v.GoString()), fl, wid);
+        continue;
+      }
       const vStr = formatV(unbox(v, "v"), fl.plus, true, false, U.both(t, v?.__fd));
       out += U.pad(sharp ? U.gs(v, t, true) : vStr, fl, wid);
       continue;

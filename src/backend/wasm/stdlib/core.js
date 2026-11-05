@@ -1348,7 +1348,50 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(valTmp, valW);
 	}
 
+	// The `GoString() string` method fmt's %#v calls on a value of static type
+	// `goType` (value receivers on values, pointer receivers on pointers), or null.
+	_fmtGoStringOf(goType) {
+		if (!goType || isAnyType(goType, this.mod.checker)) return null;
+		const isPtr = _isPointerKind(goType);
+		const named = this._fmtNamed(isPtr ? (goType.base ?? goType.elem) : goType);
+		if (!named) return null;
+		const sig = this._fmtMethodMap(named)?.get("GoString");
+		if (!_isFmtMethodSig(sig, isPtr)) return null;
+		const found = this._fmtMethodFunc(named, "GoString");
+		if (!found || found.valueRecv === isPtr) return null;
+		return found;
+	}
+
 	emitToExternref(
+		goType,
+		isNested = false,
+		seen = new Set(),
+		allowNil = false,
+	) {
+		const gm = this._fmtGoStringOf(goType);
+		if (!gm) {
+			this._emitToExternrefStringer(goType, isNested, seen, allowNil);
+			return;
+		}
+		const valW = toWasmType(goType, this.mod.checker, this.mod);
+		const valTmp = this.acquireTemp(valW);
+		const rawTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.tee", index: valTmp });
+		this._emitToExternrefStringer(goType, isNested, seen, allowNil);
+		this.pushInstruction({ op: "local.set", index: rawTmp });
+		this.pushInstruction({ op: "local.get", index: rawTmp });
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "call", funcIndex: gm.funcIndex });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStringerIndex(),
+		});
+		this.releaseTemp(rawTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitToExternrefStringer(
 		goType,
 		isNested = false,
 		seen = new Set(),
@@ -2835,7 +2878,23 @@ export class StdlibCoreEmitter {
 						baseGoType?.kind === "named" ? baseGoType : concreteGoType,
 					)
 				: null;
-		return { baseGoType, sInfo, valueBox };
+		return {
+			baseGoType,
+			sInfo,
+			valueBox: valueBox ?? this._errorsAsScalarBox(baseGoType),
+		};
+	}
+
+	// A named non-struct, non-interface target (`type E byte`): a value of it
+	// sits in the interface box of its type.
+	_errorsAsScalarBox(baseGoType) {
+		const named = this._fmtNamed(baseGoType);
+		if (!named) return null;
+		const under =
+			named.underlying ?? this.mod.checker?.types?.get(named.name)?.underlying;
+		if (!under || ["struct", "interface", "pointer"].includes(under.kind))
+			return null;
+		return this.mod.getIfaceBoxType(named);
 	}
 
 	// A typed nil `*T` in the chain (a marker object) matches a `*T` target.
@@ -2877,6 +2936,7 @@ export class StdlibCoreEmitter {
 
 		const { baseGoType, sInfo, valueBox } = this._errorsAsTarget(args[1]);
 		const matchIndex = valueBox ? valueBox.typeIndex : sInfo?.typeIndex;
+		const hasMatch = matchIndex !== undefined;
 		const nilBox = this._errorsAsNilBox(sInfo, valueBox, baseGoType);
 		const pushMatched = () => {
 			this.pushInstruction({ op: "local.get", index: errTmp });
@@ -2910,12 +2970,59 @@ export class StdlibCoreEmitter {
 			this.pushInstruction({ op: "br_if", depth: 0 });
 		}
 
-		this.pushInstruction({ op: "loop", blockType: "void" });
+		// The chain is errors.flatten(err): the error, then (depth first) its
+		// Unwrap() error / Unwrap() []error children.
 		this.pushInstruction({ op: "local.get", index: errTmp });
 		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+		const flatInfo = this.mod.getSliceType({
+			kind: "interface",
+			name: "error",
+		});
+		const flatW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: flatInfo.typeIndex,
+		};
+		const arrW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: flatInfo.arrInfo.typeIndex,
+		};
+		const flatTmp = this.acquireTemp(flatW);
+		const arrTmp = this.acquireTemp(arrW);
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const idxTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: errTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("flatten$$errors"),
+		});
+		this.pushInstruction({ op: "local.set", index: flatTmp });
+		this._emitSliceUnpack(flatTmp, flatInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+		});
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: idxTmp });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_u");
 		this.pushInstruction({ op: "br_if", depth: 1 });
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({
+			op: "array.get",
+			typeIndex: flatInfo.arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: errTmp });
 
-		if (!sInfo && isNonEmptyInterface(baseGoType, this.mod.checker)) {
+		if (!hasMatch && isNonEmptyInterface(baseGoType, this.mod.checker)) {
 			this._emitErrorsAsInterface(baseGoType, {
 				targetLocal,
 				targetTmp,
@@ -2924,7 +3031,7 @@ export class StdlibCoreEmitter {
 				resLoc,
 			});
 		}
-		if (sInfo) {
+		if (hasMatch) {
 			this.pushInstruction({ op: "local.get", index: errTmp });
 			this.pushInstruction({ op: "ref.test", typeIndex: matchIndex });
 			this._emitOrTypedNil(nilBox, errTmp);
@@ -2958,17 +3065,20 @@ export class StdlibCoreEmitter {
 			this.pushInstruction("end");
 		}
 
-		this.pushInstruction({ op: "local.get", index: errTmp });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__errors_unwrap"),
-		});
-		this.pushInstruction({ op: "local.set", index: errTmp });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: idxTmp });
 		this.pushInstruction({ op: "br", depth: 0 });
 		this.pushInstruction("end");
 		this.pushInstruction("end");
 
 		this.pushInstruction({ op: "local.get", index: resLoc });
+		this.releaseTemp(idxTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, arrW);
+		this.releaseTemp(flatTmp, flatW);
 		this.releaseTemp(resLoc, "i32");
 		if (targetTmp !== null) {
 			this.releaseTemp(targetTmp, "anyref");

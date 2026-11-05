@@ -658,15 +658,15 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 26: `fmt`, `errors.As` and `encoding/binary` Emitter Parity
 
-- [ ] Task 26.1: `fmt.Fprint` spacing between non-string operands and `%#v` `GoStringer` dispatch
+- [x] Task 26.1: `fmt.Fprint` spacing between non-string operands and `%#v` `GoStringer` dispatch
   - Files: `src/backend/js/stdlib/fmt.js`, `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`
   - Test: `test/unit/stdlib/fmt.test.js` — S14 `n, _ := fmt.Fprint(&sb, "b", 2, 3, "c"); fmt.Println(n, sb.String())` → `5 b2 3c`; S23 `type T struct{}; func (T) GoString() string { return "pkg.T" }; fmt.Printf("%#v\n", T{})` → `pkg.T` on all targets.
   - Done when: both repros match Go on js/both/wasm.
-- [ ] Task 26.2: WASM `errors.As` walks multi-error (`Unwrap() []error`) trees and matches named basic error types
+- [x] Task 26.2: WASM `errors.As` walks multi-error (`Unwrap() []error`) trees and matches named basic error types
   - Files: `src/backend/wasm/stdlib/core.js`, `test/unit/stdlib/errors.test.js`
   - Test: S09 `errors.As(errors.Join(e1, fmt.Errorf("n: %w", NotFound{"z"})), &nf)` → `true z`; S22 `type E byte; func (E) Error() string { return "E" }; var t E; fmt.Println(errors.As(error(E(7)), &t), byte(t))` → `true 7` on all targets.
   - Done when: both repros match Go on wasm (js/both pinned).
-- [ ] Task 26.3: JS `binary.Read` into 64-bit integers stores `BigInt` and `binary.Size` resolves named structs
+- [x] Task 26.3: JS `binary.Read` into 64-bit integers stores `BigInt` and `binary.Size` resolves named structs
   - Files: `src/backend/js/stdlib/binary.js`, `src/backend/js/runtime.js`, `test/unit/stdlib/binary.test.js`
   - Test: S21 `var a int64; binary.Read(&buf, binary.LittleEndian, &a); fmt.Println(a + 1)` → `-4` (and `uint64`); S24 `type Point struct { X, Y int32 }; fmt.Println(binary.Size(Point{}))` → `8` on all targets.
   - Done when: both repros match Go on js/both/wasm.
