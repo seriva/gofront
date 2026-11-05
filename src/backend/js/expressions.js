@@ -2,7 +2,6 @@ import {
 	closureMutates,
 	fnMutates,
 	nodeMutatesVar,
-	nodeWritesVar,
 	rootIdentName,
 	someChild,
 } from "../../lower/index.js";
@@ -13,7 +12,6 @@ import {
 	ERROR,
 	embeddedFieldName,
 	is64BitInt,
-	is64BitSigned,
 	is64BitUnsigned,
 	isAny,
 	isComplex,

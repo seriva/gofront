@@ -20,7 +20,6 @@
 import {
 	computeEmbeddedStubs,
 	hasDirectRecover,
-	isReferenceType,
 	markInBoundsIndexes,
 	markRedundantNilChecks,
 	normalizeDefers,
