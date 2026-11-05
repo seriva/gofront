@@ -1847,6 +1847,20 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	// __gfUnbox hands fmt the raw value for the other verbs.
 	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
 	class FmtErr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } Error() { return this.s; } }
+	// A value whose type has GoString(): %#v prints it. Wraps the value as the
+	// String/Error layer (if any) left it, so the other verbs are unchanged.
+	class FmtGo {
+		constructor(r, s) {
+			this.r = r;
+			this.s = s;
+			if (r !== null && typeof r === "object") {
+				if (typeof r.String === "function") this.String = () => r.String();
+				if (typeof r.Error === "function") this.Error = () => r.Error();
+			}
+		}
+		__gfUnbox() { return this.r !== null && typeof this.r === "object" && typeof this.r.__gfUnbox === "function" ? this.r.__gfUnbox() : this.r; }
+		GoString() { return this.s; }
+	}
 	const late = { exports: null };
 	// Go separates operands with a space unconditionally, so track whether the
 	// current line already holds an operand (an empty string leaves lineBuf empty).
@@ -2043,7 +2057,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"fmt_box_u64": (v) => { v = BigInt.asUintN(64, v); return v > ${P}MAX ? v : Number(v); },
 		"fmt_box_f64": (v) => v,
 		"fmt_box_bool": (v) => v !== 0,
-		"fmt_new_stringer": (r, s, isErr) => (isErr !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
+		"fmt_new_stringer": (r, s, kind) => (kind === 2 ? new FmtGo(r, s) : kind !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
 		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
 		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
 		"testing_arg_str": targ, "testing_arg_any": targ,

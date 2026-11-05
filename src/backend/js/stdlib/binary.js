@@ -3,6 +3,8 @@
 
 function sizeOfGoType(gt) {
 	if (!gt) return -1;
+	if (gt.kind === "named")
+		return gt.underlying ? sizeOfGoType(gt.underlying) : -1;
 	if (gt.kind === "basic") {
 		switch (gt.name) {
 			case "bool":

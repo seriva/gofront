@@ -162,3 +162,34 @@ no wrap same true
 `,
 	);
 });
+
+test("errors.As walks Join trees and matches named basic error types", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type NotFound struct{ Name string }
+
+func (e NotFound) Error() string { return e.Name + " not found" }
+
+type E byte
+
+func (E) Error() string { return "E" }
+
+func main() {
+	var nf NotFound
+	e1 := errors.New("a")
+	fmt.Println(errors.As(errors.Join(e1, fmt.Errorf("n: %w", NotFound{"z"})), &nf), nf.Name)
+	var t E
+	fmt.Println(errors.As(error(E(7)), &t), byte(t))
+}
+`,
+		`true z
+true 7
+`,
+	);
+});

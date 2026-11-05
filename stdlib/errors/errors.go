@@ -140,3 +140,24 @@ func (e *joinError) Error() string {
 func (e *joinError) Unwrap() []error {
 	return e.errs
 }
+
+// flatten lists err and then, depth first, every error in its tree. The
+// emitter-backed As walks this list instead of recursing.
+func flatten(err error) []error {
+	var out []error
+	for err != nil {
+		out = append(out, err)
+		switch x := err.(type) {
+		case interface{ Unwrap() error }:
+			err = x.Unwrap()
+		case interface{ Unwrap() []error }:
+			for _, e := range x.Unwrap() {
+				out = append(out, flatten(e)...)
+			}
+			return out
+		default:
+			return out
+		}
+	}
+	return out
+}
