@@ -72,7 +72,7 @@ GoFront strings are JavaScript strings on both backends (`externref` in WebAssem
 Consequences for portable code:
 - **Byte operations**: Standard library packages that parse formats (`encoding/json`, `encoding/hex`, `crypto/sha256`) operate on `[]byte(s)` rather than string indexing so that byte offsets and multi-byte UTF-8 sequences are exact.
 - **`strings` offsets**: `strings.Index`, `LastIndex`, `IndexRune`, `IndexFunc` and the other search functions return UTF-16 code unit offsets, the same units as `len(s)` and `s[i:j]`, so `s[strings.Index(s, sub):]` always works. For ASCII text they equal Go's byte offsets; for other text they differ, as `len` does. `bytes` functions work on UTF-8 bytes and return byte offsets.
-- **Escape sequences**: `\xNN` and octal escapes decode to the code point U+00NN (`len("\x00")` is 1 as in Go, but `"\xc3"` is the code point `Ã`, so `[]byte("\xc3")` yields the two UTF-8 bytes `0xc3 0x83`; use `[]byte{0xc3}` when raw byte literals are required).
+- **Escape sequences**: `\xNN` and octal escapes are raw bytes, as in Go: `"\xc3\xa9"` is `é`, while a lone `"\xc3"` is one invalid byte, so `[]byte("\xc3")` has length 1. Astral rune literals such as `'😀'` are one rune.
 - **Format offsets**: Byte offsets reported by `json.SyntaxError.Offset` count UTF-8 input bytes, matching Go.
 
 ### Semantic differences

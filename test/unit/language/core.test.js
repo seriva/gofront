@@ -692,15 +692,15 @@ func Main() int {
 	assertEqual(res.wasmRes, 111221);
 });
 
-test("\\xNN above 0x7f is the code point, so []byte gives its UTF-8 (documented)", () => {
+test("\\xNN above 0x7f is a raw byte, so []byte keeps it as one byte", () => {
 	const res = compileHybrid(`package main
 
 func Main() int {
 	return len([]byte("\\xc3"))
 }
 `).run("Main");
-	assertEqual(res.jsRes, 2);
-	assertEqual(res.wasmRes, 2);
+	assertEqual(res.jsRes, 1);
+	assertEqual(res.wasmRes, 1);
 });
 
 test("error: unknown string escape", () => {
