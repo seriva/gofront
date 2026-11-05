@@ -51,7 +51,6 @@ const PLANS = [
 			"stdlib/internal/fmtrt/{,fmtrt.go}",
 			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom}.js",
 			"src/backend/wasm/stdlib/pure.js",
-			"test/perf/fmt-bench.js",
 			"test/unit/stdlib/testing.test.js",
 		],
 	},
