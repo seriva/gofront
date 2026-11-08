@@ -279,6 +279,16 @@ test("a pointer to a scalar formats with a stable id per target", () => {
 	);
 });
 
+test("the same scalar pointer printed twice has one id", () => {
+	assertEqual(
+		out(`x := 5
+	p := &x
+	fmt.Println(p, p)
+	fmt.Println(fmt.Sprint(p, &x))`),
+		"0x1 0x1\n0x1 0x1",
+	);
+});
+
 test("func values print as an address-style value, nil as <nil>", () => {
 	assertEqual(out(`fmt.Println(func() {})`), "0x1");
 	assertEqual(

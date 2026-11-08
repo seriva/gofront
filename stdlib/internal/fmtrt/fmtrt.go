@@ -65,6 +65,7 @@ type Arg struct {
 	Nil     bool
 	N       int
 	Ptr     any
+	Boxed   bool // Ptr is a pointer to a scalar, boxed anew each time it is put in an Arg
 	IsBytes bool                      // a []byte or [N]byte, whose elements are in Bytes
 	Bytes   []byte
 	Field   func(i int) (string, Arg) // the name and value of field i
@@ -82,6 +83,14 @@ type Entry struct {
 type registry struct {
 	keys    []string
 	lookups []func(v any) (Arg, bool)
+	scalars []numbered
+}
+
+// numbered is a pointer to a scalar that has been given an id; same reports
+// whether a value is that pointer.
+type numbered struct {
+	same func(v any) bool
+	id   uint64
 }
 
 var reg = &registry{}
@@ -123,6 +132,29 @@ func PtrID(v any) uint64 {
 		return 0
 	}
 	return ptrID(v)
+}
+
+// ArgPtrID returns the identity number of the pointer, function or channel
+// that a holds. A pointer to a scalar is boxed anew each time it is put in an
+// Arg and the host would see a different object, so those are matched by
+// equality against the ones already numbered.
+func ArgPtrID(a Arg) uint64 {
+	if !a.Boxed {
+		return PtrID(a.Ptr)
+	}
+	p := a.Ptr
+	for _, n := range reg.scalars {
+		if n.same(p) {
+			return n.id
+		}
+	}
+	id := PtrID(p)
+	reg.remember(p, id)
+	return id
+}
+
+func (r *registry) remember(p any, id uint64) {
+	r.scalars = append(r.scalars, numbered{func(v any) bool { return v == p }, id})
 }
 
 // ptrID is the host's stable identity number for an object.

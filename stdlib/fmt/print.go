@@ -410,7 +410,7 @@ func (p *pp) fmtPointer(a fmtrt.Arg, verb rune) {
 	switch a.K {
 	case fmtrt.KChan, fmtrt.KFunc, fmtrt.KPtr, fmtrt.KUnsafePtr:
 		if !a.Nil {
-			u = fmtrt.PtrID(a.Ptr)
+			u = fmtrt.ArgPtrID(a)
 		}
 	default:
 		p.badVerb(verb, a)
@@ -808,7 +808,7 @@ func compareArgs(a, b fmtrt.Arg) int {
 		}
 		return 0
 	case fmtrt.KPtr, fmtrt.KChan, fmtrt.KUnsafePtr:
-		return compareUint(fmtrt.PtrID(a.Ptr), fmtrt.PtrID(b.Ptr))
+		return compareUint(fmtrt.ArgPtrID(a), fmtrt.ArgPtrID(b))
 	case fmtrt.KStruct:
 		for i := 0; i < a.N; i++ {
 			_, x := a.Field(i)

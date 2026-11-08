@@ -425,7 +425,8 @@ class FmtGen extends TypeSpeller {
 			k === "struct" || k === "array" || k === "slice" || k === "map"
 				? `, Inner: func() fmtrt.Arg {\n\t\treturn ${this.describe(u.base, "*x")}\n\t}`
 				: "";
-		return `fmtrt.Arg{K: fmtrt.KPtr, T: ${T}, Nil: x == nil, Ptr: x${inner}${m}}`;
+		const boxed = k !== "struct" && k !== "array" ? ", Boxed: true" : "";
+		return `fmtrt.Arg{K: fmtrt.KPtr, T: ${T}, Nil: x == nil, Ptr: x${boxed}${inner}${m}}`;
 	}
 
 	// ── Call sites ──────────────────────────────────────────────
