@@ -16,9 +16,15 @@
 import { resolveJsonFields } from "../typechecker/resolve.js";
 import { defaultType } from "../typechecker/types.js";
 import {
+	collectProgramTypes,
+	hasSharedRepr,
+	importsFor,
+	isEmptyIface,
 	mentionsTypeParam,
 	results,
+	SHARED_REPR,
 	TypeSpeller,
+	under,
 	walkNodes,
 } from "./gen-types.js";
 
@@ -72,10 +78,6 @@ const DYNAMIC_BASICS = [
 const unalias = (n) => ALIAS[n] ?? n;
 const q = (s) => JSON.stringify(s);
 
-function under(t) {
-	return t?.kind === "named" ? under(t.underlying) : t;
-}
-
 function isBasic(t, set) {
 	const u = under(t);
 	return u?.kind === "basic" && set.has(unalias(u.name));
@@ -98,10 +100,6 @@ function isBytes(t) {
 		u?.kind === "slice" && !isRaw(t) && unalias(under(u.elem)?.name) === "uint8"
 	);
 }
-
-const isEmptyIface = (t) =>
-	(t?.kind === "basic" && t.name === "any") ||
-	(under(t)?.kind === "interface" && under(t).methods?.size === 0);
 
 const isNilType = (t) =>
 	t?.kind === "nil" || (t?.kind === "basic" && t.name === "nil");
@@ -962,10 +960,10 @@ export class JsonCodecGen extends TypeSpeller {
 	}
 
 	entryEncode(argType) {
-		this.qualified("json.Encoder");
+		const json = this.qualifierFor(JSON_PATH);
 		const name = `${this.prefix}encode${this.entries.length}`;
 		const lines = [
-			`func ${name}(enc *json.Encoder, v any) error {`,
+			`func ${name}(enc *${json}.Encoder, v any) error {`,
 			"\tif enc.Err() != nil {",
 			"\t\treturn enc.Err()",
 			"\t}",
@@ -994,10 +992,10 @@ export class JsonCodecGen extends TypeSpeller {
 	}
 
 	entryDecode(argType) {
-		this.qualified("json.Decoder");
+		const json = this.qualifierFor(JSON_PATH);
 		const name = `${this.prefix}decode${this.entries.length}`;
 		const lines = [
-			`func ${name}(dec *json.Decoder, v any) error {`,
+			`func ${name}(dec *${json}.Decoder, v any) error {`,
 			"\tdata, err := dec.ScanNext()",
 			"\tif err != nil {",
 			"\t\treturn err",
@@ -1088,11 +1086,8 @@ export class JsonCodecGen extends TypeSpeller {
 		for (const t of this.programTypes()) {
 			this.encFn(t, false);
 		}
-		for (const [name, t] of this.checker.types) {
-			if (t?.kind !== "named" || name.includes(".") || name.includes("$$"))
-				continue;
-			if (t.name !== name || t.typeArgs?.length || t._genericOf) continue;
-			if (mentionsTypeParam(t)) continue;
+		for (const { type: t, via } of this.collectedTypes()) {
+			if (via !== "declared" || mentionsTypeParam(t)) continue;
 			const u = under(t);
 			if (!u || u.kind === "interface" || u.kind === "func") continue;
 			this.encFn(t, false);
@@ -1100,26 +1095,13 @@ export class JsonCodecGen extends TypeSpeller {
 		}
 	}
 
-	// True when the type can be written as Go source in the generated file.
-	spellable(t, depth = 0) {
-		if (!t || depth > 8) return false;
-		const ok = (x) => this.spellable(x, depth + 1);
-		const byKind = {
-			basic: () => t.name !== "void" && t.name !== "nil",
-			named: () =>
-				isJsonValue(t) ||
-				(!t.name.includes("$$") &&
-					!t.name.includes("[") &&
-					(t.typeArgs ?? []).every(ok)),
-			pointer: () => ok(t.base),
-			slice: () => ok(t.elem),
-			array: () => ok(t.elem),
-			map: () => ok(t.key) && ok(t.value),
-			interface: () => true,
-			struct: () => (t._structFields ?? []).every((f) => ok(f.type)),
-			func: () => t.params.every(ok) && results(t).every(ok),
-		};
-		return byKind[t.kind]?.() ?? false;
+	spellableNamed(t, ok) {
+		return (
+			isJsonValue(t) ||
+			(!t.name.includes("$$") &&
+				!t.name.includes("[") &&
+				(t.typeArgs ?? []).every(ok))
+		);
 	}
 
 	addTypeArg(found, a) {
@@ -1135,29 +1117,31 @@ export class JsonCodecGen extends TypeSpeller {
 		found.set(this.key(p), p);
 	}
 
+	collectedTypes() {
+		this.collected ??= collectProgramTypes(this.programs, this.checker);
+		return this.collected;
+	}
+
 	// Types the program builds with composite literals, `&T{}`, make and new:
 	// candidates for a value stored in an interface (an `any` map value, say).
 	programTypes() {
 		const found = new Map();
-		for (const p of this.programs) {
-			walkNodes(p.decls, (node) => {
-				// A generic call's type arguments are what its body encodes and
-				// decodes through `T` and `&v`.
-				for (const a of node._typeArgs ?? []) this.addTypeArg(found, a);
-				if (!node._type) return;
-				const t = defaultType(node._type);
-				// A func literal in an interface reports its own type.
-				if (node.kind === "FuncLit" && this.spellable(t)) {
-					found.set(this.key(t), t);
-					return;
-				}
-				// Slices, arrays and maps reach an interface from any expression
-				// (a function result, a variable), not only from a literal
-				if (!buildsValue(node) && !isCompositeType(t) && !isJsonValue(t))
-					return;
-				if (this.spellable(t) && under(t)?.kind !== "interface")
-					found.set(this.key(t), t);
-			});
+		for (const { type: t, node, via } of this.collectedTypes()) {
+			// A generic call's type arguments are what its body encodes and
+			// decodes through `T` and `&v`.
+			if (via === "typeArg") this.addTypeArg(found, t);
+			if (via !== "expr" || !t) continue;
+			// A func literal in an interface reports its own type.
+			if (node.kind === "FuncLit" && this.spellable(t)) {
+				found.set(this.key(t), t);
+				continue;
+			}
+			// Slices, arrays and maps reach an interface from any expression
+			// (a function result, a variable), not only from a literal
+			if (!buildsValue(node) && !isCompositeType(t) && !isJsonValue(t))
+				continue;
+			if (this.spellable(t) && under(t)?.kind !== "interface")
+				found.set(this.key(t), t);
 		}
 		return [...found.values()];
 	}
@@ -1186,22 +1170,6 @@ export class JsonCodecGen extends TypeSpeller {
 	}
 }
 
-// Arrays and maps of these share one WebAssembly representation (and so one
-// type-switch case), so only literals may register them: a `[2]byte` conversion
-// must not shadow a `[2]int32` that is stored in an interface.  A slice of
-// them is tagged with its Go type in an interface and registers like any other.
-const SHARED_REPR = new Set([
-	"bool",
-	"int8",
-	"int16",
-	"int32",
-	"uint8",
-	"uint16",
-	"uint32",
-	"byte",
-	"rune",
-]);
-
 // A slice of booleans or small integers carries a tag of its Go type inside an
 // interface, so it never shadows another slice type in the type switch.
 const isTaggedSlice = (t) =>
@@ -1219,17 +1187,6 @@ export const isCompositeType = (t) => {
 		(isTaggedSlice(t) || !hasSharedRepr(t))
 	);
 };
-
-export function hasSharedRepr(t, depth = 0) {
-	if (!t || depth > 8) return false;
-	const u = under(t);
-	if (u?.kind === "basic") return SHARED_REPR.has(u.name);
-	if (u?.kind === "slice" || u?.kind === "array")
-		return hasSharedRepr(u.elem, depth + 1);
-	if (u?.kind === "map")
-		return hasSharedRepr(u.key, depth + 1) || hasSharedRepr(u.value, depth + 1);
-	return false;
-}
 
 // Func values are not JSON-encodable, and `case []func():` does not parse.
 export function holdsFunc(t, depth = 0) {
@@ -1340,7 +1297,7 @@ function selectCodecEntry(gen, fn, argType) {
 export function generateJsonCodecs(programs, checker, pkgName) {
 	const { sites, diagnostics } = findSites(programs);
 	if (sites.length + diagnostics.length === 0) return null;
-	const qualifiers = new Set();
+	const qualifiers = new Map();
 	const gen = new JsonCodecGen(checker, pkgName, qualifiers, programs);
 	const pending = [];
 	for (const { call, fn, program } of sites) {
@@ -1370,19 +1327,9 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 		sel._genEntry = entry;
 		if (isStream) sel._jsonStream = true;
 	}
-	const importPaths = new Map();
-	for (const p of programs)
-		for (const imp of p.imports ?? [])
-			for (const spec of imp.imports) {
-				const last = spec.path.split("/").pop();
-				importPaths.set(spec.alias ?? last, spec.path);
-			}
-	const imports = [...qualifiers]
-		.map((qn) => importPaths.get(qn))
-		.filter(Boolean);
 	return {
 		body: gen.body(),
-		imports: ["internal/jsonrt", ...imports],
+		imports: ["internal/jsonrt", ...importsFor(qualifiers)],
 		diagnostics,
 	};
 }

@@ -132,19 +132,19 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Done when: `grep -n overlay src/link/stdlib.js` matches nothing, the `import alias … is not supported` branch is gone, `GO_OVERLAID_PACKAGES` / `GO_MEMBER_PACKAGES` are deleted from `test/unit/helpers.js`, and `npm test` passes.
 
 ### Phase 2: Shared Import Qualification, Type Discovery & `compileSingleFile`
-- [ ] Task 2.1: Canonicalize import qualifiers in `TypeSpeller` and move `importsFor` to `src/lower/gen-types.js`
+- [x] Task 2.1: Canonicalize import qualifiers in `TypeSpeller` and move `importsFor` to `src/lower/gen-types.js`
   - Files: `src/lower/gen-types.js`, `src/lower/errors-as.js`, `src/link/stdlib.js`, `test/unit/compiler/stdlib-go.test.js`
   - Test: failing multi-file cases where `a.go` has `import sc "strconv"` and `var T *sc.NumError` and `main.go` calls `errors.As(err, &T)`, and the same with a third file declaring package-level `var strconv = 1`.
   - Done when: `TypeSpeller` spells canonical (or `_gf_<name>`-aliased) qualifiers, `checkGeneratedGo` emits aliased import specs, `errors-as.js` imports `importsFor` from `gen-types.js`, and both cases run on JS and WASM.
-- [ ] Task 2.2: Consolidate `importsFor`, `SHARED_REPR`, `hasSharedRepr`, `isEmptyIface` and `spellable` in `src/lower/gen-types.js`
+- [x] Task 2.2: Consolidate `importsFor`, `SHARED_REPR`, `hasSharedRepr`, `isEmptyIface` and `spellable` in `src/lower/gen-types.js`
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`, `src/lower/fmt-formatters.js`, `test/unit/builtins/json.test.js`
   - Test: failing cross-file `import t "time"` cases with static `json.Marshal(Make())` and dynamic `json.Marshal(any(Make()))` (`assertAllTargetsOutput`).
   - Done when: the helpers are exported once from `gen-types.js`, `json-codecs.js` and `fmt-formatters.js` hold no copies (no inline import map in `generateJsonCodecs`), and the cases pass.
-- [ ] Task 2.3: Unify closed-world type enumeration (`collectProgramTypes`) and delegate `compileSingleFile` to `compileFiles`
+- [x] Task 2.3: Unify closed-world type enumeration (`collectProgramTypes`) and delegate `compileSingleFile` to `compileFiles`
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`, `src/lower/fmt-formatters.js`, `src/compiler.js`, `test/unit/compiler/packages.test.js`
   - Test: failing `test/unit/compiler/packages.test.js` case calling `compileSingleFile` on one `.go` file using `json.Marshal`, `errors.As` and `fmt.Sprintf("%v", P{1})` and checking `runJs` output; existing `compileSingleFile` tests in `packages.test.js`, `optimize-build.test.js` and `targets.test.js` stay green.
   - Done when: `collectProgramTypes(programs, checker)` replaces `programTypes` in `json-codecs.js` and the operand-type enumeration in `fmt-formatters.js`, `compileSingleFile` is `dumpTokens`/`dumpAst` handling plus a `compileFiles` call that preserves the `outputDir` default, and the tests pass.
-- [ ] Task 2.4: User docs for aliased `encoding/json`, `RawMessage` methods and `json` function values
+- [x] Task 2.4: User docs for aliased `encoding/json`, `RawMessage` methods and `json` function values
   - Files: `docs/go-compatibility.md`, `docs/language-support.md`
   - Test: `npm run check` (doc fixture checks) and `test/unit/compiler/plan-paths.test.js`.
   - Done when: the `encoding/json` rows (`docs/go-compatibility.md:106`, `docs/language-support.md:140`) list `RawMessage.MarshalJSON`/`UnmarshalJSON`, say aliased imports work, and note that `Marshal`/`MarshalIndent`/`Unmarshal` must be called directly (not used as values).
