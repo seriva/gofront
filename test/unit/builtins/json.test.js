@@ -3235,6 +3235,19 @@ func main() {
 	}
 });
 
+section("encoding/json — reachability");
+
+test("json.Valid alone keeps the codec runtime out of the output", () => {
+	const { js, errors } = compile(`package main
+import "encoding/json"
+func main() {
+	_ = json.Valid(nil)
+}`);
+	assertEqual(errors.length, 0);
+	assert(!js.includes("UnmarshalTypeError"), "UnmarshalTypeError in output");
+	assert(!js.includes("EncodeBytes"), "EncodeBytes in output");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
