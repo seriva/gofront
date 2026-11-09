@@ -3104,6 +3104,76 @@ json: cannot unmarshal string into Go struct field S.P of type int
 	);
 });
 
+section("encoding/json — RawMessage methods and import alias");
+
+test("json.RawMessage MarshalJSON / UnmarshalJSON", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type W struct {
+	R json.RawMessage
+}
+
+func main() {
+	b, err := json.RawMessage("true").MarshalJSON()
+	fmt.Println(string(b), err)
+	b, err = json.RawMessage(nil).MarshalJSON()
+	fmt.Println(string(b), err)
+	var rm json.RawMessage
+	src := []byte("[1,2]")
+	err = (&rm).UnmarshalJSON(src)
+	src[1] = '9'
+	fmt.Println(string(rm), err)
+	err = (*json.RawMessage)(nil).UnmarshalJSON(src)
+	fmt.Println(err)
+	var w W
+	err = json.Unmarshal([]byte(\`{"R":{"a": 1}}\`), &w)
+	fmt.Println(string(w.R), err)
+	out, err := json.Marshal(w)
+	fmt.Println(string(out), err)
+}
+`,
+		`true <nil>
+null <nil>
+[1,2] <nil>
+json.RawMessage: UnmarshalJSON on nil pointer
+{"a": 1} <nil>
+{"R":{"a":1}} <nil>
+`,
+	);
+});
+
+test("json import alias", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"fmt"
+	myjson "encoding/json"
+)
+
+func main() {
+	b, err := myjson.Marshal(map[string]int{"a": 1})
+	fmt.Println(string(b), err)
+	var m map[string]int
+	err = myjson.Unmarshal(b, &m)
+	fmt.Println(m["a"], err)
+	fmt.Println(myjson.Valid(b), myjson.Valid([]byte("{")))
+	r := myjson.RawMessage("1")
+	fmt.Println(string(r))
+}
+`,
+		`{"a":1} <nil>
+1 <nil>
+true false
+1
+`,
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
