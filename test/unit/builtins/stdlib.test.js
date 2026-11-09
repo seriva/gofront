@@ -179,7 +179,8 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(js !== null);
-	assertContains(js, "__sprintf");
+	assertContains(js, "Printf$$fmt");
+	assertEqual(runJs(js), "count: 7");
 });
 
 test("fmt.Print compiles without error", () => {
@@ -188,7 +189,7 @@ func main() {
 	fmt.Print("hello %s", "world")
 }`);
 	assertEqual(errors.length, 0);
-	assertContains(js, "__sprintf");
+	assertContains(js, "Print$$fmt");
 });
 
 test("fmt.Printf compiles without error", () => {
@@ -197,7 +198,7 @@ func main() {
 	fmt.Printf("value: %d", 42)
 }`);
 	assertEqual(errors.length, 0);
-	assertContains(js, "__sprintf");
+	assertContains(js, "Printf$$fmt");
 });
 
 test("fmt.Sprintf %t for booleans", () => {
@@ -553,9 +554,7 @@ test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, tim
 	);
 	assert(
 		res.errors.some((e) =>
-			e.message?.includes(
-				"'time.AfterFunc' is not yet available in wasm packages",
-			),
+			e.message?.includes("'time.AfterFunc' is only available in js packages"),
 		),
 	);
 	res = compile(
@@ -564,7 +563,7 @@ test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, tim
 	);
 	assert(
 		res.errors.some((e) =>
-			e.message?.includes("'time.Timer' is not yet available in wasm packages"),
+			e.message?.includes("'time.Timer' is only available in js packages"),
 		),
 	);
 	res = compile(
@@ -573,7 +572,7 @@ test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, tim
 	);
 	assert(
 		res.errors.some((e) =>
-			e.message?.includes("'time.Sleep' is not yet available in wasm packages"),
+			e.message?.includes("'time.Sleep' is only available in js packages"),
 		),
 	);
 });
@@ -603,6 +602,7 @@ section("unicode package");
 
 test("unicode.IsLetter recognizes letters", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.IsLetter(65))
   println(unicode.IsLetter(49))
@@ -613,6 +613,7 @@ func main() {
 
 test("unicode.IsDigit recognizes digits", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.IsDigit(49))
   println(unicode.IsDigit(65))
@@ -623,6 +624,7 @@ func main() {
 
 test("unicode.ToUpper converts lowercase rune", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.ToUpper(97))
 }`);
@@ -632,6 +634,7 @@ func main() {
 
 test("unicode.ToLower converts uppercase rune", () => {
 	const { js, errors } = compile(`package main
+import "unicode"
 func main() {
   println(unicode.ToLower(65))
 }`);
@@ -645,6 +648,7 @@ section("os package");
 
 test("os.Getenv compiles without error", () => {
 	const { errors } = compile(`package main
+import "os"
 func main() {
   v := os.Getenv("HOME")
   println(v)
@@ -654,6 +658,7 @@ func main() {
 
 test("os.Exit compiles without error", () => {
 	const { errors } = compile(`package main
+import "os"
 func main() {
   os.Exit(0)
 }`);

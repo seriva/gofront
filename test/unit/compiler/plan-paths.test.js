@@ -23,18 +23,52 @@ const PLANS = [
 		exempt: [],
 	},
 	{
+		file: "plans/v1.9.0/compiler-shrinking-plan.md",
+		exempt: [
+			// Files the shrinking tasks deleted or moved, and line ranges cited
+			// as comma lists (which the extractor does not normalize).
+			"src/backend/js/stdlib/{binary,builder,json,math,fmt}.js",
+			"src/backend/wasm/stdlib/{fmt,packages}.js",
+			"src/backend/js/expressions.js:892-894,2082-2094,3255-3257",
+			"src/backend/js/index.js:625-628,953-964,1237-1239",
+			"src/backend/wasm/module-emitter.js:787-789,1589-1591",
+			"src/backend/wasm/stdlib/core.js:12-55,1514-1808",
+			"src/backend/wasm/stdlib/io.js:12-111,215-289,677-860",
+			"src/backend/wasm/types.js:58-67,491-493",
+			"stdlib/internal/jsonrt/decode.go:33-53,234-345",
+			"stdlib/internal/jsonrt/{decode,encode}.go",
+			"src/link/reachability.js",
+			"src/lower/stdlib-refs.js",
+			"test/unit/stdlib/{encodings-crypto,math-bits-rand,strings-bytes}.test.js",
+		],
+	},
+	{
+		file: "plans/v1.9.0/overlays-to-go-plan.md",
+		exempt: [
+			// The Go sources, generator and tests the plan's tasks add.
+			"src/lower/stdlib-refs.js",
+			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom,testing,fmt}.js",
+			"src/backend/js/fmt-runtime.js",
+			"src/backend/wasm/stdlib/pure.js",
+			"src/backend/shared/errorf.js",
+		],
+	},
+	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			// Files that completed tasks removed (their "Removes" lines still cite them).
-			"src/backend/js/stdlib/{slices,sort}.js",
+			"src/backend/js/stdlib/{slices,sort,time}.js",
 			"stdlib/slices/{extra,iter}.go",
 			"src/backend/js/stdlib/maps.js",
+			"src/backend/js/fmt-runtime.js",
 			"stdlib/maps/iter.go",
 			"stdlib/errors/overlay.go",
 			"src/backend/js/stdlib/{html,path}.js",
 			"src/backend/js/stdlib/utf8.js",
+			"src/backend/js/stdlib/errors.js",
+			"src/backend/wasm/stdlib/pure.js",
 			"stdlib/unicode/utf8/bytes.go",
 			"src/backend/js/stdlib/io.js",
 			"stdlib/bytes/{iter,search,split}.go",

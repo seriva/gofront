@@ -59,7 +59,7 @@ order = 7
 
 [[layers]]
 name  = "stdlib-high"
-paths = ["stdlib/encoding/json/**", "stdlib/encoding/binary/**"]
+paths = ["stdlib/encoding/json/**", "stdlib/encoding/binary/**", "stdlib/testing/**"]
 order = 9
 
 [[layers]]
@@ -69,10 +69,10 @@ order = 10
 
 [[layers]]
 name  = "stdlib-mid"
-paths = ["stdlib/io/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*"]
+paths = ["stdlib/io/**", "stdlib/os/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/fmt/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*", "stdlib/regexp/**", "stdlib/context/**"]
 order = 11
 
 [[layers]]
 name  = "stdlib-leaf"
-paths = ["stdlib/cmp/**", "stdlib/errors/**", "stdlib/html/**", "stdlib/iter/**", "stdlib/math/bits/**", "stdlib/math/rand/**", "stdlib/sync/**", "stdlib/time/**", "stdlib/unicode/**"]
+paths = ["stdlib/cmp/**", "stdlib/errors/**", "stdlib/gom/**", "stdlib/internal/fmtrt/*", "stdlib/html/**", "stdlib/iter/**", "stdlib/math/bits/**", "stdlib/math/rand/**", "stdlib/sync/**", "stdlib/time/**", "stdlib/unicode/**"]
 order = 12

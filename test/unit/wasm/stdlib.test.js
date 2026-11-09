@@ -9,7 +9,6 @@ import {
 	assertThrows,
 	compileHybrid,
 	compileHybridProject,
-	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -625,10 +624,7 @@ test("slices.SortFunc & SortStableFunc & Reverse on nil slices", () => {
 	const src = `
 package main
 
-import (
-	"fmt"
-	"slices"
-)
+import "slices"
 
 func Main() string {
 	var s1 []int
@@ -1985,24 +1981,6 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "3-x-1");
 	assertEqual(jsRes, "3-x-1");
-});
-
-test("a stdlib member that cannot be a value names itself in the error", () => {
-	assertThrows(
-		() =>
-			compileWasm(`
-package main
-
-import "regexp"
-
-func Main() int {
-	f := regexp.QuoteMeta
-	_ = f
-	return 1
-}
-`),
-		"regexp.QuoteMeta cannot be used as a value",
-	);
 });
 
 section("WASM stdlib — native call sites");

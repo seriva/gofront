@@ -3,9 +3,11 @@
 // the expected text is what go1.26 prints.
 
 import {
+	assert,
 	assertEqual,
 	assertWasmProgramOutput,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	instantiateWasm,
 	section,
@@ -278,6 +280,16 @@ test("a pointer to a scalar formats with a stable id per target", () => {
 	);
 });
 
+test("the same scalar pointer printed twice has one id", () => {
+	assertEqual(
+		out(`x := 5
+	p := &x
+	fmt.Println(p, p)
+	fmt.Println(fmt.Sprint(p, &x))`),
+		"0x1 0x1\n0x1 0x1",
+	);
+});
+
 test("func values print as an address-style value, nil as <nil>", () => {
 	assertEqual(out(`fmt.Println(func() {})`), "0x1");
 	assertEqual(
@@ -302,8 +314,6 @@ type L struct{ S string; N int }`,
 		"map[{1}:3 {2}:2]\nmap[{a 2}:4 {a 9}:3 {b 1}:2]",
 	);
 });
-
-summarize();
 
 test("fmt prints a struct whose field has a named slice or array type", () => {
 	const src = `
@@ -529,3 +539,62 @@ test("a struct with a slice of any or an uint64 field printed with an any field"
 	);
 	assertEqual(o, "{[1 b] 5 9}");
 });
+
+section("fmt: types of another package held in an any");
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a struct built in a package without fmt prints through an any (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}
+package lib
+
+type Inner struct{ N int }
+
+type T struct {
+	A     int
+	b     string
+	Inner Inner
+	P     *Inner
+}
+
+func New() T { return T{1, "x", Inner{2}, nil} }
+func NewPtr() *T { return &T{3, "y", Inner{4}, nil} }
+`,
+			"main.go": `//gofront:target ${target}
+package main
+import ("fmt"; "./lib")
+func main() {
+	var a any = lib.New()
+	fmt.Println(a, any(lib.NewPtr()))
+	fmt.Println([]any{lib.New()})
+}
+`,
+		});
+		assertEqual(
+			lines.join("\n"),
+			"{1 x {2} <nil>} &{3 y {4} <nil>}\n[{1 x {2} <nil>}]",
+		);
+	});
+}
+
+test("a wasm package that uses encoding/json and testing.T builds a valid module", () => {
+	const { wasm, errors } = compileWasm(
+		`package main
+import (
+	"encoding/json"
+	"testing"
+)
+type C struct{ N int }
+func load(s string, t *testing.T) error {
+	var c C
+	return json.Unmarshal([]byte(s), &c)
+}
+func Main() int { return 1 }
+`,
+		{ exportAll: false },
+	);
+	assertEqual(errors?.length ?? 0, 0);
+	assert(WebAssembly.validate(wasm), "invalid wasm module");
+});
+
+summarize();

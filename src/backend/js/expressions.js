@@ -225,15 +225,6 @@ function splitLastAccess(js) {
 
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
-	rand: {
-		Reader: "__crypto_rand_reader",
-	},
-	os: {
-		Args: "process.argv",
-		Stdout: "__os_stdout",
-		Stderr: "__os_stderr",
-		Stdin: "__os_stdin",
-	},
 	time: {
 		Nanosecond: "1n",
 		Microsecond: "1000n",
@@ -612,17 +603,6 @@ export const expressionGenMethods = {
 				}
 			}
 		}
-		if (expr._ifaceSrc && !expr._fmtDescing && !this._isNamedBoxKind(expr)) {
-			const desc = this._fmtDesc(expr._ifaceSrc);
-			if (desc) {
-				expr._fmtDescing = true;
-				try {
-					return this._fmtDescWrap(this.genExpr(expr), desc);
-				} finally {
-					expr._fmtDescing = false;
-				}
-			}
-		}
 		if (expr._ifaceBox && !expr._ifaceBoxing && !this._isNamedBoxKind(expr)) {
 			expr._ifaceBoxing = true;
 			try {
@@ -631,6 +611,7 @@ export const expressionGenMethods = {
 					this.genExpr(expr),
 					expr._ifaceBox,
 					expr._ifacePtrFields,
+					expr.kind === "CompositeLit",
 				);
 				return this._typedNilWrap(boxed, expr);
 			} finally {
@@ -724,7 +705,9 @@ export const expressionGenMethods = {
 	},
 
 	// `js` boxed as `box` (a checker _ifaceBoxMeta kind) for an interface.
-	_ifaceBoxWrap(js, box, ptrFields) {
+	// `fresh` marks a value nothing else refers to (a composite literal), which
+	// a struct box then takes over instead of copying.
+	_ifaceBoxWrap(js, box, ptrFields, fresh = false) {
 		this.useHelper("ifaceBox");
 		const fn =
 			{
@@ -734,8 +717,10 @@ export const expressionGenMethods = {
 				map: "__ifm",
 				slice: "__ifs",
 			}[box] ?? "__ifv";
-		const extra = ptrFields?.length ? `, ${JSON.stringify(ptrFields)}` : "";
-		return `${fn}(${js}${extra})`;
+		const fields = ptrFields?.length ? JSON.stringify(ptrFields) : "";
+		if (fn === "__ifv" && fresh)
+			return `${fn}(${js}, ${fields || "null"}, true)`;
+		return `${fn}(${js}${fields ? `, ${fields}` : ""})`;
 	},
 
 	// A nil `*T` entering an interface is a typed nil: it keeps T's methods
@@ -748,12 +733,6 @@ export const expressionGenMethods = {
 		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
 		if (!this.structNames.has(cls)) return js;
 		return `__ifn(${js}, ${cls})`;
-	},
-
-	// `js` tagged with the fmt descriptor source `desc` (see _fmtDesc).
-	_fmtDescWrap(js, desc) {
-		this.useHelper("ifd");
-		return `__ifd(${js}, ${desc})`;
 	},
 
 	_isNamedBoxKind(expr) {
@@ -1136,11 +1115,6 @@ export const expressionGenMethods = {
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) {
-				if (expr.expr.name === "rand" && expr.field === "Reader") {
-					this.useHelper("cryptoRand");
-				} else if (expr.expr.name === "os") {
-					this.useHelper("os");
-				}
 				return nsConst;
 			}
 		}
@@ -1351,10 +1325,21 @@ export const expressionGenMethods = {
 		return expr.args.map((a, i) =>
 			a._spread
 				? this._genSpreadArg(expr, a)
-				: this._callerCopiesArg(expr, i)
-					? this.genValueExpr(a)
-					: this.genExpr(a),
+				: a._boxTypeParam
+					? this._genTypeParamBox(a)
+					: this._callerCopiesArg(expr, i)
+						? this.genValueExpr(a)
+						: this.genExpr(a),
 		);
+	},
+
+	// A type parameter operand of a Print-family fmt call (see
+	// src/lower/fmt-formatters.js): a JS value does not know its Go type, so
+	// the type argument boxes it as converting it to an `any` does.
+	_genTypeParamBox(a) {
+		const js = this.genExpr(a);
+		const tpf = this._typeParamZeroFactory(a._type.name);
+		return tpf ? `(${tpf}.b ?? ${tpf}.fb ?? ((__v) => __v))(${js})` : js;
 	},
 
 	// A direct call of a `//gofront:native` function: host code from the
@@ -1374,6 +1359,9 @@ export const expressionGenMethods = {
 	// marker (its prologue unwraps it); other callees get a JS spread.
 	_genSpreadArg(call, arg) {
 		const js = this.genExpr(arg);
+		// A variadic function of a Go-source package (`fmt.Println`): a nil
+		// slice spreads to no operands.
+		if (call.func._stdName) return `...(${js} ?? [])`;
 		return this._calleeIsGoVariadic(call) ? `{ __sp: ${js} }` : `...${js}`;
 	},
 
@@ -1780,13 +1768,13 @@ export const expressionGenMethods = {
 	// (see src/lower/json-codecs.js); a stream method takes its receiver first.
 	_jsonEntryCall(expr) {
 		const sel = expr.func;
-		const func = { kind: "Ident", name: sel._jsonGen, _type: sel._type };
+		const func = { kind: "Ident", name: sel._genEntry, _type: sel._type };
 		const args = sel._jsonStream ? [sel.expr, ...expr.args] : expr.args;
 		return { ...expr, func, args };
 	},
 
 	genCall(expr) {
-		if (expr.func._jsonGen) return this.genCall(this._jsonEntryCall(expr));
+		if (expr.func._genEntry) return this.genCall(this._jsonEntryCall(expr));
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
 
 		const native = this._genNativeCall(expr);
@@ -1893,22 +1881,6 @@ export const expressionGenMethods = {
 	},
 
 	_genReceiverTypeCall(recvName, expr) {
-		if (recvName === "regexp.Regexp")
-			return this._genRegexpMethodCall(expr.func.field, expr);
-		if (recvName === "time.Timer") {
-			const recv = this.genExpr(expr.func.expr);
-			if (expr.func.field === "Stop")
-				return `(${recv} ? ${recv}.Stop() : false)`;
-			if (expr.func.field === "Reset")
-				return `(${recv} ? ${recv}.Reset(${this.genExpr(expr.args[0])}) : false)`;
-		}
-		if (
-			recvName === "testing.T" ||
-			recvName === "testing.B" ||
-			recvName === "testing.M" ||
-			recvName === "testing.TB"
-		)
-			return this._genTestingMethodCall(expr.func.field, expr);
 		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
@@ -2111,8 +2083,13 @@ export const expressionGenMethods = {
 					(sliceType.kind === "named" ? sliceType.underlying : sliceType).elem,
 				)
 			: null;
-		if (typedCtor)
+		if (typedCtor) {
+			const single = expr.args.length === 2 && expr.args[1]._spread;
+			// One source slice or string: append it as it is, not spread.
+			if (single)
+				return `__appendv((${slice}) ?? __tn(${typedCtor}), ${this._genSliceSource(expr.args[1])} ?? [])`;
 			return `__append((${slice}) ?? __tn(${typedCtor}), ${elems.join(", ")})`;
+		}
 		// A json codec grows a slice it has just made and no one else holds:
 		// pushing in place is O(1), where __append copies the whole slice.
 		if (
@@ -3318,8 +3295,10 @@ export const expressionGenMethods = {
 		}
 		if (base?.kind === "slice") {
 			const elem = base.elem?.name;
-			if (elem === "byte" || elem === "uint8")
-				return `new TextDecoder().decode(new Uint8Array(${inner}))`;
+			if (elem === "byte" || elem === "uint8") {
+				this.useHelper("u8dec");
+				return `__u8dec(${inner})`;
+			}
 			if (elem === "rune" || elem === "int" || elem === "int32") {
 				this.useHelper("runestr");
 				return `Array.from(${inner}, c => __rstr(c)).join("")`;

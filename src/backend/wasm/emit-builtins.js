@@ -16,7 +16,6 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
-	isTestingT,
 	printOperandKind,
 	toWasmType,
 } from "./types.js";
@@ -41,7 +40,6 @@ export class BuiltinsEmitter {
 		}
 		const msgTmp = this.acquireTemp("externref");
 		this.pushInstruction({ op: "local.tee", index: msgTmp });
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
@@ -1092,10 +1090,6 @@ export class BuiltinsEmitter {
 	_emitPackageCall(call, targetWasmType) {
 		const { func, args } = call;
 		if (func.kind !== "SelectorExpr") return false;
-		if (isTestingT(func.expr?._type)) {
-			this.emitTestingCall(func, args);
-			return true;
-		}
 		if (
 			func.expr?.name &&
 			(this.resolveLocal(func.expr.name) ||
@@ -1104,24 +1098,8 @@ export class BuiltinsEmitter {
 			return false;
 		const pkgName = func.expr?.name;
 		switch (pkgName) {
-			case "fmt":
-				if (func.field.startsWith("Fprint")) {
-					this.emitFprintCall(func.field, call, targetWasmType);
-					return true;
-				}
-				this.emitFmtCall(func.field, args);
-				return true;
-			case "errors":
-				this.emitErrorsCall(func.field, args);
-				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);
-				return true;
-			case "unicode":
-				this.emitUnicodeCall(func.field, args, targetWasmType);
-				return true;
-			case "rand":
-				this.emitRandCall(func.field, args, targetWasmType);
 				return true;
 			case "simd":
 				this.emitSimdPackageCall(func.field, args, targetWasmType);
@@ -1310,6 +1288,12 @@ export class BuiltinsEmitter {
 			if (targetFuncIdx !== null) {
 				const paramTypes = this.mod.getFuncParamTypes(func.name);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(func.name);
+				if (call._multiForward) {
+					// `f(g())`: g's results are f's arguments as they come.
+					this.emitExpr(args[0], null);
+					this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
+					return true;
+				}
 				for (let i = 0; i < args.length; i++) {
 					const arg = args[i];
 					const pType = paramTypes[i] ?? null;

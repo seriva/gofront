@@ -391,8 +391,8 @@ func main() {
 	fmt.Println(strings.Trim("¡¡¡Hello, Gophers!!!", "!¡"), strings.TrimLeft("xxhixx", "x"), strings.TrimRight("xxhixx", "x"), "["+strings.Trim("abc", "")+"]", "["+strings.Trim("", "x")+"]", "["+strings.Trim("xxx", "x")+"]")
 	fmt.Println(strings.Trim("😀x😀", "😀"), strings.TrimLeft("😀😀x", "😀"), strings.TrimRight("x😀😀", "😀a"))
 	fmt.Println(strings.TrimPrefix("¡¡¡Hello, Gophers!!!", "¡¡¡Hello, "), strings.TrimSuffix("a.go", ".go"), strings.TrimPrefix("abc", ""), strings.TrimSuffix("abc", ""), strings.TrimSuffix("abc", "bc"), strings.TrimPrefix("abc", "x"))
-	digit := func(r rune) bool { return unicode.IsDigit(int(r)) }
-	letter := func(r rune) bool { return unicode.IsLetter(int(r)) }
+	digit := func(r rune) bool { return unicode.IsDigit(r) }
+	letter := func(r rune) bool { return unicode.IsLetter(r) }
 	fmt.Println(strings.TrimFunc("123abc456", digit), strings.TrimLeftFunc("123abc456", digit), strings.TrimRightFunc("123abc456", digit), "["+strings.TrimFunc("123", digit)+"]")
 	fmt.Println(strings.IndexFunc("Hello, world", unicode.IsUpper2), strings.IndexFunc("123", letter), strings.LastIndexFunc("go 123", letter), strings.LastIndexFunc("", letter), strings.ContainsFunc("a1", digit))
 	fmt.Println(strings.Map(func(r rune) rune {
@@ -410,7 +410,7 @@ func main() {
 }
 `.replace(
 			"unicode.IsUpper2",
-			"func(r rune) bool { return unicode.IsUpper(int(r)) }",
+			"func(r rune) bool { return unicode.IsUpper(r) }",
 		),
 		`GOPHER gopher HÉLLO ✓ àé 
 LOUD NOISES ǅ ǅ

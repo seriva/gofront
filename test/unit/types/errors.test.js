@@ -560,7 +560,6 @@ func main() {
 
 test("type assertion fails for non-matching error type", () => {
 	const { js, errors } = compile(`package main
-import "errors"
 type ErrA struct {}
 func (e ErrA) Error() string { return "a" }
 type ErrB struct {}

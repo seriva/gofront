@@ -1,7 +1,7 @@
 # Stdlib Overlays to Go — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Planned  
+**Status:** Completed (2026-11-09)  
 **Base branch:** `main`  
 **Related:** [`compiler-shrinking-plan.md`](compiler-shrinking-plan.md) (prerequisite: its Phase 4 makes per-package generated Go run on every target), [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md), [`../v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md)  
 **Release note:** `fmt`, `testing`, `os`, `unicode`, `regexp`, `crypto/rand`, the timer half of `time` and the `gom` DOM builders now compile from Go source, so WebAssembly packages format values and run their tests inside the module instead of calling back into JavaScript. `errors.As` honours custom `As` methods on both targets, `os.File.WriteString` reports byte counts, and importing a JavaScript-only package such as `regexp` from a WebAssembly package reports a clear error instead of crashing the compiler.
@@ -51,6 +51,7 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 | **Generated-style `errors.As` works on both backends today** | A hand-written copy of the §B generated functions passes four-way for every target shape: `**NotFound` (plain chain, `errors.Join` tree, and via a custom `As(any) bool` that asserts `target.(**NotFound)` and assigns through it), interface target `*Temp`, `*error`, and named scalar `*Code`. Pointer pointees are already boxed (`isReplaceableRef` includes `pointer`, `src/backend/wasm/types.js:497-508`) and `_emitDerefAssign` (`src/backend/wasm/emit-stmts.js:1014`) stores through interface and pointer boxes; no backend change is needed for Task 1.2. | Probe P16 (`assertFourWay`): output `true k / true via-As / true j / true true / true plain / true 7` on all four ways. |
 | **JS `any` loses numeric kind and pointer-receiver method sets** | On the JS backend an unnamed numeric value stored in `any` is a raw JS `number` (or `BigInt` for 64-bit kinds), so a Go `switch v.(type)` reports `int` for `float64(1e6)`, `3.0`, `float32(2)`, `int8(1)` and `uint8(1)`; and `v.(fmt.Stringer)` is `true` for a struct *value* whose `String()` has a pointer receiver. Today's JS `fmt` compensates at the call site, where static types are known: `_fmtArgJs` wraps operands with `__ft(value, descriptor)` (`src/backend/js/stdlib/fmt.js:241-357`, descriptors from `src/backend/shared/fmt-types.js`) and `_genFmtClassMeta` emits `__pr` pointer-receiver lists that `__sprintf` consults (`fmt.js:154-199`, `runtime.js:900-906`; asserted by `test/unit/builtins/fmt-stringer.test.js:271`). A Go-source `fmt` receiving `...any` would lose that information on JS unless the compiler supplies it per call site. WASM boxes every kind separately (`ifaceBoxTypes`) and is unaffected. | Probe P17 (`assertFourWay`): `kind(any(1000000)), kind(any(float64(1e6))), kind(any(3.0)), kind(any(float32(2))), kind(any(int8(1))), kind(any(uint8(1)))` → JS `int int int int int int` (Go: `int float64 float64 float32 int8 uint8`); `isStringer(Counter{5}), isStringer(&c)` with `func (*Counter) String()` → JS `true true` (Go: `false true`). Also `fmt-stringer.test.js:217` ("struct fields: exported use String, unexported do not") encodes Go's rule that unexported struct fields skip `Stringer`/`GoStringer` but still print `error` values. |
 | **Dead code that falls with `fmt`** | `src/backend/shared/errorf.js` (43 lines, `%w` index scanning) is imported only by `js/stdlib/fmt.js` and `wasm/stdlib/core.js`; `src/backend/shared/fmt-types.js` (299) is imported by `js/type-info.js` (descriptors) and `wasm/monomorph.js` (`goTypeName` only). The WASM synthetic error helpers (`ERROR_STRUCT`/`__mk_error`/`__mk_wrap_errors`/`__error_str`, `hasErrorType`) are referenced from `index.js`, `module-emitter.js`, `emit-builtins.js`, `core.js`, `io.js`, `types.js`, `prescan.js`; part of that serves `Errorf`/`errors` emitters, part serves panic/recover and host-error conversion (`boundary.js:2092-2096`) and must stay. | `grep -rn "errorf.js\|fmt-types.js" src` → 4 imports; `grep -rln "ERROR_STRUCT\|__mk_error\|hasErrorType" src/backend/wasm` → 7 files. |
+| **`fmt` performance baseline** | `test/perf/fmt-bench.js` (100k mixed `Sprintf`: `%d %s %v` struct `%q %.2f` Stringer, timed in-program, best of 5) on the hand-written engines measures **JS ≈ 770 ms, WASM ≈ 1,160 ms**; the committed gate baselines are 790 / 1,200 ms (measured + ~3% noise margin). Phase 5 sets JS ≤ 2.0× / WASM ≤ 1.0× of these. | `node test/perf/fmt-bench.js` |
 
 ---
 
@@ -162,125 +163,133 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 
 ### Phase 1: Generated-Go spine & `errors.As`
 
-- [ ] Task 1.1: Generalise the generated-file hook and register the plan with the path guard
-  - Files: `src/link/stdlib.js`, `src/lower/stdlib-refs.js`, `test/unit/compiler/plan-paths.test.js`
+- [x] Task 1.1: Generalise the generated-file hook and register the plan with the path guard
+  - Files: `src/link/stdlib.js`, `src/link/wasm.js`, `src/lower/gen-types.js`, `src/lower/json-codecs.js`, `test/unit/compiler/plan-paths.test.js`
   - Test: `test/unit/compiler/link.test.js` (generated file named `gofront_gen.go`, json fragments unchanged, `_genEntry` rewrite of a selector into an `Ident` call), `test/unit/compiler/plan-paths.test.js` (this plan and `compiler-shrinking-plan.md` listed in `PLANS` with their created/deleted paths as exemptions)
   - Done when: `checkGeneratedGo` accepts a generator list, `test/unit/builtins/json.test.js` and `test/unit/wasm/json.test.js` pass unchanged, and `plan-paths.test.js` guards both v1.9.0 plans.
-- [ ] Task 1.2: Generate `errors.As` per target type
+- [x] Task 1.2: Generate `errors.As` per target type
   - Files: `src/lower/errors-as.js`, `src/link/stdlib.js`, `stdlib/errors/errors.go`
   - Test: `test/unit/stdlib/errors.test.js` (new four-way cases: custom `As` method, interface target, struct-value target, typed-nil, `Join` tree, nil target panic, non-pointer target compile error)
   - Done when: every `errors.As` call site is rewritten to `gfe_<pkg>_as_<n>`, the P16 program (all six target shapes) and the custom-`As` probe print their Go output on all four ways, and `flatten` is gone from `errors.go`.
-- [ ] Task 1.3: Delete the `errors.As` emitters, runtime helper and overlay
+- [x] Task 1.3: Delete the `errors.As` emitters, runtime helper and overlay
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/js/stdlib/errors.js` (delete), `src/backend/js/runtime.js`, `src/backend/js/stdlib/index.js`, `src/backend/wasm/emit-builtins.js`, `src/typechecker/stdlib/core.js`, `src/typechecker/types.js`, `src/lower/reachability.js`
   - Test: `test/unit/stdlib/errors.test.js`, `test/unit/wasm/stdlib.test.js`, `test/unit/compiler/semantics.test.js`
   - Done when: `_emitErrorsAs*`, `_errorsAs*`, `emitErrorsCall`, `HELPER_ERROR_AS` and the `errors` overlay are deleted (≈ 370 lines), `errors` is absent from `STDLIB_PACKAGES`/`WASM_STDLIB_MEMBERS`, and `npm test` passes.
 
 ### Phase 2: `os`, `unicode`, `crypto/rand` in Go source
 
-- [ ] Task 2.1: `stdlib/os/os.go` with `os_*` intrinsics
+- [x] Task 2.1: `stdlib/os/os.go` with `os_*` intrinsics
   - Files: `stdlib/os/os.go`, `src/typechecker/types.js`, `src/backend/js/index.js`, `src/backend/wasm/natives.js`, `src/backend/wasm/boundary.js`
   - Test: `test/unit/stdlib/io.test.js` (new `os` section: `WriteString("é\n") == 3`, `Write` bytes, `io.Writer` dispatch, `Stderr`, `Read` → `io.EOF`, `Getenv`/`Setenv` round trip)
   - Done when: `os_write`, `os_exit`, `os_getenv`, `os_setenv` have one JS body and one WASM entry each and the new section passes four-way.
-- [ ] Task 2.2: Delete the `os` overlay, JS/WASM emitters and `fmt_print_raw` fast paths
+- [x] Task 2.2: Delete the `os` overlay, JS/WASM emitters and `fmt_print_raw` fast paths
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/os.js` (delete), `src/backend/js/runtime.js`, `src/backend/wasm/stdlib/io.js`, `src/backend/js/stdlib/fmt.js`, `src/backend/wasm/module-emitter.js`
   - Test: `test/unit/stdlib/io.test.js`, `test/unit/builtins/fmt-verbs.test.js` (`Fprint*` to `os.Stdout`/`os.Stderr`), `test/unit/compiler/targets.test.js`
   - Done when: `HELPER_OS`, `emitOsConst`, `_emitHelperOsFile*`, the os branch of `_emitWriterWrite` and `_genStdoutWrite` are deleted, `os` leaves `WASM_STDLIB_MEMBERS`, and `fmt.Println` output is byte-identical on all targets.
-- [ ] Task 2.3: `unicode` predicates in Go with three intrinsics
+- [x] Task 2.3: `unicode` predicates in Go with three intrinsics
   - Files: `stdlib/unicode/unicode.go`, `src/backend/js/index.js`, `src/backend/wasm/natives.js`, `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/unicode.js` (delete), `src/backend/wasm/stdlib/pure.js`, `src/backend/wasm/module-emitter.js`
   - Test: `test/unit/stdlib/unicode.test.js` (new: ASCII and non-ASCII for all 11 members, `IsNumber` still excluded), `test/unit/builtins/stdlib.test.js`, `test/unit/wasm/stdlib.test.js`
   - Done when: the eleven members are Go source, the ten `unicode_*` imports are replaced by `unicode_is`/`unicode_to_upper`/`unicode_to_lower`, and `unicode` has no overlay.
-- [ ] Task 2.4: `crypto/rand.Read` in Go and delete `pure.js`
+- [x] Task 2.4: `crypto/rand.Read` in Go and delete `pure.js`
   - Files: `stdlib/crypto/rand/rand.go`, `src/backend/wasm/stdlib/pure.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/js/stdlib/cryptorand.js` (delete), `src/backend/js/runtime.js`, `src/typechecker/stdlib/extended.js`
   - Test: `test/unit/stdlib/rand.test.js` (`Read` length/err, short buffers, zero length), `test/unit/wasm/stdlib.test.js`
   - Done when: `crypto_rand_u32` is the only host entry, `HELPER_CRYPTO_RAND` and the `rand` overlay are deleted, and `pure.js` no longer exists.
 
 ### Phase 3: JS-only stdlib: loader targets, `time`, `regexp`, `gom`
 
-- [ ] Task 3.1: Target-aware stdlib file loading and diagnostics
+- [x] Task 3.1: Target-aware stdlib file loading and diagnostics
   - Files: `src/link/stdlib.js`, `src/typechecker/types.js`, `src/typechecker/index.js`
   - Test: `test/unit/compiler/stdlib-go.test.js` (fixture package via `stdlibRoot` with `both` + `js` files: js importer sees all, wasm importer gets `'X.Sleepish' is only available in js packages`; all-js package → `package 'X' is only available in js packages`), `test/unit/compiler/targets.test.js`
   - Done when: `parseStdlibFiles` honours per-file `//gofront:target`, `checkStdlibPrograms` checks with the importer's target, and `WASM_SUPPORTED_STDLIB` lists no Go-source package.
-- [ ] Task 3.2: `time.Sleep`, `AfterFunc`, `Timer` as a `js` file of `stdlib/time`
+- [x] Task 3.2: `time.Sleep`, `AfterFunc`, `Timer` as a `js` file of `stdlib/time`
   - Files: `stdlib/time/sleep_js.go`, `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/time.js` (delete), `src/backend/js/runtime.js`, `src/backend/js/index.js`
   - Test: `test/unit/stdlib/time.test.js` (`Sleep` ordering with `await`, `AfterFunc` fires/`Stop` cancels/`Reset` reschedules via fake timers in `runJs`), `test/unit/compiler/targets.test.js` (wasm → only-available-in-js text)
   - Done when: the `time` overlay, `time.js` and `HELPER_TIMER` are deleted and `time_sleep` is an async intrinsic with a JS body only.
-- [ ] Task 3.3: `stdlib/regexp` as a `js` package
+- [x] Task 3.3: `stdlib/regexp` as a `js` package
   - Files: `stdlib/regexp/regexp.go`, `src/typechecker/stdlib/extended.js`, `src/backend/js/stdlib/regexp.js` (delete), `src/backend/js/stdlib/index.js`, `src/backend/wasm/emit-exprs.js`
   - Test: `test/unit/stdlib/regexp.test.js` (new: every member, `$1` replacement, `Split` limits, `FindAllString(-1)`), `test/unit/compiler/targets.test.js` (wasm import → diagnostic, no throw)
   - Done when: `regexp` has no overlay, the P8 crash is a diagnostic, and `test/unit/builtins/stdlib.test.js` regexp cases pass unchanged.
-- [ ] Task 3.4: `stdlib/gom` as a `js` package with resolver auto-import
+- [x] Task 3.4: `stdlib/gom` as a `js` package with resolver auto-import
   - Files: `stdlib/gom/gom.go`, `src/link/stdlib.js`, `src/typechecker/stdlib/extended.js`, `src/backend/js/stdlib/gom.js` (delete), `src/backend/js/stdlib/index.js`, `src/compiler.js`, `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/gom.test.js` (31, unchanged: `Map` over `[]string` and `[]int`), `test/unit/compiler/templ.test.js` (67, unchanged: `ref="key"` populates `___refs` through `gom.Mount(sel, node, refs)`), `test/unit/compiler/targets.test.js` (`both` → `package 'gom' is not available in wasm packages`)
   - Done when: `gom.js` and the `gom` overlay are deleted, `Node.Mount(parent any, refs any)` and generic `Map[T]` are as specified in §D, a `js` program using `gom.` without an import compiles, `.templ` components type as `gom.Node`, and `npm run test:e2e` passes for `example/templ` and `example/gom`.
 
 ### Phase 4: `fmt` in Go — printer, `%v` family and generated formatters
 
-- [ ] Task 4.1: Record the `fmt` baseline and add the bench
+- [x] Task 4.1: Record the `fmt` baseline and add the bench
   - Files: `test/perf/fmt-bench.js`, `package.json`
   - Test: `node test/perf/fmt-bench.js` prints JS and WASM ms for the 100k-call corpus and fails above the configured thresholds (initially its own baseline × 1.0)
   - Done when: the bench runs on today's emitters and the plan's `Verified Gaps` row for `fmt` performance is appended with the measured numbers.
-- [ ] Task 4.2: `stdlib/fmt` printer core, `internal/fmtrt`, and the `Print`/`Sprint`/`Fprint`/`Append` members
+- [x] Task 4.2: `stdlib/fmt` printer core, `internal/fmtrt`, and the `Print`/`Sprint`/`Fprint`/`Append` members
   - Files: `stdlib/fmt/print.go`, `stdlib/fmt/format.go`, `stdlib/internal/fmtrt/fmtrt.go`, `src/typechecker/stdlib/core.js`
   - Test: `test/unit/builtins/fmt-stringer.test.js` (Stringer/error/GoStringer dispatch at depth 0 and in containers), `test/unit/stdlib/fmt.test.js`
   - Done when: `Sprint`, `Sprintln`, `Print`, `Println`, `Fprint`, `Fprintln`, `Append`, `Appendln`, `Stringer`, `GoStringer` are Go source (overlay rows removed), `fmtrt.Arg`/`Printer`/`Register` exist, basic kinds/complex/`[]byte`/`error`/`Stringer` format as Go, and `Print*` write through `os.Stdout`.
-- [ ] Task 4.3: Call-site wrappers, per-type formatters, the registered switch and `%p`
+- [x] Task 4.3: Call-site wrappers, per-type formatters, the registered switch and `%p`
   - Files: `src/lower/fmt-formatters.js`, `src/link/stdlib.js`, `src/backend/js/index.js`, `src/backend/wasm/natives.js`
   - Test: `test/unit/wasm/fmt-any.test.js` (`%v` of structs, nested structs, pointers, slices, arrays, maps, nil boxes via `any`; cross-package struct printed via `any`), `test/unit/builtins/fmt-stringer.test.js` (package-level `var s = fmt.Sprint(P{1})`; `[]Celsius` elements; pointer-receiver `String` on a value vs pointer, P17b; exported vs unexported field dispatch), `test/unit/builtins/fmt-verbs.test.js` (`%T`/`%v` of `3.0`, `float32`, `int8`, `uint8`, `uint64` static operands, P17a), `test/unit/compiler/optimize-build.test.js` (a program printing only strings/ints/Stringers emits no `gff_` symbol)
   - Done when: call sites with statically typed operands are redirected to `gff_<pkg>_<fn>_<sig>` wrappers passing `fmtrt.Arg`, packages that pass the gate register `gff_<pkg>_value`/`gff_<pkg>_type` through `fmtrt.Register` and others get no registry root, `fmt_ptr_id` is an intrinsic on both backends, and the listed cases pass four-way.
-- [ ] Task 4.4: Delete the JS `__sprint` path and WASM `Print`/`Sprint` routing
+- [x] Task 4.4: Delete the JS `__sprint` path and WASM `Print`/`Sprint` routing
   - Files: `src/backend/js/stdlib/fmt.js`, `src/backend/js/runtime.js`, `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/emit-builtins.js`
   - Test: `test/unit/builtins/fmt-stringer.test.js`, `test/unit/wasm/fmt-any.test.js`, `test/unit/compiler/natives.test.js`
   - Done when: `HELPER_SPRINT`, `_genPrintOperands` and the `Print*`/`Sprint*`/`Append*` arms of `emitFmtCall` are deleted and no test references them.
 
+- Phase 4 as built (deviations, for Phase 5/6): `fmtrt` holds data, not a printer. `Arg` describes an operand (kind, value in a typed field, closures for fields/elements/entries/pointee, `Err`/`Str`/`GoStr` set from the static method set); `fmt` owns all printing and `fmtrt` has only `Arg`, `Register(key, f)`, `Lookup`, `PtrID`; there is no `fmtrt.Printer`. Generated per package: `gff_<pkg>_<Fn>_<n>` wrappers (statically typed params, non-variadic, redirect via `_genEntry`, `call.func._type` replaced), `gff_<pkg>_a<n>` builders (one per composite type), `gff_<pkg>_value` + `gff_<pkg>_ensure` (registered lazily by every wrapper of a package with a lookup, so package-level initialisers that print work; `Register` dedupes by key). Bare operands: `string`, `bool`, `wasm`-only `int`, interfaces, named struct/scalar types whose value method set has `String`/`Error` (not string-kinded, slices, maps). JS wraps `int` (a JS number is exact only to 2^53, plan assumed bare). Type-parameter operands are boxed by the JS backend through the type argument (`_boxTypeParam`, `__ti` `.b`/`.fb`) because they cannot be described statically. Local (function-scope) types are spelled by name: the checker type table resolves them in the generated file. Unknown dynamic values print `<nil>` for `%v` (nil func in `any` has no type to look up). Parsed ASTs are cached across builds: the generator clears stale `_genEntry` first. Known gaps in `follow-ups.md`. Phase 5 must: add the `f` family to `FMT_PRINT_FUNCS`/`PRINT_FUNCS` and make interface operands of any interface type (not only `any`) trigger the lookup, because `%d`/`%+v` call no methods; keep the `isString` bare-operand rule when widening bare named types.
+
 ### Phase 5: `fmt` in Go — verbs, flags, `Errorf`, and the JS engine removal
 
-- [ ] Task 5.1: `doPrintf`: verbs, flags, width/precision, argument indexes and error forms
+- [x] Task 5.1: `doPrintf`: verbs, flags, width/precision, argument indexes and error forms
   - Files: `stdlib/fmt/print.go`, `stdlib/fmt/format.go`
   - Test: `test/unit/builtins/fmt-verbs.test.js` (60: `%d %b %o %O %x %X %c %q %U %e %E %f %F %g %G %s %t %v %T %p`, `+ - # 0 space`, `*`, `%[n]`, `%!v(MISSING)`, `%!(EXTRA …)`, `%!(BADINDEX)`, `%!d(string=x)`)
   - Done when: `Sprintf`, `Printf`, `Fprintf`, `Appendf` are Go source and all 60 cases pass four-way.
-- [ ] Task 5.2: `Errorf` with `%w` wrapping
+- [x] Task 5.2: `Errorf` with `%w` wrapping
   - Files: `stdlib/fmt/errors.go`, `src/typechecker/stdlib/core.js`
   - Test: `test/unit/stdlib/errors.test.js` (`%w` single, multiple, non-error operand, `errors.Is`/`As`/`Unwrap` over the result), `test/unit/stdlib/fmt.test.js`
   - Done when: `Errorf` is Go source with `wrapError`/`wrapErrors`, the `fmt` overlay has no members left, and `fmt`/`fmt.Stringer` are removed from `STDLIB_PACKAGES`/`WASM_STDLIB_MEMBERS`/`types.set`.
-- [ ] Task 5.3: Delete the JS `fmt` emitter, runtime engine, descriptors and shared fmt helpers; enforce the perf gate
+- [x] Task 5.3 (partial; remainder moved to Task 7.4, see Phase 5 as built): Delete the JS `fmt` emitter, runtime engine, descriptors and shared fmt helpers; enforce the perf gate
   - Files: `src/backend/js/stdlib/fmt.js` (delete), `src/backend/js/fmt-runtime.js` (delete), `src/backend/shared/errorf.js` (delete), `src/backend/shared/fmt-types.js`, `src/backend/js/runtime.js`, `src/backend/js/type-info.js`, `src/backend/js/expressions.js`, `src/backend/js/index.js`, `src/backend/js/stdlib/index.js`, `test/perf/fmt-bench.js`
   - Test: `test/unit/builtins/fmt-verbs.test.js`, `test/unit/builtins/fmt-stringer.test.js` (the `__pr` output assertion at 271–273 rewritten as a behavioural pointer-vs-value case), `test/unit/stdlib/fmt.test.js`, `node test/perf/fmt-bench.js`
   - Done when: `HELPER_SPRINTF`, `HELPER_IFD`, `__ft`/`_fmtDesc*`/`_genFmtClassMeta`/`__pr`/`_fmtDescWrap`, `errorf.js` are gone, `fmt-types.js` keeps only `goTypeName` (used by `src/backend/wasm/monomorph.js`), and the bench thresholds are set to JS ≤ 2.0× / WASM ≤ 1.0× of the Task 4.1 baselines and pass.
 
+- Phase 5 as built (deviations, for Phase 6/7): Task 5.3 is partly open. Done: JS `_genFmt` and the Printf/Errorf/Fprintf arms, `emitFmtCall`/`emitFprintCall` and `_emitErrorfResult`/`_emitWrapErrors`, `errorf.js`, `fmtWantsTypes`. Open: the JS engine (`HELPER_SPRINTF`/`fmt-runtime.js`, `HELPER_IFD`, `__ft`, `__pr`/`_fmtDesc*`/`_genFmtClassMeta`, `fmt-types.js` beyond `goTypeName`) is still read by `testing` (`HELPER_TESTING` `Logf`/`Errorf` call `__sprintf`; the WASM `testing_call` path tags operands through `_emitArgBuffer`/`fmt_arg_type`/`__ft`) and by the WASM boundary (`fmt_sprintf`/`fmt_printf`, Task 6.2); delete them with Task 7.4, not here. The perf gate passes after the buffer work: `node test/perf/fmt-bench.js` gives JS ≈ 1.34 s (limit 1.58 s) and WASM ≈ 1.14-1.16 s (limit 1.2 s, thin margin: WASM strings are host strings, so each `s[i]` is two host calls). Done toward it: index-based `fmtState` output buffer (`putByte`/`putString`/`putBytes`, no per-byte append), `fmtFixed` fast path for plain `%f` and `plainQuotable` for `%q`, small-int digit loop, `__u8dec` (shared decoder) for `string([]byte)`, `__ifv` skips the copy for composite literals and iterates with `for..in`, `__appendv` (no spread for `append(b, s...)`), one shared `TextEncoder`, `strconv.fixed` native (toFixed with Go's half-even ties) for `%f`. `printf` `%[n]`/`*`/EXTRA/MISSING/BADINDEX, `%w`/`Errorf`, flags and `%p` unified ids are Go source. Other deviations: `fmt.format` renamed `fmtState` (a parameter named `format` shadowed the type); bare Stringer/error operands are described in format calls (`%d`/`%+v` call no methods) and every interface operand triggers the lookup there; `%T` of a stdlib error asks the value (`GofrontTypeName` on `errors.errorString`/`joinError`, `fmt.wrapError`/`wrapErrors`); packages importing `encoding/json` get the lookup (jsonrt prints `%T` of any); `fmt.Println(any(x))` is described as `x` (`_ifaceSrc`-free peel in `fmt-formatters.js`); float64 precedes float32 in `describe` (JS cannot tell them apart); strconv `Quote` keeps a real U+FFFD.
+
 ### Phase 6: `fmt` in Go — WASM machinery removal and docs
 
-- [ ] Task 6.1: Delete the WASM externref marshalling, `__any_fmt` and the fmt-only synthetic error helpers
+- Phase 6 as built (deviations, for Phase 7): the WASM `testing_call` path still tags and marshals every operand through the externref family, so only what no `testing` operand reaches was deleted. Done: `fmt_sprintf`/`fmt_printf`/`fmt_format_v` imports and host entries, `${P}stdlib_fmt` (the testing entries stay, renamed `${P}stdlib_testing`; `io.take`/`io.printf` gone), `fmt` in `STDLIB_ENV_PKGS` and `HELPER_SPRINTF` in `WASM_STDLIB_JS` (a facade of a fmt-only package ships neither; `test-runner.js` still defines it for `testing`), `__wrapErrors`/`__mk_wrap_errors` and their `Error`/`Unwrap` helpers, the dead `__errors_is`/`__errors_unwrap` helpers, `_emitLazyErrorGlobal`, `_callStdlib`, and the `fmt` call detection in prescan (`_usesFmtAny`, now `_usesTestingAny`: `__any_fmt`/`__any_fmt_key` are synthesised only for a `*testing.T` call with an `any` operand, so fmt programs no longer pay for them). Kept for `testing`, delete with Task 7.4: `_emitArgBuffer`, `_emitOperandExternref` and the whole `_emit*ToExternref`/`_fmt*`/`_emitAnyFmt*` family in `core.js`, `getFmtNew*`/`getFmtBox*`/`getFmtStruct*`/`getFmtArgTypeImportIndex` and the `fmt_new_*`/`fmt_array_push`/`fmt_map_set`/`fmt_box_*`/`fmt_struct_*`/`fmt_arg_type` imports in `boundary.js` (`WASM_IMPORTS_JS`, shipped to every wasm module), `fmtTypeDesc` descriptors, `scanFmtU64`/`getFmtBoxU64Index`, and the `ERROR_STRUCT` runtime error (kept for panic/recover, `__mk_error` in `emit-builtins.js` and `__error_str`; its `cause` field and the `fmt.wrapError` tag in `_emitErrorDynamicType` only serve testing operands). `fmt_ptr_id` stays: it is the Go `fmt` intrinsic. `io.js` was already reduced to the generic `io.Writer` write helper (nothing calls it; left in place). Plan assumption corrected: `os.Getenv` is not JS-only (`hostGetenv` is an intrinsic on both backends), so the docs list `regexp`, `gom`, `time.Sleep`, `time.AfterFunc` and `time.Timer` as the JS-only members.
+
+- [x] Task 6.1 (partial; remainder moved to Task 7.4, see Phase 6 as built): Delete the WASM externref marshalling, `__any_fmt` and the fmt-only synthetic error helpers
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/index.js`, `src/backend/wasm/prescan.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/types.js`
   - Test: `test/unit/wasm/fmt-any.test.js`, `test/unit/wasm/strings_any.test.js`, `test/unit/wasm/interfaces.test.js`, `test/unit/wasm/defer_recover.test.js`, `test/unit/wasm/traps.test.js` (panic/recover and host-error conversion keep their helpers)
   - Done when: every method listed in the `fmt` footprint row for `core.js` (≈ 1,520 lines), `__any_fmt`/`__any_fmt_key` synthesis, prescan fmt detection, and each `ERROR_STRUCT`/`__mk_wrap_errors`/`hasErrorType` reference that only `Errorf`/`errors` emitters used are deleted (each remaining reference annotated with its panic/recover or boundary caller), and `npm test` passes.
-- [ ] Task 6.2: Delete `fmt_*` host imports, `${P}stdlib_fmt` and `io.js` `Fprint` routing
+- [x] Task 6.2 (partial; remainder moved to Task 7.4, see Phase 6 as built): Delete `fmt_*` host imports, `${P}stdlib_fmt` and `io.js` `Fprint` routing
   - Files: `src/backend/wasm/module-emitter.js`, `src/backend/wasm/boundary.js`, `src/backend/wasm/stdlib/io.js`
   - Test: `test/unit/wasm/boundary.test.js` (facade for a fmt-using wasm package has no `fmt_` import), `test/unit/compiler/optimize-build.test.js`
   - Done when: the facade of the P1 probe program contains zero `fmt_*` entries and no `__sprintf`, and `io.js` keeps only generic `io.Writer` helpers.
-- [ ] Task 6.3: Documentation for the Go-source `fmt`, `errors`, `os`, `unicode`, `regexp`, `time` and `gom`
+- [x] Task 6.3: Documentation for the Go-source `fmt`, `errors`, `os`, `unicode`, `regexp`, `time` and `gom`
   - Files: `docs/go-compatibility.md`, `docs/architecture.md`, `README.md`
   - Test: `npm run check` (doc fixture checks), `test/unit/compiler/plan-paths.test.js`
   - Done when: `docs/go-compatibility.md:58` no longer lists `errors.As`, `fmt`, `regexp`, `os` as compiler-provided, the `%p` row and the JS-only table (`regexp`, `time.Sleep`, `os.Getenv`) reflect the new diagnostics, `docs/architecture.md` "Standard library" lists the new packages and the generated-file spine, and `README.md` mentions no removed helper.
 
 ### Phase 7: `testing` in Go source with a generated driver
 
-- [ ] Task 7.1: `stdlib/testing` and minimal `stdlib/context`
+- Phase 7 as built (deviations): the driver and runtime differ from §F in these ways. (1) The in-memory driver is handed to `compileFiles` as `options.testDriver(programs, target)`, called after the package's files are parsed and its target is known (the runner cannot know the target earlier); the driver program is checked and emitted with the package but is not in the returned `programs`. (2) The testing API for the driver is `testing.GofrontMain(pkg, run, bench, verbose, tests, benches) *M` over `GofrontTest`/`GofrontBenchmark` entries (not `MainStart`/`InternalTest`, which stay excluded for user code), `M.Run()`, `M.ExitCode()`, and for `js` packages `M.RunAsync()`; there is no per-test `async func` wrapper or `Guard`/`Settle` pair in the driver: `T.invoke` guards the body, and `async_js.go` installs a hook so `T.Run` keeps the promise of an async subtest (`testing_call` is `func(any, any) any`, returning the promise or nil) and `RunAsync` awaits each test and its pending subtests in declaration order. A `js` package is driven with `RunAsync` unless it has a `TestMain` (then the driver calls it and returns `m.ExitCode()`; async tests with `TestMain` are a build error). (3) The package line (`ok  \tpkg\tT` / `FAIL`) and colour are printed by `M.Run` itself, from the `GOFRONT_TEST_LABEL` and `GOFRONT_TEST_COLOR` environment variables the harness sets, so `TestMain` with `os.Exit(m.Run())` still prints it; the runner no longer adds a line. (4) Package state sits behind a pointer (`cfg`) because a `both` package may not assign package variables. (5) Only `GofrontRunTests` of a `_test.go` file crosses the wasm boundary: the facade skips every other declaration of test files. (6) `Skip` after `Error` reports `FAIL`, `-run` splits on `/` and matches each level, and a nil/struct operand of `t.Log` formats as Go does (`{root}`, not JSON); the fmt generator treats `Log/Error/Fatal/Skip` (and `f` forms) on `*testing.T`, `*testing.B` and `testing.TB` as lookup sites (`findTestingCalls`), and package `testing` types are excluded from the lookup. (7) Two compiler fixes were needed: the parser records `embeddedName` for a plain embedded field (a Go-source stdlib type embedded as `common` was keyed `common$$testing`), and `stdlib/context` is a new package (the removed-package entry is gone, so `import "context"` works: `Background`, `TODO`, `WithCancel`, `WithValue`, no `Done`). (8) Task 5.3/6.1/6.2 remainders deleted: `HELPER_SPRINTF`, `fmt-runtime.js`, `HELPER_IFD`, `__ft`, `_fmtDesc*`, `_genFmtClassMeta`/`__pr` (the JS `fmt` emitter file is gone), the `__ti` `td` argument, `fmt-types.js` is `goTypeName` only, the whole externref marshalling family in `core.js` (2,131 -> 396 lines), `fmt_new_*`/`fmt_box_*`/`fmt_struct_*`/`fmt_arg_type`/`testing_*` host imports, `FmtStr`/`FmtErr`/`FmtGo`, `__any_fmt`, `typeMayHoldU64`, `ERROR_STRUCT`'s `cause` field and `Unwrap`, `IMPLIES_TIME` and the testing branch of `addExtraRoots`; `fmt_ptr_id` keeps one pointer-id table (`globalThis.__fmtptr`) for JS and the wasm host. `STDLIB_PACKAGES` is `{gofront/shared, gofront/simd, encoding/json}`. Final `src/` size: 65,422 -> 60,874 lines (net -4,548 over the phase; below the plan's >= 5,000 goal because the Go-source pieces took more generator code than estimated).
+
+- [x] Task 7.1: `stdlib/testing` and minimal `stdlib/context`
   - Files: `stdlib/testing/testing.go`, `stdlib/testing/benchmark.go`, `stdlib/context/context.go`
   - Test: `test/unit/stdlib/testing.test.js` (new, compiles small `_test.go` fixtures through `runTests` for js and wasm: pass/fail/skip output format, `Fatal` under `recover`, `Cleanup` LIFO and panic, subtests and `-run Parent/sub`, `TB` helpers, `Setenv` restore, `Context` cancelled on cleanup, `b.Loop`/`b.N`/`Elapsed`/`BenchmarkResult.String`)
   - Done when: `T`, `B`, `M`, `TB`, `BenchmarkResult`, `Benchmark`, `Short`, `Verbose`, `Testing` are Go source, `testing_nanotime`/`testing_match` are intrinsics on both backends, and the fixtures pass on js and wasm with the old driver still generating the entry calls.
-- [ ] Task 7.2: In-memory `gofront_testmain_test.go` driver in the runner
+- [x] Task 7.2: In-memory `gofront_testmain_test.go` driver in the runner
   - Files: `src/cli/test-runner.js`, `src/compiler.js`, `stdlib/testing/testing.go`
   - Test: `test/unit/cli/test-runner.test.js` (driver source for sync/`TestMain`/benchmark packages, `-run`/`-bench`/`-v` plumbing, exit codes, empty suite, build failure, no file written to the package directory), `test/unit/cli/cli-core.test.js`
   - Done when: `compilePackageTests`/`compilePackageTestsWasm` accept an extra in-memory source, the runner calls only `GofrontRunTests(run, bench, verbose)`, `__testRegistry`/`generateTestHarness` class coupling is gone, and `gofront test` passes on `example/simple`, `example/hybrid` (wasm) and `example/gom`.
-- [ ] Task 7.3: Async tests and subtests (`js` packages)
+- [x] Task 7.3: Async tests and subtests (`js` packages)
   - Files: `stdlib/testing/async_js.go`, `src/cli/test-runner.js`, `src/typechecker/types.js`
   - Test: `test/unit/cli/test-runner.test.js` (async `TestX` failing after `await`, async subtest failing its parent, `TestMain` + async → build error text), `example/preact/src/fetch_test.go`
   - Done when: `testing_call` is a js-only intrinsic, async tests are wrapped in the driver and settled before the summary, and `gofront test example/preact/src` passes.
-- [ ] Task 7.4: Delete the host `testing` protocol, runtime helper and overlays
+- [x] Task 7.4: Delete the host `testing` protocol, runtime helper and overlays
   - Files: `src/backend/js/runtime.js`, `src/backend/js/stdlib/testing.js` (delete), `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/boundary.js`, `src/backend/wasm/index.js`, `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js` (the `isTestingT` `b.N` special case at 630), `src/backend/wasm/emit-builtins.js`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `src/link/stdlib.js`, `src/lower/reachability.js`
   - Test: `test/unit/cli/test-runner.test.js`, `test/unit/stdlib/testing.test.js`, `test/unit/compiler/check-layers.test.js`
-  - Done when: `HELPER_TESTING`, `emitTestingCall`, `testing_*` imports, `__testing_*_cb`, the externref mapping, the `testing`/`context` overlays, `IMPLIES_TIME` and the testing branch of `addExtraRoots` are deleted (≈ 1,010 lines), `STDLIB_PACKAGES` is `{gofront/shared, gofront/simd, encoding/json}`, and `npm test && npm run check && npm run test:e2e` pass.
-- [ ] Task 7.5: Testing documentation
+  - Done when (also the Task 5.3 and Phase 6 remainders: the `_emitArgBuffer`/externref `_emit*ToExternref`/`_fmt*`/`_emitAnyFmt*` family, the `fmt_new_*`/`fmt_box_*`/`fmt_struct_*`/`fmt_arg_type` imports and their `boundary.js` JS, `scanFmtU64`, `_usesTestingAny`/`__any_fmt` synthesis, the `fmt.wrapError` tag in `_emitErrorDynamicType` and `HELPER_SPRINTF` in `test-runner.js` are deleted): `HELPER_SPRINTF`/`fmt-runtime.js`, `HELPER_IFD`, `__ft`/`_fmtDesc*`/`_genFmtClassMeta`/`__pr`/`_fmtDescWrap` are gone and `fmt-types.js` keeps only `goTypeName`; `HELPER_TESTING`, `emitTestingCall`, `testing_*` imports, `__testing_*_cb`, the externref mapping, the `testing`/`context` overlays, `IMPLIES_TIME` and the testing branch of `addExtraRoots` are deleted (≈ 1,010 lines), `STDLIB_PACKAGES` is `{gofront/shared, gofront/simd, encoding/json}`, and `npm test && npm run check && npm run test:e2e` pass.
+- [x] Task 7.5: Testing documentation
   - Files: `docs/usage.md`, `docs/architecture.md`
   - Test: `npm run check`
   - Done when: the `## Testing` section of `docs/usage.md` describes the supported `testing` API, async tests/subtests and the `TestMain` + async limitation from the user's point of view, and `docs/architecture.md` describes the generated driver.

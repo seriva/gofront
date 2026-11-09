@@ -2,10 +2,8 @@
 // checker. Called once from TypeChecker._setupGlobals() during construction.
 //
 // Delegates to two focused sub-modules:
-//   stdlib/core.js     — browser globals, fmt, strings, bytes, strconv,
-//                        math, errors, time, unicode, os, html, io
-//   stdlib/extended.js — gom, maps, regexp, rand, utf8, path,
-//                        built-in functions
+//   stdlib/core.js     — browser globals
+//   stdlib/extended.js — encoding/json and built-in functions
 
 import { setupCoreGlobals } from "./core.js";
 import { setupExtendedGlobals } from "./extended.js";
@@ -14,7 +12,7 @@ import { setupSimdGlobals } from "./simd.js";
 import { setupWebGlobals } from "./web.js";
 
 export function setupGlobals(globals, types) {
-	setupCoreGlobals(globals, types);
+	setupCoreGlobals(globals);
 	setupExtendedGlobals(globals, types);
 	setupSharedGlobals(globals, types);
 	setupSimdGlobals(globals, types);

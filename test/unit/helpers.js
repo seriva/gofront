@@ -17,6 +17,7 @@ import {
 	compileDir,
 	compileFiles,
 	compileWasm as compileWasmSource,
+	evictParseCache,
 } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
@@ -79,7 +80,12 @@ export const FIXTURES = join(__dirname, "fixtures");
 // Packages whose typechecker table keeps only emitter members (`errors.As`):
 // the rest is Go source, so a program importing one is linked
 // like the others.
-const GO_OVERLAID_PACKAGES = new Set(["errors", "encoding/json", "time"]);
+const GO_OVERLAID_PACKAGES = new Set([
+	"errors",
+	"encoding/json",
+	"fmt",
+	"time",
+]);
 
 // Emitter-backed packages that also carry Go-source members (`bytes`); a
 // program names one of them as `pkg.Member`.
@@ -90,6 +96,8 @@ const GO_MEMBER_RE = /\bbytes\./;
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
 // helpers do not link those; they go through `compileFiles` instead.
 function importsGoSourceStdlib(ast, source = "") {
+	// `fmt`, `gom` and `regexp` need no import in a js package.
+	if (/\b(?:fmt|gom|regexp)\./.test(source)) return true;
 	return ast.imports.some((imp) =>
 		imp.imports.some(
 			({ path }) =>
@@ -117,6 +125,7 @@ function compileSourceFile(source, target, options = {}) {
 	} catch (e) {
 		return { res: null, errors: [{ message: e.message }] };
 	} finally {
+		evictParseCache(join(dir, "main.go"));
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -175,7 +184,7 @@ export function compile(
 	}
 
 	if (importsGoSourceStdlib(ast, source)) {
-		const { res, errors } = compileSourceFile(source, pkgTarget);
+		const { res, errors } = compileSourceFile(source, pkgTarget, { strict });
 		return errors.length > 0
 			? { js: null, errors }
 			: { js: res.js, errors: [], warnings: [] };
@@ -226,6 +235,9 @@ export function runJs(js, extraGlobals = {}) {
 	} catch (e) {
 		throw new Error(`Runtime error in generated JS: ${e.message}`);
 	}
+	// A host without `process` prints whole lines; the partial last line of
+	// os.Stdout (fmt.Print) is still buffered.
+	if (ctx.__os_buf) lines.push(ctx.__os_buf);
 	return lines.join("\n");
 }
 
@@ -250,6 +262,8 @@ export function runInDom(
 		Boolean,
 		Array,
 		Object,
+		TextDecoder,
+		TextEncoder,
 		document: window.document,
 		console: {
 			log: (...args) => lines.push(args.map((a) => String(a)).join(" ")),
@@ -377,9 +391,20 @@ export function compileHybrid(source, options = {}) {
 			let wasmRes;
 			let wasmErr = null;
 			try {
+				// A linked module imports the facade's closure callers for the
+				// exported functions that take or return a func.
+				const env = {};
+				for (const imp of WebAssembly.Module.imports(
+					new WebAssembly.Module(wasm),
+				))
+					if (imp.module === "env" && imp.name.startsWith("__invoke$"))
+						env[imp.name] = () => {
+							throw new Error("a closure crossed the host boundary");
+						};
 				const { exports } = instantiateWasm(wasm, {
 					stringTable,
 					stdout: (msg) => wasmLines.push(msg),
+					extraImports: { env },
 				});
 				if (typeof exports[fnName] === "function") {
 					wasmRes = exports[fnName](...args);
@@ -464,7 +489,13 @@ export async function compileHybridProject(
 		parts.push(
 			"const console = { log: (...a) => __out.push(a.map((x) => String(x)).join(' ')) };",
 		);
+		// os.Stdout (fmt.Print*) writes to the host's stream when there is one:
+		// collect its whole lines like console.log's.
+		parts.push(
+			'let __buf = ""; const process = { stdout: { write: (s) => { __buf += String(s); let i; while ((i = __buf.indexOf("\\n")) >= 0) { __out.push(__buf.slice(0, i)); __buf = __buf.slice(i + 1); } } } };',
+		);
 		parts.push(stripImports(result.js));
+		parts.push("if (__buf) __out.push(__buf);");
 		parts.push(`export const __lines = __out;`);
 		if (exports.length > 0) parts.push(`export { ${exports.join(", ")} };`);
 		const bundlePath = join(root, "bundle.mjs");

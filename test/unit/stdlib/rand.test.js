@@ -1,4 +1,4 @@
-// GoFront test suite — math/rand (Go-source)
+// GoFront test suite — math/rand and crypto/rand (Go-source)
 //
 // Every case runs four ways (JS and WASM, natives on and off) and must print
 // what the real Go toolchain printed for the same program.  Values from the
@@ -180,6 +180,81 @@ Int31n invalid argument to Int31n
 Shuffle invalid argument to Shuffle
 Perm runtime error: makeslice: len out of range
 Rand.Intn invalid argument to Intn
+`,
+	);
+});
+
+section("crypto/rand (Go-source)");
+
+test("Read fills the buffer for every length and reports it", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"crypto/rand"
+	"fmt"
+	"io"
+)
+
+func main() {
+	for _, n := range []int{0, 1, 3, 4, 5, 7, 8, 1000, 70000} {
+		b := make([]byte, n)
+		got, err := rand.Read(b)
+		fmt.Println(n, got, err)
+	}
+	n, err := rand.Read(nil)
+	fmt.Println(n, err)
+	// 64 random bytes are all zero with probability 2^-512.
+	b := make([]byte, 64)
+	rand.Read(b)
+	zero := true
+	for _, c := range b {
+		zero = zero && c == 0
+	}
+	fmt.Println(zero)
+	// A short buffer is filled up to its length and no further.
+	big := make([]byte, 10)
+	rand.Read(big[:3])
+	fmt.Println(big[3:])
+	var r io.Reader = rand.Reader
+	m, err := io.ReadFull(r, make([]byte, 9))
+	fmt.Println(m, err)
+}
+`,
+		`0 0 <nil>
+1 1 <nil>
+3 3 <nil>
+4 4 <nil>
+5 5 <nil>
+7 7 <nil>
+8 8 <nil>
+1000 1000 <nil>
+70000 70000 <nil>
+0 <nil>
+false
+[0 0 0 0 0 0 0]
+9 <nil>
+`,
+	);
+});
+
+test("math/rand and crypto/rand can be imported together", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	crand "crypto/rand"
+	"fmt"
+	"math/rand"
+)
+
+func main() {
+	b := make([]byte, 4)
+	n, err := crand.Read(b)
+	fmt.Println(n, err, rand.Intn(1) == 0)
+}
+`,
+		`4 <nil> true
 `,
 	);
 });

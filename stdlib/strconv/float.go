@@ -473,6 +473,15 @@ func AppendFloat(dst []byte, f float64, fmt byte, prec, bitSize int) []byte {
 }
 
 func genericFtoa(dst []byte, val float64, fmt byte, prec, bitSize int) []byte {
+	if fmt == 'f' && prec >= 0 && prec <= 60 && bitSize == 64 && val-val == 0 {
+		// The host's fixed-point printer, which the Go body declines.
+		if s := fixed(math.Abs(val), prec); s != "" {
+			if math.Signbit(val) {
+				dst = append(dst, '-')
+			}
+			return append(dst, s...)
+		}
+	}
 	var bits uint64
 	var flt *floatInfo
 	switch bitSize {
@@ -536,6 +545,16 @@ func genericFtoa(dst []byte, val float64, fmt byte, prec, bitSize int) []byte {
 		return formatDigits(dst, true, neg, digs, prec, fmt)
 	}
 	return bigFtoa(dst, prec, fmt, neg, mant, exp, flt)
+}
+
+// fixed formats f, a finite float64 of at least zero, with prec digits after
+// the point as %f does, rounding exact ties to even; "" when the host cannot
+// (f is 1e21 or more). The Go body always declines, and the caller then uses
+// bigFtoa.
+//
+//gofront:native strconv.fixed
+func fixed(f float64, prec int) string {
+	return ""
 }
 
 // shortestDigits returns the fewest digits that read back as f, a finite

@@ -106,71 +106,17 @@ export const BROWSER_GLOBALS = new Set([
 // gains support; anything not listed is rejected at import with "not yet available in
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
-	"errors",
-	"fmt",
-	"unicode",
-	"time",
-	"testing",
 	"gofront/shared",
 	"gofront/simd",
-	"crypto/rand",
-	"os",
 	"encoding/json",
 ]);
 
-export const STDLIB_PACKAGES = new Set([
-	...WASM_SUPPORTED_STDLIB,
-	"gom",
-	"regexp",
-]);
+export const STDLIB_PACKAGES = WASM_SUPPORTED_STDLIB;
 
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
-export const WASM_STDLIB_MEMBERS = new Map([
-	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
-	["errors", new Set(["As"])],
-	[
-		"fmt",
-		new Set([
-			"Sprintf",
-			"Sprint",
-			"Sprintln",
-			"Append",
-			"Appendf",
-			"Appendln",
-			"Errorf",
-			"Printf",
-			"Println",
-			"Print",
-			"Fprintf",
-			"Fprintln",
-			"Fprint",
-			"Stringer",
-		]),
-	],
-	[
-		"unicode",
-		new Set([
-			"IsLetter",
-			"IsDigit",
-			"IsSpace",
-			"IsUpper",
-			"IsLower",
-			"IsPunct",
-			"IsControl",
-			"IsPrint",
-			"IsGraphic",
-			"ToUpper",
-			"ToLower",
-		]),
-	],
-	["rand", new Set(["Read", "Reader"])],
-	// Go source declares the package; only the JS-only Sleep, AfterFunc and
-	// Timer are emitter members.
-	["time", new Set()],
-	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
-]);
+export const WASM_STDLIB_MEMBERS = new Map();
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
@@ -185,6 +131,31 @@ export const INTRINSICS = new Map([
 	// seconds east of UTC of the host's time zone at a Unix time (time).
 	["time_now", "func() int64"],
 	["time_zone_offset", "func(int64) int"],
+	// time (js only): suspend for a number of nanoseconds; the declaration is
+	// `async`.
+	["time_sleep", "func(int64) void"],
+	// os: write a string to a file descriptor (0 stdin, 1 stdout, 2 stderr),
+	// exit the process, and read and set environment variables.
+	["os_write", "func(int, string) void"],
+	["os_exit", "func(int) void"],
+	["os_getenv", "func(string) string"],
+	["os_setenv", "func(string, string) void"],
+	// unicode: the host's answer for runes above ASCII, by class (the
+	// constants of stdlib/unicode), and its case mappings.
+	["unicode_is", "func(int32, int) bool"],
+	["unicode_to_upper", "func(int32) int32"],
+	["unicode_to_lower", "func(int32) int32"],
+	// crypto/rand: four random bytes from the host's secure source.
+	["crypto_rand_u32", "func() uint32"],
+	// testing: a monotonic clock in nanoseconds, and an unanchored regular
+	// expression match for -run and -bench patterns.
+	["testing_nanotime", "func() int64"],
+	["testing_match", "func(string, string) bool"],
+	// testing (js only): call a test body and return what it returned (a
+	// promise for an async body, otherwise nil).
+	["testing_call", "func(any, any) any"],
+	// fmt: a stable number for a pointer, function or other reference.
+	["fmt_ptr_id", "func(any) uint64"],
 	// math: IEEE-754 bit casts, and the host's `Math.*` (`%` for Mod).
 	["math_float64bits", "func(float64) uint64"],
 	["math_float64frombits", "func(uint64) float64"],
@@ -212,6 +183,24 @@ export const INTRINSICS = new Map([
 		`math_${f}`,
 		"func(float64, float64) float64",
 	]),
+]);
+
+// The fmt functions whose calls the compiler wraps with a generated function
+// (src/lower/fmt-formatters.js); a wrapped call may forward `f()`'s results.
+export const FMT_PRINT_FUNCS = new Set([
+	"Sprint",
+	"Sprintln",
+	"Print",
+	"Println",
+	"Fprint",
+	"Fprintln",
+	"Append",
+	"Appendln",
+	"Sprintf",
+	"Printf",
+	"Errorf",
+	"Fprintf",
+	"Appendf",
 ]);
 
 // Names a standard-library function may carry in `//gofront:native <name>`:
@@ -257,6 +246,7 @@ export const NATIVES = new Set([
 	"strings.TrimPrefix",
 	"strings.TrimSuffix",
 	"strconv.shortest",
+	"strconv.fixed",
 	"strconv.parseDecimal",
 	// internal/jsonrt: the encoder's writes into its output buffer.
 	"jsonrt.putString",

@@ -147,17 +147,32 @@ gofront test app/src -bench .      # also run BenchmarkXxx functions and print n
 
 - `testing.T` supports `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `FailNow`, `Failed`,
   `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`, `Cleanup`, `Setenv`,
-  `Context`, `Deadline` and `Parallel`. `testing.Short()` and `testing.Verbose()` are
-  available at package level in `js` packages.
-- `func TestMain(m *testing.M)` runs setup and teardown around the tests; call `m.Run()`.
+  `Context`, `Deadline` and `Parallel`, and `testing.TB` is implemented by both `*testing.T`
+  and `*testing.B`. `testing.Short()`, `testing.Verbose()` and `testing.Testing()` work in
+  every package. `t.Fatal` and `t.FailNow` stop the test, and a test that calls them still
+  fails if it recovers the panic. Tests run one at a time, so `Parallel` does nothing.
+- `t.Context()` returns a `context.Context` that is canceled just before the test's cleanup
+  functions run. The `context` package provides `Background`, `TODO`, `WithCancel` and
+  `WithValue`; its `Context` has no `Done` channel, so poll `Err`.
+- `-run` takes a regular expression per level of the name: `-run 'TestGroup/beta'` runs only
+  the subtest `beta` of `TestGroup`.
+- `func TestMain(m *testing.M)` runs setup and teardown around the tests; call `m.Run()` and
+  pass its result to `os.Exit`, or return and let the runner use it.
 - `BenchmarkXxx(b *testing.B)` functions run with `-bench <regex>`; use `b.N` or `b.Loop()`,
   and `b.ResetTimer()` or `b.ReportAllocs()` as in Go.
+- In a `js` package a test may be `async func TestXxx(t *testing.T)` and use `await`, and a
+  subtest may be an `async func` passed to `t.Run`. The runner waits for each async test and
+  for the async subtests it starts, in order, so a failure after an `await` still fails the
+  test (and its parent) before the package summary. An `async` test cannot be combined with a
+  `TestMain` in the same package: the build reports an error, so remove `TestMain` or make
+  the tests synchronous.
 - Output follows `go test`: `ok` / `FAIL` / `?  [no test files]` per package, non-zero exit
   when anything fails.
 - `--dom` requires `jsdom` to be installed (it is a devDependency of GoFront itself; add it to
   your project when using a global install).
 - Packages targeting `wasm` run inside the linked module, and `both` packages run once per
-  backend (`pkg [js]`, `pkg [wasm]`). `t.Run` subtests work in `wasm` test packages too.
+  backend (`pkg [js]`, `pkg [wasm]`). Subtests, cleanups and benchmarks work in `wasm` test
+  packages too.
   See the [hybrid guide](hybrid-wasm.md#testing-hybrid-packages).
 
 ---
