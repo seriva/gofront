@@ -14,6 +14,16 @@ features (e.g. `plans/v1.8.0/`).
 
 ---
 
+## v1.9.1
+
+**Theme: Review follow-ups.** Patch release fixing the 24 reproducing review follow-ups left after v1.9.0.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Follow-up fixes (2026-11-09) | High | Draft | 24 defects in 6 phases: typechecker checks (`switch` cases, `cap`, negative array lengths, local vs imported types), `any` → concrete without a type assertion, parser constraint elements and JS statements (local-type TDZ, 64-bit constants, labeled range-over-func, map range into boxed vars), WASM codegen (labeled range-over-func, unhashable-key messages, interface assertions from `any`), JS nil receivers and unhashable keys, and dynamic types / `%T` / `encoding/json`. Untyped JS-interop `any` deferred. See [follow-ups-2026-11-09-plan.md](v1.9.1/follow-ups-2026-11-09-plan.md). |
+
+---
+
 ## v1.9.0
 
 **Theme: Stdlib in Go.** Move every remaining stdlib package whose behaviour is ordinary Go over GoFront values onto the Go-source path (`stdlib/`), and keep host-backed fast paths as small registered **natives** (`//gofront:native`) that a four-way differential test (JS/WASM × natives on/off) checks against the Go body. Removes the hand-written type tables, JS shims and WASM emitters for `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `io`, `bytes`, `strings`, `encoding/{hex,base64,binary}`, `crypto/sha256`, `math/{bits,rand}`, `sync`, `time` and `strconv` (WASM stdlib emitters 26,438 → ≤ 8,000 lines). Fixes what the old path gets wrong: every WASM sort is O(n²), sorting `NaN` is wrong on both backends, `sort.Slice` tie order differs from Go, generic helpers reject named slice and map types, and 24 deferred member bugs from the v1.8.0 follow-up fixes. Verified with Go-output unit cases (no manifest or real-Go harness). Starts after the v1.8.0 follow-up fixes complete. Design document in [`plans/v1.9.0/stdlib-in-go-plan.md`](v1.9.0/stdlib-in-go-plan.md).
