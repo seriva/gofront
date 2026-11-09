@@ -17,6 +17,7 @@ import {
 	compileDir,
 	compileFiles,
 	compileWasm as compileWasmSource,
+	evictParseCache,
 } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
@@ -124,6 +125,7 @@ function compileSourceFile(source, target, options = {}) {
 	} catch (e) {
 		return { res: null, errors: [{ message: e.message }] };
 	} finally {
+		evictParseCache(join(dir, "main.go"));
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
