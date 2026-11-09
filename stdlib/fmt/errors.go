@@ -22,7 +22,7 @@ func Errorf(format string, a ...any) error {
 	p := newPrinter()
 	p.wrapErrs = true
 	p.doPrintf(format, a)
-	s := string(p.fmt.buf)
+	s := string(p.fmt.bytes())
 	var err error
 	switch len(p.wrappedErrs) {
 	case 0:

@@ -4,10 +4,12 @@
 //
 // `toFixed` is exact except that it rounds a tie (a value whose decimal
 // expansion ends in a 5 right after the digits kept) up, where Go rounds it
-// to even; the extra digits of a second call tell the two apart. "" declines.
+// to even; the extra digits of a second call tell the two apart. A tie is a
+// multiple of 2^-(p+1), so any other value needs no second call. "" declines.
 export const FIXED_FLOAT_JS = `(x, p) => {
   if (!(x < 1e21)) return "";
   const s = x.toFixed(p);
+  if (x % 1 === 0 || (x * 2 ** (p + 1)) % 1 !== 0) return s;
   const t = x.toFixed(p + 30);
   const dot = t.indexOf(".");
   if (/^50*$/.test(t.slice(dot + 1 + p))) {

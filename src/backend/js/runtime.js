@@ -26,6 +26,13 @@ var __u8enc = __u8enc || function(s) {
   return Uint8Array.from(out);
 };`;
 
+// []byte -> string: UTF-8 with U+FFFD for invalid bytes. A typed array is
+// decoded in place; anything else is copied into one first.
+export const HELPER_U8DEC = `var __u8d = __u8d || null;
+var __u8dec = __u8dec || function(b) {
+  return (__u8d ??= new TextDecoder()).decode(ArrayBuffer.isView(b) ? b : new Uint8Array(b));
+};`;
+
 // Slice views (Go's `b[lo:hi:max]` shares the backing store).  A view of a
 // plain array is a Proxy over an empty `__SV` array that holds the backing
 // array `b`, offset `o`, length `n` and capacity `c`: Array.isArray, length,
@@ -328,9 +335,9 @@ export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {
 
 // Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
 // switches can tell T from *T; tags are non-enumerable so __equal/JSON ignore them.
-export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
+export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields, fresh) {
   if (x === null || typeof x !== "object") return x;
-  const c = typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+  const c = fresh === true ? x : typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
   Object.defineProperty(c, "__v", { value: true, configurable: true });
   if (Array.isArray(ptrFields)) {
     for (const f of ptrFields) {
@@ -345,10 +352,11 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
       }
     }
   }
-  for (const k of Object.keys(c)) {
-    if (c[k] !== null && typeof c[k] === "object" && !Array.isArray(c[k]) && !ArrayBuffer.isView(c[k])) {
-      if (!c[k].__v && !c[k].__p && Object.isExtensible(c[k]) && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
-        Object.defineProperty(c[k], "__v", { value: true, configurable: true });
+  for (const k in c) {
+    const v = c[k];
+    if (v !== null && typeof v === "object" && !Array.isArray(v) && !ArrayBuffer.isView(v)) {
+      if (!v.__v && !v.__p && Object.isExtensible(v) && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
+        Object.defineProperty(v, "__v", { value: true, configurable: true });
       }
     }
   }

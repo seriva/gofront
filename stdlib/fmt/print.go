@@ -70,27 +70,31 @@ type pp struct {
 
 func newPrinter() *pp {
 	p := &pp{}
-	p.fmt.intbuf = make([]byte, 68)
+	p.fmt.buf = make([]byte, 64)
 	return p
 }
 
 func (p *pp) writeString(s string) {
-	p.fmt.buf = append(p.fmt.buf, s...)
+	p.fmt.putString(s)
 }
 
 func (p *pp) writeByte(c byte) {
-	p.fmt.buf = append(p.fmt.buf, c)
+	p.fmt.putByte(c)
 }
 
 func (p *pp) writeRune(r rune) {
-	p.fmt.buf = append(p.fmt.buf, string(r)...)
+	if r >= 0 && r < 0x80 {
+		p.fmt.putByte(byte(r))
+		return
+	}
+	p.fmt.putString(string(r))
 }
 
 // Fprintf formats according to a format specifier and writes to w.
 func Fprintf(w io.Writer, format string, a ...any) (n int, err error) {
 	p := newPrinter()
 	p.doPrintf(format, a)
-	n, err = w.Write(p.fmt.buf)
+	n, err = w.Write(p.fmt.bytes())
 	return
 }
 
@@ -103,7 +107,7 @@ func Printf(format string, a ...any) (n int, err error) {
 func Sprintf(format string, a ...any) string {
 	p := newPrinter()
 	p.doPrintf(format, a)
-	return string(p.fmt.buf)
+	return string(p.fmt.bytes())
 }
 
 // Appendf formats according to a format specifier, appends the result to the
@@ -111,7 +115,7 @@ func Sprintf(format string, a ...any) string {
 func Appendf(b []byte, format string, a ...any) []byte {
 	p := newPrinter()
 	p.doPrintf(format, a)
-	return append(b, p.fmt.buf...)
+	return append(b, p.fmt.bytes()...)
 }
 
 // Fprint formats using the default formats for its operands and writes to w.
@@ -119,7 +123,7 @@ func Appendf(b []byte, format string, a ...any) []byte {
 func Fprint(w io.Writer, a ...any) (n int, err error) {
 	p := newPrinter()
 	p.doPrint(a)
-	n, err = w.Write(p.fmt.buf)
+	n, err = w.Write(p.fmt.bytes())
 	return
 }
 
@@ -132,7 +136,7 @@ func Print(a ...any) (n int, err error) {
 func Sprint(a ...any) string {
 	p := newPrinter()
 	p.doPrint(a)
-	return string(p.fmt.buf)
+	return string(p.fmt.bytes())
 }
 
 // Append formats using the default formats for its operands, appends the result to
@@ -140,7 +144,7 @@ func Sprint(a ...any) string {
 func Append(b []byte, a ...any) []byte {
 	p := newPrinter()
 	p.doPrint(a)
-	return append(b, p.fmt.buf...)
+	return append(b, p.fmt.bytes()...)
 }
 
 // Fprintln formats using the default formats for its operands and writes to w.
@@ -148,7 +152,7 @@ func Append(b []byte, a ...any) []byte {
 func Fprintln(w io.Writer, a ...any) (n int, err error) {
 	p := newPrinter()
 	p.doPrintln(a)
-	n, err = w.Write(p.fmt.buf)
+	n, err = w.Write(p.fmt.bytes())
 	return
 }
 
@@ -161,7 +165,7 @@ func Println(a ...any) (n int, err error) {
 func Sprintln(a ...any) string {
 	p := newPrinter()
 	p.doPrintln(a)
-	return string(p.fmt.buf)
+	return string(p.fmt.bytes())
 }
 
 // Appendln formats using the default formats for its operands, appends the result
@@ -169,7 +173,7 @@ func Sprintln(a ...any) string {
 func Appendln(b []byte, a ...any) []byte {
 	p := newPrinter()
 	p.doPrintln(a)
-	return append(b, p.fmt.buf...)
+	return append(b, p.fmt.bytes()...)
 }
 
 // describe turns an operand into its description. An operand the compiler
