@@ -1,7 +1,8 @@
 # Runtime & Overlay Pruning — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft  
+**Status:** In Progress  
+**Base branch:** main  
 **Related:** [`plans/v1.9.0/overlays-to-go-plan.md`](overlays-to-go-plan.md) (prerequisite: every phase), [`plans/v1.9.0/stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`plans/v1.9.0/compiler-shrinking-plan.md`](compiler-shrinking-plan.md), [`plans/v1.9.0/follow-ups-2026-11-07-plan.md`](follow-ups-2026-11-07-plan.md) (`F73` scheduled here)  
 **Release note:** `encoding/json` can now be imported under an alias (`import myjson "encoding/json"`), `json.RawMessage` has its `MarshalJSON` and `UnmarshalJSON` methods, and single-file builds (`gofront main.go`) work with `encoding/json` and `errors.As`. Programs that use `encoding/json` produce smaller JavaScript, and WebAssembly packages that import `time` ship less JavaScript glue.  
 
