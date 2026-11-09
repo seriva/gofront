@@ -21,6 +21,9 @@ const PLANS = [
 	{
 		file: "plans/roadmap.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
+			"src/backend/js/stdlib/{shared,simd}.js",
 			// Typechecker files collapsed into stdlib/index.js.
 			"src/typechecker/stdlib/{core,extended}.js",
 		],
@@ -28,6 +31,8 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/compiler-shrinking-plan.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
 			// Typechecker files collapsed into stdlib/index.js.
 			"src/typechecker/stdlib/{core,extended}.js",
 			// Files the shrinking tasks deleted or moved, and line ranges cited
@@ -50,6 +55,8 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/overlays-to-go-plan.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
 			// Typechecker files collapsed into stdlib/index.js.
 			"src/typechecker/stdlib/{core,extended}.js",
 			// The Go sources, generator and tests the plan's tasks add.
@@ -63,6 +70,8 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
 			// Typechecker files collapsed into stdlib/index.js.
 			"src/typechecker/stdlib/{core,extended}.js",
 			// The Go files each migration task adds under stdlib/.  Files that
