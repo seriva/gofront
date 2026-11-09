@@ -39,6 +39,8 @@ User-visible fixes: aliased `encoding/json` imports, local variables named `json
 
 Probes were run on `feat/overlays-to-go` at `9a214e3` (overlays-to-go Phases 1–3 merged, 4–7 open). `compileDir` = `test/unit/helpers.js` re-export of `src/compiler.js`; the helper `compileWasm` defaults `exportAll: true`.
 
+**Line-count baseline (Phase 1 start, post-`overlays-to-go` tree):** `find src -name '*.js' -exec cat {} + | wc -l` = 60874. The Goal target is ≤ 60074.
+
 | Area | Finding | Evidence & Probe Reference |
 |---|---|---|
 | `encoding/json` import alias (`src/link/stdlib.js:601-609`) | Aliasing `encoding/json` fails because it is still in `STDLIB_PACKAGES` (`src/typechecker/types.js:113`) and so loads as a hybrid `pkg.overlay`. | Probe: `withTempDir({"main.go":"package main\nimport myjson \"encoding/json\"\nfunc main(){_,_=myjson.Marshal(1)}"},compileDir)` → `Type error in main.go at line 2:15: import alias for 'encoding/json' is not supported`. |
@@ -108,23 +110,23 @@ Probes were run on `feat/overlays-to-go` at `9a214e3` (overlays-to-go Phases 1�
 Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `find src -name '*.js' -exec cat {} + | wc -l` in this plan's Verified Gaps as the line-count baseline.
 
 ### Phase 1: `encoding/json` in Go Source & Hybrid Overlay Retirement
-- [ ] Task 1.1: Move `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid` and `RawMessage` to `stdlib/encoding/json/json.go` and retire the `json` overlay
+- [x] Task 1.1: Move `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid` and `RawMessage` to `stdlib/encoding/json/json.go` and retire the `json` overlay
   - Files: `stdlib/encoding/json/json.go`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `src/lower/json-codecs.js` (`isRaw` only), `test/unit/builtins/json.test.js`
   - Test: failing `assertAllTargetsOutput` cases in `test/unit/builtins/json.test.js` for `json.RawMessage("true").MarshalJSON()`, `RawMessage(nil).MarshalJSON()`, `(&rm).UnmarshalJSON(b)` then mutating `b`, `(*json.RawMessage)(nil).UnmarshalJSON(b)`, a struct field of type `json.RawMessage` round-tripping through `Marshal`/`Unmarshal`, and `import myjson "encoding/json"` with `myjson.Marshal`, `myjson.Unmarshal`, `myjson.Valid` and `myjson.RawMessage`.
   - Done when: `json.go` defines the five members, `extended.js` has no `json` namespace / `RAW_MESSAGE_T`, `STDLIB_PACKAGES` no longer has `"encoding/json"`, `isRaw` matches the mangled name, and the new cases pass on JS and WASM.
-- [ ] Task 1.2: Fix `json` call-site matching in `src/lower/json-codecs.js`
+- [x] Task 1.2: Fix `json` call-site matching in `src/lower/json-codecs.js`
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: failing cases for a local `var json S; json.Marshal()` in a file importing `"encoding/json"` (`F73`, `assertAllTargetsOutput`), `f := json.Valid` called later, and `f := json.Marshal` / `json.Unmarshal` as values (`assertErrorContains(errors, "json.Marshal cannot be used as a value")`).
   - Done when: `isJsonCall` checks `node.func.expr._type?.kind === "namespace"`, `Valid` is no longer rewritten (`entryValid` deleted), non-call `Marshal`/`MarshalIndent`/`Unmarshal` selectors report the diagnostic, and the cases pass.
-- [ ] Task 1.3: Prune dead `jsonrt` hooks and the `JSON_NAMES` / `addExtraRoots` roots
+- [x] Task 1.3: Prune dead `jsonrt` hooks and the `JSON_NAMES` / `addExtraRoots` roots
   - Files: `stdlib/internal/jsonrt/enc.go`, `stdlib/internal/jsonrt/dec.go`, `src/lower/reachability.js`, `test/unit/builtins/json.test.js`
   - Test: failing test that the JS of `func main(){_=json.Valid(nil)}` contains neither `UnmarshalTypeError` nor `EncodeBytes`, plus the existing `Encoder.SetEscapeHTML` / `Decoder.UseNumber` / `DisallowUnknownFields` cases staying green.
   - Done when: `EncodeBytes`, `DecodeBytes` and the three `Opt*` variables are gone (`NewEnc` sets `EscapeHTML: true`), `JSON_NAMES` and `addExtraRoots` are deleted, and the assertions pass.
-- [ ] Task 1.4: Collapse `src/typechecker/stdlib/{core,extended}.js` into `index.js`
+- [x] Task 1.4: Collapse `src/typechecker/stdlib/{core,extended}.js` into `index.js`
   - Files: `src/typechecker/stdlib/index.js`, `src/typechecker/stdlib/core.js` (delete), `src/typechecker/stdlib/extended.js` (delete)
   - Test: no behaviour change; `test/unit/types/` and `test/unit/language/` suites (browser globals and builtins) and `test/unit/compiler/check-layers.test.js` stay green.
   - Done when: `BROWSER_GLOBALS` and `BUILTINS` registration live in `setupGlobals` and both files are deleted.
-- [ ] Task 1.5: Delete hybrid `pkg.overlay` merging from `src/link/stdlib.js`, `src/resolver.js` and `test/unit/helpers.js`
+- [x] Task 1.5: Delete hybrid `pkg.overlay` merging from `src/link/stdlib.js`, `src/resolver.js` and `test/unit/helpers.js`
   - Files: `src/link/stdlib.js`, `src/resolver.js`, `test/unit/helpers.js`
   - Test: pure deletion (no failing test possible): add a regression case in `test/unit/compiler/stdlib-go.test.js` that aliased `import e "errors"` / `import s "strings"` run on JS and WASM (they already do), and keep the Task 1.1 alias cases green.
   - Done when: `grep -n overlay src/link/stdlib.js` matches nothing, the `import alias … is not supported` branch is gone, `GO_OVERLAID_PACKAGES` / `GO_MEMBER_PACKAGES` are deleted from `test/unit/helpers.js`, and `npm test` passes.

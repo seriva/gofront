@@ -147,31 +147,18 @@ func Run() string {
 	assertEqual(out, "true unsupported operation");
 });
 
-test("an overlay that redeclares an emitter member is rejected", () => {
-	withTempDir(
-		{
-			"stdlib/encoding/json/overlay.go": `//go:build gofront
+test("aliased errors and strings imports parity", async () => {
+	const out = await stdParity(`import (
+	e "errors"
+	s "strings"
+)
 
-//gofront:target both
-
-package json
-
-func Valid(data []byte) bool { return false }
-`,
-			"app/main.go": `package main
-
-import "encoding/json"
-
-func main() { println(json.Valid(nil)) }
-`,
-		},
-		(dir) => {
-			assertThrows(
-				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares json.Valid",
-			);
-		},
-	);
+func Run() string {
+	err := e.New("boom")
+	return s.ToUpper(err.Error()) + s.Repeat("!", 2)
+}
+`);
+	assertEqual(out, "BOOM!!");
 });
 
 section("Go-source stdlib: name coexistence and diagnostics");
@@ -367,28 +354,6 @@ func main() { println(u.C(1, 2), w.Run()) }
 			const first = compileDir(dir);
 			const second = compileDir(dir);
 			assertEqual(second.js, first.js);
-		},
-	);
-});
-
-test("an aliased overlay import is rejected at the import", () => {
-	withTempDir(
-		{
-			"stdlib/encoding/json/overlay.go": `//go:build gofront
-
-//gofront:target both
-
-package json
-
-func Hello() {}
-`,
-			"app/main.go": `package main\n\nimport j "encoding/json"\n\nfunc main() { println(j.Valid(nil)) }\n`,
-		},
-		(dir) => {
-			assertThrows(
-				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"import alias for 'encoding/json' is not supported",
-			);
 		},
 	);
 });

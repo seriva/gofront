@@ -51,12 +51,6 @@ func (e *InvalidUnmarshalError) Error() string {
 	return "json: Unmarshal(nil " + e.Type + ")"
 }
 
-var (
-	OptEscapeHTML            = true
-	OptUseNumber             bool
-	OptDisallowUnknownFields bool
-)
-
 // Dec is the state of one Unmarshal call. The input has been checked to be
 // valid JSON, so the readers below do not look for syntax errors.
 type Dec struct {
@@ -78,11 +72,7 @@ func NewDec(data []byte) (*Dec, error) {
 	if err := CheckValid(data); err != nil {
 		return nil, err
 	}
-	return &Dec{
-		data:                  data,
-		UseNumber:             OptUseNumber,
-		DisallowUnknownFields: OptDisallowUnknownFields,
-	}, nil
+	return &Dec{data: data}, nil
 }
 
 // UnknownField records an error when an unknown struct field is encountered with DisallowUnknownFields.
@@ -212,12 +202,6 @@ func (d *Dec) Bytes(typ string) (v []byte, ok bool) {
 		return nil, false
 	}
 	return b, true
-}
-
-// DecodeBytes decodes standard base64 text; the JavaScript JSON codec calls it
-// for []byte values.
-func DecodeBytes(s string) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(s)
 }
 
 // KeyInt parses the current object member name as an integer map key.
