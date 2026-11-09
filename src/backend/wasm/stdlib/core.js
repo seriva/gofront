@@ -27,7 +27,6 @@ import {
 	isStructType,
 	isUnhashableGoType,
 	toWasmType,
-	WRAP_ERRORS_STRUCT,
 } from "../types.js";
 
 function _isPointerKind(t) {
@@ -105,26 +104,6 @@ export class StdlibCoreEmitter {
 		} else {
 			this.pushInstruction({ op: "i32.const", value: v });
 		}
-	}
-
-	_emitLazyErrorGlobal(gIdx, msg) {
-		this.pushInstruction({ op: "global.get", index: gIdx });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		const strIdx = this.mod.internString(msg);
-		this.pushInstruction({ op: "i32.const", value: strIdx });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStringImportIndex(),
-		});
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-		});
-		this.pushInstruction({ op: "global.set", index: gIdx });
-		this.pushInstruction("end");
-		this.pushInstruction({ op: "global.get", index: gIdx });
 	}
 
 	// `t.Method(args...)` on a `*testing.T`: the receiver is a JS object held
@@ -923,12 +902,7 @@ export class StdlibCoreEmitter {
 		const checker = this.mod.checker;
 		const isPtr = _isPointerKind(goType);
 		const named = this._fmtNamed(isPtr ? (goType.base ?? goType.elem) : goType);
-		if (
-			!named ||
-			named.name === ERROR_STRUCT ||
-			named.name === WRAP_ERRORS_STRUCT
-		)
-			return null;
+		if (!named || named.name === ERROR_STRUCT) return null;
 		// Elements of an `any`-held container share a wasm type across Go types
 		// (`[]Color` and `[]int`), so scalar-backed named types are not dispatched.
 		if (
@@ -1012,12 +986,7 @@ export class StdlibCoreEmitter {
 		let t = _isPointerKind(goType) ? (goType.base ?? goType.elem) : goType;
 		if (t?.kind === "TypeName" || t?.kind === "Ident")
 			t = this.mod.checker?.types?.get(t.name) ?? t;
-		if (
-			t?.kind !== "named" ||
-			t.name === ERROR_STRUCT ||
-			t.name === WRAP_ERRORS_STRUCT
-		)
-			return null;
+		if (t?.kind !== "named" || t.name === ERROR_STRUCT) return null;
 		const sInfo = this.mod.getStructType(t.name);
 		const field = sInfo?.fields?.find(
 			(f) => f.embedded && isErrorType(f.goType),
@@ -1479,8 +1448,6 @@ export class StdlibCoreEmitter {
 			e: { k: "struct", n: name, f: [] },
 		});
 		const errInfo = this.mod.getStructType(ERROR_STRUCT);
-		const wrapInfo = this.mod.getStructType(WRAP_ERRORS_STRUCT);
-		when(wrapInfo.typeIndex, () => tag(ptrTo("fmt.wrapErrors")));
 		when(errInfo.typeIndex, () => {
 			this.pushInstruction({ op: "local.get", index: errTmp });
 			this.pushInstruction({ op: "ref.cast", typeIndex: errInfo.typeIndex });
@@ -1595,13 +1562,6 @@ export class StdlibCoreEmitter {
 			kind: "ref",
 			nullable: true,
 			typeIndex: sliceInfo.typeIndex,
-		});
-	}
-
-	_callStdlib(name) {
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStdlibImportIndex(name),
 		});
 	}
 
@@ -1762,28 +1722,26 @@ export class StdlibCoreEmitter {
 	_emitAnyFmtError(done) {
 		if (!this.mod.hasErrorType) return;
 		const msgTmp = this.acquireTemp("externref");
-		for (const name of [ERROR_STRUCT, WRAP_ERRORS_STRUCT]) {
-			const errInfo = this.mod.getStructType(name);
-			this.pushInstruction({ op: "local.get", index: 0 });
-			this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: 0 });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.resolveFuncIndex("__error_str"),
-			});
-			this.pushInstruction({ op: "local.set", index: msgTmp });
-			this.pushInstruction({ op: "local.get", index: msgTmp });
-			this.pushInstruction({ op: "local.get", index: msgTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getFmtNewStringerIndex(),
-			});
-			this.pushInstruction("return");
-			this.pushInstruction("end");
-			done.add(errInfo.typeIndex);
-		}
+		const errInfo = this.mod.getStructType(ERROR_STRUCT);
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__error_str"),
+		});
+		this.pushInstruction({ op: "local.set", index: msgTmp });
+		this.pushInstruction({ op: "local.get", index: msgTmp });
+		this.pushInstruction({ op: "local.get", index: msgTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStringerIndex(),
+		});
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+		done.add(errInfo.typeIndex);
 		this.releaseTemp(msgTmp, "externref");
 	}
 
@@ -1808,10 +1766,7 @@ export class StdlibCoreEmitter {
 	_emitAnyFmtStructs(done) {
 		const checker = this.mod.checker;
 		for (const [name, sInfo] of [...this.mod.structTypes.entries()]) {
-			const named =
-				name === ERROR_STRUCT || name === WRAP_ERRORS_STRUCT
-					? null
-					: checker?.types?.get(name);
+			const named = name === ERROR_STRUCT ? null : checker?.types?.get(name);
 			if (!named) continue;
 			const ptrType = { kind: "pointer", base: named };
 			const w = toWasmType(ptrType, checker, this.mod);
@@ -2060,29 +2015,6 @@ export class StdlibCoreEmitter {
 				});
 				this.pushInstruction("return");
 				return;
-			case "wrap_msg":
-			case "wrap_errs": {
-				const wrapInfo = this.mod.getStructType(WRAP_ERRORS_STRUCT);
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: wrapInfo.typeIndex,
-					fieldIndex: fn._isRuntimeHelper === "wrap_msg" ? 0 : 1,
-				});
-				this.pushInstruction("return");
-				return;
-			}
-			case "mk_wrap_errors": {
-				const wrapInfo = this.mod.getStructType(WRAP_ERRORS_STRUCT);
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({ op: "local.get", index: 1 });
-				this.pushInstruction({
-					op: "struct.new",
-					typeIndex: wrapInfo.typeIndex,
-				});
-				this.pushInstruction("return");
-				return;
-			}
 			case "mk_error":
 				// nil message (strconv success) → nil error
 				this.pushInstruction({ op: "local.get", index: 0 });
@@ -2131,61 +2063,6 @@ export class StdlibCoreEmitter {
 				});
 				this.pushInstruction("return");
 				return;
-			case "errors_is": {
-				// for err != nil { if err == target || sameMsg(err, target) { return true }; err = unwrap(err) }
-				this.pushInstruction({ op: "block", blockType: "void" });
-				this.pushInstruction({ op: "loop", blockType: "void" });
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "br_if", depth: 1 });
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({ op: "local.get", index: 1 });
-				this._emitAnyEq();
-				this.pushInstruction({ op: "if", blockType: "void" });
-				this.pushInstruction({ op: "i32.const", value: 1 });
-				this.pushInstruction("return");
-				this.pushInstruction("end");
-				// both runtime errors with equal messages (mirrors the JS backend)
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
-				this.pushInstruction({ op: "local.get", index: 1 });
-				this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
-				this.pushInstruction("i32.and");
-				this.pushInstruction({ op: "if", blockType: "void" });
-				for (const idx of [0, 1]) {
-					this.pushInstruction({ op: "local.get", index: idx });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: errInfo.typeIndex,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: errInfo.typeIndex,
-						fieldIndex: 0,
-					});
-				}
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.getStringCmpImportIndex("=="),
-				});
-				this.pushInstruction({ op: "if", blockType: "void" });
-				this.pushInstruction({ op: "i32.const", value: 1 });
-				this.pushInstruction("return");
-				this.pushInstruction("end");
-				this.pushInstruction("end");
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex("__errors_unwrap"),
-				});
-				this.pushInstruction({ op: "local.set", index: 0 });
-				this.pushInstruction({ op: "br", depth: 0 });
-				this.pushInstruction("end");
-				this.pushInstruction("end");
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("return");
-				return;
-			}
 			case "testing_run_cb": {
 				// (fn anyref, t externref): fn is a func(*testing.T) closure
 				const closureInfo = this.mod.getTestingRunClosureType();
