@@ -1424,6 +1424,15 @@ export class ExprsEmitter {
 		return null;
 	}
 
+	// True when the target wasm type is the `$complex64` struct, whether it is
+	// named or only carries the struct's type index.
+	_isComplex64Target(w) {
+		return (
+			w?.typeName === "$complex64" ||
+			this._complexKindOfWType(w) === "complex64"
+		);
+	}
+
 	emitBasicLit(lit, targetWasmType) {
 		const targetComplex = this._complexKindOfWType(targetWasmType);
 		const isTargetComplex64 =
@@ -1504,7 +1513,7 @@ export class ExprsEmitter {
 	emitImagLit(lit, targetWasmType) {
 		const is64 =
 			lit._type?.name === "complex64" ||
-			targetWasmType?.typeName === "$complex64";
+			this._isComplex64Target(targetWasmType);
 		const complexName = is64 ? "complex64" : "complex128";
 		const info = this.mod.getComplexType(complexName);
 		const imVal = Number(lit.value);
@@ -1729,7 +1738,7 @@ export class ExprsEmitter {
 			const is64 =
 				isComplex64(expr._type) ||
 				isComplex64(operand._type) ||
-				targetWasmType?.typeName === "$complex64";
+				this._isComplex64Target(targetWasmType);
 			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
 			const cWType = {
 				kind: "ref",
@@ -2095,7 +2104,7 @@ export class ExprsEmitter {
 			isComplex64(expr._type) ||
 			isComplex64(left._type) ||
 			isComplex64(right._type) ||
-			targetWasmType?.typeName === "$complex64";
+			this._isComplex64Target(targetWasmType);
 		const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
 		const f = info.elemWType;
 		const cWType = {

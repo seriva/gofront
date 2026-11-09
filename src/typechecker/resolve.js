@@ -8,6 +8,7 @@ import {
 	ANY,
 	BASIC_TYPES,
 	COMPARABLE,
+	DECLARED_ANY,
 	defaultType,
 	displayTypeName,
 	isAny,
@@ -212,7 +213,8 @@ export const resolveMethods = {
 		if (!node) return ANY;
 		switch (node.kind) {
 			case "TypeName": {
-				if (BASIC_TYPES[node.name]) return BASIC_TYPES[node.name];
+				if (BASIC_TYPES[node.name])
+					return node.name === "any" ? DECLARED_ANY : BASIC_TYPES[node.name];
 				if (node.name === "comparable") return COMPARABLE;
 				if (scope) {
 					const fromScope = scope.lookup(node.name);

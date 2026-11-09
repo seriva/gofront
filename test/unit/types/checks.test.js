@@ -701,6 +701,36 @@ func main() {
 	assertEqual(runJs(js), "0 false");
 });
 
+test("any cannot be passed or assigned to a concrete struct without an assertion", () => {
+	const call = compile(`package main
+type A struct{ N int }
+func f(a A) int { return a.N }
+func main() {
+  var x any = A{3}
+  _ = f(x)
+}`);
+	assertErrorContains(call.errors, "cannot use");
+	assertErrorContains(call.errors, "need type assertion");
+	const decl = compile(`package main
+type A struct{ N int }
+func main() {
+  var x any = A{3}
+  var a A = x
+  _ = a
+}`);
+	assertErrorContains(decl.errors, "need type assertion");
+	const ok = compile(`package main
+type A struct{ N int }
+func main() {
+  var x any = A{3}
+  var a A = x.(A)
+  var y any = x
+  _ = a
+  _ = y
+}`);
+	assertEqual(ok.errors.length, 0);
+});
+
 test("v, ok = x.(T) type assertion with = succeeds", () => {
 	const { js, errors } = compile(`package main
 func main() {

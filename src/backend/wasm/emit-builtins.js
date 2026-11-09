@@ -933,7 +933,7 @@ export class BuiltinsEmitter {
 			callType?.name === "complex64" ||
 			arg0._type?.name === "float32" ||
 			arg1._type?.name === "float32" ||
-			targetWasmType?.typeName === "$complex64";
+			this._isComplex64Target(targetWasmType);
 		const complexName = is64 ? "complex64" : "complex128";
 		const info = this.mod.getComplexType(complexName);
 		this.emitExpr(arg0, info.elemWType);

@@ -314,15 +314,15 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 *Phases 8–9 were scheduled from review follow-ups on 2026-11-09 (see Verified Gaps → Review follow-ups (2026-11-09)).*
 
-- [ ] Task 8.1: Typechecker: reject assigning/passing `any` to concrete struct types
+- [x] Task 8.1: Typechecker: reject assigning/passing `any` to concrete struct types
   - Files: `src/typechecker/assignability.js`, `test/unit/types/checks.test.js`
   - Test: `F77` `type A struct{N int}; func f(a A) int { return a.N }; var x any = A{3}; _ = f(x)` and `var a A = x` in `test/unit/types/checks.test.js` → `assertErrorContains(errors, "cannot use")` and `assertErrorContains(errors, "need type assertion")`.
   - Done when: `assertAssignable` in `src/typechecker/assignability.js` (today short-circuited by `_assertAssignableEarlyReturn` on `isAny(source)`) rejects assigning an interface-typed operand to a non-interface type without an explicit type assertion, and `npm run check` and `test/unit/types/checks.test.js` pass.
-- [ ] Task 8.2: JS `for range` over nil maps (positional and keyed literals, variables)
+- [x] Task 8.2: JS `for range` over nil maps (positional and keyed literals, variables)
   - Files: `src/backend/js/statements.js`, `test/unit/language/control-flow.test.js`
   - Test: `F78` `type S struct{a int; m map[string]int}; s := S{1, nil}; for range s.m {}`, `s2 := S{m: nil}; for k := range s2.m {}`, `var mm map[string]int = nil; for k, v := range mm {}` → compiles and executes with zero iterations across `js`, `both`, and `wasm` in `test/unit/language/control-flow.test.js`.
   - Done when: `_genRangeIterExpr` in `src/backend/js/statements.js` guards map iteration against null (`${iteree} ? Object.keys(${iteree}) : []` / `Object.entries`) and `test/unit/language/control-flow.test.js` passes.
-- [ ] Task 8.3: WASM `complex64` variable and constant initializers
+- [x] Task 8.3: WASM `complex64` variable and constant initializers
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit.js`, `test/unit/wasm/complex.test.js`
   - Test: `F79` `var c64 complex64 = complex(1.5, 2.5); f(c64)` and `var a complex64 = 1 + 2i` → passes `assertValidWasm` and prints `(1.5+2.5i)` / `(1+2i)` in `test/unit/wasm/complex.test.js`.
   - Done when: WASM expression emitter respects the target `complex64` type when lowering untyped complex constants and `complex(...)` calls, emitting `$complex64` structs instead of `$complex128`.

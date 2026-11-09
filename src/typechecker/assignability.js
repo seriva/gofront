@@ -279,6 +279,7 @@ export const assignabilityMethods = {
 		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
+		if (this._checkIfaceToConcrete(target, source, node, ctx, operand)) return;
 		if (this._assertAssignableEarlyReturn(target, source)) return;
 		if (isPointer(target) && isPointer(source)) {
 			this.assertAssignable(
@@ -438,6 +439,28 @@ export const assignabilityMethods = {
 			`type '${ptr ? "*" : ""}${src.name}' (${src._target ?? "js"}) cannot implement wasm interface '${target.name}' across the boundary; implement it in a wasm package or pass a func callback`,
 			node,
 		);
+	},
+
+	// An interface-typed operand needs an explicit type assertion before it can
+	// flow into a concrete (non-interface) type.
+	_checkIfaceToConcrete(target, source, node, ctx, operand) {
+		if (!source?._declared || !operand || typeof operand !== "object")
+			return false;
+		if (!this._isConcreteTarget(target)) return false;
+		this.err(
+			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}: need type assertion`,
+			node,
+		);
+		return true;
+	},
+
+	_isConcreteTarget(target) {
+		if (!target || target.kind === "typeParam" || isAny(target)) return false;
+		if (isNil(target) || isUntyped(target)) return false;
+		const base = this.resolveType(
+			target.kind === "named" ? target.underlying : target,
+		);
+		return !!base && base.kind !== "interface" && base.kind !== "typeParam";
 	},
 
 	_assertAssignableEarlyReturn(target, source) {

@@ -303,6 +303,9 @@ export const FLOAT64 = { kind: "basic", name: "float64" };
 export const STRING = { kind: "basic", name: "string" };
 export const BOOL = { kind: "basic", name: "bool" };
 export const ANY = { kind: "basic", name: "any" };
+// `any` written in source. Untyped JS interop also yields plain ANY, which stays
+// freely assignable; only a declared `any` needs a type assertion.
+export const DECLARED_ANY = { kind: "basic", name: "any", _declared: true };
 export const TAINTED_ANY = { kind: "basic", name: "any", _tainted: true };
 export const VOID = { kind: "basic", name: "void" };
 export const NIL = { kind: "basic", name: "nil" };
