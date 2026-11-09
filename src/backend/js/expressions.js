@@ -603,17 +603,6 @@ export const expressionGenMethods = {
 				}
 			}
 		}
-		if (expr._ifaceSrc && !expr._fmtDescing && !this._isNamedBoxKind(expr)) {
-			const desc = this._fmtDesc(expr._ifaceSrc);
-			if (desc) {
-				expr._fmtDescing = true;
-				try {
-					return this._fmtDescWrap(this.genExpr(expr), desc);
-				} finally {
-					expr._fmtDescing = false;
-				}
-			}
-		}
 		if (expr._ifaceBox && !expr._ifaceBoxing && !this._isNamedBoxKind(expr)) {
 			expr._ifaceBoxing = true;
 			try {
@@ -744,12 +733,6 @@ export const expressionGenMethods = {
 		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
 		if (!this.structNames.has(cls)) return js;
 		return `__ifn(${js}, ${cls})`;
-	},
-
-	// `js` tagged with the fmt descriptor source `desc` (see _fmtDesc).
-	_fmtDescWrap(js, desc) {
-		this.useHelper("ifd");
-		return `__ifd(${js}, ${desc})`;
 	},
 
 	_isNamedBoxKind(expr) {
@@ -1898,13 +1881,6 @@ export const expressionGenMethods = {
 	},
 
 	_genReceiverTypeCall(recvName, expr) {
-		if (
-			recvName === "testing.T" ||
-			recvName === "testing.B" ||
-			recvName === "testing.M" ||
-			recvName === "testing.TB"
-		)
-			return this._genTestingMethodCall(expr.func.field, expr);
 		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;

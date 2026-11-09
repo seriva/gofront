@@ -48,7 +48,6 @@ import {
 	HELPER_GENERICS,
 	HELPER_GEQ,
 	HELPER_IFACE_BOX,
-	HELPER_IFD,
 	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
 	HELPER_JSONRT,
@@ -66,10 +65,8 @@ import {
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
-	HELPER_SPRINTF,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
-	HELPER_TESTING,
 	HELPER_TO64,
 	HELPER_U8DEC,
 	HELPER_U8ENC,
@@ -147,7 +144,6 @@ const HELPER_MAP = [
 	["va", HELPER_VA],
 	["vclone", HELPER_VCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
-	["ifd", HELPER_IFD],
 	["equal", HELPER_EQUAL],
 	["geq", HELPER_GEQ],
 	["ptreq", HELPER_PTREQ],
@@ -163,9 +159,7 @@ const HELPER_MAP = [
 	["nm", HELPER_NM],
 	["structKey", HELPER_STRUCT_KEY],
 	["generics", HELPER_GENERICS],
-	["sprintf", HELPER_SPRINTF],
 	["error", HELPER_ERROR],
-	["testing", HELPER_TESTING],
 	["jsonrt", HELPER_JSONRT],
 	["simd", HELPER_SIMD],
 ];
@@ -196,6 +190,11 @@ const JS_INTRINSICS = {
 	crypto_rand_u32: () =>
 		'const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto; if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0]; return Math.floor(Math.random() * 4294967296);',
 	// A number per object for the whole run, from 1 (pointers print as 0x<id>).
+	testing_nanotime: () => "return BigInt(Math.round(performance.now() * 1e6));",
+	testing_match: ([pattern, s]) =>
+		`const c = (globalThis.__testRe ??= new Map()); let re = c.get(${pattern}); if (!re) { re = new RegExp(${pattern}); c.set(${pattern}, re); } return re.test(${s});`,
+	testing_call: ([f, t]) =>
+		`const r = ${f}(${t}); return r && typeof r.then === "function" ? r : null;`,
 	fmt_ptr_id: ([v]) =>
 		`if (${v} === null || ${v} === undefined || (typeof ${v} !== "object" && typeof ${v} !== "function")) return 0n; const t = (globalThis.__fmtptr ??= { m: new WeakMap(), n: 1 }); let id = t.m.get(${v}); if (!id) { id = t.n++; t.m.set(${v}, id); } return BigInt(id);`,
 	math_float64bits: ([f]) =>
@@ -623,11 +622,7 @@ export class CodeGen {
 		if (name === "slice") this._helpers.add("sv");
 	}
 
-	_prependHelpers(isTest = false) {
-		if (isTest || this._helpers.has("testing")) {
-			this.useHelper("sprintf");
-			this.useHelper("testing");
-		}
+	_prependHelpers(_isTest = false) {
 		const helpers = [];
 		if (this.collectedCss.length > 0) helpers.push(HELPER_INJECT_STYLES);
 		for (const [name, src] of HELPER_MAP) {
@@ -992,7 +987,6 @@ export class CodeGen {
 			);
 		}
 		this._genValueMethodMeta(name, methodDecls);
-		this._genFmtClassMeta(name, methodDecls);
 	}
 
 	// Names of the value-receiver methods: a typed nil pointer in an interface

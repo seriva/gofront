@@ -99,9 +99,9 @@ function isUnexportedForeign(name) {
 	return at > 0 && !/^\p{Lu}/u.test(name);
 }
 
-// Types the host provides: a value of one is an opaque reference, not a Go
-// struct that can be described.
-const HOST_TYPE = /^(testing)\./;
+// The types of package testing: the lookup of a package that logs through a
+// *testing.T never describes the test state itself.
+const HOST_TYPE = /^testing\.|\$\$testing$/;
 
 function under(t) {
 	return t?.kind === "named" ? under(t.underlying) : t;
@@ -659,6 +659,33 @@ const isFmtRef = (node, aliases) =>
 	aliases.has(node.expr.name) &&
 	FMT_PRINT_FUNCS.has(node.field);
 
+// The methods of *testing.T, *testing.B and testing.TB that format their
+// operands like Print (Log, Error, Fatal, Skip) or like Printf (the f forms).
+const TESTING_FORMATS = new Set(
+	["Log", "Error", "Fatal", "Skip"].flatMap((m) => [m, `${m}f`]),
+);
+const TESTING_RECEIVER = /^(T|B|TB)\$\$testing$|^testing\.(T|B|TB)$/;
+
+// Whether the package logs operands through testing's methods, and whether
+// any of those calls is formatted. The operands reach fmt as `any` values, so
+// the package needs the lookup (and, for a format call, the description of
+// Stringers and errors) as for a forwarded Print call.
+function findTestingCalls(programs) {
+	const found = { calls: false, formatted: false };
+	for (const program of programs)
+		walkNodes(program.decls, (node) => {
+			if (node.kind !== "CallExpr" || node.func?.kind !== "SelectorExpr")
+				return;
+			if (!TESTING_FORMATS.has(node.func.field)) return;
+			let recv = node.func.expr?._type;
+			if (recv?.kind === "pointer") recv = recv.base;
+			if (!TESTING_RECEIVER.test(recv?.name ?? "")) return;
+			found.calls = true;
+			if (isFormatted(node.func.field)) found.formatted = true;
+		});
+	return found;
+}
+
 function findSites(programs) {
 	const sites = [];
 	const values = []; // uses that are not calls: the operands are unknown
@@ -773,18 +800,20 @@ export function generateFmtFormatters(programs, checker, pkgName) {
 	// encoding/json names the type of a target that is not a pointer with %T,
 	// an operand that arrives through an interface.
 	const usesJson = hasJsonTargetNotPointer(programs);
-	if (sites.length + values.length === 0 && !usesJson) return null;
+	const testing = findTestingCalls(programs);
+	if (sites.length + values.length === 0 && !usesJson && !testing.calls)
+		return null;
 	const qualifiers = new Set();
 	const gen = new FmtGen(
 		checker,
 		pkgName,
 		qualifiers,
 		programs,
-		sites.some((s) => isFormatted(s.call.func.field)),
+		testing.formatted || sites.some((s) => isFormatted(s.call.func.field)),
 	);
 	const diagnostics = [];
 	const marks = [];
-	let lookup = values.length > 0 || usesJson;
+	let lookup = values.length > 0 || usesJson || testing.calls;
 	for (const { call, program } of sites) {
 		// Parsed trees outlive a build: forget how an earlier build wrapped it.
 		delete call.func._genEntry;

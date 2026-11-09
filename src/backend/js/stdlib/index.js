@@ -1,17 +1,14 @@
 // CodeGen stdlib call generation — installed as a mixin on CodeGen.prototype.
 // One file per Go package under ./stdlib/. This index merges them.
 
-import { fmtMethods } from "./fmt.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
-import { testingMethods } from "./testing.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
 // Stdlib namespace → handler method name. Used by _genStdlibCall to dispatch
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
-	testing: "_genTesting",
 	shared: "_genShared",
 	simd: "_genSimd",
 };
@@ -54,9 +51,7 @@ const dispatchMethods = {
 
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
-	...fmtMethods,
 	...sharedMethods,
 	...simdMethods,
-	...testingMethods,
 	...dispatchMethods,
 };

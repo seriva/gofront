@@ -815,8 +815,6 @@ const EXCLUDED_MEMBER_GROUPS = {
 const REMOVED_PACKAGES = {
 	bufio: "removed in v1.8.0; use strings and bytes readers",
 	"net/url": "removed in v1.8.0; use the URL class from a js package",
-	context:
-		"removed in v1.8.0; use a cancel flag, or AbortController from a js package",
 	"encoding/csv":
 		"removed in v1.8.0; split lines and fields with strings.Split",
 	"container/heap":

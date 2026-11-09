@@ -3,7 +3,6 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
-	assertContains,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -252,26 +251,24 @@ type Outer struct {
 	);
 });
 
-test("a promoted pointer-receiver String is marked in the class metadata", () => {
-	// Positional literals and promoted-method calls of embedding structs are
-	// not reliable on JS yet, so only the emitted metadata is checked.
-	const { js, errors } = compile(`package main
-import "fmt"
-${TYPES}
+test("a promoted pointer-receiver String is called for a pointer, not a value", () => {
+	assertEqual(
+		run(
+			`pw := PW{Counter{3}, 1}
+	vw := VW{Point{1, 2}, 4}
+	fmt.Println(pw, &pw)
+	fmt.Println(vw, &vw)`,
+			`${TYPES}
 type PW struct {
 	Counter
-	N int
+	N2 int
 }
 type VW struct {
 	Point
 	N int
-}
-func main() { fmt.Println(PW{}, VW{}) }`);
-	assertEqual(errors.length, 0, errors.join("\n"));
-	assertContains(js, 'PW.prototype, "__pr", { value: ["String"] }');
-	assert(
-		!js.includes('VW.prototype, "__pr"'),
-		"value-receiver String is not marked",
+}`,
+		),
+		"{{3} 1} counter=3\n(1,2) (1,2)",
 	);
 });
 
