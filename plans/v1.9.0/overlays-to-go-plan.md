@@ -245,7 +245,7 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
   - Files: `stdlib/fmt/errors.go`, `src/typechecker/stdlib/core.js`
   - Test: `test/unit/stdlib/errors.test.js` (`%w` single, multiple, non-error operand, `errors.Is`/`As`/`Unwrap` over the result), `test/unit/stdlib/fmt.test.js`
   - Done when: `Errorf` is Go source with `wrapError`/`wrapErrors`, the `fmt` overlay has no members left, and `fmt`/`fmt.Stringer` are removed from `STDLIB_PACKAGES`/`WASM_STDLIB_MEMBERS`/`types.set`.
-- [ ] Task 5.3 (partial, see Phase 5 as built): Delete the JS `fmt` emitter, runtime engine, descriptors and shared fmt helpers; enforce the perf gate
+- [x] Task 5.3 (partial; remainder moved to Task 7.4, see Phase 5 as built): Delete the JS `fmt` emitter, runtime engine, descriptors and shared fmt helpers; enforce the perf gate
   - Files: `src/backend/js/stdlib/fmt.js` (delete), `src/backend/js/fmt-runtime.js` (delete), `src/backend/shared/errorf.js` (delete), `src/backend/shared/fmt-types.js`, `src/backend/js/runtime.js`, `src/backend/js/type-info.js`, `src/backend/js/expressions.js`, `src/backend/js/index.js`, `src/backend/js/stdlib/index.js`, `test/perf/fmt-bench.js`
   - Test: `test/unit/builtins/fmt-verbs.test.js`, `test/unit/builtins/fmt-stringer.test.js` (the `__pr` output assertion at 271–273 rewritten as a behavioural pointer-vs-value case), `test/unit/stdlib/fmt.test.js`, `node test/perf/fmt-bench.js`
   - Done when: `HELPER_SPRINTF`, `HELPER_IFD`, `__ft`/`_fmtDesc*`/`_genFmtClassMeta`/`__pr`/`_fmtDescWrap`, `errorf.js` are gone, `fmt-types.js` keeps only `goTypeName` (used by `src/backend/wasm/monomorph.js`), and the bench thresholds are set to JS ≤ 2.0× / WASM ≤ 1.0× of the Task 4.1 baselines and pass.
@@ -284,7 +284,7 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 - [ ] Task 7.4: Delete the host `testing` protocol, runtime helper and overlays
   - Files: `src/backend/js/runtime.js`, `src/backend/js/stdlib/testing.js` (delete), `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/boundary.js`, `src/backend/wasm/index.js`, `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js` (the `isTestingT` `b.N` special case at 630), `src/backend/wasm/emit-builtins.js`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `src/link/stdlib.js`, `src/lower/reachability.js`
   - Test: `test/unit/cli/test-runner.test.js`, `test/unit/stdlib/testing.test.js`, `test/unit/compiler/check-layers.test.js`
-  - Done when: `HELPER_TESTING`, `emitTestingCall`, `testing_*` imports, `__testing_*_cb`, the externref mapping, the `testing`/`context` overlays, `IMPLIES_TIME` and the testing branch of `addExtraRoots` are deleted (≈ 1,010 lines), `STDLIB_PACKAGES` is `{gofront/shared, gofront/simd, encoding/json}`, and `npm test && npm run check && npm run test:e2e` pass.
+  - Done when (also the Task 5.3 remainder): `HELPER_SPRINTF`/`fmt-runtime.js`, `HELPER_IFD`, `__ft`/`_fmtDesc*`/`_genFmtClassMeta`/`__pr`/`_fmtDescWrap` are gone and `fmt-types.js` keeps only `goTypeName`; `HELPER_TESTING`, `emitTestingCall`, `testing_*` imports, `__testing_*_cb`, the externref mapping, the `testing`/`context` overlays, `IMPLIES_TIME` and the testing branch of `addExtraRoots` are deleted (≈ 1,010 lines), `STDLIB_PACKAGES` is `{gofront/shared, gofront/simd, encoding/json}`, and `npm test && npm run check && npm run test:e2e` pass.
 - [ ] Task 7.5: Testing documentation
   - Files: `docs/usage.md`, `docs/architecture.md`
   - Test: `npm run check`
