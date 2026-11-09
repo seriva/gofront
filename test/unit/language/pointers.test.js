@@ -889,6 +889,57 @@ func main() {
 	);
 });
 
+test("method values and expressions on a nil pointer receiver do not dereference it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ v T }
+
+func (b *Box[T]) M() int { return 0 }
+
+type S struct{}
+
+func (s *S) Ping() { fmt.Println("ping") }
+
+func main() {
+	var b *Box[int]
+	g := (*Box[int]).M
+	fmt.Println(g(b))
+	var s *S
+	f := s.Ping
+	f()
+	h := (*S).Ping
+	h(s)
+}
+`,
+		"0\nping\nping\n",
+	);
+});
+
+test("len and cap of a nil array pointer evaluate the call and return N", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func getNil() *[3]int {
+	fmt.Println("getNil")
+	return nil
+}
+
+func main() {
+	fmt.Println(len(getNil()))
+	fmt.Println(cap(getNil()))
+	var p *[4]int
+	fmt.Println(len(p), cap(p))
+}
+`,
+		"getNil\n3\ngetNil\n3\n4 4\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

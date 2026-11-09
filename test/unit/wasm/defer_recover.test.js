@@ -779,3 +779,49 @@ func Main() (res string) {
 	});
 	assertEqual(exports.Main(), "host boom");
 });
+
+section("Panic values keep their type");
+
+test("a user string panic that reads like a runtime error is not an error", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		_, ok := r.(error)
+		_, isStr := r.(string)
+		fmt.Println(ok, isStr, r)
+	}()
+	panic("runtime error: foo")
+}
+`,
+		"false true runtime error: foo\n",
+	);
+});
+
+test("panic with a defined string error type keeps its type and Error method", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type rt string
+
+func (rt) Error() string { return "boom" }
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Println(r)
+		_, ok := r.(rt)
+		fmt.Println(ok)
+	}()
+	panic(rt("q"))
+}
+`,
+		"boom\ntrue\n",
+	);
+});
