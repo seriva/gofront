@@ -39,7 +39,7 @@ GoFront supports standard library packages that compile to self-contained JavaSc
 | Category | Policy | Examples |
 |---|---|---|
 | **Supported on both backends** | Available in `js`, `wasm`, and `both` packages | `encoding/json`, `cmp`, `iter`, `slices`, `maps`, `strings`, `bytes` |
-| **JS-only by design** | Available in `js` packages; targeted diagnostic in `wasm` | `regexp`, `time.Sleep`, DOM APIs, host event loop |
+| **JS-only by design** | Available in `js` packages; a `wasm` or `both` package gets `package 'regexp' is only available in js packages` (or `'time.Sleep' is only available in js packages`) | `regexp`, `gom`, `time.Sleep`, `time.AfterFunc`, `time.Timer`, DOM APIs, host event loop |
 | **Not supported: runtime** | Targeted diagnostic in every target, for the language features and for importing `reflect`, `unsafe` or `runtime` | Goroutines, channels, `select`, `reflect`, `unsafe`, `runtime`, `weak`, `unique` |
 | **Not supported: small utility packages** | `import` reports `package '<path>' is not available` with a suggested alternative in every target | `bufio`, `net/url`, `context`, `log`, `encoding/csv`, `encoding/base32`, `container/*`, `hash/adler32`, `hash/crc32`, `hash/fnv`, `crypto/hmac`, `crypto/md5`, `crypto/sha1`, `crypto/sha512`, `crypto/subtle`, `math/rand/v2`, `math/cmplx`, `sync/atomic`, `unicode/utf16` |
 | **Not supported: host OS** | Targeted diagnostic in every target: on the `import`, or on use for file I/O in `os` (`os.ReadFile is not available`) | `net/http`, `net`, `os/exec`, file I/O in `os`, `syscall` |
@@ -48,14 +48,14 @@ GoFront supports standard library packages that compile to self-contained JavaSc
 
 ### Standard library behaviour
 
-Most packages (`slices`, `sort`, `maps`, `errors`, `io`, `os`, `unicode`, `strings`, `bytes`, `strconv`, `time`, `math/bits`, `math/rand`, `crypto/rand`, `sync`, `encoding/hex`, `encoding/base64`, `encoding/binary`, `crypto/sha256` and the others under [`stdlib/`](../stdlib/)) are written in Go from the real packages' algorithms, so they follow Go's signatures and results on `js`, `wasm` and `both` packages alike:
+Most packages (`fmt`, `slices`, `sort`, `maps`, `errors`, `io`, `os`, `unicode`, `strings`, `bytes`, `strconv`, `time`, `math/bits`, `math/rand`, `crypto/rand`, `sync`, `encoding/hex`, `encoding/base64`, `encoding/binary`, `crypto/sha256` and the others under [`stdlib/`](../stdlib/)) are written in Go from the real packages' algorithms, so they follow Go's signatures and results on `js`, `wasm` and `both` packages alike:
 
 - **Sorting:** `sort.Slice`, `slices.SortFunc` and friends break ties in the same order as Go, and `NaN` values sort before every other float. Use `sort.SliceStable` or `slices.SortStableFunc` when equal elements must keep their input order.
 - **Generic helpers on named types:** `slices` and `maps` functions accept named slice and map types such as `type IDs []int`, and return the same named type.
 - **Errors:** `strconv` parse failures are `*strconv.NumError` values wrapping `strconv.ErrSyntax` or `strconv.ErrRange`, so use `errors.Is` or `errors.As` instead of comparing text. `base64` reports Go's error positions, and `time` formats and parses every layout.
 - **Numbers:** `strconv.FormatFloat` and `ParseFloat` round exactly as Go does for bit sizes 32 and 64, including `-0`, hexadecimal floats and `1e39` as `float32`. `strconv.Atoi` and `strconv.Itoa` use `int`, which is exact up to 2⁵³ in JavaScript output; `ParseInt` and `ParseUint` return exact `int64` and `uint64`.
 - **Host fast paths:** Searching, sorting primitive slices, trimming and case conversion in `strings`, `bytes`, `slices` and `sort`, and the digit conversion in `strconv.FormatFloat` and `ParseFloat`, call the host (`indexOf`, `toExponential`, `Number`) where it gives Go's result. The Go body runs for every other case. Pass `--no-natives` when compiling an input (`gofront <input> -o out.js --no-natives`) to run the Go bodies everywhere, for example to compare results.
-- **Still provided by the compiler:** `errors.As` is the only member of the Go-source packages that the backends implement directly; `fmt`, `encoding/json` and `testing` also keep compiler support.
+- **Still provided by the compiler:** `encoding/json` (generated per-type codecs), `testing`, `gofront/shared` and `gofront/simd`. Every other package listed here, including `fmt` and `errors.As`, is Go source that you can read under `stdlib/`.
 
 ### String semantics (both backends)
 

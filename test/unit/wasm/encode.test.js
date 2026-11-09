@@ -17,7 +17,7 @@ import {
 	hasNativeWasmOpt,
 	optimizeWasm,
 } from "../../../src/backend/wasm/optimize.js";
-import { _usesFmtAny } from "../../../src/backend/wasm/prescan.js";
+import { _usesTestingAny } from "../../../src/backend/wasm/prescan.js";
 import { compileWasm } from "../../../src/compiler.js";
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { Parser } from "../../../src/parser/index.js";
@@ -531,8 +531,51 @@ function checkedProgram(src) {
 	return { funcDecls, mod: { checker } };
 }
 
-// The checker here does not import packages, so `fmt` is a stand-in value.
-test("_usesFmtAny is true for fmt.Printf(any(x))", () => {
+// The checker here does not import packages, so `t` and `fmt` are stand-in
+// values; `markTestingT` gives `t` the type a real `*testing.T` has.
+function markTestingT(funcDecls) {
+	const visit = (n) => {
+		if (!n || typeof n !== "object") return;
+		if (Array.isArray(n)) return n.forEach(visit);
+		if (
+			n.kind === "SelectorExpr" &&
+			n.expr?.kind === "Ident" &&
+			n.expr.name === "t"
+		)
+			n.expr._type = {
+				kind: "pointer",
+				base: { kind: "named", name: "testing.T" },
+			};
+		for (const k of Object.keys(n)) if (k !== "_type") visit(n[k]);
+	};
+	for (const fn of funcDecls) visit(fn.body);
+}
+
+test("_usesTestingAny is true for t.Logf with an any operand", () => {
+	const { funcDecls, mod } = checkedProgram(`package main
+var t struct{ Logf func(string, ...any) }
+func main() {
+	x := 1
+	t.Logf("%v", any(x))
+}
+`);
+	markTestingT(funcDecls);
+	assertEqual(_usesTestingAny(funcDecls, mod), true);
+});
+
+test("_usesTestingAny is false for scalar-only t.Logf calls", () => {
+	const { funcDecls, mod } = checkedProgram(`package main
+var t struct{ Logf func(string, ...any) }
+func main() {
+	x := 1
+	t.Logf("%v", x)
+}
+`);
+	markTestingT(funcDecls);
+	assertEqual(_usesTestingAny(funcDecls, mod), false);
+});
+
+test("_usesTestingAny is false for fmt calls with an any operand", () => {
 	const { funcDecls, mod } = checkedProgram(`package main
 var fmt struct{ Printf func(string, ...any) }
 func main() {
@@ -540,18 +583,7 @@ func main() {
 	fmt.Printf("%v", any(x))
 }
 `);
-	assertEqual(_usesFmtAny(funcDecls, mod), true);
-});
-
-test("_usesFmtAny is false for scalar-only fmt calls", () => {
-	const { funcDecls, mod } = checkedProgram(`package main
-var fmt struct{ Printf func(string, ...any) }
-func main() {
-	x := 1
-	fmt.Printf("%v", x)
-}
-`);
-	assertEqual(_usesFmtAny(funcDecls, mod), false);
+	assertEqual(_usesTestingAny(funcDecls, mod), false);
 });
 
 test("_orderConstInits orders dependent constants topologically", () => {

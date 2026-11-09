@@ -57,8 +57,7 @@ operation on it is silently permitted, preventing cascading errors.
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
 
-Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
-`__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
+Runtime helpers (`__len`, `__append`, `__s`, `__equal`, `__cmul`, `__cdiv`, `__error`,
 `__sclone`, `__ifv`, `__ifp` and the `__simd_*` `gofront/simd` fallback) are tree-shaken: only
 emitted when actually used. `encoding/json` has no JavaScript emitter of its own: its calls compile
 to the same generated Go codecs as on WebAssembly (`src/lower/json-codecs.js`, on top of
@@ -128,13 +127,17 @@ Two markers connect Go source to the backends:
 
 | Package | Where it lives |
 |---|---|
-| `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
+| `cmp`, `iter`, `maps`, `errors`, `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
 | `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `os`, `unicode`, `crypto/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
+| `fmt` | Go in `stdlib/fmt/` over `stdlib/internal/fmtrt/`, plus generated formatters (see below) |
 | `encoding/binary` | Go in `stdlib/encoding/binary/` |
-| `errors.As` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
 | `regexp`, `gom`, and `time.Sleep`, `time.AfterFunc`, `time.Timer` | Go marked `//gofront:target js` (`stdlib/regexp/`, `stdlib/gom/`, `stdlib/time/sleep_js.go`); loaded only for `js` packages |
-| `fmt`, `testing`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
+| `testing`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
 | `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |
+
+#### Generated Go per package
+
+Some library calls need code that depends on the types the calling package uses: an `encoding/json` codec for each encoded type, a type switch for each `errors.As` target, and a formatter for each type that reaches an `fmt` operand. Instead of emitting these per backend, the compiler writes them as ordinary Go source: after a package type-checks, the generators in `src/lower/` (`json-codecs.js`, `errors-as.js`, `fmt-formatters.js`) each return a fragment, and `checkGeneratedGo` in `src/link/stdlib.js` joins the fragments into one file, `gofront_gen.go`, which is parsed, imported and type-checked as one more file of the package. Calls to the library are rewritten to call the generated functions, which are named `gfj_<pkg>_*` (json), `gfe_<pkg>_as_*` (`errors.As`) and `gff_<pkg>_*` (`fmt`). Because the generated file goes through the same checker and backends as hand-written code, `js`, `wasm` and `both` packages behave the same and no backend has a formatter or `errors.As` implementation of its own.
 
 ---
 
