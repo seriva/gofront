@@ -224,19 +224,19 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 4: JS Nil Receivers, Panic/Recover, and Map Keys
 
-- [ ] Task 4.1: JS method values and method expressions on nil pointers and nil generic pointers
+- [x] Task 4.1: JS method values and method expressions on nil pointers and nil generic pointers
   - Files: `src/backend/js/expressions.js`, `test/unit/language/pointers.test.js`
   - Test: `F13` `var b *Box[int]; g := (*Box[int]).M; fmt.Println(g(b))` → `"0"` on `js`, `both`, and `wasm`; `F14` `var s *S; f := s.Ping; f()` → `"ping"` on all targets.
   - Done when: JS method expressions `(*T).M` and method values `s.M` on pointer receivers do not read `.M` off a `null` receiver reference.
-- [ ] Task 4.2: JS user `panic("runtime error: ...")` vs runtime error and panic/recover of defined string `error` types
+- [x] Task 4.2: JS user `panic("runtime error: ...")` vs runtime error and panic/recover of defined string `error` types
   - Files: `src/backend/js/statements.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `F36` `defer func() { r := recover(); _, ok := r.(error); fmt.Println(ok) }(); panic("runtime error: foo")` → `"false"` on `js`, `both`, and `wasm`; `F64` `type rt string; func (rt) Error() string { return "boom" }; defer func() { r := recover(); fmt.Println(r); _, ok := r.(rt); fmt.Println(ok) }(); panic(rt("q"))` → `"boom\ntrue"` on all targets in `test/unit/wasm/defer_recover.test.js`.
   - Done when: user string panics never masquerade as runtime `error` values on JS, and panicking with a defined string type preserves its dynamic type and `Error()` method across `recover()` on JS and WASM.
-- [ ] Task 4.3: JS unhashable slice in `any` map key panic
+- [x] Task 4.3: JS unhashable slice in `any` map key panic
   - Files: `src/backend/js/runtime.js`, `src/backend/js/expressions.js`, `test/unit/wasm/maps.test.js`
   - Test: `F22` `defer func() { fmt.Println(recover()) }(); var x any = []int{1}; m := map[any]int{}; m[x] = 1` → `"runtime error: hash of unhashable type []int"` on `both` and `wasm`, plus `var y any = [1]int{1}; m[y] = 1` still succeeding.
   - Done when: `__ik` in `src/backend/js/runtime.js` (fed the dynamic type tag of `any` keys by the map-index codegen in `src/backend/js/expressions.js`) throws a recoverable runtime error matching Go's message for slices, maps, and functions (and structs/arrays containing them) while arrays and comparable structs stay hashable.
-- [ ] Task 4.4: `len(f())` side-effect evaluation when `f()` returns a nil array pointer on JS and WASM
+- [x] Task 4.4: `len(f())` side-effect evaluation when `f()` returns a nil array pointer on JS and WASM
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/language/pointers.test.js`
   - Test: `F45` `func getNil() *[3]int { fmt.Println("getNil"); return nil }; fmt.Println(len(getNil()))` (plus `cap(getNil())`) → `"getNil\n3"` on `js`, `both`, and `wasm`.
   - Done when: `len`/`cap` on `*[N]T` evaluates the operand for side effects when it contains a function call and returns `N` without dereferencing the pointer on both backends.

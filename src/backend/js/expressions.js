@@ -5,6 +5,7 @@ import {
 	rootIdentName,
 	someChild,
 } from "../../lower/index.js";
+import { hasCallOrReceive } from "../../lower/walk.js";
 import { constIntValue } from "../../typechecker/const-fold.js";
 import {
 	BROWSER_GLOBALS,
@@ -361,6 +362,7 @@ const BUILTIN_GEN = {
 	append: (s, e) => s.genAppend(e),
 	len: (s, e) => s._genBuiltinLen(e),
 	cap: (s, e) => {
+		if (e._constLen != null) return s._genConstLen(e);
 		s.useHelper("slice");
 		return `__cap(${s.genExpr(e.args[0])})`;
 	},
@@ -414,8 +416,6 @@ const BUILTIN_GEN = {
 		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
 	panic: (s, e) => {
 		const arg = s.genExpr(e.args[0]);
-		if (s._isStringExprType(e.args[0]?._type))
-			return `(() => { throw new Error(${arg}); })()`;
 		s.useHelper("panicRt");
 		return `__gopanicv(${arg})`;
 	},
@@ -1104,14 +1104,9 @@ export const expressionGenMethods = {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
 			const rt = expr._methodExprRecv;
-			const nilSafe =
-				rt?.kind === "pointer" &&
-				rt.base?.kind === "named" &&
-				!rt.base.typeArgs?.length
-					? rt.base.name
-					: null;
-			if (nilSafe && this.nilSafeMethods?.has(`${nilSafe}.${expr.field}`))
-				return `((recv, ...args) => ${nilSafe}.prototype.${expr.field}.call(recv, ...args))`;
+			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
+			if (protoCls)
+				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(recv, ...args))`;
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
@@ -1420,8 +1415,15 @@ export const expressionGenMethods = {
 					);
 					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
 				}
-				const nilSafe = this._nilSafeMethodClass(expr);
-				if (nilSafe) return `${nilSafe}.prototype.${expr.field}.bind(${base})`;
+				// A pointer receiver may be nil: bind through the prototype so
+				// `s.M` on a nil pointer does not read `.M` off null.
+				const protoCls = this._ptrMethodProtoClass(
+					expr.expr._type,
+					expr.field,
+					expr,
+				);
+				if (protoCls)
+					return `${protoCls}.prototype.${expr.field}.bind(${base})`;
 				return `${sel}.bind(${base})`;
 			}
 			return sel;
@@ -1853,6 +1855,17 @@ export const expressionGenMethods = {
 		return `${cls}.prototype.${sel.field}.call(${rest ? `${obj}, ${rest}` : obj})`;
 	},
 
+	// The class whose prototype holds pointer-receiver method `field`, for a
+	// pointer to a struct type that declares it directly (not promoted), so a
+	// method value or expression can reach it with a nil receiver; else null.
+	_ptrMethodProtoClass(ptr, field, sel) {
+		if (ptr?.kind !== "pointer" || ptr.base?.kind !== "named") return null;
+		if (ptr.base.underlying?.kind !== "struct") return null;
+		if (sel && this._promotedPath(sel)) return null;
+		if (!ptr.base.methods?.has(field)) return null;
+		return ptr.base.name;
+	},
+
 	// The class of a pointer-receiver struct method that accepts a nil receiver
 	// when `func` selects it on a pointer of exactly that struct, else null.
 	_nilSafeMethodClass(func) {
@@ -2015,6 +2028,16 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	// `len`/`cap` of an array or array pointer is a constant, but an operand
+	// containing a call or receive is still evaluated (and a nil pointer is
+	// not dereferenced).
+	_genConstLen(expr) {
+		const arg = expr.args[0];
+		if (arg && hasCallOrReceive(arg))
+			return `(${this.genExpr(arg)}, ${expr._constLen})`;
+		return String(expr._constLen);
+	},
+
 	_isInterfaceType(t) {
 		if (!t) return false;
 		if (t.kind === "interface") return true;
@@ -2022,7 +2045,7 @@ export const expressionGenMethods = {
 	},
 
 	_genBuiltinLen(expr) {
-		if (expr._constLen != null) return String(expr._constLen);
+		if (expr._constLen != null) return this._genConstLen(expr);
 		const arg = expr.args[0];
 		const t = arg?._type;
 		const wrapField = this._namedWrapperField(t, arg);

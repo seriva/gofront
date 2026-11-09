@@ -968,3 +968,29 @@ func main() {
 		"0 0 false\ntrue true false\n7 0\n7 true\none str true\nfalse\n",
 	);
 });
+
+test("an unhashable slice or map in an any key panics like Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	m := map[any]int{}
+	var s any = []int{1}
+	var mm any = map[string]int{}
+	var arr any = [1]int{1}
+	try(func() { m[s] = 1 })
+	try(func() { _ = m[mm] })
+	m[arr] = 2
+	fmt.Println(len(m), m[arr])
+}
+`,
+		"runtime error: hash of unhashable type []int\nruntime error: hash of unhashable type map[string]int\n1 2\n",
+	);
+});

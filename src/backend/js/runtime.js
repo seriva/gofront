@@ -717,6 +717,9 @@ var __ik = __ik || function(k, tag) {
     }
   }
   if (t === "number" || t === "boolean" || t === "bigint") return "\\u0001" + t + ":" + String(k);
+  // A slice, map or func in an \`any\` carries its type tag: Go cannot hash it.
+  if ((t === "object" || t === "function") && typeof k.__t === "string" && /^(\\[\\]|map\\[|func\\()/.test(k.__t))
+    throw new Error("runtime error: hash of unhashable type " + k.__t.replace(/ void$/, ""));
   if (k !== null && t === "object" && typeof k.__gfUnbox === "function" && !k.constructor.name.endsWith("$Ptr")) {
     const v = k.__gfUnbox(), vt = typeof v;
     if (vt === "string" || vt === "number" || vt === "boolean" || vt === "bigint") {
@@ -868,7 +871,13 @@ var __runDefers = __runDefers || function(defers, frame) {
   }
 };
 var __gopanicv = __gopanicv || function(v) {
-  if (typeof v === "string") throw new Error(v);
+  if (typeof v === "string") {
+    // The value rides in pv so recover() returns the string itself, never a
+    // runtime error value, however the message reads.
+    const se = new Error(v);
+    se.pv = { v };
+    throw se;
+  }
   let msg;
   try { msg = typeof v?.Error === "function" ? v.Error() : String(v); } catch { msg = String(v); }
   const e = new Error(msg);

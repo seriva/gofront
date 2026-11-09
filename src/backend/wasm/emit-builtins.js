@@ -97,15 +97,30 @@ export class BuiltinsEmitter {
 		return null;
 	}
 
+	// `len`/`cap` of an array or array pointer: the constant length.  An
+	// operand containing a call or receive is still evaluated, and its value
+	// (a nil array pointer included) is dropped without being dereferenced.
+	_emitConstArrayLen(call, targetWasmType) {
+		const arg = call.args[0];
+		if (hasCallOrReceive(arg)) {
+			this.emitExpr(
+				arg,
+				this.toWasmType(arg._type ?? this._resolveExprGoType(arg)),
+			);
+			this.pushInstruction("drop");
+		}
+		this.pushInstruction({ op: "i32.const", value: call._constLen });
+		if ((targetWasmType ?? "i64") === "i64")
+			this.pushInstruction("i64.extend_i32_u");
+	}
+
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
 		// `len` of an array (or a pointer to one) is a constant, and the
 		// operand is not evaluated unless it contains a call or a receive.
-		if (call._constLen != null && !hasCallOrReceive(arg)) {
-			this.pushInstruction({ op: "i32.const", value: call._constLen });
-			if ((targetWasmType ?? "i64") === "i64")
-				this.pushInstruction("i64.extend_i32_u");
+		if (call._constLen != null) {
+			this._emitConstArrayLen(call, targetWasmType);
 			return;
 		}
 		if (this._sharedInfo(argType)) {
@@ -175,6 +190,10 @@ export class BuiltinsEmitter {
 	_emitBuiltinCap(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type;
+		if (call._constLen != null) {
+			this._emitConstArrayLen(call, targetWasmType);
+			return;
+		}
 		if (isSliceType(argType, this.mod.checker)) {
 			const elemType = this._getSliceElemType(argType);
 			const sliceInfo = this.mod.getSliceType(elemType);
@@ -794,7 +813,11 @@ export class BuiltinsEmitter {
 		} else {
 			const goType = this._resolveExprGoType(arg);
 			const wType = toWasmType(goType, this.mod.checker);
-			if (
+			if (goType?.kind === "named" && wType === "externref") {
+				// A defined string type keeps its identity (and methods) in the
+				// panic value, so `recover()` returns it, not the bare string.
+				this.emitExpr(arg, "anyref");
+			} else if (
 				isStringType(goType, this.mod.checker) ||
 				(arg.kind === "BasicLit" && arg.litKind === "STRING") ||
 				wType === "externref"
