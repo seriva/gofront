@@ -225,6 +225,27 @@ func TestEnv(t *testing.T) {
 	);
 });
 
+test("Context is canceled before cleanups registered after it run", async () => {
+	await onBothTargets(
+		`import (
+	"testing"
+)
+func TestCtx(t *testing.T) {
+	ctx := t.Context()
+	t.Cleanup(func() {
+		if ctx.Err() == nil {
+			t.Error("context not canceled before cleanup")
+		}
+	})
+}
+`,
+		{},
+		(r, target) => {
+			assertEqual(r.exitCode, 0, `${target}: ${r.stdout}`);
+		},
+	);
+});
+
 section("testing — subtests and -run");
 
 const SUBTESTS = `import "testing"

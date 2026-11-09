@@ -125,15 +125,16 @@ type pendingSub struct {
 
 // common holds the state shared by T and B.
 type common struct {
-	name     string
-	logs     []string
-	failed   bool
-	skipped  bool
-	parent   *common
-	cleanups []func()
-	start    int64
-	ctx      context.Context
-	pending  []pendingSub
+	name      string
+	logs      []string
+	failed    bool
+	skipped   bool
+	parent    *common
+	cleanups  []func()
+	start     int64
+	ctx       context.Context
+	cancelCtx func()
+	pending   []pendingSub
 }
 
 // T is a type passed to Test functions to manage test state and support
@@ -251,7 +252,7 @@ func (c *common) Context() context.Context {
 	if c.ctx == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		c.ctx = ctx
-		c.Cleanup(cancel)
+		c.cancelCtx = cancel
 	}
 	return c.ctx
 }
@@ -274,6 +275,10 @@ func (c *common) Guard() {
 // runCleanups calls the cleanup functions, last added first. A panic in one
 // fails the test.
 func (c *common) runCleanups() {
+	if c.cancelCtx != nil {
+		c.cancelCtx()
+		c.cancelCtx = nil
+	}
 	for len(c.cleanups) > 0 {
 		n := len(c.cleanups) - 1
 		f := c.cleanups[n]

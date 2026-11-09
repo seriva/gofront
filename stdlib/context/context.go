@@ -92,6 +92,10 @@ type valueCtx struct {
 	key, val any
 }
 
+func (c *valueCtx) Deadline() (deadline time.Time, ok bool) { return c.Context.Deadline() }
+
+func (c *valueCtx) Err() error { return c.Context.Err() }
+
 func (c *valueCtx) Value(key any) any {
 	if c.key == key {
 		return c.val
