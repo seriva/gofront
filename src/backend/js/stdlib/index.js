@@ -11,7 +11,6 @@ import { testingMethods } from "./testing.js";
 // Stdlib namespace → handler method name. Used by _genStdlibCall to dispatch
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
-	fmt: "_genFmt",
 	testing: "_genTesting",
 	shared: "_genShared",
 	simd: "_genSimd",
@@ -37,18 +36,16 @@ const dispatchMethods = {
 	_genStdlibCall(ns, fn, expr) {
 		const method = STDLIB_METHOD_MAP[ns];
 		if (!method) return undefined;
-		// A member written in Go (fmt.Println) is an ordinary call of its
-		// mangled name.
+		// A member written in Go is an ordinary call of its mangled name.
 		if (expr.func?._stdName) return undefined;
-		// Stdlib shims take raw values; only fmt uses the interface box
-		// of a named value (Error() dispatch).
+		// Stdlib shims take raw values, not the interface box of a named value.
 		const isNamespace = expr.func?.expr?._type?.kind === "namespace";
-		if (isNamespace && ns !== "fmt") {
+		if (isNamespace) {
 			for (const e of expr.args) if (e) e._noNamedBox = true;
 		}
 		const a = () => expr.args.map((e) => this.genExpr(e));
 		const res = this[method](fn, a, expr);
-		if (res === undefined && isNamespace && ns !== "fmt") {
+		if (res === undefined && isNamespace) {
 			for (const e of expr.args) if (e) delete e._noNamedBox;
 		}
 		return res;

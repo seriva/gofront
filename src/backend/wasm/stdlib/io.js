@@ -1,5 +1,5 @@
 // src/backend/wasm/stdlib/io.js
-// FunctionEmitter mixin: io, readers/writers, fmt.Fprint*.
+// FunctionEmitter mixin: io, readers/writers.
 
 export class IoEmitter {
 	_emitWriterWrite(wExpr, strTmp) {
@@ -19,26 +19,5 @@ export class IoEmitter {
 			this.pushInstruction({ op: "ref.null", heapType: "any" });
 		}
 		this.releaseTemp(wTmp, "anyref");
-	}
-
-	// `fmt.Fprintf(w, format, operands...)`: the other Fprint functions are
-	// Go source (stdlib/fmt).
-	emitFprintCall(_fn, call, _targetWasmType) {
-		const args = this._expandTupleFmtArgs(call.args);
-		const wExpr = args[0];
-		const strTmp = this.acquireTemp("externref");
-		const [format, ...rest] = args.slice(1);
-		const temps = this._emitArgBuffer(
-			rest,
-			false,
-			this._fmtNeedsTypes(format, rest),
-		);
-		this.emitExpr(format, "externref");
-		this._callStdlib("fmt_sprintf");
-		this._releaseArgBuffer(temps);
-		this.pushInstruction({ op: "local.set", index: strTmp });
-
-		this._emitWriterWrite(wExpr, strTmp);
-		this.releaseTemp(strTmp, "externref");
 	}
 }

@@ -11,8 +11,9 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 
 // string -> []byte: UTF-8, except that a lone surrogate U+DC80-U+DCFF (a raw
 // byte from a \xNN escape) encodes as that single byte.
-export const HELPER_U8ENC = `var __u8enc = __u8enc || function(s) {
-  const e = new TextEncoder();
+export const HELPER_U8ENC = `var __u8e = __u8e || new TextEncoder();
+var __u8enc = __u8enc || function(s) {
+  const e = __u8e;
   if (s.isWellFormed()) return e.encode(s);
   const out = [];
   for (let i = 0; i < s.length; i++) {
@@ -233,25 +234,27 @@ export const HELPER_RUNESTR = `var __rstr = __rstr || function(c) {
 export const HELPER_APPEND = `var __tn = __tn || function(c) {
   return Object.hasOwn(c, "__tnil") ? c.__tnil : Object.defineProperty(c, "__tnil", { value: Object.defineProperty(new c(0), "__nilt", { value: true }) }).__tnil;
 };
+// Append the elements of the array-like b to a typed array.
+var __tapp = __tapp || function(a, b) {
+  const c = __tcap.get(a);
+  if (c !== undefined && a.length + b.length <= c) {
+    const r = new a.constructor(a.buffer, a.byteOffset, a.length + b.length);
+    r.set(b, a.length);
+    if (c > r.length) __tcap.set(r, c);
+    return r;
+  }
+  // Grow with spare capacity so repeated appends cost O(1) amortized.
+  const n = a.length + b.length;
+  const cap = Math.max(n, a.length * 2);
+  const res = new a.constructor(new a.constructor(cap).buffer, 0, n);
+  res.set(a);
+  res.set(b, a.length);
+  __tcap.set(res, cap);
+  return res;
+};
 var __append = __append || function(a, ...b) {
   if (b.length === 0) return a !== null && a !== undefined && a.__nilt === true ? null : a;
-  if (a && ArrayBuffer.isView(a)) {
-    const c = __tcap.get(a);
-    if (c !== undefined && a.length + b.length <= c) {
-      const r = new a.constructor(a.buffer, a.byteOffset, a.length + b.length);
-      r.set(b, a.length);
-      if (c > r.length) __tcap.set(r, c);
-      return r;
-    }
-    // Grow with spare capacity so repeated appends cost O(1) amortized.
-    const n = a.length + b.length;
-    const cap = Math.max(n, a.length * 2);
-    const res = new a.constructor(new a.constructor(cap).buffer, 0, n);
-    res.set(a);
-    res.set(b, a.length);
-    __tcap.set(res, cap);
-    return res;
-  }
+  if (a && ArrayBuffer.isView(a)) return __tapp(a, b);
   const s = a ? a[__sv] : undefined;
   if (s !== undefined && s.n + b.length <= s.c) {
     for (let i = 0; i < b.length; i++) s.b[s.o + s.n + i] = b[i];
@@ -266,6 +269,11 @@ var __append = __append || function(a, ...b) {
     }
   }
   return a ? [...a, ...b] : b;
+};
+// append(a, b...) of a typed array with one source: no argument spread.
+var __appendv = __appendv || function(a, b) {
+  if (b.length === 0) return a !== null && a !== undefined && a.__nilt === true ? null : a;
+  return __tapp(a, b);
 };`;
 
 // `s = append(s, x)` in the json codecs, where the slice is a local that no

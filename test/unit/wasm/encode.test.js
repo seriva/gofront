@@ -531,9 +531,10 @@ function checkedProgram(src) {
 	return { funcDecls, mod: { checker } };
 }
 
+// The checker here does not import packages, so `fmt` is a stand-in value.
 test("_usesFmtAny is true for fmt.Printf(any(x))", () => {
 	const { funcDecls, mod } = checkedProgram(`package main
-import "fmt"
+var fmt struct{ Printf func(string, ...any) }
 func main() {
 	x := 1
 	fmt.Printf("%v", any(x))
@@ -544,7 +545,7 @@ func main() {
 
 test("_usesFmtAny is false for scalar-only fmt calls", () => {
 	const { funcDecls, mod } = checkedProgram(`package main
-import "fmt"
+var fmt struct{ Printf func(string, ...any) }
 func main() {
 	x := 1
 	fmt.Printf("%v", x)

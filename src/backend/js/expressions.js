@@ -2102,8 +2102,13 @@ export const expressionGenMethods = {
 					(sliceType.kind === "named" ? sliceType.underlying : sliceType).elem,
 				)
 			: null;
-		if (typedCtor)
+		if (typedCtor) {
+			const single = expr.args.length === 2 && expr.args[1]._spread;
+			// One source slice or string: append it as it is, not spread.
+			if (single)
+				return `__appendv((${slice}) ?? __tn(${typedCtor}), ${this._genSliceSource(expr.args[1])} ?? [])`;
 			return `__append((${slice}) ?? __tn(${typedCtor}), ${elems.join(", ")})`;
+		}
 		// A json codec grows a slice it has just made and no one else holds:
 		// pushing in place is O(1), where __append copies the whole slice.
 		if (

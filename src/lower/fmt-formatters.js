@@ -33,6 +33,7 @@ import { holdsFunc, isCompositeType } from "./json-codecs.js";
 
 const FMT_PATH = "fmt";
 const RT_PATH = "internal/fmtrt";
+const JSON_PATH = "encoding/json";
 
 // The Print family: fn -> what precedes the operands.
 const PRINT_FUNCS = new Map([
@@ -44,7 +45,15 @@ const PRINT_FUNCS = new Map([
 	["Fprintln", "io.Writer"],
 	["Append", "[]byte"],
 	["Appendln", "[]byte"],
+	["Sprintf", null],
+	["Printf", null],
+	["Errorf", null],
+	["Fprintf", "io.Writer"],
+	["Appendf", "[]byte"],
 ]);
+
+// The functions that take a format string after the prefix.
+const isFormatted = (fn) => fn.endsWith("f");
 
 const RESULT = {
 	Sprint: "string",
@@ -55,6 +64,11 @@ const RESULT = {
 	Fprintln: "(int, error)",
 	Append: "[]byte",
 	Appendln: "[]byte",
+	Sprintf: "string",
+	Printf: "(int, error)",
+	Errorf: "error",
+	Fprintf: "(int, error)",
+	Appendf: "[]byte",
 };
 
 // Where a wrapper registers the package's lookup (when it has one) before it
@@ -77,6 +91,17 @@ const UINT_KINDS = new Set([
 	"uintptr",
 ]);
 const FORMAT_METHODS = { Err: "Error", Str: "String", GoStr: "GoString" };
+
+// A type of another package that has no exported name: the generated file
+// cannot spell it.
+function isUnexportedForeign(name) {
+	const at = name.indexOf("$$");
+	return at > 0 && !/^\p{Lu}/u.test(name);
+}
+
+// Types the host provides: a value of one is an opaque reference, not a Go
+// struct that can be described.
+const HOST_TYPE = /^(testing)\./;
 
 function under(t) {
 	return t?.kind === "named" ? under(t.underlying) : t;
@@ -116,9 +141,12 @@ const returnsString = (m) => {
 };
 
 class FmtGen extends TypeSpeller {
-	constructor(checker, pkgName, qualifiers, programs) {
+	constructor(checker, pkgName, qualifiers, programs, formatted = false) {
 		super(pkgName, qualifiers, programs);
 		this.checker = checker;
+		// A package with a format call: %d and %+v call no methods, so an
+		// error or Stringer in an interface is described by its type too.
+		this.formatted = formatted;
 		this.prefix = `gff_${String(pkgName).replace(/[^A-Za-z0-9_]/g, "_")}_`;
 		this.builders = new Map(); // key -> function name
 		this.wrappers = new Map(); // signature -> function name
@@ -228,21 +256,37 @@ class FmtGen extends TypeSpeller {
 	}
 
 	// True when the type can be written as Go source in the generated file.
-	spellable(t, depth = 0) {
+	spellable(t, depth = 0, seen = new Set()) {
 		if (!t || depth > 8) return false;
-		const ok = (x) => this.spellable(x, depth + 1);
+		const ok = (x) => this.spellable(x, depth + 1, seen);
+		// A field of an interface type is described by its value.
+		const fieldsOk = (st) =>
+			(st._structFields ?? []).every((f) => isInterface(f.type) || ok(f.type));
+		const named = () => {
+			if (
+				t.name.includes("[") ||
+				!(t.typeArgs ?? []).every(ok) ||
+				!this.isNamedInScope(t) ||
+				isUnexportedForeign(t.name) ||
+				HOST_TYPE.test(t.name)
+			)
+				return false;
+			// A named struct is as spellable as its fields (a type may hold itself).
+			const u = under(t);
+			if (u?.kind === "namespace") return false;
+			if (u?.kind !== "struct" || seen.has(t)) return true;
+			seen.add(t);
+			return fieldsOk(u);
+		};
 		const byKind = {
 			basic: () => t.name !== "void" && t.name !== "nil",
-			named: () =>
-				!t.name.includes("[") &&
-				(t.typeArgs ?? []).every(ok) &&
-				this.isNamedInScope(t),
+			named,
 			pointer: () => ok(t.base),
 			slice: () => ok(t.elem),
 			array: () => ok(t.elem),
 			map: () => ok(t.key) && ok(t.value),
 			interface: () => t.name === "error" || isEmptyIface(t),
-			struct: () => (t._structFields ?? []).every((f) => ok(f.type)),
+			struct: () => fieldsOk(t),
 			func: () => t.params.every(ok) && results(t).every(ok),
 		};
 		return byKind[t.kind]?.() ?? false;
@@ -312,7 +356,7 @@ class FmtGen extends TypeSpeller {
 		t = defaultType(t);
 		const T = q(this.typeName(t));
 		if (isInterface(t) || t?.kind === "typeParam") {
-			if (!isMethodOnly(t)) this.needsLookup = true;
+			if (this.formatted || !isMethodOnly(t)) this.needsLookup = true;
 			return `fmtrt.Arg{K: fmtrt.KInterface, V: ${x}}`;
 		}
 		const m = this.methodFields(t, x);
@@ -433,14 +477,15 @@ class FmtGen extends TypeSpeller {
 
 	// Whether an operand of static type `t` needs a description, or reaches
 	// fmt in a form it understands: { wrap } or { bare, lookup }.
-	classify(t) {
+	classify(t, formatted = false) {
 		t = defaultType(t);
 		if (!t) return { bare: true, lookup: true };
 		if (t.kind === "nil" || (t.kind === "basic" && t.name === "nil"))
 			return { bare: true };
 		if (mentionsTypeParam(t) || t.kind === "typeParam")
 			return { bare: true, lookup: true };
-		if (isInterface(t)) return { bare: true, lookup: !isMethodOnly(t) };
+		if (isInterface(t))
+			return { bare: true, lookup: formatted || !isMethodOnly(t) };
 		if (t.kind === "basic" && !t.alias) {
 			if (t.name === "string" || t.name === "bool") return { bare: true };
 			// A JS number holds an int exactly only up to 2^53: past it the
@@ -456,7 +501,10 @@ class FmtGen extends TypeSpeller {
 		// are not strings, and a bare value does not say its kind.  So are
 		// slices and maps, which WebAssembly does not box with their methods.)
 		const declared = (m) => this.hasFormatMethod(t, m)?.path === null;
+		// A format call may print it with %d or %+v, which call no methods, so
+		// there it is described.
 		if (
+			!formatted &&
 			t.kind === "named" &&
 			(under(t)?.kind === "struct" ||
 				(under(t)?.kind === "basic" && under(t).name !== "string")) &&
@@ -480,6 +528,7 @@ class FmtGen extends TypeSpeller {
 		this.wrappers.set(sig, name);
 		const params = [];
 		if (prefixType) params.push(`p ${prefixType}`);
+		if (isFormatted(fn)) params.push("format string");
 		const args = [];
 		operandTypes.forEach((t, i) => {
 			const a = `a${i}`;
@@ -491,7 +540,11 @@ class FmtGen extends TypeSpeller {
 				args.push(a);
 			}
 		});
-		const callArgs = [...(prefixType ? ["p"] : []), ...args].join(", ");
+		const callArgs = [
+			...(prefixType ? ["p"] : []),
+			...(isFormatted(fn) ? ["format"] : []),
+			...args,
+		].join(", ");
 		this.out.push(
 			`func ${name}(${params.join(", ")}) ${RESULT[fn]} {${ENSURE}\n\treturn fmt.${fn}(${callArgs})\n}`,
 		);
@@ -627,6 +680,45 @@ function findSites(programs) {
 	return { sites, values };
 }
 
+// `fmt.Println(any(x))` formats x: the conversion hides the static type the
+// description is made from, and drops nothing else.
+function unwrapInterfaceConversions(call, skip) {
+	const args = call.args ?? [];
+	for (let i = skip; i < args.length; i++) {
+		const a = args[i];
+		if (a?.kind !== "TypeConversion" || !isInterface(a._type)) continue;
+		const inner = a.expr;
+		const t = defaultType(inner?._type);
+		if (t && t.kind !== "tuple" && !isInterface(t) && !inner._spread)
+			args[i] = inner;
+	}
+}
+
+// Whether the package passes json.Unmarshal or a Decode call a target that is
+// not statically a pointer (an `any` that may hold a value): the decoder then
+// reports the target's type, which only a registered lookup can name.
+function hasJsonTargetNotPointer(programs) {
+	let found = false;
+	for (const program of programs) {
+		if (
+			!(program.imports ?? []).some((imp) =>
+				imp.imports.some((spec) => spec.path === JSON_PATH),
+			)
+		)
+			continue;
+		walkNodes(program.decls, (node) => {
+			if (found || node.kind !== "CallExpr") return;
+			const f = node.func;
+			if (f?.kind !== "SelectorExpr") return;
+			const at = f.field === "Unmarshal" ? 1 : f.field === "Decode" ? 0 : -1;
+			const arg = node.args?.[at];
+			if (at < 0 || !arg?._type) return;
+			if (under(defaultType(arg._type))?.kind !== "pointer") found = true;
+		});
+	}
+	return found;
+}
+
 // The operand types of a call, or null when it cannot be wrapped.
 function operandTypes(call, skip) {
 	const args = call.args ?? [];
@@ -647,7 +739,7 @@ function markCall(call, { name, kinds, skip, types, exact }) {
 	call.func._genEntry = name;
 	call.func._type = {
 		kind: "func",
-		params: [...(skip ? [orig.params[0]] : []), ...types.map(operand)],
+		params: [...orig.params.slice(0, skip), ...types.map(operand)],
 		returns: orig.returns,
 		variadic: false,
 	};
@@ -678,25 +770,36 @@ function importsFor(programs, qualifiers, extra) {
 // each call that needs a wrapper with `_genEntry`.
 export function generateFmtFormatters(programs, checker, pkgName) {
 	const { sites, values } = findSites(programs);
-	if (sites.length + values.length === 0) return null;
+	// encoding/json names the type of a target that is not a pointer with %T,
+	// an operand that arrives through an interface.
+	const usesJson = hasJsonTargetNotPointer(programs);
+	if (sites.length + values.length === 0 && !usesJson) return null;
 	const qualifiers = new Set();
-	const gen = new FmtGen(checker, pkgName, qualifiers, programs);
+	const gen = new FmtGen(
+		checker,
+		pkgName,
+		qualifiers,
+		programs,
+		sites.some((s) => isFormatted(s.call.func.field)),
+	);
 	const diagnostics = [];
 	const marks = [];
-	let lookup = values.length > 0;
+	let lookup = values.length > 0 || usesJson;
 	for (const { call, program } of sites) {
 		// Parsed trees outlive a build: forget how an earlier build wrapped it.
 		delete call.func._genEntry;
 		for (const a of call.args ?? []) if (a) delete a._boxTypeParam;
 		const fn = call.func.field;
 		const prefix = PRINT_FUNCS.get(fn);
-		const skip = prefix ? 1 : 0;
+		const formatted = isFormatted(fn);
+		const skip = (prefix ? 1 : 0) + (formatted ? 1 : 0);
+		if (!call._multiForward) unwrapInterfaceConversions(call, skip);
 		const types = operandTypes(call, skip);
 		if (!types) {
 			lookup = true;
 			continue;
 		}
-		const kinds = types.map((t) => gen.classify(t));
+		const kinds = types.map((t) => gen.classify(t, formatted));
 		if (kinds.some((k) => k.lookup)) lookup = true;
 		// A type parameter value is boxed by its type argument (JS backend).
 		if (!call._multiForward)
@@ -742,7 +845,8 @@ export function generateFmtFormatters(programs, checker, pkgName) {
 		body.includes("fmt.Sprint") ||
 		body.includes("fmt.Print") ||
 		body.includes("fmt.Fprint") ||
-		body.includes("fmt.Append")
+		body.includes("fmt.Append") ||
+		body.includes("fmt.Errorf")
 	)
 		imports.add(FMT_PATH);
 	if (body.includes("fmtrt.")) imports.add(RT_PATH);
