@@ -1,7 +1,7 @@
 // test/unit/compiler/optimize-build.test.js
 // Tests for WASM Optimizer tooling & CLI integration (handleBuild, compileSingleFile, build summary).
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isGoFrontWasm } from "../../../src/backend/wasm/encode.js";
 import {
@@ -9,7 +9,7 @@ import {
 	handleBuild,
 	parseBuildArgs,
 } from "../../../src/cli/cli-core.js";
-import { compileSingleFile } from "../../../src/compiler.js";
+import { compileFiles, compileSingleFile } from "../../../src/compiler.js";
 import {
 	assert,
 	assertEqual,
@@ -207,4 +207,59 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
 	assertEqual(wasmRes, "86400:256|6:4:-10:-5|10:30|10:30|hello-10|world-30|6");
+});
+
+section("fmt: generated formatters are paid for only where they are used");
+
+test("a program printing strings, errors and Stringers emits no gff_ symbol", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type Level struct{ n int }
+
+func (l Level) String() string { return "level" }
+
+func main() {
+	fmt.Println("hello", true, Level{1}, errors.New("boom"))
+	fmt.Println(fmt.Sprint("a", "b"))
+}
+`,
+		},
+		(dir) => {
+			for (const forceTarget of ["both", "wasm"]) {
+				const res = compileFiles([join(dir, "main.go")], { forceTarget });
+				assert(!res.js.includes("gff_"), `${forceTarget}: no formatter in JS`);
+			}
+		},
+	);
+});
+
+test("a wasm program printing ints needs no formatter, a js program wraps them", () => {
+	withTempDir(
+		{
+			"main.go": `//gofront:target TARGET
+package main
+
+import "fmt"
+
+func main() { fmt.Println(len("abc"), "x") }
+`,
+		},
+		(dir) => {
+			const src = readFileSync(join(dir, "main.go"), "utf8");
+			const build = (target) => {
+				const file = join(dir, `${target}.go`);
+				writeFileSync(file, src.replace("TARGET", target));
+				return compileFiles([file], { forceTarget: target }).js;
+			};
+			assert(!build("wasm").includes("gff_"), "wasm: ints are bare");
+			assert(build("both").includes("gff_"), "both: a JS int may exceed 2^53");
+		},
+	);
 });

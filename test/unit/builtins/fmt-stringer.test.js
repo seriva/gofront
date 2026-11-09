@@ -3,7 +3,6 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
-	assertContains,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -252,26 +251,24 @@ type Outer struct {
 	);
 });
 
-test("a promoted pointer-receiver String is marked in the class metadata", () => {
-	// Positional literals and promoted-method calls of embedding structs are
-	// not reliable on JS yet, so only the emitted metadata is checked.
-	const { js, errors } = compile(`package main
-import "fmt"
-${TYPES}
+test("a promoted pointer-receiver String is called for a pointer, not a value", () => {
+	assertEqual(
+		run(
+			`pw := PW{Counter{3}, 1}
+	vw := VW{Point{1, 2}, 4}
+	fmt.Println(pw, &pw)
+	fmt.Println(vw, &vw)`,
+			`${TYPES}
 type PW struct {
 	Counter
-	N int
+	N2 int
 }
 type VW struct {
 	Point
 	N int
-}
-func main() { fmt.Println(PW{}, VW{}) }`);
-	assertEqual(errors.length, 0, errors.join("\n"));
-	assertContains(js, 'PW.prototype, "__pr", { value: ["String"] }');
-	assert(
-		!js.includes('VW.prototype, "__pr"'),
-		"value-receiver String is not marked",
+}`,
+		),
+		"{{3} 1} counter=3\n(1,2) (1,2)",
 	);
 });
 
@@ -313,7 +310,7 @@ fmt.Println(&r)`,
 	err  error
 	errs []error
 }`,
-		'"fmt"; "errors"',
+		'"fmt"',
 	);
 	assertEqual(
 		out,
@@ -457,7 +454,7 @@ test("a nil pointer with a pointer-receiver String uses it for %v, %s and %q but
 	fmt.Printf("%v|%s|%#v|%q\\n", p, p, p, p)`,
 		'type C struct{ n int }\nfunc (c *C) String() string { return "c" }',
 	);
-	assertEqual(o, 'c|c|<nil>|"c"\n');
+	assertEqual(o, 'c|c|(*main.C)(nil)|"c"');
 });
 
 // Runs `body` (which returns a string) on the js target, as a `both` package
@@ -475,7 +472,9 @@ ${body}
 		`//gofront:target both\n${src}\nfunc main() { fmt.Print(Main()) }`,
 	);
 	assertEqual(both.errors.length, 0, both.errors.join("\n"));
-	assertEqual(runJs(both.js), jsRes);
+	// fmt.Print writes through os.Stdout, which a captured console sees as
+	// whole lines: a final newline is the line end.
+	assertEqual(runJs(both.js), jsRes.replace(/\n$/, ""));
 	return jsRes;
 }
 
@@ -851,6 +850,51 @@ F! U!S!
 COL COL
 1.5 2
 C<5>
+`,
+	);
+});
+
+section("fmt Stringer: package-level initialisers and registered types");
+
+test("a package-level initialiser prints values held in interfaces", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func (p *P) String() string { return "P*" }
+
+type Celsius float64
+
+func (c Celsius) String() string { return fmt.Sprintf("%.1f°C", float64(c)) }
+
+type V struct{ N int }
+
+func (v V) String() string { return "V" }
+
+type Q struct{ A, B int }
+
+var s = fmt.Sprint(P{1}, &P{2}, V{3}, &V{4}, []Celsius{1, 2})
+var t = fmt.Sprint(any(P{5}), any(&P{6}), any(Q{7, 8}), any([]Celsius{3}))
+
+func show(v any) string { return fmt.Sprint(v) }
+
+var u = show(Q{9, 10}) + show(&Q{1, 2}) + show(map[string]Q{"k": {1, 2}})
+
+func main() {
+	fmt.Println(s)
+	fmt.Println(t)
+	fmt.Println(u)
+	var c Celsius = 36.6
+	fmt.Println(c, &c, []*Celsius{&c}[0] == &c)
+}
+`,
+		`{1} P* V V [1.0°C 2.0°C]
+{5} P* {7 8} [3.0°C]
+{9 10}&{1 2}map[k:{1 2}]
+36.6°C 36.6°C true
 `,
 	);
 });

@@ -28,7 +28,6 @@ import {
 	isStringType,
 	isStructType,
 	isTaggedSliceType,
-	isTestingT,
 	toWasmType,
 } from "./types.js";
 
@@ -615,22 +614,10 @@ export class ExprsEmitter {
 			this.emitUtf8Const(expr.field, targetWasmType);
 			return true;
 		}
-		if (this._isOsConst?.(expr)) {
-			this.emitOsConst(expr.field, targetWasmType);
-			return true;
-		}
 		return false;
 	}
 
 	emitSelectorExpr(expr) {
-		if (isTestingT(expr.expr?._type) && expr.field === "N") {
-			this.emitExpr(expr.expr, "externref");
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStdlibImportIndex("testing_n"),
-			});
-			return;
-		}
 		const structInfo = this._resolveStructInfo(expr.expr);
 		if (!structInfo) {
 			if (expr.expr?.kind === "Ident" && expr.expr._type?.kind === "namespace")

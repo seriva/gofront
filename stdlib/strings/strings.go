@@ -20,14 +20,13 @@ import (
 	"unicode/utf8"
 )
 
-// isSpace is unicode.IsSpace as a func(rune) bool (the checker types the
-// unicode predicates over int).
+// isSpace is unicode.IsSpace as a func(rune) bool.
 func isSpace(r rune) bool {
-	return unicode.IsSpace(int(r))
+	return unicode.IsSpace(r)
 }
 
-func upperRune(r rune) rune { return rune(unicode.ToUpper(int(r))) }
-func lowerRune(r rune) rune { return rune(unicode.ToLower(int(r))) }
+func upperRune(r rune) rune { return unicode.ToUpper(r) }
+func lowerRune(r rune) rune { return unicode.ToLower(r) }
 
 // validRune reports whether r is a code point a string can hold.
 func validRune(r rune) bool {
@@ -483,10 +482,10 @@ func isSeparator(r rune) bool {
 		}
 		return true
 	}
-	if unicode.IsLetter(int(r)) || unicode.IsDigit(int(r)) {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
 		return false
 	}
-	return unicode.IsSpace(int(r))
+	return unicode.IsSpace(r)
 }
 
 // Title returns a copy of the string s with all Unicode letters that begin

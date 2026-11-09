@@ -158,7 +158,7 @@ func TestTemplMountDOM(t *testing.T) {
 	}
 	container := document.createElement("div")
 	node := TodoItem(Todo{id: 99, text: "Templ DOM task", done: false, priority: PriorityHigh})
-	node.Mount(container)
+	node.Mount(container, nil)
 
 	if container.children.length != 1 {
 		t.Fatalf("expected 1 child in container, got %d", container.children.length)

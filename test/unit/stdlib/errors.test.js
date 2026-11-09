@@ -3,7 +3,13 @@
 // Every case runs four ways (JS and WASM, natives on and off) and must print
 // what the real Go toolchain printed for the same program.
 
-import { assertFourWay, section, test } from "../helpers.js";
+import {
+	assertErrorContains,
+	assertFourWay,
+	compile,
+	section,
+	test,
+} from "../helpers.js";
 
 section("errors (Go-source)");
 
@@ -97,6 +103,65 @@ multi 2
 `,
 	);
 });
+test("Errorf wraps one, several, reordered and invalid %w operands like Go", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type S struct{ A int }
+
+func (S) String() string { return "s" }
+
+type E struct{ N int }
+
+func (e E) Error() string { return fmt.Sprint("E", e.N) }
+
+func main() {
+	base := errors.New("base")
+	other := errors.New("other")
+	w := fmt.Errorf("one: %w", base)
+	fmt.Println(w, errors.Unwrap(w) == base, errors.Is(w, base))
+	w2 := fmt.Errorf("two: %w and %w", base, other)
+	fmt.Println(w2, errors.Unwrap(w2) == nil, errors.Is(w2, base), errors.Is(w2, other))
+	w3 := fmt.Errorf("re: %[2]w %[1]w", base, other)
+	fmt.Println(w3, errors.Is(w3, base), errors.Is(w3, other))
+	w4 := fmt.Errorf("dup: %[1]w %[1]w", base)
+	fmt.Println(w4, errors.Is(w4, base))
+	w5 := fmt.Errorf("bad: %w", "x")
+	fmt.Println(w5, errors.Unwrap(w5) == nil)
+	w6 := fmt.Errorf("nil: %w", nil)
+	fmt.Println(w6, errors.Unwrap(w6) == nil)
+	var target E
+	w7 := fmt.Errorf("typed: %w", E{9})
+	fmt.Println(errors.As(w7, &target), target.N, w7)
+	fmt.Printf("%T %T %T\\n", w, w2, fmt.Errorf("plain %d", 1))
+	var st fmt.Stringer = S{3}
+	var er error = E{4}
+	fmt.Printf("%d|%+v|%v|%s\\n", st, st, st, st)
+	fmt.Printf("%d|%+v|%v\\n", er, er, er)
+	var a any = S{5}
+	fmt.Printf("%d|%v\\n", a, a)
+}
+`,
+		`one: base true true
+two: base and other true true true
+re: other base true true
+dup: base base true
+bad: %!w(string=x) true
+nil: %!w(<nil>) true
+true 9 typed: E9
+*fmt.wrapError *fmt.wrapErrors *errors.errorString
+{3}|s|s|s
+{4}|E4|E4
+{5}|s
+`,
+	);
+});
+
 test("sentinels, typed targets and joined trees", async () => {
 	await assertFourWay(
 		`package main
@@ -191,5 +256,251 @@ func main() {
 		`true z
 true 7
 `,
+	);
+});
+
+test("errors.As fills every target shape and honours custom As methods", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type NotFound struct{ Name string }
+
+func (e *NotFound) Error() string { return e.Name + " not found" }
+
+type Temp interface{ Temporary() bool }
+
+type tmpErr struct{}
+
+func (tmpErr) Error() string   { return "tmp" }
+func (tmpErr) Temporary() bool { return true }
+
+type Code int
+
+func (c Code) Error() string { return fmt.Sprint("code ", int(c)) }
+
+type Val struct{ N int }
+
+func (v Val) Error() string { return fmt.Sprint("val ", v.N) }
+
+// Custom As: fills **NotFound.
+type Wrapper struct{ name string }
+
+func (w Wrapper) Error() string { return "wrapper " + w.name }
+func (w Wrapper) As(target any) bool {
+	if t, ok := target.(**NotFound); ok {
+		*t = &NotFound{w.name}
+		return true
+	}
+	return false
+}
+
+func main() {
+	base := &NotFound{"a"}
+	var nf *NotFound
+	fmt.Println(errors.As(fmt.Errorf("w: %w", base), &nf), nf.Name)
+
+	nf = nil
+	j := errors.Join(errors.New("x"), fmt.Errorf("y: %w", &NotFound{"joined"}))
+	fmt.Println(errors.As(j, &nf), nf.Name)
+
+	nf = nil
+	fmt.Println(errors.As(fmt.Errorf("c: %w", Wrapper{"viaAs"}), &nf), nf.Name)
+
+	var tm Temp
+	fmt.Println(errors.As(fmt.Errorf("t: %w", tmpErr{}), &tm), tm.Temporary())
+
+	var e error
+	fmt.Println(errors.As(fmt.Errorf("t: %w", Code(4)), &e), e)
+
+	var c Code
+	fmt.Println(errors.As(fmt.Errorf("t: %w", Code(404)), &c), int(c))
+
+	var v Val
+	fmt.Println(errors.As(errors.Join(nil, Val{3}), &v), v.N)
+
+	var typedNil *NotFound
+	var chain error = typedNil
+	nf = nil
+	fmt.Println(errors.As(chain, &nf), nf == nil)
+
+	fmt.Println(errors.As(nil, &nf))
+	var other *NotFound
+	fmt.Println(errors.As(errors.New("plain"), &other), other == nil)
+
+	func() {
+		defer func() { fmt.Println("recovered:", recover()) }()
+		var np *Code
+		errors.As(Code(1), np)
+	}()
+}
+`,
+		`true a
+true joined
+true viaAs
+true true
+true t: code 4
+true 404
+true 3
+true true
+false
+false true
+recovered: errors: target must be a non-nil pointer
+`,
+	);
+});
+
+test("errors.As in a generic function and through a method value", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type NotFound struct{ Name string }
+
+func (e *NotFound) Error() string { return e.Name }
+
+func Find[T error](err error) (T, bool) {
+	var t T
+	ok := errors.As(err, &t)
+	return t, ok
+}
+
+func main() {
+	err := fmt.Errorf("w: %w", &NotFound{"g"})
+	nf, ok := Find[*NotFound](err)
+	fmt.Println(ok, nf.Name)
+	_, ok = Find[*NotFound](errors.New("x"))
+	fmt.Println(ok)
+}
+`,
+		`true g
+false
+`,
+	);
+});
+
+test("errors.As needs a pointer target", () => {
+	for (const call of [
+		"errors.As(err, nf)",
+		"errors.As(err, 3)",
+		"errors.As(err, nil)",
+	]) {
+		const { errors: errs } = compile(`package main
+
+import "errors"
+
+type NF struct{}
+
+func (NF) Error() string { return "" }
+
+func main() {
+	var err error
+	var nf NF
+	_ = nf
+	_ = ${call}
+}
+`);
+		assertErrorContains(
+			errs,
+			"errors.As: second argument must be a non-nil pointer",
+		);
+	}
+});
+
+test("errors.As through an import alias", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	e "errors"
+	"fmt"
+)
+
+type Code int
+
+func (c Code) Error() string { return fmt.Sprint("code ", int(c)) }
+
+func main() {
+	var c Code
+	fmt.Println(e.As(fmt.Errorf("w: %w", Code(7)), &c), int(c))
+}
+`,
+		`true 7
+`,
+	);
+});
+
+test("errors.As cannot be used as a value", () => {
+	const { errors: errs } = compile(
+		`package main
+
+import "errors"
+
+func main() {
+	f := errors.As
+	_ = f
+}
+`,
+		{ target: "both" },
+	);
+	assertErrorContains(errs, "errors.As cannot be used as a value");
+});
+
+test("a local named errors is not the errors package", () => {
+	const { errors: errs } = compile(
+		`package main
+
+import "errors"
+
+type Config struct{ As int }
+
+type Runner struct{}
+
+func (Runner) As(n int) bool { return n > 0 }
+
+func main() {
+	var errors Config
+	_ = errors.As
+	var r Runner
+	errors2 := r
+	_ = errors2.As(1)
+	{
+		errors := Runner{}
+		_ = errors.As(1)
+	}
+	_ = errors
+}
+
+var _ = errors.New
+`,
+		{ target: "both" },
+	);
+	if (errs.length > 0) throw new Error(errs.map((e) => e.message).join("; "));
+});
+
+test("errors.As rejects an anonymous interface target", () => {
+	const { errors: errs } = compile(
+		`package main
+
+import "errors"
+
+func main() {
+	var t interface{ Temporary() bool }
+	_ = errors.As(errors.New("x"), &t)
+}
+`,
+		{ target: "both" },
+	);
+	assertErrorContains(
+		errs,
+		"errors.As with a target of an anonymous interface type is not yet available",
 	);
 });

@@ -7,11 +7,8 @@ import {
 	anonIfaceName,
 	getInterfaceMethodList,
 	getReceiverTypeName,
-	isAnyType,
-	isBoolGoType,
 	isInterfaceType,
 	isNonEmptyInterface,
-	isTestingT,
 	printOperandKind,
 	toWasmType,
 } from "./types.js";
@@ -65,28 +62,6 @@ export function _someNode(node, pred) {
 	return false;
 }
 
-export function _usesTestingRun(node) {
-	return _someNode(
-		node,
-		(n) =>
-			n.kind === "CallExpr" &&
-			n.func?.kind === "SelectorExpr" &&
-			n.func.field === "Run" &&
-			isTestingT(n.func.expr?._type),
-	);
-}
-
-export function _usesTestingCleanup(node) {
-	return _someNode(
-		node,
-		(n) =>
-			n.kind === "CallExpr" &&
-			n.func?.kind === "SelectorExpr" &&
-			n.func.field === "Cleanup" &&
-			isTestingT(n.func.expr?._type),
-	);
-}
-
 // `__any_eq` is only needed when some `==`/`!=` (or switch case) compares
 // anyref operands, a struct with an anyref field is compared, or the error
 // runtime (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a
@@ -111,113 +86,8 @@ export function _usesAnyEq(funcDecls, mod) {
 	);
 }
 
-// Whether an `any`/interface value is reachable through `t` as a slice or
-// array element, a map key or a map value, or a struct field: such operands
-// are formatted by dynamic type (`__any_fmt`, `__any_fmt_key`).
-function typeHasIfaceInContainer(t, mod, seen = new Set(), depth = 0) {
-	if (!t || typeof t !== "object" || seen.has(t) || depth > 6) return false;
-	seen.add(t);
-	const sub = (x) => typeHasIfaceInContainer(x, mod, seen, depth + 1);
-	const isIface = (x) =>
-		isAnyType(x, mod.checker) || isInterfaceType(x, mod.checker);
-	switch (t.kind) {
-		case "named":
-			return sub(t.underlying);
-		case "pointer":
-			return sub(t.base);
-		case "slice":
-		case "array":
-			return isIface(t.elem) || sub(t.elem);
-		case "map":
-			return isIface(t.key) || isIface(t.value) || sub(t.value);
-		case "struct": {
-			const fields =
-				t.fields instanceof Map ? [...t.fields.values()] : t.fields;
-			return (fields ?? []).some((f) => {
-				const ft = f?.type ?? f;
-				return isIface(ft) || sub(ft);
-			});
-		}
-		default:
-			return false;
-	}
-}
-
-// An `fmt` call with an `any`/interface operand or a `xs...` spread needs
-// `__any_fmt`.  `emitFmtCall` falls back to scalar-only dispatch without it.
-export function _usesFmtAny(funcDecls, mod) {
-	return funcDecls.some((fn) =>
-		_someNode(
-			fn.body,
-			(n) =>
-				n.kind === "CallExpr" &&
-				n.func?.kind === "SelectorExpr" &&
-				n.func.expr?.kind === "Ident" &&
-				n.func.expr.name === "fmt" &&
-				n.args?.some((a) =>
-					(a._type?.kind === "tuple" ? a._type.types : [a._type]).some(
-						(t) =>
-							a._spread ||
-							isAnyType(t, mod.checker) ||
-							isInterfaceType(t, mod.checker) ||
-							typeHasIfaceInContainer(t, mod),
-					),
-				),
-		),
-	);
-}
-
-// Whether a value of this static type may hold a 64-bit unsigned integer
-// (directly, inside a container or struct, or behind `any`/an interface when
-// `viaIface` is set).  Without `viaIface` an `any` holds none: the value that
-// reaches it has its own, more specific static type at its origin.
-export function typeMayHoldU64(
-	t,
-	mod,
-	seen = new Set(),
-	depth = 0,
-	viaIface = true,
-) {
-	if (!t || typeof t !== "object" || seen.has(t) || depth > 8) return false;
-	seen.add(t);
-	if (isAnyType(t, mod.checker) || isInterfaceType(t, mod.checker))
-		return viaIface;
-	const sub = (x) => typeMayHoldU64(x, mod, seen, depth + 1, viaIface);
-	switch (t.kind) {
-		case "basic":
-			return t.name === "uint64" || t.name === "uint" || t.name === "uintptr";
-		case "TypeName":
-		case "Ident":
-			return sub(
-				mod.checker?.resolveType?.(t) ?? { kind: "basic", name: t.name },
-			);
-		case "named":
-			return sub(t.underlying);
-		case "tuple":
-			return (t.types ?? []).some(sub);
-		case "pointer":
-			return sub(t.base);
-		case "slice":
-		case "array":
-			return sub(t.elem);
-		case "map":
-			return sub(t.key) || sub(t.value);
-		case "struct":
-			return [...(t.fields?.values?.() ?? [])].some(sub);
-		default:
-			return false;
-	}
-}
-
 export function _scanImportsInBody(node, mod) {
 	if (!node || typeof node !== "object") return;
-
-	// `fmt_box_u64` prints a uint64 that reaches an `any`/interface operand or
-	// a fmt container.  Such a value starts as an expression whose static type
-	// holds a 64-bit unsigned integer, so a program without one skips it.
-	if (node._type && typeMayHoldU64(node._type, mod, new Set(), 0, false)) {
-		mod.getFmtBoxU64Index();
-	}
 
 	if (node.kind === "CallExpr") {
 		const { func, args } = node;
@@ -235,30 +105,6 @@ export function _scanImportsInBody(node, mod) {
 				const { wType, isBool } = printOperandKind(args[i], mod.checker);
 				mod.getLogImportIndex(wType, isLast, isBool);
 				if (!isPrintln) mod.getPrintResetIndex();
-			}
-		} else if (
-			func.kind === "SelectorExpr" &&
-			isTestingT(func.expr?._type) &&
-			func.field
-		) {
-			mod.internString(func.field);
-			if (func.field === "Name") mod.getTestingNameImportIndex();
-			else if (func.field === "Failed" || func.field === "Skipped")
-				mod.getTestingFlagImportIndex();
-			else if (func.field === "Run") {
-				// closure type for func(*testing.T) must exist before bodies are emitted
-				mod.getTestingRunClosureType();
-			} else if (func.field === "Cleanup") {
-				mod.getTestingCleanupClosureType();
-			} else {
-				mod.getTestingCallImportIndex();
-				for (const arg of args) {
-					mod.getTestingArgImportIndex(
-						toWasmType(arg._type, mod.checker),
-						isBoolGoType(arg._type) ||
-							(arg.kind === "BasicLit" && arg.litKind === "BOOL"),
-					);
-				}
 			}
 		}
 	}

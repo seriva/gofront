@@ -12,6 +12,8 @@
 //            arguments (`emitter.emitExpr`, in order) and then the
 //            instructions or the import call, leaving the call's result.
 
+const EXT = "externref";
+
 export const WASM_NATIVES = new Map();
 
 // Bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
@@ -55,6 +57,129 @@ const WASM_INTRINSICS = {
 			e.pushInstruction("i64.extend_i32_s");
 		},
 	},
+	// os: the host's output, exit and environment (`env.os_*`, always present
+	// in the host table).  A file descriptor narrows to an i32.
+	os_write: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "os_write", ["i32", EXT], []),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction("i32.wrap_i64");
+			e.pushInstruction({ op: "local.get", index: 1 });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"os_write",
+					["i32", EXT],
+					[],
+				),
+			});
+		},
+	},
+	os_exit: {
+		prepare: (mod) => mod.getOrAddFuncImport("env", "os_exit", ["i32"], []),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction("i32.wrap_i64");
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport("env", "os_exit", ["i32"], []),
+			});
+		},
+	},
+	os_getenv: hostStrings("os_getenv", 1, [EXT]),
+	os_setenv: hostStrings("os_setenv", 2, []),
+	// unicode: the host's class tables and case mappings.
+	unicode_is: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "unicode_is", ["i32", "i32"], ["i32"]),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction({ op: "local.get", index: 1 });
+			e.pushInstruction("i32.wrap_i64");
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"unicode_is",
+					["i32", "i32"],
+					["i32"],
+				),
+			});
+		},
+	},
+	unicode_to_upper: hostRune("unicode_to_upper"),
+	unicode_to_lower: hostRune("unicode_to_lower"),
+	// crypto/rand: four bytes of the host's secure source.
+	crypto_rand_u32: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "crypto_rand_u32", [], ["i32"]),
+		emit: (e) =>
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"crypto_rand_u32",
+					[],
+					["i32"],
+				),
+			}),
+	},
+	// testing: the host clock in nanoseconds (`env.testing_nanotime` returns
+	// a double) and the host's regular expressions for -run and -bench.
+	testing_nanotime: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "testing_nanotime", [], ["f64"]),
+		emit: (e) => {
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"testing_nanotime",
+					[],
+					["f64"],
+				),
+			});
+			e.pushInstruction("i64.trunc_sat_f64_s");
+		},
+	},
+	testing_match: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "testing_match", [EXT, EXT], ["i32"]),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction({ op: "local.get", index: 1 });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"testing_match",
+					[EXT, EXT],
+					["i32"],
+				),
+			});
+		},
+	},
+	// fmt: the host's identity number for a reference held in an `any`.
+	fmt_ptr_id: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "fmt_ptr_id", [EXT], ["i32"]),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction("extern.convert_any");
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"fmt_ptr_id",
+					[EXT],
+					["i32"],
+				),
+			});
+			e.pushInstruction("i64.extend_i32_u");
+		},
+	},
 	// math: IEEE-754 bit casts of the parameter.
 	math_float64bits: reinterpret("i64.reinterpret_f64"),
 	math_float64frombits: reinterpret("f64.reinterpret_i64"),
@@ -87,6 +212,34 @@ const WASM_INTRINSICS = {
 		].map(([f, binary]) => [`math_${f}`, hostMath(f, binary)]),
 	),
 };
+
+function hostStrings(name, count, results) {
+	const params = Array(count).fill(EXT);
+	return {
+		prepare: (mod) => mod.getOrAddFuncImport("env", name, params, results),
+		emit: (e) => {
+			for (let i = 0; i < count; i++)
+				e.pushInstruction({ op: "local.get", index: i });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport("env", name, params, results),
+			});
+		},
+	};
+}
+
+function hostRune(name) {
+	return {
+		prepare: (mod) => mod.getOrAddFuncImport("env", name, ["i32"], ["i32"]),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport("env", name, ["i32"], ["i32"]),
+			});
+		},
+	};
+}
 
 function reinterpret(op) {
 	return {
@@ -153,8 +306,6 @@ export function emitWasmNative(emitter, call, targetWasmType) {
 // a byte or rune (`i`, an i32); results are a bool or int (`int` widens to
 // the Go int) or a string.
 
-const EXT = "externref";
-
 function hostCall(name, argKinds, resultKind) {
 	const params = argKinds.map((k) =>
 		k === "s" ? EXT : k === "f" ? "f64" : "i32",
@@ -211,6 +362,7 @@ const STRING_NATIVES = {
 // strconv: the shortest digits of a float64 (a string) and a decimal's
 // float64 (`f` is an f64 argument).
 STRING_NATIVES["strconv.shortest"] = ["strconv_shortest", "f", "str"];
+STRING_NATIVES["strconv.fixed"] = ["strconv_fixed", "fi", "str"];
 STRING_NATIVES["strconv.parseDecimal"] = [
 	"strconv_parse_decimal",
 	"s",

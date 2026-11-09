@@ -2277,3 +2277,52 @@ func main() {
 		`expected unmatched-instance error, got: ${msg}`,
 	);
 });
+
+section("WASM Boundary — fmt needs no host machinery");
+
+test("a wasm package that uses fmt imports no fmt_ function and ships no __sprintf", async () => {
+	const res = await compileHybridProject({
+		"report/report.go": `//gofront:target wasm
+package report
+
+import (
+	"errors"
+	"fmt"
+)
+
+type Item struct {
+	Name string
+	Qty  int
+}
+
+func Line(it Item) string {
+	var extra any = 4.5
+	err := fmt.Errorf("wrap: %w", errors.New("inner"))
+	return fmt.Sprintf("%s x%d %v %+v | %v", it.Name, it.Qty, extra, it, err)
+}
+`,
+		"main.go": `package main
+
+import "./report"
+
+func main() {
+	println(report.Line(report.Item{Name: "nut", Qty: 3}))
+}
+`,
+	});
+	assertEqual(
+		res.lines.join("\n"),
+		"nut x3 4.5 {Name:nut Qty:3} | wrap: inner",
+	);
+	const imports = WebAssembly.Module.imports(new WebAssembly.Module(res.wasm));
+	const fmtImports = imports.filter((i) =>
+		/^(fmt_(?!ptr_id)|testing_)/.test(i.name),
+	);
+	assertEqual(
+		fmtImports.map((i) => i.name).join(","),
+		"",
+		"the module must not import fmt_* helpers",
+	);
+	assert(!res.js.includes("__sprintf"), "facade must not ship __sprintf");
+	assert(!res.js.includes("fmt_sprintf"), "facade must not define fmt_sprintf");
+});

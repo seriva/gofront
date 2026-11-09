@@ -13,7 +13,6 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
-import { fmtTypeDesc } from "../shared/fmt-types.js";
 import { mentionsTypeParam } from "./expressions.js";
 
 // True when type node `node` names one of the type parameters `names`.
@@ -179,18 +178,11 @@ export const typeInfoGenMethods = {
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t);
 		const fmtBox = this._fmtBoxFor(t);
-		// The static type for fmt (`%T` of a type parameter operand).
-		const td = mentionsTypeParam(t)
-			? null
-			: fmtTypeDesc(t, (x) => this.checker?.resolveType?.(x) ?? x);
-		const tdJs = td && td.k !== "i" ? JSON.stringify(td) : null;
-		const tail = tdJs
-			? `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${tdJs}`
-			: fmtBox
-				? `, ${box ?? "null"}, ${fmtBox}`
-				: box
-					? `, ${box}`
-					: "";
+		const tail = fmtBox
+			? `, ${box ?? "null"}, ${fmtBox}`
+			: box
+				? `, ${box}`
+				: "";
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
@@ -218,8 +210,19 @@ export const typeInfoGenMethods = {
 	},
 
 	// A function giving a plain value of type `t` the type information fmt
-	// needs once it is an `any` operand (see _fmtDesc); null when it needs none.
+	// needs once it is an `any` operand; null when it needs none.
 	_fmtBoxFor(t) {
+		const base = this._fmtBoxBase(t);
+		// An unnamed slice, map or pointer also carries its type tag, as
+		// converting it to an `any` gives it, so a type switch tells it apart.
+		const tag = this._dynTypeTag(t);
+		if (!tag) return base;
+		this.useHelper("ifaceBox");
+		const ptr = t.kind === "pointer" ? ", true" : "";
+		return `(__v) => __ity(${base ? `(${base})(__v)` : "__v"}, ${JSON.stringify(tag)}${ptr})`;
+	},
+
+	_fmtBoxBase(t) {
 		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
 		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
 		const u = this._underlyingOf(t);
@@ -227,15 +230,12 @@ export const typeInfoGenMethods = {
 			this.useHelper("ifaceBox");
 			return "(__v) => __ifp(__v)";
 		}
-		const desc = this._fmtDesc(t);
-		if (desc) this.useHelper("ifd");
-		const tagged = (v) => (desc ? `__ifd(${v}, ${desc})` : v);
 		if (u?.kind === "map") {
 			this.useHelper("ifaceBox");
-			return `(__v) => __ifm(${tagged("__v")})`;
+			return "(__v) => __ifm(__v)";
 		}
-		if (u?.kind === "slice") return `(__v) => ${tagged("(__v ?? [])")}`;
-		return desc ? `(__v) => ${tagged("__v")}` : null;
+		if (u?.kind === "slice") return "(__v) => (__v ?? [])";
+		return null;
 	},
 
 	// The run-time type tag of an unnamed slice, map or non-struct pointer

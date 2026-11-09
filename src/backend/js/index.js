@@ -32,30 +32,30 @@ import {
 	isComplex,
 	isNumeric,
 } from "../../typechecker/types.js";
+import {
+	unicodeIsJs,
+	unicodeToLowerJs,
+	unicodeToUpperJs,
+} from "../shared/host-unicode.js";
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
-	HELPER_CRYPTO_RAND,
 	HELPER_EQUAL,
 	HELPER_ERROR,
-	HELPER_ERROR_AS,
 	HELPER_GENERICS,
 	HELPER_GEQ,
 	HELPER_IFACE_BOX,
-	HELPER_IFD,
 	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
-	HELPER_IO_EOF,
 	HELPER_JSONRT,
 	HELPER_LEN,
 	HELPER_MKLEN,
 	HELPER_NIL_CALL,
 	HELPER_NIL_MAP,
 	HELPER_NM,
-	HELPER_OS,
 	HELPER_PANIC,
 	HELPER_PTREQ,
 	HELPER_PUSHS,
@@ -65,13 +65,10 @@ import {
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
-	HELPER_SPRINT,
-	HELPER_SPRINTF,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
-	HELPER_TESTING,
-	HELPER_TIMER,
 	HELPER_TO64,
+	HELPER_U8DEC,
 	HELPER_U8ENC,
 	HELPER_VA,
 	HELPER_VCLONE,
@@ -135,6 +132,7 @@ const jsBindingName = (n) =>
 const HELPER_MAP = [
 	["len", HELPER_LEN],
 	["u8enc", HELPER_U8ENC],
+	["u8dec", HELPER_U8DEC],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
 	["mklen", HELPER_MKLEN],
@@ -146,7 +144,6 @@ const HELPER_MAP = [
 	["va", HELPER_VA],
 	["vclone", HELPER_VCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
-	["ifd", HELPER_IFD],
 	["equal", HELPER_EQUAL],
 	["geq", HELPER_GEQ],
 	["ptreq", HELPER_PTREQ],
@@ -162,15 +159,7 @@ const HELPER_MAP = [
 	["nm", HELPER_NM],
 	["structKey", HELPER_STRUCT_KEY],
 	["generics", HELPER_GENERICS],
-	["sprintf", HELPER_SPRINTF],
-	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
-	["errorAs", HELPER_ERROR_AS],
-	["ioEOF", HELPER_IO_EOF],
-	["os", HELPER_OS],
-	["timer", HELPER_TIMER],
-	["testing", HELPER_TESTING],
-	["cryptoRand", HELPER_CRYPTO_RAND],
 	["jsonrt", HELPER_JSONRT],
 	["simd", HELPER_SIMD],
 ];
@@ -181,8 +170,33 @@ const JS_INTRINSICS = {
 	rand_source: () => "return Math.random();",
 	time_now: () =>
 		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
+	time_sleep: ([ns]) =>
+		`await new Promise((r) => setTimeout(r, Number(${ns}) / 1000000));`,
 	time_zone_offset: ([unix]) =>
 		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
+	// os: node writes straight to the stream; other hosts print whole lines
+	// (console.log adds the newline), buffering the partial line.
+	os_write: ([fd, s]) =>
+		`if (typeof process !== "undefined" && process?.stdout?.write) { process.stdout.write(${s}); return; } let b = (globalThis.__os_buf ?? "") + ${s}; const nl = b.lastIndexOf("\\n"); if (nl >= 0) { (${fd} === 2 && typeof console.error === "function" ? console.error : console.log)(b.slice(0, nl)); b = b.slice(nl + 1); } globalThis.__os_buf = b;`,
+	os_exit: ([code]) =>
+		`if (typeof process !== "undefined" && process?.exit) process.exit(${code}); throw new Error("os.Exit(" + ${code} + ")");`,
+	os_getenv: ([key]) =>
+		`return (typeof process !== "undefined" && process?.env ? process.env : (globalThis.__os_env ??= {}))[${key}] ?? "";`,
+	os_setenv: ([key, value]) =>
+		`(typeof process !== "undefined" && process?.env ? process.env : (globalThis.__os_env ??= {}))[${key}] = ${value};`,
+	unicode_is: ([r, class_]) => unicodeIsJs(r, class_),
+	unicode_to_upper: ([r]) => unicodeToUpperJs(r),
+	unicode_to_lower: ([r]) => unicodeToLowerJs(r),
+	crypto_rand_u32: () =>
+		'const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto; if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0]; return Math.floor(Math.random() * 4294967296);',
+	// A number per object for the whole run, from 1 (pointers print as 0x<id>).
+	testing_nanotime: () => "return BigInt(Math.round(performance.now() * 1e6));",
+	testing_match: ([pattern, s]) =>
+		`const c = (globalThis.__testRe ??= new Map()); let re = c.get(${pattern}); if (!re) { re = new RegExp(${pattern}); c.set(${pattern}, re); } return re.test(${s});`,
+	testing_call: ([f, t]) =>
+		`const r = ${f}(${t}); return r && typeof r.then === "function" ? r : null;`,
+	fmt_ptr_id: ([v]) =>
+		`if (${v} === null || ${v} === undefined || (typeof ${v} !== "object" && typeof ${v} !== "function")) return 0n; const t = (globalThis.__fmtptr ??= { m: new WeakMap(), n: 1 }); let id = t.m.get(${v}); if (!id) { id = t.n++; t.m.set(${v}, id); } return BigInt(id);`,
 	math_float64bits: ([f]) =>
 		`const $b = new ArrayBuffer(8); new Float64Array($b)[0] = ${f}; return new BigUint64Array($b)[0];`,
 	math_float64frombits: ([u]) =>
@@ -600,24 +614,15 @@ export class CodeGen {
 		this._helpers.add(name);
 		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
 		if (name === "geq") this._helpers.add("ifeq");
-		if (name === "ioEOF" || name === "json") {
-			this._helpers.add("error");
-		}
-		if (name === "os") {
-			this.useHelper("ioEOF");
+		if (name === "json") {
 			this._helpers.add("error");
 		}
 		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
-		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
 	}
 
-	_prependHelpers(isTest = false) {
-		if (isTest || this._helpers.has("testing")) {
-			this.useHelper("sprintf");
-			this.useHelper("testing");
-		}
+	_prependHelpers(_isTest = false) {
 		const helpers = [];
 		if (this.collectedCss.length > 0) helpers.push(HELPER_INJECT_STYLES);
 		for (const [name, src] of HELPER_MAP) {
@@ -636,7 +641,7 @@ export class CodeGen {
 	// Annotates each decl with its source file index before merging.
 	generateAll(programs, options = {}) {
 		this._srcFileNames = programs.map((p) => p._filename ?? null);
-		this._jsonCodecFileIdx = programs.findIndex((p) => p._jsonCodecs);
+		this._jsonCodecFileIdx = programs.findIndex((p) => p._generated);
 		this._hasJsonCodecs = this._jsonCodecFileIdx >= 0;
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
@@ -982,7 +987,6 @@ export class CodeGen {
 			);
 		}
 		this._genValueMethodMeta(name, methodDecls);
-		this._genFmtClassMeta(name, methodDecls);
 	}
 
 	// Names of the value-receiver methods: a typed nil pointer in an interface

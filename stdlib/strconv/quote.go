@@ -111,7 +111,9 @@ func appendQuotedWith(buf []byte, s string, quote byte, ASCIIonly, graphicOnly b
 	buf = append(buf, quote)
 	for len(s) > 0 {
 		r, width := utf8.DecodeRuneInString(s)
-		if width == 1 && r == utf8.RuneError {
+		// A U+FFFD that is in the string, not an invalid byte, has width 1 where
+		// a string is made of UTF-16 units.
+		if width == 1 && r == utf8.RuneError && rune(s[0]) != utf8.RuneError {
 			b0 := int(byte(s[0]))
 			buf = append(buf, byte('\\'), byte('x'), hexDigit(b0>>4), hexDigit(b0))
 			s = s[1:]

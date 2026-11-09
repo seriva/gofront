@@ -144,11 +144,12 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
 | `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
 | `math/rand` | js, wasm, both | Top-level functions draw from the host; `New(NewSource(seed))` repeats for a seed but not in Go's sequence |
-| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
+| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`, `Exit`, `Getenv`, `Setenv`, `Args` (always empty) |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
 | `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
 | `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
+| `context` | js, wasm, both | `Background`, `TODO`, `WithCancel`, `WithValue`; no `Done` channel |
 | `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
 | `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
 
@@ -168,10 +169,10 @@ Notable members per package:
 - `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256` (`Sum256`, `Sum224`, `New`, `New224`)
 - `encoding/binary` (`LittleEndian`, `BigEndian`, varints), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
-- `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
+- `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `context`, `gofront/shared`, and `gofront/simd` (experimental).
 
-Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
-(e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
+Any other import, or JS-only API (`regexp`, `gom`, `time.Sleep`, `time.AfterFunc`, `time.Timer`), reports a targeted diagnostic
+(e.g. `'time.Sleep' is only available in js packages` or `package 'gom' is not available in wasm packages`).
 `math` follows Go's results in every package. `Sqrt`, `Floor`, `Ceil`, `Trunc`, `Abs` and `Copysign` compile to single WASM instructions, `Round` rounds half away from zero, and `Min`, `Max` and `Pow` handle Go's special cases such as `Pow(1, NaN)`. Functions without a WASM instruction (`Sin`, `Cos`, `Atan2`, `Mod`, `Hypot`, `Cbrt`, …) are imported from the JavaScript host's `Math`; `Mod` keeps the sign of the dividend.
 
 Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised
@@ -204,7 +205,7 @@ compile error.
 | `[]simd.F32x4`, `[]simd.Mask32x4` | In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. |
 | `func` values | Wrapped in both directions, so callbacks work either way. |
 | Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
-| `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
+| `*testing.T` | Does not cross the boundary: tests run inside the module, and only the test runner's generated entry point is exported. |
 | `shared.Float32`, `shared.Int32`, … (`gofront/shared`) | **Zero-copy** TypedArray view over the module's linear memory in both directions (see below). |
 | `error` | **WASM → JS:** `Error` subclass carrying `.message` and the WASM reference (`__ref`). A nil error is `null`. **JS → WASM:** only WASM-owned error instances are accepted; identity is preserved (`errors.Is`). Non-WASM error throws `TypeError`. |
 | `map[K]V` (K = string, number, bool) | Copied both ways as a fresh JS `Map` in insertion order. Map parameters accept a plain JS object or a `Map`. Mutating the returned JS `Map` does not alter WASM state. Entries are also readable as properties (`m["a"]`, `Object.keys(m)`), which is how GoFront code reads a map, except for keys that are names a `Map` already has, such as `get` or `size`. |
@@ -370,7 +371,7 @@ deleted.
 | Package target | How tests run | Reported as |
 |---|---|---|
 | `js` | In Node (optionally JSDOM with `--dom`) | `pkg` |
-| `wasm` | Inside the linked `app.wasm`; `*testing.T` stays in JS (`t.Run` subtests included) | `pkg` |
+| `wasm` | Inside the linked `app.wasm`, `t.Run` subtests included | `pkg` |
 | `both` | Twice — once per backend; both must pass | `pkg [js]` and `pkg [wasm]` |
 
 Running `wasm`/`both` tests needs Node 22+ (WasmGC); older runtimes fail the build step

@@ -221,9 +221,8 @@ func main() {
 		assertContains(on.js, "Math.floor(x)");
 		assertContains(on.js, "Math.sqrt(x)");
 		const off = compileFiles([goPath], { forceTarget: "both", natives: false });
-		assertContains(off.js, "__ft(Floor$$math(x)");
-		assertContains(off.js, "__ft(Sqrt$$math(x)");
-		assert(!on.js.includes("__ft(Sqrt$$math(x)"), "natives on calls the host");
+		assertContains(off.js, "(Floor$$math(x), Sqrt$$math(x)");
+		assert(!on.js.includes("(Floor$$math(x)"), "natives on calls the host");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

@@ -9,6 +9,8 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { CodeGen } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
+import { generateErrorsAs } from "../lower/errors-as.js";
+import { generateFmtFormatters } from "../lower/fmt-formatters.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
@@ -37,17 +39,48 @@ function stdlibSuffix(importPath) {
 	return `$$${importPath.replaceAll("/", "$")}`;
 }
 
-function parseStdlibFiles(dir, deps) {
+// Each file keeps its own `//gofront:target` (default `both`).  A package
+// with `js` files is compiled whole for `js` importers (the `js` variant) and
+// without those files for `wasm` and `both` importers (the `shared` variant).
+function parseStdlibFiles(dir, deps, variant = "js", target = "both") {
+	return deps
+		.gwFilesIn(dir)
+		.map((f) => {
+			const source = readFileSync(f, "utf8");
+			const filename = basename(f);
+			const tokens = new Lexer(source, filename).tokenize();
+			const ast = new Parser(tokens, filename, source).parse();
+			ast._source = source;
+			ast._path = resolve(f);
+			ast._fileTarget = tokens.target ?? "both";
+			return ast;
+		})
+		.filter((ast) => variant === "js" || ast._fileTarget !== "js")
+		.map((ast) => Object.assign(ast, { target }));
+}
+
+// Targets of the package's files, read without parsing.
+function stdlibFileTargets(dir, deps) {
 	return deps.gwFilesIn(dir).map((f) => {
-		const source = readFileSync(f, "utf8");
-		const filename = basename(f);
-		const tokens = new Lexer(source, filename).tokenize();
-		const ast = new Parser(tokens, filename, source).parse();
-		ast._source = source;
-		ast._path = resolve(f);
-		ast.target = "both";
-		return ast;
+		const m = /^\/\/gofront:target\s+(\S+)/m.exec(readFileSync(f, "utf8"));
+		return m?.[1] ?? "both";
 	});
+}
+
+// Exported names declared by the `js` files (what a `wasm` or `both` importer
+// cannot use).
+function stdlibJsOnlyNames(dir, deps) {
+	const programs = parseStdlibFiles(dir, deps).filter(
+		(p) => p._fileTarget === "js",
+	);
+	const { values, types } = stdlibTopLevelNames(programs);
+	return new Set([...values, ...types].filter((n) => /^[A-Z]/.test(n)));
+}
+
+// Whether every file of the package is `js`-only.
+export function stdlibIsJsOnly(dir, deps) {
+	const targets = stdlibFileTargets(dir, deps);
+	return targets.length > 0 && targets.every((t) => t === "js");
 }
 
 // Top-level value and type names declared by the package.
@@ -163,9 +196,16 @@ function mangleIdentRef(node, { suffix, values, types, overlay }) {
 	}
 }
 
-function checkStdlibPrograms(programs, pkgName, options, overlay, deps) {
+function checkStdlibPrograms(
+	programs,
+	pkgName,
+	options,
+	overlay,
+	deps,
+	target,
+) {
 	const checker = new deps.TypeChecker();
-	checker.target = "both";
+	checker.target = target;
 	checker.pkgName = pkgName;
 	checker.isStdlib = true;
 	checker.lazyBodies = true;
@@ -212,14 +252,21 @@ function throwStdlibErrors(errors) {
 
 // Pass 1: type-check the package as written and record which identifiers
 // refer to package scope.  An overlay sees its emitter members unqualified.
-function probeStdlibPackage(_importPath, dir, options, overlay, deps) {
-	const programs = parseStdlibFiles(dir, deps);
+function probeStdlibPackage(_importPath, dir, options, overlay, deps, v) {
+	const programs = parseStdlibFiles(dir, deps, v.variant, v.target);
 	const pkgName = programs[0].pkg.name;
 	const { values, types } = stdlibTopLevelNames(programs);
 	for (const n of [...values, ...types])
 		if (overlay && n in overlay.members)
 			throw new Error(`overlay redeclares ${overlay.name}.${n}`);
-	const probe = checkStdlibPrograms(programs, pkgName, options, overlay, deps);
+	const probe = checkStdlibPrograms(
+		programs,
+		pkgName,
+		options,
+		overlay,
+		deps,
+		v.target,
+	);
 	probe._pkgRefs = new Set();
 	throwStdlibErrors(probe.checkAll(programs));
 	return {
@@ -268,7 +315,12 @@ function installLazyBodies(info, programs, checker, overlay) {
 
 // Exported members as seen by importers (original name -> type) and the
 // original -> mangled name map; an overlay keeps the emitter members too.
-function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
+function stdlibNamespace(
+	checker,
+	{ pkgName, values, types, suffix },
+	overlay,
+	jsOnly,
+) {
 	const members = overlay ? { ...overlay.members } : {};
 	const mangle = new Map();
 	const consts = new Map();
@@ -293,6 +345,7 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
 		members,
 		_gofront: !overlay,
 		_target: "both",
+		_jsOnly: jsOnly,
 		_mangle: mangle,
 		_consts: consts,
 	};
@@ -312,38 +365,57 @@ function stdlibExportedTypes(checker, { pkgName, suffix }) {
 	return out;
 }
 
+// The compilation a package gets for an importer: `js` importers see every
+// file, `wasm` and `both` importers only the files for both targets (cached
+// as `<path>#shared` when that differs).  Returns { key, variant, target }.
+function stdlibVariant(importPath, dir, importerTarget, deps) {
+	const hasJs = stdlibFileTargets(dir, deps).includes("js");
+	importerTarget ??= "js";
+	if (!hasJs) return { key: importPath, variant: "js", target: "both" };
+	if (importerTarget === "js")
+		return { key: importPath, variant: "js", target: "js" };
+	return { key: `${importPath}#shared`, variant: "shared", target: "both" };
+}
+
 // Loads (once per build) and compiles the Go-source package at `dir`.  A
 // failure is cached too, so every importer reports it.
-function loadStdlibPackage(importPath, dir, options, deps) {
+function loadStdlibPackage(
+	importPath,
+	dir,
+	options,
+	deps,
+	importerTarget = "js",
+) {
+	const v = stdlibVariant(importPath, dir, importerTarget, deps);
 	const cache = options.stdlibCache;
-	const cached = cache.get(importPath);
+	const cached = cache.get(v.key);
 	if (cached === null)
 		throw new Error(`import cycle in Go-source stdlib: ${importPath}`);
 	if (cached instanceof Error) throw cached;
 	if (cached) return cached;
-	cache.set(importPath, null);
+	cache.set(v.key, null);
 	try {
-		const pkg = buildStdlibPackage(importPath, dir, options, deps);
-		cache.set(importPath, pkg);
+		const pkg = buildStdlibPackage(importPath, dir, options, deps, v);
+		cache.set(v.key, pkg);
 		return pkg;
 	} catch (e) {
-		cache.set(importPath, e);
+		cache.set(v.key, e);
 		throw e;
 	}
 }
 
-function buildStdlibPackage(importPath, dir, options, deps) {
+function buildStdlibPackage(importPath, dir, options, deps, v) {
 	const cache = options.stdlibCache;
 	const overlay = isBuiltinPackage(importPath)
 		? new deps.TypeChecker().globals.lookup(importPath.split("/").at(-1))
 		: null;
 	const info = {
-		...probeStdlibPackage(importPath, dir, options, overlay, deps),
+		...probeStdlibPackage(importPath, dir, options, overlay, deps, v),
 		suffix: stdlibSuffix(importPath),
 	};
 
 	// Pass 2: mangle a fresh parse and check it again.
-	const programs = parseStdlibFiles(dir, deps);
+	const programs = parseStdlibFiles(dir, deps, v.variant, v.target);
 	mangleStdlibAst(programs, { ...info, overlay }, { lazy: true });
 	const checker = checkStdlibPrograms(
 		programs,
@@ -351,6 +423,7 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 		options,
 		null,
 		deps,
+		v.target,
 	);
 	throwStdlibErrors(checker.checkAll(programs));
 	lowerStdlibRefs(programs);
@@ -360,7 +433,9 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 	// error in the standard library surfaces at the call.  Failures from other
 	// packages' bodies surface when the output is assembled.
 	const reach = new StdlibReach(programs);
-	const namespace = stdlibNamespace(checker, info, overlay);
+	const jsOnly =
+		v.variant === "shared" ? stdlibJsOnlyNames(dir, deps) : new Set();
+	const namespace = stdlibNamespace(checker, info, overlay, jsOnly);
 	namespace._path = importPath;
 	namespace._reach = (name) => {
 		const seen = reach.failures.length;
@@ -370,6 +445,7 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 
 	const pkg = {
 		importPath,
+		key: v.key,
 		checker,
 		pkgName: info.pkgName,
 		overlay,
@@ -377,7 +453,11 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 		exportedTypes: stdlibExportedTypes(checker, info),
 		deps: programs
 			.flatMap((p) => p.imports.flatMap((imp) => imp.imports))
-			.map(({ path }) => cache.get(path))
+			.map(({ path }) =>
+				v.variant === "shared"
+					? (cache.get(`${path}#shared`) ?? cache.get(path))
+					: cache.get(path),
+			)
 			.filter(Boolean),
 		unit: {
 			key: `stdlib:${importPath}`,
@@ -396,8 +476,8 @@ function buildStdlibPackage(importPath, dir, options, deps) {
 // emitted (see lower/reachability.js).  Importers leave a marker line.
 const STDLIB_MARKER_RE = /^\/\*__GOFRONT_STDLIB:([^*]*)\*\/$/;
 
-function stdlibMarker(importPath) {
-	return `/*__GOFRONT_STDLIB:${importPath}*/`;
+function stdlibMarker(key) {
+	return `/*__GOFRONT_STDLIB:${key}*/`;
 }
 
 function stdlibJs(pkg, reached, natives) {
@@ -406,16 +486,11 @@ function stdlibJs(pkg, reached, natives) {
 		decls: p.decls.filter((d) => reached.has(d)),
 	}));
 	if (programs.every((p) => p.decls.length === 0)) return "";
-	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
-		target: "both",
+	return new CodeGen(pkg.checker, new Map(), new Set(), {
+		target: pkg.checker.target,
 		strict: true,
 		natives,
 	}).generateAll(programs, { isTest: false });
-	// The runtime's own io.EOF producers (os.Stdin) return
-	// `__io_eof`: make it the Go package's value so `err == io.EOF` holds.
-	return pkg.importPath === "io" && js.includes("let EOF$$io")
-		? `${js}\nvar __io_eof = EOF$$io;`
-		: js;
 }
 
 // The API a wasm package exposes to JS through the facade: exported func and
@@ -441,11 +516,15 @@ function spliceStdlibJs(merged, options) {
 	const pkgs = lines
 		.map((l) => l.match(STDLIB_MARKER_RE)?.[1])
 		.filter(Boolean)
-		.map((path) => options.stdlibCache.get(path));
+		.map((key) => options.stdlibCache.get(key));
 	if (pkgs.length === 0) return;
+	// The whole package carries everything its shared variant has.
+	const keys = new Set(pkgs.map((pkg) => pkg.key));
+	const emitted = (pkg) =>
+		pkg.key.endsWith("#shared") ? !keys.has(pkg.importPath) : true;
 	const reached = reachableStdlibDecls(
 		[options.jsRootPrograms, wasmExportedSignatures(options.wasmUnits)],
-		pkgs.flatMap((pkg) => pkg.unit.programs),
+		pkgs.filter(emitted).flatMap((pkg) => pkg.unit.programs),
 	);
 	const out = [];
 	const spliced = new Set();
@@ -457,11 +536,8 @@ function spliceStdlibJs(merged, options) {
 		}
 		if (spliced.has(path)) continue;
 		spliced.add(path);
-		const js = stdlibJs(
-			options.stdlibCache.get(path),
-			reached,
-			options.natives,
-		);
+		const pkg = options.stdlibCache.get(path);
+		const js = emitted(pkg) ? stdlibJs(pkg, reached, options.natives) : "";
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
 		for (const m of merged.mappings)
@@ -491,10 +567,10 @@ function emitStdlibPackage(
 		emitStdlibPackage(dep, importerTarget, preambles, bundledDirs, options);
 	// Every importer leaves a JS marker: the facade of a wasm package may
 	// expose a stdlib type; unreachable code splices to nothing.
-	const key = `${pkg.unit.key}:js`;
+	const key = `${pkg.key}:js`;
 	if (!bundledDirs.has(key)) {
 		bundledDirs.add(key);
-		preambles.push(stdlibMarker(pkg.importPath));
+		preambles.push(stdlibMarker(pkg.key));
 	}
 	if (importerTarget !== "js") registerWasmUnit(options, pkg.unit);
 }
@@ -550,31 +626,63 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
 	}
-	if (!pkg.overlay)
+	if (!pkg.overlay && !spec._implicit)
 		checker.trackImport(name, importNode(spec), p._filename, p._source);
 }
 
-// Generates, imports and checks the codecs for the package's `encoding/json`
-// calls as one more file.  Returns the generated programs: none for a
-// package with errors or one that makes no json calls.
-export function checkJsonCodecs(programs, checker, preambles, options, deps) {
+// The generators behind the package's `gofront_gen.go`: each scans the
+// checked programs for its call sites, marks them with `_genEntry` and returns
+// null (no sites) or { body, imports, diagnostics }.
+const GENERATORS = [
+	generateJsonCodecs,
+	generateErrorsAs,
+	generateFmtFormatters,
+];
+
+// Generates, imports and checks the package's generated Go (json codecs,
+// `errors.As` functions) as one more file.  Returns the generated programs:
+// none for a package with errors or one with no generated call sites.
+export function checkGeneratedGo(
+	programs,
+	checker,
+	preambles,
+	options,
+	deps,
+	generators = GENERATORS,
+) {
 	if (checker.errors.length > 0) return [];
-	const gen = generateJsonCodecs(programs, checker, checker.pkgName);
-	if (!gen) return [];
-	for (const { program, node, message, hint } of gen.diagnostics) {
-		checker._setCurrentFile(program);
-		checker.recordBlocker("unsupported stdlib member", message);
-		checker.err(message, node, hint);
-	}
-	if (gen.diagnostics.length > 0) return [];
-	const filename = "json_codecs.go";
+	const parts = generators
+		.map((gen) => gen(programs, checker, checker.pkgName))
+		.filter(Boolean);
+	if (parts.length === 0) return [];
+	let failed = false;
+	for (const { diagnostics } of parts)
+		for (const { program, node, message, hint } of diagnostics) {
+			failed = true;
+			checker._setCurrentFile(program);
+			checker.recordBlocker("unsupported stdlib member", message);
+			checker.err(message, node, hint);
+		}
+	if (failed) return [];
+	const imports = [...new Set(parts.flatMap((p) => p.imports))];
+	const source = [
+		`package ${checker.pkgName}`,
+		...(imports.length > 0
+			? [
+					`import (\n${imports.map((p) => `\t${JSON.stringify(p)}`).join("\n")}\n)`,
+				]
+			: []),
+		...parts.map((p) => p.body),
+		"",
+	].join("\n\n");
+	const filename = "gofront_gen.go";
 	const ast = new Parser(
-		new Lexer(gen.source, filename).tokenize(),
+		new Lexer(source, filename).tokenize(),
 		filename,
-		gen.source,
+		source,
 	).parse();
-	ast._source = gen.source;
-	ast._jsonCodecs = true;
+	ast._source = source;
+	ast._generated = true;
 	ast._path = join(dirname(programs[0]._path ?? "."), filename);
 	ast.target = checker.target;
 	importStdlibPackages(
@@ -593,18 +701,69 @@ export function checkJsonCodecs(programs, checker, preambles, options, deps) {
 			.map((e) => e.message)
 			.join("\n");
 		throw new Error(
-			`internal error in the generated encoding/json codecs; please report\n${detail}`,
+			`internal error in the generated Go; please report\n${detail}`,
 		);
 	}
+	for (const { link } of parts) link?.(checker);
 	return [ast];
 }
 
-// Built-in packages whose emitter members return `time.Time` and
-// `time.Duration` (`t.Deadline()`, `b.Elapsed()`): the Go source of `time` is
-// part of the build, and its types are known, when one of them is imported.
-const IMPLIES_TIME = new Set(["testing", "context"]);
+// Packages a `js` package may use without importing them, as the compiler
+// has always allowed: a program that selects from the identifier (or, for
+// `gom`, declares a templ component, typed as `gom.Node`) without declaring
+// or importing it gets the import.
+const IMPLICIT_PACKAGES = ["fmt", "gom", "regexp"];
 
-function importImpliedTime(
+function implicitImports(programs) {
+	const declared = (name) =>
+		programs.some(
+			(p) =>
+				p.imports.some((imp) =>
+					imp.imports.some((s) => s.path === name || s.alias === name),
+				) || stdlibTopLevelNames([p]).values.has(name),
+		);
+	const used = new Set();
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) return node.forEach(visit);
+		if (node.kind === "TemplDecl") used.add("gom");
+		else if (
+			node.kind === "SelectorExpr" &&
+			IMPLICIT_PACKAGES.includes(node.expr?.name)
+		)
+			used.add(node.expr.name);
+		else if (typeof node.name === "string" && node.kind?.endsWith("TypeName"))
+			for (const name of IMPLICIT_PACKAGES)
+				if (node.name.startsWith(`${name}.`)) used.add(name);
+		forEachChild(node, visit);
+	};
+	for (const p of programs) visit(p.decls);
+	return [...used]
+		.filter((name) => !declared(name))
+		.map((path) => ({ path, _line: 1, _col: 1, _implicit: true }));
+}
+
+// Packages that keep their own wording for the unavailable-in-wasm error.
+const NOT_IN_WASM = new Map([["gom", "gom usage"]]);
+
+// Reports an import of a `js`-only package from a `wasm` or `both` package.
+function errJsOnlyImport(checker, p, spec) {
+	// Its uses are not a second root cause.
+	checker._unavailableImports ??= new Set();
+	checker._unavailableImports.add(spec.alias ?? spec.path.split("/").at(-1));
+	const category = NOT_IN_WASM.get(spec.path);
+	if (category) {
+		checker.recordBlocker(category, spec.path);
+		const msg = `package '${spec.path}' is not available in wasm packages`;
+		return errAtImport(checker, p, spec, msg);
+	}
+	checker.recordBlocker("unsupported stdlib import", spec.path);
+	const msg = `package '${spec.path}' is only available in js packages`;
+	errAtImport(checker, p, spec, msg, "move this code to a js package");
+}
+
+// Loads and binds one import of program `p`.
+function importStdlibSpec(
 	p,
 	spec,
 	checker,
@@ -613,18 +772,21 @@ function importImpliedTime(
 	options,
 	deps,
 ) {
-	if (!IMPLIES_TIME.has(spec.path)) return;
-	const dir = resolveStdlibSource("time", options.stdlibRoot);
+	if (spec.path.startsWith("js:") || isLocalPath(spec.path)) return;
+	const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
 	if (!dir) return;
+	const wasmImporter = checker.target === "wasm" || checker.target === "both";
+	if (wasmImporter && stdlibIsJsOnly(dir, deps))
+		return errJsOnlyImport(checker, p, spec);
+	let pkg;
 	try {
-		const pkg = loadStdlibPackage("time", dir, options, deps);
-		emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
-		for (const [k, t] of pkg.exportedTypes)
-			if (k.includes(".")) checker.types.set(k, t);
+		pkg = loadStdlibPackage(spec.path, dir, options, deps, checker.target);
 	} catch (e) {
-		const msg = "internal stdlib error in time; please report";
-		errAtImport(checker, p, spec, msg, e.message);
+		const msg = `internal stdlib error in ${spec.path}; please report`;
+		return errAtImport(checker, p, spec, msg, e.message);
 	}
+	emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
+	bindStdlibImport(checker, p, spec, pkg);
 }
 
 export function importStdlibPackages(
@@ -635,32 +797,12 @@ export function importStdlibPackages(
 	options,
 	deps,
 ) {
+	const wasmImporter = checker.target === "wasm" || checker.target === "both";
+	const implicit = wasmImporter ? [] : implicitImports(programs);
 	for (const p of programs) {
-		for (const spec of p.imports.flatMap((imp) => imp.imports)) {
-			if (spec.path.startsWith("js:") || isLocalPath(spec.path)) continue;
-			const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
-			if (!dir) {
-				importImpliedTime(
-					p,
-					spec,
-					checker,
-					preambles,
-					bundledDirs,
-					options,
-					deps,
-				);
-				continue;
-			}
-			let pkg;
-			try {
-				pkg = loadStdlibPackage(spec.path, dir, options, deps);
-			} catch (e) {
-				const msg = `internal stdlib error in ${spec.path}; please report`;
-				errAtImport(checker, p, spec, msg, e.message);
-				continue;
-			}
-			emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
-			bindStdlibImport(checker, p, spec, pkg);
-		}
+		const specs = p.imports.flatMap((imp) => imp.imports);
+		if (p === programs[0]) specs.push(...implicit);
+		for (const spec of specs)
+			importStdlibSpec(p, spec, checker, preambles, bundledDirs, options, deps);
 	}
 }

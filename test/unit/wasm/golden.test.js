@@ -126,14 +126,22 @@ func Main() { g(1) }
 	assert(!names.includes("fmt_box_u64"), "unexpected fmt_box_u64 import");
 });
 
-test("a uint64 passed to an any parameter imports fmt_box_u64 and prints", () => {
+test("a uint64 passed to an any parameter prints through Printf", () => {
 	const src = `package main
+import "fmt"
+func g(x any) { fmt.Printf("%v\\n", x) }
+func Main() { g(uint64(18446744073709551615)) }
+`;
+	const o = compileHybrid(src).run("Main").output;
+	assertEqual(o, "18446744073709551615");
+});
+
+test("a uint64 passed to an any parameter prints unsigned from Go source", () => {
+	const o = compileHybrid(`package main
 import "fmt"
 func g(x any) { fmt.Println(x) }
 func Main() { g(uint64(18446744073709551615)) }
-`;
-	assert(importNames(src).includes("fmt_box_u64"), "missing fmt_box_u64");
-	const o = compileHybrid(src).run("Main").output;
+`).run("Main").output;
 	assertEqual(o, "18446744073709551615");
 });
 

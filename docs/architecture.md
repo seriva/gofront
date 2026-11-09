@@ -57,8 +57,7 @@ operation on it is silently permitted, preventing cascading errors.
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
 
-Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
-`__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
+Runtime helpers (`__len`, `__append`, `__s`, `__equal`, `__cmul`, `__cdiv`, `__error`,
 `__sclone`, `__ifv`, `__ifp` and the `__simd_*` `gofront/simd` fallback) are tree-shaken: only
 emitted when actually used. `encoding/json` has no JavaScript emitter of its own: its calls compile
 to the same generated Go codecs as on WebAssembly (`src/lower/json-codecs.js`, on top of
@@ -103,9 +102,20 @@ a WebAssembly GC module:
 `compiler.js` links every `wasm`/`both` unit reached by a build into a single `app.wasm` and
 rejects top-level name collisions between them.
 
-`gofront test` runs the tests of a `wasm` package inside the linked module (`*testing.T`
-stays a JS object) and runs the tests of a `both` package twice — once per backend,
-reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce identical results.
+`gofront test` runs the tests of a `wasm` package inside the linked module and runs the tests
+of a `both` package twice — once per backend, reported as `pkg [js]` and `pkg [wasm]` —
+ensuring both backends produce identical results. The `testing` package is Go source
+(`stdlib/testing/`), so `*testing.T` never crosses the boundary: the runner compiles one extra
+in-memory file, `gofront_testmain_test.go`, next to the package's `_test.go` files (it is never
+written to disk). The file holds a table of the package's `Test…` and `Benchmark…` functions and
+`GofrontRunTests(run, bench string, verbose bool) int`, which builds a `testing.M` and runs it.
+In a `js` package the driver is an `async func` that awaits async tests and subtests; when the
+package has a `TestMain` the driver calls it with the `M` instead. The generated test child
+process (`src/cli/test-runner.js`) only loads the bundle, applies `--dom`, calls
+`GofrontRunTests` and exits with its result; discovery, filtering, output and timing all
+happen inside the compiled package. The two host primitives it needs, a monotonic clock and a
+regular-expression match for `-run`/`-bench`, are the `testing_nanotime` and `testing_match`
+intrinsics, and `testing_call` (js only) keeps the promise of an async test body.
 
 *(For package targets, boundary rules and benchmarks see the [Hybrid JS + WebAssembly Guide](hybrid-wasm.md).)*
 
@@ -115,24 +125,32 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 ### Go-source standard library (`stdlib/`)
 
-Most standard library packages are ordinary GoFront Go under `stdlib/<import path>/`, written with `//gofront:target both` and `//go:build gofront`. The resolver loads them before the built-in namespaces and compiles them into the caller's target (`js`, `wasm` or `both`), so each package is written once and behaves the same on both backends. A package that is also a built-in namespace (`strings`, `errors`, `time`, `encoding/binary`, `unicode`) is an overlay: its Go declarations extend the namespace and the built-in members stay with the emitters.
+Most standard library packages are ordinary GoFront Go under `stdlib/<import path>/`, written with `//gofront:target both` and `//go:build gofront`. The resolver loads them before the built-in namespaces and compiles them into the caller's target (`js`, `wasm` or `both`), so each package is written once and behaves the same on both backends. A package that is also a built-in namespace (`strings`, `time`, `encoding/binary`) is an overlay: its Go declarations extend the namespace and the built-in members stay with the emitters.
+
+A file marked `//gofront:target js` (such as `stdlib/time/sleep_js.go`) is loaded only for `js` packages, where it may use `async`/`await` and browser globals; a `wasm` or `both` package gets the package without those files and reports `'time.Sleep' is only available in js packages` for a name they declare. A package whose files are all `js` (`regexp`, `gom`) is rejected at the import of a `wasm` or `both` package.
 
 Function bodies in these packages are type-checked only when the program reaches them, and only reachable declarations are emitted, so an unused import adds nothing to `app.js` or `app.wasm`.
 
 Two markers connect Go source to the backends:
 
 - `//gofront:native <name>` keeps the Go body as the specification and lets a backend replace calls with a faster host primitive (`indexOf` for `strings.Index`, `Math.clz32` or a WASM instruction for `math/bits`). A native may decline an instantiation, in which case the call runs the Go body. Names form a closed set in `src/typechecker/types.js`; implementations live in `src/backend/js/natives.js` and `src/backend/wasm/natives.js`. `test/unit/compiler/natives.test.js` fails when a name is missing from a registry (outside a short single-target list) or when a registry entry has no Go declaration.
-- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, IEEE-754 bit casts and the host `Math.*` functions behind `math`).
+- `//gofront:intrinsic <name>` marks a body-less function whose body each backend supplies (host clock, entropy, time-zone offset, standard streams, exit and environment, Unicode tables, IEEE-754 bit casts and the host `Math.*` functions behind `math`; target-specific intrinsics such as `time_sleep` provide host timers on JavaScript).
 
 | Package | Where it lives |
 |---|---|
-| `cmp`, `iter`, `maps`, `errors` (except `As`), `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
-| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
+| `cmp`, `iter`, `maps`, `errors`, `io`, `html`, `path`, `path/filepath`, `sync`, `hash`, `crypto/sha256`, `encoding/hex`, `encoding/base64` | Go only, `stdlib/<package>/` |
+| `slices`, `sort`, `strings`, `bytes`, `unicode/utf8`, `math`, `math/bits`, `strconv`, `math/rand`, `os`, `unicode`, `crypto/rand`, `time` | Go in `stdlib/<package>/` plus natives and intrinsics |
+| `fmt` | Go in `stdlib/fmt/` over `stdlib/internal/fmtrt/`, plus generated formatters (see below) |
 | `encoding/binary` | Go in `stdlib/encoding/binary/` |
-| `errors.As` | emitters (`src/backend/js/stdlib/`, `src/backend/wasm/stdlib/`) |
-| `time.Sleep`, `time.AfterFunc`, `time.Timer` | JS-only emitter (`src/backend/js/stdlib/time.js`) |
-| `fmt`, `unicode` (`Is*`, `To*`), `os`, `testing`, `regexp`, `crypto/rand`, `gom`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
+| `regexp`, `gom`, and `time.Sleep`, `time.AfterFunc`, `time.Timer` | Go marked `//gofront:target js` (`stdlib/regexp/`, `stdlib/gom/`, `stdlib/time/sleep_js.go`); loaded only for `js` packages |
+| `testing` | Go in `stdlib/testing/` plus intrinsics; the runner adds a generated driver (see [Testing](usage.md#testing)) |
+| `context` | Go in `stdlib/context/` (`Background`, `TODO`, `WithCancel`, `WithValue`; no `Done` channel) |
+| `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
 | `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |
+
+#### Generated Go per package
+
+Some library calls need code that depends on the types the calling package uses: an `encoding/json` codec for each encoded type, a type switch for each `errors.As` target, and a formatter for each type that reaches an `fmt` operand. Instead of emitting these per backend, the compiler writes them as ordinary Go source: after a package type-checks, the generators in `src/lower/` (`json-codecs.js`, `errors-as.js`, `fmt-formatters.js`) each return a fragment, and `checkGeneratedGo` in `src/link/stdlib.js` joins the fragments into one file, `gofront_gen.go`, which is parsed, imported and type-checked as one more file of the package. Calls to the library are rewritten to call the generated functions, which are named `gfj_<pkg>_*` (json), `gfe_<pkg>_as_*` (`errors.As`) and `gff_<pkg>_*` (`fmt`). Because the generated file goes through the same checker and backends as hand-written code, `js`, `wasm` and `both` packages behave the same and no backend has a formatter or `errors.As` implementation of its own.
 
 ---
 

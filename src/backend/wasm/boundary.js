@@ -31,16 +31,19 @@
 //     module's exported linear memory; JS sees a zero-copy TypedArray over
 //     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
 //     handed out by this facade) may be passed back in.
-//   - `*testing.T`: the harness's JS test object, passed as an opaque
-//     externref (test methods are routed back to JS via `env.testing_*`).
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
-import { HELPER_ERROR, HELPER_SPRINT, HELPER_SPRINTF } from "../js/runtime.js";
+import { HELPER_ERROR } from "../js/runtime.js";
+import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
+import {
+	unicodeIsJs,
+	unicodeToLowerJs,
+	unicodeToUpperJs,
+} from "../shared/host-unicode.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
 	getSharedInfo,
-	isTestingT,
 } from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
@@ -109,7 +112,6 @@ function funcSigFromAst(t) {
 // Returns a descriptor `{ k, ... }`; `k === "unsupported"` carries `what`.
 function classifyType(goType, mod) {
 	if (!goType) return { k: "void" };
-	if (isTestingT(goType)) return { k: "extern", wType: "externref" };
 
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
 		if (goType.name === "error") return { k: "error", wType: "anyref" };
@@ -567,6 +569,9 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 	for (const p of progs) {
 		const pkgName = p.pkg?.name ?? "main";
 		const pkgTarget = p.target ?? "wasm";
+		// The tests of a package run inside the module: only the generated
+		// driver crosses the boundary.
+		if (isTestSource(p._path ?? p._filename)) continue;
 		for (const d of p.decls ?? []) {
 			if (d.kind === "TypeDecl" && d.type?.kind === "StructType") {
 				collectStructDecl(d, pkgName, pkgTarget, meta, mod);
@@ -580,6 +585,7 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 
 	for (const fn of funcDecls) {
 		if (fn._isClosure || fn._pkgTarget !== "wasm") continue;
+		if (isTestSource(fn._srcFile) && fn.name !== TEST_DRIVER) continue;
 		if (fn._isMethod) collectMethodMeta(fn, meta, errors, mod);
 		else collectFuncMeta(fn, meta, errors, mod);
 	}
@@ -587,6 +593,11 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
 	return meta;
 }
+
+// The driver function the test runner compiles in (src/cli/test-runner.js).
+const TEST_DRIVER = "GofrontRunTests";
+
+const isTestSource = (file) => Boolean(file?.endsWith("_test.go"));
 
 function collectStructDecl(d, pkgName, pkgTarget, meta, mod) {
 	if (!isExported(d.name) || meta.structByName.has(d.name)) return;
@@ -1838,29 +1849,10 @@ function indent(text, prefix) {
 // quoted, helpers prefixed with `__`.
 export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
-	// Each instance numbers its pointers and funcs from 1 (see __fmtid).
-	if (typeof __fmtptr !== "undefined") __fmtptr = { m: new WeakMap(), n: 1 };
+	// Each instance numbers the references fmt_ptr_id is asked about from 1
+	// (the table the JS body of that intrinsic uses).
+	globalThis.__fmtptr = { m: new WeakMap(), n: 1 };
 	let lineBuf = "";
-	let targs = [];
-	let fmtStructMap = new WeakMap();
-	// A value whose type has String()/Error(): the method already ran in WASM.
-	// __gfUnbox hands fmt the raw value for the other verbs.
-	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
-	class FmtErr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } Error() { return this.s; } }
-	// A value whose type has GoString(): %#v prints it. Wraps the value as the
-	// String/Error layer (if any) left it, so the other verbs are unchanged.
-	class FmtGo {
-		constructor(r, s) {
-			this.r = r;
-			this.s = s;
-			if (r !== null && typeof r === "object") {
-				if (typeof r.String === "function") this.String = () => r.String();
-				if (typeof r.Error === "function") this.Error = () => r.Error();
-			}
-		}
-		__gfUnbox() { return this.r !== null && typeof this.r === "object" && typeof this.r.__gfUnbox === "function" ? this.r.__gfUnbox() : this.r; }
-		GoString() { return this.s; }
-	}
 	const late = { exports: null };
 	// Go separates operands with a space unconditionally, so track whether the
 	// current line already holds an operand (an empty string leaves lineBuf empty).
@@ -1876,7 +1868,6 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		print(v);
 		flush();
 	};
-	const targ = (v) => { targs.push(v); };
 	let utf8Encoded = null;
 	let convBytes = null, convPos = 0;
 	const env = {
@@ -1926,7 +1917,36 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_contains": (s, sub) => ((s ?? "").includes(sub ?? "") ? 1 : 0),
 		"str_has_prefix": (s, pre) => ((s ?? "").startsWith(pre ?? "") ? 1 : 0),
 		"str_has_suffix": (s, suf) => ((s ?? "").endsWith(suf ?? "") ? 1 : 0),
+		"os_write": (fd, s) => {
+			lineBuf += s ?? "";
+			const nl = lineBuf.lastIndexOf("\\n");
+			if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
+		},
+		"os_exit": (code) => {
+			if (lineBuf !== "") { write(lineBuf); lineBuf = ""; }
+			if (typeof process !== "undefined" && process.exit) process.exit(code);
+			throw new Error("os.Exit(" + code + ")");
+		},
+		"os_getenv": (k) => (typeof process !== "undefined" && process.env ? process.env : (globalThis.__os_env ??= {}))[k ?? ""] ?? "",
+		"os_setenv": (k, v) => { (typeof process !== "undefined" && process.env ? process.env : (globalThis.__os_env ??= {}))[k ?? ""] = v ?? ""; },
+		"unicode_is": (r, k) => { ${unicodeIsJs("r", "k")} },
+		"unicode_to_upper": (r) => { ${unicodeToUpperJs("r")} },
+		"unicode_to_lower": (r) => { ${unicodeToLowerJs("r")} },
+		"testing_nanotime": () => performance.now() * 1e6,
+		"testing_match": (p, s) => new RegExp(p ?? "").test(s ?? "") ? 1 : 0,
+		"fmt_ptr_id": (o) => {
+			if (o === null || o === undefined || (typeof o !== "object" && typeof o !== "function")) return 0;
+			const t = globalThis.__fmtptr;
+			let id = t.m.get(o);
+			if (!id) { id = t.n++; t.m.set(o, id); }
+			return id;
+		},
+		"crypto_rand_u32": () => {
+			const c = typeof crypto !== "undefined" ? crypto : globalThis.crypto;
+			return c?.getRandomValues ? c.getRandomValues(new Uint32Array(1))[0] | 0 : (Math.random() * 4294967296) | 0;
+		},
 		"strconv_shortest": (f) => f.toExponential(),
+		"strconv_fixed": ${FIXED_FLOAT_JS},
 		"strconv_parse_decimal": (s) => Number((s ?? "").replaceAll("_", "")),
 		"str_index": (s, sub) => (s ?? "").indexOf(sub ?? ""),
 		"str_last_index": (s, sub) => (s ?? "").lastIndexOf(sub ?? ""),
@@ -2011,80 +2031,11 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"println_str": println, "println_any": println,
 		"println_bool": (b) => println(b !== 0 ? "true" : "false"),
 		"println_empty": flush,
-		"fmt_new_array": () => [],
-		"fmt_array_push": (arr, v) => { arr.push(v); },
-		"fmt_new_map": () => new Map(),
-		"fmt_map_set": (m, k, v) => { m.set(k, v); },
-		"fmt_new_struct": (ref, isPtr) => {
-			// One object per struct and per kind: a value and a pointer to it
-			// in the same call (fmt.Println(&s, s)) must stay distinct.
-			const slot = isPtr;
-			if (isPtr === 3) {
-				const fn = function () {};
-				Object.defineProperty(fn, "__pid", { value: __fmtid(ref) });
-				return fn;
-			}
-			if (isPtr === 2) {
-				const seenBox = ref !== null && ref !== undefined && typeof ref === "object" ? fmtStructMap.get(ref) : undefined;
-				if (seenBox?.[2]) return seenBox[2];
-				const b = { value: null, __p: true, __box: true };
-				if (ref !== null && ref !== undefined && typeof ref === "object") {
-					Object.defineProperty(b, "__pid", { value: __fmtid(ref) });
-					if (seenBox) seenBox[2] = b;
-					else fmtStructMap.set(ref, [undefined, undefined, b]);
-				}
-				return b;
-			}
-			const isRef = ref !== null && ref !== undefined && typeof ref === "object";
-			const seen = isRef ? fmtStructMap.get(ref) : undefined;
-			if (seen?.[slot]) return seen[slot];
-			const o = {};
-			Object.defineProperty(o, "__struct", { value: true, configurable: true });
-			if (isPtr !== 0) {
-				Object.defineProperty(o, "__p", { value: true, configurable: true });
-				if (isRef) Object.defineProperty(o, "__pid", { value: __fmtid(ref) });
-			}
-			if (isRef) {
-				if (seen) seen[slot] = o;
-				else fmtStructMap.set(ref, slot ? [undefined, o] : [o, undefined]);
-			}
-			return o;
-		},
-		"fmt_struct_type": (o, i) => { Object.defineProperty(o, "__tn", { value: stringTable[i], configurable: true }); },
-		"fmt_struct_set": (o, k, v) => { o[typeof k === "number" ? stringTable[k] : k] = v; },
-		"fmt_box_i32": (v) => v,
-		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
-		"fmt_box_u64": (v) => { v = BigInt.asUintN(64, v); return v > ${P}MAX ? v : Number(v); },
-		"fmt_box_f64": (v) => v,
-		"fmt_box_bool": (v) => v !== 0,
-		"fmt_new_stringer": (r, s, kind) => (kind === 2 ? new FmtGo(r, s) : kind !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
-		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
-		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
-		"testing_arg_str": targ, "testing_arg_any": targ,
-		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
-		"testing_arg_bool": (v) => targ(v !== 0),
-		"testing_arg_u64": (v) => { v = BigInt.asUintN(64, v); targ(v > ${P}MAX ? v : Number(v)); },
-		"fmt_arg_type": (i) => { if (targs.length > 0) targs[targs.length - 1] = __ft(targs[targs.length - 1], JSON.parse(stringTable[i])); },
-		"testing_arg_spread": (a) => { if (a) for (const v of a) targs.push(v); },
-		"testing_arg_err": (s) => targ(s === null ? null : { Error() { return s; } }),
-		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
-		"testing_name": (t) => t.Name(),
-		"testing_flag": (t, i) => Number(t[stringTable[i]]()),
-		"testing_n": (t) => BigInt(t.N ?? 0),
-		"testing_elapsed": (t) => BigInt(t.Elapsed()),
-		"testing_context": (t) => t.Context(),
-		"testing_output": (t) => t.Output(),
 	};
-	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
+	// Stdlib imports (strings, io, time) are a separate block so
 	// modules that never call them do not ship it (see WASM_STDLIB_JS).
 	if (typeof ${P}stdlib === "function") {
 		Object.assign(env, ${P}stdlib(stringTable, {
-			"take": () => { const a = targs; targs = []; fmtStructMap = new WeakMap(); return a; },
-			"printf": (s) => {
-				lineBuf += s;
-				const nl = lineBuf.lastIndexOf("\\n");
-				if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
-			},
 			"late": late,
 		}));
 	}
@@ -2191,44 +2142,8 @@ function ${P}replace(s, o, w, n) {
 // JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
 // module imports one of the packages that use it.
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
-${HELPER_SPRINTF}
-${HELPER_SPRINT}
-function ${P}stdlib_fmt(stringTable, io) {
-	return {
-		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
-		"testing_cleanup": (t, fn) => { t.Cleanup(() => { io.late.exports.__testing_cleanup_cb(fn); }); },
-		"testing_n": (t) => BigInt(t.N ?? 0),
-		"testing_elapsed": (t) => BigInt(t.Elapsed()),
-		"testing_context": (t) => t.Context(),
-		"testing_output": (t) => t.Output(),
-		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
-		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
-		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
-		"fmt_print_raw": (s) => { io.printf(s ?? ""); },
-		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
-		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
-	};
-}
-function ${P}stdlib_str(stringTable, io) {
-	return {
-		// unicode
-		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
-		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
-		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]/.test(c)) ? 1 : 0; },
-		"unicode_is_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Lu}/u.test(c)) ? 1 : 0; },
-		"unicode_is_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Ll}/u.test(c)) ? 1 : 0; },
-		"unicode_is_punct": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{P}/u.test(c)) ? 1 : 0; },
-		"unicode_is_control": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_is_print": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
-		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; if (!c) return r; const m = c.toUpperCase(); const u = m.codePointAt(0); return m.length > (u > 0xffff ? 2 : 1) ? r : u; },
-		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
-	};
-}
 function ${P}stdlib_sys(stringTable, io) {
 	let trimStart = 0, trimEnd = 0;
-	let rawBytes = new Uint8Array(0);
-	let rawPos = 0;
 	return {
 		// bytes trim
 		"bytes_trim": (s, cutset, left, right) => {
@@ -2246,36 +2161,11 @@ function ${P}stdlib_sys(stringTable, io) {
 		// time
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
 		"time_timezone_offset": (ms) => (-new Date(ms).getTimezoneOffset() * 60) | 0,
-		"raw_bytes_init": (len) => {
-			rawBytes = new Uint8Array(len);
-			rawPos = 0;
-		},
-		"raw_bytes_push": (b) => {
-			if (rawPos < rawBytes.length) {
-				rawBytes[rawPos++] = b & 0xff;
-			}
-		},
-		"raw_bytes_len": () => rawBytes.length,
-		"raw_bytes_get": (i) => rawBytes[i] ?? 0,
-		"crypto_rand_fill": (len) => {
-			rawBytes = new Uint8Array(len);
-			if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-				const CHUNK = 65536;
-				for (let offset = 0; offset < len; offset += CHUNK) {
-					crypto.getRandomValues(rawBytes.subarray(offset, Math.min(offset + CHUNK, len)));
-				}
-			} else {
-				for (let i = 0; i < len; i++) rawBytes[i] = Math.floor(Math.random() * 256);
-			}
-			return len;
-		},
 	};
 }
 function ${P}stdlib(stringTable, io) {
 	return Object.assign(
 		{},
-		${P}stdlib_fmt(stringTable, io),
-		${P}stdlib_str(stringTable, io),
 		${P}stdlib_sys(stringTable, io),
 	);
 }`;

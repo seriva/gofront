@@ -3,8 +3,11 @@
 
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { mergeCompilationChunks } from "../../../src/link/sourcemap.js";
-import { mangleStdlibAst } from "../../../src/link/stdlib.js";
-import { checkLinkCollisions } from "../../../src/link/wasm.js";
+import { checkGeneratedGo, mangleStdlibAst } from "../../../src/link/stdlib.js";
+import {
+	checkLinkCollisions,
+	lowerStdlibRefs,
+} from "../../../src/link/wasm.js";
 import { forEachChild } from "../../../src/lower/walk.js";
 import { Parser } from "../../../src/parser/index.js";
 import {
@@ -221,4 +224,116 @@ test("without an overlay an unknown package-scope name is untouched", () => {
 	});
 	const wrap = ast.decls.find((d) => d.name === "Wrap$$demo");
 	assertEqual(wrap.body.stmts[0].values[0].func.name, "New");
+});
+
+// ── Generated Go ─────────────────────────────────────────────
+
+section("Link — checkGeneratedGo");
+
+const stubChecker = () => ({
+	errors: [],
+	pkgName: "main",
+	target: "js",
+	checked: [],
+	checkAll(asts) {
+		this.checked.push(...asts);
+	},
+	recordBlocker() {},
+	_setCurrentFile() {},
+	err(message) {
+		this.errors.push({ message });
+	},
+});
+
+const mainProgram = () => ({ _path: "/p/main.go", imports: [], decls: [] });
+
+test("every generator's fragment lands in one gofront_gen.go", () => {
+	const checker = stubChecker();
+	const linked = [];
+	const a = () => ({
+		body: "func gfx_a() {}",
+		imports: ["strings"],
+		diagnostics: [],
+		link: () => linked.push("a"),
+	});
+	const b = () => ({
+		body: "func gfx_b() {}",
+		imports: ["strings", "sort"],
+		diagnostics: [],
+	});
+	const none = () => null;
+	const [ast, ...more] = checkGeneratedGo(
+		[mainProgram()],
+		checker,
+		[],
+		{},
+		{},
+		[a, none, b],
+	);
+	assertEqual(more.length, 0);
+	assertEqual(ast._filename, "gofront_gen.go");
+	assertEqual(ast._path, "/p/gofront_gen.go");
+	assert(ast._generated, "the program is flagged as generated");
+	assertEqual(ast.decls.map((d) => d.name).join(","), "gfx_a,gfx_b");
+	assertEqual(ast.imports.flatMap((i) => i.imports).length, 2);
+	assertEqual(checker.checked.length, 1);
+	assertEqual(linked.join(","), "a");
+});
+
+test("no fragment, no file", () => {
+	const out = checkGeneratedGo([mainProgram()], stubChecker(), [], {}, {}, [
+		() => null,
+	]);
+	assertEqual(out.length, 0);
+});
+
+test("a diagnostic is reported and nothing is generated", () => {
+	const checker = stubChecker();
+	const gen = () => ({
+		body: "func gfx() {}",
+		imports: [],
+		diagnostics: [{ program: mainProgram(), node: {}, message: "no way" }],
+	});
+	const out = checkGeneratedGo([mainProgram()], checker, [], {}, {}, [gen]);
+	assertEqual(out.length, 0);
+	assertEqual(checker.errors[0].message, "no way");
+	assertEqual(checker.checked.length, 0);
+});
+
+section("Link — lowerStdlibRefs");
+
+test("a selector carrying _genEntry becomes a call of the generated function", () => {
+	const call = {
+		kind: "CallExpr",
+		func: {
+			kind: "SelectorExpr",
+			expr: { kind: "Ident", name: "errors" },
+			field: "As",
+			_genEntry: "gfe_main_as_0",
+		},
+		args: [],
+	};
+	lowerStdlibRefs({ kind: "Program", decls: [call] });
+	assertEqual(call.func.kind, "Ident");
+	assertEqual(call.func.name, "gfe_main_as_0");
+	assert(call.func.expr === undefined, "the package qualifier is dropped");
+});
+
+test("a stream method's receiver becomes the first argument", () => {
+	const recv = { kind: "Ident", name: "enc" };
+	const call = {
+		kind: "CallExpr",
+		func: {
+			kind: "SelectorExpr",
+			expr: recv,
+			field: "Encode",
+			_genEntry: "gfj_main_encode",
+			_jsonStream: true,
+		},
+		args: [{ kind: "Ident", name: "v" }],
+	};
+	lowerStdlibRefs(call);
+	assertEqual(call.func.name, "gfj_main_encode");
+	assert(call.args[0] === recv, "receiver first");
+	assertEqual(call.args.length, 2);
 });

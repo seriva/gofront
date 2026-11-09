@@ -32,7 +32,7 @@ import {
 	WASM_MAP_URL,
 } from "./link/sourcemap.js";
 import {
-	checkJsonCodecs,
+	checkGeneratedGo,
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
@@ -62,8 +62,19 @@ import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
 // Map<filePath, { mtime: number, ast: object }>
 const _parseCache = new Map();
 
+// A cached AST keeps everything the build attached to it (checked types,
+// lowered stdlib programs), so a build of a Go-source stdlib importer pins
+// megabytes.  The cache is therefore bounded; the least recently used file goes
+// first.
+const PARSE_CACHE_LIMIT = 16;
+
 export function clearParseCache() {
 	_parseCache.clear();
+}
+
+// Drops one file, e.g. a throwaway source that was deleted after its build.
+export function evictParseCache(filePath) {
+	_parseCache.delete(resolve(filePath));
 }
 
 export function parseCacheSize() {
@@ -76,7 +87,11 @@ function parseGoFrontFile(filePath) {
 	const key = resolve(filePath);
 	const mtime = statSync(filePath).mtimeMs;
 	const cached = _parseCache.get(key);
-	if (cached && cached.mtime === mtime) return cached.ast;
+	if (cached && cached.mtime === mtime) {
+		_parseCache.delete(key);
+		_parseCache.set(key, cached);
+		return cached.ast;
+	}
 
 	const source = readFileSync(filePath, "utf8");
 	const filename = basename(filePath);
@@ -92,6 +107,8 @@ function parseGoFrontFile(filePath) {
 	// compileFiles overwrites `target` with the resolved one; keep the directive.
 	ast._declaredTarget = ast.target;
 	_parseCache.set(key, { mtime, ast });
+	if (_parseCache.size > PARSE_CACHE_LIMIT)
+		_parseCache.delete(_parseCache.keys().next().value);
 	return ast;
 }
 
@@ -185,12 +202,6 @@ function resolveImports(
 						checker.recordBlocker("js: import", path);
 						checker.err(
 							"js: imports are not allowed in wasm packages",
-							impNode,
-						);
-					} else if (path === "gom") {
-						checker.recordBlocker("gom usage", "gom");
-						checker.err(
-							"package 'gom' is not available in wasm packages",
 							impNode,
 						);
 					} else if (path === "gofront/shared" && pkgTarget === "both") {
@@ -586,6 +597,11 @@ export function compileFiles(files, options = {}) {
 	);
 	for (const p of programs) p.target = pkgTarget;
 
+	// The test runner's driver is a source that exists only in memory: it is
+	// parsed and checked with the package but never written next to it.
+	const driver = testDriverProgram(options, programs, pkgTarget, fromDir);
+	if (driver) programs.push(driver);
+
 	// ── 2. Resolve imports ────────────────────────────────────────
 	const checker = new TypeChecker();
 	checker.target = pkgTarget;
@@ -608,7 +624,7 @@ export function compileFiles(files, options = {}) {
 
 	// ── 3. Type-check ─────────────────────────────────────────────
 	const errors = checker.checkAll(programs);
-	const codecs = checkJsonCodecs(
+	const codecs = checkGeneratedGo(
 		programs,
 		checker,
 		preambles,
@@ -681,7 +697,7 @@ export function compileFiles(files, options = {}) {
 		wasmOptInfo,
 		wasmSourceMap,
 		stringTable,
-		programs,
+		programs: driver ? programs.filter((p) => p !== driver) : programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: withOriginalTypeNames(
 			checker.getExportedTypes(),
@@ -692,6 +708,25 @@ export function compileFiles(files, options = {}) {
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
 	};
+}
+
+// Parses the in-memory driver source `options.testDriver(programs, target)`
+// returns (null: no driver) as a `_test.go` file of the package.
+function testDriverProgram(options, programs, pkgTarget, fromDir) {
+	if (!options.testDriver || options.isDependency) return null;
+	const source = options.testDriver(programs, pkgTarget);
+	if (!source) return null;
+	const filename = "gofront_testmain_test.go";
+	const ast = new Parser(
+		new Lexer(source, filename).tokenize(),
+		filename,
+		source,
+	).parse();
+	ast._source = source;
+	ast._path = join(fromDir, filename);
+	ast._declaredTarget = ast.target;
+	ast.target = pkgTarget;
+	return ast;
 }
 
 // The renamed ASTs must not be reused from the parse cache by a later build.

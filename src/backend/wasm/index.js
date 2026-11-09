@@ -31,9 +31,6 @@ import {
 	_scanInterfaceCallNodes,
 	_scanInterfaceTypeDecls,
 	_usesAnyEq,
-	_usesFmtAny,
-	_usesTestingCleanup,
-	_usesTestingRun,
 	importsAnyOf,
 } from "./prescan.js";
 import { pruneUnusedFuncs } from "./prune-funcs.js";
@@ -43,7 +40,6 @@ import {
 	isInterfaceType,
 	isMapType,
 	toWasmType,
-	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
 import { emitWat } from "./wat.js";
@@ -653,9 +649,7 @@ export function compileWasmModule(
 		});
 	}
 
-	// 1e3. Runtime helpers: error values, interface equality, t.Run callback.
-	mod.usesTestingRun = funcDecls.some((fn) => _usesTestingRun(fn.body));
-	mod.usesTestingCleanup = funcDecls.some((fn) => _usesTestingCleanup(fn.body));
+	// 1e3. Runtime helpers: error values and interface equality.
 	mod.usesAnyEq = _usesAnyEq(funcDecls, mod);
 	const ANY_T = { kind: "basic", name: "any" };
 	const STR_T = { kind: "basic", name: "string" };
@@ -705,14 +699,6 @@ export function compileWasmModule(
 			kind: "pointer",
 			base: { kind: "named", name: ERROR_STRUCT },
 		};
-		const wrapPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: WRAP_ERRORS_STRUCT },
-		};
-		const ERRS_T = {
-			kind: "slice",
-			elem: { kind: "interface", name: "error" },
-		};
 		funcDecls.push(
 			helper(
 				`${ERROR_STRUCT}.Error`,
@@ -725,126 +711,8 @@ export function compileWasmModule(
 					_methodName: "Error",
 				},
 			),
-			helper(
-				`${ERROR_STRUCT}.Unwrap`,
-				[{ name: "e", type: errPtr }],
-				ANY_T,
-				"error_cause",
-				{
-					_isMethod: true,
-					_recvTypeName: ERROR_STRUCT,
-					_methodName: "Unwrap",
-				},
-			),
-			helper(
-				"__mk_error",
-				[
-					{ name: "msg", type: STR_T },
-					{ name: "cause", type: ANY_T },
-				],
-				ANY_T,
-				"mk_error",
-			),
-			helper(
-				`${WRAP_ERRORS_STRUCT}.Error`,
-				[{ name: "e", type: wrapPtr }],
-				STR_T,
-				"wrap_msg",
-				{
-					_isMethod: true,
-					_recvTypeName: WRAP_ERRORS_STRUCT,
-					_methodName: "Error",
-				},
-			),
-			helper(
-				`${WRAP_ERRORS_STRUCT}.Unwrap`,
-				[{ name: "e", type: wrapPtr }],
-				ERRS_T,
-				"wrap_errs",
-				{
-					_isMethod: true,
-					_recvTypeName: WRAP_ERRORS_STRUCT,
-					_methodName: "Unwrap",
-				},
-			),
-			helper(
-				"__mk_wrap_errors",
-				[
-					{ name: "msg", type: STR_T },
-					{ name: "errs", type: ERRS_T },
-				],
-				ANY_T,
-				"mk_wrap_errors",
-			),
+			helper("__mk_error", [{ name: "msg", type: STR_T }], ANY_T, "mk_error"),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
-			// Used by the io and bytes emitters to compare an error with io.EOF.
-			helper(
-				"__errors_is",
-				[
-					{ name: "err", type: ANY_T },
-					{ name: "target", type: ANY_T },
-				],
-				BOOL_T,
-				"errors_is",
-			),
-			{
-				kind: "FuncDecl",
-				name: "__errors_unwrap",
-				params: [{ name: "__recv", type: ANY_T }],
-				returnType: ANY_T,
-				body: { kind: "Block", stmts: [], list: [] },
-				_isInterfaceDispatcher: true,
-				_softDispatch: true,
-				_ifaceName: "error",
-				_ifaceType: null,
-				_methodName: "Unwrap",
-				_rootFuncDecl: null,
-			},
-		);
-	}
-	if (mod.usesTestingRun) {
-		funcDecls.push(
-			helper(
-				"__testing_run_cb",
-				[
-					{ name: "fn", type: ANY_T },
-					{
-						name: "t",
-						type: {
-							kind: "pointer",
-							base: { kind: "named", name: "testing.T" },
-						},
-					},
-				],
-				null,
-				"testing_run_cb",
-				{ _forceExport: true },
-			),
-		);
-	}
-	if (mod.usesTestingCleanup) {
-		funcDecls.push(
-			helper(
-				"__testing_cleanup_cb",
-				[{ name: "fn", type: ANY_T }],
-				null,
-				"testing_cleanup_cb",
-				{ _forceExport: true },
-			),
-		);
-	}
-	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
-	// `__any_fmt` turns an `any` operand of fmt into the host value; its body
-	// is emitted last-but-one so every type registered by user code is seen.
-	if (_usesFmtAny(funcDecls, mod)) {
-		funcDecls.push(
-			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
-			helper(
-				"__any_fmt_key",
-				[{ name: "a", type: ANY_T }],
-				STR_T,
-				"any_fmt_key",
-			),
 		);
 	}
 
@@ -909,8 +777,6 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
-				!fn._isIoHelper &&
-				!fn._isPhase7Helper &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -971,8 +837,6 @@ export function compileWasmModule(
 			emitter.emitSharedHelper(fn);
 		} else if (fn._isRuntimeHelper) {
 			emitter.emitRuntimeHelper(fn);
-		} else if (fn._isIoHelper || fn._isPhase7Helper) {
-			emitter.emitIoHelper(fn);
 		} else if (fn.intrinsic) {
 			emitWasmIntrinsic(emitter, fn);
 		} else if (fn.body) {
@@ -1134,78 +998,5 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 
 	for (const info of interfaceCalls.values()) {
 		funcDecls.push(_makeInterfaceDispatcher(info, checker));
-	}
-}
-
-function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
-	const progs = Array.isArray(programs) ? programs : [programs];
-
-	const BYTE_SLICE_T = {
-		kind: "slice",
-		elem: { kind: "basic", name: "byte" },
-	};
-	const INT_T = { kind: "basic", name: "int" };
-	const ERR_T = { kind: "interface", name: "error" };
-	const INT_ERR_RET = { kind: "tuple", types: [INT_T, ERR_T] };
-	const ioHelper = (name, params, returnType, kind, extra = {}) => ({
-		kind: "FuncDecl",
-		name,
-		params,
-		returnType,
-		body: { kind: "Block", stmts: [], list: [] },
-		_isIoHelper: kind,
-		_rootFuncDecl: null,
-		...extra,
-	});
-
-	const hasOs = importsAnyOf(progs, ["os"]);
-	if (hasOs && mod.structTypes.has("os.File")) {
-		const fPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "os.File" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"os.File.Write",
-				[
-					{ name: "f", type: fPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"os_file_write",
-				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Write" },
-			),
-			ioHelper(
-				"os.File.WriteString",
-				[
-					{ name: "f", type: fPtr },
-					{ name: "s", type: strType },
-				],
-				INT_ERR_RET,
-				"os_file_write_string",
-				{
-					_isMethod: true,
-					_recvTypeName: "os.File",
-					_methodName: "WriteString",
-				},
-			),
-			ioHelper(
-				"os.File.Read",
-				[
-					{ name: "f", type: fPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"os_file_read",
-				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Read" },
-			),
-			ioHelper(
-				"os.File.Close",
-				[{ name: "f", type: fPtr }],
-				ERR_T,
-				"os_file_close",
-				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Close" },
-			),
-		);
 	}
 }
