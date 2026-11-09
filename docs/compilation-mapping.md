@@ -70,7 +70,7 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | `print` / `println` | `console.log` |
 | `complex(r, i)` | `{ re: r, im: i }` |
 | `real(z)` / `imag(z)` | `z.re` / `z.im` |
-| `fmt.Sprintf` | `__sprintf` tree-shaken helper |
+| `fmt.Sprintf` and the other `fmt` functions | Ordinary calls into Go source (`stdlib/fmt/`), the same on both backends; a generated formatter describes each type that reaches an `any` operand |
 | `json.Marshal(v)` / `json.Unmarshal(b, &v)` | `__json_marshal(__json_enc_T, v)` / `__json_unmarshal(__json_dec_T, b, v)` — one encoder/decoder function generated per type from its `json` struct tags; `MarshalJSON`/`UnmarshalJSON` methods are called directly |
 
 ### Type system at runtime
