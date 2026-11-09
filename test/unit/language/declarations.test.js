@@ -982,9 +982,9 @@ func main() { x := sync{}; _ = x.Cond }`,
 test("real stdlib excluded members keep their diagnostics", () => {
 	assertErrorContains(
 		compile(`package main
-import "context"
+import "encoding/csv"
 func main() {}`).errors,
-		"package 'context' is not available",
+		"package 'encoding/csv' is not available",
 	);
 	assertErrorContains(
 		compile(`package main

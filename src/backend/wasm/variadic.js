@@ -13,9 +13,9 @@ function variadicFuncType(t) {
 	return fn?.kind === "func" && fn.variadic ? fn : null;
 }
 
-// `fmt.Sprintf(...)` or a method of an emitter-backed type (`t.Errorf(...)`
-// on `*testing.T`): those emitters take the arguments unpacked.  Emitter
-// types are the dotted names; GoFront and Go-source types are not.
+// A call of a package member or a method of an emitter-backed type: those
+// emitters take the arguments unpacked.  Emitter types are the dotted names;
+// GoFront and Go-source types are not.
 function isStdlibCall(call) {
 	const f = call.func;
 	if (f?.kind !== "SelectorExpr") return false;

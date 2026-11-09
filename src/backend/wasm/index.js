@@ -31,9 +31,6 @@ import {
 	_scanInterfaceCallNodes,
 	_scanInterfaceTypeDecls,
 	_usesAnyEq,
-	_usesTestingAny,
-	_usesTestingCleanup,
-	_usesTestingRun,
 	importsAnyOf,
 } from "./prescan.js";
 import { pruneUnusedFuncs } from "./prune-funcs.js";
@@ -652,9 +649,7 @@ export function compileWasmModule(
 		});
 	}
 
-	// 1e3. Runtime helpers: error values, interface equality, t.Run callback.
-	mod.usesTestingRun = funcDecls.some((fn) => _usesTestingRun(fn.body));
-	mod.usesTestingCleanup = funcDecls.some((fn) => _usesTestingCleanup(fn.body));
+	// 1e3. Runtime helpers: error values and interface equality.
 	mod.usesAnyEq = _usesAnyEq(funcDecls, mod);
 	const ANY_T = { kind: "basic", name: "any" };
 	const STR_T = { kind: "basic", name: "string" };
@@ -716,72 +711,8 @@ export function compileWasmModule(
 					_methodName: "Error",
 				},
 			),
-			helper(
-				`${ERROR_STRUCT}.Unwrap`,
-				[{ name: "e", type: errPtr }],
-				ANY_T,
-				"error_cause",
-				{
-					_isMethod: true,
-					_recvTypeName: ERROR_STRUCT,
-					_methodName: "Unwrap",
-				},
-			),
-			helper(
-				"__mk_error",
-				[
-					{ name: "msg", type: STR_T },
-					{ name: "cause", type: ANY_T },
-				],
-				ANY_T,
-				"mk_error",
-			),
+			helper("__mk_error", [{ name: "msg", type: STR_T }], ANY_T, "mk_error"),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
-		);
-	}
-	if (mod.usesTestingRun) {
-		funcDecls.push(
-			helper(
-				"__testing_run_cb",
-				[
-					{ name: "fn", type: ANY_T },
-					{
-						name: "t",
-						type: {
-							kind: "pointer",
-							base: { kind: "named", name: "testing.T" },
-						},
-					},
-				],
-				null,
-				"testing_run_cb",
-				{ _forceExport: true },
-			),
-		);
-	}
-	if (mod.usesTestingCleanup) {
-		funcDecls.push(
-			helper(
-				"__testing_cleanup_cb",
-				[{ name: "fn", type: ANY_T }],
-				null,
-				"testing_cleanup_cb",
-				{ _forceExport: true },
-			),
-		);
-	}
-	// `__any_fmt` turns an `any` operand of a `*testing.T` call into the host
-	// value; its body is emitted last-but-one so every type registered by user
-	// code is seen.
-	if (_usesTestingAny(funcDecls, mod)) {
-		funcDecls.push(
-			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
-			helper(
-				"__any_fmt_key",
-				[{ name: "a", type: ANY_T }],
-				STR_T,
-				"any_fmt_key",
-			),
 		);
 	}
 

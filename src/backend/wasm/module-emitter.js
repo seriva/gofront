@@ -28,7 +28,7 @@ const ERROR_PRODUCING_PKGS = new Set([
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
 // declare the imports and ship that JS block.
-const STDLIB_ENV_PKGS = new Set(["strings", "testing", "io", "time"]);
+const STDLIB_ENV_PKGS = new Set(["strings", "io", "time"]);
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
 // side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
@@ -36,13 +36,6 @@ const STDLIB_ENV_PKGS = new Set(["strings", "testing", "io", "time"]);
 // locked before function bodies are emitted.
 const S = "externref";
 const STDLIB_IMPORTS = [
-	// testing.T.Run: the harness calls back into the exported __testing_run_cb
-	["testing_run", [S, S, "anyref"], ["i32"]],
-	["testing_cleanup", [S, "anyref"], []],
-	["testing_n", [S], ["i64"]],
-	["testing_elapsed", [S], ["i64"]],
-	["testing_context", [S], [S]],
-	["testing_output", [S], [S]],
 	["bytes_trim", [S, S, "i32", "i32"], []],
 	["bytes_trim_start", [], ["i32"]],
 	["bytes_trim_end", [], ["i32"]],
@@ -108,7 +101,6 @@ export class ModuleEmitter {
 		this.hasErrorType =
 			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
 		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
-		this.importsTesting = importsAnyOf(programs, ["testing"]);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -119,26 +111,23 @@ export class ModuleEmitter {
 	}
 
 	// The runtime error struct is not declared in Go source: give the checker a
-	// named type with its method set (`Error() string`, `Unwrap() error`) so
-	// type assertions to `interface{ Unwrap() error }` find it as a candidate.
+	// named type with its method set (`Error() string`) so type assertions to
+	// `interface{ Error() string }` find it as a candidate.
 	_registerRuntimeErrorType() {
 		const types = this.checker?.types;
 		if (!types || types.has(ERROR_STRUCT)) return;
 		const STRING = { kind: "basic", name: "string" };
-		const ERROR = { kind: "interface", name: "error" };
-		const named = (name, unwrapReturn) => ({
+		types.set(ERROR_STRUCT, {
 			kind: "named",
-			name,
+			name: ERROR_STRUCT,
 			underlying: {
 				kind: "struct",
 				fields: new Map(),
 				methods: new Map([
 					["Error", { kind: "func", params: [], returns: [STRING] }],
-					["Unwrap", { kind: "func", params: [], returns: [unwrapReturn] }],
 				]),
 			},
 		});
-		types.set(ERROR_STRUCT, named(ERROR_STRUCT, ERROR));
 	}
 
 	initTypes(programs) {
@@ -154,10 +143,7 @@ export class ModuleEmitter {
 				name: ERROR_STRUCT,
 				structType: {
 					kind: "struct",
-					fields: new Map([
-						["msg", { kind: "basic", name: "string" }],
-						["cause", { kind: "basic", name: "any" }],
-					]),
+					fields: new Map([["msg", { kind: "basic", name: "string" }]]),
 				},
 			});
 		}
@@ -186,11 +172,6 @@ export class ModuleEmitter {
 			for (const [key, t] of this.checker.types.entries()) {
 				if (t.kind === "named" && t.underlying?.kind === "struct") {
 					const name = t.name ?? key;
-					if (
-						name.startsWith("testing.") &&
-						(!this.importsTesting || name !== "testing.BenchmarkResult")
-					)
-						continue;
 					if (!seen.has(name)) {
 						seen.add(name);
 						rawStructs.push({ name, structType: t.underlying });
@@ -880,30 +861,6 @@ export class ModuleEmitter {
 		this.getBytesToStrInitImportIndex();
 		this.getBytesToStrPushImportIndex();
 		this.getBytesToStrFinishImportIndex();
-		this.getTestingCallImportIndex();
-		this.getTestingNameImportIndex();
-		this.getTestingFlagImportIndex();
-		for (const t of ["i32", "i64", "f32", "f64", "externref", "anyref"]) {
-			this.getTestingArgImportIndex(t, false);
-		}
-		this.getTestingArgImportIndex("i32", true);
-		this.getTestingArgErrImportIndex();
-		this.getTestingArgSpreadImportIndex();
-		this.getTestingArgU64ImportIndex();
-		this.getFmtArgTypeImportIndex();
-		this.getFmtStructTypeImportIndex();
-		this.getFmtNewArrayIndex();
-		this.getFmtArrayPushIndex();
-		this.getFmtNewMapIndex();
-		this.getFmtMapSetIndex();
-		this.getFmtNewStructIndex();
-		this.getFmtStructSetIndex();
-		this.getFmtBoxI32Index();
-		this.getFmtBoxI64Index();
-		this.getFmtBoxF64Index();
-		this.getFmtBoxBoolIndex();
-		this.getFmtNewBoxIndex();
-		this.getFmtNewStringerIndex();
 		if (this.usesStdlibEnv) {
 			for (const [name, params, results] of STDLIB_IMPORTS) {
 				this.getOrAddFuncImport("env", name, params, results);
@@ -1152,194 +1109,6 @@ export class ModuleEmitter {
 		return this.getOrAddFuncImport("env", "println_empty", [], []);
 	}
 
-	getFmtNewArrayIndex() {
-		return this.getOrAddFuncImport("env", "fmt_new_array", [], ["externref"]);
-	}
-
-	getFmtArrayPushIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_array_push",
-			["externref", "externref"],
-			[],
-		);
-	}
-
-	getFmtNewMapIndex() {
-		return this.getOrAddFuncImport("env", "fmt_new_map", [], ["externref"]);
-	}
-
-	getFmtMapSetIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_map_set",
-			["externref", "externref", "externref"],
-			[],
-		);
-	}
-
-	getFmtNewStringerIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_new_stringer",
-			["externref", "externref", "i32"],
-			["externref"],
-		);
-	}
-
-	getFmtNewStructIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_new_struct",
-			["anyref", "i32"],
-			["externref"],
-		);
-	}
-
-	// Names the Go type of a struct built for fmt (`%T`, `%#v` of an any).
-	getFmtStructTypeImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_struct_type",
-			["externref", "i32"],
-			[],
-		);
-	}
-
-	getFmtStructSetIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_struct_set",
-			["externref", "i32", "externref"],
-			[],
-		);
-	}
-
-	getFmtBoxI32Index() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_box_i32",
-			["i32"],
-			["externref"],
-		);
-	}
-
-	getFmtBoxI64Index() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_box_i64",
-			["i64"],
-			["externref"],
-		);
-	}
-
-	// Registered only for programs whose fmt operands may hold a uint64
-	// (see scanFmtU64), so other modules keep their import table.
-	getFmtBoxU64Index() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_box_u64",
-			["i64"],
-			["externref"],
-		);
-	}
-
-	getFmtBoxF64Index() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_box_f64",
-			["f64"],
-			["externref"],
-		);
-	}
-
-	getFmtBoxBoolIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"fmt_box_bool",
-			["i32"],
-			["externref"],
-		);
-	}
-
-	getFmtNewBoxIndex() {
-		return this.getOrAddFuncImport("env", "fmt_new_box", [], ["externref"]);
-	}
-
-	// `*testing.T` method calls: args are pushed one by one to a JS-side
-	// buffer, then `testing_call(t, methodNameStrIdx)` invokes the method.
-	getTestingArgImportIndex(wType, isBool = false) {
-		if (isBool)
-			return this.getOrAddFuncImport("env", "testing_arg_bool", ["i32"], []);
-		const suffix =
-			wType === "externref" ? "str" : wType === "anyref" ? "any" : wType;
-		if (!["i32", "i64", "f32", "f64", "str", "any"].includes(suffix)) {
-			throw new Error(
-				"only primitive, string, error and any arguments are supported for fmt and testing.T calls in wasm packages (format slices/structs field by field)",
-			);
-		}
-		return this.getOrAddFuncImport(
-			"env",
-			`testing_arg_${suffix}`,
-			[suffix === "str" ? "externref" : suffix === "any" ? "anyref" : wType],
-			[],
-		);
-	}
-
-	// Error operands of fmt.Sprint/Print/Append: a non-string for the host.
-	getTestingArgSpreadImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"testing_arg_spread",
-			["externref"],
-			[],
-		);
-	}
-
-	// An unsigned 64-bit operand: the host reinterprets the i64 as unsigned.
-	getTestingArgU64ImportIndex() {
-		return this.getOrAddFuncImport("env", "testing_arg_u64", ["i64"], []);
-	}
-
-	// Tags the last operand in the argument buffer with the static type
-	// descriptor (JSON) held in string table entry `i32`, for `%T` and `%#v`.
-	getFmtArgTypeImportIndex() {
-		return this.getOrAddFuncImport("env", "fmt_arg_type", ["i32"], []);
-	}
-
-	getTestingArgErrImportIndex() {
-		return this.getOrAddFuncImport("env", "testing_arg_err", ["externref"], []);
-	}
-
-	getTestingCallImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"testing_call",
-			["externref", "i32"],
-			[],
-		);
-	}
-
-	getTestingNameImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"testing_name",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getTestingFlagImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"testing_flag",
-			["externref", "i32"],
-			["i32"],
-		);
-	}
-
-	// `print` ends each operand with this call so the next one is not
-	// separated by a space.
 	getPrintResetIndex() {
 		return this.getOrAddFuncImport("env", "print_reset", [], []);
 	}
@@ -1521,29 +1290,11 @@ export class ModuleEmitter {
 		return this.getOrAddFuncImport("Math", "random", [], ["f64"]);
 	}
 
-	// Imports from the STDLIB_IMPORTS table (strings/strconv/utf8/fmt/testing.Run).
+	// Imports from the STDLIB_IMPORTS table (strings, io, time).
 	getStdlibImportIndex(name) {
 		const idx = this.importCache.get(`env.${name}`);
 		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
 		return idx;
-	}
-
-	// Closure type of `func(*testing.T)` (the t.Run body).
-	getTestingRunClosureType() {
-		return this.getClosureType({
-			kind: "func",
-			params: [{ kind: "pointer", base: { kind: "named", name: "testing.T" } }],
-			returns: [],
-		});
-	}
-
-	// Closure type of `func()` (the t.Cleanup body).
-	getTestingCleanupClosureType() {
-		return this.getClosureType({
-			kind: "func",
-			params: [],
-			returns: [],
-		});
 	}
 
 	resolveFuncIndex(name) {

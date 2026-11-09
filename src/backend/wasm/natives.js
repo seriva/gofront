@@ -126,6 +126,41 @@ const WASM_INTRINSICS = {
 				),
 			}),
 	},
+	// testing: the host clock in nanoseconds (`env.testing_nanotime` returns
+	// a double) and the host's regular expressions for -run and -bench.
+	testing_nanotime: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "testing_nanotime", [], ["f64"]),
+		emit: (e) => {
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"testing_nanotime",
+					[],
+					["f64"],
+				),
+			});
+			e.pushInstruction("i64.trunc_sat_f64_s");
+		},
+	},
+	testing_match: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "testing_match", [EXT, EXT], ["i32"]),
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction({ op: "local.get", index: 1 });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"testing_match",
+					[EXT, EXT],
+					["i32"],
+				),
+			});
+		},
+	},
 	// fmt: the host's identity number for a reference held in an `any`.
 	fmt_ptr_id: {
 		prepare: (mod) =>

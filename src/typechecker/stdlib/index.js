@@ -3,8 +3,7 @@
 //
 // Delegates to two focused sub-modules:
 //   stdlib/core.js     — browser globals
-//   stdlib/extended.js — context, testing,
-//                        built-in functions
+//   stdlib/extended.js — encoding/json and built-in functions
 
 import { setupCoreGlobals } from "./core.js";
 import { setupExtendedGlobals } from "./extended.js";

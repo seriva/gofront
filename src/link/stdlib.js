@@ -708,34 +708,6 @@ export function checkGeneratedGo(
 	return [ast];
 }
 
-// Built-in packages whose emitter members return `time.Time` and
-// `time.Duration` (`t.Deadline()`, `b.Elapsed()`): the Go source of `time` is
-// part of the build, and its types are known, when one of them is imported.
-const IMPLIES_TIME = new Set(["testing", "context"]);
-
-function importImpliedTime(
-	p,
-	spec,
-	checker,
-	preambles,
-	bundledDirs,
-	options,
-	deps,
-) {
-	if (!IMPLIES_TIME.has(spec.path)) return;
-	const dir = resolveStdlibSource("time", options.stdlibRoot);
-	if (!dir) return;
-	try {
-		const pkg = loadStdlibPackage("time", dir, options, deps, checker.target);
-		emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
-		for (const [k, t] of pkg.exportedTypes)
-			if (k.includes(".")) checker.types.set(k, t);
-	} catch (e) {
-		const msg = "internal stdlib error in time; please report";
-		errAtImport(checker, p, spec, msg, e.message);
-	}
-}
-
 // Packages a `js` package may use without importing them, as the compiler
 // has always allowed: a program that selects from the identifier (or, for
 // `gom`, declares a templ component, typed as `gom.Node`) without declaring
@@ -802,16 +774,7 @@ function importStdlibSpec(
 ) {
 	if (spec.path.startsWith("js:") || isLocalPath(spec.path)) return;
 	const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
-	if (!dir)
-		return importImpliedTime(
-			p,
-			spec,
-			checker,
-			preambles,
-			bundledDirs,
-			options,
-			deps,
-		);
+	if (!dir) return;
 	const wasmImporter = checker.target === "wasm" || checker.target === "both";
 	if (wasmImporter && stdlibIsJsOnly(dir, deps))
 		return errJsOnlyImport(checker, p, spec);
