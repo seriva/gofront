@@ -172,15 +172,15 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Done when: `_genShared` / `_genSimd` live in `index.js`, both files are deleted, and `npm run check && npm test` pass.
 
 ### Phase 4: WASM Map Emitter Pruning (`emit-maps.js`)
-- [ ] Task 4.1: Delete dead `emitMapClone` and stop exporting synthesised helpers under `options.exportAll`
+- [x] Task 4.1: Delete dead `emitMapClone` and stop exporting synthesised helpers under `options.exportAll`
   - Files: `src/backend/wasm/emit-maps.js`, `src/backend/wasm/index.js`, `src/backend/wasm/module-emitter.js`, `test/unit/wasm/maps.test.js`
   - Test: failing WAT test (helper `compileWasm`, `exportAll` default) that a wasm module using only `map[string]int` creation and lookup emits no `$__map_clone_`, `$__map_delete_`, `$__map_clear_`, `$__map_keys_` or `$__map_values_`; `test/unit/wasm/boundary.test.js` map round-trips stay green.
   - Done when: `emitMapClone`, the `clone` arm/`funcDecls` entry and `cloneFuncName` are deleted, the export rule skips `_isMapHelper` / `_isInterfaceDispatcher` / `_isSharedHelper` / `_isRuntimePanic` / `_isIndexPanic`, and the tests pass.
-- [ ] Task 4.2: Merge `emitMapKeys` / `emitMapValues` into `emitMapProject`
+- [x] Task 4.2: Merge `emitMapKeys` / `emitMapValues` into `emitMapProject`
   - Files: `src/backend/wasm/emit-maps.js`, `test/unit/wasm/boundary.test.js`
   - Test: failing `test/unit/wasm/boundary.test.js` cases returning `map[string]int`, `map[int64]string` and an empty and a nil map from `//gofront:export` functions, checking keys and values match pairwise on the JS side.
   - Done when: one `emitMapProject(mapInfo, isValues)` emits both helpers and the cases pass.
-- [ ] Task 4.3: Merge `emitMapGet` / `emitMapGetOk` into `emitMapLookup`
+- [x] Task 4.3: Merge `emitMapGet` / `emitMapGetOk` into `emitMapLookup`
   - Files: `src/backend/wasm/emit-maps.js`, `test/unit/wasm/maps.test.js`
   - Test: `assertAllTargetsOutput` cases for `v := m[k]` and `v, ok := m[k]` on nil, empty, populated and hash-colliding maps with `string`, `int64`, struct and `any` keys.
   - Done when: `emitMapGet` and `emitMapGetOk` share `emitMapLookup(mapInfo, withOk)` and `npm run check && npm test` pass.

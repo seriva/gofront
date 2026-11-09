@@ -9,6 +9,7 @@ import {
 	compile,
 	compileHybrid,
 	compileHybridProject,
+	compileWasm,
 	runJs,
 	section,
 	test,
@@ -909,5 +910,61 @@ func main() {
 }
 `,
 		"hello\n9\n",
+	);
+});
+
+section("WASM Maps — Helper Pruning");
+
+test("exportAll build of a basic map program emits no unused map helpers", () => {
+	const res = compileWasm(
+		`
+package main
+
+func main() {
+	m := map[string]int{"a": 1}
+	println(m["a"])
+}
+`,
+		{ emitWat: true },
+	);
+	assertEqual(res.errors?.length ?? 0, 0);
+	for (const name of [
+		"__map_clone_",
+		"__map_clear_",
+		"__map_keys_",
+		"__map_values_",
+		"__map_delete_",
+	]) {
+		assertEqual(res.wat.includes(`$${name}`), false);
+	}
+});
+
+test("map lookup with and without ok on nil, empty and populated maps", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	var nm map[string]int
+	em := map[int64]string{}
+	pm := map[P]int{{1, 2}: 7}
+	am := map[any]string{1: "one", "k": "str"}
+	v, ok := nm["a"]
+	fmt.Println(nm["a"], v, ok)
+	s, ok := em[3]
+	fmt.Println(em[3] == "", s == "", ok)
+	fmt.Println(pm[P{1, 2}], pm[P{2, 1}])
+	p, ok := pm[P{1, 2}]
+	fmt.Println(p, ok)
+	a, ok := am["k"]
+	fmt.Println(am[1], a, ok)
+	_, ok = am[2.5]
+	fmt.Println(ok)
+}
+`,
+		"0 0 false\ntrue true false\n7 0\n7 true\none str true\nfalse\n",
 	);
 });
