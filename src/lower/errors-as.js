@@ -8,7 +8,12 @@
 // as part of the package's generated file (src/link/stdlib.js), so both
 // backends compile the same code.
 
-import { mentionsTypeParam, TypeSpeller, walkNodes } from "./gen-types.js";
+import {
+	importsFor,
+	mentionsTypeParam,
+	TypeSpeller,
+	walkNodes,
+} from "./gen-types.js";
 
 const ERRORS_PATH = "errors";
 const NOT_POINTER =
@@ -130,23 +135,13 @@ function classifyTarget(call) {
 	return { base };
 }
 
-// The import paths of the package qualifiers the generated code spells.
-function importsFor(programs, qualifiers) {
-	const importPaths = new Map();
-	for (const p of programs)
-		for (const imp of p.imports ?? [])
-			for (const spec of imp.imports)
-				importPaths.set(spec.alias ?? spec.path.split("/").pop(), spec.path);
-	return [...qualifiers].map((qn) => importPaths.get(qn)).filter(Boolean);
-}
-
 // Generates the `errors.As` functions for a package's call sites.  Returns
 // null when it has none; otherwise { body, imports, diagnostics, link } and
 // marks each call's SelectorExpr with `_genEntry`.
 export function generateErrorsAs(programs, _checker, pkgName) {
 	const { sites, diagnostics } = findSites(programs);
 	if (sites.length + diagnostics.length === 0) return null;
-	const qualifiers = new Set();
+	const qualifiers = new Map();
 	const speller = new TypeSpeller(pkgName, qualifiers, programs);
 	const prefix = `gfe_${String(pkgName).replace(/[^A-Za-z0-9_]/g, "_")}_as_`;
 	const names = new Map(); // spelled target -> function name
@@ -194,7 +189,7 @@ export function generateErrorsAs(programs, _checker, pkgName) {
 	};
 	return {
 		body: out.join("\n\n"),
-		imports: importsFor(programs, qualifiers),
+		imports: importsFor(qualifiers),
 		diagnostics,
 		link,
 	};

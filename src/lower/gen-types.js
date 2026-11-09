@@ -1,8 +1,46 @@
 // src/lower/gen-types.js
 // Spells checked types as Go source for the generated per-package file
-// (src/lower/json-codecs.js, src/lower/errors-as.js).
+// (src/lower/json-codecs.js, src/lower/errors-as.js,
+// src/lower/fmt-formatters.js), and holds what those generators share: the
+// imports the spelled code needs and the enumeration of the program's types.
 
+import { defaultType } from "../typechecker/types.js";
 import { forEachChild } from "./walk.js";
+
+export function under(t) {
+	return t?.kind === "named" ? under(t.underlying) : t;
+}
+
+export const isEmptyIface = (t) =>
+	(t?.kind === "basic" && t.name === "any") ||
+	(under(t)?.kind === "interface" && under(t).methods?.size === 0);
+
+// Arrays and maps of these share one WebAssembly representation (and so one
+// type-switch case), so only literals may register them: a `[2]byte` conversion
+// must not shadow a `[2]int32` that is stored in an interface.  A slice of
+// them is tagged with its Go type in an interface and registers like any other.
+export const SHARED_REPR = new Set([
+	"bool",
+	"int8",
+	"int16",
+	"int32",
+	"uint8",
+	"uint16",
+	"uint32",
+	"byte",
+	"rune",
+]);
+
+export function hasSharedRepr(t, depth = 0) {
+	if (!t || depth > 8) return false;
+	const u = under(t);
+	if (u?.kind === "basic") return SHARED_REPR.has(u.name);
+	if (u?.kind === "slice" || u?.kind === "array")
+		return hasSharedRepr(u.elem, depth + 1);
+	if (u?.kind === "map")
+		return hasSharedRepr(u.key, depth + 1) || hasSharedRepr(u.value, depth + 1);
+	return false;
+}
 
 // A method's results; a multi-value result is one tuple type.
 export function results(m) {
@@ -48,11 +86,75 @@ export function mentionsTypeParam(t, seen = new Set()) {
 	}
 }
 
+// The last element of an import path: the package's name.
+const canonicalName = (modPath) => modPath.split("/").pop();
+
+// The names the programs declare at package level.
+function declaredNames(programs) {
+	const names = new Set();
+	for (const p of programs)
+		for (const d of p.decls ?? []) {
+			if (d.kind === "TypeDecl" || d.kind === "FuncDecl") names.add(d.name);
+			else if (d.kind === "VarDecl" || d.kind === "ConstDecl")
+				for (const spec of d.decls ?? [])
+					for (const n of spec.names ?? []) names.add(n);
+		}
+	return names;
+}
+
+// Every name an import answers to (its alias, its package name) -> its path.
+function importPaths(programs) {
+	const paths = new Map();
+	for (const p of programs)
+		for (const imp of p.imports ?? [])
+			for (const spec of imp.imports) {
+				if (spec.alias === "_" || spec.alias === ".") continue;
+				paths.set(canonicalName(spec.path), spec.path);
+				if (spec.alias) paths.set(spec.alias, spec.path);
+			}
+	return paths;
+}
+
+// The generated file's imports for the qualifiers (name -> path) its code
+// spells: a path, or { path, alias } for a qualifier renamed to stay clear of
+// a package-level name.
+export function importsFor(qualifiers) {
+	return [...qualifiers].map(([name, path]) =>
+		name === canonicalName(path) ? path : { path, alias: name },
+	);
+}
+
+// Every type a closed-world generator may need to describe: the entries
+// { type, node, via } for the type arguments of generic calls (`typeArg`),
+// the type of every expression (`expr`) and the package's declared named
+// types (`declared`, node null).
+export function collectProgramTypes(programs, checker) {
+	const found = [];
+	for (const p of programs)
+		walkNodes(p.decls, (node) => {
+			for (const a of node._typeArgs ?? [])
+				found.push({ type: defaultType(a), node, via: "typeArg" });
+			if (node._type)
+				found.push({ type: defaultType(node._type), node, via: "expr" });
+		});
+	for (const [name, t] of checker.types) {
+		if (t?.kind !== "named" || t.name !== name) continue;
+		if (name.includes(".") || name.includes("$$")) continue;
+		if (t._genericOf || t.typeArgs?.length) continue;
+		found.push({ type: t, node: null, via: "declared" });
+	}
+	return found;
+}
+
 export class TypeSpeller {
+	// `qualifiers` receives name -> import path for each package the spelled
+	// code names.
 	constructor(pkgName, qualifiers, programs = []) {
 		this.pkgName = pkgName;
 		this.qualifiers = qualifiers;
 		this.programs = programs;
+		this.importPaths = importPaths(programs);
+		this.declared = declaredNames(programs);
 	}
 
 	// Go source for the type.
@@ -74,33 +176,35 @@ export class TypeSpeller {
 		return byKind[t.kind]();
 	}
 
-	resolveImportAlias(modPath) {
-		for (const p of this.programs) {
-			for (const imp of p.imports ?? []) {
-				for (const spec of imp.imports) {
-					if (spec.path === modPath) {
-						return spec.alias ?? spec.path.split("/").pop();
-					}
-				}
-			}
-		}
-		return modPath.split("/").pop();
+	// The name the generated file uses for the package at `modPath`: its
+	// package name, or `_gf_<name>` when the package declares that name itself
+	// or another path took it.
+	qualifierFor(modPath) {
+		for (const [name, path] of this.qualifiers)
+			if (path === modPath) return name;
+		const base = canonicalName(modPath);
+		const taken = (n) => this.declared.has(n) || this.qualifiers.has(n);
+		let name = base;
+		for (let i = 1; taken(name); i++) name = `_gf_${base}${i > 1 ? i : ""}`;
+		this.qualifiers.set(name, modPath);
+		return name;
 	}
 
 	spellNamed(t) {
 		let name = t.name;
 		const at = name.indexOf("$$");
+		const dot = name.indexOf(".");
 		if (at >= 0) {
 			const orig = name.slice(0, at);
 			const modPath = name.slice(at + 2).replaceAll("$", "/");
-			const alias = this.resolveImportAlias(modPath);
-			this.qualifiers.add(alias);
-			name = `${alias}.${orig}`;
+			name = `${this.qualifierFor(modPath)}.${orig}`;
+		} else if (dot > 0) {
+			const modPath = this.importPaths.get(name.slice(0, dot));
+			if (modPath) name = `${this.qualifierFor(modPath)}${name.slice(dot)}`;
 		}
-		const base = this.qualified(name);
 		return t.typeArgs?.length
-			? `${base}[${t.typeArgs.map((a) => this.spell(a)).join(", ")}]`
-			: base;
+			? `${name}[${t.typeArgs.map((a) => this.spell(a)).join(", ")}]`
+			: name;
 	}
 
 	spellStruct(t) {
@@ -110,12 +214,6 @@ export class TypeSpeller {
 			return `${f.names.join(", ")} ${this.spell(f.type)}${tag}`;
 		});
 		return `struct { ${fields.join("; ")} }`;
-	}
-
-	qualified(name) {
-		const dot = name.indexOf(".");
-		if (dot > 0) this.qualifiers.add(name.slice(0, dot));
-		return name;
 	}
 
 	funcString(t, name) {
@@ -131,5 +229,33 @@ export class TypeSpeller {
 			t.variadic && i === t.params.length - 1 ? `...${name(p)}` : name(p),
 		);
 		return `func(${params.join(", ")})${res}`;
+	}
+
+	// True when the type can be written as Go source in the generated file.
+	// Subclasses decide what a named type, an interface and a struct field
+	// need.
+	spellable(t, depth = 0, seen = new Set()) {
+		if (!t || depth > 8) return false;
+		const ok = (x) => this.spellable(x, depth + 1, seen);
+		const byKind = {
+			basic: () => t.name !== "void" && t.name !== "nil",
+			named: () => this.spellableNamed(t, ok, seen),
+			pointer: () => ok(t.base),
+			slice: () => ok(t.elem),
+			array: () => ok(t.elem),
+			map: () => ok(t.key) && ok(t.value),
+			interface: () => this.spellableInterface(t),
+			struct: () => this.spellableStruct(t, ok),
+			func: () => t.params.every(ok) && results(t).every(ok),
+		};
+		return byKind[t.kind]?.() ?? false;
+	}
+
+	spellableInterface(_t) {
+		return true;
+	}
+
+	spellableStruct(t, ok) {
+		return (t._structFields ?? []).every((f) => ok(f.type));
 	}
 }
