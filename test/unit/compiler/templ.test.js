@@ -635,6 +635,23 @@ templ Label(n int) {
 
 section("templ — error cases");
 
+test("tagless switch with a non-bool case is rejected", () => {
+	assertThrows(
+		() =>
+			compilePkg({
+				"main.go": "package main\nfunc main() {}",
+				"bad.templ": `package main
+templ Bad(n int) {
+	switch {
+	case 5:
+		<span>x</span>
+	}
+}`,
+			}),
+		"invalid case 5 in switch",
+	);
+});
+
 test("mismatched close tag throws parse error", () => {
 	assertThrows(
 		() =>

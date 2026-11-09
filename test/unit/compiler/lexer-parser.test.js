@@ -1400,6 +1400,26 @@ test("parser: //gofront:native survives a doc comment before func", () => {
 	assertEqual(fn.native, "str.Index");
 });
 
+// ── func-typed fields and variables ───────────────────────────
+
+section("Parser — result-less func types");
+
+test("struct tag after a func-typed field and var f func() = ...", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+var _ = struct{ F func() \`json:"f"\` }{}
+func main() {
+	var f func() = func() { fmt.Println("a") }
+	f()
+	var g func(int) = nil
+	fmt.Println(g == nil)
+}
+`,
+		"a\ntrue\n",
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
