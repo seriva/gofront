@@ -2,7 +2,9 @@
 // Tests for complex numbers in WASM: representation, arithmetic, builtins, literals, conversions.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
+	assertWasmProgramOutput,
 	compileHybrid,
 	runWasm,
 	section,
@@ -192,6 +194,47 @@ func Main() int {
 	const res = hybrid.run("Main");
 	assertEqual(res.wasmRes, 1n);
 	assertEqual(res.jsRes, 1);
+});
+
+test("complex64 variable and constant initializers keep the complex64 layout", () => {
+	const src = `
+package main
+
+func f(c complex64) float32 {
+	return real(c) + imag(c)
+}
+
+func Main() int {
+	var c64 complex64 = complex(1.5, 2.5)
+	var a complex64 = 1 + 2i
+	if f(c64) == 4 && real(a) == 1 && imag(a) == 2 {
+		return 1
+	}
+	return 0
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});
+
+test("complex64 initializers print on every target", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(c complex64) { fmt.Println(c) }
+
+func main() {
+	var c64 complex64 = complex(1.5, 2.5)
+	f(c64)
+	var a complex64 = 1 + 2i
+	fmt.Println(a)
+}
+`;
+	await assertAllTargetsOutput(src, "(1.5+2.5i)\n(1+2i)\n");
+	await assertWasmProgramOutput(src, "(1.5+2.5i)\n(1+2i)\n");
 });
 
 test("complex64 precision and rounding", () => {
