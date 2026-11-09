@@ -5,7 +5,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
 	ALLOW,
-	ALLOW_CROSS,
 	findCrossBackendImports,
 	findLayerGaps,
 	findStaleExemptions,
@@ -120,7 +119,12 @@ test("flags a wasm to js import that is not allowlisted", () => {
 	assertEqual(found[0].to, "src/backend/js/other.js");
 });
 
-test("passes the boundary.js to js/runtime.js edge", () => {
+// An allowlisted pair: the mechanism stays tested while the real list is empty.
+const ALLOW_CROSS = [
+	["src/backend/wasm/boundary.js", "src/backend/js/runtime.js"],
+];
+
+test("passes an allowlisted cross-backend edge", () => {
 	const found = findCrossBackendImports(
 		{
 			"src/backend/wasm/boundary.js": 'import { H } from "../js/runtime.js";\n',
@@ -299,19 +303,16 @@ test("only documented files are exempt from layering", () => {
 	assertEqual(Object.keys(ALLOW).join(","), "");
 });
 
-// With fmt-types.js in src/backend/shared/, the only cross-backend import
-// left in the repo is the allowlisted boundary.js -> js/runtime.js edge.
-test("cross-backend imports: only the allowlisted boundary edge remains", () => {
+// With fmt-types.js in src/backend/shared/ and the wasm error helper gone, no
+// cross-backend import is left in the repo.
+test("cross-backend imports: none remain", () => {
 	const sources = Object.fromEntries(
 		repoFiles
 			.filter((f) => f.startsWith("src/backend/"))
 			.map((f) => [f, readFileSync(join(ROOT, f), "utf8")]),
 	);
 	const found = findCrossBackendImports(sources, []);
-	assertEqual(
-		found.map((x) => `${x.from} -> ${x.to}`).join("\n"),
-		"src/backend/wasm/boundary.js -> src/backend/js/runtime.js",
-	);
+	assertEqual(found.map((x) => `${x.from} -> ${x.to}`).join("\n"), "");
 	assertEqual(findCrossBackendImports(sources).length, 0);
 	assertEqual(PENDING_CROSS.length, 0);
 });
@@ -364,14 +365,6 @@ test("the guard script fails on each fixture and passes on the real tree", () =>
 			assertContains(r.stderr, needle);
 		});
 	}
-	withTempDir(base, (dir) => {
-		const r = run(dir);
-		assertEqual(r.status, 1, "stale fixture");
-		assertContains(
-			r.stderr,
-			"cross-backend allowlist entry with no matching import: src/backend/wasm/boundary.js -> src/backend/js/runtime.js",
-		);
-	});
 });
 
 test("a missing root reports the rules file and exits 1 without a stack trace", () => {
