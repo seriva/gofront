@@ -213,7 +213,7 @@ test("fmt.Errorf creates error from format", () => {
 	const { js, errors } = compile(`package main
 func main() {
   err := fmt.Errorf("failed at step %d", 3)
-  console.log(err)
+  console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "failed at step 3");
@@ -245,21 +245,21 @@ func main() {
 	assertEqual(runJs(js), "no verbs here");
 });
 
-test("__sprintf not emitted when fmt is unused", () => {
+test("no fmt code is emitted when fmt is unused", () => {
 	const { js } = compile(`package main
 func main() {
   console.log("hello")
 }`);
-	assert(!js.includes("__sprintf"), "expected __sprintf not to be emitted");
+	assert(!js.includes("$$fmt"), "expected no fmt code to be emitted");
 });
 
-test("fmt.Sprintf emits __sprintf helper", () => {
+test("fmt.Sprintf compiles to a call of the Go source", () => {
 	const { js } = compile(`package main
 func main() {
   console.log(fmt.Sprintf("%s", "x"))
 }`);
-	assertContains(js, "__sprintf");
-	assertContains(js, "var __sprintf");
+	assertContains(js, "Sprintf$$fmt");
+	assert(!js.includes("__sprintf"), "expected no __sprintf helper");
 });
 
 section("recover()");

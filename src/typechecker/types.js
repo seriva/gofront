@@ -106,7 +106,6 @@ export const BROWSER_GLOBALS = new Set([
 // gains support; anything not listed is rejected at import with "not yet available in
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
-	"fmt",
 	"testing",
 	"gofront/shared",
 	"gofront/simd",
@@ -119,25 +118,6 @@ export const STDLIB_PACKAGES = WASM_SUPPORTED_STDLIB;
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
-	[
-		"fmt",
-		new Set([
-			"Sprintf",
-			"Sprint",
-			"Sprintln",
-			"Append",
-			"Appendf",
-			"Appendln",
-			"Errorf",
-			"Printf",
-			"Println",
-			"Print",
-			"Fprintf",
-			"Fprintln",
-			"Fprint",
-			"Stringer",
-		]),
-	],
 	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
 ]);
 
@@ -212,6 +192,11 @@ export const FMT_PRINT_FUNCS = new Set([
 	"Fprintln",
 	"Append",
 	"Appendln",
+	"Sprintf",
+	"Printf",
+	"Errorf",
+	"Fprintf",
+	"Appendf",
 ]);
 
 // Names a standard-library function may carry in `//gofront:native <name>`:
@@ -257,6 +242,7 @@ export const NATIVES = new Set([
 	"strings.TrimPrefix",
 	"strings.TrimSuffix",
 	"strconv.shortest",
+	"strconv.fixed",
 	"strconv.parseDecimal",
 	// internal/jsonrt: the encoder's writes into its output buffer.
 	"jsonrt.putString",

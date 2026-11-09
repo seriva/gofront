@@ -327,6 +327,7 @@ const STRING_NATIVES = {
 // strconv: the shortest digits of a float64 (a string) and a decimal's
 // float64 (`f` is an f64 argument).
 STRING_NATIVES["strconv.shortest"] = ["strconv_shortest", "f", "str"];
+STRING_NATIVES["strconv.fixed"] = ["strconv_fixed", "fi", "str"];
 STRING_NATIVES["strconv.parseDecimal"] = [
 	"strconv_parse_decimal",
 	"s",

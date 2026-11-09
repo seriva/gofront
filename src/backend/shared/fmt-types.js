@@ -14,8 +14,6 @@
 // `null`; the runtime then derives a best-effort type from the value.
 
 const MAX_DEPTH = 4;
-const FLAGS = "#+\\- 0";
-const VERBS = "vTtcdoObxXUeEfFgGsqp";
 
 const qualify = (name) =>
 	name.split("[")[0].includes(".") ? name : `main.${name}`;
@@ -219,63 +217,6 @@ export function fmtDescHasFloat(desc) {
 		default:
 			return false;
 	}
-}
-
-/**
- * Whether a type descriptor is a slice or array (possibly named).  `%s`, `%q`
- * and `%x` read a byte slice as text, which a plain list of numbers cannot
- * tell from any other slice of small numbers.
- * @param {any} desc result of fmtTypeDesc
- * @returns {boolean}
- */
-export function fmtDescIsSeq(desc) {
-	let d = desc;
-	while (d?.k === "named") d = d.u;
-	return d?.k === "slice" || d?.k === "array";
-}
-
-/**
- * Whether the type is a pointer: a nil one prints `0` under `%d` and the other
- * integer verbs and <nil> under `%s`, which only the static type can tell from
- * a nil interface.
- * @param {any} desc result of fmtTypeDesc
- * @returns {boolean}
- */
-export function fmtDescIsPtr(desc) {
-	return desc?.k === "ptr";
-}
-
-/**
- * Whether a call with this literal format string needs operand types: `%T`,
- * `%#v`, an unknown verb (`%!z(int=5)`), or more operands than verbs
- * (`%!(EXTRA int=1)`).
- * @param {unknown} format
- * @param {number} nargs operand count, -1 when not known statically
- * @param {boolean} [seqArgs] some operand is a slice or array, whose element
- *   type decides how `%s`, `%q`, `%x` and `%X` read it
- * @param {boolean} [ptrArgs] some operand is a pointer, whose nil value is told
- *   from a nil interface by its type
- */
-export function fmtWantsTypes(format, nargs, seqArgs = false, ptrArgs = false) {
-	if (typeof format !== "string") return false;
-	const re = new RegExp(
-		`%([${FLAGS}]*)((?:\\[\\d+\\])?(?:\\*|\\d+)?(?:\\.(?:\\[\\d+\\])?(?:\\*|\\d*))?(?:\\[\\d+\\])?)([^]?)`,
-		"g",
-	);
-	let count = 0;
-	let indexed = false;
-	for (const m of format.matchAll(re)) {
-		const verb = m[3];
-		if (verb === "%") continue;
-		if (verb === "T" || verb === "p") return true;
-		if (verb === "v" && m[1].includes("#")) return true;
-		if (seqArgs && "sqxX".includes(verb)) return true;
-		if (ptrArgs && "bodxXsq".includes(verb)) return true;
-		if (verb !== "" && !VERBS.includes(verb) && verb !== "w") return true;
-		if (/[[*]/.test(m[2])) indexed = true;
-		count++;
-	}
-	return nargs >= 0 && !indexed && nargs > count;
 }
 
 /**

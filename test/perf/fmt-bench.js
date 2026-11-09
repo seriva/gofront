@@ -5,7 +5,7 @@
 // formatting. Run on the JS backend and on WASM.
 //
 // Gate: each backend must stay at or under its recorded baseline times the
-// configured factor. The default gate is the baseline itself (factor 1.0).
+// configured factor (JS 2.0, WASM 1.0).
 //
 // Usage:
 //   node test/perf/fmt-bench.js [--runs 3] [--calls 100000] [--json]
@@ -24,7 +24,7 @@ const JSON_OUT = args.includes("--json");
 // Baselines measured on the hand-written engine (the last commit before fmt
 // moved to Go source). Gate factors: JS <= 2.0x, WASM <= 1.0x.
 export const BASELINE_MS = { js: 790, wasm: 1200 };
-export const GATE_FACTOR = { js: 1.0, wasm: 1.0 };
+export const GATE_FACTOR = { js: 2.0, wasm: 1.0 };
 
 const src = `package main
 

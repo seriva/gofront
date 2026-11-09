@@ -457,7 +457,7 @@ test("a nil pointer with a pointer-receiver String uses it for %v, %s and %q but
 	fmt.Printf("%v|%s|%#v|%q\\n", p, p, p, p)`,
 		'type C struct{ n int }\nfunc (c *C) String() string { return "c" }',
 	);
-	assertEqual(o, 'c|c|<nil>|"c"\n');
+	assertEqual(o, 'c|c|(*main.C)(nil)|"c"');
 });
 
 // Runs `body` (which returns a string) on the js target, as a `both` package

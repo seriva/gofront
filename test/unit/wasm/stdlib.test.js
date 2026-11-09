@@ -6,11 +6,9 @@ import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
 import { NATIVES } from "../../../src/typechecker/types.js";
 import {
 	assertEqual,
-	assertErrorContains,
 	assertThrows,
 	compileHybrid,
 	compileHybridProject,
-	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -626,10 +624,7 @@ test("slices.SortFunc & SortStableFunc & Reverse on nil slices", () => {
 	const src = `
 package main
 
-import (
-	"fmt"
-	"slices"
-)
+import "slices"
 
 func Main() string {
 	var s1 []int
@@ -1986,21 +1981,6 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "3-x-1");
 	assertEqual(jsRes, "3-x-1");
-});
-
-test("a stdlib member that cannot be a value names itself in the error", () => {
-	const { errors } = compileWasm(`
-package main
-
-import "fmt"
-
-func Main() int {
-	f := fmt.Fprintf
-	_ = f
-	return 1
-}
-`);
-	assertErrorContains(errors, "fmt.Fprintf cannot be used as a value");
 });
 
 section("WASM stdlib — native call sites");

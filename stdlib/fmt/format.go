@@ -40,10 +40,10 @@ type fmtFlags struct {
 	sharpV bool
 }
 
-// format is the part of the printer that lays out one value in a buffer. It
+// fmtState is the part of the printer that lays out one value in a buffer. It
 // holds the flags of fmtFlags directly: an embedded struct would be renamed
 // with its type when the package is linked.
-type format struct {
+type fmtState struct {
 	buf []byte
 
 	widPresent  bool
@@ -61,19 +61,19 @@ type format struct {
 	intbuf []byte
 }
 
-func (f *format) clearflags() {
+func (f *fmtState) clearflags() {
 	f.restoreFlags(fmtFlags{})
 	f.wid = 0
 	f.prec = 0
 }
 
 // saveFlags returns the flags of the verb being formatted.
-func (f *format) saveFlags() fmtFlags {
+func (f *fmtState) saveFlags() fmtFlags {
 	return fmtFlags{f.widPresent, f.precPresent, f.minus, f.plus, f.sharp, f.space, f.zero, f.plusV, f.sharpV}
 }
 
 // restoreFlags sets the flags saved by saveFlags.
-func (f *format) restoreFlags(s fmtFlags) {
+func (f *fmtState) restoreFlags(s fmtFlags) {
 	f.widPresent = s.widPresent
 	f.precPresent = s.precPresent
 	f.minus = s.minus
@@ -86,7 +86,7 @@ func (f *format) restoreFlags(s fmtFlags) {
 }
 
 // writePadding appends n padding bytes.
-func (f *format) writePadding(n int) {
+func (f *fmtState) writePadding(n int) {
 	if n <= 0 {
 		return
 	}
@@ -101,7 +101,7 @@ func (f *format) writePadding(n int) {
 }
 
 // pad appends b to f.buf, padded on left (!f.minus) or right (f.minus).
-func (f *format) pad(b []byte) {
+func (f *fmtState) pad(b []byte) {
 	if !f.widPresent || f.wid == 0 {
 		f.buf = append(f.buf, b...)
 		return
@@ -119,7 +119,7 @@ func (f *format) pad(b []byte) {
 }
 
 // padString appends s to f.buf, padded on left (!f.minus) or right (f.minus).
-func (f *format) padString(s string) {
+func (f *fmtState) padString(s string) {
 	if !f.widPresent || f.wid == 0 {
 		f.buf = append(f.buf, s...)
 		return
@@ -137,7 +137,7 @@ func (f *format) padString(s string) {
 }
 
 // fmtBoolean formats a boolean.
-func (f *format) fmtBoolean(v bool) {
+func (f *fmtState) fmtBoolean(v bool) {
 	if v {
 		f.padString("true")
 	} else {
@@ -146,7 +146,7 @@ func (f *format) fmtBoolean(v bool) {
 }
 
 // fmtUnicode formats a uint64 as "U+0078" or with f.sharp set as "U+0078 'x'".
-func (f *format) fmtUnicode(u uint64) {
+func (f *fmtState) fmtUnicode(u uint64) {
 	buf := f.intbuf[0:]
 
 	// With default precision set the maximum needed buf length is 18
@@ -205,7 +205,7 @@ func (f *format) fmtUnicode(u uint64) {
 }
 
 // fmtInteger formats signed and unsigned integers.
-func (f *format) fmtInteger(u uint64, base int, isSigned bool, verb rune, digits string) {
+func (f *fmtState) fmtInteger(u uint64, base int, isSigned bool, verb rune, digits string) {
 	negative := isSigned && int64(u) < 0
 	if negative {
 		u = -u
@@ -331,7 +331,7 @@ func (f *format) fmtInteger(u uint64, base int, isSigned bool, verb rune, digits
 }
 
 // truncateString truncates the string s to the specified precision, if present.
-func (f *format) truncateString(s string) string {
+func (f *fmtState) truncateString(s string) string {
 	if f.precPresent {
 		n := f.prec
 		for i := range s {
@@ -345,7 +345,7 @@ func (f *format) truncateString(s string) string {
 }
 
 // truncate truncates the byte slice b as a string of the specified precision, if present.
-func (f *format) truncate(b []byte) []byte {
+func (f *fmtState) truncate(b []byte) []byte {
 	if f.precPresent {
 		n := f.prec
 		for i := 0; i < len(b); {
@@ -364,19 +364,19 @@ func (f *format) truncate(b []byte) []byte {
 }
 
 // fmtS formats a string.
-func (f *format) fmtS(s string) {
+func (f *fmtState) fmtS(s string) {
 	s = f.truncateString(s)
 	f.padString(s)
 }
 
 // fmtBs formats the byte slice b as if it was formatted as string with fmtS.
-func (f *format) fmtBs(b []byte) {
+func (f *fmtState) fmtBs(b []byte) {
 	b = f.truncate(b)
 	f.pad(b)
 }
 
 // fmtSbx formats a string or byte slice as a hexadecimal encoding of its bytes.
-func (f *format) fmtSbx(s string, b []byte, digits string) {
+func (f *fmtState) fmtSbx(s string, b []byte, digits string) {
 	length := len(b)
 	if b == nil {
 		// No byte slice present. Assume string s should be encoded.
@@ -440,19 +440,19 @@ func (f *format) fmtSbx(s string, b []byte, digits string) {
 }
 
 // fmtSx formats a string as a hexadecimal encoding of its bytes.
-func (f *format) fmtSx(s, digits string) {
+func (f *fmtState) fmtSx(s, digits string) {
 	f.fmtSbx(s, nil, digits)
 }
 
 // fmtBx formats a byte slice as a hexadecimal encoding of its bytes.
-func (f *format) fmtBx(b []byte, digits string) {
+func (f *fmtState) fmtBx(b []byte, digits string) {
 	f.fmtSbx("", b, digits)
 }
 
 // fmtQ formats a string as a double-quoted, escaped Go string constant.
 // If f.sharp is set a raw (backquoted) string may be returned instead
 // if the string does not contain any control characters other than tab.
-func (f *format) fmtQ(s string) {
+func (f *fmtState) fmtQ(s string) {
 	s = f.truncateString(s)
 	if f.sharp && strconv.CanBackquote(s) {
 		f.padString("`" + s + "`")
@@ -468,7 +468,7 @@ func (f *format) fmtQ(s string) {
 
 // fmtC formats an integer as a Unicode character.
 // If the character is not valid Unicode, it will print '�'.
-func (f *format) fmtC(c uint64) {
+func (f *fmtState) fmtC(c uint64) {
 	// Explicitly check whether c exceeds utf8.MaxRune since the conversion
 	// of a uint64 to a rune may lose precision that indicates an overflow.
 	r := rune(c)
@@ -481,7 +481,7 @@ func (f *format) fmtC(c uint64) {
 
 // fmtQc formats an integer as a single-quoted, escaped Go character constant.
 // If the character is not valid Unicode, it will print '�'.
-func (f *format) fmtQc(c uint64) {
+func (f *fmtState) fmtQc(c uint64) {
 	r := rune(c)
 	if c > utf8.MaxRune {
 		r = utf8.RuneError
@@ -496,7 +496,7 @@ func (f *format) fmtQc(c uint64) {
 
 // fmtFloat formats floats. The default precision for each verb
 // is specified as last argument in the call to fmt_float.
-func (f *format) fmtFloat(v float64, size int, verb rune, prec int) {
+func (f *fmtState) fmtFloat(v float64, size int, verb rune, prec int) {
 	// Format number, reserving space for leading + sign if needed.
 	if f.precPresent {
 		prec = f.prec

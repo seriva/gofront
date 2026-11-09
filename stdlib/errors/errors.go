@@ -34,6 +34,12 @@ func (e *errorString) Error() string {
 	return e.s
 }
 
+// GofrontTypeName is the type %T prints for the error. Package fmt cannot
+// name the unexported type, so the error says it.
+func (e *errorString) GofrontTypeName() string {
+	return "*errors.errorString"
+}
+
 // ErrUnsupported indicates that a requested operation cannot be performed,
 // because it is unsupported.
 var ErrUnsupported = New("unsupported operation")
@@ -128,6 +134,11 @@ func Join(errs ...error) error {
 
 type joinError struct {
 	errs []error
+}
+
+// GofrontTypeName is the type %T prints for the error (see errorString).
+func (e *joinError) GofrontTypeName() string {
+	return "*errors.joinError"
 }
 
 func (e *joinError) Error() string {

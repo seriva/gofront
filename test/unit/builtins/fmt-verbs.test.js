@@ -2,10 +2,7 @@
 // %*d, 64-bit integers and the MISSING/EXTRA forms (both backends)
 
 import { fileURLToPath } from "node:url";
-import {
-	HELPER_SPRINTF,
-	HELPER_STRUCT_KEY,
-} from "../../../src/backend/js/runtime.js";
+import { HELPER_STRUCT_KEY } from "../../../src/backend/js/runtime.js";
 import {
 	assertEqual,
 	assertProgramOutput,
@@ -169,10 +166,21 @@ test("%+d, % d, %#x, %U and %q on runes", () => {
 	);
 });
 
-test("%#08x and %#06o zero-pad accounts for prefix width", () => {
+test("%#08x and %#06o zero-pad the digits, then add the prefix, like Go", () => {
 	assertEqual(
 		parity(`return fmt.Sprintf("%#08x|%#06o", 255, 10)`),
-		"0x0000ff|000012",
+		"0x000000ff|000012",
+	);
+});
+
+test("a scalar pointer printed by Println and by %p gets one id on both targets", () => {
+	assertEqual(
+		parity(
+			`x := 5
+	p := &x
+	return fmt.Sprintln(p) + fmt.Sprintf("%p|%v", p, p)`,
+		),
+		"0x1\n0x1|0x1",
 	);
 });
 
@@ -225,7 +233,7 @@ test("an unknown verb prints the bad-verb form", () => {
 test("JS: Printf with a wrong-type operand prints the bad-verb form", () => {
 	assertEqual(
 		runJsBody(`fmt.Printf("%d|%s\\n", "x", 5)`),
-		"%!d(string=x)|%!s(int=5)\n",
+		"%!d(string=x)|%!s(int=5)",
 	);
 });
 
@@ -1246,35 +1254,39 @@ func g() (*T, T, float32, uint32, any) { return &T{2}, T{3}, 0.1, 4000000000, ui
 
 section("fmt BigInt formatting and key encoding helpers (Task 1.2)");
 
-test("BigInt with fmt verbs (%d %x %X %o %O %b %c %q %U %v, width and flags)", () => {
-	const sprintf = new Function(`${HELPER_SPRINTF}; return __sprintf;`)();
-	const max64 = 9223372036854775807n;
-	const min64 = -9223372036854775808n;
-	const umax64 = 18446744073709551615n;
-
-	assertEqual(sprintf("%d", max64), "9223372036854775807");
-	assertEqual(sprintf("%d", min64), "-9223372036854775808");
-	assertEqual(sprintf("%d", umax64), "18446744073709551615");
-	assertEqual(sprintf("%x", max64), "7fffffffffffffff");
-	assertEqual(sprintf("%X", max64), "7FFFFFFFFFFFFFFF");
-	assertEqual(sprintf("%o", max64), "777777777777777777777");
-	assertEqual(sprintf("%O", max64), "0o777777777777777777777");
-	assertEqual(sprintf("%b", 15n), "1111");
-	assertEqual(sprintf("%b", -15n), "-1111");
-	assertEqual(sprintf("%c", 65n), "A");
-	assertEqual(sprintf("%q", 65n), "'A'");
-	assertEqual(sprintf("%U", 65n), "U+0041");
-	assertEqual(sprintf("%#U", 65n), "U+0041 'A'");
-	assertEqual(sprintf("%U", -1n), "U+FFFFFFFFFFFFFFFF");
-	assertEqual(sprintf("%U", 1n << 60n), "U+1000000000000000");
-	assertEqual(sprintf("%v", max64), "9223372036854775807");
-	assertEqual(sprintf("%22d", max64), "   9223372036854775807");
-	assertEqual(sprintf("%-22d", max64), "9223372036854775807   ");
-	assertEqual(sprintf("%022d", max64), "0009223372036854775807");
-	assertEqual(sprintf("%+d", max64), "+9223372036854775807");
-	assertEqual(sprintf("% d", max64), " 9223372036854775807");
-	assertEqual(sprintf("%+d", min64), "-9223372036854775808");
-	assertEqual(sprintf("%f", 42n), "%!f(int64=42)");
+test("64-bit integers with fmt verbs (%d %x %X %o %O %b %c %q %U %v, width and flags)", () => {
+	const cases = [
+		["%d", "max", "9223372036854775807"],
+		["%d", "min", "-9223372036854775808"],
+		["%d", "umax", "18446744073709551615"],
+		["%x", "max", "7fffffffffffffff"],
+		["%X", "max", "7FFFFFFFFFFFFFFF"],
+		["%o", "max", "777777777777777777777"],
+		["%O", "max", "0o777777777777777777777"],
+		["%b", "int64(15)", "1111"],
+		["%b", "int64(-15)", "-1111"],
+		["%c", "int64(65)", "A"],
+		["%q", "int64(65)", "'A'"],
+		["%U", "int64(65)", "U+0041"],
+		["%#U", "int64(65)", "U+0041 'A'"],
+		["%U", "int64(-1)", "U+FFFFFFFFFFFFFFFF"],
+		["%U", "int64(1) << 60", "U+1000000000000000"],
+		["%v", "max", "9223372036854775807"],
+		["%22d", "max", "   9223372036854775807"],
+		["%-22d", "max", "9223372036854775807   "],
+		["%022d", "max", "0009223372036854775807"],
+		["%+d", "max", "+9223372036854775807"],
+		["% d", "max", " 9223372036854775807"],
+		["%+d", "min", "-9223372036854775808"],
+		["%f", "int64(42)", "%!f(int64=42)"],
+	];
+	const body = `var max int64 = 9223372036854775807
+var min int64 = -9223372036854775808
+var umax uint64 = 18446744073709551615
+out := ""
+${cases.map(([f, v]) => `out += fmt.Sprintf(${JSON.stringify(f)}, ${v}) + "|"`).join("\n")}
+return out`;
+	assertEqual(parity(body), `${cases.map((c) => c[2]).join("|")}|`);
 });
 
 test("BigInt and struct keys encoding and comparison helpers", () => {
