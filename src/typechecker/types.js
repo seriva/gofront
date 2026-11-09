@@ -602,9 +602,13 @@ export function embeddedFieldName(f) {
 		.replace(/\$\$.*$/, "");
 }
 
+// A function-local type shadowed by another type is renamed `Name__L<n>`.
+export const LOCAL_TYPE_SUFFIX = /__L\d+/;
+
 // Go-source stdlib names are mangled to `Name$$path` (`List$$container$list`);
 // diagnostics show them qualified, as Go does (`list.List`).
 export function displayTypeName(name) {
+	if (typeof name === "string") name = name.replace(LOCAL_TYPE_SUFFIX, "");
 	const i = typeof name === "string" ? name.indexOf("$$") : -1;
 	if (i < 0) return name;
 	return `${name

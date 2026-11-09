@@ -831,8 +831,12 @@ export const expressionGenMethods = {
 	// Pseudo type object for an AST type node (used where no checker type is available).
 	_typeFromNode(node) {
 		if (!node) return null;
-		if (node.kind === "TypeName" && this.structNames.has(node.name))
-			return { kind: "named", name: node.name, underlying: { kind: "struct" } };
+		if (node.kind === "TypeName" || node.kind === "SelectorExpr") {
+			// `pkg.S` of a bundled package names the class `S`.
+			const name = this.getTypeName(node);
+			if (name && this.structNames.has(name))
+				return { kind: "named", name, underlying: { kind: "struct" } };
+		}
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
 		return null;
@@ -2572,7 +2576,13 @@ export const expressionGenMethods = {
 			return this.getTypeName(typeNode.expr);
 		if (typeNode.kind === "SelectorExpr") {
 			const base = this.getTypeName(typeNode.expr);
-			if (this.bundledPackages.has(base)) return typeNode.field;
+			if (this.bundledPackages.has(base)) {
+				// `p.A` for `type A = Base` in p: no class is emitted for A.
+				const t = this.checker?.types.get(`${base}.${typeNode.field}`);
+				return t?.kind === "named" && t.name && !t.name.includes("$$")
+					? t.name
+					: typeNode.field;
+			}
 			return `${base}.${typeNode.field}`;
 		}
 		return null;

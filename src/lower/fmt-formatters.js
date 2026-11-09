@@ -22,6 +22,7 @@ import {
 	defaultType,
 	embeddedFieldName,
 	FMT_PRINT_FUNCS,
+	LOCAL_TYPE_SUFFIX,
 } from "../typechecker/types.js";
 import {
 	collectProgramTypes,
@@ -194,7 +195,7 @@ class FmtGen extends TypeSpeller {
 			case "basic":
 				return t.name === "any" ? "interface {}" : unalias(t.name);
 			case "named": {
-				let name = t.name;
+				let name = t.name.replace(LOCAL_TYPE_SUFFIX, "");
 				const at = name.indexOf("$$");
 				if (at >= 0)
 					name = `${name
