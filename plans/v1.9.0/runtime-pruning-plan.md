@@ -122,7 +122,7 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Files: `stdlib/internal/jsonrt/enc.go`, `stdlib/internal/jsonrt/dec.go`, `src/lower/reachability.js`, `test/unit/builtins/json.test.js`
   - Test: failing test that the JS of `func main(){_=json.Valid(nil)}` contains neither `UnmarshalTypeError` nor `EncodeBytes`, plus the existing `Encoder.SetEscapeHTML` / `Decoder.UseNumber` / `DisallowUnknownFields` cases staying green.
   - Done when: `EncodeBytes`, `DecodeBytes` and the three `Opt*` variables are gone (`NewEnc` sets `EscapeHTML: true`), `JSON_NAMES` and `addExtraRoots` are deleted, and the assertions pass.
-- [ ] Task 1.4: Collapse `src/typechecker/stdlib/{core,extended}.js` into `index.js`
+- [x] Task 1.4: Collapse `src/typechecker/stdlib/{core,extended}.js` into `index.js`
   - Files: `src/typechecker/stdlib/index.js`, `src/typechecker/stdlib/core.js` (delete), `src/typechecker/stdlib/extended.js` (delete)
   - Test: no behaviour change; `test/unit/types/` and `test/unit/language/` suites (browser globals and builtins) and `test/unit/compiler/check-layers.test.js` stay green.
   - Done when: `BROWSER_GLOBALS` and `BUILTINS` registration live in `setupGlobals` and both files are deleted.
