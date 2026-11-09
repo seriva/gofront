@@ -23,7 +23,7 @@ import {
 } from "./gen-types.js";
 
 const JSON_PATH = "encoding/json";
-const SITE_FUNCS = new Set(["Marshal", "MarshalIndent", "Unmarshal", "Valid"]);
+const SITE_FUNCS = new Set(["Marshal", "MarshalIndent", "Unmarshal"]);
 
 const INT_KINDS = new Set(["int", "int8", "int16", "int32", "int64"]);
 const UINT_KINDS = new Set([
@@ -961,14 +961,6 @@ export class JsonCodecGen extends TypeSpeller {
 		return name;
 	}
 
-	entryValid() {
-		const name = `${this.prefix}valid${this.entries.length}`;
-		this.entries.push(
-			`func ${name}(data []byte) bool {\n\treturn jsonrt.Valid(data)\n}`,
-		);
-		return name;
-	}
-
 	entryEncode(argType) {
 		this.qualified("json.Encoder");
 		const name = `${this.prefix}encode${this.entries.length}`;
@@ -1272,12 +1264,17 @@ function jsonAliases(program) {
 	return aliases;
 }
 
+// `json.Marshal`-style selector on the imported package (not a local that
+// shadows its name).
+const isJsonRef = (node, aliases) =>
+	node.kind === "SelectorExpr" &&
+	node.expr?.kind === "Ident" &&
+	node.expr._type?.kind === "namespace" &&
+	aliases.has(node.expr.name) &&
+	SITE_FUNCS.has(node.field);
+
 const isJsonCall = (node, aliases) =>
-	node.kind === "CallExpr" &&
-	node.func?.kind === "SelectorExpr" &&
-	node.func.expr?.kind === "Ident" &&
-	aliases.has(node.func.expr.name) &&
-	SITE_FUNCS.has(node.func.field);
+	node.kind === "CallExpr" && isJsonRef(node.func, aliases);
 
 function isStreamCall(node) {
 	if (node.kind !== "CallExpr" || node.func?.kind !== "SelectorExpr")
@@ -1297,21 +1294,36 @@ function isStreamCall(node) {
 	return null;
 }
 
-// Finds `json.Marshal/Unmarshal/Valid` call sites in the checked programs.
+// Finds `json.Marshal/MarshalIndent/Unmarshal` call sites in the checked
+// programs, and a diagnostic for each use of them that is not a call.
 function findSites(programs) {
 	const sites = [];
+	const diagnostics = [];
 	for (const p of programs) {
 		const aliases = jsonAliases(p);
+		const callees = new Set();
+		const refs = [];
 		walkNodes(p.decls, (node) => {
 			if (isJsonCall(node, aliases)) {
 				sites.push({ call: node, fn: node.func.field, program: p });
+				callees.add(node.func);
+			} else if (isJsonRef(node, aliases)) {
+				refs.push(node);
 			} else {
 				const streamFn = isStreamCall(node);
 				if (streamFn) sites.push({ call: node, fn: streamFn, program: p });
 			}
 		});
+		for (const node of refs)
+			if (!callees.has(node))
+				diagnostics.push({
+					program: p,
+					node: node.expr,
+					message: `json.${node.field} cannot be used as a value`,
+					hint: `call json.${node.field} directly`,
+				});
 	}
-	return sites;
+	return { sites, diagnostics };
 }
 
 function selectCodecEntry(gen, fn, argType) {
@@ -1320,19 +1332,17 @@ function selectCodecEntry(gen, fn, argType) {
 	if (fn === "Unmarshal") return gen.entryUnmarshal(argType(1));
 	if (fn === "Encode") return gen.entryEncode(argType(0));
 	if (fn === "Decode") return gen.entryDecode(argType(0));
-	return gen.entryValid();
 }
 
 // Generates the codec file for a package's `json` call sites.  Returns null
 // when it has none; otherwise { body, imports, diagnostics } and marks each call's
 // SelectorExpr with `_genEntry`, the entry point the WASM link calls instead.
 export function generateJsonCodecs(programs, checker, pkgName) {
-	const sites = findSites(programs);
-	if (sites.length === 0) return null;
+	const { sites, diagnostics } = findSites(programs);
+	if (sites.length + diagnostics.length === 0) return null;
 	const qualifiers = new Set();
 	const gen = new JsonCodecGen(checker, pkgName, qualifiers, programs);
 	const pending = [];
-	const diagnostics = [];
 	for (const { call, fn, program } of sites) {
 		// A site inside a generic function is shared by every instance, so a type
 		// that mentions a type parameter takes the dynamic entry.
