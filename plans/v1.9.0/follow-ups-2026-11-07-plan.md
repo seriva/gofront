@@ -1,8 +1,8 @@
 # v1.9.0 Review Follow-ups (2026-11-07) — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft  
-**Base branch:** `main` (`feat/overlays-to-go` merged at `68d6a51`)  
+**Status:** In Progress  
+**Base branch:** main  
 **Related:** [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md), [`compiler-shrinking-plan.md`](compiler-shrinking-plan.md), [`overlays-to-go-plan.md`](overlays-to-go-plan.md), [`runtime-pruning-plan.md`](runtime-pruning-plan.md)  
 **Release note:** More Go programs now behave identically to Go across JavaScript and WebAssembly, including function-local types with the same name in different functions, cross-package type aliases and value parameters, interface type assertions and their failure messages, `unicode.IsPrint` on non-ASCII spaces, `os.Stderr` output under Node.js, `regexp` no-match results, ranging over a nil map, `complex64` constants in WebAssembly, output without a trailing newline in WebAssembly, `%p` of maps and slices, and printing generic values stored in `any`, and the compiler rejects more invalid programs that Go rejects. Templ components now support multi-value `switch` cases (`case a, b:`) and inline struct literals in `for` headers, and `b.Run` sub-benchmarks now run to the target duration and report their own result line.
 
