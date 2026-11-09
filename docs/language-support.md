@@ -107,7 +107,7 @@ Coverage of the Go standard library, per package. Anything not listed here is no
 | `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; async tests in `js` packages; no fuzzing |
 | `context` | js, wasm, both | `Background`, `TODO`, `WithCancel`, `WithValue`; no `Done` channel, deadlines or timeouts |
-| `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
+| `time` | js, wasm, both | `Sleep`, `AfterFunc` and `Timer` are JS-only; no tickers |
 | `gom` | js | GoFront DOM package |
 | `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
 

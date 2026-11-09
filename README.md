@@ -258,7 +258,7 @@ example/gom/
 ```
 
 Key types and functions (all accessed as `gom.*`, no import needed):
-- `gom.Node` — interface with a single `Mount(parent any)` method
+- `gom.Node` — interface with a single `Mount(parent any, refs any)` method
 - `gom.NodeFunc` — `type NodeFunc func(parent any)` with `Mount` method; any function becomes a `Node`
 - `gom.Group` — `type Group []Node` with `Mount` method; composes children in order
 - `gom.El(tag, children...)` — creates an element node
@@ -461,12 +461,12 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 ## Tests
 
 ```sh
-npm test                  # unit, zero-alloc perf, and example tests (~2,900 tests, no browser required)
+npm test                  # unit, zero-alloc perf, and example tests (~3,800 tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Raycast, JSON, and SIMD particle benchmarks (pure JS vs hybrid WASM)
 ```
 
-**Unit tests** (~2,900) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~3,800) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,
 embedded structs, string formatting, compile-time `encoding/json` serialization with struct tags,
 map iteration order, integer overflow semantics, unused variable detection,

@@ -5,7 +5,7 @@ All notable changes to this project will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
-## [Unreleased]
+## [1.9.0] - 2026-11-09
 
 ### Added
 - **Standard library that matches Go**: `slices`, `sort`, `maps`, `errors`, `io`, `strings`, `bytes`, `strconv`, `time`, `sync`, `math/bits`, `math/rand` and the `encoding` and `crypto/sha256` packages now follow Go's signatures and results on every target, so sorting orders ties and `NaN` like Go, `slices` and `maps` accept named types such as `type IDs []int`, `errors.Is` walks `errors.Join` trees, and `io.Copy` and `io.ReadAll` work with `bytes.Buffer`. `time` keeps nanoseconds and parses every layout, `strconv` formats and parses floats exactly as Go does, and `encoding/binary` gains varints and `sha256` gains `Sum224` and `New224` ([details](docs/go-compatibility.md#standard-library-behaviour)).
@@ -26,13 +26,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Breaking:** An `async` test function cannot be combined with `TestMain` in the same package, and the build now reports an error. Remove `TestMain` or make the tests synchronous.
 - **Breaking:** `gom.Node` is now `Mount(parent any, refs any)`, and `gom.Map` is generic over the slice's element type. Add the `refs any` parameter to your own `Mount` methods.
 - **Breaking:** Like Go, the `unicode` functions take and return `rune` rather than `int`. Convert an `int` argument with `rune(x)`.
-- **Breaking:** `os`, `unicode` and `crypto/rand` must now be imported before use, as in Go. Add the missing `import`.
-- **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable to an `int`, a `switch` case whose constant does not fit the tag's type, and constants or package variables that depend on themselves. Convert explicitly, for example `int(y)`, or fix the case value or the circular definition.
-- **Breaking:** Like Go, the compiler now also rejects a `switch` case of the wrong type, a fractional constant assigned to an integer (`var i int = 1.5`), `:=` that declares no new variable, `cap` of a string, and assigning an `any` to a concrete type without a type assertion. Fix the expression or add the assertion, for example `x.(A)`.
+- **Breaking:** Like Go, the compiler now rejects assigning a `float64` variable or a fractional constant to an `int`, assigning an `any` to a concrete type without a type assertion, a `switch` case of the wrong type or whose constant does not fit the tag's type, `:=` that declares no new variable, `cap` of a string, and constants or package variables that depend on themselves. Convert explicitly (`int(y)`), add the assertion (`x.(A)`), or fix the case value or circular definition.
 - **Breaking:** Like Go, indexing a string (`s[i]`) gives a `byte` rather than an `int`, `strings.Builder.WriteByte` takes a `byte`, and `cap` on a map is rejected. Convert with `int(s[i])` where an `int` is needed and use `len` for maps.
 - **Breaking:** `\xNN` and octal escapes in string literals are now raw bytes as in Go, so `"\xe9"` is one byte rather than `é`. Write the character itself or a `\u` escape such as `"\u00e9"` when you mean text.
 - **Breaking:** In `.templ` files a conditional attribute `name?={ expr }` must be a `bool`, and tokens left after a `{ }` expression (as in `{ name ) }`) are a parse error. Fix the expression.
-- **Breaking:** Standard library packages such as `errors`, `sort` and `strings` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
+- **Breaking:** Like Go, standard library packages such as `errors`, `sort`, `strings`, `os`, `unicode` and `crypto/rand` must now be imported before use. Add the missing `import` line wherever the compiler reports `No member … in namespace`.
 - **Breaking:** `maps.Delete` and the top-level `binary.AppendUint16`, `AppendUint32` and `AppendUint64` are removed because Go has no such functions. Use the built-in `delete` and `binary.LittleEndian.AppendUint16` (or `binary.BigEndian`).
 - **Breaking:** `binary.Read`, `binary.Write` and `binary.Size` are removed and report a compile error. Use the `binary.LittleEndian` or `binary.BigEndian` methods to encode and decode bytes.
 - **Breaking:** `fmt.Sscan`, `fmt.Sscanf` and `fmt.Sscanln` are removed and report a compile error. Split the text with `strings.Fields` and parse each part with `strconv`.

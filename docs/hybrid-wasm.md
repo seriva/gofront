@@ -150,7 +150,7 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
 | `context` | js, wasm, both | `Background`, `TODO`, `WithCancel`, `WithValue`; no `Done` channel |
-| `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
+| `time` | js, wasm, both | `Sleep`, `AfterFunc` and `Timer` are JS-only; no tickers |
 | `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
 
 Notable members per package:
@@ -162,9 +162,9 @@ Notable members per package:
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `IsPrint`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
 - `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
-- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`, `CopyBuffer`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`, `CopyBuffer`), `os` (`Stdout`, `Stderr`, `Stdin`, `File`, `Exit`, `Getenv`, `Setenv`, `Args`)
 - `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
-- `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `time.Sleep` stays JS-only)
+- `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `Sleep`, `AfterFunc` and `Timer` stay JS-only)
 - `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`)
 - `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256` (`Sum256`, `Sum224`, `New`, `New224`)
 - `encoding/binary` (`LittleEndian`, `BigEndian`, varints), `encoding/hex`, `encoding/base64`

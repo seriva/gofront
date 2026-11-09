@@ -92,7 +92,7 @@ a WebAssembly GC module:
 | `emit-builtins.js` | `panic`/`recover`, Go builtins (`len`, `append`, `make`, …) and call dispatch |
 | `emit-maps.js` | map runtime helpers (key hash/eq, get/set/delete, iteration) and zero values |
 | `emit-shared.js` | `gofront/shared` linear-memory buffer allocation, load/store indexing, `Subarray` and `copy` |
-| `stdlib/` | natively implemented stdlib modules (`core.js`, `pure.js`, `io.js`, `packages.js`, `simd.js`, indexed by `index.js`) |
+| `stdlib/` | the `gofront/simd` emitter (`simd.js`), indexed by `index.js`; every other package is Go source |
 | `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section, `app.wasm.map` source maps) — no dependencies |
 | `optimize.js` | Binaryen (`wasm-opt`) optimization pipeline (`-O3` + `--gufa`) and source map pass-through for `--release` / `--wasm-opt` |
 | `wat.js` | Module IR → WAT text for `--emit-wat` and golden tests |
@@ -125,7 +125,7 @@ intrinsics, and `testing_call` (js only) keeps the promise of an async test body
 
 ### Go-source standard library (`stdlib/`)
 
-Most standard library packages are ordinary GoFront Go under `stdlib/<import path>/`, written with `//gofront:target both` and `//go:build gofront`. The resolver loads them before the built-in namespaces and compiles them into the caller's target (`js`, `wasm` or `both`), so each package is written once and behaves the same on both backends. A package that is also a built-in namespace (`strings`, `time`, `encoding/binary`) is an overlay: its Go declarations extend the namespace and the built-in members stay with the emitters.
+Most standard library packages are ordinary GoFront Go under `stdlib/<import path>/`, written with `//gofront:target both` and `//go:build gofront`. The resolver loads them before the built-in namespaces and compiles them into the caller's target (`js`, `wasm` or `both`), so each package is written once and behaves the same on both backends. Only `gofront/shared` and `gofront/simd` remain built-in namespaces implemented by the compiler.
 
 A file marked `//gofront:target js` (such as `stdlib/time/sleep_js.go`) is loaded only for `js` packages, where it may use `async`/`await` and browser globals; a `wasm` or `both` package gets the package without those files and reports `'time.Sleep' is only available in js packages` for a name they declare. A package whose files are all `js` (`regexp`, `gom`) is rejected at the import of a `wasm` or `both` package.
 
@@ -177,10 +177,10 @@ src/
   link/               bundle linking: source maps, wasm units into one app.wasm, Go-source stdlib
   lexer/              lexer.js and tokens.js (Go lexer with semicolon insertion and //gofront: directives), templ-lexer.js (.templ dual-mode lexer)
   parser/             declarations, statements, expressions, types (mixins on Parser); templ.js is the .templ parser
-  typechecker/        resolve, assignability, statements, expressions, termination; stdlib/ typings
+  typechecker/        resolve, assignability, statements, expressions, termination; stdlib/ typings (`gofront/shared`, `gofront/simd`, WebGL/WebGPU/TypedArray globals, unsupported-member diagnostics)
   lower/              backend-independent analyses stored as side tables
   backend/shared/     fmt type descriptors used by both backends
-  backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, stdlib/ shims
+  backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, `gofront/shared` and `gofront/simd` calls
   backend/wasm/       WasmGC backend (see table above)
 test/
   unit/               Compiler, parser, type checker, and backend unit tests; run.js discovers every *.test.js
