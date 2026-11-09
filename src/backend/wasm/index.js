@@ -589,18 +589,6 @@ export function compileWasmModule(
 			_mapInfo: mapInfo,
 			_rootFuncDecl: null,
 		});
-		// clone
-		funcDecls.push({
-			kind: "FuncDecl",
-			name: mapInfo.cloneFuncName,
-			params: [{ name: "m", type: mapInfo.wType }],
-			returnType: mapInfo.wType,
-			body: { kind: "Block", stmts: [], list: [] },
-			_isMapHelper: true,
-			_mapHelperKind: "clone",
-			_mapInfo: mapInfo,
-			_rootFuncDecl: null,
-		});
 	}
 
 	// 1e2. `gofront/shared` linear-memory helpers (only when imported).
@@ -776,6 +764,11 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
+				!fn._isMapHelper &&
+				!fn._isInterfaceDispatcher &&
+				!fn._isSharedHelper &&
+				!fn._isRuntimePanic &&
+				!fn._isIndexPanic &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
