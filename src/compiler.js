@@ -41,7 +41,6 @@ import {
 import {
 	linkIntoBundle,
 	registerPackageUnit,
-	registerWasmUnit,
 	wasmMarker,
 } from "./link/wasm.js";
 import { lower } from "./lower/index.js";
