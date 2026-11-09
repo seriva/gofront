@@ -118,7 +118,7 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: failing cases for a local `var json S; json.Marshal()` in a file importing `"encoding/json"` (`F73`, `assertAllTargetsOutput`), `f := json.Valid` called later, and `f := json.Marshal` / `json.Unmarshal` as values (`assertErrorContains(errors, "json.Marshal cannot be used as a value")`).
   - Done when: `isJsonCall` checks `node.func.expr._type?.kind === "namespace"`, `Valid` is no longer rewritten (`entryValid` deleted), non-call `Marshal`/`MarshalIndent`/`Unmarshal` selectors report the diagnostic, and the cases pass.
-- [ ] Task 1.3: Prune dead `jsonrt` hooks and the `JSON_NAMES` / `addExtraRoots` roots
+- [x] Task 1.3: Prune dead `jsonrt` hooks and the `JSON_NAMES` / `addExtraRoots` roots
   - Files: `stdlib/internal/jsonrt/enc.go`, `stdlib/internal/jsonrt/dec.go`, `src/lower/reachability.js`, `test/unit/builtins/json.test.js`
   - Test: failing test that the JS of `func main(){_=json.Valid(nil)}` contains neither `UnmarshalTypeError` nor `EncodeBytes`, plus the existing `Encoder.SetEscapeHTML` / `Decoder.UseNumber` / `DisallowUnknownFields` cases staying green.
   - Done when: `EncodeBytes`, `DecodeBytes` and the three `Opt*` variables are gone (`NewEnc` sets `EscapeHTML: true`), `JSON_NAMES` and `addExtraRoots` are deleted, and the assertions pass.

@@ -68,7 +68,7 @@ type Enc struct {
 
 // NewEnc returns an encoder that escapes <, > and & like json.Marshal.
 func NewEnc() *Enc {
-	return &Enc{buf: make([]byte, 256), EscapeHTML: OptEscapeHTML}
+	return &Enc{buf: make([]byte, 256), EscapeHTML: true}
 }
 
 // Result returns the encoded bytes, or the first error.
@@ -358,12 +358,6 @@ func (e *Enc) Bytes(v []byte) {
 	e.Byte('"')
 	putString(e, base64.StdEncoding.EncodeToString(v))
 	e.Byte('"')
-}
-
-// EncodeBytes returns the standard base64 text of v; the JavaScript JSON codec
-// calls it for []byte values.
-func EncodeBytes(v []byte) string {
-	return base64.StdEncoding.EncodeToString(v)
 }
 
 // Raw appends a json.RawMessage: validated and compacted, null when empty.
