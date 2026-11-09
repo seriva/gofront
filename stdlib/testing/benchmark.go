@@ -21,6 +21,10 @@ type B struct {
 	bytes      int64
 	targetNs   int64
 
+	// hasSub is set once b.Run has run a sub-benchmark: the parent then
+	// reports no result of its own and is not grown.
+	hasSub bool
+
 	loopStarted bool
 	loopIters   int
 	nextCheck   int
@@ -114,7 +118,8 @@ func (b *B) invoke(f func(*B)) {
 	f(b)
 }
 
-// Run runs f once as a sub-benchmark of b called name. It reports whether f
+// Run runs f as a sub-benchmark of b called name, growing b.N until the run
+// takes the target time, and reports its result. It reports whether f
 // succeeded.
 func (b *B) Run(name string, f func(b *B)) bool {
 	full := name
@@ -124,12 +129,22 @@ func (b *B) Run(name string, f func(b *B)) bool {
 	if !selected(full) {
 		return true
 	}
+	b.hasSub = true
 	sub := newB(full, b.targetNs)
 	sub.parent = &b.common
 	sub.begin()
+	sub.ResetTimer()
 	sub.invoke(f)
+	sub.grow(f)
 	sub.StopTimer()
-	sub.finish()
+	sub.runCleanups()
+	if sub.failed {
+		// A failure in a regrown run did not reach the parent.
+		b.Fail()
+	}
+	if !sub.onlyParent() {
+		sub.reportBenchmark()
+	}
 	return !sub.failed
 }
 
@@ -186,7 +201,7 @@ func (r BenchmarkResult) String() string {
 // grow reruns f with a larger b.N until the run takes the target time. A
 // benchmark that calls b.Loop sizes itself.
 func (b *B) grow(f func(*B)) {
-	if b.loopStarted || b.failed || b.skipped {
+	if b.loopStarted || b.hasSub || b.failed || b.skipped {
 		return
 	}
 	b.StopTimer()
@@ -245,7 +260,15 @@ func (m *M) runBenchmark(bb GofrontBenchmark) {
 	if b.failed {
 		m.failures++
 	}
-	b.reportBenchmark()
+	if !b.onlyParent() {
+		b.reportBenchmark()
+	}
+}
+
+// onlyParent reports whether b just ran sub-benchmarks, which reported their
+// own results, so it has none of its own.
+func (b *B) onlyParent() bool {
+	return b.hasSub && !b.failed && !b.skipped
 }
 
 func (b *B) reportBenchmark() {

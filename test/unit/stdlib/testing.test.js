@@ -401,4 +401,60 @@ func BenchmarkBad(b *testing.B) { b.Fatal("bench failed") }
 	);
 });
 
+test("b.Run sub-benchmarks grow N and report their own result row", async () => {
+	await onBothTargets(
+		`import (
+	"fmt"
+	"testing"
+)
+func BenchmarkX(b *testing.B) {
+	b.Run("sub", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+		}
+		if b.N > 1 {
+			fmt.Println("grew")
+		}
+	})
+	b.Run("inner", func(b *testing.B) {
+		b.Run("leaf", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+			}
+		})
+	})
+}
+`,
+		{ bench: "X", verbose: true },
+		(r, target) => {
+			assertEqual(r.exitCode, 0, `${target}: ${r.stdout}`);
+			assertContains(r.stdout, "=== RUN   BenchmarkX/sub");
+			assertContains(r.stdout, "grew");
+			const rows = r.stdout
+				.split("\n")
+				.filter((l) => /^Benchmark\S*\s+\d+\s+\d+ ns\/op/.test(l))
+				.map((l) => l.split(/\s+/)[0]);
+			assertEqual(
+				rows.join(","),
+				"BenchmarkX/sub,BenchmarkX/inner/leaf",
+				`${target}: ${r.stdout}`,
+			);
+		},
+	);
+});
+
+test("a failing b.Run sub-benchmark fails the run", async () => {
+	await onBothTargets(
+		`import "testing"
+func BenchmarkX(b *testing.B) {
+	b.Run("sub", func(b *testing.B) { b.Fatal("sub failed") })
+}
+`,
+		{ bench: "X" },
+		(r, target) => {
+			assertEqual(r.exitCode, 1, target);
+			assertContains(r.stdout, "--- FAIL: BenchmarkX/sub");
+			assertContains(r.stdout, "sub failed");
+		},
+	);
+});
+
 await summarize();
