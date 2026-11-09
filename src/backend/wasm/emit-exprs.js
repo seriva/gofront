@@ -11,8 +11,10 @@ import {
 	compositeLitIndices,
 	compositeLitMaxIndex,
 } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import { emitWasmNative } from "./natives.js";
 import {
+	getInterfaceMethodList,
 	getMapKeyValTypes,
 	isAnyType,
 	isArrayType,
@@ -20,6 +22,7 @@ import {
 	isComplex64,
 	isFuncType,
 	isMapType,
+	isNonEmptyInterface,
 	isPointerToStruct,
 	isRuneSlice,
 	isScalarType,
@@ -141,6 +144,51 @@ export class ExprsEmitter {
 		}
 
 		this._emitRawExpr(expr, targetWasmType);
+	}
+
+	// Panics with Go's failed type assertion message: the static interface
+	// type, the dynamic type of the value in `anyTmp` and the target type.
+	_emitTypeAssertPanic(expr, anyTmp) {
+		const checker = this.mod.checker;
+		const target = this._resolveTestTarget(expr._type ?? expr.type);
+		const iface = isNonEmptyInterface(target, checker);
+		this.pushInstruction({ op: "local.get", index: anyTmp });
+		if (iface) {
+			const names = getInterfaceMethodList(target.underlying ?? target)
+				.map((m) => m.name)
+				.sort();
+			this._pushStringConst(names[0] ?? "");
+		} else {
+			this._pushStringConst(this._assertSrcName(expr.expr?._type));
+		}
+		this._pushStringConst(
+			target.name === "error" ? "error" : goTypeName(target),
+		);
+		this.pushInstruction({ op: "i32.const", value: iface ? 1 : 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__ta_fail"),
+		});
+		this.pushInstruction("unreachable");
+	}
+
+	// The static interface type of an assertion operand as Go names it.
+	_assertSrcName(srcType) {
+		if (!srcType || !isNonEmptyInterface(srcType, this.mod.checker))
+			return "interface {}";
+		return srcType.name === "error" ? "error" : goTypeName(srcType);
+	}
+
+	// Pushes the interned string `text` as an externref.
+	_pushStringConst(text) {
+		this.pushInstruction({
+			op: "i32.const",
+			value: this.mod.internString(text),
+		});
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringImportIndex(),
+		});
 	}
 
 	// The slice on the stack becomes the tagged subtype of its Go type, so a
@@ -332,7 +380,7 @@ export class ExprsEmitter {
 				this._emitTypeTest(targetGoType);
 				this.pushInstruction("i32.eqz");
 				this.pushInstruction({ op: "if", blockType: "void" });
-				this.emitPanic("interface conversion: type assertion failed");
+				this._emitTypeAssertPanic(expr, anyTmp);
 				this.pushInstruction("end");
 
 				this.pushInstruction({ op: "local.get", index: anyTmp });

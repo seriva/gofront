@@ -1342,13 +1342,14 @@ export class StmtsEmitter {
 		return this.mod.checker?.types?.get(t.name) ?? t;
 	}
 
-	// A defined func or map type that has methods lives in `any` as a box.
+	// A defined func type, or a defined map type that has methods, lives in
+	// `any` as a box (so `iter.Seq[int]` is not a plain `func(func(int) bool)`).
 	_isMethodNamedRef(goType) {
 		const t = this._resolveTestTarget(goType);
+		if (t?.kind !== "named") return false;
 		return (
-			t?.kind === "named" &&
-			t.methods?.size > 0 &&
-			(isFuncType(t, this.mod.checker) || isMapType(t, this.mod.checker))
+			isFuncType(t, this.mod.checker) ||
+			(t.methods?.size > 0 && isMapType(t, this.mod.checker))
 		);
 	}
 

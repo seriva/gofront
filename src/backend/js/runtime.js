@@ -441,8 +441,10 @@ var __ifps = __ifps || function(x) {
 };
 var __ity = __ity || function(x, t, ptr) {
   if (x === null || x === undefined) {
-    if (!ptr) return x;
-    const n = {};
+    // A nil slice keeps its type as an empty tagged array (not a nil interface).
+    if (!ptr && t.charCodeAt(0) !== 91) return x;
+    const n = ptr ? {} : [];
+    if (!ptr) Object.defineProperty(n, "__nils", { value: true });
     Object.defineProperty(n, "__nilp", { value: true });
     Object.defineProperty(n, "__t", { value: t });
     return n;
@@ -487,6 +489,34 @@ var __isty = __isty || function(v, t, k, c, n) {
     if (/^(u?int(8|16|32)?|uintptr|float(32|64))$/.test(x)) return typeof e === "number";
   }
   return true;
+};
+var __dtn = __dtn || function(v) {
+  if (v === null || v === undefined) return "nil";
+  switch (typeof v) {
+    case "string": return "string";
+    case "boolean": return "bool";
+    case "number": return Number.isInteger(v) ? "int" : "float64";
+    case "bigint": return "int64";
+  }
+  if (v.__t !== undefined) return v.__t;
+  if (Array.isArray(v)) return "[]interface {}";
+  const c = v.constructor;
+  if (c && c !== Object && typeof c.name === "string" && c.name !== "") {
+    const ptr = c.name.endsWith("$Ptr");
+    const n = ptr ? c.name.slice(0, -4) : c.name;
+    const i = n.indexOf("$$");
+    const q = i < 0 ? "main." + n : n.slice(i + 2) + "." + n.slice(0, i);
+    return (ptr || v.__v !== true && typeof v.__gfUnbox !== "function" ? "*" : "") + q;
+  }
+  return typeof v === "function" ? "func()" : "map[string]interface {}";
+};
+var __tafail = __tafail || function(src, v, target, methods) {
+  if (methods) {
+    if (v === null || v === undefined) return new Error("interface conversion: interface is nil, not " + target);
+    const m = methods.find((n) => typeof v[n] !== "function") ?? methods[0];
+    return new Error("interface conversion: " + __dtn(v) + " is not " + target + ": missing method " + m);
+  }
+  return new Error("interface conversion: " + src + " is " + __dtn(v) + ", not " + target);
 };`;
 
 // Nil-interface method call guard (strict mode only): matches Go's panic
@@ -793,6 +823,7 @@ var __kcmp = __kcmp || function(a, b) {
 export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
   if (a === b) return true;
   if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+  if (a.__nilp === true && b.__nilp === true && a.__t !== undefined) return a.__t === b.__t;
   if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
     return a.__gfUnbox() === b.__gfUnbox();
   }

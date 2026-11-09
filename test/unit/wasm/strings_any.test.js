@@ -244,7 +244,12 @@ func Main() int64 {
 		exports.Main();
 	} catch (e) {
 		caught = true;
-		assertEqual(e.message.includes("type assertion failed"), true);
+		assertEqual(
+			e.message.includes(
+				"interface conversion: interface {} is string, not int64",
+			),
+			true,
+		);
 	}
 	assertEqual(caught, true);
 });

@@ -87,6 +87,8 @@ export const typeInfoGenMethods = {
 
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
+		if (node._ifaceSrc?.kind === "typeParam" && names.has(node._ifaceSrc.name))
+			return true;
 		switch (node.kind) {
 			case "TypeAssertExpr":
 				return typeNodeMentions(node.type, names);
@@ -176,7 +178,7 @@ export const typeInfoGenMethods = {
 		const check = this._typeCheckForType(t, "__v");
 		const is = check ? `(__v) => ${check}` : "null";
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
-		const box = this._ifaceKeyBox(t);
+		const box = this._ifaceKeyBox(t) ?? this._ptrMethodBox(t);
 		const fmtBox = this._fmtBoxFor(t);
 		const tail = fmtBox
 			? `, ${box ?? "null"}, ${fmtBox}`
@@ -207,6 +209,13 @@ export const typeInfoGenMethods = {
 	_ifaceKeyBox(t) {
 		if (!this._boxesInInterface(t) || t?.kind !== "named") return null;
 		return `(__v) => ${this._genNamedIfaceBox("__v", t, false)}`;
+	},
+
+	// A function boxing a pointer to a named non-struct type with methods, as
+	// converting it to an interface does; null for any other type.
+	_ptrMethodBox(t) {
+		if (t?.kind !== "pointer" || !this._boxesInInterface(t)) return null;
+		return `(__v) => ${this._genNamedIfaceBox("__v", t.base, true)}`;
 	},
 
 	// A function giving a plain value of type `t` the type information fmt

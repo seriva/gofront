@@ -20,6 +20,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
@@ -585,6 +586,22 @@ export const expressionGenMethods = {
 				return `__pbs(${this.genExpr(expr)})`;
 			} finally {
 				expr._pbsWrapping = false;
+			}
+		}
+		if (
+			expr._ifaceSrc?.kind === "typeParam" &&
+			!expr._tpBoxing &&
+			!expr._ifaceKeyDyn &&
+			this._typeParamZeroFactory(expr._ifaceSrc.name)
+		) {
+			// A type parameter's value entering an interface is boxed and
+			// tagged by the instantiated type (see `__ti`).
+			expr._tpBoxing = true;
+			try {
+				const f = this._typeParamZeroFactory(expr._ifaceSrc.name);
+				return `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${this.genExpr(expr)})`;
+			} finally {
+				expr._tpBoxing = false;
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
@@ -1336,7 +1353,11 @@ export const expressionGenMethods = {
 	// src/lower/fmt-formatters.js): a JS value does not know its Go type, so
 	// the type argument boxes it as converting it to an `any` does.
 	_genTypeParamBox(a) {
+		// Boxed below: skip the boxing of a value entering an interface.
+		const wasBoxing = a._tpBoxing;
+		a._tpBoxing = true;
 		const js = this.genExpr(a);
+		a._tpBoxing = wasBoxing;
 		const tpf = this._typeParamZeroFactory(a._type.name);
 		return tpf ? `(${tpf}.b ?? ${tpf}.fb ?? ((__v) => __v))(${js})` : js;
 	},
@@ -1562,8 +1583,9 @@ export const expressionGenMethods = {
 		if (!expr._commaOk) {
 			// plain assertion: panic if check fails (matches Go behavior)
 			if (check === "true") return src; // can't check at runtime — pass through
+			this.useHelper("ifaceBox");
 			return wrap(
-				`(${check} ? ${out} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
+				`(${check} ? ${out} : (() => { throw ${this._typeAssertFailJs(expr, val)}; })())`,
 			);
 		}
 		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct
@@ -1572,6 +1594,25 @@ export const expressionGenMethods = {
 		const valT = this._typeFromNode(expr.type);
 		const okOut = this._aggregateBase(valT) ? this._cloneJs(valT, out) : out;
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
+	},
+
+	// The error a failed `x.(T)` throws: Go's `interface conversion: ...` text
+	// naming the static interface type, the dynamic type and the target.
+	_typeAssertFailJs(expr, val) {
+		const target = expr._type;
+		const u = this._underlyingOf(target);
+		const methods =
+			u?.kind === "interface" ? [...(u.methods?.keys() ?? [])] : [];
+		const tName = this._assertTypeName(target) ?? goTypeName(expr.type);
+		const src = this._assertTypeName(expr.expr?._type) ?? "interface {}";
+		return `__tafail(${JSON.stringify(src)}, ${val}, ${JSON.stringify(tName)}, ${methods.length ? JSON.stringify(methods.sort()) : "null"})`;
+	},
+
+	// Go's spelling of the static type in a failed assertion message; null for
+	// `any` (`interface {}`).
+	_assertTypeName(t) {
+		if (!t || isAny(t)) return null;
+		return t.name === "error" ? "error" : goTypeName(t);
 	},
 
 	// `csv.ParseError` names the class of the bundled Go-source package type.
@@ -1620,7 +1661,7 @@ export const expressionGenMethods = {
 		const namedInfo = this._namedBoxInfo(named);
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
 		// User-declared interfaces: check the dynamic value has every method.
-		if (!name.includes(".") && named?.underlying?.kind === "interface")
+		if (named?.underlying?.kind === "interface")
 			return this._ifaceMethodCheck(
 				val,
 				[...named.underlying.methods.keys()],
@@ -1683,6 +1724,11 @@ export const expressionGenMethods = {
 			this._isStructPtrTypeNode(typeNode) ||
 			(typeNode?.kind === "PointerType" && typeNode._assertType)
 		) {
+			this.useHelper("ifaceBox");
+			return `__unnil(${val})`;
+		}
+		if (typeNode?._assertType?.kind === "slice") {
+			// A nil slice in an interface is a tagged empty array.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
@@ -3015,6 +3061,9 @@ export const expressionGenMethods = {
 		const nilMap = this._genNilMapCompare(expr);
 		if (nilMap) return nilMap;
 
+		const anyNil = this._genAnyNilCompare(expr);
+		if (anyNil) return anyNil;
+
 		const tpEq = this._genTypeParamEquality(expr);
 		if (tpEq) return tpEq;
 
@@ -3216,6 +3265,25 @@ export const expressionGenMethods = {
 		);
 	},
 
+	// The `any` operand of `x == nil` / `x != nil` (JS documents a nil slice
+	// stored in an `any` as equal to nil, though it keeps a type tag), or null.
+	_anyNilOperand(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		const operand = this._isNilLiteral(expr.right)
+			? expr.left
+			: this._isNilLiteral(expr.left)
+				? expr.right
+				: null;
+		return operand && this._isIfaceType(operand._type) ? operand : null;
+	},
+
+	_genAnyNilCompare(expr) {
+		const operand = this._anyNilOperand(expr);
+		if (!operand) return null;
+		const test = `((__a) => __a == null || __a.__nils === true)(${this.genExpr(operand)})`;
+		return expr.op === "==" ? test : `!${test}`;
+	},
+
 	_isNilLiteral(expr) {
 		return (
 			(expr.kind === "Ident" && expr.name === "nil") ||
@@ -3234,6 +3302,7 @@ export const expressionGenMethods = {
 			return null;
 		if (this._isStructEquality(expr) || this._isIntDivision(expr)) return null;
 		if (this._nilMapOperand(expr)) return null;
+		if (this._anyNilOperand(expr)) return null;
 		if (this._isIfaceEquality(expr)) return null;
 		if (expr.op === "&^") return "&";
 		if (expr.op === "==" || expr.op === "!=") {
