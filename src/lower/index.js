@@ -20,6 +20,8 @@ import { extractNamedReturns, hasDefer, normalizeDefers } from "./functions.js";
 import { computeGlobalAnalysis } from "./globals.js";
 import { OwnershipContext, takesElementAddress } from "./ownership.js";
 
+export { takesElementAddress };
+
 class LowerResult {
 	constructor() {
 		// Map<ASTNode (FuncDecl, MethodDecl, FuncLit), Set<string>>

@@ -645,6 +645,46 @@ func main() {
 	);
 });
 
+section("uint subtraction and local constants in 64-bit shifts");
+
+test("uint subtraction wraps below zero in both packages", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var n uint = 3
+	fmt.Println(n-64 > 100)
+	var m uint = 5
+	m -= 9
+	fmt.Println(m > 100)
+	var a uint = 7
+	fmt.Println(a&3-5 > 100, 10-a&3 < 100)
+}
+`,
+		"true\ntrue\ntrue true\n",
+	);
+});
+
+test("a function-local untyped constant shifted into a uint64 is exact", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b uint64 = 1
+	var e uint = 3
+	const half = 1 << 51
+	b += half >> e
+	fmt.Println(b)
+}
+`,
+		"281474976710657\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

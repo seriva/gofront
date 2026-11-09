@@ -44,7 +44,7 @@ import {
 	registerPackageUnit,
 	wasmMarker,
 } from "./link/wasm.js";
-import { lower } from "./lower/index.js";
+import { lower, takesElementAddress } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
 import { TemplParser } from "./parser/templ.js";
 import {
@@ -301,6 +301,9 @@ function resolveImports(
 					isDependency: true,
 				});
 				if (!alreadyBundled) preambles.push(dep);
+				// A dependency that hands out `&xs[i]` makes whole-element
+				// stores in this package write in place too.
+				if (dep.elemAddrTaken) checker.depElemAddrTaken = true;
 
 				// Target import rules for local packages
 				const impNode = {
@@ -597,6 +600,9 @@ export function compileFiles(files, options = {}) {
 	return {
 		pkgName,
 		target: pkgTarget,
+		elemAddrTaken:
+			checker.depElemAddrTaken === true ||
+			programs.some((p) => takesElementAddress(p.decls)),
 		js: merged.js,
 		css: allCss,
 		wasm,

@@ -385,7 +385,9 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
-		this._elemAddrTaken = takesElementAddress(program.decls);
+		this._elemAddrTaken =
+			takesElementAddress(program.decls) ||
+			this.checker?.depElemAddrTaken === true;
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
