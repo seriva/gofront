@@ -14,7 +14,7 @@
 // which switches over every type the program encodes or decodes anywhere.
 
 import { resolveJsonFields } from "../typechecker/resolve.js";
-import { defaultType } from "../typechecker/types.js";
+import { defaultType, LOCAL_TYPE_SUFFIX } from "../typechecker/types.js";
 import {
 	collectProgramTypes,
 	hasSharedRepr,
@@ -194,7 +194,7 @@ export class JsonCodecGen extends TypeSpeller {
 			case "basic":
 				return REFLECT_NAME[t.name] ?? unalias(t.name);
 			case "named": {
-				let name = t.name;
+				let name = t.name.replace(LOCAL_TYPE_SUFFIX, "");
 				const at = name.indexOf("$$");
 				if (at >= 0) {
 					const orig = name.slice(0, at);

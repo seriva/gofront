@@ -18,7 +18,11 @@ import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
-export { mangleCollidingTypes, withOriginalTypeNames } from "./type-names.js";
+export {
+	mangleCollidingTypes,
+	renameLocalTypes,
+	withOriginalTypeNames,
+} from "./type-names.js";
 
 // ── Go-source stdlib ──────────────────────────────────────────
 //

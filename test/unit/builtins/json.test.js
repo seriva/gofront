@@ -3305,6 +3305,36 @@ func main() {
 	assert(!js.includes("EncodeBytes"), "EncodeBytes in output");
 });
 
+test("same-named local types marshal with their own fields and tags", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func f1() {
+	type Config struct{ A int \`json:"a"\` }
+	b, _ := json.Marshal(Config{1})
+	fmt.Println(string(b))
+}
+
+func f2() {
+	type Config struct{ B string }
+	b, _ := json.Marshal(Config{"x"})
+	fmt.Println(string(b))
+}
+
+func main() {
+	f1()
+	f2()
+}
+`,
+		'{"a":1}\n{"B":"x"}\n',
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

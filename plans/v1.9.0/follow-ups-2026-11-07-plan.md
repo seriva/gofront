@@ -178,23 +178,23 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 2: Package Types, Aliases, and Function-Local Types
 
-- [ ] Task 2.1: Package-qualified struct literal resolution when `main` defines a same-named type
+- [x] Task 2.1: Package-qualified struct literal resolution when `main` defines a same-named type
   - Files: `src/typechecker/expressions.js`, `src/typechecker/resolve.js`, `test/unit/compiler/packages.test.js`
   - Test: `F08` `package a; type Pt struct{ X int }` and `package main; type Pt struct{ Z bool }; func main() { fmt.Println(Pt{true}, a.Pt{1}) }` → `"{true} {1}"` on `js`, `both`, and `wasm`.
   - Done when: composite literals with a `SelectorExpr` type (`a.Pt{1}`) resolve the struct definition from package `a`'s namespace instead of the unqualified `Pt` in `main`.
-- [ ] Task 2.2: Cross-package struct type alias literals in JS
+- [x] Task 2.2: Cross-package struct type alias literals in JS
   - Files: `src/backend/js/expressions.js`, `src/typechecker/expressions.js`, `test/unit/compiler/packages.test.js`
   - Test: `F10` `package p; type Base struct{ V int }; type A = Base` and `main` evaluating `fmt.Println(p.A{42})` → `"{42}"` on `js`, `both`, and `wasm`.
   - Done when: JS composite literal codegen unwraps cross-package type aliases to the target struct's emitted class name.
-- [ ] Task 2.3: Function-local types with identical names across functions
+- [x] Task 2.3: Function-local types with identical names across functions
   - Files: `src/typechecker/statements.js`, `src/backend/js/index.js`, `src/backend/wasm/types.js`
   - Test: `F49` two functions `a()` and `b()` declaring incompatible `type Dup struct{...}` → `"{1}\n{y}"` on `both` and `wasm` in `test/unit/types/shadowing.test.js`.
   - Done when: function-local `TypeDecl` nodes register distinct scoped type identities so later functions do not overwrite earlier local types in the checker, JS class emitter, or WASM struct table, while `%T` still prints `main.Dup`.
-- [ ] Task 2.4: JS array length from package constant selector and cross-package struct value parameter cloning
+- [x] Task 2.4: JS array length from package constant selector and cross-package struct value parameter cloning
   - Files: `src/typechecker/resolve.js`, `src/backend/js/expressions.js`, `src/backend/js/statements.js`
   - Test: `F71` `var a [math.MaxInt8]int; fmt.Println(len(a), math.Pi > 3)` → `"127 true"` and, with no other `math` use, `fmt.Println(len(a))` → `"127"` (no `'math' imported and not used`) on `js`, `both`, and `wasm` in `test/unit/compiler/packages.test.js`; `F68` `func f(s pkg.S) { s.Inc() }; s := pkg.S{X: 1}; f(s); fmt.Println(s.X)` → `"1"` on all targets.
   - Done when: `_foldArrayLen` in `src/typechecker/resolve.js` folds `SelectorExpr` package constants (marking the import used) so both backends see a literal length, and JS function prologues clone imported-package struct value parameters when mutated or passed to pointer-receiver methods.
-- [ ] Task 2.5: JSON codecs for same-named function-local types
+- [x] Task 2.5: JSON codecs for same-named function-local types
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: `F72` `f1()` declaring `type Config struct{A int \`json:"a"\`}` and `f2()` declaring `type Config struct{B string}`, each calling `json.Marshal(Config{...})` → `'{"a":1}'` from `f1()` on `both` and `wasm`.
   - Done when: `json-codecs.js` keys generated encoders/decoders by the scoped local type identity from Task 2.3, so each function-local `Config` uses its own field layout and tags.
