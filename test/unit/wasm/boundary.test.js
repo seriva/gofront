@@ -784,6 +784,50 @@ func main() { _ = mappkg.OrderedMap }
 	assertEqual(res.mod.SumMap(inMap), 6);
 });
 
+test("exported maps keep keys and values paired for string, int64, empty and nil maps", async () => {
+	const res = await compileHybridProject(
+		{
+			"mapproj/mapproj.go": `//gofront:target wasm
+package mapproj
+
+func Strs() map[string]int {
+	return map[string]int{"a": 1, "b": 2, "c": 3}
+}
+
+func Ints() map[int64]string {
+	return map[int64]string{10: "x", 20: "y"}
+}
+
+func Empty() map[string]int {
+	return map[string]int{}
+}
+
+func Nil() map[string]int {
+	return nil
+}
+`,
+			"main.go": `package main
+import "./mapproj"
+func main() { _ = mapproj.Strs }
+`,
+		},
+		{ exports: ["Strs", "Ints", "Empty", "Nil"] },
+	);
+
+	const strs = res.mod.Strs();
+	assertEqual(
+		[...strs.entries()].map(([k, v]) => `${k}=${v}`).join(","),
+		"a=1,b=2,c=3",
+	);
+	const ints = res.mod.Ints();
+	assertEqual(
+		[...ints.entries()].map(([k, v]) => `${k}=${v}`).join(","),
+		"10=x,20=y",
+	);
+	assertEqual(res.mod.Empty().size, 0);
+	assertEqual(res.mod.Nil() === null || res.mod.Nil().size === 0, true);
+});
+
 test("pointers to non-structs use copy-in/copy-out boxes with panic propagation", async () => {
 	const res = await compileHybridProject(
 		{
