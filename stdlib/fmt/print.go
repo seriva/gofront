@@ -18,7 +18,6 @@ import (
 	"internal/fmtrt"
 	"io"
 	"os"
-	"slices"
 )
 
 // Stringer is implemented by any value that has a String method, which
@@ -715,9 +714,41 @@ func sortedEntries(es []fmtrt.Entry) []fmtrt.Entry {
 	if len(es) < 2 {
 		return es
 	}
-	slices.SortStableFunc(es, func(a, b fmtrt.Entry) int {
-		return compareArgs(a.Key, b.Key)
-	})
+	return mergeEntries(es, make([]fmtrt.Entry, len(es)))
+}
+
+// mergeEntries is a stable merge sort of es using tmp as scratch space.  It
+// keeps fmt from importing slices, whose source every fmt user would
+// otherwise have to parse and check.
+func mergeEntries(es, tmp []fmtrt.Entry) []fmtrt.Entry {
+	if len(es) < 2 {
+		return es
+	}
+	mid := len(es) / 2
+	left := mergeEntries(es[:mid], tmp[:mid])
+	right := mergeEntries(es[mid:], tmp[mid:])
+	i, j, k := 0, 0, 0
+	for i < len(left) && j < len(right) {
+		if compareArgs(right[j].Key, left[i].Key) < 0 {
+			tmp[k] = right[j]
+			j++
+		} else {
+			tmp[k] = left[i]
+			i++
+		}
+		k++
+	}
+	for i < len(left) {
+		tmp[k] = left[i]
+		i++
+		k++
+	}
+	for j < len(right) {
+		tmp[k] = right[j]
+		j++
+		k++
+	}
+	copy(es, tmp[:k])
 	return es
 }
 
