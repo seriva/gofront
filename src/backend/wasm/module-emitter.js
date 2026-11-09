@@ -700,7 +700,6 @@ export class ModuleEmitter {
 			clearFuncName: `__map_clear_${suffix}`,
 			keysFuncName: `__map_keys_${suffix}`,
 			valuesFuncName: `__map_values_${suffix}`,
-			cloneFuncName: `__map_clone_${suffix}`,
 		};
 		this.mapTypes.set(key, mapInfo);
 		this.mapTypesByIndex.set(mapTypeIndex, mapInfo);

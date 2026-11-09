@@ -42,10 +42,10 @@ export class MapsEmitter {
 				this.emitMapMake(mapInfo);
 				break;
 			case "get":
-				this.emitMapGet(mapInfo);
+				this.emitMapLookup(mapInfo, false);
 				break;
 			case "get_ok":
-				this.emitMapGetOk(mapInfo);
+				this.emitMapLookup(mapInfo, true);
 				break;
 			case "set":
 				this.emitMapSet(mapInfo);
@@ -60,13 +60,10 @@ export class MapsEmitter {
 				this.emitMapClear(mapInfo);
 				break;
 			case "keys":
-				this.emitMapKeys(mapInfo);
+				this.emitMapProject(mapInfo, false);
 				break;
 			case "values":
-				this.emitMapValues(mapInfo);
-				break;
-			case "clone":
-				this.emitMapClone(mapInfo);
+				this.emitMapProject(mapInfo, true);
 				break;
 		}
 	}
@@ -497,7 +494,7 @@ export class MapsEmitter {
 		this.pushInstruction({ op: "return" });
 	}
 
-	emitMapGet(mapInfo) {
+	emitMapLookup(mapInfo, withOk) {
 		const hLoc = this.allocLocal(null, "i32");
 		const bLoc = this.allocLocal(null, "i32");
 		const idxLoc = this.allocLocal(null, "i32");
@@ -508,11 +505,12 @@ export class MapsEmitter {
 		});
 		const entryKeyLoc = this.allocLocal(null, mapInfo.keyWType);
 
-		// If m == null -> return zero
+		// If m == null -> return zero (and false when withOk)
 		this.pushInstruction({ op: "local.get", index: 0 });
 		this.pushInstruction("ref.is_null");
 		this.pushInstruction({ op: "if", blockType: "void" });
 		this.emitZeroValue(mapInfo.valGoType, mapInfo.valWType);
+		if (withOk) this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "return" });
 		this.pushInstruction("end");
 
@@ -594,6 +592,7 @@ export class MapsEmitter {
 			typeIndex: mapInfo.entryTypeIndex,
 			fieldIndex: 1,
 		});
+		if (withOk) this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction({ op: "return" });
 		this.pushInstruction("end");
 		this.pushInstruction("end");
@@ -611,121 +610,7 @@ export class MapsEmitter {
 
 		// Not found
 		this.emitZeroValue(mapInfo.valGoType, mapInfo.valWType);
-		this.pushInstruction({ op: "return" });
-	}
-
-	emitMapGetOk(mapInfo) {
-		const hLoc = this.allocLocal(null, "i32");
-		const bLoc = this.allocLocal(null, "i32");
-		const idxLoc = this.allocLocal(null, "i32");
-		const entryLoc = this.allocLocal(null, {
-			kind: "ref",
-			nullable: true,
-			typeIndex: mapInfo.entryTypeIndex,
-		});
-		const entryKeyLoc = this.allocLocal(null, mapInfo.keyWType);
-
-		// If m == null -> return zero, false
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.emitZeroValue(mapInfo.valGoType, mapInfo.valWType);
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "return" });
-		this.pushInstruction("end");
-
-		this.emitKeyHash(1, mapInfo.keyGoType);
-		this.pushInstruction({ op: "local.set", index: hLoc });
-
-		this.pushInstruction({ op: "local.get", index: hLoc });
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 8,
-		});
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction("i32.sub");
-		this.pushInstruction("i32.and");
-		this.pushInstruction({ op: "local.set", index: bLoc });
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "local.get", index: bLoc });
-		this.pushInstruction({
-			op: "array.get",
-			typeIndex: mapInfo.bucketsTypeIndex,
-		});
-		this.pushInstruction({ op: "local.set", index: idxLoc });
-
-		this.pushInstruction({ op: "block", blockType: "void" });
-		this.pushInstruction({ op: "loop", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: idxLoc });
-		this.pushInstruction({ op: "i32.const", value: -1 });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction({ op: "br_if", depth: 1 });
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.get", index: idxLoc });
-		this.pushInstruction({
-			op: "array.get",
-			typeIndex: mapInfo.entriesTypeIndex,
-		});
-		this.pushInstruction({ op: "local.set", index: entryLoc });
-
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 5,
-		});
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction({ op: "if", blockType: "void" });
-
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "local.set", index: entryKeyLoc });
-
-		this.emitKeyEq(1, entryKeyLoc, mapInfo.keyGoType);
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction({ op: "return" });
-		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: idxLoc });
-		this.pushInstruction({ op: "br", depth: 0 });
-		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		this.emitZeroValue(mapInfo.valGoType, mapInfo.valWType);
-		this.pushInstruction({ op: "i32.const", value: 0 });
+		if (withOk) this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "return" });
 	}
 
@@ -1693,8 +1578,10 @@ export class MapsEmitter {
 		this.pushInstruction({ op: "return" });
 	}
 
-	emitMapKeys(mapInfo) {
-		const sliceInfo = this.mod.getSliceType(mapInfo.keyGoType);
+	emitMapProject(mapInfo, isValues) {
+		const sliceInfo = this.mod.getSliceType(
+			isValues ? mapInfo.valGoType : mapInfo.keyGoType,
+		);
 		const lenLoc = this.allocLocal(null, "i32");
 		const arrLoc = this.allocLocal(null, {
 			kind: "ref",
@@ -1771,7 +1658,7 @@ export class MapsEmitter {
 		this.pushInstruction({
 			op: "struct.get",
 			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 0,
+			fieldIndex: isValues ? 1 : 0,
 		});
 		this.pushInstruction({
 			op: "array.set",
@@ -1802,207 +1689,6 @@ export class MapsEmitter {
 			op: "struct.new",
 			typeIndex: sliceInfo.typeIndex,
 		});
-		this.pushInstruction({ op: "return" });
-	}
-
-	emitMapValues(mapInfo) {
-		const sliceInfo = this.mod.getSliceType(mapInfo.valGoType);
-		const lenLoc = this.allocLocal(null, "i32");
-		const arrLoc = this.allocLocal(null, {
-			kind: "ref",
-			nullable: true,
-			typeIndex: sliceInfo.arrInfo.typeIndex,
-		});
-		const iLoc = this.allocLocal(null, "i32");
-		const idxLoc = this.allocLocal(null, "i32");
-		const entryLoc = this.allocLocal(null, {
-			kind: "ref",
-			nullable: true,
-			typeIndex: mapInfo.entryTypeIndex,
-		});
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({
-			op: "global.get",
-			index: sliceInfo.emptyGlobalIndex,
-		});
-		this.pushInstruction({ op: "return" });
-		this.pushInstruction("end");
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: lenLoc });
-
-		this.pushInstruction({ op: "local.get", index: lenLoc });
-		this.pushInstruction({
-			op: "array.new_default",
-			typeIndex: sliceInfo.arrInfo.typeIndex,
-		});
-		this.pushInstruction({ op: "local.set", index: arrLoc });
-
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.set", index: iLoc });
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 5,
-		});
-		this.pushInstruction({ op: "local.set", index: idxLoc });
-
-		this.pushInstruction({ op: "block", blockType: "void" });
-		this.pushInstruction({ op: "loop", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: idxLoc });
-		this.pushInstruction({ op: "i32.const", value: -1 });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction({ op: "br_if", depth: 1 });
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.get", index: idxLoc });
-		this.pushInstruction({
-			op: "array.get",
-			typeIndex: mapInfo.entriesTypeIndex,
-		});
-		this.pushInstruction({ op: "local.set", index: entryLoc });
-
-		this.pushInstruction({ op: "local.get", index: arrLoc });
-		this.pushInstruction({ op: "local.get", index: iLoc });
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({
-			op: "array.set",
-			typeIndex: sliceInfo.arrInfo.typeIndex,
-		});
-
-		this.pushInstruction({ op: "local.get", index: iLoc });
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "local.set", index: iLoc });
-
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 4,
-		});
-		this.pushInstruction({ op: "local.set", index: idxLoc });
-		this.pushInstruction({ op: "br", depth: 0 });
-		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		this.pushInstruction({ op: "local.get", index: arrLoc });
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.get", index: lenLoc });
-		this.pushInstruction({ op: "local.get", index: lenLoc });
-		this.pushInstruction({
-			op: "struct.new",
-			typeIndex: sliceInfo.typeIndex,
-		});
-		this.pushInstruction({ op: "return" });
-	}
-
-	emitMapClone(mapInfo) {
-		const dstLoc = this.allocLocal(null, mapInfo.wType);
-		const idxLoc = this.allocLocal(null, "i32");
-		const entryLoc = this.allocLocal(null, {
-			kind: "ref",
-			nullable: true,
-			typeIndex: mapInfo.entryTypeIndex,
-		});
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({ op: "ref.null", heapType: mapInfo.typeIndex });
-		this.pushInstruction({ op: "return" });
-		this.pushInstruction("end");
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex(mapInfo.makeFuncName),
-		});
-		this.pushInstruction({ op: "local.set", index: dstLoc });
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 5,
-		});
-		this.pushInstruction({ op: "local.set", index: idxLoc });
-
-		this.pushInstruction({ op: "block", blockType: "void" });
-		this.pushInstruction({ op: "loop", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: idxLoc });
-		this.pushInstruction({ op: "i32.const", value: -1 });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction({ op: "br_if", depth: 1 });
-
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.get", index: idxLoc });
-		this.pushInstruction({
-			op: "array.get",
-			typeIndex: mapInfo.entriesTypeIndex,
-		});
-		this.pushInstruction({ op: "local.set", index: entryLoc });
-
-		this.pushInstruction({ op: "local.get", index: dstLoc });
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
-		});
-
-		this.pushInstruction({ op: "local.get", index: entryLoc });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: mapInfo.entryTypeIndex,
-			fieldIndex: 4,
-		});
-		this.pushInstruction({ op: "local.set", index: idxLoc });
-		this.pushInstruction({ op: "br", depth: 0 });
-		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		this.pushInstruction({ op: "local.get", index: dstLoc });
 		this.pushInstruction({ op: "return" });
 	}
 }
