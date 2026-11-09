@@ -6,6 +6,7 @@ import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
 import { NATIVES } from "../../../src/typechecker/types.js";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertThrows,
 	compileHybrid,
@@ -2159,4 +2160,38 @@ func Main() string {
 	assertEqual(errors.length, 0);
 	assert(!wat.includes("time_now_ms"), "no time_now_ms import");
 	assert(!wat.includes("time_timezone_offset"), "no timezone import");
+});
+
+test("a partial last line is written when the program ends", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+func main() { print("a", "b", 1) }
+`,
+		"ab1",
+	);
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() { fmt.Println("x"); fmt.Print("hello") }
+`,
+		"x\nhello",
+	);
+});
+
+test("println prints a defined bool type as true or false", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+type MyBool bool
+
+func main() {
+	var b MyBool = true
+	println(b, MyBool(false))
+}
+`,
+		"true false\n",
+	);
 });

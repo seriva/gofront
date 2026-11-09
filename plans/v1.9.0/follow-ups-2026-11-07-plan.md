@@ -266,23 +266,23 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 6: WASM Control Flow, Captures, Strings, Builtins, and Facade
 
-- [ ] Task 6.1: WASM recoverable nil-dereference panic on embedded pointer value-method call and nil interface method value binding
+- [x] Task 6.1: WASM recoverable nil-dereference panic on embedded pointer value-method call and nil interface method value binding
   - Files: `src/backend/wasm/emit-exprs.js`, `test/unit/wasm/traps.test.js`
   - Test: `F07` `P{}.Val()` (`type P struct{ *Base }`) recovered → `"recovered"`; `F35` `var n N; _ = n.Name` recovered → `"runtime error: invalid memory address or nil pointer dereference"` on `js`, `both`, and `wasm`.
   - Done when: unwrapping an embedded struct pointer for a promoted value-receiver method call and evaluating a method value on an interface emit a recoverable nil check on WASM.
-- [ ] Task 6.2: WASM array map key copying on insert and range, comma-ok into `any`, and map-key closure capture
+- [x] Task 6.2: WASM array map key copying on insert and range, comma-ok into `any`, and map-key closure capture
   - Files: `src/backend/wasm/emit-maps.js`, `src/backend/wasm/emit-stmts.js`, `src/lower/captures.js`
   - Test: `F21` `ar[key] = 5; key[0] = 9; for k := range ar { k[0]++ }` → `"5 1 5"`; `F37` `var x any; var ok bool; x, ok = mi["k"]` → `"5 true"`; `F38` `k := "hello"; f := func() { m := map[string]int{k: 42}; fmt.Println(len(m)) }; f()` → `"1"` on `js`, `both`, and `wasm` in `test/unit/wasm/maps.test.js`.
   - Done when: WASM clones `[N]T` array keys on map insertion and `range` iteration, boxes scalar values in comma-ok assignments to `any` targets, and `src/lower/captures.js` visits map literal keys.
-- [ ] Task 6.3: WASM stacked loop labels and package-level/struct/array string zero values
+- [x] Task 6.3: WASM stacked loop labels and package-level/struct/array string zero values
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/module-emitter.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: `F40` `outer: inner: for i := 0; i < 2; i++ { for j := 0; j < 2; j++ { fmt.Println(i, j); break outer } }` → `"0 0"`; `F43` `type T struct{ S string }; var t T; var s string; fmt.Println(t, s == "", t.S == "")` → `"{} true true"` on `js`, `both`, and `wasm`.
   - Done when: WASM loop emission registers all stacked labels on a loop for `break`/`continue`, and default-initialized package-level `string` globals, struct string fields, and `[N]string` arrays initialize to `""` instead of `ref.null extern`.
-- [ ] Task 6.4: WASM `print` flush without trailing newline and `println` of defined `bool` types
+- [x] Task 6.4: WASM `print` flush without trailing newline and `println` of defined `bool` types
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/glue.js`, `src/backend/wasm/boundary.js`
   - Test: `F46` `print("a", "b", 1)` → `"ab1"`; `F80` `fmt.Print("hello")` → `"hello"`; `F47` `type MyBool bool; var b MyBool = true; println(b)` → `"true"` on `both` and `wasm` in `test/unit/wasm/stdlib.test.js`.
   - Done when: WASM host glue flushes the partial line buffer (`lineBuf` in `boundary.js`, filled by both `print` and `os_write`) after `main` returns, and `println` unwraps named boolean types.
-- [ ] Task 6.5: WASM facade promoted methods from unexported embedded structs
+- [x] Task 6.5: WASM facade promoted methods from unexported embedded structs
   - Files: `src/backend/wasm/boundary.js`, `test/unit/wasm/boundary.test.js`
   - Test: `F48` WASM package `type hidden struct{ v int }; func (h hidden) Public() int { return h.v }; type Outer struct{ hidden }` called via `o.Public()` from JS `main` → `"7"` in `test/unit/wasm/boundary.test.js`.
   - Done when: WASM boundary facade generation exposes exported methods promoted from unexported embedded struct fields on the exported outer struct's JS class.

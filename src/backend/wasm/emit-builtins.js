@@ -1286,13 +1286,21 @@ export class BuiltinsEmitter {
 		const { chain, methodName } = found;
 		const subIdx = this.mod.resolveFuncIndex(methodName);
 		const targetParamTypes = this.mod.getFuncParamTypes(methodName);
+		const valueRecv =
+			this.mod.getFuncParamGoTypes(methodName)[0]?.kind !== "pointer";
 		this.emitExpr(func.expr, this.toWasmType(recvType));
-		for (const { structInfo: owner, embed } of chain) {
+		this._emitNilCheck(func.expr._type);
+		for (const [i, { structInfo: owner, embed }] of chain.entries()) {
 			this.pushInstruction({
 				op: "struct.get",
 				typeIndex: owner.typeIndex,
 				fieldIndex: embed.fieldIndex,
 			});
+			// Reading through an embedded nil pointer (to the next embedded
+			// struct, or as a value receiver) is a recoverable nil dereference.
+			const ft = owner.fields[embed.fieldIndex]?.goType;
+			const isPtr = ft?.kind === "pointer" || ft?.kind === "PointerType";
+			if (isPtr && (i < chain.length - 1 || valueRecv)) this._emitNilBranch();
 		}
 		for (let i = 0; i < args.length; i++) {
 			const pType = targetParamTypes[i + 1] ?? null;

@@ -599,11 +599,13 @@ const TEST_DRIVER = "GofrontRunTests";
 const isTestSource = (file) => Boolean(file?.endsWith("_test.go"));
 
 function collectStructDecl(d, pkgName, pkgTarget, meta, mod) {
-	if (!isExported(d.name) || meta.structByName.has(d.name)) return;
+	if (meta.structByName.has(d.name)) return;
 	const info = mod.getStructType(d.name);
 	if (!info) return;
 	const s = { name: d.name, pkgName, pkgTarget, info, methods: [] };
-	meta.structs.push(s);
+	// An unexported struct has no class of its own, but its exported methods
+	// reach JS through the exported structs that embed it.
+	if (isExported(d.name)) meta.structs.push(s);
 	meta.structByName.set(d.name, s);
 }
 
@@ -2061,7 +2063,17 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
 	// Exports are needed by imports that call back into the module (t.Run).
-	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
+	// A partial last line (print / fmt.Print without a newline) is written when
+	// the program ends; Node gets it without the newline console.log adds.
+	const flushPartial = () => {
+		if (lineBuf === "") return;
+		const s = lineBuf;
+		lineBuf = "";
+		started = false;
+		if (typeof process !== "undefined" && process?.stdout?.write) process.stdout.write(s);
+		else write(s);
+	};
+	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; }, "__flush": flushPartial };
 }
 // string -> bytes: UTF-8, except that a lone surrogate U+DC80-U+DCFF (a raw
 // byte from a \\xNN escape in the source) encodes as that single byte.
@@ -2151,6 +2163,7 @@ async function ${P}instantiate(imports) {
 	}
 	return WebAssembly.instantiate(await ${P}fetch(url), imports);
 }
+let ${P}flushOut = () => {};
 async function ${P}load(stringTable, extraEnv) {
 	if (typeof WebAssembly === "undefined" || typeof WebAssembly.Tag !== "function") {
 		throw new Error("GoFront: this runtime lacks the WebAssembly GC / exception support required by app.wasm");
@@ -2162,6 +2175,7 @@ async function ${P}load(stringTable, extraEnv) {
 	// returned raw: no try/catch wrapper, which keeps JS→wasm calls inlinable.
 	const result = await ${P}instantiate(imports);
 	imports.__bind(result.instance.exports);
+	${P}flushOut = imports.__flush;
 	return result.instance.exports;
 }
 // Go int/int64 cross the boundary as f64 (exact within the safe-integer range).
@@ -2572,7 +2586,7 @@ function ${P}shin(v, Ctor) {
 		);
 	}
 
-	if (callMain) out.push("__w.main();");
+	if (callMain) out.push(`try { __w.main(); } finally { ${P}flushOut(); }`);
 	return bindExports(out.join("\n"));
 }
 

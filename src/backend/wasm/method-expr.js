@@ -96,6 +96,10 @@ function forwardingFuncLit(sel, recvName = "recv$") {
 	};
 }
 
+function isInterfaceRecv(t) {
+	return (t?.underlying ?? t)?.kind === "interface";
+}
+
 function methodValueLit(sel) {
 	const fnType = sel._type;
 	let recvType = sel.expr._type;
@@ -143,7 +147,14 @@ function methodValueLit(sel) {
 			returnType: typeToTypeNode(fnType),
 			body: {
 				kind: "Block",
-				stmts: [{ kind: "ReturnStmt", values: [inner] }],
+				stmts: [
+					// A method value on a nil interface panics when it is
+					// evaluated, not when it is called.
+					...(isInterfaceRecv(recvType)
+						? [{ kind: "NilCheckStmt", expr: ident(recvName, recvType, sel) }]
+						: []),
+					{ kind: "ReturnStmt", values: [inner] },
+				],
 			},
 			_type: outerType,
 			_line: sel._line,
