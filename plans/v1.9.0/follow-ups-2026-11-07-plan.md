@@ -329,19 +329,19 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 9: Stdlib `fmt` & `testing`
 
-- [ ] Task 9.1: `fmt`: `%p` pointer formatting for maps and slices
+- [x] Task 9.1: `fmt`: `%p` pointer formatting for maps and slices
   - Files: `stdlib/fmt/print.go`, `docs/go-compatibility.md`, `test/unit/stdlib/fmt.test.js`
   - Test: `F23` `fmt.Sprintf("%p", map[string]int(nil))` → `"0x0"`, `fmt.Sprintf("%p", []int(nil))` → `"0x0"`, and non-nil map/slice printing a `0x...` hex identifier in `test/unit/stdlib/fmt.test.js`.
   - Done when: `fmtPointer` in `stdlib/fmt/print.go` handles `KMap` and `KSlice`, printing `"0x0"` when nil or delegating to `fmtrt.ArgPtrID` / `fmt0x64` when non-nil, matching the documented `%p` behavior; and `docs/go-compatibility.md` documents the `any` sized numeric behavior (`F26`).
-- [ ] Task 9.2: `fmt`: register generic struct instantiations inside generic functions in `fmtrt.Lookup`
+- [x] Task 9.2: `fmt`: register generic struct instantiations inside generic functions in `fmtrt.Lookup`
   - Files: `src/lower/fmt-formatters.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `F09` `type Box[T any] struct{ V T }; func wrap[T any](v T) any { return Box[T]{v} }; fmt.Println(wrap(1.5)); fmt.Printf("%T\n", wrap(2))` → `"{1.5}\nmain.Box[int]"` on `both` and `wasm` in `test/unit/wasm/fmt-any.test.js`.
   - Done when: `fmt-formatters.js` walks generic function instantiations to collect concrete types constructed and boxed into `any` inside generic functions, registering them in `gff_<pkg>_value`.
-- [ ] Task 9.3: `fmt`: `%w` outside `Errorf` and `%d` description for `errors.New` values
-  - Files: `stdlib/fmt/print.go`, `src/lower/fmt-formatters.js`, `test/unit/stdlib/fmt.test.js`
-  - Test: `F82` `fmt.Sprintf("%w", errors.New("e1"))` → `%!w(*errors.errorString=&{e1})`, `fmt.Sprintf("%d", errors.New("e1"))` → `%!d(*errors.errorString=&{e1})` on `both` and `wasm` in `test/unit/stdlib/fmt.test.js`.
+- [x] Task 9.3: `fmt`: `%w` outside `Errorf` and `%d` description for `errors.New` values
+  - Files: `stdlib/fmt/print.go`, `stdlib/errors/errors.go` (the unexported `errorString` supplies its fields; `fmt-formatters.js` cannot spell it), `test/unit/stdlib/fmt.test.js`
+  - Test: `F82` `fmt.Sprintf("%w", errors.New("e1"))` → `%!w(*errors.errorString=&{e1})`, `fmt.Sprintf("%d", errors.New("e1"))` → `&{%!d(string=e1)}` (real Go 1.26 output; the first draft of this line was wrong) on `both` and `wasm` in `test/unit/stdlib/fmt.test.js`.
   - Done when: `badVerb` in `stdlib/fmt/print.go` and `fmt-formatters.js` describe `errors.New` (`*errors.errorString`) with its concrete pointer type and underlying struct value instead of an empty type name and `(unknown)`.
-- [ ] Task 9.4: `testing`: `b.Run` sub-benchmark execution, N-growth and result reporting
+- [x] Task 9.4: `testing`: `b.Run` sub-benchmark execution, N-growth and result reporting
   - Files: `stdlib/testing/benchmark.go`, `test/unit/stdlib/testing.test.js`
   - Test: `F83` `func BenchmarkX(b *testing.B) { b.Run("sub", func(b *testing.B) { for i := 0; i < b.N; i++ {}; if b.N > 1 { println("grew") } }) }` run via `gofront test` grows `b.N > 1`, prints the `=== RUN BenchmarkX/sub` line, and outputs a `BenchmarkX/sub` result row while suppressing the top-level parent result row in `test/unit/stdlib/testing.test.js`.
   - Done when: `(*B).Run` invokes `grow` and `reportBenchmark` for the sub-benchmark and marks the parent as having sub-benchmarks so `m.runBenchmark` skips the parent `grow` and result row.

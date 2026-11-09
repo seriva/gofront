@@ -217,3 +217,72 @@ func main() {
 `,
 	);
 });
+
+test("%p of maps and slices, %w outside Errorf and a verb that does not fit errors.New", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+type M map[string]int
+
+func main() {
+	fmt.Println(fmt.Sprintf("%p", map[string]int(nil)), fmt.Sprintf("%p", []int(nil)), fmt.Sprintf("%p", []byte(nil)))
+	m := map[string]int{"a": 1}
+	s := []int{1, 2}
+	var x any = s
+	a, c := fmt.Sprintf("%p", m), fmt.Sprintf("%p", s)
+	fmt.Println(strings.HasPrefix(a, "0x"), strings.HasPrefix(c, "0x"), a != "0x0", c != "0x0")
+	fmt.Println(a == fmt.Sprintf("%p", m), c == fmt.Sprintf("%p", s), a != c, fmt.Sprintf("%p", x) == c, fmt.Sprintf("%p", M(m)) == a)
+	fmt.Println(fmt.Sprintf("%p", [2]int{}))
+	fmt.Println(fmt.Sprintf("%w", errors.New("e1")))
+	fmt.Println(fmt.Sprintf("%d", errors.New("e1")))
+	var e error = errors.New("e2")
+	fmt.Println(fmt.Sprintf("%t|%w|%s", e, e, e))
+	fmt.Println(fmt.Errorf("x: %w", e))
+}
+`,
+		`0x0 0x0 0x0
+true true true true
+true true true true true
+%!p([2]int=[0 0])
+%!w(*errors.errorString=&{e1})
+&{%!d(string=e1)}
+&{%!t(string=e2)}|%!w(*errors.errorString=&{e2})|e2
+x: e2
+`,
+	);
+});
+
+test("generic struct values built inside generic functions print with their type", async () => {
+	await assertFourWay(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+func wrap[T any](v T) any { return Box[T]{v} }
+func outer[T any](v T) any { return wrap(v) }
+func ptr[T any](v T) any { return &Box[T]{v} }
+
+func main() {
+	fmt.Println(wrap(1.5))
+	fmt.Printf("%T\\n", wrap(2))
+	fmt.Printf("%T %v\\n", outer("s"), outer(true))
+	fmt.Printf("%T %v\\n", wrap(Box[int]{3}), wrap(Box[int]{3}))
+	fmt.Printf("%v %T\\n", ptr(4), ptr(4))
+}
+`,
+		`{1.5}
+main.Box[int]
+main.Box[string] {true}
+main.Box[main.Box[int]] {{3}}
+&{4} *main.Box[int]
+`,
+	);
+});

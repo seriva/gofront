@@ -577,6 +577,17 @@ func main() {
 	});
 }
 
+test("generic struct instantiations built inside generic functions", () => {
+	const o = out(
+		`
+	fmt.Println(wrap(1.5))
+	fmt.Printf("%T\\n", wrap(2))`,
+		`type Box[T any] struct{ V T }
+func wrap[T any](v T) any { return Box[T]{v} }`,
+	);
+	assertEqual(o, "{1.5}\nmain.Box[int]");
+});
+
 test("a wasm package that uses encoding/json and testing.T builds a valid module", () => {
 	const { wasm, errors } = compileWasm(
 		`package main
