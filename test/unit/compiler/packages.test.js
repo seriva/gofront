@@ -570,6 +570,37 @@ test("compileSingleFile with subpackage includes all packages in source map", ()
 	);
 });
 
+test("compileSingleFile generates json, errors.As and fmt helpers", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+)
+
+type P struct{ X int }
+
+func main() {
+	b, _ := json.Marshal(P{1})
+	fmt.Println(string(b))
+	_, err := strconv.Atoi("x")
+	var ne *strconv.NumError
+	fmt.Println(errors.As(err, &ne), ne.Func)
+	fmt.Println(fmt.Sprintf("%v", P{1}))
+}
+`,
+		},
+		(dir) => {
+			const { js } = compileSingleFile(join(dir, "main.go"));
+			assertEqual(runJs(js), '{"X":1}\ntrue Atoi\n{1}');
+		},
+	);
+});
+
 test("multi-file package maps methods in second file to second file in source map", () => {
 	withTempDir(
 		{

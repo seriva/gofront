@@ -583,12 +583,18 @@ export function checkGeneratedGo(
 			checker.err(message, node, hint);
 		}
 	if (failed) return [];
-	const imports = [...new Set(parts.flatMap((p) => p.imports))];
+	// An import is a path or { path, alias }.
+	const specs = new Map();
+	for (const imp of parts.flatMap((p) => p.imports)) {
+		const { path, alias } = typeof imp === "string" ? { path: imp } : imp;
+		specs.set(`${alias ?? ""} ${path}`, { path, alias });
+	}
+	const imports = [...specs.values()];
 	const source = [
 		`package ${checker.pkgName}`,
 		...(imports.length > 0
 			? [
-					`import (\n${imports.map((p) => `\t${JSON.stringify(p)}`).join("\n")}\n)`,
+					`import (\n${imports.map(({ path, alias }) => `\t${alias ? `${alias} ` : ""}${JSON.stringify(path)}`).join("\n")}\n)`,
 				]
 			: []),
 		...parts.map((p) => p.body),

@@ -12,6 +12,7 @@ import {
 	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
+	compileHybridProject,
 	runJs,
 	section,
 	summarize,
@@ -3234,6 +3235,62 @@ func main() {
 		assertErrorContains(errors, `json.${fn} cannot be used as a value`);
 	}
 });
+
+section("encoding/json — types named through another file's import alias");
+
+// `a.go` names time.Time as `t.Time`; `b.go` marshals it without importing time.
+async function marshalAcrossFiles(target, dyn, extraFiles = {}) {
+	const res = await compileHybridProject({
+		"lib/a.go": `//gofront:target ${target}
+package lib
+
+import t "time"
+
+func Make() t.Time { return t.Date(2020, 1, 2, 3, 4, 5, 0, t.UTC) }
+
+type W struct{ D t.Time }
+
+func MakeW() W { return W{D: Make()} }
+`,
+		...extraFiles,
+		"lib/b.go": `package lib
+
+import "encoding/json"
+
+func Run() string {
+	b, _ := json.Marshal(${dyn ? "any(Make())" : "Make()"})
+	c, _ := json.Marshal(${dyn ? "any(MakeW())" : "MakeW()"})
+	return string(b) + " " + string(c)
+}
+`,
+		"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	return res.lines.join("\n");
+}
+
+const TIME_JSON = '"2020-01-02T03:04:05Z" {"D":"2020-01-02T03:04:05Z"}';
+
+for (const target of ["both", "wasm"]) {
+	for (const dyn of [false, true]) {
+		const kind = dyn ? "dynamic" : "static";
+		test(`json.Marshal of an aliased time.Time in another file (${kind}, ${target})`, async () => {
+			assertEqual(await marshalAcrossFiles(target, dyn), TIME_JSON);
+		});
+		test(`json.Marshal of time.Time beside a package-level 'time' (${kind}, ${target})`, async () => {
+			assertEqual(
+				await marshalAcrossFiles(target, dyn, {
+					"lib/c.go": "package lib\n\nvar time = 5\n",
+				}),
+				TIME_JSON,
+			);
+		});
+	}
+}
 
 section("encoding/json — reachability");
 

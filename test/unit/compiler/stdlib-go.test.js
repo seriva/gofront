@@ -1450,3 +1450,98 @@ async func main() {
 		assertEqual(res.lines.join("\n"), "40 41");
 	});
 });
+
+section("Go-source stdlib: generated-file import qualifiers");
+
+// A multi-file package: `a.go` names `strconv.NumError` through an alias,
+// `main.go` calls errors.As on it (the generated file spells the type).
+async function asAcrossFiles(extra) {
+	const out = [];
+	for (const target of ["both", "wasm"]) {
+		const res = await compileHybridProject({
+			"lib/a.go": `//gofront:target ${target}
+package lib
+
+import sc "strconv"
+
+type Num = *sc.NumError
+`,
+			"lib/b.go": `package lib
+
+import (
+	"errors"
+	"strconv"
+)
+
+func Run() string {
+	_, err := strconv.Atoi("x")
+	var t Num
+	if errors.As(err, &t) {
+		return t.Func + " " + t.Num
+	}
+	return "no"
+}
+${extra}`,
+			"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+		});
+		out.push(res.lines.join("\n"));
+	}
+	return out;
+}
+
+test("errors.As target spelled through an aliased import in another file", async () => {
+	const [js, wasm] = await asAcrossFiles("");
+	assertEqual(js, "Atoi x");
+	assertEqual(wasm, "Atoi x");
+});
+
+test("errors.As target survives a package-level name equal to the package", async () => {
+	const [js, wasm] = await asAcrossFiles("");
+	assertEqual(js, "Atoi x");
+	assertEqual(wasm, "Atoi x");
+	const out = [];
+	for (const target of ["both", "wasm"]) {
+		const res = await compileHybridProject({
+			"lib/a.go": `//gofront:target ${target}
+package lib
+
+import sc "strconv"
+
+type Num = *sc.NumError
+`,
+			"lib/c.go": `package lib
+
+var strconv = 1
+`,
+			"lib/b.go": `package lib
+
+import (
+	"errors"
+	str "strconv"
+)
+
+func Run() string {
+	_, err := str.Atoi("x")
+	var t Num
+	if errors.As(err, &t) {
+		return t.Func + " " + t.Num
+	}
+	return "no"
+}
+`,
+			"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+		});
+		out.push(res.lines.join("\n"));
+	}
+	assertEqual(out.join("|"), "Atoi x|Atoi x");
+});
