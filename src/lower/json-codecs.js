@@ -82,8 +82,7 @@ function isBasic(t, set) {
 }
 
 const isRaw = (t) =>
-	t?.kind === "named" &&
-	(t.name === "json.RawMessage" || t.name === "encoding/json.RawMessage");
+	t?.kind === "named" && t.name === "RawMessage$$encoding$json";
 
 const isNumber = (t) =>
 	t?.kind === "named" &&

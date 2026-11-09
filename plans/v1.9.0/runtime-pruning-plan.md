@@ -39,6 +39,8 @@ User-visible fixes: aliased `encoding/json` imports, local variables named `json
 
 Probes were run on `feat/overlays-to-go` at `9a214e3` (overlays-to-go Phases 1–3 merged, 4–7 open). `compileDir` = `test/unit/helpers.js` re-export of `src/compiler.js`; the helper `compileWasm` defaults `exportAll: true`.
 
+**Line-count baseline (Phase 1 start, post-`overlays-to-go` tree):** `find src -name '*.js' -exec cat {} + | wc -l` = 60874. The Goal target is ≤ 60074.
+
 | Area | Finding | Evidence & Probe Reference |
 |---|---|---|
 | `encoding/json` import alias (`src/link/stdlib.js:601-609`) | Aliasing `encoding/json` fails because it is still in `STDLIB_PACKAGES` (`src/typechecker/types.js:113`) and so loads as a hybrid `pkg.overlay`. | Probe: `withTempDir({"main.go":"package main\nimport myjson \"encoding/json\"\nfunc main(){_,_=myjson.Marshal(1)}"},compileDir)` → `Type error in main.go at line 2:15: import alias for 'encoding/json' is not supported`. |
@@ -108,7 +110,7 @@ Probes were run on `feat/overlays-to-go` at `9a214e3` (overlays-to-go Phases 1�
 Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `find src -name '*.js' -exec cat {} + | wc -l` in this plan's Verified Gaps as the line-count baseline.
 
 ### Phase 1: `encoding/json` in Go Source & Hybrid Overlay Retirement
-- [ ] Task 1.1: Move `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid` and `RawMessage` to `stdlib/encoding/json/json.go` and retire the `json` overlay
+- [x] Task 1.1: Move `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid` and `RawMessage` to `stdlib/encoding/json/json.go` and retire the `json` overlay
   - Files: `stdlib/encoding/json/json.go`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `src/lower/json-codecs.js` (`isRaw` only), `test/unit/builtins/json.test.js`
   - Test: failing `assertAllTargetsOutput` cases in `test/unit/builtins/json.test.js` for `json.RawMessage("true").MarshalJSON()`, `RawMessage(nil).MarshalJSON()`, `(&rm).UnmarshalJSON(b)` then mutating `b`, `(*json.RawMessage)(nil).UnmarshalJSON(b)`, a struct field of type `json.RawMessage` round-tripping through `Marshal`/`Unmarshal`, and `import myjson "encoding/json"` with `myjson.Marshal`, `myjson.Unmarshal`, `myjson.Valid` and `myjson.RawMessage`.
   - Done when: `json.go` defines the five members, `extended.js` has no `json` namespace / `RAW_MESSAGE_T`, `STDLIB_PACKAGES` no longer has `"encoding/json"`, `isRaw` matches the mangled name, and the new cases pass on JS and WASM.
