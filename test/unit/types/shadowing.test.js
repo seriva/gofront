@@ -382,3 +382,42 @@ outer:
 		"2 0\n3 0\n4 0\n1\n",
 	);
 });
+
+section("Function-local types sharing a name");
+
+test("same-named local types in two functions keep their own layout", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func a() { type Dup struct{ X int }; fmt.Println(Dup{1}) }
+func b() { type Dup struct{ Y string }; fmt.Println(Dup{"y"}) }
+
+func main() {
+	a()
+	b()
+	type Dup struct{ Z bool }
+	fmt.Printf("%T\\n", Dup{})
+}
+`,
+		"{1}\n{y}\nmain.Dup\n",
+	);
+});
+
+test("a local type shadows a package-level type of the same name", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func main() {
+	type T struct{ B string }
+	fmt.Println(T{"x"})
+}
+`,
+		"{x}\n",
+	);
+});

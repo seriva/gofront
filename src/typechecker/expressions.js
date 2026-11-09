@@ -127,7 +127,11 @@ const BUILTIN_CHECK = {
 	},
 	print: (s, n, e, at) => s._checkPrintArgs(n, e, at),
 	println: (s, n, e, at) => s._checkPrintArgs(n, e, at),
-	panic: () => VOID,
+	panic: (s, _n, e, at) => {
+		// The operand converts to `any`, so a defined type keeps its identity.
+		if (e.args[0] && at?.[0]) s._markIfaceBox(ANY, at[0], e.args[0]);
+		return VOID;
+	},
 	recover: () => ANY,
 	error: () => ERROR,
 	min: (_s, _n, _e, at) => minMaxType(at),
@@ -1876,21 +1880,31 @@ export const expressionCheckMethods = {
 
 	_checkBuiltinLen(name, expr, argTypes) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
+		const operand = expr.args?.[0];
 		if (expr.args?.length === 1)
 			argTypes[0] = this._derefArrayPtr(expr.args, 0, argTypes[0]);
-		if (name === "len") {
-			const size = this._constLenFromType(argTypes[0]);
-			if (size != null) expr._constLen = size;
-		} else if ((argTypes[0]?.underlying ?? argTypes[0])?.kind === "map") {
-			this.err(
-				`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
-				expr,
-			);
-		} else if (sharedInfo(argTypes[0])) {
-			this.err(
-				`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
-				expr,
-			);
+		// `len` and `cap` of an array (or pointer to one) are its length.
+		const size = this._constLenFromType(argTypes[0]);
+		if (size != null) {
+			expr._constLen = size;
+			// The operand is not dereferenced: a nil `*[N]T` has length N.
+			if (expr.args.length === 1) expr.args[0] = operand;
+		}
+		if (name === "cap") {
+			if (
+				(argTypes[0]?.underlying ?? argTypes[0])?.kind === "map" ||
+				isString(argTypes[0])
+			) {
+				this.err(
+					`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
+					expr,
+				);
+			} else if (sharedInfo(argTypes[0])) {
+				this.err(
+					`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
+					expr,
+				);
+			}
 		}
 		return INT;
 	},

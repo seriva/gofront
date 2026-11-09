@@ -184,9 +184,10 @@ export class TypeChecker {
 				this._ambiguousImported.add(prior);
 				this._ambiguousImported.add(type);
 			}
-			// A renamed type (`Pt` declared as `Pt$$b`) keeps a bare name another
-			// package already owns; it is reached as `pkg.Pt`.
-			if (!(prior && type.name !== name)) this.types.set(name, type);
+			// A renamed type (`Pt` declared as `Pt$$b`) never takes the bare name:
+			// another package owns it, and this package's own declaration would
+			// otherwise reuse the imported placeholder. It is reached as `pkg.Pt`.
+			if (type.name === name) this.types.set(name, type);
 			this.types.set(`${pkgName}.${name}`, type);
 		}
 	}
@@ -1134,9 +1135,13 @@ export class TypeChecker {
 
 	_checkTemplSwitch(n, scope) {
 		this._checkTemplExpr(n, n.exprTokens, scope);
+		// A tag that failed to parse leaves `n.expr` unset: not a tagless switch.
+		const tagless = !n.exprTokens?.length;
 		for (const c of n.cases ?? []) {
 			this._checkTemplExpr(c, c.caseTokens, scope);
-			if (c.expr) this._checkCaseValue(n.expr, c.expr);
+			for (const e of c.exprs?.slice(1) ?? []) this.checkExpr(e, scope);
+			if (n.expr || tagless)
+				for (const e of c.exprs ?? []) this._checkCaseValue(n.expr, e);
 			this._checkTemplNodes(c.body, scope);
 		}
 	}

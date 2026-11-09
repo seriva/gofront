@@ -135,6 +135,7 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
 		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
+		this._checkIntegerCmpKinds(op, lt, rt, node);
 		this._checkEqualityComparable(op, lt, rt, node);
 		return BOOL;
 	},
@@ -173,6 +174,17 @@ export const assignabilityMethods = {
 				: lt;
 		if (lt.name === "float32" && rt.name === "float32") return lt;
 		return isFloat ? FLOAT64 : lt;
+	},
+
+	// Comparing two typed integers of different types (`byte != int`) is a
+	// mismatch in Go; untyped constants adapt to either side.
+	_checkIntegerCmpKinds(op, lt, rt, node) {
+		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return;
+		if (!isInteger(lt) || !isInteger(rt) || typeStr(lt) === typeStr(rt)) return;
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
+			node,
+		);
 	},
 
 	_checkComplexCmpOp(op, lt, rt, node) {
@@ -232,8 +244,10 @@ export const assignabilityMethods = {
 		else if (e.kind === "BinaryExpr" && !this._constValue(e)) {
 			const isShift = e.op === "<<" || e.op === ">>";
 			this._retypeShiftTree(e.left, target);
-			if (isShift && e.left._type?.kind === "untyped") e.left._type = target;
-			else if (!isShift) this._retypeShiftTree(e.right, target);
+			if (isShift && e.left._type?.kind === "untyped") {
+				e.left._type = target;
+				if (is64BitInt(target)) e.left._is64Bit = true;
+			} else if (!isShift) this._retypeShiftTree(e.right, target);
 		} else return;
 		if (this._constValue(e)) return;
 		e._type = target;
@@ -265,6 +279,7 @@ export const assignabilityMethods = {
 		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
+		if (this._checkIfaceToConcrete(target, source, node, ctx, operand)) return;
 		if (this._assertAssignableEarlyReturn(target, source)) return;
 		if (isPointer(target) && isPointer(source)) {
 			this.assertAssignable(
@@ -424,6 +439,28 @@ export const assignabilityMethods = {
 			`type '${ptr ? "*" : ""}${src.name}' (${src._target ?? "js"}) cannot implement wasm interface '${target.name}' across the boundary; implement it in a wasm package or pass a func callback`,
 			node,
 		);
+	},
+
+	// An interface-typed operand needs an explicit type assertion before it can
+	// flow into a concrete (non-interface) type.
+	_checkIfaceToConcrete(target, source, node, ctx, operand) {
+		if (!source?._declared || !operand || typeof operand !== "object")
+			return false;
+		if (!this._isConcreteTarget(target)) return false;
+		this.err(
+			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}: need type assertion`,
+			node,
+		);
+		return true;
+	},
+
+	_isConcreteTarget(target) {
+		if (!target || target.kind === "typeParam" || isAny(target)) return false;
+		if (isNil(target) || isUntyped(target)) return false;
+		const base = this.resolveType(
+			target.kind === "named" ? target.underlying : target,
+		);
+		return !!base && base.kind !== "interface" && base.kind !== "typeParam";
 	},
 
 	_assertAssignableEarlyReturn(target, source) {

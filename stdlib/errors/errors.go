@@ -40,6 +40,16 @@ func (e *errorString) GofrontTypeName() string {
 	return "*errors.errorString"
 }
 
+// GofrontFmt is how package fmt prints the error with a verb that does not
+// apply to it (%v only reaches it from a failed verb): Go prints the pointer
+// to the struct, whose one field is a string.
+func (e *errorString) GofrontFmt(verb rune) string {
+	if verb == 'v' {
+		return "&{" + e.s + "}"
+	}
+	return "&{%!" + string(verb) + "(string=" + e.s + ")}"
+}
+
 // ErrUnsupported indicates that a requested operation cannot be performed,
 // because it is unsupported.
 var ErrUnsupported = New("unsupported operation")

@@ -747,11 +747,28 @@ export class TemplLexer {
 		return /(?:^|[^\w\])])(?:map)?\[[^\]]*\][\w.*[\]]*$/.test(before);
 	}
 
+	// `{` right after the `struct` or `interface` keyword: a type literal's body.
+	_atTypeBrace(start) {
+		const before = this.src.slice(start, this.pos);
+		return /(?:^|[^\w])(?:struct|interface)\s*$/.test(before);
+	}
+
+	// `{` that opens a composite literal: after `[]T`, `map[K]V` or right after
+	// a `struct{...}` / `interface{...}` type ending at `typeEnd`.
+	_atLiteralBrace(start, typeEnd) {
+		if (typeEnd >= 0 && /^\s*$/.test(this.src.slice(typeEnd, this.pos)))
+			return true;
+		return this._atCompositeLiteral(start);
+	}
+
 	_skipToOpenBrace() {
 		// Skip text until we hit an unbalanced {, tracking parens/brackets
 		const start = this.pos;
 		let paren = 0,
 			bracket = 0;
+		// End of the last `struct{...}` / `interface{...}` type literal: a `{`
+		// right after it opens a composite literal, never the body.
+		let typeEnd = -1;
 		while (!this.eof()) {
 			const c = this.peek();
 			if (c === "(") paren++;
@@ -759,8 +776,10 @@ export class TemplLexer {
 			else if (c === "[") bracket++;
 			else if (c === "]") bracket--;
 			else if (c === "{" && paren === 0 && bracket === 0) {
-				if (!this._atCompositeLiteral(start)) return;
+				const isTypeBrace = this._atTypeBrace(start);
+				if (!isTypeBrace && !this._atLiteralBrace(start, typeEnd)) return;
 				this._skipBalanced("{", "}");
+				typeEnd = isTypeBrace ? this.pos : -1;
 				continue;
 			} else if (c === '"' || c === "'") {
 				this._skipGoString(c);

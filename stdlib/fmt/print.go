@@ -268,7 +268,7 @@ func typeName(a fmtrt.Arg) string {
 // bytesArg describes a []byte.
 func bytesArg(b []byte, typ string) fmtrt.Arg {
 	return fmtrt.Arg{
-		K: fmtrt.KSlice, T: typ, Nil: b == nil, N: len(b), IsBytes: true, Bytes: b,
+		K: fmtrt.KSlice, T: typ, Nil: b == nil, Ptr: b, N: len(b), IsBytes: true, Bytes: b,
 		Elem: func(i int) fmtrt.Arg {
 			return fmtrt.Arg{K: fmtrt.KUint, T: "uint8", Size: 8, U: uint64(b[i])}
 		},
@@ -309,7 +309,7 @@ func (p *pp) badVerb(verb rune, a fmtrt.Arg) {
 	if a.K == fmtrt.KInterface && a.V == nil {
 		p.writeString(nilAngleString)
 	} else {
-		p.writeString(a.T)
+		p.writeString(typeName(a))
 		p.writeByte('=')
 		p.printDesc(a, 'v', 0, false)
 	}
@@ -466,7 +466,7 @@ func (p *pp) fmtBytes(v []byte, verb rune, a fmtrt.Arg) {
 func (p *pp) fmtPointer(a fmtrt.Arg, verb rune) {
 	var u uint64
 	switch a.K {
-	case fmtrt.KChan, fmtrt.KFunc, fmtrt.KPtr, fmtrt.KUnsafePtr:
+	case fmtrt.KChan, fmtrt.KFunc, fmtrt.KPtr, fmtrt.KUnsafePtr, fmtrt.KMap, fmtrt.KSlice:
 		if !a.Nil {
 			u = fmtrt.ArgPtrID(a)
 		}
@@ -627,7 +627,12 @@ func (p *pp) printDesc(a fmtrt.Arg, verb rune, depth int, ro bool) {
 			p.writeString(nilAngleString)
 			return
 		}
-		p.printDesc(describe(a.V), verb, depth+1, ro)
+		// An operand held in an interface at the top level is the operand
+		// itself: Go's printArg reflects on its dynamic value.
+		if depth > 0 {
+			depth++
+		}
+		p.printDesc(describe(a.V), verb, depth, ro)
 		return
 	}
 	if p.handleMethods(a, verb, ro) {
@@ -678,6 +683,12 @@ func (p *pp) printDesc(a fmtrt.Arg, verb rune, depth int, ro bool) {
 				p.printDesc(d, verb, depth, ro)
 				return
 			}
+		}
+		// The error errors.New returns is a pointer to a struct of a package
+		// that fmt cannot spell: it prints itself.
+		if f, ok := a.V.(interface{ GofrontFmt(rune) string }); ok && depth == 0 {
+			p.writeString(f.GofrontFmt(verb))
+			return
 		}
 		// A value of a type no generated description covers. What reaches
 		// here is a nil func in an interface, which has no type to look up,

@@ -968,3 +968,100 @@ func main() {
 		"0 0 false\ntrue true false\n7 0\n7 true\none str true\nfalse\n",
 	);
 });
+
+test("an unhashable slice or map in an any key panics like Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	m := map[any]int{}
+	var s any = []int{1}
+	var mm any = map[string]int{}
+	var arr any = [1]int{1}
+	try(func() { m[s] = 1 })
+	try(func() { _ = m[mm] })
+	m[arr] = 2
+	fmt.Println(len(m), m[arr])
+}
+`,
+		"runtime error: hash of unhashable type []int\nruntime error: hash of unhashable type map[string]int\n1 2\n",
+	);
+});
+
+test("array map keys are copied on insert and range", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	ar := map[[2]int]int{}
+	key := [2]int{1, 2}
+	ar[key] = 5
+	key[0] = 9
+	for k := range ar {
+		k[0]++
+	}
+	fmt.Println(len(ar), ar[[2]int{1, 2}], ar[[2]int{9, 2}], ar[key])
+	for k := range ar {
+		fmt.Println(k)
+	}
+}
+`,
+		"1 5 0 0\n[1 2]\n",
+	);
+});
+
+test("comma-ok assignment stores into an any variable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	mi := map[string]int{"k": 5}
+	var x any
+	var ok bool
+	x, ok = mi["k"]
+	fmt.Println(x, ok)
+	f := func() { x = "s" }
+	f()
+	x, ok = mi["zz"]
+	fmt.Println(x, ok)
+	var y any = "s"
+	y, ok = y.(string)
+	fmt.Println(y, ok)
+	var z any
+	z, ok = any(7).(int)
+	fmt.Println(z, ok)
+}
+`,
+		"5 true\n0 false\ns true\n7 true\n",
+	);
+});
+
+test("a map literal key may be a captured variable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	k := "hello"
+	f := func() {
+		m := map[string]int{k: 42}
+		fmt.Println(len(m), m["hello"])
+	}
+	f()
+}
+`,
+		"1 42\n",
+	);
+});

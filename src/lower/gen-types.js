@@ -176,6 +176,19 @@ export class TypeSpeller {
 		return byKind[t.kind]();
 	}
 
+	// The package name `%T` and errors print for the bare-named type `t`: this
+	// package, or the local package an importer reaches it through as `p.Name`.
+	declaringPackage(t) {
+		if (this.declared.has(t.name) || !this.checker) return this.pkgName;
+		for (const [key, v] of this.checker.types) {
+			const dot = key.indexOf(".");
+			if (v !== t || dot <= 0 || key.slice(dot + 1) !== t.name) continue;
+			const modPath = this.importPaths.get(key.slice(0, dot));
+			if (modPath) return canonicalName(modPath);
+		}
+		return this.pkgName;
+	}
+
 	// The name the generated file uses for the package at `modPath`: its
 	// package name, or `_gf_<name>` when the package declares that name itself
 	// or another path took it.

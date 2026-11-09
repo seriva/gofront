@@ -3,6 +3,13 @@
 
 import { embeddedFieldName } from "../typechecker/types.js";
 
+// A method promoted from an embedded struct value but declared on its
+// pointer receiver is outside the method set of the outer struct's value.
+function isPtrOnlyPromotion(rawEmbed, embed, mName, mType) {
+	if (rawEmbed.kind === "pointer") return false;
+	return Boolean((mType ?? embed.methods?.get(mName))?._ptrRecv);
+}
+
 export function computeEmbeddedStubs(name, methodDecls, checker) {
 	if (!checker) return [];
 	const resolvedType = checker.types.get(name)?.underlying;
@@ -36,12 +43,13 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 			continue;
 		}
 
-		for (const [mName] of embedBase.methods.entries()) {
+		for (const [mName, mType] of embedBase.methods.entries()) {
 			if (!declared.has(mName)) {
 				stubs.push({
 					methodName: mName,
 					embedName,
 					fieldName,
+					ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
 				});
 				declared.add(mName); // Prevent duplicate stubs for diamond embeds
 			}

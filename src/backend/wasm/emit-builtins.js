@@ -4,6 +4,7 @@
 
 import { hasCallOrReceive } from "../../lower/walk.js";
 import { typeStr } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import {
 	anonIfaceName,
 	ERROR_STRUCT,
@@ -97,15 +98,30 @@ export class BuiltinsEmitter {
 		return null;
 	}
 
+	// `len`/`cap` of an array or array pointer: the constant length.  An
+	// operand containing a call or receive is still evaluated, and its value
+	// (a nil array pointer included) is dropped without being dereferenced.
+	_emitConstArrayLen(call, targetWasmType) {
+		const arg = call.args[0];
+		if (hasCallOrReceive(arg)) {
+			this.emitExpr(
+				arg,
+				this.toWasmType(arg._type ?? this._resolveExprGoType(arg)),
+			);
+			this.pushInstruction("drop");
+		}
+		this.pushInstruction({ op: "i32.const", value: call._constLen });
+		if ((targetWasmType ?? "i64") === "i64")
+			this.pushInstruction("i64.extend_i32_u");
+	}
+
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
 		// `len` of an array (or a pointer to one) is a constant, and the
 		// operand is not evaluated unless it contains a call or a receive.
-		if (call._constLen != null && !hasCallOrReceive(arg)) {
-			this.pushInstruction({ op: "i32.const", value: call._constLen });
-			if ((targetWasmType ?? "i64") === "i64")
-				this.pushInstruction("i64.extend_i32_u");
+		if (call._constLen != null) {
+			this._emitConstArrayLen(call, targetWasmType);
 			return;
 		}
 		if (this._sharedInfo(argType)) {
@@ -175,6 +191,10 @@ export class BuiltinsEmitter {
 	_emitBuiltinCap(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type;
+		if (call._constLen != null) {
+			this._emitConstArrayLen(call, targetWasmType);
+			return;
+		}
 		if (isSliceType(argType, this.mod.checker)) {
 			const elemType = this._getSliceElemType(argType);
 			const sliceInfo = this.mod.getSliceType(elemType);
@@ -794,7 +814,11 @@ export class BuiltinsEmitter {
 		} else {
 			const goType = this._resolveExprGoType(arg);
 			const wType = toWasmType(goType, this.mod.checker);
-			if (
+			if (goType?.kind === "named" && wType === "externref") {
+				// A defined string type keeps its identity (and methods) in the
+				// panic value, so `recover()` returns it, not the bare string.
+				this.emitExpr(arg, "anyref");
+			} else if (
 				isStringType(goType, this.mod.checker) ||
 				(arg.kind === "BasicLit" && arg.litKind === "STRING") ||
 				wType === "externref"
@@ -909,7 +933,7 @@ export class BuiltinsEmitter {
 			callType?.name === "complex64" ||
 			arg0._type?.name === "float32" ||
 			arg1._type?.name === "float32" ||
-			targetWasmType?.typeName === "$complex64";
+			this._isComplex64Target(targetWasmType);
 		const complexName = is64 ? "complex64" : "complex128";
 		const info = this.mod.getComplexType(complexName);
 		this.emitExpr(arg0, info.elemWType);
@@ -1262,13 +1286,21 @@ export class BuiltinsEmitter {
 		const { chain, methodName } = found;
 		const subIdx = this.mod.resolveFuncIndex(methodName);
 		const targetParamTypes = this.mod.getFuncParamTypes(methodName);
+		const valueRecv =
+			this.mod.getFuncParamGoTypes(methodName)[0]?.kind !== "pointer";
 		this.emitExpr(func.expr, this.toWasmType(recvType));
-		for (const { structInfo: owner, embed } of chain) {
+		this._emitNilCheck(func.expr._type);
+		for (const [i, { structInfo: owner, embed }] of chain.entries()) {
 			this.pushInstruction({
 				op: "struct.get",
 				typeIndex: owner.typeIndex,
 				fieldIndex: embed.fieldIndex,
 			});
+			// Reading through an embedded nil pointer (to the next embedded
+			// struct, or as a value receiver) is a recoverable nil dereference.
+			const ft = owner.fields[embed.fieldIndex]?.goType;
+			const isPtr = ft?.kind === "pointer" || ft?.kind === "PointerType";
+			if (isPtr && (i < chain.length - 1 || valueRecv)) this._emitNilBranch();
 		}
 		for (let i = 0; i < args.length; i++) {
 			const pType = targetParamTypes[i + 1] ?? null;
@@ -1498,6 +1530,133 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "call", funcIndex: idx });
 	}
 
+	// Every `[wasm type index, Go type name]` an `any` can hold in this module,
+	// more specific types last so they overwrite their supertypes.
+	_dynamicTypeNames() {
+		const named = (name) => {
+			const i = name.indexOf("$$");
+			return i < 0
+				? goTypeName({ kind: "named", name })
+				: `${name.slice(i + 2)}.${name.slice(0, i)}`;
+		};
+		const mod = this.mod;
+		const names = [];
+		for (const s of mod.sliceTypes.values())
+			names.push([
+				s.typeIndex,
+				goTypeName({ kind: "slice", elem: s.elemGoType }),
+			]);
+		for (const m of mod.mapTypes.values())
+			names.push([
+				m.typeIndex,
+				goTypeName({ kind: "map", key: m.keyGoType, value: m.valGoType }),
+			]);
+		for (const info of new Set(mod.structTypes.values())) {
+			if (info.isAnon) continue;
+			names.push([
+				info.typeIndex,
+				info.name === ERROR_STRUCT
+					? "*errors.errorString"
+					: `*${named(info.name)}`,
+			]);
+		}
+		for (const box of mod.ifaceBoxTypes.values())
+			names.push([box.typeIndex, goTypeName(box.goType)]);
+		for (const info of mod.taggedSliceTypes.values())
+			names.push([info.typeIndex, goTypeName(info.goType)]);
+		for (const info of mod.nilBoxTypes.values())
+			names.push([info.typeIndex, goTypeName(info.goType)]);
+		return names;
+	}
+
+	// Body of `__ta_fail(v any, src string, target string, iface int32)`: panics
+	// with Go's failed type assertion message, naming the dynamic type of `v`
+	// from the types the module knows (`src` is the static interface type, or
+	// the first method the target interface needs when `iface` is 1).
+	_emitTypeAssertFail() {
+		const strConst = (text) => {
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString(text),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+		};
+		const concat = () =>
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+		const dyn = this.allocLocal(null, "externref");
+		strConst("interface {}");
+		this.pushInstruction({ op: "local.set", index: dyn });
+		const when = (typeIndex, text) => {
+			this.pushInstruction({ op: "local.get", index: 0 });
+			this.pushInstruction({ op: "ref.test", typeIndex });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			strConst(text);
+			this.pushInstruction({ op: "local.set", index: dyn });
+			this.pushInstruction("end");
+		};
+		for (const [typeIndex, text] of this._dynamicTypeNames())
+			when(typeIndex, text);
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getIsStringImportIndex(),
+		});
+		this.pushInstruction({ op: "if", blockType: "void" });
+		strConst("string");
+		this.pushInstruction({ op: "local.set", index: dyn });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		strConst("nil");
+		this.pushInstruction({ op: "local.set", index: dyn });
+		this.pushInstruction("end");
+
+		// An interface target: `<dyn> is not <target>: missing method <M>`.
+		this.pushInstruction({ op: "local.get", index: 3 });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		strConst("interface conversion: interface is nil, not ");
+		this.pushInstruction({ op: "local.get", index: 2 });
+		concat();
+		this.emitRuntimePanicThrow();
+		this.pushInstruction("end");
+		strConst("interface conversion: ");
+		this.pushInstruction({ op: "local.get", index: dyn });
+		concat();
+		strConst(" is not ");
+		concat();
+		this.pushInstruction({ op: "local.get", index: 2 });
+		concat();
+		strConst(": missing method ");
+		concat();
+		this.pushInstruction({ op: "local.get", index: 1 });
+		concat();
+		this.emitRuntimePanicThrow();
+		this.pushInstruction("end");
+
+		strConst("interface conversion: ");
+		this.pushInstruction({ op: "local.get", index: 1 });
+		concat();
+		strConst(" is ");
+		concat();
+		this.pushInstruction({ op: "local.get", index: dyn });
+		concat();
+		strConst(", not ");
+		concat();
+		this.pushInstruction({ op: "local.get", index: 2 });
+		concat();
+		this.emitRuntimePanicThrow();
+	}
+
 	emitRuntimeHelper(fn) {
 		const errInfo = this.mod.getStructType(ERROR_STRUCT);
 		switch (fn._isRuntimeHelper) {
@@ -1709,6 +1868,9 @@ export class BuiltinsEmitter {
 				this.pushInstruction("return");
 				return;
 			}
+			case "ta_fail":
+				this._emitTypeAssertFail();
+				return;
 			case "error_msg":
 				this.pushInstruction({ op: "local.get", index: 0 });
 				this.pushInstruction({

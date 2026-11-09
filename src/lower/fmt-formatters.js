@@ -22,6 +22,7 @@ import {
 	defaultType,
 	embeddedFieldName,
 	FMT_PRINT_FUNCS,
+	LOCAL_TYPE_SUFFIX,
 } from "../typechecker/types.js";
 import {
 	collectProgramTypes,
@@ -194,14 +195,15 @@ class FmtGen extends TypeSpeller {
 			case "basic":
 				return t.name === "any" ? "interface {}" : unalias(t.name);
 			case "named": {
-				let name = t.name;
+				let name = t.name.replace(LOCAL_TYPE_SUFFIX, "");
 				const at = name.indexOf("$$");
 				if (at >= 0)
 					name = `${name
 						.slice(at + 2)
 						.split("$")
 						.at(-1)}.${name.slice(0, at)}`;
-				else if (!name.includes(".")) name = `${this.pkgName}.${name}`;
+				else if (!name.includes("."))
+					name = `${this.declaringPackage(t)}.${name}`;
 				return t.typeArgs?.length
 					? `${name}[${t.typeArgs.map(n).join(",")}]`
 					: name;
@@ -430,14 +432,14 @@ class FmtGen extends TypeSpeller {
 				? ", IsBytes: true, Bytes: []byte(x)"
 				: ", IsBytes: true, Bytes: x[:]"
 			: "";
-		const nil = kind === "KSlice" ? ", Nil: x == nil" : "";
+		const nil = kind === "KSlice" ? ", Nil: x == nil, Ptr: x" : "";
 		return `fmtrt.Arg{K: fmtrt.${kind}, T: ${T}, N: ${len}${nil}${bytes}, Elem: func(i int) fmtrt.Arg {\n\t\treturn ${this.describe(u.elem, "x[i]")}\n\t}${m}}`;
 	}
 
 	mapArg(u, T, m) {
 		const key = this.describe(u.key, "k");
 		const val = this.describe(u.value, "v");
-		return `fmtrt.Arg{K: fmtrt.KMap, T: ${T}, Nil: x == nil, N: len(x), Entries: func() []fmtrt.Entry {\n\t\tif x == nil {\n\t\t\treturn nil\n\t\t}\n\t\tes := make([]fmtrt.Entry, 0, len(x))\n\t\tfor k, v := range x {\n\t\t\tes = append(es, fmtrt.Entry{Key: ${key}, Val: ${val}})\n\t\t}\n\t\treturn es\n\t}${m}}`;
+		return `fmtrt.Arg{K: fmtrt.KMap, T: ${T}, Nil: x == nil, Ptr: x, N: len(x), Entries: func() []fmtrt.Entry {\n\t\tif x == nil {\n\t\t\treturn nil\n\t\t}\n\t\tes := make([]fmtrt.Entry, 0, len(x))\n\t\tfor k, v := range x {\n\t\t\tes = append(es, fmtrt.Entry{Key: ${key}, Val: ${val}})\n\t\t}\n\t\treturn es\n\t}${m}}`;
 	}
 
 	pointerArg(u, T, m) {
@@ -557,7 +559,66 @@ class FmtGen extends TypeSpeller {
 			if (via === "declared" && !this.topLevel.has(type.name)) continue;
 			add(type);
 		}
+		// Only instances of generic types (and pointers to them): they are the
+		// types a package never spells, and any other type here would take the
+		// place of the dispatch a type parameter value already has.
+		for (const type of this.genericBodyTypes()) {
+			const base = type.kind === "pointer" ? type.base : type;
+			if (base.kind === "named" && base.typeArgs?.length > 0) add(type);
+		}
 		return [...found.values()];
+	}
+
+	// The types the bodies of generic functions build for each instantiation
+	// the package makes: `Box[T]{v}` inside `wrap[T]` is a `Box[int]` once
+	// `wrap(2)` is called, a type no expression of the package spells.
+	genericBodyTypes() {
+		const decls = new Map();
+		for (const program of this.programs)
+			for (const d of program.decls ?? [])
+				if (d.kind === "FuncDecl" && !d.recv && d.typeParams?.length)
+					decls.set(d.name, d);
+		if (decls.size === 0) return [];
+		const out = [];
+		const seen = new Set();
+		const queue = [];
+		const request = (call, map) => {
+			const inst = this.genericInstance(call, map, decls);
+			if (!inst || seen.has(inst.id) || seen.size >= 512) return;
+			seen.add(inst.id);
+			queue.push(inst);
+		};
+		for (const program of this.programs)
+			walkNodes(program.decls, (node) => request(node, new Map()));
+		while (queue.length > 0) {
+			const { decl, map } = queue.shift();
+			walkNodes(decl.body, (node) => {
+				// A type without a type parameter is found by the walk of the
+				// package already.
+				if (node._type && mentionsTypeParam(node._type))
+					out.push(defaultType(this.checker.substituteType(node._type, map)));
+				request(node, map);
+			});
+		}
+		return out;
+	}
+
+	// The instantiation of a generic function that `call` makes, with its
+	// type arguments substituted through `map` (the instantiation of the
+	// function that contains the call), or null for any other node or one
+	// whose type arguments are still open.
+	genericInstance(call, map, decls) {
+		const generic = call._genericFnType;
+		const decl = generic && decls.get(generic.name);
+		const args = call._typeArgs ?? call.func?._typeArgs;
+		if (!decl || args?.length !== generic.typeParams?.length) return null;
+		const sub = args.map((a) => this.checker.substituteType(a, map));
+		if (sub.some((a) => mentionsTypeParam(a))) return null;
+		return {
+			decl,
+			id: `${decl.name}|${sub.map((a) => this.key(a)).join(",")}`,
+			map: new Map(generic.typeParams.map((tp, i) => [tp.name, sub[i]])),
+		};
 	}
 
 	usable(t) {

@@ -268,9 +268,15 @@ export const statementGenMethods = {
 		const mapExpr = pre?.map ?? this.genExpr(rhsNode.expr);
 		const keyExpr = pre?.key ?? this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-		// A name `:=` reuses is assigned, not declared again.
-		const declOf = (l) => (isDefine && !l._redecl ? "let " : "");
-		const [vDecl, okDecl] = stmt.lhs.map(declOf);
+		// A name `:=` reuses is assigned, not declared again; an address-taken
+		// variable lives in a `{ value }` box.
+		const bind = (l, name, js) => {
+			const boxed = this._boxedVars.has(name);
+			if (isDefine && !l._redecl)
+				return `let ${name} = ${boxed ? `{ value: ${js} }` : js};`;
+			return `${name}${boxed ? ".value" : ""} = ${js};`;
+		};
+		const [vL, okL] = stmt.lhs;
 		// A struct or array map value is a copy, not the stored value.
 		const valType = rhsNode._mapValueType;
 		const copyVal = (js) =>
@@ -278,10 +284,10 @@ export const statementGenMethods = {
 		if (isDefine && !this.strict) {
 			if (vName !== "_") {
 				const val = this._nonStrictMapRead(mapExpr, keyExpr, valType, copyVal);
-				this.line(`${vDecl}${vName} = ${val};`);
+				this.line(bind(vL, vName, val));
 			}
 			if (okName !== "_") {
-				this.line(`${okDecl}${okName} = (${keyExpr}) in ${mapExpr};`);
+				this.line(bind(okL, okName, `(${keyExpr}) in ${mapExpr}`));
 			}
 			return;
 		}
@@ -294,13 +300,15 @@ export const statementGenMethods = {
 		this.line(`const ${mTmp} = ${mapExpr}, ${kTmp} = ${keyExpr};`);
 		if (vName !== "_") {
 			this.line(
-				`${vDecl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero};`,
+				bind(
+					vL,
+					vName,
+					`(${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero}`,
+				),
 			);
 		}
 		if (okName !== "_") {
-			this.line(
-				`${okDecl}${okName} = Boolean(${mTmp} && (${kTmp} in ${mTmp}));`,
-			);
+			this.line(bind(okL, okName, `Boolean(${mTmp} && (${kTmp} in ${mTmp}))`));
 		}
 	},
 
@@ -405,17 +413,21 @@ export const statementGenMethods = {
 					this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`),
 				);
 				break;
-			case "LabeledStmt":
-				if (stmt.body && stmt.body.kind === "ForStmt") {
-					stmt.body.label = stmt.label;
+			case "LabeledStmt": {
+				// Stacked labels (`a: b: for ...`) all stay attached to the loop.
+				const labels = [stmt.label];
+				let body = stmt.body;
+				while (body?.kind === "LabeledStmt") {
+					labels.push(body.label);
+					body = body.body;
 				}
-				{
-					const hoisted = this._hoistForInit(stmt.body);
-					this.line(`${stmt.label}:`);
-					this.genStmt(stmt.body);
-					if (hoisted) this._closeHoistedForInit();
-				}
+				if (body?.kind === "ForStmt") body.label = labels[labels.length - 1];
+				const hoisted = this._hoistForInit(body);
+				for (const label of labels) this.line(`${label}:`);
+				this.genStmt(body);
+				if (hoisted) this._closeHoistedForInit();
 				break;
+			}
 			case "Block":
 				this.line("{");
 				this.indented(() => this.genBlock(stmt));
@@ -959,7 +971,7 @@ export const statementGenMethods = {
 
 	_genCommaOkTypeAssert(stmt) {
 		const val = this.genExpr(stmt.rhs[0]);
-		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		const [vName, okName] = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__ta${this._tmpCounter}`;
 		this.line(`const ${tmp} = ${val};`);
@@ -1276,7 +1288,8 @@ export const statementGenMethods = {
 
 	_rangeExprLimit(iterType, iteree) {
 		if (this._isIntRangeType(iterType)) return iteree;
-		if (this._isMapRangeType(iterType)) return `Object.keys(${iteree}).length`;
+		if (this._isMapRangeType(iterType))
+			return `Object.keys(${iteree} ?? {}).length`;
 		return `(${iteree} ? ${iteree}.length : 0)`;
 	},
 
@@ -1562,13 +1575,17 @@ export const statementGenMethods = {
 		const s = `__s${d}`;
 		const i = `__i${d}`;
 		const cp = `__cp${d}`;
+		const w = `__w${d}`;
+		// The index is a UTF-16 offset (an astral rune is two units) so `s[i:]`
+		// agrees with the WebAssembly string layout.
 		this.line(
-			`for (let ${i} = 0, ${s} = Array.from(${iteree} ?? ""); ${i} < ${s}.length; ${i}++) {`,
+			`for (let ${i} = 0, ${s} = ${iteree} ?? "", ${w} = 0; ${i} < ${s}.length; ${i} += ${w}) {`,
 		);
 		this.indented(() => {
+			this.line(`const ${cp} = ${s}.codePointAt(${i});`);
+			this.line(`${w} = ${cp} > 0xffff ? 2 : 1;`);
 			this._emitRangeVar(idxNode, i, isAssign);
 			if (valNode && valNode.name !== "_") {
-				this.line(`const ${cp} = ${s}[${i}].codePointAt(0);`);
 				this._emitRangeVar(valNode, cp, isAssign);
 			}
 			const declared = isAssign
@@ -1594,13 +1611,17 @@ export const statementGenMethods = {
 		const paramKey = this._typeParamKeyRange(iterType);
 		const is64Key = this._is64BitMapRange(iterType);
 		const scalarKey = this._scalarKeyRange(iterType);
+		const isAssign = init.kind === "AssignStmt";
+		// `for _, v = range m` assigns existing variables, where a blank is a
+		// hole in the destructuring pattern; a lone blank still needs a binding.
+		const blank = isAssign && lhs.length > 1 ? "" : "_$";
 		const binding =
 			lhs.length === 1
 				? lhs[0] === "_"
 					? "_$"
 					: lhs[0]
-				: `[${lhs.map((n) => (n === "_" ? "_$" : n)).join(", ")}]`;
-		const kw = init.kind === "AssignStmt" ? "" : "let ";
+				: `[${lhs.map((n) => (n === "_" ? blank : n)).join(", ")}]`;
+		const kw = !isAssign || binding === "_$" ? "let " : "";
 		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
 		this.indented(() => {
 			if (paramKey && lhs[0] !== "_")
@@ -1745,8 +1766,9 @@ export const statementGenMethods = {
 
 	_genRangeIterExpr(iterType, iteree, lhs) {
 		if (this._isMapRangeType(iterType)) {
-			if (lhs.length === 1) return `Object.keys(${iteree})`;
-			return `Object.entries(${iteree})`;
+			// A nil map is `null`; ranging over it runs zero iterations.
+			if (lhs.length === 1) return `Object.keys(${iteree} ?? {})`;
+			return `Object.entries(${iteree} ?? {})`;
 		}
 		this.useHelper("sliceGuard");
 		if (lhs.length === 1) return `__s(${iteree}).keys()`;

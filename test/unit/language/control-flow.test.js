@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -662,6 +663,94 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
+
+section("Stacked labels and range assignment");
+
+test("stacked labels on a for with a shadowing init keep continue working", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 1
+outer:
+inner:
+	for n := n + 1; n < 3; n++ {
+		continue outer
+	}
+	_ = n
+	fmt.Println("done")
+}
+`,
+		"done\n",
+	);
+});
+
+test("for _, v = range m assigns an existing variable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]int{"a": 1}
+	var v int
+	for _, v = range m {
+	}
+	fmt.Println(v)
+}
+`,
+		"1\n",
+	);
+});
+
+test("range over nil maps from literals and variables runs zero iterations", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct {
+	a int
+	m map[string]int
+}
+
+func main() {
+	s := S{1, nil}
+	for range s.m {
+	}
+	s2 := S{m: nil}
+	for k := range s2.m {
+		fmt.Println(k)
+	}
+	var mm map[string]int = nil
+	for k, v := range mm {
+		fmt.Println(k, v)
+	}
+	fmt.Println("ok")
+}
+`,
+		"ok\n",
+	);
+});
+
+test("string range offsets count UTF-16 units so s[i:] lines up", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := "éa😀b"
+	for i, r := range s {
+		fmt.Println(i, r, s[i:])
+	}
+}
+`,
+		"0 233 éa😀b\n1 97 a😀b\n2 128512 😀b\n4 98 b\n",
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

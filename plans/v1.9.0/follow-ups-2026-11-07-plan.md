@@ -1,8 +1,8 @@
 # v1.9.0 Review Follow-ups (2026-11-07) — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft  
-**Base branch:** `main` (`feat/overlays-to-go` merged at `68d6a51`)  
+**Status:** Completed (2026-11-09)  
+**Base branch:** main  
 **Related:** [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md), [`compiler-shrinking-plan.md`](compiler-shrinking-plan.md), [`overlays-to-go-plan.md`](overlays-to-go-plan.md), [`runtime-pruning-plan.md`](runtime-pruning-plan.md)  
 **Release note:** More Go programs now behave identically to Go across JavaScript and WebAssembly, including function-local types with the same name in different functions, cross-package type aliases and value parameters, interface type assertions and their failure messages, `unicode.IsPrint` on non-ASCII spaces, `os.Stderr` output under Node.js, `regexp` no-match results, ranging over a nil map, `complex64` constants in WebAssembly, output without a trailing newline in WebAssembly, `%p` of maps and slices, and printing generic values stored in `any`, and the compiler rejects more invalid programs that Go rejects. Templ components now support multi-value `switch` cases (`case a, b:`) and inline struct literals in `for` headers, and `b.Run` sub-benchmarks now run to the target duration and report their own result line.
 
@@ -155,157 +155,157 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 *Phases 1–7 were scheduled from review follow-ups on 2026-11-07 (see Verified Gaps → Review follow-ups).*
 
-- [ ] Task 1.1: Parser: struct field tags after `func`-typed fields
+- [x] Task 1.1: Parser: struct field tags after `func`-typed fields
   - Files: `src/parser/declarations.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: `F50` `var _ = struct{ F func() \`json:"f"\` }{}` compiles and runs on `js`, `both`, and `wasm`; same root cause: `var f func() = func() { fmt.Println("a") }; f()` → `"a"` and `var g func(int) = nil; fmt.Println(g == nil)` → `"true"` in `test/unit/compiler/lexer-parser.test.js`.
   - Done when: `parseReturnType(inTypeExpr = true)` in `src/parser/declarations.js` also ends a result-less func type at a `STRING` tag and at `=`, so struct tags after `func`-typed fields and `var f func(...) = ...` parse, and `test/unit/compiler/lexer-parser.test.js` passes.
-- [ ] Task 1.2: Typechecker: `switch` on untyped constant tag and tagless `switch` non-bool cases
+- [x] Task 1.2: Typechecker: `switch` on untyped constant tag and tagless `switch` non-bool cases
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`, `test/unit/compiler/templ.test.js`
   - Test: `F05` `switch "foo" { case 5: }` → `assertErrorContains(errors, "cannot convert 5 (untyped int constant) to type string")`; `F57` `switch { case 5: }` (in `.go` and `.templ`) → `assertErrorContains(errors, "invalid case 5 in switch")`.
   - Done when: `_checkSwitchStmt` / `_checkCaseValue` in `src/typechecker/statements.js` validate case expressions against untyped constant tags and require `bool` cases when `tag == null` (today `_checkCaseValue` returns early on `!tag`; templ reaches it through `_checkTemplSwitch`), and both tests pass.
-- [ ] Task 1.3: Typechecker: reject fractional untyped float to `int` and `byte != int(q)` comparisons
+- [x] Task 1.3: Typechecker: reject fractional untyped float to `int` and `byte != int(q)` comparisons
   - Files: `src/typechecker/assignability.js`, `src/typechecker/expressions.js`, `test/unit/types/checks.test.js`
   - Test: `F06` `var i int = 1.5` → `assertErrorContains(errors, "cannot use 1.5 (untyped float constant) as int value in variable declaration (truncated)")`; `F63` `s := "abc"; q := byte(97); _ = s[0] != int(q)` → `assertErrorContains(errors, "mismatched types")`.
   - Done when: untyped float constants with non-zero fractional parts are rejected for integer types and distinct typed integer kinds (`uint8` vs `int`) are rejected in binary comparisons; `npm run check` and `test/unit/types/checks.test.js` pass.
-- [ ] Task 1.4: Typechecker: reject `cap` on strings and comma-ok `:=` with no new variables
+- [x] Task 1.4: Typechecker: reject `cap` on strings and comma-ok `:=` with no new variables
   - Files: `src/typechecker/expressions.js`, `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: `F62` `_ = cap("hello")` → `assertErrorContains(errors, "invalid argument")`; `F12` `var a any = 1; var x int; var ok bool; x, ok := a.(int)` → `assertErrorContains(errors, "no new variables on left side of :=")`.
   - Done when: `cap` rejects string arguments and comma-ok short variable declarations enforce at least one newly declared variable on the LHS.
-- [ ] Task 1.5: Typechecker: check key assignability in comma-ok map lookups
+- [x] Task 1.5: Typechecker: check key assignability in comma-ok map lookups
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: `F61` `m := map[int64]string{1 << 60: "hello"}; v, ok := m[1<<60]; fmt.Println(v, ok)` → `"hello true"` on `js`, `both`, and `wasm` (and `v, ok = m[1<<60]` assignment form).
   - Done when: comma-ok map index statements type-check and tag the key expression with the map's key type so 64-bit constant keys emit as `BigInt` on JS.
 
 ### Phase 2: Package Types, Aliases, and Function-Local Types
 
-- [ ] Task 2.1: Package-qualified struct literal resolution when `main` defines a same-named type
+- [x] Task 2.1: Package-qualified struct literal resolution when `main` defines a same-named type
   - Files: `src/typechecker/expressions.js`, `src/typechecker/resolve.js`, `test/unit/compiler/packages.test.js`
   - Test: `F08` `package a; type Pt struct{ X int }` and `package main; type Pt struct{ Z bool }; func main() { fmt.Println(Pt{true}, a.Pt{1}) }` → `"{true} {1}"` on `js`, `both`, and `wasm`.
   - Done when: composite literals with a `SelectorExpr` type (`a.Pt{1}`) resolve the struct definition from package `a`'s namespace instead of the unqualified `Pt` in `main`.
-- [ ] Task 2.2: Cross-package struct type alias literals in JS
+- [x] Task 2.2: Cross-package struct type alias literals in JS
   - Files: `src/backend/js/expressions.js`, `src/typechecker/expressions.js`, `test/unit/compiler/packages.test.js`
   - Test: `F10` `package p; type Base struct{ V int }; type A = Base` and `main` evaluating `fmt.Println(p.A{42})` → `"{42}"` on `js`, `both`, and `wasm`.
   - Done when: JS composite literal codegen unwraps cross-package type aliases to the target struct's emitted class name.
-- [ ] Task 2.3: Function-local types with identical names across functions
+- [x] Task 2.3: Function-local types with identical names across functions
   - Files: `src/typechecker/statements.js`, `src/backend/js/index.js`, `src/backend/wasm/types.js`
   - Test: `F49` two functions `a()` and `b()` declaring incompatible `type Dup struct{...}` → `"{1}\n{y}"` on `both` and `wasm` in `test/unit/types/shadowing.test.js`.
   - Done when: function-local `TypeDecl` nodes register distinct scoped type identities so later functions do not overwrite earlier local types in the checker, JS class emitter, or WASM struct table, while `%T` still prints `main.Dup`.
-- [ ] Task 2.4: JS array length from package constant selector and cross-package struct value parameter cloning
+- [x] Task 2.4: JS array length from package constant selector and cross-package struct value parameter cloning
   - Files: `src/typechecker/resolve.js`, `src/backend/js/expressions.js`, `src/backend/js/statements.js`
   - Test: `F71` `var a [math.MaxInt8]int; fmt.Println(len(a), math.Pi > 3)` → `"127 true"` and, with no other `math` use, `fmt.Println(len(a))` → `"127"` (no `'math' imported and not used`) on `js`, `both`, and `wasm` in `test/unit/compiler/packages.test.js`; `F68` `func f(s pkg.S) { s.Inc() }; s := pkg.S{X: 1}; f(s); fmt.Println(s.X)` → `"1"` on all targets.
   - Done when: `_foldArrayLen` in `src/typechecker/resolve.js` folds `SelectorExpr` package constants (marking the import used) so both backends see a literal length, and JS function prologues clone imported-package struct value parameters when mutated or passed to pointer-receiver methods.
-- [ ] Task 2.5: JSON codecs for same-named function-local types
+- [x] Task 2.5: JSON codecs for same-named function-local types
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: `F72` `f1()` declaring `type Config struct{A int \`json:"a"\`}` and `f2()` declaring `type Config struct{B string}`, each calling `json.Marshal(Config{...})` → `'{"a":1}'` from `f1()` on `both` and `wasm`.
   - Done when: `json-codecs.js` keys generated encoders/decoders by the scoped local type identity from Task 2.3, so each function-local `Config` uses its own field layout and tags.
 
 ### Phase 3: JS Statements, Loops, Pointers, and Numerics
 
-- [ ] Task 3.1: JS pointer conversion method dispatch and comma-ok define boxing
+- [x] Task 3.1: JS pointer conversion method dispatch and comma-ok define boxing
   - Files: `src/backend/js/expressions.js`, `src/backend/js/statements.js`, `test/unit/language/pointers.test.js`
   - Test: `F03` `type Base struct{n int}; type S Base; func (s *S) Inc() { s.n++ }; b := Base{1}; (*S)(&b).Inc(); fmt.Println(b.n)` → `"2"` on `js`; `F04` `m := map[string]int{"k": 3}; x, y := m["k"]; p := &x; *p = 9; fmt.Println(x, y)` → `"9 true"` on `js`, `both`, and `wasm`.
   - Done when: method calls on converted struct pointers dispatch to the target type's prototype method on JS, and address-taken variables bound by comma-ok map lookups (and type assertions) are boxed as `{ value: ... }` on JS.
-- [ ] Task 3.2: JS stacked labels on `for` with hoisted init and `for _, v = range m` blank-key assignment
+- [x] Task 3.2: JS stacked labels on `for` with hoisted init and `for _, v = range m` blank-key assignment
   - Files: `src/backend/js/statements.js`, `test/unit/language/control-flow.test.js`
   - Test: `F11` `n := 1; outer: inner: for n := n + 1; n < 3; n++ { continue outer }` → `"done"` on `js`, `both`, and `wasm`; `F42` `m := map[string]int{"a": 1}; var v int; for _, v = range m {}; fmt.Println(v)` → `"1"` on all targets.
   - Done when: hoisting a `for` init statement into an enclosing JS block keeps all loop labels attached to the loop statement for `continue`, and `for _, v = range m` with an existing value variable declares the temporary key binding properly.
-- [ ] Task 3.3: JS `for i, r := range s` UTF-16 offsets on astral runes (match WASM)
+- [x] Task 3.3: JS `for i, r := range s` UTF-16 offsets on astral runes (match WASM)
   - Files: `src/backend/js/statements.js`, `docs/go-compatibility.md`, `test/unit/language/control-flow.test.js`
   - Test: `F56` `s := "éa😀b"; for i, r := range s { fmt.Println(i, r, s[i:]) }` → `"0 233 éa😀b\n1 97 a😀b\n2 128512 😀b\n4 98 b"` on `js`, `both`, and `wasm` (`assertAllTargetsOutput`).
   - Done when: JS string range loops advance the index by the UTF-16 length of each decoded code point (2 for astral runes) so JS matches WASM and `s[i:]`, and the `for i := range` row in `docs/go-compatibility.md` **String semantics** describes UTF-16 code-unit offsets instead of rune counts.
-- [ ] Task 3.4: JS `uint` subtraction underflow wrapping and function-local untyped constants with `uint64`
+- [x] Task 3.4: JS `uint` subtraction underflow wrapping and function-local untyped constants with `uint64`
   - Files: `src/backend/js/expressions.js`, `src/typechecker/const-fold.js`, `test/unit/builtins/operators.test.js`
   - Test: `F69` `var n uint = 3; fmt.Println(n-64 > 100)` → `"true"` on `both` and `wasm`; `F70` `var b uint64 = 1; var e uint = 3; const half = 1 << 51; b += half >> e; fmt.Println(b)` → `"281474976710657"` on `both` and `wasm`.
   - Done when: `uint` subtraction in `both` packages wraps negative results modulo 2⁶⁴ (`r < 0 ? r + 2 ** 64 : r`; plain `js` packages keep documented float64 semantics), and function-local untyped integer constants used in 64-bit (`int64`/`uint64`) shift/binary expressions emit as `BigInt`.
-- [ ] Task 3.5: JS slice copy/append/reslice struct element cloning and cross-package element pointer aliasing
+- [x] Task 3.5: JS slice copy/append/reslice struct element cloning and cross-package element pointer aliasing
   - Files: `src/backend/js/expressions.js`, `src/lower/ownership.js`, `test/unit/language/value-semantics.test.js`
   - Test: `F41` `a := []P{{1, 1}}; b := append([]P(nil), a...); b[0].N = 50; fmt.Println(a)` (plus `copy`) → `"[{1 1}]"` on `js`, `both`, and `wasm`; `F44` `package p; func First(xs []S) *S { return &xs[0] }` + `main` `q := p.First(ys); ys[0] = p.S{9}; fmt.Println(q.A)` → `"9"` on all targets.
   - Done when: copying/appending slices of value structs clones the struct elements into the new backing array while in-place element writes (`ys[0] = ...`) mutate fields in place so pointers returned from other packages stay live.
 
 ### Phase 4: JS Nil Receivers, Panic/Recover, and Map Keys
 
-- [ ] Task 4.1: JS method values and method expressions on nil pointers and nil generic pointers
+- [x] Task 4.1: JS method values and method expressions on nil pointers and nil generic pointers
   - Files: `src/backend/js/expressions.js`, `test/unit/language/pointers.test.js`
   - Test: `F13` `var b *Box[int]; g := (*Box[int]).M; fmt.Println(g(b))` → `"0"` on `js`, `both`, and `wasm`; `F14` `var s *S; f := s.Ping; f()` → `"ping"` on all targets.
   - Done when: JS method expressions `(*T).M` and method values `s.M` on pointer receivers do not read `.M` off a `null` receiver reference.
-- [ ] Task 4.2: JS user `panic("runtime error: ...")` vs runtime error and panic/recover of defined string `error` types
+- [x] Task 4.2: JS user `panic("runtime error: ...")` vs runtime error and panic/recover of defined string `error` types
   - Files: `src/backend/js/statements.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `F36` `defer func() { r := recover(); _, ok := r.(error); fmt.Println(ok) }(); panic("runtime error: foo")` → `"false"` on `js`, `both`, and `wasm`; `F64` `type rt string; func (rt) Error() string { return "boom" }; defer func() { r := recover(); fmt.Println(r); _, ok := r.(rt); fmt.Println(ok) }(); panic(rt("q"))` → `"boom\ntrue"` on all targets in `test/unit/wasm/defer_recover.test.js`.
   - Done when: user string panics never masquerade as runtime `error` values on JS, and panicking with a defined string type preserves its dynamic type and `Error()` method across `recover()` on JS and WASM.
-- [ ] Task 4.3: JS unhashable slice in `any` map key panic
+- [x] Task 4.3: JS unhashable slice in `any` map key panic
   - Files: `src/backend/js/runtime.js`, `src/backend/js/expressions.js`, `test/unit/wasm/maps.test.js`
   - Test: `F22` `defer func() { fmt.Println(recover()) }(); var x any = []int{1}; m := map[any]int{}; m[x] = 1` → `"runtime error: hash of unhashable type []int"` on `both` and `wasm`, plus `var y any = [1]int{1}; m[y] = 1` still succeeding.
   - Done when: `__ik` in `src/backend/js/runtime.js` (fed the dynamic type tag of `any` keys by the map-index codegen in `src/backend/js/expressions.js`) throws a recoverable runtime error matching Go's message for slices, maps, and functions (and structs/arrays containing them) while arrays and comparable structs stay hashable.
-- [ ] Task 4.4: `len(f())` side-effect evaluation when `f()` returns a nil array pointer on JS and WASM
+- [x] Task 4.4: `len(f())` side-effect evaluation when `f()` returns a nil array pointer on JS and WASM
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/language/pointers.test.js`
   - Test: `F45` `func getNil() *[3]int { fmt.Println("getNil"); return nil }; fmt.Println(len(getNil()))` (plus `cap(getNil())`) → `"getNil\n3"` on `js`, `both`, and `wasm`.
   - Done when: `len`/`cap` on `*[N]T` evaluates the operand for side effects when it contains a function call and returns `N` without dereferencing the pointer on both backends.
 
 ### Phase 5: Dynamic Types, Type Switches, and Interface Assertions (JS & WASM)
 
-- [ ] Task 5.1: JS typed nil non-struct pointers and nil slices/funcs in `any`
+- [x] Task 5.1: JS typed nil non-struct pointers and nil slices/funcs in `any`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F15` `var p1, p2 *int; var a1, a2 any = p1, p2; fmt.Println(a1 == a2)` → `"true"`; `F16` `var s []int; var a any = s; _, ok := a.([]int); fmt.Println(ok)` → `"true"` on `both` and `wasm` (`a == nil` is not asserted: documented JS `nil` row).
   - Done when: nil non-struct pointers and nil slices/funcs stored in `any` keep their dynamic type on JS so `any == any` and `.([]T)` match Go, without changing the documented JS `== nil` result.
-- [ ] Task 5.2: JS boxing and type switches inside generic functions and pointer-receiver methods on type parameters
+- [x] Task 5.2: JS boxing and type switches inside generic functions and pointer-receiver methods on type parameters
   - Files: `src/backend/js/expressions.js`, `src/backend/js/type-info.js`, `test/unit/types/generics.test.js`
   - Test: `F17` `F(p)` (`var p *int`) and `Kind[Name](Name("a"))` → `"false T"`; `F18` `c := Counter(5); Step(&c); fmt.Println(c)` → `"6"` on `js`, `both`, and `wasm`.
   - Done when: `any(v)` inside generic functions uses the runtime type-parameter factory to box nil pointers/named strings and dispatch pointer-receiver constraint methods without re-boxing a pointer into a scalar box.
-- [ ] Task 5.3: JS interface assertions: promoted pointer-receiver methods on value structs and `case fmt.Stringer`
+- [x] Task 5.3: JS interface assertions: promoted pointer-receiver methods on value structs and `case fmt.Stringer`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F19` `var v any = Outer{}; _, ok := v.(Mer); fmt.Println(ok)` → `"false"`; `F31` `switch v.(type) { case error: return "d"; case fmt.Stringer: return "s" }` on `3` → `"other"` on `js`, `both`, and `wasm`.
   - Done when: value structs embedding a struct `Inner` by value do not claim `*Inner`'s pointer-receiver methods in interface assertions, and `case fmt.Stringer:` on JS checks Go `String() string` implementation rather than `Object.prototype.toString`.
-- [ ] Task 5.4: Named func type (`iter.Seq[int]`) and defined slice/map/array identity in `any` type assertions and switches
+- [x] Task 5.4: Named func type (`iter.Seq[int]`) and defined slice/map/array identity in `any` type assertions and switches
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F32` `var b any = seq; _, ok := b.(iter.Seq[int]); fmt.Println(ok)` → `"false"` on `js`, `both`, and `wasm`; `F34` `type S []int; switch any([]int{1}).(type) { case S: return "S"; case []int: return "slice" }` → `"slice"` on all targets.
   - Done when: WASM boxes/tags defined func types (`iter.Seq[T]`) and defined slice types (`type S []int`) distinctly from unnamed `func(func(T) bool)` and `[]int` when converted to `any`.
-- [ ] Task 5.5: Failed type assertion panic message with concrete and target type names
+- [x] Task 5.5: Failed type assertion panic message with concrete and target type names
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/emit-exprs.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F33` `defer func() { fmt.Println(recover().(error).Error()) }(); var i any = "s"; _ = i.(int)` → `"interface conversion: interface {} is string, not int"` on `both` and `wasm`, plus the nil-operand form (`interface {} is nil, not int`); update the existing `includes("type assertion failed")` assertions in `test/unit/wasm/interfaces.test.js` and `test/unit/wasm/strings_any.test.js`.
   - Done when: non-comma-ok type assertions (JS throw in `src/backend/js/expressions.js`, WASM `emitPanic` in `src/backend/wasm/emit-exprs.js`) include the interface name, dynamic concrete type name, and target type name in the panic message on both backends.
 
 ### Phase 6: WASM Control Flow, Captures, Strings, Builtins, and Facade
 
-- [ ] Task 6.1: WASM recoverable nil-dereference panic on embedded pointer value-method call and nil interface method value binding
+- [x] Task 6.1: WASM recoverable nil-dereference panic on embedded pointer value-method call and nil interface method value binding
   - Files: `src/backend/wasm/emit-exprs.js`, `test/unit/wasm/traps.test.js`
   - Test: `F07` `P{}.Val()` (`type P struct{ *Base }`) recovered → `"recovered"`; `F35` `var n N; _ = n.Name` recovered → `"runtime error: invalid memory address or nil pointer dereference"` on `js`, `both`, and `wasm`.
   - Done when: unwrapping an embedded struct pointer for a promoted value-receiver method call and evaluating a method value on an interface emit a recoverable nil check on WASM.
-- [ ] Task 6.2: WASM array map key copying on insert and range, comma-ok into `any`, and map-key closure capture
+- [x] Task 6.2: WASM array map key copying on insert and range, comma-ok into `any`, and map-key closure capture
   - Files: `src/backend/wasm/emit-maps.js`, `src/backend/wasm/emit-stmts.js`, `src/lower/captures.js`
   - Test: `F21` `ar[key] = 5; key[0] = 9; for k := range ar { k[0]++ }` → `"5 1 5"`; `F37` `var x any; var ok bool; x, ok = mi["k"]` → `"5 true"`; `F38` `k := "hello"; f := func() { m := map[string]int{k: 42}; fmt.Println(len(m)) }; f()` → `"1"` on `js`, `both`, and `wasm` in `test/unit/wasm/maps.test.js`.
   - Done when: WASM clones `[N]T` array keys on map insertion and `range` iteration, boxes scalar values in comma-ok assignments to `any` targets, and `src/lower/captures.js` visits map literal keys.
-- [ ] Task 6.3: WASM stacked loop labels and package-level/struct/array string zero values
+- [x] Task 6.3: WASM stacked loop labels and package-level/struct/array string zero values
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/module-emitter.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: `F40` `outer: inner: for i := 0; i < 2; i++ { for j := 0; j < 2; j++ { fmt.Println(i, j); break outer } }` → `"0 0"`; `F43` `type T struct{ S string }; var t T; var s string; fmt.Println(t, s == "", t.S == "")` → `"{} true true"` on `js`, `both`, and `wasm`.
   - Done when: WASM loop emission registers all stacked labels on a loop for `break`/`continue`, and default-initialized package-level `string` globals, struct string fields, and `[N]string` arrays initialize to `""` instead of `ref.null extern`.
-- [ ] Task 6.4: WASM `print` flush without trailing newline and `println` of defined `bool` types
+- [x] Task 6.4: WASM `print` flush without trailing newline and `println` of defined `bool` types
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/glue.js`, `src/backend/wasm/boundary.js`
   - Test: `F46` `print("a", "b", 1)` → `"ab1"`; `F80` `fmt.Print("hello")` → `"hello"`; `F47` `type MyBool bool; var b MyBool = true; println(b)` → `"true"` on `both` and `wasm` in `test/unit/wasm/stdlib.test.js`.
   - Done when: WASM host glue flushes the partial line buffer (`lineBuf` in `boundary.js`, filled by both `print` and `os_write`) after `main` returns, and `println` unwraps named boolean types.
-- [ ] Task 6.5: WASM facade promoted methods from unexported embedded structs
+- [x] Task 6.5: WASM facade promoted methods from unexported embedded structs
   - Files: `src/backend/wasm/boundary.js`, `test/unit/wasm/boundary.test.js`
   - Test: `F48` WASM package `type hidden struct{ v int }; func (h hidden) Public() int { return h.v }; type Outer struct{ hidden }` called via `o.Public()` from JS `main` → `"7"` in `test/unit/wasm/boundary.test.js`.
   - Done when: WASM boundary facade generation exposes exported methods promoted from unexported embedded struct fields on the exported outer struct's JS class.
 
 ### Phase 7: `encoding/json`, Templ, and Stdlib (`unicode`, `os`, `regexp`)
 
-- [ ] Task 7.1: `encoding/json`: nil unsupported map/slice in `any`, cross-package typed nil `Unmarshal` error package name, and cross-package `any` `Marshal`
+- [x] Task 7.1: `encoding/json`: nil unsupported map/slice in `any`, cross-package typed nil `Unmarshal` error package name, and cross-package `any` `Marshal`
   - Files: `src/lower/json-codecs.js`, `stdlib/internal/jsonrt/enc.go`, `stdlib/internal/jsonrt/dec.go`
   - Test: `F51` `var m map[float64]int; var v any = m; _, err := json.Marshal(v)` → `"json: unsupported type: map[float64]int"`; `F52` `var v any = sub.NewNil(); json.Unmarshal([]byte("{}"), v)` → `"json: Unmarshal(nil *sub.OtherItem)"`; `F53` `pkg.Encode(any(TextVal{"hello"}))` where `main` does not import `"encoding/json"` → `'"text-hello"'` on `js`, `both`, and `wasm` in `test/unit/builtins/json.test.js`.
   - Done when: `json-codecs.js` and `jsonrt` report unsupported map/slice types even when nil in `any`, preserve the defining package name for typed nil pointers in `Unmarshal`, and register dynamic types across linked packages when any package in the build uses `encoding/json`.
-- [ ] Task 7.2: Templ multi-value `case a, b:`
+- [x] Task 7.2: Templ multi-value `case a, b:`
   - Files: `src/parser/templ.js`, `src/typechecker/index.js`, `src/backend/js/templ.js`
   - Test: `F58` `templ V(n int) { switch n { case 1, 2: <p>x</p> } }` with `V(2)` → `"<p>x</p>"` (plus a mismatched `case 1, "a":` → `assertErrorContains(errors, "cannot convert")`) in `test/unit/compiler/templ.test.js`.
   - Done when: `parseTemplSwitch` parses `caseTokens` as an expression list (today `parseExprTokens` parses one expression and fails with `unexpected ','`), `_checkTemplSwitch` runs `_checkCaseValue` on each expression, and `_genTemplSwitch` emits one JS `case` label per expression.
-- [ ] Task 7.3: Templ inline struct composite literals in `for` headers
+- [x] Task 7.3: Templ inline struct composite literals in `for` headers
   - Files: `src/lexer/templ-lexer.js`, `test/unit/compiler/templ.test.js`
   - Test: `F59` `templ V() { for _, s := range []struct{ A int }{{1}} { <p>{ s.A }</p> } }` → `"<p>1</p>"` in `test/unit/compiler/templ.test.js`.
   - Done when: the templ `for` header scanner tracks nested `{ ... }` braces in types and composite literals before opening the loop body.
-- [ ] Task 7.4: Go-source `unicode.IsPrint` non-ASCII spaces and `regexp` `nil` slices on no match
+- [x] Task 7.4: Go-source `unicode.IsPrint` non-ASCII spaces and `regexp` `nil` slices on no match
   - Files: `stdlib/unicode/unicode.go`, `stdlib/regexp/regexp.go`
   - Test: `F74` `fmt.Println(unicode.IsPrint(0xA0), unicode.IsPrint(0x3000))` → `"false false"` on `both` and `wasm` in `test/unit/stdlib/unicode.test.js`; `F76` `re := regexp.MustCompile("a"); fmt.Println(re.FindStringSubmatch("b") == nil, re.FindAllString("b", -1) == nil)` → `"true true"` in a `js` package (`regexp` is JS-only) in `test/unit/stdlib/regexp.test.js`.
   - Done when: `unicode.IsPrint` returns `false` for non-ASCII spaces (`r >= 0x80 && IsSpace(r)`), and `FindString*`/`FindAll*` methods in `stdlib/regexp/regexp.go` return `nil` (not `[]string{}`) when nothing matches.
-- [ ] Task 7.5: `os.Stderr` writes to `process.stderr` under Node
+- [x] Task 7.5: `os.Stderr` writes to `process.stderr` under Node
   - Files: `src/backend/js/index.js`, `src/backend/wasm/boundary.js`, `test/unit/stdlib/io.test.js`
   - Test: `F75` `os.Stderr.WriteString("err\n")` → stdout `""`, stderr `"err\n"` for a `js` package and a `both`/`wasm` package run under Node.
   - Done when: the `os_write` native in `src/backend/js/index.js` and the WASM `os_write` import in `src/backend/wasm/boundary.js` route `fd === 2` to `process.stderr.write` when available (falling back to buffered `console.error`), and `fd === 1` output is unchanged.
@@ -314,34 +314,34 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 *Phases 8–9 were scheduled from review follow-ups on 2026-11-09 (see Verified Gaps → Review follow-ups (2026-11-09)).*
 
-- [ ] Task 8.1: Typechecker: reject assigning/passing `any` to concrete struct types
+- [x] Task 8.1: Typechecker: reject assigning/passing `any` to concrete struct types
   - Files: `src/typechecker/assignability.js`, `test/unit/types/checks.test.js`
   - Test: `F77` `type A struct{N int}; func f(a A) int { return a.N }; var x any = A{3}; _ = f(x)` and `var a A = x` in `test/unit/types/checks.test.js` → `assertErrorContains(errors, "cannot use")` and `assertErrorContains(errors, "need type assertion")`.
   - Done when: `assertAssignable` in `src/typechecker/assignability.js` (today short-circuited by `_assertAssignableEarlyReturn` on `isAny(source)`) rejects assigning an interface-typed operand to a non-interface type without an explicit type assertion, and `npm run check` and `test/unit/types/checks.test.js` pass.
-- [ ] Task 8.2: JS `for range` over nil maps (positional and keyed literals, variables)
+- [x] Task 8.2: JS `for range` over nil maps (positional and keyed literals, variables)
   - Files: `src/backend/js/statements.js`, `test/unit/language/control-flow.test.js`
   - Test: `F78` `type S struct{a int; m map[string]int}; s := S{1, nil}; for range s.m {}`, `s2 := S{m: nil}; for k := range s2.m {}`, `var mm map[string]int = nil; for k, v := range mm {}` → compiles and executes with zero iterations across `js`, `both`, and `wasm` in `test/unit/language/control-flow.test.js`.
   - Done when: `_genRangeIterExpr` in `src/backend/js/statements.js` guards map iteration against null (`${iteree} ? Object.keys(${iteree}) : []` / `Object.entries`) and `test/unit/language/control-flow.test.js` passes.
-- [ ] Task 8.3: WASM `complex64` variable and constant initializers
+- [x] Task 8.3: WASM `complex64` variable and constant initializers
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit.js`, `test/unit/wasm/complex.test.js`
   - Test: `F79` `var c64 complex64 = complex(1.5, 2.5); f(c64)` and `var a complex64 = 1 + 2i` → passes `assertValidWasm` and prints `(1.5+2.5i)` / `(1+2i)` in `test/unit/wasm/complex.test.js`.
   - Done when: WASM expression emitter respects the target `complex64` type when lowering untyped complex constants and `complex(...)` calls, emitting `$complex64` structs instead of `$complex128`.
 
 ### Phase 9: Stdlib `fmt` & `testing`
 
-- [ ] Task 9.1: `fmt`: `%p` pointer formatting for maps and slices
+- [x] Task 9.1: `fmt`: `%p` pointer formatting for maps and slices
   - Files: `stdlib/fmt/print.go`, `docs/go-compatibility.md`, `test/unit/stdlib/fmt.test.js`
   - Test: `F23` `fmt.Sprintf("%p", map[string]int(nil))` → `"0x0"`, `fmt.Sprintf("%p", []int(nil))` → `"0x0"`, and non-nil map/slice printing a `0x...` hex identifier in `test/unit/stdlib/fmt.test.js`.
   - Done when: `fmtPointer` in `stdlib/fmt/print.go` handles `KMap` and `KSlice`, printing `"0x0"` when nil or delegating to `fmtrt.ArgPtrID` / `fmt0x64` when non-nil, matching the documented `%p` behavior; and `docs/go-compatibility.md` documents the `any` sized numeric behavior (`F26`).
-- [ ] Task 9.2: `fmt`: register generic struct instantiations inside generic functions in `fmtrt.Lookup`
+- [x] Task 9.2: `fmt`: register generic struct instantiations inside generic functions in `fmtrt.Lookup`
   - Files: `src/lower/fmt-formatters.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `F09` `type Box[T any] struct{ V T }; func wrap[T any](v T) any { return Box[T]{v} }; fmt.Println(wrap(1.5)); fmt.Printf("%T\n", wrap(2))` → `"{1.5}\nmain.Box[int]"` on `both` and `wasm` in `test/unit/wasm/fmt-any.test.js`.
   - Done when: `fmt-formatters.js` walks generic function instantiations to collect concrete types constructed and boxed into `any` inside generic functions, registering them in `gff_<pkg>_value`.
-- [ ] Task 9.3: `fmt`: `%w` outside `Errorf` and `%d` description for `errors.New` values
-  - Files: `stdlib/fmt/print.go`, `src/lower/fmt-formatters.js`, `test/unit/stdlib/fmt.test.js`
-  - Test: `F82` `fmt.Sprintf("%w", errors.New("e1"))` → `%!w(*errors.errorString=&{e1})`, `fmt.Sprintf("%d", errors.New("e1"))` → `%!d(*errors.errorString=&{e1})` on `both` and `wasm` in `test/unit/stdlib/fmt.test.js`.
+- [x] Task 9.3: `fmt`: `%w` outside `Errorf` and `%d` description for `errors.New` values
+  - Files: `stdlib/fmt/print.go`, `stdlib/errors/errors.go` (the unexported `errorString` supplies its fields; `fmt-formatters.js` cannot spell it), `test/unit/stdlib/fmt.test.js`
+  - Test: `F82` `fmt.Sprintf("%w", errors.New("e1"))` → `%!w(*errors.errorString=&{e1})`, `fmt.Sprintf("%d", errors.New("e1"))` → `&{%!d(string=e1)}` (real Go 1.26 output; the first draft of this line was wrong) on `both` and `wasm` in `test/unit/stdlib/fmt.test.js`.
   - Done when: `badVerb` in `stdlib/fmt/print.go` and `fmt-formatters.js` describe `errors.New` (`*errors.errorString`) with its concrete pointer type and underlying struct value instead of an empty type name and `(unknown)`.
-- [ ] Task 9.4: `testing`: `b.Run` sub-benchmark execution, N-growth and result reporting
+- [x] Task 9.4: `testing`: `b.Run` sub-benchmark execution, N-growth and result reporting
   - Files: `stdlib/testing/benchmark.go`, `test/unit/stdlib/testing.test.js`
   - Test: `F83` `func BenchmarkX(b *testing.B) { b.Run("sub", func(b *testing.B) { for i := 0; i < b.N; i++ {}; if b.N > 1 { println("grew") } }) }` run via `gofront test` grows `b.N > 1`, prints the `=== RUN BenchmarkX/sub` line, and outputs a `BenchmarkX/sub` result row while suppressing the top-level parent result row in `test/unit/stdlib/testing.test.js`.
   - Done when: `(*B).Run` invokes `grow` and `reportBenchmark` for the sub-benchmark and marks the parent as having sub-benchmarks so `m.runBenchmark` skips the parent `grow` and result row.

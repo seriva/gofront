@@ -701,6 +701,36 @@ func main() {
 	assertEqual(runJs(js), "0 false");
 });
 
+test("any cannot be passed or assigned to a concrete struct without an assertion", () => {
+	const call = compile(`package main
+type A struct{ N int }
+func f(a A) int { return a.N }
+func main() {
+  var x any = A{3}
+  _ = f(x)
+}`);
+	assertErrorContains(call.errors, "cannot use");
+	assertErrorContains(call.errors, "need type assertion");
+	const decl = compile(`package main
+type A struct{ N int }
+func main() {
+  var x any = A{3}
+  var a A = x
+  _ = a
+}`);
+	assertErrorContains(decl.errors, "need type assertion");
+	const ok = compile(`package main
+type A struct{ N int }
+func main() {
+  var x any = A{3}
+  var a A = x.(A)
+  var y any = x
+  _ = a
+  _ = y
+}`);
+	assertEqual(ok.errors.length, 0);
+});
+
 test("v, ok = x.(T) type assertion with = succeeds", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -1760,6 +1790,79 @@ func main() {
 }`,
 	);
 	assertEqual(errors.length, 0);
+});
+
+section("Statement and operator checks");
+
+const stmtErrorCases = [
+	[
+		"switch on untyped string tag rejects an int case",
+		'package main\nfunc main() { switch "foo" {\n case 5: } }',
+		"cannot convert 5 (untyped int constant) to type string",
+	],
+	[
+		"tagless switch rejects a non-bool case",
+		"package main\nfunc main() { switch {\n case 5: } }",
+		"invalid case 5 in switch",
+	],
+	[
+		"fractional untyped float is not an int",
+		"package main\nfunc main() { var i int = 1.5; _ = i }",
+		"cannot use 1.5 (untyped float constant) as int value in variable declaration (truncated)",
+	],
+	[
+		"comparing byte with int is a mismatch",
+		'package main\nfunc main() { s := "abc"; q := byte(97); _ = s[0] != int(q) }',
+		"mismatched types",
+	],
+	[
+		"cap of a string is invalid",
+		'package main\nfunc main() { _ = cap("hello") }',
+		"invalid argument",
+	],
+	[
+		"comma-ok assertion with no new variables",
+		"package main\nfunc main() { var a any = 1; var x int; var ok bool; _, _ = x, ok; x, ok := a.(int) }",
+		"no new variables on left side of :=",
+	],
+];
+
+for (const [name, code, expected] of stmtErrorCases) {
+	test(name, () => {
+		assertErrorContains(compile(code).errors, expected);
+	});
+}
+
+test("valid cases still compile", () => {
+	const { errors } = compile(`package main
+func main() {
+	var i int = 2.0
+	var b byte = 1
+	var c byte = 2
+	switch { case i > 1: }
+	switch true { case i > 1: }
+	switch 5 { case 5: }
+	_ = b == c
+	_ = b != 'a'
+	_ = i
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("comma-ok map lookup with a 64-bit constant key", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func main() {
+	m := map[int64]string{1 << 60: "hello"}
+	v, ok := m[1<<60]
+	fmt.Println(v, ok)
+	v, ok = m[1<<60]
+	fmt.Println(v, ok)
+}
+`,
+		"hello true\nhello true\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

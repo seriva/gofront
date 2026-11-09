@@ -177,7 +177,7 @@ const JS_INTRINSICS = {
 	// os: node writes straight to the stream; other hosts print whole lines
 	// (console.log adds the newline), buffering the partial line.
 	os_write: ([fd, s]) =>
-		`if (typeof process !== "undefined" && process?.stdout?.write) { process.stdout.write(${s}); return; } let b = (globalThis.__os_buf ?? "") + ${s}; const nl = b.lastIndexOf("\\n"); if (nl >= 0) { (${fd} === 2 && typeof console.error === "function" ? console.error : console.log)(b.slice(0, nl)); b = b.slice(nl + 1); } globalThis.__os_buf = b;`,
+		`if (typeof process !== "undefined" && process?.stdout?.write) { (${fd} === 2 && process.stderr?.write ? process.stderr : process.stdout).write(${s}); return; } let b = (globalThis.__os_buf ?? "") + ${s}; const nl = b.lastIndexOf("\\n"); if (nl >= 0) { (${fd} === 2 && typeof console.error === "function" ? console.error : console.log)(b.slice(0, nl)); b = b.slice(nl + 1); } globalThis.__os_buf = b;`,
 	os_exit: ([code]) =>
 		`if (typeof process !== "undefined" && process?.exit) process.exit(${code}); throw new Error("os.Exit(" + ${code} + ")");`,
 	os_getenv: ([key]) =>
@@ -385,7 +385,9 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
-		this._elemAddrTaken = takesElementAddress(program.decls);
+		this._elemAddrTaken =
+			takesElementAddress(program.decls) ||
+			this.checker?.depElemAddrTaken === true;
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
@@ -1000,6 +1002,9 @@ export class CodeGen {
 		// Pointer-receiver methods are outside the method set of a struct value
 		// held in an interface (see _ifaceMethodCheck).
 		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
+		// ...and so are those promoted from an embedded struct value.
+		for (const stub of computeEmbeddedStubs(name, methodDecls, this.checker))
+			if (stub.ptrOnly) pm.push(stub.methodName);
 		if (pm.length > 0)
 			this.line(
 				`Object.defineProperty(${name}, "__pm", { value: ${JSON.stringify(pm)} });`,

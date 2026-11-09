@@ -2231,6 +2231,32 @@ func main() {
 	assertEqual(res.lines.join("\n"), "-1 11");
 });
 
+test("exported methods promoted from an unexported embedded struct reach a js main", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type hidden struct{ v int }
+
+func (h hidden) Public() int { return h.v }
+
+type Outer struct{ hidden }
+
+func MkOuter() Outer { return Outer{hidden{7}} }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	o := g.MkOuter()
+	println(o.Public())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "7");
+});
+
 test("generic instances with several type arguments and map values read from a js main", async () => {
 	const res = await compileHybridProject({
 		"g/g.go": `//gofront:target wasm

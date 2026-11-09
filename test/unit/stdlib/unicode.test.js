@@ -99,3 +99,23 @@ import "unicode"
 func main() { _ = unicode.IsNumber('1') }`);
 	assertErrorContains(errors, "unicode.IsNumber");
 });
+
+test("IsPrint excludes non-ASCII spaces but IsGraphic keeps them", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"unicode"
+)
+
+func main() {
+	fmt.Println(unicode.IsPrint(0xA0), unicode.IsPrint(0x3000), unicode.IsPrint(0x2003), unicode.IsPrint('é'))
+	fmt.Println(unicode.IsGraphic(0xA0), unicode.IsGraphic(0x3000))
+}
+`,
+		`false false false true
+true true
+`,
+	);
+});

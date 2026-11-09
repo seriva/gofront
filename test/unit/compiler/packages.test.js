@@ -804,6 +804,77 @@ test("parse cache never serves renamed ASTs to a later build", () => {
 	);
 });
 
+section("package type resolution across packages");
+
+const PKG_CASES = {
+	"qualified literal beats a same-named type in main": [
+		{
+			"a/a.go": "package a\ntype Pt struct{ X int }\n",
+			"main.go": `package main
+import ("fmt"; "./a")
+type Pt struct{ Z bool }
+func main() { fmt.Println(Pt{true}, a.Pt{1}) }
+`,
+		},
+		"{true} {1}",
+	],
+	"literal of a cross-package struct alias": [
+		{
+			"p/p.go": "package p\ntype Base struct{ V int }\ntype A = Base\n",
+			"main.go": `package main
+import ("fmt"; "./p")
+func main() { fmt.Println(p.A{42}) }
+`,
+		},
+		"{42}",
+	],
+	"array length from a package constant": [
+		{
+			"main.go": `package main
+import ("fmt"; "math")
+func main() { var a [math.MaxInt8]int; fmt.Println(len(a), math.Pi > 3) }
+`,
+		},
+		"127 true",
+	],
+	"array length from a package constant is a use of the import": [
+		{
+			"main.go": `package main
+import ("fmt"; "math")
+func main() { var a [math.MaxInt8]int; fmt.Println(len(a)) }
+`,
+		},
+		"127",
+	],
+	"cross-package struct value parameter is copied": [
+		{
+			"pkg/pkg.go":
+				"package pkg\ntype S struct{ X int }\nfunc (s *S) Inc() { s.X++ }\n",
+			"main.go": `package main
+import ("fmt"; "./pkg")
+func f(s pkg.S) { s.Inc() }
+func main() { s := pkg.S{X: 1}; f(s); fmt.Println(s.X) }
+`,
+		},
+		"1",
+	],
+};
+
+for (const [name, [files, want]] of Object.entries(PKG_CASES)) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} (${target})`, async () => {
+			const withTarget = Object.fromEntries(
+				Object.entries(files).map(([k, v]) => [
+					k,
+					`//gofront:target ${target}\n${v}`,
+				]),
+			);
+			const { lines } = await compileHybridProject(withTarget);
+			assertEqual(lines.join("\n"), want);
+		});
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

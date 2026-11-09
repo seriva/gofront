@@ -78,6 +78,17 @@ function collectReferencedNames(node, scopes, refs = new Set(), types) {
 		case "KeyValueExpr":
 			walk(node.value);
 			return refs;
+		// Map keys are expressions that may read captured variables; struct
+		// field names are not references.
+		case "CompositeLit": {
+			const t = node._type?.underlying ?? node._type;
+			if (t && t.kind !== "struct") {
+				for (const el of node.elems ?? []) {
+					if (el?.kind === "KeyValueExpr") walk(el.key);
+				}
+			}
+			break;
+		}
 		case "FuncLit":
 			scoped(() => {
 				for (const p of node.params ?? []) declare(p.name);

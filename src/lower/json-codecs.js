@@ -14,7 +14,7 @@
 // which switches over every type the program encodes or decodes anywhere.
 
 import { resolveJsonFields } from "../typechecker/resolve.js";
-import { defaultType } from "../typechecker/types.js";
+import { defaultType, LOCAL_TYPE_SUFFIX } from "../typechecker/types.js";
 import {
 	collectProgramTypes,
 	hasSharedRepr,
@@ -142,6 +142,9 @@ function isSimpleKey(s) {
 	return /^[A-Za-z0-9_ .-]*$/.test(s);
 }
 
+const isNamedOrPointer = (t) =>
+	t.kind === "named" || (t.kind === "pointer" && t.base?.kind === "named");
+
 export class JsonCodecGen extends TypeSpeller {
 	constructor(checker, pkgName, qualifiers, programs = []) {
 		super(pkgName, qualifiers, programs);
@@ -194,14 +197,14 @@ export class JsonCodecGen extends TypeSpeller {
 			case "basic":
 				return REFLECT_NAME[t.name] ?? unalias(t.name);
 			case "named": {
-				let name = t.name;
+				let name = t.name.replace(LOCAL_TYPE_SUFFIX, "");
 				const at = name.indexOf("$$");
 				if (at >= 0) {
 					const orig = name.slice(0, at);
 					const modPath = name.slice(at + 2).replaceAll("$", "/");
 					name = `${modPath}.${orig}`;
 				} else if (!name.includes(".")) {
-					name = `${this.pkgName}.${name}`;
+					name = `${this.declaringPackage(t)}.${name}`;
 				}
 				return t.typeArgs?.length
 					? `${name}[${t.typeArgs.map((a) => this.refl(a)).join(",")}]`
@@ -497,31 +500,45 @@ export class JsonCodecGen extends TypeSpeller {
 			if (e.addr || seen.has(key)) continue;
 			seen.add(key);
 			if (isInterface(e.t)) continue;
+			// A package that only lends its encoder knows its named types.
+			if (this.registerOnly && !isNamedOrPointer(e.t)) continue;
 			// Where one run-time shape serves both float sizes, a float64 that a
 			// float32 holds exactly encodes as the float32 it most likely is.
 			const body =
 				f32 && e.t.kind === "basic" && e.t.name === "float64"
 					? `\t\tif jsonrt.LooksFloat32(x) {\n\t\t\t${f32}(e, float32(x))\n\t\t} else {\n\t\t\t${e.name}(e, x)\n\t\t}`
 					: `\t\t${e.name}(e, x)`;
-			cases.push({ t: e.t, src: `\tcase ${this.spell(e.t)}:\n${body}` });
+			cases.push({
+				t: e.t,
+				src: `\tcase ${this.spell(e.t)}:\n${body}\n\t\treturn true`,
+			});
 		}
 		// JS numbers do not tell an int from a float64 or float32: whole numbers
 		// take the int cases, then float64, then float32.
 		const rank = ({ t }) =>
 			t.name === "float64" ? 1 : t.name === "float32" ? 2 : 0;
 		cases.sort((a, b) => rank(a) - rank(b));
+		const known = `${this.prefix}encKnown`;
 		this.out.push(
 			[
-				`func ${this.prefix}encAny(e *jsonrt.Enc, v any) {`,
+				`func ${known}(e *jsonrt.Enc, v any) bool {`,
 				"\tif v == nil {",
 				"\t\te.Null()",
-				"\t\treturn",
+				"\t\treturn true",
 				"\t}",
 				"\tswitch x := v.(type) {",
 				...cases.map((c) => c.src),
 				"\tdefault:",
 				"\t\t_ = x",
-				'\t\te.FailType("unsupported dynamic type")',
+				"\t\treturn false",
+				"\t}",
+				"}",
+				// Every package with codecs lends its dynamic encoder to the others,
+				// so a value of a type another package declares still encodes.
+				`var _ = jsonrt.RegisterEncoder(${known})`,
+				`func ${this.prefix}encAny(e *jsonrt.Enc, v any) {`,
+				`\tif !${known}(e, v) {`,
+				"\t\te.EncodeDynamic(v)",
 				"\t}",
 				"}",
 			].join("\n"),
@@ -1075,14 +1092,16 @@ export class JsonCodecGen extends TypeSpeller {
 
 	// Registers what the dynamic encoder handles, until nothing new appears.
 	addDynamicTypes() {
-		for (const n of DYNAMIC_BASICS) this.encFn({ kind: "basic", name: n });
 		const anyT = { kind: "basic", name: "any" };
-		this.encFn({ kind: "slice", elem: anyT });
-		this.encFn({
-			kind: "map",
-			key: { kind: "basic", name: "string" },
-			value: anyT,
-		});
+		if (!this.registerOnly) {
+			for (const n of DYNAMIC_BASICS) this.encFn({ kind: "basic", name: n });
+			this.encFn({ kind: "slice", elem: anyT });
+			this.encFn({
+				kind: "map",
+				key: { kind: "basic", name: "string" },
+				value: anyT,
+			});
+		}
 		for (const t of this.programTypes()) {
 			this.encFn(t, false);
 		}
@@ -1291,14 +1310,37 @@ function selectCodecEntry(gen, fn, argType) {
 	if (fn === "Decode") return gen.entryDecode(argType(0));
 }
 
+// Records that the build uses `json` when this package calls it; returns
+// whether the package has call sites (or misuses) of its own. One without
+// them still lends its types to the dynamic encoder once `json` is in use.
+// The flag is tracked per target so WASM-only use does not pull `json` into
+// JS output (and vice versa).
+function jsonTargets(checker) {
+	return checker.target === "both" || !checker.target
+		? ["js", "wasm"]
+		: [checker.target];
+}
+
+function noteJsonUse(options, sites, diagnostics, checker) {
+	if (sites.length > 0 && options.jsonBuild)
+		for (const t of jsonTargets(checker)) options.jsonBuild[t] = true;
+	return sites.length + diagnostics.length > 0;
+}
+
 // Generates the codec file for a package's `json` call sites.  Returns null
 // when it has none; otherwise { body, imports, diagnostics } and marks each call's
 // SelectorExpr with `_genEntry`, the entry point the WASM link calls instead.
-export function generateJsonCodecs(programs, checker, pkgName) {
+export function generateJsonCodecs(programs, checker, pkgName, options = {}) {
 	const { sites, diagnostics } = findSites(programs);
-	if (sites.length + diagnostics.length === 0) return null;
+	const registerOnly = !noteJsonUse(options, sites, diagnostics, checker);
+	if (registerOnly && !jsonTargets(checker).some((t) => options.jsonBuild?.[t]))
+		return null;
 	const qualifiers = new Map();
 	const gen = new JsonCodecGen(checker, pkgName, qualifiers, programs);
+	if (registerOnly) {
+		gen.registerOnly = true;
+		gen.flagDynamic();
+	}
 	const pending = [];
 	for (const { call, fn, program } of sites) {
 		// A site inside a generic function is shared by every instance, so a type
@@ -1323,6 +1365,8 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 		pending.push([call.func, entry, fn === "Encode" || fn === "Decode"]);
 	}
 	gen.finish();
+	if (registerOnly && !gen.out.some((o) => o.includes("RegisterEncoder")))
+		return null;
 	for (const [sel, entry, isStream] of pending) {
 		sel._genEntry = entry;
 		if (isStream) sel._jsonStream = true;

@@ -8,6 +8,7 @@ import {
 	ANY,
 	BASIC_TYPES,
 	COMPARABLE,
+	DECLARED_ANY,
 	defaultType,
 	displayTypeName,
 	isAny,
@@ -212,7 +213,8 @@ export const resolveMethods = {
 		if (!node) return ANY;
 		switch (node.kind) {
 			case "TypeName": {
-				if (BASIC_TYPES[node.name]) return BASIC_TYPES[node.name];
+				if (BASIC_TYPES[node.name])
+					return node.name === "any" ? DECLARED_ANY : BASIC_TYPES[node.name];
 				if (node.name === "comparable") return COMPARABLE;
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
@@ -343,10 +345,25 @@ export const resolveMethods = {
 		try {
 			const lit = foldConstExpr(size, resolve);
 			const n = lit ? Number(lit.value) : Number.NaN;
-			return Number.isInteger(n) && n >= 0 ? n : size;
+			if (Number.isInteger(n) && n >= 0) return n;
 		} catch {
-			return size;
+			// fall through to the checker's evaluator
 		}
+		// `[math.MaxInt8]T`: a package constant the AST folder cannot see.
+		const q = this._constIntValue(size, scope);
+		if (q === null || !Number.isInteger(q) || q < 0) return size;
+		this._useQualifiedConsts(size);
+		return q;
+	},
+
+	// `pkg.K` inside a folded array length counts as using the import.
+	_useQualifiedConsts(node) {
+		if (!node || typeof node !== "object") return;
+		if (node.kind === "SelectorExpr" && node.expr?.kind === "Ident")
+			this.globals.lookup(node.expr.name);
+		for (const key of ["expr", "left", "right", "operand"])
+			this._useQualifiedConsts(node[key]);
+		for (const arg of node.args ?? []) this._useQualifiedConsts(arg);
 	},
 
 	_resolveArrayTypeNode(node, scope) {

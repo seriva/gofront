@@ -198,6 +198,34 @@ func (e *Enc) FailType(typ string) {
 	e.Fail(&UnsupportedTypeError{typ})
 }
 
+// encoders are the dynamic encoders every package with generated codecs
+// registers at start-up: each encodes the values of its own package's types
+// and reports whether it knew the value.
+type encoderList struct {
+	fns []func(*Enc, any) bool
+}
+
+var encoders = &encoderList{}
+
+// RegisterEncoder adds a package's dynamic encoder. Each target fills its own
+// list from the package initializers it runs, so the list is built through a local.
+func RegisterEncoder(f func(*Enc, any) bool) bool {
+	list := encoders
+	list.fns = append(list.fns, f)
+	return true
+}
+
+// EncodeDynamic encodes v with the first registered encoder that knows its
+// type, and fails the encoding when none does.
+func (e *Enc) EncodeDynamic(v any) {
+	for _, f := range encoders.fns {
+		if f(e, v) {
+			return
+		}
+	}
+	e.FailType("unsupported dynamic type")
+}
+
 // Lit appends s, which is already valid JSON text.
 func (e *Enc) Lit(s string) {
 	putString(e, s)

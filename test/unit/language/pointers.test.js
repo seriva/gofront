@@ -825,6 +825,121 @@ func main() {
 	);
 });
 
+section("Pointer conversions and comma-ok boxing");
+
+test("a method called on a converted struct pointer runs the target type's method (js)", () => {
+	const { js, errors } = compile(`package main
+type Base struct{ n int }
+type S Base
+func (s *S) Inc() { s.n++ }
+func main() {
+	b := Base{1}
+	(*S)(&b).Inc()
+	println(b.n)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2");
+});
+
+test("a variable bound by a comma-ok map lookup can be address-taken", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]int{"k": 3}
+	x, y := m["k"]
+	p := &x
+	*p = 9
+	fmt.Println(x, y)
+}
+`,
+		"9 true\n",
+	);
+});
+
+test("an address-taken variable assigned by comma-ok forms keeps its box", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var i any = 3
+	x, ok := i.(int)
+	p := &x
+	*p = 9
+	fmt.Println(x, ok)
+	var y int
+	var ok2 bool
+	q := &y
+	y, ok2 = i.(int)
+	*q += 1
+	fmt.Println(y, ok2)
+	m := map[string]int{"k": 3}
+	var z int
+	r := &z
+	z, ok2 = m["k"]
+	*r += 1
+	fmt.Println(z, ok2)
+}
+`,
+		"9 true\n4 true\n4 true\n",
+	);
+});
+
+test("method values and expressions on a nil pointer receiver do not dereference it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ v T }
+
+func (b *Box[T]) M() int { return 0 }
+
+type S struct{}
+
+func (s *S) Ping() { fmt.Println("ping") }
+
+func main() {
+	var b *Box[int]
+	g := (*Box[int]).M
+	fmt.Println(g(b))
+	var s *S
+	f := s.Ping
+	f()
+	h := (*S).Ping
+	h(s)
+}
+`,
+		"0\nping\nping\n",
+	);
+});
+
+test("len and cap of a nil array pointer evaluate the call and return N", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func getNil() *[3]int {
+	fmt.Println("getNil")
+	return nil
+}
+
+func main() {
+	fmt.Println(len(getNil()))
+	fmt.Println(cap(getNil()))
+	var p *[4]int
+	fmt.Println(len(p), cap(p))
+}
+`,
+		"getNil\n3\ngetNil\n3\n4 4\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

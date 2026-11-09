@@ -303,6 +303,9 @@ export const FLOAT64 = { kind: "basic", name: "float64" };
 export const STRING = { kind: "basic", name: "string" };
 export const BOOL = { kind: "basic", name: "bool" };
 export const ANY = { kind: "basic", name: "any" };
+// `any` written in source. Untyped JS interop also yields plain ANY, which stays
+// freely assignable; only a declared `any` needs a type assertion.
+export const DECLARED_ANY = { kind: "basic", name: "any", _declared: true };
 export const TAINTED_ANY = { kind: "basic", name: "any", _tainted: true };
 export const VOID = { kind: "basic", name: "void" };
 export const NIL = { kind: "basic", name: "nil" };
@@ -602,9 +605,13 @@ export function embeddedFieldName(f) {
 		.replace(/\$\$.*$/, "");
 }
 
+// A function-local type shadowed by another type is renamed `Name__L<n>`.
+export const LOCAL_TYPE_SUFFIX = /__L\d+/;
+
 // Go-source stdlib names are mangled to `Name$$path` (`List$$container$list`);
 // diagnostics show them qualified, as Go does (`list.List`).
 export function displayTypeName(name) {
+	if (typeof name === "string") name = name.replace(LOCAL_TYPE_SUFFIX, "");
 	const i = typeof name === "string" ? name.indexOf("$$") : -1;
 	if (i < 0) return name;
 	return `${name

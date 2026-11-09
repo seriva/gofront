@@ -15,6 +15,7 @@
 //   TemplFor    { kind, stmtTokens, body: TemplNode[] }
 //   TemplSwitch { kind, exprTokens, cases: TemplCase[] }
 //   TemplCase   { kind, caseTokens: tokens | null (null = default), body: TemplNode[] }
+//               (a `case a, b:` also carries `exprs`, one expression per value)
 //
 // Go expressions embedded in templ (`{ expr }`, attribute values, `if`
 // conditions, `switch` and `case` expressions, `@Comp(...)` calls) and `for`
@@ -80,6 +81,34 @@ function parseExprTokens(tokens, allowEmpty = true) {
 	} catch (exprError) {
 		return { expr: null, exprError };
 	}
+}
+
+// Parses `tokens` as a comma-separated expression list (`case 1, 2:`). `expr`
+// and `exprError` describe the first expression (or the first error); `exprs`
+// holds every parsed expression.
+function parseExprListTokens(tokens) {
+	if (!tokens || tokens.length === 0) return { expr: null };
+	const parts = [[]];
+	let depth = 0;
+	for (const t of trimSemicolons(tokens ?? [])) {
+		if (t.type === T.LPAREN || t.type === T.LBRACKET || t.type === T.LBRACE)
+			depth++;
+		else if (
+			t.type === T.RPAREN ||
+			t.type === T.RBRACKET ||
+			t.type === T.RBRACE
+		)
+			depth--;
+		if (t.type === T.COMMA && depth === 0) parts.push([]);
+		else parts[parts.length - 1].push(t);
+	}
+	const exprs = [];
+	for (const part of parts) {
+		const parsed = parseExprTokens(part, false);
+		if (parsed.exprError) return { expr: null, exprError: parsed.exprError };
+		exprs.push(parsed.expr);
+	}
+	return { expr: exprs[0] ?? null, exprs };
 }
 
 // Parses an `if` condition; the lexer may leave the `if` keyword in front.
@@ -341,7 +370,7 @@ export class TemplParser extends Parser {
 				cases.push(
 					attach(
 						{ kind: "TemplCase", caseTokens, body },
-						isDefault ? { expr: null } : parseExprTokens(caseTokens),
+						isDefault ? { expr: null } : parseExprListTokens(caseTokens),
 					),
 				);
 			} else {

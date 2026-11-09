@@ -73,6 +73,8 @@ export const statementCheckMethods = {
 	_checkDefineCommaOkAssert(stmt, rhs, scope) {
 		if (!stmt.rhs[0]?._commaOk) return false;
 		this._declareDefineVars(stmt, [rhs[0], BOOL], scope);
+		if (stmt.lhs.every((e) => e._redecl || (e.name ?? e) === "_"))
+			this.err("no new variables on left side of :=", stmt.lhs[0]);
 		stmt._rhsTypes = [rhs[0], BOOL];
 		return true;
 	},
@@ -103,6 +105,7 @@ export const statementCheckMethods = {
 		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return false;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this.assertAssignable(resolvedBase.key, keyType, stmt.rhs[0].index);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
@@ -162,6 +165,7 @@ export const statementCheckMethods = {
 		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return null;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this.assertAssignable(resolvedBase.key, keyType, stmt.rhs[0].index);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
@@ -391,9 +395,15 @@ export const statementCheckMethods = {
 	// `case e:` compares `tag == e`, so `e` must convert to the tag's type
 	// (or the other way round for typed values).
 	_checkCaseValue(tag, e) {
-		if (!tag) return;
-		const tagType = this.resolveType(tag._type);
 		const caseType = this.resolveType(e._type);
+		if (!tag) {
+			this._checkTaglessCase(e, caseType);
+			return;
+		}
+		let tagType = this.resolveType(tag._type);
+		// `switch "foo" {` compares as the constant's default type.
+		if (isUntyped(tagType) && !isNil(tagType) && tagType.base !== "bool")
+			tagType = defaultType(tagType);
 		if (this._caseValueUnchecked(tagType, caseType)) return;
 		if (isUntyped(caseType)) {
 			if (this._isUntypedAssignable(tagType, caseType)) return;
@@ -410,6 +420,19 @@ export const statementCheckMethods = {
 			return;
 		this.err(
 			`invalid case ${exprText(e)} in switch on ${exprText(tag)} (mismatched types ${typeStr(caseType)} and ${typeStr(tagType)})`,
+			e,
+		);
+	},
+
+	// A tagless `switch` is `switch true`, so every case must be boolean.
+	_checkTaglessCase(e, caseType) {
+		if (!caseType || caseType._tainted || caseType.kind === "typeParam") return;
+		if (isAny(caseType) || isNil(caseType) || isBool(caseType)) return;
+		if (isUntyped(caseType) && caseType.base === "bool") return;
+		const under = this.resolveType(caseType.underlying ?? caseType);
+		if (isBool(under)) return;
+		this.err(
+			`invalid case ${exprText(e)} in switch (mismatched types ${typeStr(caseType)} and bool)`,
 			e,
 		);
 	},

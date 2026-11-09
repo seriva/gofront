@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertProgramOutput,
 	compile,
+	compileHybridProject,
 	runJs,
 	section,
 	test,
@@ -499,3 +500,61 @@ func main() {
 		"[97 98 99] 3\nmap[k:1] 2\n",
 	);
 });
+
+section("Slice element copies");
+
+test("append and copy clone struct elements", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N, M int }
+
+func main() {
+	a := []P{{1, 1}}
+	b := append([]P(nil), a...)
+	b[0].N = 50
+	fmt.Println(a)
+	c := make([]P, 1)
+	copy(c, a)
+	c[0].N = 7
+	fmt.Println(a, c)
+	d := append(a, a...)
+	d[1].N = 9
+	fmt.Println(a, d)
+}
+`,
+		"[{1 1}]\n[{1 1}] [{7 1}]\n[{1 1}] [{1 1} {9 1}]\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a pointer into another package's slice sees a later element store (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"p/p.go": `//gofront:target ${target}
+package p
+
+type S struct{ A int }
+
+func First(xs []S) *S { return &xs[0] }
+`,
+			"main.go": `//gofront:target ${target}
+package main
+
+import (
+	"fmt"
+	"./p"
+)
+
+func main() {
+	ys := []p.S{{1}, {2}}
+	q := p.First(ys)
+	ys[0] = p.S{9}
+	fmt.Println(q.A)
+}
+`,
+		});
+		assertEqual(lines.join("\n"), "9");
+	});
+}

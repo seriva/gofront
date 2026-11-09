@@ -36,6 +36,7 @@ import {
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
+	renameLocalTypes,
 	withOriginalTypeNames,
 } from "./link/stdlib.js";
 import {
@@ -43,7 +44,7 @@ import {
 	registerPackageUnit,
 	wasmMarker,
 } from "./link/wasm.js";
-import { lower } from "./lower/index.js";
+import { lower, takesElementAddress } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
 import { TemplParser } from "./parser/templ.js";
 import {
@@ -300,6 +301,9 @@ function resolveImports(
 					isDependency: true,
 				});
 				if (!alreadyBundled) preambles.push(dep);
+				// A dependency that hands out `&xs[i]` makes whole-element
+				// stores in this package write in place too.
+				if (dep.elemAddrTaken) checker.depElemAddrTaken = true;
 
 				// Target import rules for local packages
 				const impNode = {
@@ -441,6 +445,7 @@ export function compileFiles(files, options = {}) {
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
 		typeOwners: options.typeOwners ?? new Map(),
+		jsonBuild: options.jsonBuild ?? { js: false, wasm: false },
 	};
 	const outputDir =
 		options.outputDir ??
@@ -596,6 +601,9 @@ export function compileFiles(files, options = {}) {
 	return {
 		pkgName,
 		target: pkgTarget,
+		elemAddrTaken:
+			checker.depElemAddrTaken === true ||
+			programs.some((p) => takesElementAddress(p.decls)),
 		js: merged.js,
 		css: allCss,
 		wasm,
@@ -638,7 +646,9 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
-	if (renamed.size > 0) for (const p of programs) _parseCache.delete(p._path);
+	const locals = renameLocalTypes(programs);
+	if (renamed.size > 0 || locals)
+		for (const p of programs) _parseCache.delete(p._path);
 	return renamed;
 }
 

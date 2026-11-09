@@ -214,11 +214,13 @@ export const templGenMethods = {
 		this.line(`switch (${exprJs}) {`);
 		this.indented(() => {
 			for (const c of cases) {
-				const label =
-					c.caseTokens === null
-						? "default"
-						: `case ${this._genTemplExpr(c, '""')}`;
-				this.line(`${label}: {`);
+				if (c.caseTokens === null) this.line("default: {");
+				else {
+					// One JS label per value of `case a, b:`.
+					if (c.exprError) throw c.exprError;
+					const labels = (c.exprs ?? []).map((e) => `case ${this.genExpr(e)}:`);
+					this.line(`${labels.join(" ") || 'case "":'} {`);
+				}
 				this.indented(() => this._genTemplNodes(c.body, p));
 				this.line(`break; }`);
 			}

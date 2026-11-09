@@ -5,7 +5,12 @@
 import { foldConstExpr } from "../../typechecker/const-fold.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import { _someNode } from "./prescan.js";
-import { isStructType, toWasmType, variadicAsSlice } from "./types.js";
+import {
+	isStringType,
+	isStructType,
+	toWasmType,
+	variadicAsSlice,
+} from "./types.js";
 
 // Package-level `const` declarations (iota is already substituted by the
 // parser).  Literals and expressions the folder can reduce become BasicLits in
@@ -169,6 +174,25 @@ function _zeroArrayConst(goType, mod, depth = 0) {
 	return out;
 }
 
+// True when the zero value of `t` holds a string (a string, or a struct or
+// array containing one). A constant expression cannot build the empty string,
+// so such globals get their zero value from the start function.
+function _zeroHasString(t, mod, depth = 0) {
+	if (!t || depth > 4 || _isPointerGoType(t, mod)) return false;
+	if (isStringType(t, mod.checker)) return true;
+	const shape = _arrayShape(t, mod.checker);
+	if (shape) return _zeroHasString(shape.elem, mod, depth + 1);
+	const w = toWasmType(t, mod.checker, mod);
+	if (typeof w === "object" && typeof w?.typeIndex === "number") {
+		const info = Array.from(mod.structTypes.values()).find(
+			(x) => x.typeIndex === w.typeIndex,
+		);
+		if (info)
+			return info.fields.some((f) => _zeroHasString(f.goType, mod, depth + 1));
+	}
+	return false;
+}
+
 // Types of the names in `var a, b = f()` / `var v, ok = m[k]`: one value fills
 // every name.
 function _spreadValueTypes(spec, value) {
@@ -263,6 +287,9 @@ export function _collectPackageGlobals(progs, mod, checker) {
 							];
 						}
 					}
+
+					if (values.length === 0 && _zeroHasString(rawType, mod))
+						needsRuntimeZero = true;
 
 					let litNode = values?.[i];
 					let sign = 1;

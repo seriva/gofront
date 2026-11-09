@@ -169,7 +169,7 @@ func (re *Regexp) FindStringIndex(s string) []int {
 // FindAllString returns a slice of all successive matches of the expression;
 // a negative n means all matches.
 func (re *Regexp) FindAllString(s string, n int) []string {
-	out := []string{}
+	var out []string
 	for _, m := range re.matches(s, n) {
 		out = append(out, text(m.([]any)[0]))
 	}
@@ -181,14 +181,14 @@ func (re *Regexp) FindAllString(s string, n int) []string {
 func (re *Regexp) FindStringSubmatch(s string) []string {
 	m := re.re.exec(s)
 	if m == nil {
-		return []string{}
+		return nil
 	}
 	return groups(m)
 }
 
 // FindAllStringSubmatch is the 'All' version of FindStringSubmatch.
 func (re *Regexp) FindAllStringSubmatch(s string, n int) [][]string {
-	out := [][]string{}
+	var out [][]string
 	for _, m := range re.matches(s, n) {
 		out = append(out, groups(m))
 	}

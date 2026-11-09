@@ -313,3 +313,55 @@ func main() {
 		"9 true\n5 5\nruntime error: invalid memory address or nil pointer dereference\n",
 	);
 });
+
+test("a promoted value method through a nil embedded pointer panics recoverably", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+
+func (b Base) Val() int { return b.n }
+
+type P struct{ *Base }
+type Q struct{ P }
+
+func try(f func()) {
+	defer func() { fmt.Println(recover() != nil) }()
+	f()
+}
+
+func main() {
+	try(func() { fmt.Println(P{}.Val()) })
+	try(func() { fmt.Println(Q{}.Val()) })
+	fmt.Println(P{&Base{4}}.Val())
+}
+`,
+		"true\ntrue\n4\n",
+	);
+});
+
+test("a method value on a nil interface panics when it is evaluated", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type N interface{ Name() string }
+type T struct{}
+
+func (T) Name() string { return "t" }
+
+func main() {
+	var ok N = T{}
+	f := ok.Name
+	fmt.Println(f())
+	defer func() { fmt.Println(recover().(error).Error()) }()
+	var n N
+	_ = n.Name
+}
+`,
+		"t\nruntime error: invalid memory address or nil pointer dereference\n",
+	);
+});

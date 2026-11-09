@@ -30,6 +30,7 @@ import {
 	_scanImportsInBody,
 	_scanInterfaceCallNodes,
 	_scanInterfaceTypeDecls,
+	_someNode,
 	_usesAnyEq,
 } from "./prescan.js";
 import { pruneUnusedFuncs } from "./prune-funcs.js";
@@ -661,6 +662,25 @@ export function compileWasmModule(
 				],
 				BOOL_T,
 				"any_eq",
+			),
+		);
+	}
+	// `x.(T)` outside comma-ok form panics with the dynamic type's name.
+	mod.usesTypeAssertFail = funcDecls.some((fn) =>
+		_someNode(fn.body, (n) => n.kind === "TypeAssertExpr" && !n._commaOk),
+	);
+	if (mod.usesTypeAssertFail) {
+		funcDecls.push(
+			helper(
+				"__ta_fail",
+				[
+					{ name: "v", type: ANY_T },
+					{ name: "src", type: STR_T },
+					{ name: "target", type: STR_T },
+					{ name: "iface", type: BOOL_T },
+				],
+				null,
+				"ta_fail",
 			),
 		);
 	}

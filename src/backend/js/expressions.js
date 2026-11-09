@@ -5,6 +5,7 @@ import {
 	rootIdentName,
 	someChild,
 } from "../../lower/index.js";
+import { hasCallOrReceive } from "../../lower/walk.js";
 import { constIntValue } from "../../typechecker/const-fold.js";
 import {
 	BROWSER_GLOBALS,
@@ -19,6 +20,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
@@ -361,6 +363,7 @@ const BUILTIN_GEN = {
 	append: (s, e) => s.genAppend(e),
 	len: (s, e) => s._genBuiltinLen(e),
 	cap: (s, e) => {
+		if (e._constLen != null) return s._genConstLen(e);
 		s.useHelper("slice");
 		return `__cap(${s.genExpr(e.args[0])})`;
 	},
@@ -372,13 +375,11 @@ const BUILTIN_GEN = {
 	copy: (s, e) => {
 		const dst = s.genExpr(e.args[0]);
 		const src = s._genSliceSource(e.args[1]);
-		// Array elements are values: the copied elements must not alias src.
+		// Array and struct elements are values: the copied elements must not
+		// alias src.
 		const t = e.args[1]._type;
 		const elem = (t?.kind === "named" ? t.underlying : t)?.elem;
-		const clone =
-			s._aggregateBase(elem)?.kind === "array"
-				? s._cloneJs(elem, "__e")
-				: "__e";
+		const clone = s._aggregateBase(elem) ? s._cloneJs(elem, "__e") : "__e";
 		const items =
 			clone === "__e"
 				? "(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))"
@@ -416,8 +417,6 @@ const BUILTIN_GEN = {
 		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
 	panic: (s, e) => {
 		const arg = s.genExpr(e.args[0]);
-		if (s._isStringExprType(e.args[0]?._type))
-			return `(() => { throw new Error(${arg}); })()`;
 		s.useHelper("panicRt");
 		return `__gopanicv(${arg})`;
 	},
@@ -589,6 +588,22 @@ export const expressionGenMethods = {
 				expr._pbsWrapping = false;
 			}
 		}
+		if (
+			expr._ifaceSrc?.kind === "typeParam" &&
+			!expr._tpBoxing &&
+			!expr._ifaceKeyDyn &&
+			this._typeParamZeroFactory(expr._ifaceSrc.name)
+		) {
+			// A type parameter's value entering an interface is boxed and
+			// tagged by the instantiated type (see `__ti`).
+			expr._tpBoxing = true;
+			try {
+				const f = this._typeParamZeroFactory(expr._ifaceSrc.name);
+				return `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${this.genExpr(expr)})`;
+			} finally {
+				expr._tpBoxing = false;
+			}
+		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
 		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
 			const tag = this._dynTypeTag(expr._ifaceSrc);
@@ -640,7 +655,9 @@ export const expressionGenMethods = {
 				// A named untyped constant used as an int64 operand: its
 				// declaration holds a Number, so emit the exact BigInt.
 				const lit64 =
-					expr._is64Bit && expr._type?.kind === "untyped" && expr._const
+					expr._is64Bit &&
+					expr._const &&
+					(expr._type?.kind === "untyped" || this._is64BitInt(expr._type))
 						? this._gen64BitFoldedConst(expr, expr._const)
 						: null;
 				return lit64 ?? expr.name;
@@ -831,8 +848,12 @@ export const expressionGenMethods = {
 	// Pseudo type object for an AST type node (used where no checker type is available).
 	_typeFromNode(node) {
 		if (!node) return null;
-		if (node.kind === "TypeName" && this.structNames.has(node.name))
-			return { kind: "named", name: node.name, underlying: { kind: "struct" } };
+		if (node.kind === "TypeName" || node.kind === "SelectorExpr") {
+			// `pkg.S` of a bundled package names the class `S`.
+			const name = this.getTypeName(node);
+			if (name && this.structNames.has(name))
+				return { kind: "named", name, underlying: { kind: "struct" } };
+		}
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
 		return null;
@@ -1100,14 +1121,9 @@ export const expressionGenMethods = {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
 			const rt = expr._methodExprRecv;
-			const nilSafe =
-				rt?.kind === "pointer" &&
-				rt.base?.kind === "named" &&
-				!rt.base.typeArgs?.length
-					? rt.base.name
-					: null;
-			if (nilSafe && this.nilSafeMethods?.has(`${nilSafe}.${expr.field}`))
-				return `((recv, ...args) => ${nilSafe}.prototype.${expr.field}.call(recv, ...args))`;
+			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
+			if (protoCls)
+				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(recv, ...args))`;
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
@@ -1337,7 +1353,11 @@ export const expressionGenMethods = {
 	// src/lower/fmt-formatters.js): a JS value does not know its Go type, so
 	// the type argument boxes it as converting it to an `any` does.
 	_genTypeParamBox(a) {
+		// Boxed below: skip the boxing of a value entering an interface.
+		const wasBoxing = a._tpBoxing;
+		a._tpBoxing = true;
 		const js = this.genExpr(a);
+		a._tpBoxing = wasBoxing;
 		const tpf = this._typeParamZeroFactory(a._type.name);
 		return tpf ? `(${tpf}.b ?? ${tpf}.fb ?? ((__v) => __v))(${js})` : js;
 	},
@@ -1416,8 +1436,15 @@ export const expressionGenMethods = {
 					);
 					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
 				}
-				const nilSafe = this._nilSafeMethodClass(expr);
-				if (nilSafe) return `${nilSafe}.prototype.${expr.field}.bind(${base})`;
+				// A pointer receiver may be nil: bind through the prototype so
+				// `s.M` on a nil pointer does not read `.M` off null.
+				const protoCls = this._ptrMethodProtoClass(
+					expr.expr._type,
+					expr.field,
+					expr,
+				);
+				if (protoCls)
+					return `${protoCls}.prototype.${expr.field}.bind(${base})`;
 				return `${sel}.bind(${base})`;
 			}
 			return sel;
@@ -1556,8 +1583,9 @@ export const expressionGenMethods = {
 		if (!expr._commaOk) {
 			// plain assertion: panic if check fails (matches Go behavior)
 			if (check === "true") return src; // can't check at runtime — pass through
+			this.useHelper("ifaceBox");
 			return wrap(
-				`(${check} ? ${out} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
+				`(${check} ? ${out} : (() => { throw ${this._typeAssertFailJs(expr, val)}; })())`,
 			);
 		}
 		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct
@@ -1566,6 +1594,25 @@ export const expressionGenMethods = {
 		const valT = this._typeFromNode(expr.type);
 		const okOut = this._aggregateBase(valT) ? this._cloneJs(valT, out) : out;
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
+	},
+
+	// The error a failed `x.(T)` throws: Go's `interface conversion: ...` text
+	// naming the static interface type, the dynamic type and the target.
+	_typeAssertFailJs(expr, val) {
+		const target = expr._type;
+		const u = this._underlyingOf(target);
+		const methods =
+			u?.kind === "interface" ? [...(u.methods?.keys() ?? [])] : [];
+		const tName = this._assertTypeName(target) ?? goTypeName(expr.type);
+		const src = this._assertTypeName(expr.expr?._type) ?? "interface {}";
+		return `__tafail(${JSON.stringify(src)}, ${val}, ${JSON.stringify(tName)}, ${methods.length ? JSON.stringify(methods.sort()) : "null"})`;
+	},
+
+	// Go's spelling of the static type in a failed assertion message; null for
+	// `any` (`interface {}`).
+	_assertTypeName(t) {
+		if (!t || isAny(t)) return null;
+		return t.name === "error" ? "error" : goTypeName(t);
 	},
 
 	// `csv.ParseError` names the class of the bundled Go-source package type.
@@ -1614,7 +1661,7 @@ export const expressionGenMethods = {
 		const namedInfo = this._namedBoxInfo(named);
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
 		// User-declared interfaces: check the dynamic value has every method.
-		if (!name.includes(".") && named?.underlying?.kind === "interface")
+		if (named?.underlying?.kind === "interface")
 			return this._ifaceMethodCheck(
 				val,
 				[...named.underlying.methods.keys()],
@@ -1677,6 +1724,11 @@ export const expressionGenMethods = {
 			this._isStructPtrTypeNode(typeNode) ||
 			(typeNode?.kind === "PointerType" && typeNode._assertType)
 		) {
+			this.useHelper("ifaceBox");
+			return `__unnil(${val})`;
+		}
+		if (typeNode?._assertType?.kind === "slice") {
+			// A nil slice in an interface is a tagged empty array.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
@@ -1795,6 +1847,9 @@ export const expressionGenMethods = {
 			if (result !== undefined) return result;
 		}
 
+		const converted = this._convertedPointerMethodCall(expr);
+		if (converted) return converted;
+
 		const nilSafe = this._nilSafeMethodClass(expr.func);
 		if (nilSafe) {
 			// The method tests its receiver for nil: call it through the
@@ -1823,6 +1878,38 @@ export const expressionGenMethods = {
 		const recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
 		const args = this._genCallArgs(expr);
 		return `${recv}.${expr.func.field}(${args})`;
+	},
+
+	// `(*S)(p).M()` where `p` points at another struct type: the JS object keeps
+	// its own class, so call S's prototype method on it.
+	_convertedPointerMethodCall(expr) {
+		const sel = expr.func;
+		if (sel?.kind !== "SelectorExpr" || sel._isMethodExpr) return null;
+		let recv = sel.expr;
+		while (recv?.kind === "ParenExpr") recv = recv.expr;
+		if (recv?._isTypeConversion !== true) return null;
+		const target = recv._conversionTargetType;
+		const from = recv.args?.[0]?._type;
+		if (target?.kind !== "pointer" || target.base?.kind !== "named")
+			return null;
+		if (from?.kind !== "pointer" || from.base === target.base) return null;
+		if (target.base.underlying?.kind !== "struct") return null;
+		const cls = target.base.name;
+		if (!target.base.methods?.has(sel.field)) return null;
+		const rest = this._genCallArgs(expr);
+		const obj = this.genExpr(recv.args[0]);
+		return `${cls}.prototype.${sel.field}.call(${rest ? `${obj}, ${rest}` : obj})`;
+	},
+
+	// The class whose prototype holds pointer-receiver method `field`, for a
+	// pointer to a struct type that declares it directly (not promoted), so a
+	// method value or expression can reach it with a nil receiver; else null.
+	_ptrMethodProtoClass(ptr, field, sel) {
+		if (ptr?.kind !== "pointer" || ptr.base?.kind !== "named") return null;
+		if (ptr.base.underlying?.kind !== "struct") return null;
+		if (sel && this._promotedPath(sel)) return null;
+		if (!ptr.base.methods?.has(field)) return null;
+		return ptr.base.name;
 	},
 
 	// The class of a pointer-receiver struct method that accepts a nil receiver
@@ -1987,6 +2074,16 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	// `len`/`cap` of an array or array pointer is a constant, but an operand
+	// containing a call or receive is still evaluated (and a nil pointer is
+	// not dereferenced).
+	_genConstLen(expr) {
+		const arg = expr.args[0];
+		if (arg && hasCallOrReceive(arg))
+			return `(${this.genExpr(arg)}, ${expr._constLen})`;
+		return String(expr._constLen);
+	},
+
 	_isInterfaceType(t) {
 		if (!t) return false;
 		if (t.kind === "interface") return true;
@@ -1994,7 +2091,7 @@ export const expressionGenMethods = {
 	},
 
 	_genBuiltinLen(expr) {
-		if (expr._constLen != null) return String(expr._constLen);
+		if (expr._constLen != null) return this._genConstLen(expr);
 		const arg = expr.args[0];
 		const t = arg?._type;
 		const wrapField = this._namedWrapperField(t, arg);
@@ -2058,7 +2155,7 @@ export const expressionGenMethods = {
 		const st = expr._type ?? expr.args[0]._type;
 		const elemT = (st?.kind === "named" ? st.underlying : st)?.elem;
 		const spreadOf = (a) =>
-			this._aggregateBase(elemT)?.kind === "array"
+			this._aggregateBase(elemT)
 				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
 				: `...(${this._genSliceSource(a)} ?? [])`;
 		const is64Elem = this._is64BitInt(elemT);
@@ -2572,7 +2669,13 @@ export const expressionGenMethods = {
 			return this.getTypeName(typeNode.expr);
 		if (typeNode.kind === "SelectorExpr") {
 			const base = this.getTypeName(typeNode.expr);
-			if (this.bundledPackages.has(base)) return typeNode.field;
+			if (this.bundledPackages.has(base)) {
+				// `p.A` for `type A = Base` in p: no class is emitted for A.
+				const t = this.checker?.types.get(`${base}.${typeNode.field}`);
+				return t?.kind === "named" && t.name && !t.name.includes("$$")
+					? t.name
+					: typeNode.field;
+			}
 			return `${base}.${typeNode.field}`;
 		}
 		return null;
@@ -2958,6 +3061,9 @@ export const expressionGenMethods = {
 		const nilMap = this._genNilMapCompare(expr);
 		if (nilMap) return nilMap;
 
+		const anyNil = this._genAnyNilCompare(expr);
+		if (anyNil) return anyNil;
+
 		const tpEq = this._genTypeParamEquality(expr);
 		if (tpEq) return tpEq;
 
@@ -3159,6 +3265,25 @@ export const expressionGenMethods = {
 		);
 	},
 
+	// The `any` operand of `x == nil` / `x != nil` (JS documents a nil slice
+	// stored in an `any` as equal to nil, though it keeps a type tag), or null.
+	_anyNilOperand(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		const operand = this._isNilLiteral(expr.right)
+			? expr.left
+			: this._isNilLiteral(expr.left)
+				? expr.right
+				: null;
+		return operand && this._isIfaceType(operand._type) ? operand : null;
+	},
+
+	_genAnyNilCompare(expr) {
+		const operand = this._anyNilOperand(expr);
+		if (!operand) return null;
+		const test = `((__a) => __a == null || __a.__nils === true)(${this.genExpr(operand)})`;
+		return expr.op === "==" ? test : `!${test}`;
+	},
+
 	_isNilLiteral(expr) {
 		return (
 			(expr.kind === "Ident" && expr.name === "nil") ||
@@ -3177,6 +3302,7 @@ export const expressionGenMethods = {
 			return null;
 		if (this._isStructEquality(expr) || this._isIntDivision(expr)) return null;
 		if (this._nilMapOperand(expr)) return null;
+		if (this._anyNilOperand(expr)) return null;
 		if (this._isIfaceEquality(expr)) return null;
 		if (expr.op === "&^") return "&";
 		if (expr.op === "==" || expr.op === "!=") {
@@ -3417,6 +3543,12 @@ export const expressionGenMethods = {
 		return `${wrap}(64, (${l}) ${op} (${r}))`;
 	},
 
+	// `uint` / `uintptr`: 64-bit unsigned values held as JS numbers.
+	_isUintWord(type) {
+		const name = this._typeName(type);
+		return name === "uint" || name === "uintptr";
+	},
+
 	_needsStrictOp(op, type) {
 		if (type?.kind === "typeParam")
 			return (
@@ -3426,6 +3558,7 @@ export const expressionGenMethods = {
 			return STRICT_OPS.has(op) || op === "<<" || op === ">>" || op === "&^";
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
+		if (op === "-" && this._isUintWord(type)) return true;
 		if (op === "<<" || op === ">>")
 			return WIDE_INT_NAMES.has(this._typeName(type));
 		return this.isIntType(type) && (op === "/" || op === "%");
@@ -3546,6 +3679,8 @@ export const expressionGenMethods = {
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
+		if (op === "-" && this._isUintWord(type))
+			return `((__d) => __d < 0 ? __d + 2 ** 64 : __d)((${l}) - (${r}))`;
 		if (op === "<<" || op === ">>") {
 			// 64-bit semantics: operand first, then count (Go order); a negative
 			// count panics and the result wraps to 64 bits.

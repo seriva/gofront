@@ -198,7 +198,9 @@ export const constantCheckMethods = {
 		);
 		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
 		const i = constIntValue(node._const);
-		const range = i === null ? null : this._intRange(target);
+		const range = this._intRange(target);
+		if (i === null && range)
+			return this._reportTruncatedConst(target, node, ctx);
 		// A float or complex target holds the constant as a Number: Go rounds
 		// the same way, so the JS backend has nothing to warn about.
 		if (!range && node.kind) {
@@ -224,6 +226,24 @@ export const constantCheckMethods = {
 			ctx
 				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`
 				: `${shown} overflows ${typeStr(target)}`,
+			node,
+		);
+		return true;
+	},
+
+	// `var i int = 1.5`: an untyped float constant with a fractional part
+	// cannot become an integer.
+	_reportTruncatedConst(target, node, ctx) {
+		const c = node._const;
+		if (c.k !== "FLOAT" || c.t) return false;
+		const shown =
+			node.kind === "BasicLit"
+				? `${node.value} (untyped float constant)`
+				: `${c.v} (untyped float constant ${c.v})`;
+		this.err(
+			ctx
+				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (truncated)`
+				: `${shown} truncated to ${typeStr(target)}`,
 			node,
 		);
 		return true;

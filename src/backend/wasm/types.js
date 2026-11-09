@@ -536,10 +536,18 @@ const TAGGED_SLICE_ELEMS = new Set([
 	"rune",
 ]);
 
-// True for a slice of booleans or integers of at most 32 bits.  In an
+// True for a defined slice type or a slice of booleans or integers of at
+// most 32 bits.  In an
 // interface such a value carries a per-Go-type tag (see getTaggedSliceType).
 export function isTaggedSliceType(goType, checker = null) {
 	if (!isSliceType(goType, checker)) return false;
+	// A defined slice type (`type S []int`) is tagged whatever its element, so
+	// `case S` does not match an unnamed `[]int`.
+	const declared =
+		goType.kind === "TypeName" || goType.kind === "Ident"
+			? (checker?.types?.get(goType.name) ?? goType)
+			: goType;
+	if (declared?.kind === "named") return true;
 	let elem = getSliceElemType(goType, checker);
 	// A source-level element (`uint8` in a case list) is a TypeName node.
 	for (let i = 0; i < 16 && elem; i++) {
@@ -784,6 +792,7 @@ export function isSigned(goType) {
 export function printOperandKind(arg, checker) {
 	const isBool =
 		isBoolGoType(arg._type) ||
+		_namedBasic(arg._type) === "bool" ||
 		(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 	let wType = toWasmType(arg._type, checker);
 	let widen = false;

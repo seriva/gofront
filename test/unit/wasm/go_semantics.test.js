@@ -1080,3 +1080,58 @@ inner:
 		"0 0\n1 0\nend\n",
 	);
 });
+
+test("stacked loop labels all target the loop", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+outer:
+inner:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				continue outer
+			}
+			if i == 2 {
+				break inner
+			}
+			fmt.Println(i, j)
+		}
+	}
+	fmt.Println("done")
+}
+`,
+		"0 0\n1 0\ndone\n",
+	);
+});
+
+test("package-level, struct and array strings start as the empty string", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ S string }
+type W struct {
+	T
+	A [2]string
+}
+
+var g string
+var ga [2]string
+var gt T
+var gw W
+
+func main() {
+	var t T
+	var s string
+	fmt.Println(t, s == "", t.S == "")
+	fmt.Println(g == "", ga[1] == "", gt.S == "", gw.S == "", gw.A[1] == "", len(g+gt.S))
+}
+`,
+		"{} true true\ntrue true true true true 0\n",
+	);
+});
