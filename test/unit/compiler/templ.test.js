@@ -1478,10 +1478,6 @@ test("a slot that names no parameter is an error", () => {
 	);
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	process.exit((await summarize()) > 0 ? 1 : 0);
-}
-
 section("templ — multi-value case and inline struct in for header");
 
 test("case with several values matches any of them", () => {
@@ -1530,3 +1526,7 @@ test("for header may range over an inline struct literal", () => {
 		"<p>1</p><p>2</p>",
 	);
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit((await summarize()) > 0 ? 1 : 0);
+}

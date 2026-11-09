@@ -3403,6 +3403,32 @@ func Encode(v any) string {
 
 section("encoding/json — reachability");
 
+test("json use in a WASM package does not leak codecs into JS output", async () => {
+	const { js } = await compileHybridProject({
+		"main.go": `//gofront:target js
+package main
+
+import (
+	"fmt"
+	"./sim"
+)
+
+func main() { fmt.Println(sim.Enc(1)) }
+`,
+		"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "encoding/json"
+
+func Enc(v int) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+`,
+	});
+	assert(!js.includes("RegisterEncoder"), "RegisterEncoder in JS output");
+});
+
 test("json.Valid alone keeps the codec runtime out of the output", () => {
 	const { js, errors } = compile(`package main
 import "encoding/json"

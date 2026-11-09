@@ -1313,8 +1313,17 @@ function selectCodecEntry(gen, fn, argType) {
 // Records that the build uses `json` when this package calls it; returns
 // whether the package has call sites (or misuses) of its own. One without
 // them still lends its types to the dynamic encoder once `json` is in use.
-function noteJsonUse(options, sites, diagnostics) {
-	if (sites.length > 0 && options.jsonBuild) options.jsonBuild.used = true;
+// The flag is tracked per target so WASM-only use does not pull `json` into
+// JS output (and vice versa).
+function jsonTargets(checker) {
+	return checker.target === "both" || !checker.target
+		? ["js", "wasm"]
+		: [checker.target];
+}
+
+function noteJsonUse(options, sites, diagnostics, checker) {
+	if (sites.length > 0 && options.jsonBuild)
+		for (const t of jsonTargets(checker)) options.jsonBuild[t] = true;
 	return sites.length + diagnostics.length > 0;
 }
 
@@ -1323,8 +1332,9 @@ function noteJsonUse(options, sites, diagnostics) {
 // SelectorExpr with `_genEntry`, the entry point the WASM link calls instead.
 export function generateJsonCodecs(programs, checker, pkgName, options = {}) {
 	const { sites, diagnostics } = findSites(programs);
-	const registerOnly = !noteJsonUse(options, sites, diagnostics);
-	if (registerOnly && !options.jsonBuild?.used) return null;
+	const registerOnly = !noteJsonUse(options, sites, diagnostics, checker);
+	if (registerOnly && !jsonTargets(checker).some((t) => options.jsonBuild?.[t]))
+		return null;
 	const qualifiers = new Map();
 	const gen = new JsonCodecGen(checker, pkgName, qualifiers, programs);
 	if (registerOnly) {
