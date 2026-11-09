@@ -1288,7 +1288,8 @@ export const statementGenMethods = {
 
 	_rangeExprLimit(iterType, iteree) {
 		if (this._isIntRangeType(iterType)) return iteree;
-		if (this._isMapRangeType(iterType)) return `Object.keys(${iteree}).length`;
+		if (this._isMapRangeType(iterType))
+			return `Object.keys(${iteree} ?? {}).length`;
 		return `(${iteree} ? ${iteree}.length : 0)`;
 	},
 
@@ -1765,8 +1766,9 @@ export const statementGenMethods = {
 
 	_genRangeIterExpr(iterType, iteree, lhs) {
 		if (this._isMapRangeType(iterType)) {
-			if (lhs.length === 1) return `Object.keys(${iteree})`;
-			return `Object.entries(${iteree})`;
+			// A nil map is `null`; ranging over it runs zero iterations.
+			if (lhs.length === 1) return `Object.keys(${iteree} ?? {})`;
+			return `Object.entries(${iteree} ?? {})`;
 		}
 		this.useHelper("sliceGuard");
 		if (lhs.length === 1) return `__s(${iteree}).keys()`;

@@ -705,6 +705,36 @@ func main() {
 	);
 });
 
+test("range over nil maps from literals and variables runs zero iterations", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct {
+	a int
+	m map[string]int
+}
+
+func main() {
+	s := S{1, nil}
+	for range s.m {
+	}
+	s2 := S{m: nil}
+	for k := range s2.m {
+		fmt.Println(k)
+	}
+	var mm map[string]int = nil
+	for k, v := range mm {
+		fmt.Println(k, v)
+	}
+	fmt.Println("ok")
+}
+`,
+		"ok\n",
+	);
+});
+
 test("string range offsets count UTF-16 units so s[i:] lines up", async () => {
 	await assertAllTargetsOutput(
 		`package main
