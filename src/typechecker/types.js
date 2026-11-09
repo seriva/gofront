@@ -108,7 +108,6 @@ export const BROWSER_GLOBALS = new Set([
 export const WASM_SUPPORTED_STDLIB = new Set([
 	"gofront/shared",
 	"gofront/simd",
-	"encoding/json",
 ]);
 
 export const STDLIB_PACKAGES = WASM_SUPPORTED_STDLIB;
