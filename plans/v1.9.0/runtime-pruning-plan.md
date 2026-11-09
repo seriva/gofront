@@ -114,7 +114,7 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Files: `stdlib/encoding/json/json.go`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `src/lower/json-codecs.js` (`isRaw` only), `test/unit/builtins/json.test.js`
   - Test: failing `assertAllTargetsOutput` cases in `test/unit/builtins/json.test.js` for `json.RawMessage("true").MarshalJSON()`, `RawMessage(nil).MarshalJSON()`, `(&rm).UnmarshalJSON(b)` then mutating `b`, `(*json.RawMessage)(nil).UnmarshalJSON(b)`, a struct field of type `json.RawMessage` round-tripping through `Marshal`/`Unmarshal`, and `import myjson "encoding/json"` with `myjson.Marshal`, `myjson.Unmarshal`, `myjson.Valid` and `myjson.RawMessage`.
   - Done when: `json.go` defines the five members, `extended.js` has no `json` namespace / `RAW_MESSAGE_T`, `STDLIB_PACKAGES` no longer has `"encoding/json"`, `isRaw` matches the mangled name, and the new cases pass on JS and WASM.
-- [ ] Task 1.2: Fix `json` call-site matching in `src/lower/json-codecs.js`
+- [x] Task 1.2: Fix `json` call-site matching in `src/lower/json-codecs.js`
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: failing cases for a local `var json S; json.Marshal()` in a file importing `"encoding/json"` (`F73`, `assertAllTargetsOutput`), `f := json.Valid` called later, and `f := json.Marshal` / `json.Unmarshal` as values (`assertErrorContains(errors, "json.Marshal cannot be used as a value")`).
   - Done when: `isJsonCall` checks `node.func.expr._type?.kind === "namespace"`, `Valid` is no longer rewritten (`entryValid` deleted), non-call `Marshal`/`MarshalIndent`/`Unmarshal` selectors report the diagnostic, and the cases pass.

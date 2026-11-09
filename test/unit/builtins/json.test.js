@@ -6,6 +6,7 @@ import {
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
+	assertErrorContains,
 	assertFourWay,
 	assertJsProgramOutput,
 	assertJsTargetsOutput,
@@ -3172,6 +3173,66 @@ true false
 1
 `,
 	);
+});
+
+section("encoding/json — call-site matching");
+
+test("a local variable named json is not a json call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type S struct{}
+
+func (S) Marshal() int { return 7 }
+
+func main() {
+	fmt.Println(json.Valid(nil))
+	var json S
+	fmt.Println(json.Marshal())
+}
+`,
+		`false
+7
+`,
+	);
+});
+
+test("json.Valid works as a value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	f := json.Valid
+	fmt.Println(f([]byte("1")), f([]byte("{")))
+}
+`,
+		`true false
+`,
+	);
+});
+
+test("json.Marshal and json.Unmarshal cannot be used as values", () => {
+	for (const [fn, expr] of [
+		["Marshal", "json.Marshal"],
+		["MarshalIndent", "json.MarshalIndent"],
+		["Unmarshal", "json.Unmarshal"],
+	]) {
+		const { errors } = compile(`package main
+import "encoding/json"
+func main() {
+	f := ${expr}
+	_ = f
+}`);
+		assertErrorContains(errors, `json.${fn} cannot be used as a value`);
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
