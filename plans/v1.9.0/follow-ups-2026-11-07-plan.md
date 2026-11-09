@@ -155,23 +155,23 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 *Phases 1–7 were scheduled from review follow-ups on 2026-11-07 (see Verified Gaps → Review follow-ups).*
 
-- [ ] Task 1.1: Parser: struct field tags after `func`-typed fields
+- [x] Task 1.1: Parser: struct field tags after `func`-typed fields
   - Files: `src/parser/declarations.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: `F50` `var _ = struct{ F func() \`json:"f"\` }{}` compiles and runs on `js`, `both`, and `wasm`; same root cause: `var f func() = func() { fmt.Println("a") }; f()` → `"a"` and `var g func(int) = nil; fmt.Println(g == nil)` → `"true"` in `test/unit/compiler/lexer-parser.test.js`.
   - Done when: `parseReturnType(inTypeExpr = true)` in `src/parser/declarations.js` also ends a result-less func type at a `STRING` tag and at `=`, so struct tags after `func`-typed fields and `var f func(...) = ...` parse, and `test/unit/compiler/lexer-parser.test.js` passes.
-- [ ] Task 1.2: Typechecker: `switch` on untyped constant tag and tagless `switch` non-bool cases
+- [x] Task 1.2: Typechecker: `switch` on untyped constant tag and tagless `switch` non-bool cases
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`, `test/unit/compiler/templ.test.js`
   - Test: `F05` `switch "foo" { case 5: }` → `assertErrorContains(errors, "cannot convert 5 (untyped int constant) to type string")`; `F57` `switch { case 5: }` (in `.go` and `.templ`) → `assertErrorContains(errors, "invalid case 5 in switch")`.
   - Done when: `_checkSwitchStmt` / `_checkCaseValue` in `src/typechecker/statements.js` validate case expressions against untyped constant tags and require `bool` cases when `tag == null` (today `_checkCaseValue` returns early on `!tag`; templ reaches it through `_checkTemplSwitch`), and both tests pass.
-- [ ] Task 1.3: Typechecker: reject fractional untyped float to `int` and `byte != int(q)` comparisons
+- [x] Task 1.3: Typechecker: reject fractional untyped float to `int` and `byte != int(q)` comparisons
   - Files: `src/typechecker/assignability.js`, `src/typechecker/expressions.js`, `test/unit/types/checks.test.js`
   - Test: `F06` `var i int = 1.5` → `assertErrorContains(errors, "cannot use 1.5 (untyped float constant) as int value in variable declaration (truncated)")`; `F63` `s := "abc"; q := byte(97); _ = s[0] != int(q)` → `assertErrorContains(errors, "mismatched types")`.
   - Done when: untyped float constants with non-zero fractional parts are rejected for integer types and distinct typed integer kinds (`uint8` vs `int`) are rejected in binary comparisons; `npm run check` and `test/unit/types/checks.test.js` pass.
-- [ ] Task 1.4: Typechecker: reject `cap` on strings and comma-ok `:=` with no new variables
+- [x] Task 1.4: Typechecker: reject `cap` on strings and comma-ok `:=` with no new variables
   - Files: `src/typechecker/expressions.js`, `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: `F62` `_ = cap("hello")` → `assertErrorContains(errors, "invalid argument")`; `F12` `var a any = 1; var x int; var ok bool; x, ok := a.(int)` → `assertErrorContains(errors, "no new variables on left side of :=")`.
   - Done when: `cap` rejects string arguments and comma-ok short variable declarations enforce at least one newly declared variable on the LHS.
-- [ ] Task 1.5: Typechecker: check key assignability in comma-ok map lookups
+- [x] Task 1.5: Typechecker: check key assignability in comma-ok map lookups
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: `F61` `m := map[int64]string{1 << 60: "hello"}; v, ok := m[1<<60]; fmt.Println(v, ok)` → `"hello true"` on `js`, `both`, and `wasm` (and `v, ok = m[1<<60]` assignment form).
   - Done when: comma-ok map index statements type-check and tag the key expression with the map's key type so 64-bit constant keys emit as `BigInt` on JS.

@@ -1881,7 +1881,10 @@ export const expressionCheckMethods = {
 		if (name === "len") {
 			const size = this._constLenFromType(argTypes[0]);
 			if (size != null) expr._constLen = size;
-		} else if ((argTypes[0]?.underlying ?? argTypes[0])?.kind === "map") {
+		} else if (
+			(argTypes[0]?.underlying ?? argTypes[0])?.kind === "map" ||
+			isString(argTypes[0])
+		) {
 			this.err(
 				`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
 				expr,

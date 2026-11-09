@@ -1134,9 +1134,11 @@ export class TypeChecker {
 
 	_checkTemplSwitch(n, scope) {
 		this._checkTemplExpr(n, n.exprTokens, scope);
+		// A tag that failed to parse leaves `n.expr` unset: not a tagless switch.
+		const tagless = !n.exprTokens?.length;
 		for (const c of n.cases ?? []) {
 			this._checkTemplExpr(c, c.caseTokens, scope);
-			if (c.expr) this._checkCaseValue(n.expr, c.expr);
+			if (c.expr && (n.expr || tagless)) this._checkCaseValue(n.expr, c.expr);
 			this._checkTemplNodes(c.body, scope);
 		}
 	}

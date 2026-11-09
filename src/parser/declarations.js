@@ -231,7 +231,11 @@ export const declarationParseMethods = {
 		// `case func():`), `,`, `)` and `:` also end the type
 		if (
 			inTypeExpr &&
-			(this.check(T.COMMA) || this.check(T.RPAREN) || this.check(T.COLON))
+			(this.check(T.COMMA) ||
+				this.check(T.RPAREN) ||
+				this.check(T.COLON) ||
+				this.check(T.STRING) ||
+				this.check(T.ASSIGN))
 		)
 			return null;
 		// Multiple return values: (int, string) or named (result int, ok bool)

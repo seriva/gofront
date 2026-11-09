@@ -135,6 +135,7 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
 		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
+		this._checkIntegerCmpKinds(op, lt, rt, node);
 		this._checkEqualityComparable(op, lt, rt, node);
 		return BOOL;
 	},
@@ -173,6 +174,17 @@ export const assignabilityMethods = {
 				: lt;
 		if (lt.name === "float32" && rt.name === "float32") return lt;
 		return isFloat ? FLOAT64 : lt;
+	},
+
+	// Comparing two typed integers of different types (`byte != int`) is a
+	// mismatch in Go; untyped constants adapt to either side.
+	_checkIntegerCmpKinds(op, lt, rt, node) {
+		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return;
+		if (!isInteger(lt) || !isInteger(rt) || typeStr(lt) === typeStr(rt)) return;
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
+			node,
+		);
 	},
 
 	_checkComplexCmpOp(op, lt, rt, node) {
