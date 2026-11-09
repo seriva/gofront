@@ -2,7 +2,7 @@
 // Standard library emitters for the WebAssembly backend.
 //
 // Organized by domain:
-// - core.js:   maps, strings, strconv, testing
+// - core.js:   maps, strings, strconv
 // - io.js:     io.Writer helpers
 
 import { StdlibCoreEmitter } from "./core.js";

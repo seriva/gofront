@@ -106,7 +106,6 @@ export const BROWSER_GLOBALS = new Set([
 // gains support; anything not listed is rejected at import with "not yet available in
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
-	"testing",
 	"gofront/shared",
 	"gofront/simd",
 	"encoding/json",
@@ -117,9 +116,7 @@ export const STDLIB_PACKAGES = WASM_SUPPORTED_STDLIB;
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
-export const WASM_STDLIB_MEMBERS = new Map([
-	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
-]);
+export const WASM_STDLIB_MEMBERS = new Map();
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
@@ -150,6 +147,13 @@ export const INTRINSICS = new Map([
 	["unicode_to_lower", "func(int32) int32"],
 	// crypto/rand: four random bytes from the host's secure source.
 	["crypto_rand_u32", "func() uint32"],
+	// testing: a monotonic clock in nanoseconds, and an unanchored regular
+	// expression match for -run and -bench patterns.
+	["testing_nanotime", "func() int64"],
+	["testing_match", "func(string, string) bool"],
+	// testing (js only): call a test body and return what it returned (a
+	// promise for an async body, otherwise nil).
+	["testing_call", "func(any, any) any"],
 	// fmt: a stable number for a pointer, function or other reference.
 	["fmt_ptr_id", "func(any) uint64"],
 	// math: IEEE-754 bit casts, and the host's `Math.*` (`%` for Mod).

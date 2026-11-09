@@ -27,7 +27,7 @@ const PLANS = [
 		exempt: [
 			// Files the shrinking tasks deleted or moved, and line ranges cited
 			// as comma lists (which the extractor does not normalize).
-			"src/backend/js/stdlib/{binary,builder,json,math}.js",
+			"src/backend/js/stdlib/{binary,builder,json,math,fmt}.js",
 			"src/backend/wasm/stdlib/{fmt,packages}.js",
 			"src/backend/js/expressions.js:892-894,2082-2094,3255-3257",
 			"src/backend/js/index.js:625-628,953-964,1237-1239",
@@ -47,11 +47,10 @@ const PLANS = [
 		exempt: [
 			// The Go sources, generator and tests the plan's tasks add.
 			"src/lower/stdlib-refs.js",
-			"stdlib/{context,testing}{,/,/*.go}",
-			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom}.js",
+			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom,testing,fmt}.js",
+			"src/backend/js/fmt-runtime.js",
 			"src/backend/wasm/stdlib/pure.js",
 			"src/backend/shared/errorf.js",
-			"test/unit/stdlib/testing.test.js",
 		],
 	},
 	{
@@ -63,6 +62,7 @@ const PLANS = [
 			"src/backend/js/stdlib/{slices,sort,time}.js",
 			"stdlib/slices/{extra,iter}.go",
 			"src/backend/js/stdlib/maps.js",
+			"src/backend/js/fmt-runtime.js",
 			"stdlib/maps/iter.go",
 			"stdlib/errors/overlay.go",
 			"src/backend/js/stdlib/{html,path}.js",

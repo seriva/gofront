@@ -102,9 +102,20 @@ a WebAssembly GC module:
 `compiler.js` links every `wasm`/`both` unit reached by a build into a single `app.wasm` and
 rejects top-level name collisions between them.
 
-`gofront test` runs the tests of a `wasm` package inside the linked module (`*testing.T`
-stays a JS object) and runs the tests of a `both` package twice — once per backend,
-reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce identical results.
+`gofront test` runs the tests of a `wasm` package inside the linked module and runs the tests
+of a `both` package twice — once per backend, reported as `pkg [js]` and `pkg [wasm]` —
+ensuring both backends produce identical results. The `testing` package is Go source
+(`stdlib/testing/`), so `*testing.T` never crosses the boundary: the runner compiles one extra
+in-memory file, `gofront_testmain_test.go`, next to the package's `_test.go` files (it is never
+written to disk). The file holds a table of the package's `Test…` and `Benchmark…` functions and
+`GofrontRunTests(run, bench string, verbose bool) int`, which builds a `testing.M` and runs it.
+In a `js` package the driver is an `async func` that awaits async tests and subtests; when the
+package has a `TestMain` the driver calls it with the `M` instead. The generated test child
+process (`src/cli/test-runner.js`) only loads the bundle, applies `--dom`, calls
+`GofrontRunTests` and exits with its result; discovery, filtering, output and timing all
+happen inside the compiled package. The two host primitives it needs, a monotonic clock and a
+regular-expression match for `-run`/`-bench`, are the `testing_nanotime` and `testing_match`
+intrinsics, and `testing_call` (js only) keeps the promise of an async test body.
 
 *(For package targets, boundary rules and benchmarks see the [Hybrid JS + WebAssembly Guide](hybrid-wasm.md).)*
 
@@ -132,7 +143,9 @@ Two markers connect Go source to the backends:
 | `fmt` | Go in `stdlib/fmt/` over `stdlib/internal/fmtrt/`, plus generated formatters (see below) |
 | `encoding/binary` | Go in `stdlib/encoding/binary/` |
 | `regexp`, `gom`, and `time.Sleep`, `time.AfterFunc`, `time.Timer` | Go marked `//gofront:target js` (`stdlib/regexp/`, `stdlib/gom/`, `stdlib/time/sleep_js.go`); loaded only for `js` packages |
-| `testing`, `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
+| `testing` | Go in `stdlib/testing/` plus intrinsics; the runner adds a generated driver (see [Testing](usage.md#testing)) |
+| `context` | Go in `stdlib/context/` (`Background`, `TODO`, `WithCancel`, `WithValue`; no `Done` channel) |
+| `gofront/shared`, `gofront/simd` | emitters with typings in `src/typechecker/stdlib/` |
 | `encoding/json` | generated codecs plus Go support code in `stdlib/encoding/json/` and `stdlib/internal/jsonrt/` |
 
 #### Generated Go per package

@@ -16,7 +16,6 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
-	isTestingT,
 	printOperandKind,
 	toWasmType,
 } from "./types.js";
@@ -41,7 +40,6 @@ export class BuiltinsEmitter {
 		}
 		const msgTmp = this.acquireTemp("externref");
 		this.pushInstruction({ op: "local.tee", index: msgTmp });
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
@@ -1092,10 +1090,6 @@ export class BuiltinsEmitter {
 	_emitPackageCall(call, targetWasmType) {
 		const { func, args } = call;
 		if (func.kind !== "SelectorExpr") return false;
-		if (isTestingT(func.expr?._type)) {
-			this.emitTestingCall(func, args);
-			return true;
-		}
 		if (
 			func.expr?.name &&
 			(this.resolveLocal(func.expr.name) ||

@@ -578,18 +578,21 @@ func main() {
 }
 
 test("a wasm package that uses encoding/json and testing.T builds a valid module", () => {
-	const { wasm, errors } = compileWasm(`package main
+	const { wasm, errors } = compileWasm(
+		`package main
 import (
 	"encoding/json"
 	"testing"
 )
 type C struct{ N int }
-func Load(s string, t *testing.T) error {
+func load(s string, t *testing.T) error {
 	var c C
 	return json.Unmarshal([]byte(s), &c)
 }
 func Main() int { return 1 }
-`);
+`,
+		{ exportAll: false },
+	);
 	assertEqual(errors?.length ?? 0, 0);
 	assert(WebAssembly.validate(wasm), "invalid wasm module");
 });

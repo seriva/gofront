@@ -59,7 +59,7 @@ order = 7
 
 [[layers]]
 name  = "stdlib-high"
-paths = ["stdlib/encoding/json/**", "stdlib/encoding/binary/**"]
+paths = ["stdlib/encoding/json/**", "stdlib/encoding/binary/**", "stdlib/testing/**"]
 order = 9
 
 [[layers]]
@@ -69,7 +69,7 @@ order = 10
 
 [[layers]]
 name  = "stdlib-mid"
-paths = ["stdlib/io/**", "stdlib/os/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/fmt/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*", "stdlib/regexp/**"]
+paths = ["stdlib/io/**", "stdlib/os/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/fmt/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*", "stdlib/regexp/**", "stdlib/context/**"]
 order = 11
 
 [[layers]]

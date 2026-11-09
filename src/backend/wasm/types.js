@@ -9,25 +9,6 @@ export { isComplex, isComplex64 };
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";
 
-// `*testing.T` is a JS-side object (the harness's __GoFront_T) passed through
-// the boundary as an opaque externref.
-export function isTestingT(goType) {
-	if (!goType) return false;
-	const base =
-		goType.kind === "pointer" || goType.kind === "PointerType"
-			? goType.base
-			: goType.kind === "StarExpr"
-				? (goType.expr ?? goType.operand)
-				: goType;
-	const name = base?.name ?? (typeof base === "string" ? base : null);
-	return (
-		name === "testing.T" ||
-		name === "testing.B" ||
-		name === "testing.M" ||
-		name === "testing.TB"
-	);
-}
-
 export function toWasmType(goType, checker = null, mod = null) {
 	if (!goType) return "i32";
 	if (typeof goType === "string") {
@@ -47,7 +28,6 @@ export function toWasmType(goType, checker = null, mod = null) {
 	if (typeof goType === "object" && goType.kind === "ref") {
 		return goType;
 	}
-	if (isTestingT(goType)) return "externref";
 
 	if (
 		goType.kind === "simd" ||
