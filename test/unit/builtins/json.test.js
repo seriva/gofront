@@ -3292,7 +3292,142 @@ for (const target of ["both", "wasm"]) {
 	}
 }
 
+section("encoding/json — dynamic values and typed nils");
+
+async function runProject(files) {
+	return (await compileHybridProject(files)).lines.join("\n");
+}
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`json.Marshal of a nil unsupported map in any reports its type (${target})`, async () => {
+		assertEqual(
+			await runProject({
+				"main.go": `//gofront:target ${target}
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var m map[float64]int
+	var v any = m
+	_, err := json.Marshal(v)
+	fmt.Println(err)
+	var ok map[string]int
+	v = ok
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+`,
+			}),
+			"json: unsupported type: map[float64]int\nnull <nil>",
+		);
+	});
+
+	test(`json.Unmarshal into a typed nil pointer names the declaring package (${target})`, async () => {
+		assertEqual(
+			await runProject({
+				"main.go": `//gofront:target ${target}
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"./sub"
+)
+
+func main() {
+	var v any = sub.NewNil()
+	fmt.Println(json.Unmarshal([]byte("{}"), v))
+	fmt.Printf("%T\\n", v)
+}
+`,
+				"sub/s.go": `//gofront:target ${target}
+package sub
+
+type OtherItem struct{ A int }
+
+func NewNil() *OtherItem { return nil }
+`,
+			}),
+			"json: Unmarshal(nil *sub.OtherItem)\n*sub.OtherItem",
+		);
+	});
+
+	test(`json.Marshal of a type from a package that does not import encoding/json (${target})`, async () => {
+		assertEqual(
+			await runProject({
+				"main.go": `//gofront:target ${target}
+package main
+
+import (
+	"fmt"
+	"./pkg"
+)
+
+type TextVal struct{ S string }
+
+func (t TextVal) MarshalJSON() ([]byte, error) { return []byte("\\"text-" + t.S + "\\""), nil }
+
+type Plain struct {
+	A int    \`json:"a"\`
+	B string \`json:"b"\`
+}
+
+func main() {
+	fmt.Println(pkg.Encode(any(TextVal{"hello"})))
+	fmt.Println(pkg.Encode(Plain{1, "x"}))
+	fmt.Println(pkg.Encode(&Plain{2, "y"}))
+}
+`,
+				"pkg/p.go": `//gofront:target ${target}
+package pkg
+
+import "encoding/json"
+
+func Encode(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err.Error()
+	}
+	return string(b)
+}
+`,
+			}),
+			'"text-hello"\n{"a":1,"b":"x"}\n{"a":2,"b":"y"}',
+		);
+	});
+}
+
 section("encoding/json — reachability");
+
+test("json use in a WASM package does not leak codecs into JS output", async () => {
+	const { js } = await compileHybridProject({
+		"main.go": `//gofront:target js
+package main
+
+import (
+	"fmt"
+	"./sim"
+)
+
+func main() { fmt.Println(sim.Enc(1)) }
+`,
+		"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "encoding/json"
+
+func Enc(v int) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+`,
+	});
+	assert(!js.includes("RegisterEncoder"), "RegisterEncoder in JS output");
+});
 
 test("json.Valid alone keeps the codec runtime out of the output", () => {
 	const { js, errors } = compile(`package main

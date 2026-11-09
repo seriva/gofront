@@ -148,3 +148,14 @@ func F() bool { return regexp.MustCompile("a").MatchString("a") }
 		"package 'regexp' is only available in js packages",
 	);
 });
+
+test("no match returns nil slices", () => {
+	assertEqual(
+		run(
+			`re := regexp.MustCompile("a")
+	console.log(re.FindStringSubmatch("b") == nil, re.FindAllString("b", -1) == nil, re.FindAllStringSubmatch("b", -1) == nil, re.FindStringIndex("b") == nil)
+	console.log(len(re.FindAllString("aa", -1)), re.FindStringSubmatch("a") == nil)`,
+		),
+		"true true true true\n2 false",
+	);
+});

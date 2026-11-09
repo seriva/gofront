@@ -1139,7 +1139,9 @@ export class TypeChecker {
 		const tagless = !n.exprTokens?.length;
 		for (const c of n.cases ?? []) {
 			this._checkTemplExpr(c, c.caseTokens, scope);
-			if (c.expr && (n.expr || tagless)) this._checkCaseValue(n.expr, c.expr);
+			for (const e of c.exprs?.slice(1) ?? []) this.checkExpr(e, scope);
+			if (n.expr || tagless)
+				for (const e of c.exprs ?? []) this._checkCaseValue(n.expr, e);
 			this._checkTemplNodes(c.body, scope);
 		}
 	}

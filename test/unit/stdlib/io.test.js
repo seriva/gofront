@@ -3,7 +3,13 @@
 // Every case runs four ways (JS and WASM, natives on and off) and must print
 // what the real Go toolchain printed for the same program.
 
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { compileFiles } from "../../../src/compiler.js";
 import {
+	assertEqual,
 	assertErrorContains,
 	assertFourWay,
 	compile,
@@ -259,4 +265,54 @@ func main() {
 0
 `,
 	);
+});
+
+// Runs the compiled program as a real Node process so os.Stdout and
+// os.Stderr reach the process streams.
+function runUnderNode(source, forceTarget) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-stderr-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		const res = compileFiles([goPath], { forceTarget });
+		const wasm = res.wasm
+			? `const __wasmBytes = new Uint8Array(Buffer.from("${Buffer.from(res.wasm).toString("base64")}", "base64"));\n`
+			: "";
+		const body = res.js
+			.replace(/^import\s[^;]+;\n?/gm, "")
+			.replaceAll("globalThis.__GOFRONT_WASM_BYTES", "__wasmBytes");
+		const file = join(dir, "bundle.mjs");
+		writeFileSync(file, wasm + body);
+		const r = spawnSync(process.execPath, [file], { encoding: "utf8" });
+		return { stdout: r.stdout, stderr: r.stderr };
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+test("os.Stderr writes reach process.stderr under Node", () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Println("out")
+	os.Stderr.WriteString("err\\n")
+	fmt.Fprintln(os.Stderr, "err2")
+}
+`;
+	for (const target of ["js", "both", "wasm"]) {
+		const { stdout, stderr } = runUnderNode(src, target);
+		assertEqual(
+			`${target} stdout ${JSON.stringify(stdout)}`,
+			`${target} stdout "out\\n"`,
+		);
+		assertEqual(
+			`${target} stderr ${JSON.stringify(stderr)}`,
+			`${target} stderr "err\\nerr2\\n"`,
+		);
+	}
 });

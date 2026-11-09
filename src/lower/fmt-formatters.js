@@ -202,7 +202,8 @@ class FmtGen extends TypeSpeller {
 						.slice(at + 2)
 						.split("$")
 						.at(-1)}.${name.slice(0, at)}`;
-				else if (!name.includes(".")) name = `${this.pkgName}.${name}`;
+				else if (!name.includes("."))
+					name = `${this.declaringPackage(t)}.${name}`;
 				return t.typeArgs?.length
 					? `${name}[${t.typeArgs.map(n).join(",")}]`
 					: name;

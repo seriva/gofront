@@ -177,7 +177,7 @@ const JS_INTRINSICS = {
 	// os: node writes straight to the stream; other hosts print whole lines
 	// (console.log adds the newline), buffering the partial line.
 	os_write: ([fd, s]) =>
-		`if (typeof process !== "undefined" && process?.stdout?.write) { process.stdout.write(${s}); return; } let b = (globalThis.__os_buf ?? "") + ${s}; const nl = b.lastIndexOf("\\n"); if (nl >= 0) { (${fd} === 2 && typeof console.error === "function" ? console.error : console.log)(b.slice(0, nl)); b = b.slice(nl + 1); } globalThis.__os_buf = b;`,
+		`if (typeof process !== "undefined" && process?.stdout?.write) { (${fd} === 2 && process.stderr?.write ? process.stderr : process.stdout).write(${s}); return; } let b = (globalThis.__os_buf ?? "") + ${s}; const nl = b.lastIndexOf("\\n"); if (nl >= 0) { (${fd} === 2 && typeof console.error === "function" ? console.error : console.log)(b.slice(0, nl)); b = b.slice(nl + 1); } globalThis.__os_buf = b;`,
 	os_exit: ([code]) =>
 		`if (typeof process !== "undefined" && process?.exit) process.exit(${code}); throw new Error("os.Exit(" + ${code} + ")");`,
 	os_getenv: ([key]) =>

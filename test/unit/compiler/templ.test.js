@@ -1478,6 +1478,55 @@ test("a slot that names no parameter is an error", () => {
 	);
 });
 
+section("templ — multi-value case and inline struct in for header");
+
+test("case with several values matches any of them", () => {
+	const body = "switch n {\ncase 1, 2:\n<p>x</p>\ndefault:\n<p>d</p>\n}";
+	assertEqual(renderV("n int", body, "V(2)"), "<p>x</p>");
+	assertEqual(renderV("n int", body, "V(1)"), "<p>x</p>");
+	assertEqual(renderV("n int", body, "V(3)"), "<p>d</p>");
+});
+
+test("case values may be calls with commas", () => {
+	const body =
+		'switch s {\ncase f("A", "a"), f("b", "b"):\n<p>x</p>\ndefault:\n<p>d</p>\n}';
+	const extra = "func f(a, b string) string { return a + b }";
+	assertEqual(renderV("s string", body, 'V("bb")', extra), "<p>x</p>");
+	assertEqual(renderV("s string", body, 'V("c")', extra), "<p>d</p>");
+});
+
+test("a multi-value case with a mismatched value is a type error", () => {
+	const { build, check } = checkTempl(
+		'switch name {\n\tcase "a", 1:\n\t\t<p>x</p>\n\t}',
+	);
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(
+			r.stderr,
+			"cannot convert 1 (untyped int constant) to type string",
+		);
+	}
+});
+
+test("for header may range over an inline struct literal", () => {
+	assertEqual(
+		renderV(
+			"",
+			"for _, s := range []struct{ A int }{{1}, {2}} {\n<p>{ s.A }</p>\n}",
+			"V()",
+		),
+		"<p>1</p><p>2</p>",
+	);
+	assertEqual(
+		renderV(
+			"",
+			"for _, v := range []interface{}{1, 2} {\n<p>{ v }</p>\n}",
+			"V()",
+		),
+		"<p>1</p><p>2</p>",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

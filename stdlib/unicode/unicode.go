@@ -112,7 +112,7 @@ func IsPrint(r rune) bool {
 	if r < 0x80 {
 		return ' ' <= r && r <= '~'
 	}
-	return isValid(r) && hostIs(r, classPrint)
+	return isValid(r) && !IsSpace(r) && hostIs(r, classPrint)
 }
 
 // IsGraphic reports whether the rune is a graphic character.

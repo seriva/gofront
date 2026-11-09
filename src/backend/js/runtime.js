@@ -440,6 +440,9 @@ var __ifps = __ifps || function(x) {
   return x;
 };
 var __ity = __ity || function(x, t, ptr) {
+  // The frozen nil map cannot carry a tag: a copy of it keeps its map type.
+  if (x !== null && x !== undefined && x.__nilm === true && x.__t === undefined)
+    return Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true }, __t: { value: t } }));
   if (x === null || x === undefined) {
     // A nil slice keeps its type as an empty tagged array (not a nil interface).
     if (!ptr && t.charCodeAt(0) !== 91) return x;
@@ -686,7 +689,7 @@ var __tconv = __tconv || function(f, v) {
 // write goes through `__mw`, which panics with Go's message.
 export const HELPER_NIL_MAP = `var __nilmap = __nilmap || Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true } }));
 var __mw = __mw || function(m) {
-  if (m == null || m === __nilmap) throw new Error("assignment to entry in nil map");
+  if (m == null || m.__nilm === true) throw new Error("assignment to entry in nil map");
   return m;
 };
 var __isnm = __isnm || function(m) {
