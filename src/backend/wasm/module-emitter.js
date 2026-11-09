@@ -2,7 +2,7 @@
 // ModuleEmitter: Module IR builder that registers types, imports, globals and functions.
 
 import { wTypeKey } from "./boundary.js";
-import { hasErrorUsage, importsAnyOf } from "./prescan.js";
+import { hasErrorUsage } from "./prescan.js";
 import {
 	ERROR_STRUCT,
 	getFuncSignature,
@@ -12,37 +12,6 @@ import {
 	isSliceType,
 	toWasmType,
 } from "./types.js";
-
-const ERROR_PRODUCING_PKGS = new Set([
-	"errors",
-	"fmt",
-	"io",
-	"os",
-	"strings",
-	"time",
-	"crypto/rand",
-	"rand",
-	"encoding/binary",
-	"binary",
-]);
-// Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
-// matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
-// declare the imports and ship that JS block.
-const STDLIB_ENV_PKGS = new Set(["strings", "io", "time"]);
-
-// [name, params, results] for `env.*` imports backing stdlib calls; the JS
-// side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
-// (when any STDLIB_ENV_PKGS package is imported) because the import table is
-// locked before function bodies are emitted.
-const S = "externref";
-const STDLIB_IMPORTS = [
-	["bytes_trim", [S, S, "i32", "i32"], []],
-	["bytes_trim_start", [], ["i32"]],
-	["bytes_trim_end", [], ["i32"]],
-	// time
-	["time_now_ms", [], ["f64"]],
-	["time_timezone_offset", ["f64"], ["i32"]],
-];
 
 export class ModuleEmitter {
 	constructor(checker, lowerResult = null, programs = [], options = {}) {
@@ -98,9 +67,7 @@ export class ModuleEmitter {
 		// `errors.New` / `fmt.Errorf` / strconv parse failures allocate the
 		// runtime's own error struct; it joins the struct rec group so the
 		// `error.Error` dispatcher can `ref.test` it like any user type.
-		this.hasErrorType =
-			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
-		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
+		this.hasErrorType = hasErrorUsage(programs);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -733,7 +700,6 @@ export class ModuleEmitter {
 			clearFuncName: `__map_clear_${suffix}`,
 			keysFuncName: `__map_keys_${suffix}`,
 			valuesFuncName: `__map_values_${suffix}`,
-			cloneFuncName: `__map_clone_${suffix}`,
 		};
 		this.mapTypes.set(key, mapInfo);
 		this.mapTypesByIndex.set(mapTypeIndex, mapInfo);
@@ -861,11 +827,6 @@ export class ModuleEmitter {
 		this.getBytesToStrInitImportIndex();
 		this.getBytesToStrPushImportIndex();
 		this.getBytesToStrFinishImportIndex();
-		if (this.usesStdlibEnv) {
-			for (const [name, params, results] of STDLIB_IMPORTS) {
-				this.getOrAddFuncImport("env", name, params, results);
-			}
-		}
 
 		// Logging built-ins
 		this.getPrintlnEmptyIndex(); // env.println_empty
@@ -954,21 +915,6 @@ export class ModuleEmitter {
 			init: [{ op: "i32.const", value: 0 }],
 		});
 		this.deferArmedGlobalIndex = gIdx;
-		return gIdx;
-	}
-
-	getIoErrGlobalIndex(field) {
-		if (!this.ioErrGlobals) this.ioErrGlobals = new Map();
-		if (this.ioErrGlobals.has(field)) {
-			return this.ioErrGlobals.get(field);
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.ioErrGlobals.set(field, gIdx);
 		return gIdx;
 	}
 
@@ -1288,13 +1234,6 @@ export class ModuleEmitter {
 
 	getMathRandomImportIndex() {
 		return this.getOrAddFuncImport("Math", "random", [], ["f64"]);
-	}
-
-	// Imports from the STDLIB_IMPORTS table (strings, io, time).
-	getStdlibImportIndex(name) {
-		const idx = this.importCache.get(`env.${name}`);
-		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
-		return idx;
 	}
 
 	resolveFuncIndex(name) {

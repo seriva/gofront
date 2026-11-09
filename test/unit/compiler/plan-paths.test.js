@@ -20,11 +20,21 @@ const ROOTS = ["src", "stdlib", "test", "scripts"];
 const PLANS = [
 	{
 		file: "plans/roadmap.md",
-		exempt: [],
+		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
+			"src/backend/js/stdlib/{shared,simd}.js",
+			// Typechecker files collapsed into stdlib/index.js.
+			"src/typechecker/stdlib/{core,extended}.js",
+		],
 	},
 	{
 		file: "plans/v1.9.0/compiler-shrinking-plan.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
+			// Typechecker files collapsed into stdlib/index.js.
+			"src/typechecker/stdlib/{core,extended}.js",
 			// Files the shrinking tasks deleted or moved, and line ranges cited
 			// as comma lists (which the extractor does not normalize).
 			"src/backend/js/stdlib/{binary,builder,json,math,fmt}.js",
@@ -45,6 +55,10 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/overlays-to-go-plan.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
+			// Typechecker files collapsed into stdlib/index.js.
+			"src/typechecker/stdlib/{core,extended}.js",
 			// The Go sources, generator and tests the plan's tasks add.
 			"src/lower/stdlib-refs.js",
 			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom,testing,fmt}.js",
@@ -56,6 +70,10 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
+			// Files Phase 3 of the runtime-pruning plan dissolved.
+			"src/backend/wasm/stdlib/{core,io}.js",
+			// Typechecker files collapsed into stdlib/index.js.
+			"src/typechecker/stdlib/{core,extended}.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			// Files that completed tasks removed (their "Removes" lines still cite them).

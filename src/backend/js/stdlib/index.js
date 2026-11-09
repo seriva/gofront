@@ -1,8 +1,7 @@
 // CodeGen stdlib call generation — installed as a mixin on CodeGen.prototype.
-// One file per Go package under ./stdlib/. This index merges them.
+// Dispatches `gofront/shared` and `gofront/simd` calls to inline JS.
 
-import { sharedMethods } from "./shared.js";
-import { simdMethods } from "./simd.js";
+import { SHARED_KINDS } from "../../../typechecker/stdlib/shared.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
@@ -14,6 +13,44 @@ const STDLIB_METHOD_MAP = {
 };
 
 const dispatchMethods = {
+	// `gofront/shared`: in js packages a shared buffer is just a TypedArray (no
+	// linear memory is involved); in wasm packages the facade hands out
+	// zero-copy views onto the module memory.
+	_genShared(fn, a) {
+		if (!fn.startsWith("New")) return undefined;
+		const info = SHARED_KINDS[fn.slice(3)];
+		if (!info) return undefined;
+		return `new ${info.ctor}(${a()[0]})`;
+	},
+
+	// `gofront/simd` in JS packages.
+	_genSimd(fn, a) {
+		this.useHelper("simd");
+		const args = a();
+		switch (fn) {
+			case "Splat":
+				return `__simd_splat(${args[0]})`;
+			case "NewF32x4":
+				return `__simd_f32x4(${args[0]}, ${args[1]}, ${args[2]}, ${args[3]})`;
+			case "Select":
+				return `__simd_select(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "Shuffle":
+				return `__simd_shuffle(${args.join(", ")})`;
+			case "LoadF32x4":
+				return `__simd_load(${args[0]}, ${args[1]})`;
+			case "StoreF32x4":
+				return `__simd_store(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "LoadF32x4Slice":
+				return `__simd_load_slice(${args[0]}, ${args[1]})`;
+			case "StoreF32x4Slice":
+				return `__simd_store_slice(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "Pad4":
+				return `(Math.floor((${args[0]} + 3) / 4) * 4)`;
+			default:
+				return undefined;
+		}
+	},
+
 	typeComment(typeNode) {
 		if (!typeNode) return "unknown";
 		switch (typeNode.kind) {
@@ -51,7 +88,5 @@ const dispatchMethods = {
 
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
-	...sharedMethods,
-	...simdMethods,
 	...dispatchMethods,
 };

@@ -15,11 +15,7 @@ import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
-import {
-	isBuiltinPackage,
-	isLocalPath,
-	resolveStdlibSource,
-} from "../resolver.js";
+import { isLocalPath, resolveStdlibSource } from "../resolver.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export { mangleCollidingTypes, withOriginalTypeNames } from "./type-names.js";
@@ -31,9 +27,7 @@ export { mangleCollidingTypes, withOriginalTypeNames } from "./type-names.js";
 // is bundled for js/both importers and its programs are linked into app.wasm
 // for wasm/both importers, never through the boundary facade.  Top-level
 // names are mangled to `Name$$path` so they cannot collide with user
-// declarations in the flat JS bundle or the linked module.  A directory for an
-// emitter-backed package (`errors`) is an overlay: its members join that
-// namespace and unqualified references to emitter members become `errors.X`.
+// declarations in the flat JS bundle or the linked module.
 
 function stdlibSuffix(importPath) {
 	return `$$${importPath.replaceAll("/", "$")}`;
@@ -172,55 +166,25 @@ function mangleRefs(node, file, tparams, ctx) {
 	forEachChild(node, (child) => mangleRefs(child, file, tp, ctx));
 }
 
-function mangleTypeRef(node, tparams, { suffix, types, overlay }) {
+function mangleTypeRef(node, tparams, { suffix, types }) {
 	if (types.has(node.name) && !tparams.has(node.name)) {
 		node.name += suffix;
-	} else if (overlay && node.name in overlay.members) {
-		node.name = `${overlay.name}.${node.name}`;
 	}
 }
 
-// A package-scope identifier: a package declaration gets the suffix; in an
-// overlay, an emitter member (`New` in errors) becomes `errors.New`.
-function mangleIdentRef(node, { suffix, values, types, overlay }) {
+// A package-scope identifier: a package declaration gets the suffix.
+function mangleIdentRef(node, { suffix, values, types }) {
 	if (values.has(node.name) || types.has(node.name)) {
 		node.name += suffix;
-	} else if (overlay && node.name in overlay.members) {
-		const field = node.name;
-		delete node.name;
-		Object.assign(node, {
-			kind: "SelectorExpr",
-			expr: { kind: "Ident", name: overlay.name, _line: node._line },
-			field,
-		});
 	}
 }
 
-function checkStdlibPrograms(
-	programs,
-	pkgName,
-	options,
-	overlay,
-	deps,
-	target,
-) {
+function checkStdlibPrograms(programs, pkgName, options, deps, target) {
 	const checker = new deps.TypeChecker();
 	checker.target = target;
 	checker.pkgName = pkgName;
 	checker.isStdlib = true;
 	checker.lazyBodies = true;
-	if (overlay) {
-		for (const [name, t] of Object.entries(overlay.members)) {
-			checker.globals.define(name, t);
-			if (t.kind === "interface" || t.kind === "named" || t.kind === "struct") {
-				checker.types.set(name, t);
-			} else if (checker.types.has(`${overlay.name}.${name}`)) {
-				// An emitter type (`strings.Builder`) is declared apart from the
-				// namespace member that names it.
-				checker.types.set(name, checker.types.get(`${overlay.name}.${name}`));
-			}
-		}
-	}
 	deps.resolveImports(
 		programs,
 		programs[0]._path,
@@ -251,22 +215,12 @@ function throwStdlibErrors(errors) {
 }
 
 // Pass 1: type-check the package as written and record which identifiers
-// refer to package scope.  An overlay sees its emitter members unqualified.
-function probeStdlibPackage(_importPath, dir, options, overlay, deps, v) {
+// refer to package scope.
+function probeStdlibPackage(_importPath, dir, options, deps, v) {
 	const programs = parseStdlibFiles(dir, deps, v.variant, v.target);
 	const pkgName = programs[0].pkg.name;
 	const { values, types } = stdlibTopLevelNames(programs);
-	for (const n of [...values, ...types])
-		if (overlay && n in overlay.members)
-			throw new Error(`overlay redeclares ${overlay.name}.${n}`);
-	const probe = checkStdlibPrograms(
-		programs,
-		pkgName,
-		options,
-		overlay,
-		deps,
-		v.target,
-	);
+	const probe = checkStdlibPrograms(programs, pkgName, options, deps, v.target);
 	probe._pkgRefs = new Set();
 	throwStdlibErrors(probe.checkAll(programs));
 	return {
@@ -284,9 +238,8 @@ function probeStdlibPackage(_importPath, dir, options, overlay, deps, v) {
 // body name package scope, the body is mangled with them, and the mangled
 // body is checked.  `decl._ensure()` does all three once and returns the
 // error text, or null.
-function installLazyBodies(info, programs, checker, overlay) {
+function installLazyBodies(info, programs, checker) {
 	const { probe, probePrograms } = info;
-	const ctx = { ...info, overlay };
 	programs.forEach((p, pi) => {
 		p.decls.forEach((decl, di) => {
 			if (decl.kind !== "FuncDecl" && decl.kind !== "MethodDecl") return;
@@ -298,7 +251,7 @@ function installLazyBodies(info, programs, checker, overlay) {
 				const before = [probe.errors.length, checker.errors.length];
 				probe.checkBody(probeDecl);
 				if (probe.errors.length === before[0]) {
-					mangleBody(decl, p._filename, ctx);
+					mangleBody(decl, p._filename, info);
 					checker.checkBody(decl);
 					lowerStdlibRefs(decl);
 				}
@@ -314,14 +267,9 @@ function installLazyBodies(info, programs, checker, overlay) {
 }
 
 // Exported members as seen by importers (original name -> type) and the
-// original -> mangled name map; an overlay keeps the emitter members too.
-function stdlibNamespace(
-	checker,
-	{ pkgName, values, types, suffix },
-	overlay,
-	jsOnly,
-) {
-	const members = overlay ? { ...overlay.members } : {};
+// original -> mangled name map.
+function stdlibNamespace(checker, { pkgName, values, types, suffix }, jsOnly) {
+	const members = {};
 	const mangle = new Map();
 	const consts = new Map();
 	for (const name of [...values, ...types]) {
@@ -339,11 +287,10 @@ function stdlibNamespace(
 		}
 	}
 	return {
-		...(overlay ?? {}),
 		kind: "namespace",
 		name: pkgName,
 		members,
-		_gofront: !overlay,
+		_gofront: true,
 		_target: "both",
 		_jsOnly: jsOnly,
 		_mangle: mangle,
@@ -406,28 +353,24 @@ function loadStdlibPackage(
 
 function buildStdlibPackage(importPath, dir, options, deps, v) {
 	const cache = options.stdlibCache;
-	const overlay = isBuiltinPackage(importPath)
-		? new deps.TypeChecker().globals.lookup(importPath.split("/").at(-1))
-		: null;
 	const info = {
-		...probeStdlibPackage(importPath, dir, options, overlay, deps, v),
+		...probeStdlibPackage(importPath, dir, options, deps, v),
 		suffix: stdlibSuffix(importPath),
 	};
 
 	// Pass 2: mangle a fresh parse and check it again.
 	const programs = parseStdlibFiles(dir, deps, v.variant, v.target);
-	mangleStdlibAst(programs, { ...info, overlay }, { lazy: true });
+	mangleStdlibAst(programs, info, { lazy: true });
 	const checker = checkStdlibPrograms(
 		programs,
 		info.pkgName,
 		options,
-		null,
 		deps,
 		v.target,
 	);
 	throwStdlibErrors(checker.checkAll(programs));
 	lowerStdlibRefs(programs);
-	installLazyBodies(info, programs, checker, overlay);
+	installLazyBodies(info, programs, checker);
 
 	// A user reference to a member checks the bodies it reaches, so a type
 	// error in the standard library surfaces at the call.  Failures from other
@@ -435,7 +378,7 @@ function buildStdlibPackage(importPath, dir, options, deps, v) {
 	const reach = new StdlibReach(programs);
 	const jsOnly =
 		v.variant === "shared" ? stdlibJsOnlyNames(dir, deps) : new Set();
-	const namespace = stdlibNamespace(checker, info, overlay, jsOnly);
+	const namespace = stdlibNamespace(checker, info, jsOnly);
 	namespace._path = importPath;
 	namespace._reach = (name) => {
 		const seen = reach.failures.length;
@@ -448,7 +391,6 @@ function buildStdlibPackage(importPath, dir, options, deps, v) {
 		key: v.key,
 		checker,
 		pkgName: info.pkgName,
-		overlay,
 		namespace,
 		exportedTypes: stdlibExportedTypes(checker, info),
 		deps: programs
@@ -597,36 +539,13 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		return;
 	}
 	const name = alias ?? pkg.pkgName;
-	// Emitter-backed members are emitted by package name, so an overlaid
-	// package cannot be renamed (aliases of emitter packages never worked).
-	if (pkg.overlay && name !== pkg.pkgName) {
-		errAtImport(
-			checker,
-			p,
-			spec,
-			`import alias for '${path}' is not supported`,
-		);
-		return;
-	}
 	const ns = { ...pkg.namespace, name };
-	// Emitter members come from this checker's own namespace: some resolve
-	// types of the Go source against its type table when first used.
-	const own = pkg.overlay ? checker.globals.lookup(name)?.members : null;
-	if (own)
-		ns.members = {
-			...ns.members,
-			...Object.fromEntries(
-				Object.keys(pkg.overlay.members)
-					.filter((k) => k in own)
-					.map((k) => [k, own[k]]),
-			),
-		};
 	checker.globals.define(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
 	}
-	if (!pkg.overlay && !spec._implicit)
+	if (!spec._implicit)
 		checker.trackImport(name, importNode(spec), p._filename, p._source);
 }
 
@@ -664,12 +583,18 @@ export function checkGeneratedGo(
 			checker.err(message, node, hint);
 		}
 	if (failed) return [];
-	const imports = [...new Set(parts.flatMap((p) => p.imports))];
+	// An import is a path or { path, alias }.
+	const specs = new Map();
+	for (const imp of parts.flatMap((p) => p.imports)) {
+		const { path, alias } = typeof imp === "string" ? { path: imp } : imp;
+		specs.set(`${alias ?? ""} ${path}`, { path, alias });
+	}
+	const imports = [...specs.values()];
 	const source = [
 		`package ${checker.pkgName}`,
 		...(imports.length > 0
 			? [
-					`import (\n${imports.map((p) => `\t${JSON.stringify(p)}`).join("\n")}\n)`,
+					`import (\n${imports.map(({ path, alias }) => `\t${alias ? `${alias} ` : ""}${JSON.stringify(path)}`).join("\n")}\n)`,
 				]
 			: []),
 		...parts.map((p) => p.body),

@@ -5,10 +5,12 @@
 import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
 import { NATIVES } from "../../../src/typechecker/types.js";
 import {
+	assert,
 	assertEqual,
 	assertThrows,
 	compileHybrid,
 	compileHybridProject,
+	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -2108,4 +2110,53 @@ test("a wasm native that declines calls the Go body", async () => {
 		),
 		"4",
 	);
+});
+
+section("WASM stdlib — time host imports");
+
+const TIME_PKG = `//gofront:target wasm
+package clock
+
+import "time"
+
+//gofront:export
+func Offset() int {
+	_, off := time.Now().Zone()
+	_ = off
+	return time.Now().Year()
+}
+`;
+
+test("time.Now and Zone run through the facade; the facade carries no dead stdlib block", async () => {
+	const res = await compileHybridProject({
+		"clock/clock.go": TIME_PKG,
+		"main.go": `package main
+
+import "./clock"
+
+func main() {
+	println(clock.Offset() >= 2024)
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "true");
+	assert(res.js.includes("time_now_ms"), "env table has time_now_ms");
+	assert(!res.js.includes("bytes_trim"), "no bytes_trim in facade");
+	assert(!res.js.includes("stdlib_sys"), "no stdlib_sys in facade");
+});
+
+test("a wasm package without time has no time imports", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	return strings.ToUpper("a")
+}
+`;
+	const { wat, errors } = compileWasm(src, { emitWat: true });
+	assertEqual(errors.length, 0);
+	assert(!wat.includes("time_now_ms"), "no time_now_ms import");
+	assert(!wat.includes("time_timezone_offset"), "no timezone import");
 });

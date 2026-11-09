@@ -6,11 +6,13 @@ import {
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
+	assertErrorContains,
 	assertFourWay,
 	assertJsProgramOutput,
 	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
+	compileHybridProject,
 	runJs,
 	section,
 	summarize,
@@ -3102,6 +3104,205 @@ json: cannot unmarshal string into Go struct field S.P of type int
 {"P":1,"Q":"x","R":{"N":4},"Z":null,"Pp":3} <nil>
 `,
 	);
+});
+
+section("encoding/json — RawMessage methods and import alias");
+
+test("json.RawMessage MarshalJSON / UnmarshalJSON", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type W struct {
+	R json.RawMessage
+}
+
+func main() {
+	b, err := json.RawMessage("true").MarshalJSON()
+	fmt.Println(string(b), err)
+	b, err = json.RawMessage(nil).MarshalJSON()
+	fmt.Println(string(b), err)
+	var rm json.RawMessage
+	src := []byte("[1,2]")
+	err = (&rm).UnmarshalJSON(src)
+	src[1] = '9'
+	fmt.Println(string(rm), err)
+	err = (*json.RawMessage)(nil).UnmarshalJSON(src)
+	fmt.Println(err)
+	var w W
+	err = json.Unmarshal([]byte(\`{"R":{"a": 1}}\`), &w)
+	fmt.Println(string(w.R), err)
+	out, err := json.Marshal(w)
+	fmt.Println(string(out), err)
+}
+`,
+		`true <nil>
+null <nil>
+[1,2] <nil>
+json.RawMessage: UnmarshalJSON on nil pointer
+{"a": 1} <nil>
+{"R":{"a":1}} <nil>
+`,
+	);
+});
+
+test("json import alias", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"fmt"
+	myjson "encoding/json"
+)
+
+func main() {
+	b, err := myjson.Marshal(map[string]int{"a": 1})
+	fmt.Println(string(b), err)
+	var m map[string]int
+	err = myjson.Unmarshal(b, &m)
+	fmt.Println(m["a"], err)
+	fmt.Println(myjson.Valid(b), myjson.Valid([]byte("{")))
+	r := myjson.RawMessage("1")
+	fmt.Println(string(r))
+}
+`,
+		`{"a":1} <nil>
+1 <nil>
+true false
+1
+`,
+	);
+});
+
+section("encoding/json — call-site matching");
+
+test("a local variable named json is not a json call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type S struct{}
+
+func (S) Marshal() int { return 7 }
+
+func main() {
+	fmt.Println(json.Valid(nil))
+	var json S
+	fmt.Println(json.Marshal())
+}
+`,
+		`false
+7
+`,
+	);
+});
+
+test("json.Valid works as a value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	f := json.Valid
+	fmt.Println(f([]byte("1")), f([]byte("{")))
+}
+`,
+		`true false
+`,
+	);
+});
+
+test("json.Marshal and json.Unmarshal cannot be used as values", () => {
+	for (const [fn, expr] of [
+		["Marshal", "json.Marshal"],
+		["MarshalIndent", "json.MarshalIndent"],
+		["Unmarshal", "json.Unmarshal"],
+	]) {
+		const { errors } = compile(`package main
+import "encoding/json"
+func main() {
+	f := ${expr}
+	_ = f
+}`);
+		assertErrorContains(errors, `json.${fn} cannot be used as a value`);
+	}
+});
+
+section("encoding/json — types named through another file's import alias");
+
+// `a.go` names time.Time as `t.Time`; `b.go` marshals it without importing time.
+async function marshalAcrossFiles(target, dyn, extraFiles = {}) {
+	const res = await compileHybridProject({
+		"lib/a.go": `//gofront:target ${target}
+package lib
+
+import t "time"
+
+func Make() t.Time { return t.Date(2020, 1, 2, 3, 4, 5, 0, t.UTC) }
+
+type W struct{ D t.Time }
+
+func MakeW() W { return W{D: Make()} }
+`,
+		...extraFiles,
+		"lib/b.go": `package lib
+
+import "encoding/json"
+
+func Run() string {
+	b, _ := json.Marshal(${dyn ? "any(Make())" : "Make()"})
+	c, _ := json.Marshal(${dyn ? "any(MakeW())" : "MakeW()"})
+	return string(b) + " " + string(c)
+}
+`,
+		"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	return res.lines.join("\n");
+}
+
+const TIME_JSON = '"2020-01-02T03:04:05Z" {"D":"2020-01-02T03:04:05Z"}';
+
+for (const target of ["both", "wasm"]) {
+	for (const dyn of [false, true]) {
+		const kind = dyn ? "dynamic" : "static";
+		test(`json.Marshal of an aliased time.Time in another file (${kind}, ${target})`, async () => {
+			assertEqual(await marshalAcrossFiles(target, dyn), TIME_JSON);
+		});
+		test(`json.Marshal of time.Time beside a package-level 'time' (${kind}, ${target})`, async () => {
+			assertEqual(
+				await marshalAcrossFiles(target, dyn, {
+					"lib/c.go": "package lib\n\nvar time = 5\n",
+				}),
+				TIME_JSON,
+			);
+		});
+	}
+}
+
+section("encoding/json — reachability");
+
+test("json.Valid alone keeps the codec runtime out of the output", () => {
+	const { js, errors } = compile(`package main
+import "encoding/json"
+func main() {
+	_ = json.Valid(nil)
+}`);
+	assertEqual(errors.length, 0);
+	assert(!js.includes("UnmarshalTypeError"), "UnmarshalTypeError in output");
+	assert(!js.includes("EncodeBytes"), "EncodeBytes in output");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

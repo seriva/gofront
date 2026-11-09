@@ -77,21 +77,6 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
 
-// Packages whose typechecker table keeps only emitter members (`errors.As`):
-// the rest is Go source, so a program importing one is linked
-// like the others.
-const GO_OVERLAID_PACKAGES = new Set([
-	"errors",
-	"encoding/json",
-	"fmt",
-	"time",
-]);
-
-// Emitter-backed packages that also carry Go-source members (`bytes`); a
-// program names one of them as `pkg.Member`.
-const GO_MEMBER_PACKAGES = new Set(["bytes"]);
-const GO_MEMBER_RE = /\bbytes\./;
-
 // Whether the program imports a package that exists only as Go source under
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
 // helpers do not link those; they go through `compileFiles` instead.
@@ -103,9 +88,7 @@ function importsGoSourceStdlib(ast, source = "") {
 			({ path }) =>
 				!path.startsWith("js:") &&
 				!path.startsWith(".") &&
-				(!isBuiltinPackage(path) ||
-					GO_OVERLAID_PACKAGES.has(path) ||
-					(GO_MEMBER_PACKAGES.has(path) && GO_MEMBER_RE.test(source))) &&
+				!isBuiltinPackage(path) &&
 				resolveStdlibSource(path) !== null,
 		),
 	);
@@ -140,6 +123,7 @@ export function compileWasm(source, options = {}) {
 		return compileWasmSource(source, options);
 	const { res, errors } = compileSourceFile(source, "wasm", {
 		exportAll: options.exportAll ?? true,
+		emitWat: options.emitWat,
 	});
 	return errors.length > 0
 		? { wasm: null, errors }

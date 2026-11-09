@@ -75,28 +75,6 @@ function indexStdlib(stdlibPrograms) {
 	return { byName, methods, inits };
 }
 
-const JSON_NAMES = [
-	"SyntaxError$$internal$jsonrt",
-	"UnmarshalTypeError$$internal$jsonrt",
-	"InvalidUnmarshalError$$internal$jsonrt",
-	"UnsupportedValueError$$internal$jsonrt",
-	"UnsupportedTypeError$$internal$jsonrt",
-	"MarshalerError$$internal$jsonrt",
-	"CheckValid$$internal$jsonrt",
-	"EncodeBytes$$internal$jsonrt",
-	"DecodeBytes$$internal$jsonrt",
-	"Number$$internal$jsonrt",
-	"OptEscapeHTML$$internal$jsonrt",
-	"OptUseNumber$$internal$jsonrt",
-	"OptDisallowUnknownFields$$internal$jsonrt",
-];
-
-function addExtraRoots(names) {
-	if (names.has("json")) {
-		for (const n of JSON_NAMES) names.add(n);
-	}
-}
-
 // Incremental closure over one or more Go-source stdlib packages.  A
 // declaration's body may still be unchecked (lazy checking): `decl._ensure()`,
 // when present, checks and mangles it first and returns an error text on
@@ -120,7 +98,6 @@ export class StdlibReach {
 	add(rootNodes) {
 		const roots = new Set();
 		collectRefs(rootNodes, roots, this.fields);
-		addExtraRoots(roots);
 		for (const n of roots) this._name(n);
 		this._close();
 	}

@@ -41,7 +41,6 @@ import {
 import {
 	linkIntoBundle,
 	registerPackageUnit,
-	registerWasmUnit,
 	wasmMarker,
 } from "./link/wasm.js";
 import { lower } from "./lower/index.js";
@@ -388,122 +387,29 @@ export function resolvePackageTarget(declared, pkgDir, options = {}) {
 }
 
 export function compileSingleFile(inputPath, options = {}) {
-	const {
-		sourceMap = false,
-		outputFile = null,
-		dumpTokens = false,
-		dumpAst = false,
-	} = options;
-	options = {
+	const { outputFile = null, dumpTokens = false, dumpAst = false } = options;
+
+	if (dumpTokens || dumpAst) {
+		let source;
+		try {
+			source = readFileSync(inputPath, "utf8");
+		} catch (e) {
+			throw new Error(`cannot read '${inputPath}': ${e.message}`);
+		}
+		const tokens = new Lexer(source, basename(inputPath)).tokenize();
+		if (dumpTokens) return { tokens };
+		const ast = new Parser(tokens, basename(inputPath), source).parse();
+		ast._source = source;
+		ast._path = resolve(inputPath);
+		return { ast };
+	}
+
+	return compileFiles([resolve(inputPath)], {
 		...options,
-		wasmUnits: options.wasmUnits ?? [],
-		stdlibCache: options.stdlibCache ?? new Map(),
-		jsRootPrograms: options.jsRootPrograms ?? [],
-		bundledDirs: options.bundledDirs ?? new Set(),
-	};
-
-	let source;
-	try {
-		source = readFileSync(inputPath, "utf8");
-	} catch (e) {
-		throw new Error(`cannot read '${inputPath}': ${e.message}`);
-	}
-
-	const tokens = new Lexer(source, basename(inputPath)).tokenize();
-	if (dumpTokens) return { tokens };
-
-	const ast = new Parser(tokens, basename(inputPath), source).parse();
-	ast._source = source;
-	ast._path = resolve(inputPath);
-	if (dumpAst) return { ast };
-
-	const outputDir =
-		options.outputDir ??
-		(outputFile ? dirname(resolve(outputFile)) : resolve("."));
-
-	const checker = new TypeChecker();
-	const jsImports = new Map();
-	const bundledPackages = new Set();
-	const preambles = [];
-
-	const pkgTarget = resolvePackageTarget(
-		ast.target ?? options.target ?? "js",
-		dirname(resolve(inputPath)),
-		options,
-	);
-	ast.target = pkgTarget;
-	checker.target = pkgTarget;
-	checker.pkgName = ast.pkg?.name ?? "main";
-
-	resolveImports(
-		[ast],
-		inputPath,
-		checker,
-		jsImports,
-		bundledPackages,
-		preambles,
-		options.bundledDirs ?? new Set(),
-		{ ...options, outputDir },
-	);
-
-	const errors = checker.check(ast);
-	checker.reportUnusedImports();
-	if (errors.length > 0) {
-		throw new Error(errors.map((e) => e.message).join("\n"));
-	}
-	for (const w of checker.warnings) log.warn(w);
-
-	if (pkgTarget === "wasm" || pkgTarget === "both") {
-		registerWasmUnit(options, {
-			key: resolve(inputPath),
-			pkgName: checker.pkgName,
-			target: pkgTarget,
-			programs: [ast],
-			types: checker.types,
-			bundledPackages,
-		});
-	}
-
-	const isStrict = Boolean(options.strict || pkgTarget === "both");
-	const cg = new CodeGen(checker, jsImports, bundledPackages, {
-		target: pkgTarget,
-		strict: isStrict,
-		natives: options.natives,
+		outputDir:
+			options.outputDir ??
+			(outputFile ? dirname(resolve(outputFile)) : resolve(".")),
 	});
-	const mainJs =
-		pkgTarget === "wasm" ? wasmMarker(checker.pkgName) : cg.generate(ast);
-	logWarnings(cg.warnings);
-
-	const mainChunk = {
-		js: mainJs,
-		sourceFiles: [resolve(inputPath)],
-		sourcesContent: [source],
-		mappings: pkgTarget === "wasm" ? [] : cg.getMappings(),
-	};
-
-	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	finishStdlibJs(merged, options, [ast], pkgTarget);
-	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
-		{ ...options, sourceMap },
-		merged,
-		pkgTarget,
-		outputDir,
-	);
-
-	if (sourceMap && !options.isDependency) {
-		attachSourceMap(merged, outputDir);
-	}
-
-	return {
-		js: merged.js,
-		css: cg.getCss(),
-		target: pkgTarget,
-		wasm,
-		wat,
-		wasmOptInfo,
-		wasmSourceMap,
-		stringTable,
-	};
 }
 
 export function compileDir(dir, options = {}) {

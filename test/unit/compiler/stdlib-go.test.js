@@ -147,31 +147,18 @@ func Run() string {
 	assertEqual(out, "true unsupported operation");
 });
 
-test("an overlay that redeclares an emitter member is rejected", () => {
-	withTempDir(
-		{
-			"stdlib/encoding/json/overlay.go": `//go:build gofront
+test("aliased errors and strings imports parity", async () => {
+	const out = await stdParity(`import (
+	e "errors"
+	s "strings"
+)
 
-//gofront:target both
-
-package json
-
-func Valid(data []byte) bool { return false }
-`,
-			"app/main.go": `package main
-
-import "encoding/json"
-
-func main() { println(json.Valid(nil)) }
-`,
-		},
-		(dir) => {
-			assertThrows(
-				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares json.Valid",
-			);
-		},
-	);
+func Run() string {
+	err := e.New("boom")
+	return s.ToUpper(err.Error()) + s.Repeat("!", 2)
+}
+`);
+	assertEqual(out, "BOOM!!");
 });
 
 section("Go-source stdlib: name coexistence and diagnostics");
@@ -367,28 +354,6 @@ func main() { println(u.C(1, 2), w.Run()) }
 			const first = compileDir(dir);
 			const second = compileDir(dir);
 			assertEqual(second.js, first.js);
-		},
-	);
-});
-
-test("an aliased overlay import is rejected at the import", () => {
-	withTempDir(
-		{
-			"stdlib/encoding/json/overlay.go": `//go:build gofront
-
-//gofront:target both
-
-package json
-
-func Hello() {}
-`,
-			"app/main.go": `package main\n\nimport j "encoding/json"\n\nfunc main() { println(j.Valid(nil)) }\n`,
-		},
-		(dir) => {
-			assertThrows(
-				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"import alias for 'encoding/json' is not supported",
-			);
 		},
 	);
 });
@@ -1484,4 +1449,99 @@ async func main() {
 		);
 		assertEqual(res.lines.join("\n"), "40 41");
 	});
+});
+
+section("Go-source stdlib: generated-file import qualifiers");
+
+// A multi-file package: `a.go` names `strconv.NumError` through an alias,
+// `main.go` calls errors.As on it (the generated file spells the type).
+async function asAcrossFiles(extra) {
+	const out = [];
+	for (const target of ["both", "wasm"]) {
+		const res = await compileHybridProject({
+			"lib/a.go": `//gofront:target ${target}
+package lib
+
+import sc "strconv"
+
+type Num = *sc.NumError
+`,
+			"lib/b.go": `package lib
+
+import (
+	"errors"
+	"strconv"
+)
+
+func Run() string {
+	_, err := strconv.Atoi("x")
+	var t Num
+	if errors.As(err, &t) {
+		return t.Func + " " + t.Num
+	}
+	return "no"
+}
+${extra}`,
+			"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+		});
+		out.push(res.lines.join("\n"));
+	}
+	return out;
+}
+
+test("errors.As target spelled through an aliased import in another file", async () => {
+	const [js, wasm] = await asAcrossFiles("");
+	assertEqual(js, "Atoi x");
+	assertEqual(wasm, "Atoi x");
+});
+
+test("errors.As target survives a package-level name equal to the package", async () => {
+	const [js, wasm] = await asAcrossFiles("");
+	assertEqual(js, "Atoi x");
+	assertEqual(wasm, "Atoi x");
+	const out = [];
+	for (const target of ["both", "wasm"]) {
+		const res = await compileHybridProject({
+			"lib/a.go": `//gofront:target ${target}
+package lib
+
+import sc "strconv"
+
+type Num = *sc.NumError
+`,
+			"lib/c.go": `package lib
+
+var strconv = 1
+`,
+			"lib/b.go": `package lib
+
+import (
+	"errors"
+	str "strconv"
+)
+
+func Run() string {
+	_, err := str.Atoi("x")
+	var t Num
+	if errors.As(err, &t) {
+		return t.Func + " " + t.Num
+	}
+	return "no"
+}
+`,
+			"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+		});
+		out.push(res.lines.join("\n"));
+	}
+	assertEqual(out.join("|"), "Atoi x|Atoi x");
 });
