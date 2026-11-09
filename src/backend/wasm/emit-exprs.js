@@ -301,7 +301,6 @@ export class ExprsEmitter {
 			case "SelectorExpr": {
 				const deq = this._dequalify(expr);
 				if (deq) this.emitIdent(deq, targetWasmType);
-				else if (this._emitPkgConst(expr, targetWasmType)) break;
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -607,14 +606,6 @@ export class ExprsEmitter {
 			return null;
 		const operand = base.operand ?? base.expr;
 		return this._derefStructInfo(operand) ? operand : null;
-	}
-
-	_emitPkgConst(expr, targetWasmType) {
-		if (this._isUtf8Const(expr)) {
-			this.emitUtf8Const(expr.field, targetWasmType);
-			return true;
-		}
-		return false;
 	}
 
 	emitSelectorExpr(expr) {

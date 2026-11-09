@@ -123,6 +123,7 @@ export function compileWasm(source, options = {}) {
 		return compileWasmSource(source, options);
 	const { res, errors } = compileSourceFile(source, "wasm", {
 		exportAll: options.exportAll ?? true,
+		emitWat: options.emitWat,
 	});
 	return errors.length > 0
 		? { wasm: null, errors }

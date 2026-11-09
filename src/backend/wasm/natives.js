@@ -32,10 +32,11 @@ const WASM_INTRINSICS = {
 	},
 	// time: the host clock (`env.time_now_ms`, milliseconds) as nanoseconds.
 	time_now: {
+		prepare: (mod) => mod.getOrAddFuncImport("env", "time_now_ms", [], ["f64"]),
 		emit: (e) => {
 			e.pushInstruction({
 				op: "call",
-				funcIndex: e.mod.getStdlibImportIndex("time_now_ms"),
+				funcIndex: e.mod.getOrAddFuncImport("env", "time_now_ms", [], ["f64"]),
 			});
 			e.pushInstruction("i64.trunc_sat_f64_s");
 			e.pushInstruction({ op: "i64.const", value: 1000000n });
@@ -45,6 +46,8 @@ const WASM_INTRINSICS = {
 	// time: the host zone's offset at a Unix time (`env.time_timezone_offset`
 	// takes milliseconds and returns seconds).
 	time_zone_offset: {
+		prepare: (mod) =>
+			mod.getOrAddFuncImport("env", "time_timezone_offset", ["f64"], ["i32"]),
 		emit: (e) => {
 			e.pushInstruction({ op: "local.get", index: 0 });
 			e.pushInstruction("f64.convert_i64_s");
@@ -52,7 +55,12 @@ const WASM_INTRINSICS = {
 			e.pushInstruction("f64.mul");
 			e.pushInstruction({
 				op: "call",
-				funcIndex: e.mod.getStdlibImportIndex("time_timezone_offset"),
+				funcIndex: e.mod.getOrAddFuncImport(
+					"env",
+					"time_timezone_offset",
+					["f64"],
+					["i32"],
+				),
 			});
 			e.pushInstruction("i64.extend_i32_s");
 		},
