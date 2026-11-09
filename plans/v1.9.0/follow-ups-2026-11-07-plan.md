@@ -243,23 +243,23 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 5: Dynamic Types, Type Switches, and Interface Assertions (JS & WASM)
 
-- [ ] Task 5.1: JS typed nil non-struct pointers and nil slices/funcs in `any`
+- [x] Task 5.1: JS typed nil non-struct pointers and nil slices/funcs in `any`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F15` `var p1, p2 *int; var a1, a2 any = p1, p2; fmt.Println(a1 == a2)` → `"true"`; `F16` `var s []int; var a any = s; _, ok := a.([]int); fmt.Println(ok)` → `"true"` on `both` and `wasm` (`a == nil` is not asserted: documented JS `nil` row).
   - Done when: nil non-struct pointers and nil slices/funcs stored in `any` keep their dynamic type on JS so `any == any` and `.([]T)` match Go, without changing the documented JS `== nil` result.
-- [ ] Task 5.2: JS boxing and type switches inside generic functions and pointer-receiver methods on type parameters
+- [x] Task 5.2: JS boxing and type switches inside generic functions and pointer-receiver methods on type parameters
   - Files: `src/backend/js/expressions.js`, `src/backend/js/type-info.js`, `test/unit/types/generics.test.js`
   - Test: `F17` `F(p)` (`var p *int`) and `Kind[Name](Name("a"))` → `"false T"`; `F18` `c := Counter(5); Step(&c); fmt.Println(c)` → `"6"` on `js`, `both`, and `wasm`.
   - Done when: `any(v)` inside generic functions uses the runtime type-parameter factory to box nil pointers/named strings and dispatch pointer-receiver constraint methods without re-boxing a pointer into a scalar box.
-- [ ] Task 5.3: JS interface assertions: promoted pointer-receiver methods on value structs and `case fmt.Stringer`
+- [x] Task 5.3: JS interface assertions: promoted pointer-receiver methods on value structs and `case fmt.Stringer`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F19` `var v any = Outer{}; _, ok := v.(Mer); fmt.Println(ok)` → `"false"`; `F31` `switch v.(type) { case error: return "d"; case fmt.Stringer: return "s" }` on `3` → `"other"` on `js`, `both`, and `wasm`.
   - Done when: value structs embedding a struct `Inner` by value do not claim `*Inner`'s pointer-receiver methods in interface assertions, and `case fmt.Stringer:` on JS checks Go `String() string` implementation rather than `Object.prototype.toString`.
-- [ ] Task 5.4: Named func type (`iter.Seq[int]`) and defined slice/map/array identity in `any` type assertions and switches
+- [x] Task 5.4: Named func type (`iter.Seq[int]`) and defined slice/map/array identity in `any` type assertions and switches
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F32` `var b any = seq; _, ok := b.(iter.Seq[int]); fmt.Println(ok)` → `"false"` on `js`, `both`, and `wasm`; `F34` `type S []int; switch any([]int{1}).(type) { case S: return "S"; case []int: return "slice" }` → `"slice"` on all targets.
   - Done when: WASM boxes/tags defined func types (`iter.Seq[T]`) and defined slice types (`type S []int`) distinctly from unnamed `func(func(T) bool)` and `[]int` when converted to `any`.
-- [ ] Task 5.5: Failed type assertion panic message with concrete and target type names
+- [x] Task 5.5: Failed type assertion panic message with concrete and target type names
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/emit-exprs.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `F33` `defer func() { fmt.Println(recover().(error).Error()) }(); var i any = "s"; _ = i.(int)` → `"interface conversion: interface {} is string, not int"` on `both` and `wasm`, plus the nil-operand form (`interface {} is nil, not int`); update the existing `includes("type assertion failed")` assertions in `test/unit/wasm/interfaces.test.js` and `test/unit/wasm/strings_any.test.js`.
   - Done when: non-comma-ok type assertions (JS throw in `src/backend/js/expressions.js`, WASM `emitPanic` in `src/backend/wasm/emit-exprs.js`) include the interface name, dynamic concrete type name, and target type name in the panic message on both backends.

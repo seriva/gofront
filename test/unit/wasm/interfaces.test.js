@@ -305,7 +305,12 @@ func Main() string {
 		exports.Main();
 	} catch (e) {
 		caught = true;
-		assertEqual(e.message.includes("type assertion failed"), true);
+		assertEqual(
+			e.message.includes(
+				"interface conversion: main.Animal is *main.Dog, not *main.Cat",
+			),
+			true,
+		);
 	}
 	assertEqual(caught, true);
 });
@@ -1190,5 +1195,276 @@ func main() {
 a33 a25 name:n other
 false true 2
 `,
+	);
+});
+
+section(
+	"Dynamic types in any: typed nils, generics, promoted methods, defined types, panics",
+);
+
+test("a nil pointer or slice stored in any keeps its dynamic type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var p1, p2 *int
+	var a1, a2 any = p1, p2
+	fmt.Println(a1 == a2)
+	var q *string
+	var a3 any = q
+	fmt.Println(a1 == a3)
+	var s []int
+	var a any = s
+	_, ok := a.([]int)
+	fmt.Println(ok)
+	_, ok = a.([]string)
+	fmt.Println(ok)
+	v, _ := a.([]int)
+	fmt.Println(v == nil, len(v))
+	switch a.(type) {
+	case nil:
+		fmt.Println("nil")
+	case []int:
+		fmt.Println("[]int")
+	}
+	var empty any
+	_, ok = empty.([]int)
+	fmt.Println(ok)
+}
+`,
+		"true\nfalse\ntrue\nfalse\ntrue 0\n[]int\nfalse\n",
+	);
+});
+
+test("any(v) inside a generic function boxes by the type argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Name string
+
+func (n Name) Hi() string { return "hi " + string(n) }
+
+type Counter int
+
+func (c *Counter) Inc() { *c++ }
+
+type Incer interface{ Inc() }
+
+func IsNil[T any](v T) bool { return any(v) == nil }
+
+func Kind[T any](v T) string {
+	switch any(v).(type) {
+	case Name:
+		return "Name"
+	case *int:
+		return "*int"
+	case int:
+		return "int"
+	}
+	return "other"
+}
+
+func Step[T Incer](p T) { p.Inc() }
+
+func main() {
+	var p *int
+	fmt.Println(IsNil(p), IsNil(Name("a")), IsNil(1))
+	fmt.Println(Kind(Name("a")), Kind(p), Kind(2), Kind("s"))
+	c := Counter(5)
+	Step(&c)
+	fmt.Println(c)
+}
+`,
+		"false false false\nName *int int other\n6\n",
+	);
+});
+
+test("promoted pointer-receiver methods stay out of a struct value's method set and case fmt.Stringer checks String", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+)
+
+type Mer interface{ M() }
+type Ver interface{ V() }
+type Inner struct{}
+
+func (*Inner) M() {}
+func (Inner) V()  {}
+
+type Mid struct{ Inner }
+type Outer struct{ Mid }
+type S struct{}
+
+func (S) String() string { return "S" }
+
+func kind(v any) string {
+	switch v.(type) {
+	case error:
+		return "error"
+	case fmt.Stringer:
+		return "stringer"
+	case sort.Interface:
+		return "sorter"
+	}
+	return "other"
+}
+
+func main() {
+	var v any = Outer{}
+	_, ok := v.(Mer)
+	fmt.Println(ok)
+	_, ok = v.(Ver)
+	fmt.Println(ok)
+	v = &Outer{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+	v = Mid{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+	v = Inner{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+	fmt.Println(kind(3), kind("s"), kind(S{}), kind(errors.New("e")), kind(nil))
+}
+`,
+		"false\ntrue\ntrue\nfalse\nfalse\nother other stringer error other\n",
+	);
+});
+
+test("iter.Seq and defined slice types differ from their unnamed forms in assertions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+type S []int
+type T []string
+type B []byte
+
+func kind(v any) string {
+	switch x := v.(type) {
+	case S:
+		return fmt.Sprint("S", len(x))
+	case T:
+		return "T"
+	case B:
+		return "B"
+	case []int:
+		return fmt.Sprint("slice", len(x))
+	case []byte:
+		return "bytes"
+	}
+	return "other"
+}
+
+func main() {
+	seq := func(yield func(int) bool) { yield(1) }
+	var a any = seq
+	_, ok := a.(iter.Seq[int])
+	fmt.Println(ok)
+	fmt.Println(kind(S{1}), kind([]int{1, 2}), kind(T{"a"}), kind(B{1}), kind([]byte{1}))
+	switch any([]int{1}).(type) {
+	case S:
+		fmt.Println("S")
+	case []int:
+		fmt.Println("slice")
+	}
+}
+`,
+		"false\nS1 slice2 T B bytes\nslice\n",
+	);
+});
+
+test("a defined func or slice type in any is not its unnamed form (wasm)", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+type S []int
+
+func main() {
+	seq := func(yield func(int) bool) { yield(1) }
+	var s iter.Seq[int] = seq
+	var a any = s
+	_, ok := a.(iter.Seq[int])
+	fmt.Println(ok)
+	_, ok = a.(func(func(int) bool))
+	fmt.Println(ok)
+	a = S(nil)
+	_, ok = a.(S)
+	fmt.Println(ok)
+}
+`,
+		"true\nfalse\ntrue\n",
+	);
+});
+
+test("a failed type assertion panics with Go's interface conversion message", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type I interface{ M() }
+type A struct{}
+type B struct{}
+
+func (*B) M() {}
+
+type C struct{}
+
+func (*C) M() {}
+
+type N int
+
+func try(f func()) {
+	defer func() { fmt.Println(recover().(error).Error()) }()
+	f()
+}
+
+func main() {
+	var a any = "s"
+	try(func() { _ = a.(int) })
+	a = nil
+	try(func() { _ = a.(int) })
+	try(func() { _ = a.(I) })
+	a = A{}
+	try(func() { _ = a.(B) })
+	try(func() { _ = a.(*A) })
+	try(func() { _ = a.(I) })
+	a = &A{}
+	try(func() { _ = a.(A) })
+	a = N(3)
+	try(func() { _ = a.(int) })
+	a = 3.5
+	try(func() { _ = a.(int) })
+	a = []int{1}
+	try(func() { _ = a.([]string) })
+	var e error = errors.New("x")
+	try(func() { _ = e.(I) })
+	var i I = &B{}
+	try(func() { _ = i.(*C) })
+}
+`,
+		"interface conversion: interface {} is string, not int\ninterface conversion: interface {} is nil, not int\ninterface conversion: interface is nil, not main.I\ninterface conversion: interface {} is main.A, not main.B\ninterface conversion: interface {} is main.A, not *main.A\ninterface conversion: main.A is not main.I: missing method M\ninterface conversion: interface {} is *main.A, not main.A\ninterface conversion: interface {} is main.N, not int\ninterface conversion: interface {} is float64, not int\ninterface conversion: interface {} is []int, not []string\ninterface conversion: *errors.errorString is not main.I: missing method M\ninterface conversion: main.I is *main.B, not *main.C\n",
 	);
 });

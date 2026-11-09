@@ -516,9 +516,10 @@ export class ModuleEmitter {
 		const typeIndex = this._getTotalTypeCount();
 		const typeEntry = {
 			form: "struct",
-			// Slices of 32-bit-or-smaller elements are open: each Go type among them
-			// gets a tagged subtype when it reaches an interface.
-			sub: elemWType === "i32",
+			// Slice types are open: each defined slice type, and each Go type among
+			// the 32-bit-or-smaller elements, gets a tagged subtype when it
+			// reaches an interface.
+			sub: true,
 			fields: [
 				{
 					type: {
@@ -597,7 +598,7 @@ export class ModuleEmitter {
 				},
 			],
 		});
-		const info = { key, typeIndex, tagTypeIndex, base };
+		const info = { key, typeIndex, tagTypeIndex, base, goType: sliceGoType };
 		this.taggedSliceTypes.set(key, info);
 		return info;
 	}

@@ -1002,6 +1002,9 @@ export class CodeGen {
 		// Pointer-receiver methods are outside the method set of a struct value
 		// held in an interface (see _ifaceMethodCheck).
 		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
+		// ...and so are those promoted from an embedded struct value.
+		for (const stub of computeEmbeddedStubs(name, methodDecls, this.checker))
+			if (stub.ptrOnly) pm.push(stub.methodName);
 		if (pm.length > 0)
 			this.line(
 				`Object.defineProperty(${name}, "__pm", { value: ${JSON.stringify(pm)} });`,
