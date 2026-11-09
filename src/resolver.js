@@ -39,8 +39,7 @@ export function isBuiltinPackage(importPath) {
 }
 
 // Go-source stdlib: `stdlib/<import path>/*.go`, written in GoFront Go
-// and compiled into the caller's target.  A directory for a path that is also
-// in STDLIB_PACKAGES is an overlay: its declarations extend that namespace.
+// and compiled into the caller's target.
 const STDLIB_SOURCE_ROOT = fileURLToPath(
 	new URL("../stdlib/", import.meta.url),
 );

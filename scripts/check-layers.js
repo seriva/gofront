@@ -22,10 +22,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const ALLOW = {};
 
 // Cross-backend imports that are allowed by design: [importer, imported].
-export const PERMANENT_CROSS = [
-	// The boundary emits JS facade code that calls the JS runtime helpers.
-	["src/backend/wasm/boundary.js", "src/backend/js/runtime.js"],
-];
+export const PERMANENT_CROSS = [];
 
 // Known edges that are scheduled for removal. Delete an entry when the move
 // that fixes it lands.

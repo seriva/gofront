@@ -33,7 +33,6 @@
 //     handed out by this facade) may be passed back in.
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
-import { HELPER_ERROR } from "../js/runtime.js";
 import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
@@ -1922,6 +1921,8 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			const nl = lineBuf.lastIndexOf("\\n");
 			if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
 		},
+		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
+		"time_timezone_offset": (ms) => (-new Date(ms).getTimezoneOffset() * 60) | 0,
 		"os_exit": (code) => {
 			if (lineBuf !== "") { write(lineBuf); lineBuf = ""; }
 			if (typeof process !== "undefined" && process.exit) process.exit(code);
@@ -2032,13 +2033,6 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"println_bool": (b) => println(b !== 0 ? "true" : "false"),
 		"println_empty": flush,
 	};
-	// Stdlib imports (strings, io, time) are a separate block so
-	// modules that never call them do not ship it (see WASM_STDLIB_JS).
-	if (typeof ${P}stdlib === "function") {
-		Object.assign(env, ${P}stdlib(stringTable, {
-			"late": late,
-		}));
-	}
 	Object.assign(env, extraEnv);
 	// A host import that throws raises a Go panic: the module's panic stack
 	// gets the message (as env.panic does through __push_panic) before the
@@ -2139,40 +2133,8 @@ function ${P}replace(s, o, w, n) {
 	return r + cs.slice(m - 1).join("");
 }`;
 
-// JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
-// module imports one of the packages that use it.
-export const WASM_STDLIB_JS = `${HELPER_ERROR}
-function ${P}stdlib_sys(stringTable, io) {
-	let trimStart = 0, trimEnd = 0;
-	return {
-		// bytes trim
-		"bytes_trim": (s, cutset, left, right) => {
-			const cs = new Set(Array.from(cutset ?? ""));
-			const chars = Array.from(s ?? "");
-			let a = 0, b = chars.length;
-			if (left) while (a < b && cs.has(chars[a])) a++;
-			if (right) while (b > a && cs.has(chars[b - 1])) b--;
-			const enc = new TextEncoder();
-			trimStart = a === 0 ? 0 : enc.encode(chars.slice(0, a).join("")).length;
-			trimEnd = b === chars.length ? enc.encode(s ?? "").length : enc.encode(chars.slice(0, b).join("")).length;
-		},
-		"bytes_trim_start": () => trimStart,
-		"bytes_trim_end": () => trimEnd,
-		// time
-		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
-		"time_timezone_offset": (ms) => (-new Date(ms).getTimezoneOffset() * 60) | 0,
-	};
-}
-function ${P}stdlib(stringTable, io) {
-	return Object.assign(
-		{},
-		${P}stdlib_sys(stringTable, io),
-	);
-}`;
-
 // Runtime loader emitted at the top of the facade.
-const wasmLoaderJs = (stdlibEnv) => `${WASM_IMPORTS_JS}
-${stdlibEnv ? WASM_STDLIB_JS : ""}
+const wasmLoaderJs = `${WASM_IMPORTS_JS}
 async function ${P}fetch(url) {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error("GoFront: failed to fetch " + url + " (" + res.status + ")");
@@ -2262,10 +2224,10 @@ function facadeName(name) {
 
 export function generateFacade(
 	meta,
-	{ stringTable = [], callMain = false, stdlibEnv = true } = {},
+	{ stringTable = [], callMain = false } = {},
 ) {
 	const needs = meta._needs ?? collectNeeds(meta);
-	const out = [wasmLoaderJs(stdlibEnv)];
+	const out = [wasmLoaderJs];
 
 	// JS callback imports (registered before instantiation; bodies run after).
 	out.push(`const ${P}env = {};`);

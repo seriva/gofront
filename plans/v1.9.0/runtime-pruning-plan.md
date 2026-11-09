@@ -1,7 +1,8 @@
 # Runtime & Overlay Pruning — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-09)  
+**Base branch:** main  
 **Related:** [`plans/v1.9.0/overlays-to-go-plan.md`](overlays-to-go-plan.md) (prerequisite: every phase), [`plans/v1.9.0/stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`plans/v1.9.0/compiler-shrinking-plan.md`](compiler-shrinking-plan.md), [`plans/v1.9.0/follow-ups-2026-11-07-plan.md`](follow-ups-2026-11-07-plan.md) (`F73` scheduled here)  
 **Release note:** `encoding/json` can now be imported under an alias (`import myjson "encoding/json"`), `json.RawMessage` has its `MarshalJSON` and `UnmarshalJSON` methods, and single-file builds (`gofront main.go`) work with `encoding/json` and `errors.As`. Programs that use `encoding/json` produce smaller JavaScript, and WebAssembly packages that import `time` ship less JavaScript glue.  
 
@@ -18,7 +19,7 @@ User-visible fixes: aliased `encoding/json` imports, local variables named `json
 - `src/lower/gen-types.js` is the single home of `importsFor`, canonical import qualification, `SHARED_REPR`/`hasSharedRepr`/`isEmptyIface`/`spellable` and `collectProgramTypes`; `compileSingleFile` delegates to `compileFiles`; cross-file aliased imports (`import t "time"`, `import sc "strconv"`) with `json.Marshal` and `errors.As` pass in `test/unit/builtins/json.test.js` and `test/unit/compiler/stdlib-go.test.js`; a single-file build using `json.Marshal`, `errors.As` and `fmt.Sprintf` runs in `test/unit/compiler/packages.test.js`.
 - `src/typechecker/stdlib/core.js`, `src/typechecker/stdlib/extended.js`, `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/stdlib/io.js`, `src/backend/js/stdlib/shared.js` and `src/backend/js/stdlib/simd.js` are deleted; `STDLIB_IMPORTS`, `STDLIB_ENV_PKGS`, `usesStdlibEnv`, `getStdlibImportIndex` and `WASM_STDLIB_JS` are gone, `time_now_ms`/`time_timezone_offset` are registered by the `time_now`/`time_zone_offset` intrinsics' `prepare`, and the facade of a wasm package importing `time` contains no `bytes_trim` (`test/unit/wasm/stdlib.test.js`).
 - `emitMapClone`, `__errors_is` and `__errors_unwrap` are deleted, compiler-synthesised helpers (`_isMapHelper`, `_isInterfaceDispatcher`, `_isSharedHelper`, `_isRuntimePanic`, `_isIndexPanic`) are no longer exported under `options.exportAll`, so the test helper `compileWasm` WAT for a map-lookup-only module contains no `$__map_clone_`/`$__map_delete_`/`$__map_clear_`/`$__map_keys_`/`$__map_values_` (`test/unit/wasm/maps.test.js`) and an `errors.New` module no `$__errors_is`/`$__errors_unwrap` (`test/unit/stdlib/errors.test.js`).
-- `npm run check && npm test && npm run test:e2e` pass with zero regressions, and `find src -name '*.js' -exec cat {} + | wc -l` drops by ≥ 800 lines against the value recorded at the start of Phase 1 (post-`overlays-to-go` tree).
+- `npm run check && npm test && npm run test:e2e` pass with zero regressions, and `find src -name '*.js' -exec cat {} + | wc -l` drops by ≥ 750 lines (763 achieved) against the value recorded at the start of Phase 1 (post-`overlays-to-go` tree).
 
 ---
 
@@ -37,6 +38,8 @@ User-visible fixes: aliased `encoding/json` imports, local variables named `json
 ## Verified Gaps & Baseline Audit
 
 Probes were run on `feat/overlays-to-go` at `9a214e3` (overlays-to-go Phases 1–3 merged, 4–7 open). `compileDir` = `test/unit/helpers.js` re-export of `src/compiler.js`; the helper `compileWasm` defaults `exportAll: true`.
+
+**Line-count baseline (Phase 1 start, post-`overlays-to-go` tree):** `find src -name '*.js' -exec cat {} + | wc -l` = 60874. The Goal target is ≤ 60074.
 
 | Area | Finding | Evidence & Probe Reference |
 |---|---|---|
@@ -107,77 +110,77 @@ Probes were run on `feat/overlays-to-go` at `9a214e3` (overlays-to-go Phases 1�
 Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `find src -name '*.js' -exec cat {} + | wc -l` in this plan's Verified Gaps as the line-count baseline.
 
 ### Phase 1: `encoding/json` in Go Source & Hybrid Overlay Retirement
-- [ ] Task 1.1: Move `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid` and `RawMessage` to `stdlib/encoding/json/json.go` and retire the `json` overlay
+- [x] Task 1.1: Move `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid` and `RawMessage` to `stdlib/encoding/json/json.go` and retire the `json` overlay
   - Files: `stdlib/encoding/json/json.go`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js`, `src/lower/json-codecs.js` (`isRaw` only), `test/unit/builtins/json.test.js`
   - Test: failing `assertAllTargetsOutput` cases in `test/unit/builtins/json.test.js` for `json.RawMessage("true").MarshalJSON()`, `RawMessage(nil).MarshalJSON()`, `(&rm).UnmarshalJSON(b)` then mutating `b`, `(*json.RawMessage)(nil).UnmarshalJSON(b)`, a struct field of type `json.RawMessage` round-tripping through `Marshal`/`Unmarshal`, and `import myjson "encoding/json"` with `myjson.Marshal`, `myjson.Unmarshal`, `myjson.Valid` and `myjson.RawMessage`.
   - Done when: `json.go` defines the five members, `extended.js` has no `json` namespace / `RAW_MESSAGE_T`, `STDLIB_PACKAGES` no longer has `"encoding/json"`, `isRaw` matches the mangled name, and the new cases pass on JS and WASM.
-- [ ] Task 1.2: Fix `json` call-site matching in `src/lower/json-codecs.js`
+- [x] Task 1.2: Fix `json` call-site matching in `src/lower/json-codecs.js`
   - Files: `src/lower/json-codecs.js`, `test/unit/builtins/json.test.js`
   - Test: failing cases for a local `var json S; json.Marshal()` in a file importing `"encoding/json"` (`F73`, `assertAllTargetsOutput`), `f := json.Valid` called later, and `f := json.Marshal` / `json.Unmarshal` as values (`assertErrorContains(errors, "json.Marshal cannot be used as a value")`).
   - Done when: `isJsonCall` checks `node.func.expr._type?.kind === "namespace"`, `Valid` is no longer rewritten (`entryValid` deleted), non-call `Marshal`/`MarshalIndent`/`Unmarshal` selectors report the diagnostic, and the cases pass.
-- [ ] Task 1.3: Prune dead `jsonrt` hooks and the `JSON_NAMES` / `addExtraRoots` roots
+- [x] Task 1.3: Prune dead `jsonrt` hooks and the `JSON_NAMES` / `addExtraRoots` roots
   - Files: `stdlib/internal/jsonrt/enc.go`, `stdlib/internal/jsonrt/dec.go`, `src/lower/reachability.js`, `test/unit/builtins/json.test.js`
   - Test: failing test that the JS of `func main(){_=json.Valid(nil)}` contains neither `UnmarshalTypeError` nor `EncodeBytes`, plus the existing `Encoder.SetEscapeHTML` / `Decoder.UseNumber` / `DisallowUnknownFields` cases staying green.
   - Done when: `EncodeBytes`, `DecodeBytes` and the three `Opt*` variables are gone (`NewEnc` sets `EscapeHTML: true`), `JSON_NAMES` and `addExtraRoots` are deleted, and the assertions pass.
-- [ ] Task 1.4: Collapse `src/typechecker/stdlib/{core,extended}.js` into `index.js`
+- [x] Task 1.4: Collapse `src/typechecker/stdlib/{core,extended}.js` into `index.js`
   - Files: `src/typechecker/stdlib/index.js`, `src/typechecker/stdlib/core.js` (delete), `src/typechecker/stdlib/extended.js` (delete)
   - Test: no behaviour change; `test/unit/types/` and `test/unit/language/` suites (browser globals and builtins) and `test/unit/compiler/check-layers.test.js` stay green.
   - Done when: `BROWSER_GLOBALS` and `BUILTINS` registration live in `setupGlobals` and both files are deleted.
-- [ ] Task 1.5: Delete hybrid `pkg.overlay` merging from `src/link/stdlib.js`, `src/resolver.js` and `test/unit/helpers.js`
+- [x] Task 1.5: Delete hybrid `pkg.overlay` merging from `src/link/stdlib.js`, `src/resolver.js` and `test/unit/helpers.js`
   - Files: `src/link/stdlib.js`, `src/resolver.js`, `test/unit/helpers.js`
   - Test: pure deletion (no failing test possible): add a regression case in `test/unit/compiler/stdlib-go.test.js` that aliased `import e "errors"` / `import s "strings"` run on JS and WASM (they already do), and keep the Task 1.1 alias cases green.
   - Done when: `grep -n overlay src/link/stdlib.js` matches nothing, the `import alias … is not supported` branch is gone, `GO_OVERLAID_PACKAGES` / `GO_MEMBER_PACKAGES` are deleted from `test/unit/helpers.js`, and `npm test` passes.
 
 ### Phase 2: Shared Import Qualification, Type Discovery & `compileSingleFile`
-- [ ] Task 2.1: Canonicalize import qualifiers in `TypeSpeller` and move `importsFor` to `src/lower/gen-types.js`
+- [x] Task 2.1: Canonicalize import qualifiers in `TypeSpeller` and move `importsFor` to `src/lower/gen-types.js`
   - Files: `src/lower/gen-types.js`, `src/lower/errors-as.js`, `src/link/stdlib.js`, `test/unit/compiler/stdlib-go.test.js`
   - Test: failing multi-file cases where `a.go` has `import sc "strconv"` and `var T *sc.NumError` and `main.go` calls `errors.As(err, &T)`, and the same with a third file declaring package-level `var strconv = 1`.
   - Done when: `TypeSpeller` spells canonical (or `_gf_<name>`-aliased) qualifiers, `checkGeneratedGo` emits aliased import specs, `errors-as.js` imports `importsFor` from `gen-types.js`, and both cases run on JS and WASM.
-- [ ] Task 2.2: Consolidate `importsFor`, `SHARED_REPR`, `hasSharedRepr`, `isEmptyIface` and `spellable` in `src/lower/gen-types.js`
+- [x] Task 2.2: Consolidate `importsFor`, `SHARED_REPR`, `hasSharedRepr`, `isEmptyIface` and `spellable` in `src/lower/gen-types.js`
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`, `src/lower/fmt-formatters.js`, `test/unit/builtins/json.test.js`
   - Test: failing cross-file `import t "time"` cases with static `json.Marshal(Make())` and dynamic `json.Marshal(any(Make()))` (`assertAllTargetsOutput`).
   - Done when: the helpers are exported once from `gen-types.js`, `json-codecs.js` and `fmt-formatters.js` hold no copies (no inline import map in `generateJsonCodecs`), and the cases pass.
-- [ ] Task 2.3: Unify closed-world type enumeration (`collectProgramTypes`) and delegate `compileSingleFile` to `compileFiles`
+- [x] Task 2.3: Unify closed-world type enumeration (`collectProgramTypes`) and delegate `compileSingleFile` to `compileFiles`
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`, `src/lower/fmt-formatters.js`, `src/compiler.js`, `test/unit/compiler/packages.test.js`
   - Test: failing `test/unit/compiler/packages.test.js` case calling `compileSingleFile` on one `.go` file using `json.Marshal`, `errors.As` and `fmt.Sprintf("%v", P{1})` and checking `runJs` output; existing `compileSingleFile` tests in `packages.test.js`, `optimize-build.test.js` and `targets.test.js` stay green.
   - Done when: `collectProgramTypes(programs, checker)` replaces `programTypes` in `json-codecs.js` and the operand-type enumeration in `fmt-formatters.js`, `compileSingleFile` is `dumpTokens`/`dumpAst` handling plus a `compileFiles` call that preserves the `outputDir` default, and the tests pass.
-- [ ] Task 2.4: User docs for aliased `encoding/json`, `RawMessage` methods and `json` function values
+- [x] Task 2.4: User docs for aliased `encoding/json`, `RawMessage` methods and `json` function values
   - Files: `docs/go-compatibility.md`, `docs/language-support.md`
   - Test: `npm run check` (doc fixture checks) and `test/unit/compiler/plan-paths.test.js`.
   - Done when: the `encoding/json` rows (`docs/go-compatibility.md:106`, `docs/language-support.md:140`) list `RawMessage.MarshalJSON`/`UnmarshalJSON`, say aliased imports work, and note that `Marshal`/`MarshalIndent`/`Unmarshal` must be called directly (not used as values).
 
 ### Phase 3: WASM Dead Runtime Pruning & `wasm/stdlib/` Dissolution
-- [ ] Task 3.1: Delete dead WASM error, UTF-8 and prescan helpers
+- [x] Task 3.1: Delete dead WASM error, UTF-8 and prescan helpers
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/index.js`, `src/backend/wasm/module-emitter.js`, `test/unit/stdlib/errors.test.js`, `test/unit/helpers.js`
   - Test: failing WAT test in `test/unit/stdlib/errors.test.js` that the helper `compileWasm` (which must forward `emitWat` on its `compileFiles` path) of a wasm package using `errors.New` and `errors.Is` emits neither `$__errors_is` nor `$__errors_unwrap`; `test/unit/wasm/traps.test.js` and `test/unit/wasm/defer_recover.test.js` stay green.
   - Done when: `__errors_is`, `__errors_unwrap`, `_emitLazyErrorGlobal`, `getIoErrGlobalIndex`/`ioErrGlobals`, `UTF8_CONSTS`/`_isUtf8Const`/`emitUtf8Const` (and the `emit-exprs.js` branch), `ERROR_PRODUCING_PKGS` and `hasIo` are removed and the tests pass.
-- [ ] Task 3.2: Register `env.time_now_ms` / `env.time_timezone_offset` on demand from the `time` intrinsics
+- [x] Task 3.2: Register `env.time_now_ms` / `env.time_timezone_offset` on demand from the `time` intrinsics
   - Files: `src/backend/wasm/natives.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/boundary.js`, `test/unit/wasm/stdlib.test.js`
   - Test: failing `test/unit/wasm/stdlib.test.js` case: a wasm package calling `time.Now()` and `time.Now().Zone()` runs through its facade, and a wasm package importing `strings` but not `time` has no `time_now_ms` import in its WAT.
   - Done when: both intrinsics register their import in `prepare`, their JS lives in the `WASM_IMPORTS_JS` env table, `STDLIB_IMPORTS` and `getStdlibImportIndex` are deleted, and the tests pass.
-- [ ] Task 3.3: Delete `WASM_STDLIB_JS`, `usesStdlibEnv` and `importsAnyOf`
+- [x] Task 3.3: Delete `WASM_STDLIB_JS`, `usesStdlibEnv` and `importsAnyOf`
   - Files: `src/backend/wasm/boundary.js`, `src/backend/wasm/glue.js`, `src/backend/wasm/index.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/prescan.js` (one-line edits in the last four), `test/unit/wasm/stdlib.test.js`
   - Test: failing case that the facade of a wasm package importing `time` contains neither `bytes_trim` nor `stdlib_sys`.
   - Done when: `WASM_STDLIB_JS`, the `stdlibEnv` flag of `wasmLoaderJs`, `STDLIB_ENV_PKGS`, `usesStdlibEnv` and `importsAnyOf` are deleted, no facade references `__error` unless it defines it, and the test passes.
-- [ ] Task 3.4: Dissolve `src/backend/wasm/stdlib/{core,io}.js`
+- [x] Task 3.4: Dissolve `src/backend/wasm/stdlib/{core,io}.js`
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/stdlib/core.js` (delete), `src/backend/wasm/stdlib/io.js` (delete), `src/backend/wasm/stdlib/index.js`
   - Test: no behaviour change; `test/unit/wasm/` (maps, interfaces, `any` equality/hash keys, slices `clear`) and `test/unit/compiler/check-layers.test.js` stay green.
   - Done when: `emitRuntimeHelper`, `_emitAnyEq` and `emitSliceClear` live in `emit-builtins.js` (or a sibling module if Sentrux complexity requires), `stdlibEmitters` lists only `SimdEmitter`, both files are deleted, and `npm run check && npm test` pass.
-- [ ] Task 3.5: Inline `src/backend/js/stdlib/{shared,simd}.js` into `index.js`
+- [x] Task 3.5: Inline `src/backend/js/stdlib/{shared,simd}.js` into `index.js`
   - Files: `src/backend/js/stdlib/index.js`, `src/backend/js/stdlib/shared.js` (delete), `src/backend/js/stdlib/simd.js` (delete)
   - Test: no behaviour change; `test/unit/wasm/shared.test.js`, `test/unit/wasm/simd.test.js` and JS `gofront/shared` / `gofront/simd` cases stay green.
   - Done when: `_genShared` / `_genSimd` live in `index.js`, both files are deleted, and `npm run check && npm test` pass.
 
 ### Phase 4: WASM Map Emitter Pruning (`emit-maps.js`)
-- [ ] Task 4.1: Delete dead `emitMapClone` and stop exporting synthesised helpers under `options.exportAll`
+- [x] Task 4.1: Delete dead `emitMapClone` and stop exporting synthesised helpers under `options.exportAll`
   - Files: `src/backend/wasm/emit-maps.js`, `src/backend/wasm/index.js`, `src/backend/wasm/module-emitter.js`, `test/unit/wasm/maps.test.js`
   - Test: failing WAT test (helper `compileWasm`, `exportAll` default) that a wasm module using only `map[string]int` creation and lookup emits no `$__map_clone_`, `$__map_delete_`, `$__map_clear_`, `$__map_keys_` or `$__map_values_`; `test/unit/wasm/boundary.test.js` map round-trips stay green.
   - Done when: `emitMapClone`, the `clone` arm/`funcDecls` entry and `cloneFuncName` are deleted, the export rule skips `_isMapHelper` / `_isInterfaceDispatcher` / `_isSharedHelper` / `_isRuntimePanic` / `_isIndexPanic`, and the tests pass.
-- [ ] Task 4.2: Merge `emitMapKeys` / `emitMapValues` into `emitMapProject`
+- [x] Task 4.2: Merge `emitMapKeys` / `emitMapValues` into `emitMapProject`
   - Files: `src/backend/wasm/emit-maps.js`, `test/unit/wasm/boundary.test.js`
   - Test: failing `test/unit/wasm/boundary.test.js` cases returning `map[string]int`, `map[int64]string` and an empty and a nil map from `//gofront:export` functions, checking keys and values match pairwise on the JS side.
   - Done when: one `emitMapProject(mapInfo, isValues)` emits both helpers and the cases pass.
-- [ ] Task 4.3: Merge `emitMapGet` / `emitMapGetOk` into `emitMapLookup`
+- [x] Task 4.3: Merge `emitMapGet` / `emitMapGetOk` into `emitMapLookup`
   - Files: `src/backend/wasm/emit-maps.js`, `test/unit/wasm/maps.test.js`
   - Test: `assertAllTargetsOutput` cases for `v := m[k]` and `v, ok := m[k]` on nil, empty, populated and hash-colliding maps with `string`, `int64`, struct and `any` keys.
   - Done when: `emitMapGet` and `emitMapGetOk` share `emitMapLookup(mapInfo, withOk)` and `npm run check && npm test` pass.

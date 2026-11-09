@@ -31,7 +31,6 @@ import {
 	_scanInterfaceCallNodes,
 	_scanInterfaceTypeDecls,
 	_usesAnyEq,
-	importsAnyOf,
 } from "./prescan.js";
 import { pruneUnusedFuncs } from "./prune-funcs.js";
 import {
@@ -590,18 +589,6 @@ export function compileWasmModule(
 			_mapInfo: mapInfo,
 			_rootFuncDecl: null,
 		});
-		// clone
-		funcDecls.push({
-			kind: "FuncDecl",
-			name: mapInfo.cloneFuncName,
-			params: [{ name: "m", type: mapInfo.wType }],
-			returnType: mapInfo.wType,
-			body: { kind: "Block", stmts: [], list: [] },
-			_isMapHelper: true,
-			_mapHelperKind: "clone",
-			_mapInfo: mapInfo,
-			_rootFuncDecl: null,
-		});
 	}
 
 	// 1e2. `gofront/shared` linear-memory helpers (only when imported).
@@ -777,6 +764,11 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
+				!fn._isMapHelper &&
+				!fn._isInterfaceDispatcher &&
+				!fn._isSharedHelper &&
+				!fn._isRuntimePanic &&
+				!fn._isIndexPanic &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -876,7 +868,6 @@ export function compileWasmModule(
 		facade = generateFacade(boundaryMeta, {
 			stringTable: mod.stringTable,
 			callMain: Boolean(options.callMain) && mod.funcMap.has("main"),
-			stdlibEnv: mod.usesStdlibEnv,
 		});
 	}
 
@@ -951,49 +942,6 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 				returns: [{ kind: "basic", name: "string" }],
 			},
 		});
-	}
-
-	const hasIo = importsAnyOf(progs, [
-		"io",
-		"fmt",
-		"strings",
-		"bytes",
-		"encoding/binary",
-		"binary",
-	]);
-	if (hasIo) {
-		const byteSliceType = {
-			kind: "slice",
-			elem: { kind: "basic", name: "byte" },
-		};
-		const intErrReturns = [
-			{ kind: "basic", name: "int" },
-			{ kind: "interface", name: "error" },
-		];
-		if (!interfaceCalls.has("io.Reader.Read")) {
-			interfaceCalls.set("io.Reader.Read", {
-				ifaceName: "io.Reader",
-				ifaceType: checker?.types?.get("io.Reader"),
-				methodName: "Read",
-				methodSig: {
-					kind: "func",
-					params: [byteSliceType],
-					returns: intErrReturns,
-				},
-			});
-		}
-		if (!interfaceCalls.has("io.Writer.Write")) {
-			interfaceCalls.set("io.Writer.Write", {
-				ifaceName: "io.Writer",
-				ifaceType: checker?.types?.get("io.Writer"),
-				methodName: "Write",
-				methodSig: {
-					kind: "func",
-					params: [byteSliceType],
-					returns: intErrReturns,
-				},
-			});
-		}
 	}
 
 	for (const info of interfaceCalls.values()) {

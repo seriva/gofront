@@ -4,9 +4,11 @@
 // what the real Go toolchain printed for the same program.
 
 import {
+	assert,
 	assertErrorContains,
 	assertFourWay,
 	compile,
+	compileWasm,
 	section,
 	test,
 } from "../helpers.js";
@@ -503,4 +505,23 @@ func main() {
 		errs,
 		"errors.As with a target of an anonymous interface type is not yet available",
 	);
+});
+
+test("wasm output carries no dead errors.Is / errors.Unwrap helpers", () => {
+	const { wat, errors } = compileWasm(
+		`package main
+
+import "errors"
+
+var e = errors.New("x")
+
+func Main() bool {
+	return errors.Is(errors.Unwrap(e), e)
+}
+`,
+		{ emitWat: true },
+	);
+	assert(errors.length === 0, "compiles");
+	assert(!wat.includes("$__errors_is"), "no __errors_is");
+	assert(!wat.includes("$__errors_unwrap"), "no __errors_unwrap");
 });

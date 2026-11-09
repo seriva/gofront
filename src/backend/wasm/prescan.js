@@ -13,15 +13,6 @@ import {
 	toWasmType,
 } from "./types.js";
 
-export function importsAnyOf(programs, pkgs) {
-	const has = (p) => (pkgs instanceof Set ? pkgs.has(p) : pkgs.includes(p));
-	return (programs ?? []).some((p) =>
-		(p.imports ?? []).some((decl) =>
-			(decl.imports ?? [decl]).some((imp) => has(imp.path)),
-		),
-	);
-}
-
 export function hasErrorUsage(programs) {
 	return (programs ?? []).some((p) => {
 		let found = false;

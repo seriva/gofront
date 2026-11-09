@@ -24,9 +24,13 @@ import {
 	FMT_PRINT_FUNCS,
 } from "../typechecker/types.js";
 import {
+	collectProgramTypes,
+	importsFor,
+	isEmptyIface,
 	mentionsTypeParam,
 	results,
 	TypeSpeller,
+	under,
 	walkNodes,
 } from "./gen-types.js";
 import { holdsFunc, isCompositeType } from "./json-codecs.js";
@@ -103,14 +107,6 @@ function isUnexportedForeign(name) {
 // *testing.T never describes the test state itself.
 const HOST_TYPE = /^testing\.|\$\$testing$/;
 
-function under(t) {
-	return t?.kind === "named" ? under(t.underlying) : t;
-}
-
-const isEmptyIface = (t) =>
-	(t?.kind === "basic" && t.name === "any") ||
-	(under(t)?.kind === "interface" && under(t).methods?.size === 0);
-
 const isInterface = (t) =>
 	t?.kind === "nil" ||
 	(t?.kind === "basic" && (t.name === "nil" || t.name === "any")) ||
@@ -154,7 +150,6 @@ class FmtGen extends TypeSpeller {
 		this.out = [];
 		this.counter = 0;
 		this.needsLookup = false;
-		this.paths = new Map(); // qualifier -> import path, for mangled stdlib names
 		this.uses = new Set(); // imports the generated code spells itself
 		this.topLevel = new Set();
 		for (const p of programs)
@@ -234,15 +229,6 @@ class FmtGen extends TypeSpeller {
 		}
 	}
 
-	spellNamed(t) {
-		const at = t.name.indexOf("$$");
-		if (at >= 0) {
-			const path = t.name.slice(at + 2).replaceAll("$", "/");
-			this.paths.set(this.resolveImportAlias(path), path);
-		}
-		return super.spellNamed(t);
-	}
-
 	// A type the generated file can name: declared at package level or by
 	// another package, or a function-local type, which the checker keeps in
 	// its type table under its name.
@@ -255,41 +241,32 @@ class FmtGen extends TypeSpeller {
 		);
 	}
 
-	// True when the type can be written as Go source in the generated file.
-	spellable(t, depth = 0, seen = new Set()) {
-		if (!t || depth > 8) return false;
-		const ok = (x) => this.spellable(x, depth + 1, seen);
-		// A field of an interface type is described by its value.
-		const fieldsOk = (st) =>
-			(st._structFields ?? []).every((f) => isInterface(f.type) || ok(f.type));
-		const named = () => {
-			if (
-				t.name.includes("[") ||
-				!(t.typeArgs ?? []).every(ok) ||
-				!this.isNamedInScope(t) ||
-				isUnexportedForeign(t.name) ||
-				HOST_TYPE.test(t.name)
-			)
-				return false;
-			// A named struct is as spellable as its fields (a type may hold itself).
-			const u = under(t);
-			if (u?.kind === "namespace") return false;
-			if (u?.kind !== "struct" || seen.has(t)) return true;
-			seen.add(t);
-			return fieldsOk(u);
-		};
-		const byKind = {
-			basic: () => t.name !== "void" && t.name !== "nil",
-			named,
-			pointer: () => ok(t.base),
-			slice: () => ok(t.elem),
-			array: () => ok(t.elem),
-			map: () => ok(t.key) && ok(t.value),
-			interface: () => t.name === "error" || isEmptyIface(t),
-			struct: () => fieldsOk(t),
-			func: () => t.params.every(ok) && results(t).every(ok),
-		};
-		return byKind[t.kind]?.() ?? false;
+	spellableNamed(t, ok, seen) {
+		if (
+			t.name.includes("[") ||
+			!(t.typeArgs ?? []).every(ok) ||
+			!this.isNamedInScope(t) ||
+			isUnexportedForeign(t.name) ||
+			HOST_TYPE.test(t.name)
+		)
+			return false;
+		// A named struct is as spellable as its fields (a type may hold itself).
+		const u = under(t);
+		if (u?.kind === "namespace") return false;
+		if (u?.kind !== "struct" || seen.has(t)) return true;
+		seen.add(t);
+		return this.spellableStruct(u, ok);
+	}
+
+	spellableInterface(t) {
+		return t.name === "error" || isEmptyIface(t);
+	}
+
+	// A field of an interface type is described by its value.
+	spellableStruct(t, ok) {
+		return (t._structFields ?? []).every(
+			(f) => isInterface(f.type) || ok(f.type),
+		);
 	}
 
 	// ── Descriptions ────────────────────────────────────────────
@@ -563,7 +540,6 @@ class FmtGen extends TypeSpeller {
 	candidateTypes() {
 		const found = new Map();
 		const add = (t) => {
-			t = defaultType(t);
 			if (!t || !this.usable(t)) return;
 			found.set(this.key(t), t);
 			if (t.kind === "named" && under(t)?.kind !== "func")
@@ -572,19 +548,14 @@ class FmtGen extends TypeSpeller {
 					base: t,
 				});
 		};
-		for (const p of this.programs) {
-			walkNodes(p.decls, (node) => {
-				for (const a of node._typeArgs ?? []) add(a);
-				// A member of a package (fmt.Println) is no value of its own.
-				if (node.expr?._type?.kind === "namespace") return;
-				if (node._type) add(node._type);
-			});
-		}
-		for (const [name, t] of this.checker.types) {
-			if (t?.kind !== "named" || t.name !== name) continue;
-			if (!this.topLevel.has(name) || t._genericOf || t.typeArgs?.length)
-				continue;
-			add(t);
+		for (const { type, node, via } of collectProgramTypes(
+			this.programs,
+			this.checker,
+		)) {
+			// A member of a package (fmt.Println) is no value of its own.
+			if (via === "expr" && node.expr?._type?.kind === "namespace") continue;
+			if (via === "declared" && !this.topLevel.has(type.name)) continue;
+			add(type);
 		}
 		return [...found.values()];
 	}
@@ -781,17 +752,6 @@ function markCall(call, { name, kinds, skip, types, exact }) {
 	});
 }
 
-function importsFor(programs, qualifiers, extra) {
-	const importPaths = new Map();
-	for (const p of programs)
-		for (const imp of p.imports ?? [])
-			for (const spec of imp.imports)
-				importPaths.set(spec.alias ?? spec.path.split("/").pop(), spec.path);
-	return [...qualifiers]
-		.map((qn) => extra.get(qn) ?? importPaths.get(qn))
-		.filter(Boolean);
-}
-
 // Generates the formatters for a package's Print-family calls.  Returns null
 // when it needs none; otherwise { body, imports, diagnostics } and redirects
 // each call that needs a wrapper with `_genEntry`.
@@ -803,7 +763,7 @@ export function generateFmtFormatters(programs, checker, pkgName) {
 	const testing = findTestingCalls(programs);
 	if (sites.length + values.length === 0 && !usesJson && !testing.calls)
 		return null;
-	const qualifiers = new Set();
+	const qualifiers = new Map();
 	const gen = new FmtGen(
 		checker,
 		pkgName,
@@ -879,6 +839,6 @@ export function generateFmtFormatters(programs, checker, pkgName) {
 	)
 		imports.add(FMT_PATH);
 	if (body.includes("fmtrt.")) imports.add(RT_PATH);
-	for (const p of importsFor(programs, qualifiers, gen.paths)) imports.add(p);
+	for (const p of importsFor(qualifiers)) imports.add(p);
 	return { body, imports: [...imports], diagnostics };
 }
