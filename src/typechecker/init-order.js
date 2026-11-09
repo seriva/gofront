@@ -144,7 +144,12 @@ function walkRefs(node, shadow, ctx, out) {
 		return;
 	}
 	if (node.kind === "Ident") {
-		if (ctx.pkgNames.has(node.name) && !shadow.has(node.name))
+		// The blank identifier names nothing, whatever `var _` the package has.
+		if (
+			node.name !== "_" &&
+			ctx.pkgNames.has(node.name) &&
+			!shadow.has(node.name)
+		)
 			out.names.add(node.name);
 		return;
 	}

@@ -188,7 +188,7 @@ func main() {
 	fmt.Print("hello %s", "world")
 }`);
 	assertEqual(errors.length, 0);
-	assertContains(js, "__sprintf");
+	assertContains(js, "Print$$fmt");
 });
 
 test("fmt.Printf compiles without error", () => {
