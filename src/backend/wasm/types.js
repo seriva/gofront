@@ -792,6 +792,7 @@ export function isSigned(goType) {
 export function printOperandKind(arg, checker) {
 	const isBool =
 		isBoolGoType(arg._type) ||
+		_namedBasic(arg._type) === "bool" ||
 		(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 	let wType = toWasmType(arg._type, checker);
 	let widen = false;

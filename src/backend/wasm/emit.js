@@ -55,6 +55,18 @@ function sameSignature(c, params, paramTypes, want, got) {
 	return want === undefined || got === undefined || sameTypes(got, want);
 }
 
+// True when a struct type embeds a pointer, directly or through an embedded
+// struct: promoted method calls read through it.
+function _embedsPointer(t, seen = new Set()) {
+	const base = t?.kind === "pointer" ? t.base : t;
+	const st = base?.underlying ?? base;
+	if (!st || seen.has(st)) return false;
+	seen.add(st);
+	return (st._embeds ?? []).some(
+		(e) => e.kind === "pointer" || _embedsPointer(e, seen),
+	);
+}
+
 export class FunctionEmitter {
 	constructor(moduleEmitter, funcDecl, funcIndex) {
 		this.mod = moduleEmitter;
@@ -781,7 +793,14 @@ export class FunctionEmitter {
 	// A pointer dereference or a call through a func value: sites whose nil
 	// operand raises Go's panic through the `nil` block.
 	_isNilTrapSite(node) {
-		if (node.kind === "CallExpr") return this._isFuncValueCall(node);
+		if (node.kind === "CallExpr")
+			return (
+				this._isFuncValueCall(node) ||
+				(node.func?.kind === "SelectorExpr" &&
+					_embedsPointer(node.func.expr?._type))
+			);
+		// Binding a method value on an interface checks it for nil.
+		if (node.kind === "NilCheckStmt") return true;
 		// A pointer to an array: indexing, slicing and ranging with a value
 		// read the array.
 		if (
@@ -1853,10 +1872,26 @@ export class FunctionEmitter {
 				this.emitExprStmt(stmt);
 				break;
 
+			// Evaluates `stmt.expr` and panics (recoverably) when it is nil.
+			case "NilCheckStmt":
+				this.emitExpr(stmt.expr, "anyref");
+				this._emitNilBranch();
+				this.pushInstruction("drop");
+				break;
+
 			case "LabeledStmt":
 				if (stmt.body) {
-					// Stacked labels (`a: b: for`) keep the inner label.
-					if (stmt.body.kind !== "LabeledStmt") stmt.body.label = stmt.label;
+					// Stacked labels (`a: b: for`) all target the loop: outer
+					// labels alias the innermost one.
+					if (stmt.body.kind !== "LabeledStmt") {
+						stmt.body.label = stmt.label;
+						this._labelAliases?.delete(stmt.label);
+					} else {
+						let inner = stmt.body;
+						while (inner.body?.kind === "LabeledStmt") inner = inner.body;
+						this._labelAliases ??= new Map();
+						this._labelAliases.set(stmt.label, inner.label);
+					}
 					this.emitStmt(stmt.body);
 				}
 				break;

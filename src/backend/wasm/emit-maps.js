@@ -1038,6 +1038,9 @@ export class MapsEmitter {
 
 		// new_entry = struct.new (key, val, next=buckets[b], order_prev=oldTail, order_next=-1, active=1)
 		this.pushInstruction({ op: "local.get", index: 1 });
+		// The stored key is a copy: later writes to the caller's array or
+		// struct must not change the map's key.
+		this._emitCopyMapEntry(mapInfo.keyGoType, mapInfo.keyWType);
 		this.pushInstruction({ op: "local.get", index: 2 });
 		this.pushInstruction({ op: "local.get", index: 0 });
 		this.pushInstruction({

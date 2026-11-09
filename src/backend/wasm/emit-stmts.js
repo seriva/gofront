@@ -1220,11 +1220,25 @@ export class StmtsEmitter {
 		}
 	}
 
+	_storeTargetWType(lhsNode) {
+		if (lhsNode.kind !== "Ident") return null;
+		const local = this.resolveLocal(lhsNode.name);
+		if (local)
+			return local.isBoxed
+				? local.boxInfo?.typeEntry?.fields?.[0]?.type
+				: local.type;
+		return this.mod.resolveGlobal(lhsNode.name)?.type ?? null;
+	}
+
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
 		if (lhsNode.kind === "Ident" && lhsNode.name === "_") return;
 		const redeclared =
 			isDefine && lhsNode._redecl && this.resolveLocal(lhsNode.name);
-		if (lhsNode.kind !== "Ident" || redeclared) {
+		// `var x any; x, ok = m[k]`: a scalar or struct result is boxed on the
+		// way into the interface-typed variable.
+		const target = isDefine ? null : this._storeTargetWType(lhsNode);
+		const boxesIntoAny = target === "anyref" && wType !== "anyref";
+		if (lhsNode.kind !== "Ident" || redeclared || boxesIntoAny) {
 			// An index, field or dereference target (or a name `:=` redeclares):
 			// assign from a named view of the temporary.
 			const name = `__ok_tmp_${this.tempCounter++}`;
@@ -3744,6 +3758,8 @@ export class StmtsEmitter {
 	}
 
 	emitBranchStmt(stmt) {
+		const alias = stmt.label && this._labelAliases?.get(stmt.label);
+		if (alias) stmt = { ...stmt, label: alias };
 		if (this._tryEmitYieldBranch(stmt)) return;
 		const isContinue = stmt.keyword === "continue";
 		const depth = this.resolveBranchDepth(stmt.label, isContinue);
