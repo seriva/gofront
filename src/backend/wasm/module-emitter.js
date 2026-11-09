@@ -11,7 +11,6 @@ import {
 	isScalarType,
 	isSliceType,
 	toWasmType,
-	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 
 const ERROR_PRODUCING_PKGS = new Set([
@@ -29,7 +28,7 @@ const ERROR_PRODUCING_PKGS = new Set([
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
 // declare the imports and ship that JS block.
-const STDLIB_ENV_PKGS = new Set(["strings", "fmt", "testing", "io", "time"]);
+const STDLIB_ENV_PKGS = new Set(["strings", "testing", "io", "time"]);
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
 // side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
@@ -37,10 +36,6 @@ const STDLIB_ENV_PKGS = new Set(["strings", "fmt", "testing", "io", "time"]);
 // locked before function bodies are emitted.
 const S = "externref";
 const STDLIB_IMPORTS = [
-	// fmt (arguments travel through the testing_arg_* buffer)
-	["fmt_sprintf", [S], [S]],
-	["fmt_printf", [S], []],
-	["fmt_format_v", [S], [S]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
 	["testing_cleanup", [S, "anyref"], []],
@@ -144,10 +139,6 @@ export class ModuleEmitter {
 			},
 		});
 		types.set(ERROR_STRUCT, named(ERROR_STRUCT, ERROR));
-		types.set(
-			WRAP_ERRORS_STRUCT,
-			named(WRAP_ERRORS_STRUCT, { kind: "slice", elem: ERROR }),
-		);
 	}
 
 	initTypes(programs) {
@@ -166,20 +157,6 @@ export class ModuleEmitter {
 					fields: new Map([
 						["msg", { kind: "basic", name: "string" }],
 						["cause", { kind: "basic", name: "any" }],
-					]),
-				},
-			});
-			seen.add(WRAP_ERRORS_STRUCT);
-			rawStructs.push({
-				name: WRAP_ERRORS_STRUCT,
-				structType: {
-					kind: "struct",
-					fields: new Map([
-						["msg", { kind: "basic", name: "string" }],
-						[
-							"errs",
-							{ kind: "slice", elem: { kind: "interface", name: "error" } },
-						],
 					]),
 				},
 			});

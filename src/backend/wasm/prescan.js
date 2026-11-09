@@ -143,17 +143,16 @@ function typeHasIfaceInContainer(t, mod, seen = new Set(), depth = 0) {
 	}
 }
 
-// An `fmt` call with an `any`/interface operand or a `xs...` spread needs
-// `__any_fmt`.  `emitFmtCall` falls back to scalar-only dispatch without it.
-export function _usesFmtAny(funcDecls, mod) {
+// A `*testing.T` method call with an `any`/interface operand or a `xs...`
+// spread needs `__any_fmt`.  (`fmt` is Go source and never reaches it.)
+export function _usesTestingAny(funcDecls, mod) {
 	return funcDecls.some((fn) =>
 		_someNode(
 			fn.body,
 			(n) =>
 				n.kind === "CallExpr" &&
 				n.func?.kind === "SelectorExpr" &&
-				n.func.expr?.kind === "Ident" &&
-				n.func.expr.name === "fmt" &&
+				isTestingT(n.func.expr?._type) &&
 				n.args?.some((a) =>
 					(a._type?.kind === "tuple" ? a._type.types : [a._type]).some(
 						(t) =>

@@ -35,7 +35,7 @@
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
-import { HELPER_ERROR, HELPER_SPRINTF } from "../js/runtime.js";
+import { HELPER_ERROR } from "../js/runtime.js";
 import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
@@ -2111,16 +2111,10 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_context": (t) => t.Context(),
 		"testing_output": (t) => t.Output(),
 	};
-	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
+	// Stdlib imports (strings/time/t.Run) are a separate block so
 	// modules that never call them do not ship it (see WASM_STDLIB_JS).
 	if (typeof ${P}stdlib === "function") {
 		Object.assign(env, ${P}stdlib(stringTable, {
-			"take": () => { const a = targs; targs = []; fmtStructMap = new WeakMap(); return a; },
-			"printf": (s) => {
-				lineBuf += s;
-				const nl = lineBuf.lastIndexOf("\\n");
-				if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
-			},
 			"late": late,
 		}));
 	}
@@ -2227,8 +2221,7 @@ function ${P}replace(s, o, w, n) {
 // JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
 // module imports one of the packages that use it.
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
-${HELPER_SPRINTF}
-function ${P}stdlib_fmt(stringTable, io) {
+function ${P}stdlib_testing(stringTable, io) {
 	return {
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"testing_cleanup": (t, fn) => { t.Cleanup(() => { io.late.exports.__testing_cleanup_cb(fn); }); },
@@ -2236,9 +2229,6 @@ function ${P}stdlib_fmt(stringTable, io) {
 		"testing_elapsed": (t) => BigInt(t.Elapsed()),
 		"testing_context": (t) => t.Context(),
 		"testing_output": (t) => t.Output(),
-		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
-		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
-		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 	};
 }
 function ${P}stdlib_sys(stringTable, io) {
@@ -2265,7 +2255,7 @@ function ${P}stdlib_sys(stringTable, io) {
 function ${P}stdlib(stringTable, io) {
 	return Object.assign(
 		{},
-		${P}stdlib_fmt(stringTable, io),
+		${P}stdlib_testing(stringTable, io),
 		${P}stdlib_sys(stringTable, io),
 	);
 }`;

@@ -31,7 +31,7 @@ import {
 	_scanInterfaceCallNodes,
 	_scanInterfaceTypeDecls,
 	_usesAnyEq,
-	_usesFmtAny,
+	_usesTestingAny,
 	_usesTestingCleanup,
 	_usesTestingRun,
 	importsAnyOf,
@@ -43,7 +43,6 @@ import {
 	isInterfaceType,
 	isMapType,
 	toWasmType,
-	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
 import { emitWat } from "./wat.js";
@@ -705,14 +704,6 @@ export function compileWasmModule(
 			kind: "pointer",
 			base: { kind: "named", name: ERROR_STRUCT },
 		};
-		const wrapPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: WRAP_ERRORS_STRUCT },
-		};
-		const ERRS_T = {
-			kind: "slice",
-			elem: { kind: "interface", name: "error" },
-		};
 		funcDecls.push(
 			helper(
 				`${ERROR_STRUCT}.Error`,
@@ -745,61 +736,7 @@ export function compileWasmModule(
 				ANY_T,
 				"mk_error",
 			),
-			helper(
-				`${WRAP_ERRORS_STRUCT}.Error`,
-				[{ name: "e", type: wrapPtr }],
-				STR_T,
-				"wrap_msg",
-				{
-					_isMethod: true,
-					_recvTypeName: WRAP_ERRORS_STRUCT,
-					_methodName: "Error",
-				},
-			),
-			helper(
-				`${WRAP_ERRORS_STRUCT}.Unwrap`,
-				[{ name: "e", type: wrapPtr }],
-				ERRS_T,
-				"wrap_errs",
-				{
-					_isMethod: true,
-					_recvTypeName: WRAP_ERRORS_STRUCT,
-					_methodName: "Unwrap",
-				},
-			),
-			helper(
-				"__mk_wrap_errors",
-				[
-					{ name: "msg", type: STR_T },
-					{ name: "errs", type: ERRS_T },
-				],
-				ANY_T,
-				"mk_wrap_errors",
-			),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
-			// Used by the io and bytes emitters to compare an error with io.EOF.
-			helper(
-				"__errors_is",
-				[
-					{ name: "err", type: ANY_T },
-					{ name: "target", type: ANY_T },
-				],
-				BOOL_T,
-				"errors_is",
-			),
-			{
-				kind: "FuncDecl",
-				name: "__errors_unwrap",
-				params: [{ name: "__recv", type: ANY_T }],
-				returnType: ANY_T,
-				body: { kind: "Block", stmts: [], list: [] },
-				_isInterfaceDispatcher: true,
-				_softDispatch: true,
-				_ifaceName: "error",
-				_ifaceType: null,
-				_methodName: "Unwrap",
-				_rootFuncDecl: null,
-			},
 		);
 	}
 	if (mod.usesTestingRun) {
@@ -833,9 +770,10 @@ export function compileWasmModule(
 			),
 		);
 	}
-	// `__any_fmt` turns an `any` operand of fmt into the host value; its body
-	// is emitted last-but-one so every type registered by user code is seen.
-	if (_usesFmtAny(funcDecls, mod)) {
+	// `__any_fmt` turns an `any` operand of a `*testing.T` call into the host
+	// value; its body is emitted last-but-one so every type registered by user
+	// code is seen.
+	if (_usesTestingAny(funcDecls, mod)) {
 		funcDecls.push(
 			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
 			helper(
