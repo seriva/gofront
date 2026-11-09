@@ -289,23 +289,23 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 7: `encoding/json`, Templ, and Stdlib (`unicode`, `os`, `regexp`)
 
-- [ ] Task 7.1: `encoding/json`: nil unsupported map/slice in `any`, cross-package typed nil `Unmarshal` error package name, and cross-package `any` `Marshal`
+- [x] Task 7.1: `encoding/json`: nil unsupported map/slice in `any`, cross-package typed nil `Unmarshal` error package name, and cross-package `any` `Marshal`
   - Files: `src/lower/json-codecs.js`, `stdlib/internal/jsonrt/enc.go`, `stdlib/internal/jsonrt/dec.go`
   - Test: `F51` `var m map[float64]int; var v any = m; _, err := json.Marshal(v)` → `"json: unsupported type: map[float64]int"`; `F52` `var v any = sub.NewNil(); json.Unmarshal([]byte("{}"), v)` → `"json: Unmarshal(nil *sub.OtherItem)"`; `F53` `pkg.Encode(any(TextVal{"hello"}))` where `main` does not import `"encoding/json"` → `'"text-hello"'` on `js`, `both`, and `wasm` in `test/unit/builtins/json.test.js`.
   - Done when: `json-codecs.js` and `jsonrt` report unsupported map/slice types even when nil in `any`, preserve the defining package name for typed nil pointers in `Unmarshal`, and register dynamic types across linked packages when any package in the build uses `encoding/json`.
-- [ ] Task 7.2: Templ multi-value `case a, b:`
+- [x] Task 7.2: Templ multi-value `case a, b:`
   - Files: `src/parser/templ.js`, `src/typechecker/index.js`, `src/backend/js/templ.js`
   - Test: `F58` `templ V(n int) { switch n { case 1, 2: <p>x</p> } }` with `V(2)` → `"<p>x</p>"` (plus a mismatched `case 1, "a":` → `assertErrorContains(errors, "cannot convert")`) in `test/unit/compiler/templ.test.js`.
   - Done when: `parseTemplSwitch` parses `caseTokens` as an expression list (today `parseExprTokens` parses one expression and fails with `unexpected ','`), `_checkTemplSwitch` runs `_checkCaseValue` on each expression, and `_genTemplSwitch` emits one JS `case` label per expression.
-- [ ] Task 7.3: Templ inline struct composite literals in `for` headers
+- [x] Task 7.3: Templ inline struct composite literals in `for` headers
   - Files: `src/lexer/templ-lexer.js`, `test/unit/compiler/templ.test.js`
   - Test: `F59` `templ V() { for _, s := range []struct{ A int }{{1}} { <p>{ s.A }</p> } }` → `"<p>1</p>"` in `test/unit/compiler/templ.test.js`.
   - Done when: the templ `for` header scanner tracks nested `{ ... }` braces in types and composite literals before opening the loop body.
-- [ ] Task 7.4: Go-source `unicode.IsPrint` non-ASCII spaces and `regexp` `nil` slices on no match
+- [x] Task 7.4: Go-source `unicode.IsPrint` non-ASCII spaces and `regexp` `nil` slices on no match
   - Files: `stdlib/unicode/unicode.go`, `stdlib/regexp/regexp.go`
   - Test: `F74` `fmt.Println(unicode.IsPrint(0xA0), unicode.IsPrint(0x3000))` → `"false false"` on `both` and `wasm` in `test/unit/stdlib/unicode.test.js`; `F76` `re := regexp.MustCompile("a"); fmt.Println(re.FindStringSubmatch("b") == nil, re.FindAllString("b", -1) == nil)` → `"true true"` in a `js` package (`regexp` is JS-only) in `test/unit/stdlib/regexp.test.js`.
   - Done when: `unicode.IsPrint` returns `false` for non-ASCII spaces (`r >= 0x80 && IsSpace(r)`), and `FindString*`/`FindAll*` methods in `stdlib/regexp/regexp.go` return `nil` (not `[]string{}`) when nothing matches.
-- [ ] Task 7.5: `os.Stderr` writes to `process.stderr` under Node
+- [x] Task 7.5: `os.Stderr` writes to `process.stderr` under Node
   - Files: `src/backend/js/index.js`, `src/backend/wasm/boundary.js`, `test/unit/stdlib/io.test.js`
   - Test: `F75` `os.Stderr.WriteString("err\n")` → stdout `""`, stderr `"err\n"` for a `js` package and a `both`/`wasm` package run under Node.
   - Done when: the `os_write` native in `src/backend/js/index.js` and the WASM `os_write` import in `src/backend/wasm/boundary.js` route `fd === 2` to `process.stderr.write` when available (falling back to buffered `console.error`), and `fd === 1` output is unchanged.

@@ -445,6 +445,7 @@ export function compileFiles(files, options = {}) {
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
 		typeOwners: options.typeOwners ?? new Map(),
+		jsonBuild: options.jsonBuild ?? { used: false },
 	};
 	const outputDir =
 		options.outputDir ??

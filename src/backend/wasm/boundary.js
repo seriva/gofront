@@ -1849,7 +1849,7 @@ function indent(text, prefix) {
 // survive the built-in mangler: no shorthand destructuring, import keys
 // quoted, helpers prefixed with `__`.
 export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
-function ${P}imports(stringTable, extraEnv, tag, write) {
+function ${P}imports(stringTable, extraEnv, tag, write, toStderr) {
 	// Each instance numbers the references fmt_ptr_id is asked about from 1
 	// (the table the JS body of that intrinsic uses).
 	globalThis.__fmtptr = { m: new WeakMap(), n: 1 };
@@ -1919,6 +1919,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_has_prefix": (s, pre) => ((s ?? "").startsWith(pre ?? "") ? 1 : 0),
 		"str_has_suffix": (s, suf) => ((s ?? "").endsWith(suf ?? "") ? 1 : 0),
 		"os_write": (fd, s) => {
+			if (fd === 2 && toStderr && typeof process !== "undefined" && process.stderr?.write) { process.stderr.write(s ?? ""); return; }
 			lineBuf += s ?? "";
 			const nl = lineBuf.lastIndexOf("\\n");
 			if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
@@ -2169,7 +2170,7 @@ async function ${P}load(stringTable, extraEnv) {
 		throw new Error("GoFront: this runtime lacks the WebAssembly GC / exception support required by app.wasm");
 	}
 	const tag = new WebAssembly.Tag({ "parameters": ["externref"] });
-	const imports = ${P}imports(stringTable, extraEnv, tag, (s) => console.log(s));
+	const imports = ${P}imports(stringTable, extraEnv, tag, (s) => console.log(s), true);
 	// Panics arrive as plain JS Errors thrown by env.panic (also from the
 	// start function while package-level initializers run), so exports are
 	// returned raw: no try/catch wrapper, which keeps JS→wasm calls inlinable.

@@ -575,7 +575,7 @@ export function checkGeneratedGo(
 ) {
 	if (checker.errors.length > 0) return [];
 	const parts = generators
-		.map((gen) => gen(programs, checker, checker.pkgName))
+		.map((gen) => gen(programs, checker, checker.pkgName, options))
 		.filter(Boolean);
 	if (parts.length === 0) return [];
 	let failed = false;
