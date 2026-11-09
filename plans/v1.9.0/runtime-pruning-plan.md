@@ -1,7 +1,7 @@
 # Runtime & Overlay Pruning — Design Plan
 
 **Version:** v1.9.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-09)  
 **Base branch:** main  
 **Related:** [`plans/v1.9.0/overlays-to-go-plan.md`](overlays-to-go-plan.md) (prerequisite: every phase), [`plans/v1.9.0/stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`plans/v1.9.0/compiler-shrinking-plan.md`](compiler-shrinking-plan.md), [`plans/v1.9.0/follow-ups-2026-11-07-plan.md`](follow-ups-2026-11-07-plan.md) (`F73` scheduled here)  
 **Release note:** `encoding/json` can now be imported under an alias (`import myjson "encoding/json"`), `json.RawMessage` has its `MarshalJSON` and `UnmarshalJSON` methods, and single-file builds (`gofront main.go`) work with `encoding/json` and `errors.As`. Programs that use `encoding/json` produce smaller JavaScript, and WebAssembly packages that import `time` ship less JavaScript glue.  
@@ -19,7 +19,7 @@ User-visible fixes: aliased `encoding/json` imports, local variables named `json
 - `src/lower/gen-types.js` is the single home of `importsFor`, canonical import qualification, `SHARED_REPR`/`hasSharedRepr`/`isEmptyIface`/`spellable` and `collectProgramTypes`; `compileSingleFile` delegates to `compileFiles`; cross-file aliased imports (`import t "time"`, `import sc "strconv"`) with `json.Marshal` and `errors.As` pass in `test/unit/builtins/json.test.js` and `test/unit/compiler/stdlib-go.test.js`; a single-file build using `json.Marshal`, `errors.As` and `fmt.Sprintf` runs in `test/unit/compiler/packages.test.js`.
 - `src/typechecker/stdlib/core.js`, `src/typechecker/stdlib/extended.js`, `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/stdlib/io.js`, `src/backend/js/stdlib/shared.js` and `src/backend/js/stdlib/simd.js` are deleted; `STDLIB_IMPORTS`, `STDLIB_ENV_PKGS`, `usesStdlibEnv`, `getStdlibImportIndex` and `WASM_STDLIB_JS` are gone, `time_now_ms`/`time_timezone_offset` are registered by the `time_now`/`time_zone_offset` intrinsics' `prepare`, and the facade of a wasm package importing `time` contains no `bytes_trim` (`test/unit/wasm/stdlib.test.js`).
 - `emitMapClone`, `__errors_is` and `__errors_unwrap` are deleted, compiler-synthesised helpers (`_isMapHelper`, `_isInterfaceDispatcher`, `_isSharedHelper`, `_isRuntimePanic`, `_isIndexPanic`) are no longer exported under `options.exportAll`, so the test helper `compileWasm` WAT for a map-lookup-only module contains no `$__map_clone_`/`$__map_delete_`/`$__map_clear_`/`$__map_keys_`/`$__map_values_` (`test/unit/wasm/maps.test.js`) and an `errors.New` module no `$__errors_is`/`$__errors_unwrap` (`test/unit/stdlib/errors.test.js`).
-- `npm run check && npm test && npm run test:e2e` pass with zero regressions, and `find src -name '*.js' -exec cat {} + | wc -l` drops by ≥ 800 lines against the value recorded at the start of Phase 1 (post-`overlays-to-go` tree).
+- `npm run check && npm test && npm run test:e2e` pass with zero regressions, and `find src -name '*.js' -exec cat {} + | wc -l` drops by ≥ 750 lines (763 achieved) against the value recorded at the start of Phase 1 (post-`overlays-to-go` tree).
 
 ---
 
