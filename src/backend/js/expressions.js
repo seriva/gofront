@@ -3274,7 +3274,7 @@ export const expressionGenMethods = {
 			: this._isNilLiteral(expr.left)
 				? expr.right
 				: null;
-		return operand && isAny(operand._type) ? operand : null;
+		return operand && this._isIfaceType(operand._type) ? operand : null;
 	},
 
 	_genAnyNilCompare(expr) {

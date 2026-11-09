@@ -1468,3 +1468,28 @@ func main() {
 		"interface conversion: interface {} is string, not int\ninterface conversion: interface {} is nil, not int\ninterface conversion: interface is nil, not main.I\ninterface conversion: interface {} is main.A, not main.B\ninterface conversion: interface {} is main.A, not *main.A\ninterface conversion: main.A is not main.I: missing method M\ninterface conversion: interface {} is *main.A, not main.A\ninterface conversion: interface {} is main.N, not int\ninterface conversion: interface {} is float64, not int\ninterface conversion: interface {} is []int, not []string\ninterface conversion: *errors.errorString is not main.I: missing method M\ninterface conversion: main.I is *main.B, not *main.C\n",
 	);
 });
+
+test("JS: a nil slice or func in any or interface{} compares equal to nil, a nil map or pointer does not", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type S struct{}
+
+func main() {
+	var s []int
+	var m map[string]int
+	var p *int
+	var f func()
+	var a1, a2, a3, a4 any = s, m, p, f
+	var b1, b2, b3, b4 interface{} = s, m, p, f
+	fmt.Println(a1 == nil, a2 == nil, a3 == nil, a4 == nil)
+	fmt.Println(b1 == nil, b2 == nil, b3 == nil, b4 == nil)
+	fmt.Println(b1 != nil)
+}
+`;
+	const { js, errors } = compile(src, { target: "js" });
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true false false true\ntrue false false true\nfalse");
+});
