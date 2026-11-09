@@ -62,8 +62,19 @@ import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
 // Map<filePath, { mtime: number, ast: object }>
 const _parseCache = new Map();
 
+// A cached AST keeps everything the build attached to it (checked types,
+// lowered stdlib programs), so a build of a Go-source stdlib importer pins
+// megabytes.  The cache is therefore bounded; the least recently used file goes
+// first.
+const PARSE_CACHE_LIMIT = 32;
+
 export function clearParseCache() {
 	_parseCache.clear();
+}
+
+// Drops one file, e.g. a throwaway source that was deleted after its build.
+export function evictParseCache(filePath) {
+	_parseCache.delete(resolve(filePath));
 }
 
 export function parseCacheSize() {
@@ -76,7 +87,11 @@ function parseGoFrontFile(filePath) {
 	const key = resolve(filePath);
 	const mtime = statSync(filePath).mtimeMs;
 	const cached = _parseCache.get(key);
-	if (cached && cached.mtime === mtime) return cached.ast;
+	if (cached && cached.mtime === mtime) {
+		_parseCache.delete(key);
+		_parseCache.set(key, cached);
+		return cached.ast;
+	}
 
 	const source = readFileSync(filePath, "utf8");
 	const filename = basename(filePath);
@@ -92,6 +107,8 @@ function parseGoFrontFile(filePath) {
 	// compileFiles overwrites `target` with the resolved one; keep the directive.
 	ast._declaredTarget = ast.target;
 	_parseCache.set(key, { mtime, ast });
+	if (_parseCache.size > PARSE_CACHE_LIMIT)
+		_parseCache.delete(_parseCache.keys().next().value);
 	return ast;
 }
 

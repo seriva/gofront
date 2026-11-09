@@ -10,8 +10,7 @@ import {
 	optimizeWasm,
 	optimizeWithBinaryen,
 } from "../../../src/backend/wasm/optimize.js";
-import { compileWasm } from "../../../src/compiler.js";
-import { assert, assertEqual, section, test } from "../helpers.js";
+import { assert, assertEqual, compileWasm, section, test } from "../helpers.js";
 
 section("WASM Optimizer — Core Pipeline (Binaryen)");
 

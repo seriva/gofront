@@ -156,19 +156,19 @@ test("an overlay that redeclares an emitter member is rejected", () => {
 
 package fmt
 
-func Println(a ...any) {}
+func Printf(format string, a ...any) {}
 `,
 			"app/main.go": `package main
 
 import "fmt"
 
-func main() { fmt.Println(0) }
+func main() { fmt.Printf("x") }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares fmt.Println",
+				"overlay redeclares fmt.Printf",
 			);
 		},
 	);
