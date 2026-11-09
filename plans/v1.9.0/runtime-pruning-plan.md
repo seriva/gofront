@@ -150,23 +150,23 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Done when: the `encoding/json` rows (`docs/go-compatibility.md:106`, `docs/language-support.md:140`) list `RawMessage.MarshalJSON`/`UnmarshalJSON`, say aliased imports work, and note that `Marshal`/`MarshalIndent`/`Unmarshal` must be called directly (not used as values).
 
 ### Phase 3: WASM Dead Runtime Pruning & `wasm/stdlib/` Dissolution
-- [ ] Task 3.1: Delete dead WASM error, UTF-8 and prescan helpers
+- [x] Task 3.1: Delete dead WASM error, UTF-8 and prescan helpers
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/index.js`, `src/backend/wasm/module-emitter.js`, `test/unit/stdlib/errors.test.js`, `test/unit/helpers.js`
   - Test: failing WAT test in `test/unit/stdlib/errors.test.js` that the helper `compileWasm` (which must forward `emitWat` on its `compileFiles` path) of a wasm package using `errors.New` and `errors.Is` emits neither `$__errors_is` nor `$__errors_unwrap`; `test/unit/wasm/traps.test.js` and `test/unit/wasm/defer_recover.test.js` stay green.
   - Done when: `__errors_is`, `__errors_unwrap`, `_emitLazyErrorGlobal`, `getIoErrGlobalIndex`/`ioErrGlobals`, `UTF8_CONSTS`/`_isUtf8Const`/`emitUtf8Const` (and the `emit-exprs.js` branch), `ERROR_PRODUCING_PKGS` and `hasIo` are removed and the tests pass.
-- [ ] Task 3.2: Register `env.time_now_ms` / `env.time_timezone_offset` on demand from the `time` intrinsics
+- [x] Task 3.2: Register `env.time_now_ms` / `env.time_timezone_offset` on demand from the `time` intrinsics
   - Files: `src/backend/wasm/natives.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/boundary.js`, `test/unit/wasm/stdlib.test.js`
   - Test: failing `test/unit/wasm/stdlib.test.js` case: a wasm package calling `time.Now()` and `time.Now().Zone()` runs through its facade, and a wasm package importing `strings` but not `time` has no `time_now_ms` import in its WAT.
   - Done when: both intrinsics register their import in `prepare`, their JS lives in the `WASM_IMPORTS_JS` env table, `STDLIB_IMPORTS` and `getStdlibImportIndex` are deleted, and the tests pass.
-- [ ] Task 3.3: Delete `WASM_STDLIB_JS`, `usesStdlibEnv` and `importsAnyOf`
+- [x] Task 3.3: Delete `WASM_STDLIB_JS`, `usesStdlibEnv` and `importsAnyOf`
   - Files: `src/backend/wasm/boundary.js`, `src/backend/wasm/glue.js`, `src/backend/wasm/index.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/prescan.js` (one-line edits in the last four), `test/unit/wasm/stdlib.test.js`
   - Test: failing case that the facade of a wasm package importing `time` contains neither `bytes_trim` nor `stdlib_sys`.
   - Done when: `WASM_STDLIB_JS`, the `stdlibEnv` flag of `wasmLoaderJs`, `STDLIB_ENV_PKGS`, `usesStdlibEnv` and `importsAnyOf` are deleted, no facade references `__error` unless it defines it, and the test passes.
-- [ ] Task 3.4: Dissolve `src/backend/wasm/stdlib/{core,io}.js`
+- [x] Task 3.4: Dissolve `src/backend/wasm/stdlib/{core,io}.js`
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/stdlib/core.js` (delete), `src/backend/wasm/stdlib/io.js` (delete), `src/backend/wasm/stdlib/index.js`
   - Test: no behaviour change; `test/unit/wasm/` (maps, interfaces, `any` equality/hash keys, slices `clear`) and `test/unit/compiler/check-layers.test.js` stay green.
   - Done when: `emitRuntimeHelper`, `_emitAnyEq` and `emitSliceClear` live in `emit-builtins.js` (or a sibling module if Sentrux complexity requires), `stdlibEmitters` lists only `SimdEmitter`, both files are deleted, and `npm run check && npm test` pass.
-- [ ] Task 3.5: Inline `src/backend/js/stdlib/{shared,simd}.js` into `index.js`
+- [x] Task 3.5: Inline `src/backend/js/stdlib/{shared,simd}.js` into `index.js`
   - Files: `src/backend/js/stdlib/index.js`, `src/backend/js/stdlib/shared.js` (delete), `src/backend/js/stdlib/simd.js` (delete)
   - Test: no behaviour change; `test/unit/wasm/shared.test.js`, `test/unit/wasm/simd.test.js` and JS `gofront/shared` / `gofront/simd` cases stay green.
   - Done when: `_genShared` / `_genSimd` live in `index.js`, both files are deleted, and `npm run check && npm test` pass.
