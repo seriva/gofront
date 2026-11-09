@@ -2,13 +2,14 @@
 // Tests for file filtering (*_test.go), testing package stdlib, discovery,
 // harness generation, and test execution.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { handleCheck, handleTest } from "../../../src/cli/cli-core.js";
 import {
 	checkWasmRuntime,
 	discoverTests,
+	generateTestDriver,
 	generateTestHarness,
 	isTestFunc,
 	MIN_WASM_NODE_MAJOR,
@@ -26,8 +27,8 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertThrows,
+	assertValidWasm,
 	compile,
-	compileWasm,
 	section,
 	summarize,
 	test,
@@ -211,12 +212,13 @@ test("discoverTests treats programs without _filename as test files", () => {
 });
 
 test("generateTestHarness produces executable runner module", () => {
-	const harness = generateTestHarness("function TestDemo(t) {}", ["TestDemo"], {
+	const harness = generateTestHarness("function GofrontRunTests() {}", {
 		pkgName: "demopkg",
 		verbose: true,
+		run: "TestDemo",
 	});
-	assertContains(harness, "TestDemo");
-	assertContains(harness, "__runGoFrontSuite");
+	assertContains(harness, "GofrontRunTests(");
+	assertContains(harness, '"TestDemo", "", true');
 	assertContains(harness, "demopkg");
 });
 
@@ -700,15 +702,16 @@ func TestDemo(t *testing.T) {}
 	);
 });
 
-test("generateTestHarness uses static __testRegistry and avoids eval", () => {
-	const harness = generateTestHarness("function TestOne(t) {}", ["TestOne"]);
-	assertContains(harness, "__testRegistry");
+test("generateTestHarness calls only the generated driver and avoids eval", () => {
+	const harness = generateTestHarness("function GofrontRunTests() {}");
+	assertContains(harness, "GofrontRunTests(");
+	assert(!harness.includes("__testRegistry"), "no per-test registry");
 	assert(!harness.includes("eval("), "harness should not contain eval");
 });
 
 test("generateTestHarness imports jsdom via resolved file:// URL, not bare specifier", () => {
 	const jsdomPath = "/some where/node_modules/jsdom/lib/api.js";
-	const harness = generateTestHarness("function TestOne(t) {}", ["TestOne"], {
+	const harness = generateTestHarness("function GofrontRunTests() {}", {
 		dom: true,
 		jsdomPath,
 	});
@@ -775,7 +778,7 @@ func TestCircular(t *testing.T) {
 			});
 			assertEqual(result.exitCode, 0);
 			assertContains(result.stdout, "--- PASS: TestCircular");
-			assertContains(result.stdout, `{"Name":"root"}`);
+			assertContains(result.stdout, "node: {root}");
 		},
 	);
 });
@@ -1260,23 +1263,32 @@ func main() {
 	new Function(out.js)();
 });
 
-test("package-level testing functions in wasm package produce clean diagnostic", () => {
-	const src = `package main
+test("package-level testing functions compile in wasm packages", async () => {
+	await withTempDir(
+		{
+			"s_test.go": `//gofront:target wasm
+package s
 import "testing"
-func main() {
-  _ = testing.Short()
+func TestShort(t *testing.T) {
+  if testing.Short() || !testing.Testing() {
+    t.Error("unexpected flags")
+  }
 }
-`;
-	const res = compileWasm(src);
-	assert(res.errors.length > 0);
-	assertErrorContains(
-		res.errors,
-		"'testing.Short' is not yet available in wasm packages",
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, { captureOutput: true });
+			assertEqual(result.exitCode, 0);
+			assertContains(result.stdout, "ok  \ts");
+		},
 	);
 });
 
-test("WASM benchmarks and testing types (b.N, b.Loop, BenchmarkResult.N, testing.TB, m.Run)", () => {
-	const src = `package main
+test("WASM benchmarks and testing types (b.N, b.Loop, BenchmarkResult.N, testing.TB, m.Run)", async () => {
+	await withTempDir(
+		{
+			"w_test.go": `//gofront:target wasm
+package w
 import "testing"
 func helper(tb testing.TB) {
   tb.Helper()
@@ -1299,10 +1311,21 @@ func TestMain(m *testing.M) {
   code := m.Run()
   _ = code
 }
-`;
-	const out = compileWasm(src);
-	assertEqual(out.errors.length, 0);
-	new WebAssembly.Module(out.wasm);
+`,
+		},
+		async (dir) => {
+			const out = compilePackageTests(dir);
+			assertValidWasm(out.wasm);
+			const result = await runTests(dir, {
+				captureOutput: true,
+				verbose: true,
+				bench: "Wasm",
+			});
+			assertEqual(result.exitCode, 0);
+			assertContains(result.stdout, "--- PASS: TestWasmTB");
+			assertContains(result.stdout, "BenchmarkWasm");
+		},
+	);
 });
 
 test("runTests propagates failure when TestMain calls os.Exit(m.Run())", async () => {
@@ -1382,6 +1405,167 @@ func main() {
 		async (dir) => {
 			const out = compileDir(dir);
 			new Function(out.js)();
+		},
+	);
+});
+
+section("test-runner — generated driver");
+
+test("generateTestDriver writes the tests table and the run call per package kind", () => {
+	const names = {
+		testNames: ["TestA", "TestB"],
+		benchNames: ["BenchmarkA"],
+		testMain: null,
+	};
+	const sync = generateTestDriver("pkg", "both", names);
+	assertContains(sync, "package pkg");
+	assertContains(
+		sync,
+		"func GofrontRunTests(run, bench string, verbose bool) int",
+	);
+	assertContains(sync, '{Name: "TestA", F: TestA},');
+	assertContains(sync, '{Name: "BenchmarkA", F: BenchmarkA},');
+	assertContains(sync, "return m.Run()");
+	assert(!sync.includes("async"), "a both package is driven synchronously");
+
+	const js = generateTestDriver("pkg", "js", names);
+	assertContains(js, "async func GofrontRunTests");
+	assertContains(js, "return await m.RunAsync()");
+
+	const main = generateTestDriver("pkg", "js", {
+		...names,
+		testMain: "TestMain",
+	});
+	assertContains(main, "TestMain(m)");
+	assertContains(main, "return m.ExitCode()");
+	assert(!main.includes("async"), "TestMain drives the run itself");
+
+	assertContains(
+		generateTestDriver("pkg", "wasm", { testNames: [], benchNames: [] }),
+		"[]testing.GofrontTest{}",
+	);
+});
+
+test("the driver is compiled in memory and never written to the package", async () => {
+	await withTempDir(
+		{
+			"ro.go": "package ro\nfunc One() int { return 1 }\n",
+			"ro_test.go": `package ro
+import "testing"
+func TestOne(t *testing.T) { if One() != 1 { t.Fatal("one") } }
+`,
+		},
+		async (dir) => {
+			const before = readdirSync(dir).sort();
+			const result = await runTests(dir, { captureOutput: true });
+			assertEqual(result.exitCode, 0);
+			assertEqual(readdirSync(dir).sort().join(","), before.join(","));
+		},
+	);
+});
+
+test("a package without tests reports [no tests to run] without a driver", async () => {
+	await withTempDir(
+		{
+			"nt_test.go": `package nt
+import "testing"
+func helper(t *testing.T) {}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, { captureOutput: true });
+			assertEqual(result.exitCode, 0);
+			assertContains(result.stdout, "[no tests to run]");
+		},
+	);
+});
+
+section("test-runner — async tests and subtests");
+
+test("an async test that fails or panics after await fails and the run goes on", async () => {
+	await withTempDir(
+		{
+			"as_test.go": `package as
+import (
+	"testing"
+	"time"
+)
+async func TestLate(t *testing.T) {
+	time.Sleep(2 * time.Millisecond)
+	t.Error("late error")
+}
+async func TestPanicsLate(t *testing.T) {
+	time.Sleep(2 * time.Millisecond)
+	panic("late boom")
+}
+async func TestFine(t *testing.T) {
+	time.Sleep(2 * time.Millisecond)
+}
+func TestSync(t *testing.T) {}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+				verbose: true,
+			});
+			assertEqual(result.exitCode, 1);
+			assertContains(result.stdout, "--- FAIL: TestLate");
+			assertContains(result.stdout, "late error");
+			assertContains(result.stdout, "panic: late boom");
+			assertContains(result.stdout, "--- PASS: TestFine");
+			assertContains(result.stdout, "--- PASS: TestSync");
+		},
+	);
+});
+
+test("a failing async subtest fails its parent before the summary", async () => {
+	await withTempDir(
+		{
+			"sub_test.go": `package sub
+import (
+	"testing"
+	"time"
+)
+func TestParent(t *testing.T) {
+	t.Run("late", async func(t *testing.T) {
+		time.Sleep(2 * time.Millisecond)
+		t.Error("async sub failed")
+	})
+	t.Run("now", func(t *testing.T) {})
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, { captureOutput: true });
+			assertEqual(result.exitCode, 1);
+			assertContains(result.stdout, "--- FAIL: TestParent/late");
+			assertContains(result.stdout, "--- FAIL: TestParent (");
+			assert(
+				result.stdout.indexOf("--- FAIL: TestParent (") <
+					result.stdout.indexOf("FAIL\tsub"),
+				"the parent reports before the summary",
+			);
+		},
+	);
+});
+
+test("async tests cannot be combined with TestMain", async () => {
+	await withTempDir(
+		{
+			"tm_test.go": `package tm
+import "testing"
+func TestMain(m *testing.M) { m.Run() }
+async func TestAsync(t *testing.T) {}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, { captureOutput: true });
+			assertEqual(result.exitCode, 1);
+			assertContains(
+				result.stderr,
+				"async test functions cannot be combined with TestMain",
+			);
 		},
 	);
 });

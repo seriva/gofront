@@ -150,25 +150,25 @@ func Run() string {
 test("an overlay that redeclares an emitter member is rejected", () => {
 	withTempDir(
 		{
-			"stdlib/testing/overlay.go": `//go:build gofront
+			"stdlib/encoding/json/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package testing
+package json
 
-func Short() bool { return false }
+func Valid(data []byte) bool { return false }
 `,
 			"app/main.go": `package main
 
-import "testing"
+import "encoding/json"
 
-func main() { println(testing.Short()) }
+func main() { println(json.Valid(nil)) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares testing.Short",
+				"overlay redeclares json.Valid",
 			);
 		},
 	);
@@ -374,20 +374,20 @@ func main() { println(u.C(1, 2), w.Run()) }
 test("an aliased overlay import is rejected at the import", () => {
 	withTempDir(
 		{
-			"stdlib/testing/overlay.go": `//go:build gofront
+			"stdlib/encoding/json/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package testing
+package json
 
 func Hello() {}
 `,
-			"app/main.go": `package main\n\nimport t "testing"\n\nfunc main() { println(t.Short()) }\n`,
+			"app/main.go": `package main\n\nimport j "encoding/json"\n\nfunc main() { println(j.Valid(nil)) }\n`,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"import alias for 'testing' is not supported",
+				"import alias for 'encoding/json' is not supported",
 			);
 		},
 	);
@@ -672,7 +672,6 @@ section("Go-source stdlib: pruned packages");
 const PRUNED_PACKAGES = [
 	"bufio",
 	"net/url",
-	"context",
 	"encoding/csv",
 	"container/heap",
 	"container/list",

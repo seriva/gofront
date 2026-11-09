@@ -597,6 +597,11 @@ export function compileFiles(files, options = {}) {
 	);
 	for (const p of programs) p.target = pkgTarget;
 
+	// The test runner's driver is a source that exists only in memory: it is
+	// parsed and checked with the package but never written next to it.
+	const driver = testDriverProgram(options, programs, pkgTarget, fromDir);
+	if (driver) programs.push(driver);
+
 	// ── 2. Resolve imports ────────────────────────────────────────
 	const checker = new TypeChecker();
 	checker.target = pkgTarget;
@@ -692,7 +697,7 @@ export function compileFiles(files, options = {}) {
 		wasmOptInfo,
 		wasmSourceMap,
 		stringTable,
-		programs,
+		programs: driver ? programs.filter((p) => p !== driver) : programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: withOriginalTypeNames(
 			checker.getExportedTypes(),
@@ -703,6 +708,25 @@ export function compileFiles(files, options = {}) {
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
 	};
+}
+
+// Parses the in-memory driver source `options.testDriver(programs, target)`
+// returns (null: no driver) as a `_test.go` file of the package.
+function testDriverProgram(options, programs, pkgTarget, fromDir) {
+	if (!options.testDriver || options.isDependency) return null;
+	const source = options.testDriver(programs, pkgTarget);
+	if (!source) return null;
+	const filename = "gofront_testmain_test.go";
+	const ast = new Parser(
+		new Lexer(source, filename).tokenize(),
+		filename,
+		source,
+	).parse();
+	ast._source = source;
+	ast._path = join(fromDir, filename);
+	ast._declaredTarget = ast.target;
+	ast.target = pkgTarget;
+	return ast;
 }
 
 // The renamed ASTs must not be reused from the parse cache by a later build.

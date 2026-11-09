@@ -269,6 +269,7 @@ export const typeParserMethods = {
 					names: [],
 					type: { kind: "TypeName", name: typeName },
 					embedded: true,
+					embeddedName: typeName,
 					tag,
 				});
 				this.semi();
