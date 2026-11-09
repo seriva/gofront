@@ -372,13 +372,11 @@ const BUILTIN_GEN = {
 	copy: (s, e) => {
 		const dst = s.genExpr(e.args[0]);
 		const src = s._genSliceSource(e.args[1]);
-		// Array elements are values: the copied elements must not alias src.
+		// Array and struct elements are values: the copied elements must not
+		// alias src.
 		const t = e.args[1]._type;
 		const elem = (t?.kind === "named" ? t.underlying : t)?.elem;
-		const clone =
-			s._aggregateBase(elem)?.kind === "array"
-				? s._cloneJs(elem, "__e")
-				: "__e";
+		const clone = s._aggregateBase(elem) ? s._cloneJs(elem, "__e") : "__e";
 		const items =
 			clone === "__e"
 				? "(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))"
@@ -640,7 +638,9 @@ export const expressionGenMethods = {
 				// A named untyped constant used as an int64 operand: its
 				// declaration holds a Number, so emit the exact BigInt.
 				const lit64 =
-					expr._is64Bit && expr._type?.kind === "untyped" && expr._const
+					expr._is64Bit &&
+					expr._const &&
+					(expr._type?.kind === "untyped" || this._is64BitInt(expr._type))
 						? this._gen64BitFoldedConst(expr, expr._const)
 						: null;
 				return lit64 ?? expr.name;
@@ -1799,6 +1799,9 @@ export const expressionGenMethods = {
 			if (result !== undefined) return result;
 		}
 
+		const converted = this._convertedPointerMethodCall(expr);
+		if (converted) return converted;
+
 		const nilSafe = this._nilSafeMethodClass(expr.func);
 		if (nilSafe) {
 			// The method tests its receiver for nil: call it through the
@@ -1827,6 +1830,27 @@ export const expressionGenMethods = {
 		const recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
 		const args = this._genCallArgs(expr);
 		return `${recv}.${expr.func.field}(${args})`;
+	},
+
+	// `(*S)(p).M()` where `p` points at another struct type: the JS object keeps
+	// its own class, so call S's prototype method on it.
+	_convertedPointerMethodCall(expr) {
+		const sel = expr.func;
+		if (sel?.kind !== "SelectorExpr" || sel._isMethodExpr) return null;
+		let recv = sel.expr;
+		while (recv?.kind === "ParenExpr") recv = recv.expr;
+		if (recv?._isTypeConversion !== true) return null;
+		const target = recv._conversionTargetType;
+		const from = recv.args?.[0]?._type;
+		if (target?.kind !== "pointer" || target.base?.kind !== "named")
+			return null;
+		if (from?.kind !== "pointer" || from.base === target.base) return null;
+		if (target.base.underlying?.kind !== "struct") return null;
+		const cls = target.base.name;
+		if (!target.base.methods?.has(sel.field)) return null;
+		const rest = this._genCallArgs(expr);
+		const obj = this.genExpr(recv.args[0]);
+		return `${cls}.prototype.${sel.field}.call(${rest ? `${obj}, ${rest}` : obj})`;
 	},
 
 	// The class of a pointer-receiver struct method that accepts a nil receiver
@@ -2062,7 +2086,7 @@ export const expressionGenMethods = {
 		const st = expr._type ?? expr.args[0]._type;
 		const elemT = (st?.kind === "named" ? st.underlying : st)?.elem;
 		const spreadOf = (a) =>
-			this._aggregateBase(elemT)?.kind === "array"
+			this._aggregateBase(elemT)
 				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
 				: `...(${this._genSliceSource(a)} ?? [])`;
 		const is64Elem = this._is64BitInt(elemT);
@@ -3427,6 +3451,12 @@ export const expressionGenMethods = {
 		return `${wrap}(64, (${l}) ${op} (${r}))`;
 	},
 
+	// `uint` / `uintptr`: 64-bit unsigned values held as JS numbers.
+	_isUintWord(type) {
+		const name = this._typeName(type);
+		return name === "uint" || name === "uintptr";
+	},
+
 	_needsStrictOp(op, type) {
 		if (type?.kind === "typeParam")
 			return (
@@ -3436,6 +3466,7 @@ export const expressionGenMethods = {
 			return STRICT_OPS.has(op) || op === "<<" || op === ">>" || op === "&^";
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
+		if (op === "-" && this._isUintWord(type)) return true;
 		if (op === "<<" || op === ">>")
 			return WIDE_INT_NAMES.has(this._typeName(type));
 		return this.isIntType(type) && (op === "/" || op === "%");
@@ -3556,6 +3587,8 @@ export const expressionGenMethods = {
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
+		if (op === "-" && this._isUintWord(type))
+			return `((__d) => __d < 0 ? __d + 2 ** 64 : __d)((${l}) - (${r}))`;
 		if (op === "<<" || op === ">>") {
 			// 64-bit semantics: operand first, then count (Go order); a negative
 			// count panics and the result wraps to 64 bits.

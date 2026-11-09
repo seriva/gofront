@@ -201,23 +201,23 @@ Plan review re-probe on `main` @ `0e9b0ab` (scratch `.probes/` scripts, deleted:
 
 ### Phase 3: JS Statements, Loops, Pointers, and Numerics
 
-- [ ] Task 3.1: JS pointer conversion method dispatch and comma-ok define boxing
+- [x] Task 3.1: JS pointer conversion method dispatch and comma-ok define boxing
   - Files: `src/backend/js/expressions.js`, `src/backend/js/statements.js`, `test/unit/language/pointers.test.js`
   - Test: `F03` `type Base struct{n int}; type S Base; func (s *S) Inc() { s.n++ }; b := Base{1}; (*S)(&b).Inc(); fmt.Println(b.n)` → `"2"` on `js`; `F04` `m := map[string]int{"k": 3}; x, y := m["k"]; p := &x; *p = 9; fmt.Println(x, y)` → `"9 true"` on `js`, `both`, and `wasm`.
   - Done when: method calls on converted struct pointers dispatch to the target type's prototype method on JS, and address-taken variables bound by comma-ok map lookups (and type assertions) are boxed as `{ value: ... }` on JS.
-- [ ] Task 3.2: JS stacked labels on `for` with hoisted init and `for _, v = range m` blank-key assignment
+- [x] Task 3.2: JS stacked labels on `for` with hoisted init and `for _, v = range m` blank-key assignment
   - Files: `src/backend/js/statements.js`, `test/unit/language/control-flow.test.js`
   - Test: `F11` `n := 1; outer: inner: for n := n + 1; n < 3; n++ { continue outer }` → `"done"` on `js`, `both`, and `wasm`; `F42` `m := map[string]int{"a": 1}; var v int; for _, v = range m {}; fmt.Println(v)` → `"1"` on all targets.
   - Done when: hoisting a `for` init statement into an enclosing JS block keeps all loop labels attached to the loop statement for `continue`, and `for _, v = range m` with an existing value variable declares the temporary key binding properly.
-- [ ] Task 3.3: JS `for i, r := range s` UTF-16 offsets on astral runes (match WASM)
+- [x] Task 3.3: JS `for i, r := range s` UTF-16 offsets on astral runes (match WASM)
   - Files: `src/backend/js/statements.js`, `docs/go-compatibility.md`, `test/unit/language/control-flow.test.js`
   - Test: `F56` `s := "éa😀b"; for i, r := range s { fmt.Println(i, r, s[i:]) }` → `"0 233 éa😀b\n1 97 a😀b\n2 128512 😀b\n4 98 b"` on `js`, `both`, and `wasm` (`assertAllTargetsOutput`).
   - Done when: JS string range loops advance the index by the UTF-16 length of each decoded code point (2 for astral runes) so JS matches WASM and `s[i:]`, and the `for i := range` row in `docs/go-compatibility.md` **String semantics** describes UTF-16 code-unit offsets instead of rune counts.
-- [ ] Task 3.4: JS `uint` subtraction underflow wrapping and function-local untyped constants with `uint64`
+- [x] Task 3.4: JS `uint` subtraction underflow wrapping and function-local untyped constants with `uint64`
   - Files: `src/backend/js/expressions.js`, `src/typechecker/const-fold.js`, `test/unit/builtins/operators.test.js`
   - Test: `F69` `var n uint = 3; fmt.Println(n-64 > 100)` → `"true"` on `both` and `wasm`; `F70` `var b uint64 = 1; var e uint = 3; const half = 1 << 51; b += half >> e; fmt.Println(b)` → `"281474976710657"` on `both` and `wasm`.
   - Done when: `uint` subtraction in `both` packages wraps negative results modulo 2⁶⁴ (`r < 0 ? r + 2 ** 64 : r`; plain `js` packages keep documented float64 semantics), and function-local untyped integer constants used in 64-bit (`int64`/`uint64`) shift/binary expressions emit as `BigInt`.
-- [ ] Task 3.5: JS slice copy/append/reslice struct element cloning and cross-package element pointer aliasing
+- [x] Task 3.5: JS slice copy/append/reslice struct element cloning and cross-package element pointer aliasing
   - Files: `src/backend/js/expressions.js`, `src/lower/ownership.js`, `test/unit/language/value-semantics.test.js`
   - Test: `F41` `a := []P{{1, 1}}; b := append([]P(nil), a...); b[0].N = 50; fmt.Println(a)` (plus `copy`) → `"[{1 1}]"` on `js`, `both`, and `wasm`; `F44` `package p; func First(xs []S) *S { return &xs[0] }` + `main` `q := p.First(ys); ys[0] = p.S{9}; fmt.Println(q.A)` → `"9"` on all targets.
   - Done when: copying/appending slices of value structs clones the struct elements into the new backing array while in-place element writes (`ys[0] = ...`) mutate fields in place so pointers returned from other packages stay live.

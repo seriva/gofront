@@ -244,8 +244,10 @@ export const assignabilityMethods = {
 		else if (e.kind === "BinaryExpr" && !this._constValue(e)) {
 			const isShift = e.op === "<<" || e.op === ">>";
 			this._retypeShiftTree(e.left, target);
-			if (isShift && e.left._type?.kind === "untyped") e.left._type = target;
-			else if (!isShift) this._retypeShiftTree(e.right, target);
+			if (isShift && e.left._type?.kind === "untyped") {
+				e.left._type = target;
+				if (is64BitInt(target)) e.left._is64Bit = true;
+			} else if (!isShift) this._retypeShiftTree(e.right, target);
 		} else return;
 		if (this._constValue(e)) return;
 		e._type = target;

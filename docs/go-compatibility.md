@@ -65,7 +65,7 @@ GoFront strings are JavaScript strings on both backends (`externref` in WebAssem
 |---|---|---|
 | `len("héllo")` | `5` (UTF-16 code units) | `6` (UTF-8 bytes) |
 | `"héllo"[1]` | `0xE9` (code unit) | `0xC3` (byte) |
-| `for i := range "héllo"` | `i` counts runes `0, 1, 2, 3, 4` | `i` is byte offset `0, 1, 3, 4, 5` |
+| `for i := range "héllo"` | `i` is a UTF-16 code-unit offset `0, 1, 2, 3, 4` (an astral rune such as `😀` advances it by 2) | `i` is byte offset `0, 1, 3, 4, 5` |
 | `[]byte("héllo")`, `string(b)` | UTF-8, 6 bytes | UTF-8, 6 bytes |
 | `[]rune(s)`, `string(r)`, `utf8.*InString` | Code points, as Go | Code points |
 
