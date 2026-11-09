@@ -169,7 +169,6 @@ test("top-level declarations get the package suffix", () => {
 		values,
 		types,
 		refs,
-		overlay: null,
 	});
 	assertEqual(
 		names(ast).join(" "),
@@ -190,7 +189,6 @@ test("a type parameter that shadows a package type is left alone", () => {
 		values,
 		types,
 		refs,
-		overlay: null,
 	});
 	const id = ast.decls.find((d) => d.name === "Id$$demo");
 	assertEqual(id.typeParams[0].name, "T");
@@ -198,20 +196,7 @@ test("a type parameter that shadows a package type is left alone", () => {
 	assertEqual(id.returnType.name, "T");
 });
 
-test("an overlay member reference becomes a package selector", () => {
-	const { ast, refs } = parseDemo();
-	const values = new Set(["helper", "Id", "Make", "Wrap", "Count"]);
-	const types = new Set(["Box", "T"]);
-	const overlay = { name: "errors", members: { New: { kind: "func" } } };
-	mangleStdlibAst([ast], { suffix: "$$demo", values, types, refs, overlay });
-	const wrap = ast.decls.find((d) => d.name === "Wrap$$demo");
-	const callee = wrap.body.stmts[0].values[0].func;
-	assertEqual(callee.kind, "SelectorExpr");
-	assertEqual(callee.expr.name, "errors");
-	assertEqual(callee.field, "New");
-});
-
-test("without an overlay an unknown package-scope name is untouched", () => {
+test("an unknown package-scope name is untouched", () => {
 	const { ast, refs } = parseDemo();
 	const values = new Set(["helper", "Id", "Make", "Wrap", "Count"]);
 	const types = new Set(["Box", "T"]);
@@ -220,7 +205,6 @@ test("without an overlay an unknown package-scope name is untouched", () => {
 		values,
 		types,
 		refs,
-		overlay: null,
 	});
 	const wrap = ast.decls.find((d) => d.name === "Wrap$$demo");
 	assertEqual(wrap.body.stmts[0].values[0].func.name, "New");

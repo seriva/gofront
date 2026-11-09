@@ -147,6 +147,20 @@ func Run() string {
 	assertEqual(out, "true unsupported operation");
 });
 
+test("aliased errors and strings imports parity", async () => {
+	const out = await stdParity(`import (
+	e "errors"
+	s "strings"
+)
+
+func Run() string {
+	err := e.New("boom")
+	return s.ToUpper(err.Error()) + s.Repeat("!", 2)
+}
+`);
+	assertEqual(out, "BOOM!!");
+});
+
 section("Go-source stdlib: name coexistence and diagnostics");
 
 test("a user package named cmp coexists with the stdlib cmp", async () => {

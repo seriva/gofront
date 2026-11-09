@@ -126,7 +126,7 @@ Starts after `overlays-to-go-plan.md` is completed. Before Task 1.1, record `fin
   - Files: `src/typechecker/stdlib/index.js`, `src/typechecker/stdlib/core.js` (delete), `src/typechecker/stdlib/extended.js` (delete)
   - Test: no behaviour change; `test/unit/types/` and `test/unit/language/` suites (browser globals and builtins) and `test/unit/compiler/check-layers.test.js` stay green.
   - Done when: `BROWSER_GLOBALS` and `BUILTINS` registration live in `setupGlobals` and both files are deleted.
-- [ ] Task 1.5: Delete hybrid `pkg.overlay` merging from `src/link/stdlib.js`, `src/resolver.js` and `test/unit/helpers.js`
+- [x] Task 1.5: Delete hybrid `pkg.overlay` merging from `src/link/stdlib.js`, `src/resolver.js` and `test/unit/helpers.js`
   - Files: `src/link/stdlib.js`, `src/resolver.js`, `test/unit/helpers.js`
   - Test: pure deletion (no failing test possible): add a regression case in `test/unit/compiler/stdlib-go.test.js` that aliased `import e "errors"` / `import s "strings"` run on JS and WASM (they already do), and keep the Task 1.1 alias cases green.
   - Done when: `grep -n overlay src/link/stdlib.js` matches nothing, the `import alias … is not supported` branch is gone, `GO_OVERLAID_PACKAGES` / `GO_MEMBER_PACKAGES` are deleted from `test/unit/helpers.js`, and `npm test` passes.
