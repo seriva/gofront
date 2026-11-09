@@ -179,7 +179,8 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(js !== null);
-	assertContains(js, "__sprintf");
+	assertContains(js, "Printf$$fmt");
+	assertEqual(runJs(js), "count: 7");
 });
 
 test("fmt.Print compiles without error", () => {
@@ -197,7 +198,7 @@ func main() {
 	fmt.Printf("value: %d", 42)
 }`);
 	assertEqual(errors.length, 0);
-	assertContains(js, "__sprintf");
+	assertContains(js, "Printf$$fmt");
 });
 
 test("fmt.Sprintf %t for booleans", () => {

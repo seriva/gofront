@@ -262,6 +262,8 @@ export function runInDom(
 		Boolean,
 		Array,
 		Object,
+		TextDecoder,
+		TextEncoder,
 		document: window.document,
 		console: {
 			log: (...args) => lines.push(args.map((a) => String(a)).join(" ")),

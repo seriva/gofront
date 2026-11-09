@@ -11,6 +11,8 @@
 // The framework evaluates each argument once, in order, however many times the
 // template mentions it.
 
+import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
+
 export const JS_NATIVES = new Map();
 
 // Runtime helper (a HELPER_MAP key) a native's template calls.
@@ -272,6 +274,7 @@ JS_NATIVES.set(
 // with the Go bodies.
 
 JS_NATIVES.set("strconv.shortest", (a) => `${a[0]}.toExponential()`);
+JS_NATIVES.set("strconv.fixed", (a) => `(${FIXED_FLOAT_JS})(${a[0]}, ${a[1]})`);
 JS_NATIVES.set(
 	"strconv.parseDecimal",
 	(a) => `Number(${a[0]}.replaceAll("_", ""))`,

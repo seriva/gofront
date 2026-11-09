@@ -3,14 +3,10 @@
 // testing) plus the runtime helper bodies they rely on.
 
 import { typeStr } from "../../../typechecker/types.js";
-import { wrappedErrorfIndices } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
-	fmtDescIsPtr,
-	fmtDescIsSeq,
 	fmtPeelAny,
 	fmtTypeDesc,
-	fmtWantsTypes,
 } from "../../shared/fmt-types.js";
 import {
 	ERROR_STRUCT,
@@ -1309,9 +1305,8 @@ export class StdlibCoreEmitter {
 	// %w cause keeps the original error value in `errTmp`).
 	// `markErrors` (Sprint/Print/Append) pushes error operands through
 	// `testing_arg_err`, so the host sees a non-string like Go does.
-	// `typed` (a Printf-style call whose format needs operand types, see
-	// fmtWantsTypes) tags each operand of a concrete static type with that
-	// type through `fmt_arg_type`, so the host can print `%T` and `%#v`.
+	// `typed` tags each operand of a concrete static type with that type
+	// through `fmt_arg_type`.
 	_emitArgBuffer(args, markErrors = false, typed = false) {
 		args = args.map(fmtPeelAny);
 		const temps = [];
@@ -1517,36 +1512,6 @@ export class StdlibCoreEmitter {
 		}
 	}
 
-	// Whether a Printf-style call's operands need their static types: the
-	// format must be a literal that uses `%T`, `%#v` or has surplus operands.
-	_fmtNeedsTypes(format, operands) {
-		operands = operands.map(fmtPeelAny);
-		if (format?.kind !== "BasicLit") return false;
-		const spread = operands.some((a) => a._spread);
-		const seqArgs = operands.some((a) =>
-			fmtDescIsSeq(
-				fmtTypeDesc(
-					a._type ?? this._resolveExprGoType(a),
-					(t) => this.mod.checker?.resolveType?.(t) ?? t,
-				),
-			),
-		);
-		const ptrArgs = operands.some((a) =>
-			fmtDescIsPtr(
-				fmtTypeDesc(
-					a._type ?? this._resolveExprGoType(a),
-					(t) => this.mod.checker?.resolveType?.(t) ?? t,
-				),
-			),
-		);
-		return fmtWantsTypes(
-			format.value,
-			spread ? -1 : operands.length,
-			seqArgs,
-			ptrArgs,
-		);
-	}
-
 	_releaseArgBuffer(temps) {
 		for (let i = temps.length - 1; i >= 0; i--) {
 			this.releaseTemp(temps[i].tmp, temps[i].wType);
@@ -1649,225 +1614,6 @@ export class StdlibCoreEmitter {
 		} else {
 			this.emitExpr(arg, "i32");
 		}
-	}
-
-	_emitAppendStringToByteSlice(dstNode, sTmp) {
-		const byteGo = { kind: "basic", name: "byte" };
-		const sliceInfo = this.mod.getSliceType(byteGo);
-		const arrInfo = sliceInfo.arrInfo;
-		const sliceW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: sliceInfo.typeIndex,
-		};
-		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
-
-		const dstTmp = this.acquireTemp(sliceW);
-		this.emitExpr(dstNode, sliceW);
-		this.pushInstruction({ op: "local.set", index: dstTmp });
-
-		const oldArrTmp = this.acquireTemp(arrW);
-		const oldOffTmp = this.acquireTemp("i32");
-		const oldLenTmp = this.acquireTemp("i32");
-		const oldCapTmp = this.acquireTemp("i32");
-		this._emitSliceUnpack(dstTmp, sliceInfo, {
-			arr: oldArrTmp,
-			off: oldOffTmp,
-			len: oldLenTmp,
-			cap: oldCapTmp,
-		});
-		this.releaseTemp(dstTmp, sliceW);
-
-		const sLenTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStringLenImportIndex(),
-		});
-		this.pushInstruction({ op: "local.set", index: sLenTmp });
-
-		const newLenTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: oldLenTmp });
-		this.pushInstruction({ op: "local.get", index: sLenTmp });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "local.set", index: newLenTmp });
-
-		const newArrTmp = this.acquireTemp(arrW);
-		const newOffTmp = this.acquireTemp("i32");
-		const newCapTmp = this.acquireTemp("i32");
-
-		this._emitGrowSlice({
-			arrInfo,
-			elemGoType: byteGo,
-			oldArrTmp,
-			oldOffTmp,
-			oldLenTmp,
-			oldCapTmp,
-			newArrTmp,
-			newOffTmp,
-			newLenTmp,
-			newCapTmp,
-		});
-
-		const kTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.set", index: kTmp });
-
-		this.pushInstruction({ op: "block", blockType: "void" });
-		this.pushInstruction({ op: "loop", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction({ op: "local.get", index: sLenTmp });
-		this.pushInstruction("i32.ge_s");
-		this.pushInstruction({ op: "br_if", depth: 1 });
-
-		this.pushInstruction({ op: "local.get", index: newArrTmp });
-		this.pushInstruction({ op: "local.get", index: newOffTmp });
-		this.pushInstruction({ op: "local.get", index: oldLenTmp });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction("i32.add");
-
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStringCodePointAtImportIndex(),
-		});
-		this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
-
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "local.set", index: kTmp });
-		this.pushInstruction({ op: "br", depth: 0 });
-		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		// struct.new sliceInfo (newArr, newOff, newLen, newCap)
-		this.pushInstruction({ op: "local.get", index: newArrTmp });
-		this.pushInstruction({ op: "local.get", index: newOffTmp });
-		this.pushInstruction({ op: "local.get", index: newLenTmp });
-		this.pushInstruction({ op: "local.get", index: newCapTmp });
-		this.pushInstruction({ op: "struct.new", typeIndex: sliceInfo.typeIndex });
-
-		this.releaseTemp(kTmp, "i32");
-		this.releaseTemp(newCapTmp, "i32");
-		this.releaseTemp(newOffTmp, "i32");
-		this.releaseTemp(newArrTmp, arrW);
-		this.releaseTemp(newLenTmp, "i32");
-		this.releaseTemp(sLenTmp, "i32");
-		this.releaseTemp(oldCapTmp, "i32");
-		this.releaseTemp(oldLenTmp, "i32");
-		this.releaseTemp(oldOffTmp, "i32");
-		this.releaseTemp(oldArrTmp, arrW);
-	}
-
-	// `fmt.Println(f())` with a multi-value `f`: every result becomes its own
-	// operand, held in a hidden local so the usual operand paths apply.
-	_expandTupleFmtArgs(args) {
-		const tuple = args.length === 1 ? args[0]._type : null;
-		if (tuple?.kind !== "tuple") return args;
-		const types = tuple.types;
-		this._fmtTupleSeq = (this._fmtTupleSeq ?? 0) + 1;
-		const names = types.map((_, i) => `__fmt_tuple_${this._fmtTupleSeq}_${i}`);
-		const idxs = types.map((t, i) =>
-			this.allocLocal(names[i], this.toWasmType(t), t, true),
-		);
-		this.emitExpr(args[0]);
-		for (let i = types.length - 1; i >= 0; i--) {
-			this.pushInstruction({ op: "local.set", index: idxs[i] });
-		}
-		return types.map((t, i) => ({ kind: "Ident", name: names[i], _type: t }));
-	}
-
-	emitFmtCall(name, args) {
-		args = this._expandTupleFmtArgs(args);
-		if (name === "Appendf") {
-			const [dst, ...rest] = args;
-			const strTmp = this.acquireTemp("externref");
-			const [format, ...operands] = rest;
-			const temps = this._emitArgBuffer(
-				operands,
-				false,
-				this._fmtNeedsTypes(format, operands),
-			);
-			this.emitExpr(format, "externref");
-			this._callStdlib("fmt_sprintf");
-			this._releaseArgBuffer(temps);
-			this.pushInstruction({ op: "local.set", index: strTmp });
-			this._emitAppendStringToByteSlice(dst, strTmp);
-			this.releaseTemp(strTmp, "externref");
-			return;
-		}
-		if (name === "Sprintf" || name === "Printf" || name === "Errorf") {
-			const [format, ...rest] = args;
-			const temps = this._emitArgBuffer(
-				rest,
-				false,
-				this._fmtNeedsTypes(format, rest),
-			);
-			this.emitExpr(format, "externref");
-			if (name === "Printf") {
-				this._callStdlib("fmt_printf");
-				this._releaseArgBuffer(temps);
-				return;
-			}
-			this._callStdlib("fmt_sprintf");
-			if (name === "Errorf") this._emitErrorfResult(format, temps);
-			this._releaseArgBuffer(temps);
-			return;
-		}
-		throw new Error(`Unsupported fmt function: fmt.${name}`);
-	}
-
-	// With the formatted message on the stack: makes the error value, wrapping
-	// the operands of the format's `%w` verbs (one cause, or several as a
-	// `[]error`).
-	_emitErrorfResult(format, temps) {
-		const causeOf = (i) => temps[i]?.errTmp ?? temps[i]?.tmp ?? null;
-		const causes = wrappedErrorfIndices(format)
-			.map(causeOf)
-			.filter((t) => t !== null);
-		if (causes.length > 1) {
-			this._emitWrapErrors(causes);
-			return;
-		}
-		if (causes.length === 1) {
-			this.pushInstruction({ op: "local.get", index: causes[0] });
-		} else {
-			this.pushInstruction({ op: "ref.null", heapType: "any" });
-		}
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-		});
-	}
-
-	// With the formatted message on the stack: wraps the `causes` (temps
-	// holding the `%w` operands) in a runtime error whose `Unwrap` returns
-	// them as a `[]error`.
-	_emitWrapErrors(causes) {
-		const sliceInfo = this.mod.getSliceType({
-			kind: "interface",
-			name: "error",
-		});
-		for (const t of causes) this.pushInstruction({ op: "local.get", index: t });
-		this.pushInstruction({
-			op: "array.new_fixed",
-			typeIndex: sliceInfo.arrInfo.typeIndex,
-			size: causes.length,
-		});
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "i32.const", value: causes.length });
-		this.pushInstruction({ op: "i32.const", value: causes.length });
-		this.pushInstruction({
-			op: "struct.new",
-			typeIndex: sliceInfo.typeIndex,
-		});
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__mk_wrap_errors"),
-		});
 	}
 
 	// `a == b` for two anyref operands (interface values).  `ref.eq` only

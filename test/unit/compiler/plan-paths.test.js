@@ -48,9 +48,9 @@ const PLANS = [
 			// The Go sources, generator and tests the plan's tasks add.
 			"src/lower/stdlib-refs.js",
 			"stdlib/{context,testing}{,/,/*.go}",
-			"stdlib/fmt/errors.go",
 			"src/backend/js/stdlib/{errors,cryptorand,os,unicode,time,regexp,gom}.js",
 			"src/backend/wasm/stdlib/pure.js",
+			"src/backend/shared/errorf.js",
 			"test/unit/stdlib/testing.test.js",
 		],
 	},

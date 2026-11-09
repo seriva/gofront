@@ -150,25 +150,25 @@ func Run() string {
 test("an overlay that redeclares an emitter member is rejected", () => {
 	withTempDir(
 		{
-			"stdlib/fmt/overlay.go": `//go:build gofront
+			"stdlib/testing/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package fmt
+package testing
 
-func Printf(format string, a ...any) {}
+func Short() bool { return false }
 `,
 			"app/main.go": `package main
 
-import "fmt"
+import "testing"
 
-func main() { fmt.Printf("x") }
+func main() { println(testing.Short()) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares fmt.Printf",
+				"overlay redeclares testing.Short",
 			);
 		},
 	);
@@ -374,20 +374,20 @@ func main() { println(u.C(1, 2), w.Run()) }
 test("an aliased overlay import is rejected at the import", () => {
 	withTempDir(
 		{
-			"stdlib/fmt/overlay.go": `//go:build gofront
+			"stdlib/testing/overlay.go": `//go:build gofront
 
 //gofront:target both
 
-package fmt
+package testing
 
 func Hello() {}
 `,
-			"app/main.go": `package main\n\nimport f "fmt"\n\nfunc main() { f.Println(1) }\n`,
+			"app/main.go": `package main\n\nimport t "testing"\n\nfunc main() { println(t.Short()) }\n`,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"import alias for 'fmt' is not supported",
+				"import alias for 'testing' is not supported",
 			);
 		},
 	);

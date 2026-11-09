@@ -103,6 +103,65 @@ multi 2
 `,
 	);
 });
+test("Errorf wraps one, several, reordered and invalid %w operands like Go", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type S struct{ A int }
+
+func (S) String() string { return "s" }
+
+type E struct{ N int }
+
+func (e E) Error() string { return fmt.Sprint("E", e.N) }
+
+func main() {
+	base := errors.New("base")
+	other := errors.New("other")
+	w := fmt.Errorf("one: %w", base)
+	fmt.Println(w, errors.Unwrap(w) == base, errors.Is(w, base))
+	w2 := fmt.Errorf("two: %w and %w", base, other)
+	fmt.Println(w2, errors.Unwrap(w2) == nil, errors.Is(w2, base), errors.Is(w2, other))
+	w3 := fmt.Errorf("re: %[2]w %[1]w", base, other)
+	fmt.Println(w3, errors.Is(w3, base), errors.Is(w3, other))
+	w4 := fmt.Errorf("dup: %[1]w %[1]w", base)
+	fmt.Println(w4, errors.Is(w4, base))
+	w5 := fmt.Errorf("bad: %w", "x")
+	fmt.Println(w5, errors.Unwrap(w5) == nil)
+	w6 := fmt.Errorf("nil: %w", nil)
+	fmt.Println(w6, errors.Unwrap(w6) == nil)
+	var target E
+	w7 := fmt.Errorf("typed: %w", E{9})
+	fmt.Println(errors.As(w7, &target), target.N, w7)
+	fmt.Printf("%T %T %T\\n", w, w2, fmt.Errorf("plain %d", 1))
+	var st fmt.Stringer = S{3}
+	var er error = E{4}
+	fmt.Printf("%d|%+v|%v|%s\\n", st, st, st, st)
+	fmt.Printf("%d|%+v|%v\\n", er, er, er)
+	var a any = S{5}
+	fmt.Printf("%d|%v\\n", a, a)
+}
+`,
+		`one: base true true
+two: base and other true true true
+re: other base true true
+dup: base base true
+bad: %!w(string=x) true
+nil: %!w(<nil>) true
+true 9 typed: E9
+*fmt.wrapError *fmt.wrapErrors *errors.errorString
+{3}|s|s|s
+{4}|E4|E4
+{5}|s
+`,
+	);
+});
+
 test("sentinels, typed targets and joined trees", async () => {
 	await assertFourWay(
 		`package main
