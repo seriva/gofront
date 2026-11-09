@@ -66,7 +66,7 @@ const _parseCache = new Map();
 // lowered stdlib programs), so a build of a Go-source stdlib importer pins
 // megabytes.  The cache is therefore bounded; the least recently used file goes
 // first.
-const PARSE_CACHE_LIMIT = 32;
+const PARSE_CACHE_LIMIT = 16;
 
 export function clearParseCache() {
 	_parseCache.clear();

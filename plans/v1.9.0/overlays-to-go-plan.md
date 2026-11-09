@@ -237,18 +237,20 @@ Remove the last hand-written stdlib machinery from `src/` after [`compiler-shrin
 
 ### Phase 5: `fmt` in Go — verbs, flags, `Errorf`, and the JS engine removal
 
-- [ ] Task 5.1: `doPrintf`: verbs, flags, width/precision, argument indexes and error forms
+- [x] Task 5.1: `doPrintf`: verbs, flags, width/precision, argument indexes and error forms
   - Files: `stdlib/fmt/print.go`, `stdlib/fmt/format.go`
   - Test: `test/unit/builtins/fmt-verbs.test.js` (60: `%d %b %o %O %x %X %c %q %U %e %E %f %F %g %G %s %t %v %T %p`, `+ - # 0 space`, `*`, `%[n]`, `%!v(MISSING)`, `%!(EXTRA …)`, `%!(BADINDEX)`, `%!d(string=x)`)
   - Done when: `Sprintf`, `Printf`, `Fprintf`, `Appendf` are Go source and all 60 cases pass four-way.
-- [ ] Task 5.2: `Errorf` with `%w` wrapping
+- [x] Task 5.2: `Errorf` with `%w` wrapping
   - Files: `stdlib/fmt/errors.go`, `src/typechecker/stdlib/core.js`
   - Test: `test/unit/stdlib/errors.test.js` (`%w` single, multiple, non-error operand, `errors.Is`/`As`/`Unwrap` over the result), `test/unit/stdlib/fmt.test.js`
   - Done when: `Errorf` is Go source with `wrapError`/`wrapErrors`, the `fmt` overlay has no members left, and `fmt`/`fmt.Stringer` are removed from `STDLIB_PACKAGES`/`WASM_STDLIB_MEMBERS`/`types.set`.
-- [ ] Task 5.3: Delete the JS `fmt` emitter, runtime engine, descriptors and shared fmt helpers; enforce the perf gate
+- [ ] Task 5.3 (partial, see Phase 5 as built): Delete the JS `fmt` emitter, runtime engine, descriptors and shared fmt helpers; enforce the perf gate
   - Files: `src/backend/js/stdlib/fmt.js` (delete), `src/backend/js/fmt-runtime.js` (delete), `src/backend/shared/errorf.js` (delete), `src/backend/shared/fmt-types.js`, `src/backend/js/runtime.js`, `src/backend/js/type-info.js`, `src/backend/js/expressions.js`, `src/backend/js/index.js`, `src/backend/js/stdlib/index.js`, `test/perf/fmt-bench.js`
   - Test: `test/unit/builtins/fmt-verbs.test.js`, `test/unit/builtins/fmt-stringer.test.js` (the `__pr` output assertion at 271–273 rewritten as a behavioural pointer-vs-value case), `test/unit/stdlib/fmt.test.js`, `node test/perf/fmt-bench.js`
   - Done when: `HELPER_SPRINTF`, `HELPER_IFD`, `__ft`/`_fmtDesc*`/`_genFmtClassMeta`/`__pr`/`_fmtDescWrap`, `errorf.js` are gone, `fmt-types.js` keeps only `goTypeName` (used by `src/backend/wasm/monomorph.js`), and the bench thresholds are set to JS ≤ 2.0× / WASM ≤ 1.0× of the Task 4.1 baselines and pass.
+
+- Phase 5 as built (deviations, for Phase 6/7): Task 5.3 is partly open. Done: JS `_genFmt` and the Printf/Errorf/Fprintf arms, `emitFmtCall`/`emitFprintCall` and `_emitErrorfResult`/`_emitWrapErrors`, `errorf.js`, `fmtWantsTypes`. Open: the JS engine (`HELPER_SPRINTF`/`fmt-runtime.js`, `HELPER_IFD`, `__ft`, `__pr`/`_fmtDesc*`/`_genFmtClassMeta`, `fmt-types.js` beyond `goTypeName`) is still read by `testing` (`HELPER_TESTING` `Logf`/`Errorf` call `__sprintf`; the WASM `testing_call` path tags operands through `_emitArgBuffer`/`fmt_arg_type`/`__ft`) and by the WASM boundary (`fmt_sprintf`/`fmt_printf`, Task 6.2); delete them with Task 7.4, not here. The perf gate passes after the buffer work: `node test/perf/fmt-bench.js` gives JS ≈ 1.34 s (limit 1.58 s) and WASM ≈ 1.14-1.16 s (limit 1.2 s, thin margin: WASM strings are host strings, so each `s[i]` is two host calls). Done toward it: index-based `fmtState` output buffer (`putByte`/`putString`/`putBytes`, no per-byte append), `fmtFixed` fast path for plain `%f` and `plainQuotable` for `%q`, small-int digit loop, `__u8dec` (shared decoder) for `string([]byte)`, `__ifv` skips the copy for composite literals and iterates with `for..in`, `__appendv` (no spread for `append(b, s...)`), one shared `TextEncoder`, `strconv.fixed` native (toFixed with Go's half-even ties) for `%f`. `printf` `%[n]`/`*`/EXTRA/MISSING/BADINDEX, `%w`/`Errorf`, flags and `%p` unified ids are Go source. Other deviations: `fmt.format` renamed `fmtState` (a parameter named `format` shadowed the type); bare Stringer/error operands are described in format calls (`%d`/`%+v` call no methods) and every interface operand triggers the lookup there; `%T` of a stdlib error asks the value (`GofrontTypeName` on `errors.errorString`/`joinError`, `fmt.wrapError`/`wrapErrors`); packages importing `encoding/json` get the lookup (jsonrt prints `%T` of any); `fmt.Println(any(x))` is described as `x` (`_ifaceSrc`-free peel in `fmt-formatters.js`); float64 precedes float32 in `describe` (JS cannot tell them apart); strconv `Quote` keeps a real U+FFFD.
 
 ### Phase 6: `fmt` in Go — WASM machinery removal and docs
 

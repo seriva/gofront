@@ -1104,13 +1104,6 @@ export class BuiltinsEmitter {
 			return false;
 		const pkgName = func.expr?.name;
 		switch (pkgName) {
-			case "fmt":
-				if (func.field.startsWith("Fprint")) {
-					this.emitFprintCall(func.field, call, targetWasmType);
-					return true;
-				}
-				this.emitFmtCall(func.field, args);
-				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;

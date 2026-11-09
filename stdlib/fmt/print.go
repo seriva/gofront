@@ -18,6 +18,7 @@ import (
 	"internal/fmtrt"
 	"io"
 	"os"
+	"unicode/utf8"
 )
 
 // Stringer is implemented by any value that has a String method, which
@@ -51,30 +52,70 @@ const (
 
 // pp is the printer state.
 type pp struct {
-	fmt format
+	fmt fmtState
 
 	// erroring is set when printing an error string to guard against calling handleMethods.
 	erroring bool
 	// panicking is set by catchPanic to avoid infinite panic, recover, panic, ... recursion.
 	panicking bool
+	// wrapErrs is set by Errorf: %w is valid only there.
+	wrapErrs bool
+	// reordered records whether the format used an explicit argument index.
+	reordered bool
+	// goodArgNum records whether the current verb's argument index was valid.
+	goodArgNum bool
+	// wrappedErrs holds the argument numbers of the %w verbs.
+	wrappedErrs []int
 }
 
 func newPrinter() *pp {
 	p := &pp{}
-	p.fmt.intbuf = make([]byte, 68)
+	p.fmt.buf = make([]byte, 64)
 	return p
 }
 
 func (p *pp) writeString(s string) {
-	p.fmt.buf = append(p.fmt.buf, s...)
+	p.fmt.putString(s)
 }
 
 func (p *pp) writeByte(c byte) {
-	p.fmt.buf = append(p.fmt.buf, c)
+	p.fmt.putByte(c)
 }
 
 func (p *pp) writeRune(r rune) {
-	p.fmt.buf = append(p.fmt.buf, string(r)...)
+	if r >= 0 && r < 0x80 {
+		p.fmt.putByte(byte(r))
+		return
+	}
+	p.fmt.putString(string(r))
+}
+
+// Fprintf formats according to a format specifier and writes to w.
+func Fprintf(w io.Writer, format string, a ...any) (n int, err error) {
+	p := newPrinter()
+	p.doPrintf(format, a)
+	n, err = w.Write(p.fmt.bytes())
+	return
+}
+
+// Printf formats according to a format specifier and writes to standard output.
+func Printf(format string, a ...any) (n int, err error) {
+	return Fprintf(os.Stdout, format, a...)
+}
+
+// Sprintf formats according to a format specifier and returns the resulting string.
+func Sprintf(format string, a ...any) string {
+	p := newPrinter()
+	p.doPrintf(format, a)
+	return string(p.fmt.bytes())
+}
+
+// Appendf formats according to a format specifier, appends the result to the
+// byte slice, and returns the updated slice.
+func Appendf(b []byte, format string, a ...any) []byte {
+	p := newPrinter()
+	p.doPrintf(format, a)
+	return append(b, p.fmt.bytes()...)
 }
 
 // Fprint formats using the default formats for its operands and writes to w.
@@ -82,7 +123,7 @@ func (p *pp) writeRune(r rune) {
 func Fprint(w io.Writer, a ...any) (n int, err error) {
 	p := newPrinter()
 	p.doPrint(a)
-	n, err = w.Write(p.fmt.buf)
+	n, err = w.Write(p.fmt.bytes())
 	return
 }
 
@@ -95,7 +136,7 @@ func Print(a ...any) (n int, err error) {
 func Sprint(a ...any) string {
 	p := newPrinter()
 	p.doPrint(a)
-	return string(p.fmt.buf)
+	return string(p.fmt.bytes())
 }
 
 // Append formats using the default formats for its operands, appends the result to
@@ -103,7 +144,7 @@ func Sprint(a ...any) string {
 func Append(b []byte, a ...any) []byte {
 	p := newPrinter()
 	p.doPrint(a)
-	return append(b, p.fmt.buf...)
+	return append(b, p.fmt.bytes()...)
 }
 
 // Fprintln formats using the default formats for its operands and writes to w.
@@ -111,7 +152,7 @@ func Append(b []byte, a ...any) []byte {
 func Fprintln(w io.Writer, a ...any) (n int, err error) {
 	p := newPrinter()
 	p.doPrintln(a)
-	n, err = w.Write(p.fmt.buf)
+	n, err = w.Write(p.fmt.bytes())
 	return
 }
 
@@ -124,7 +165,7 @@ func Println(a ...any) (n int, err error) {
 func Sprintln(a ...any) string {
 	p := newPrinter()
 	p.doPrintln(a)
-	return string(p.fmt.buf)
+	return string(p.fmt.bytes())
 }
 
 // Appendln formats using the default formats for its operands, appends the result
@@ -132,7 +173,7 @@ func Sprintln(a ...any) string {
 func Appendln(b []byte, a ...any) []byte {
 	p := newPrinter()
 	p.doPrintln(a)
-	return append(b, p.fmt.buf...)
+	return append(b, p.fmt.bytes()...)
 }
 
 // describe turns an operand into its description. An operand the compiler
@@ -168,14 +209,16 @@ func describe(arg any) fmtrt.Arg {
 		return fmtrt.Arg{K: fmtrt.KUint, T: "uint64", Size: 64, U: f}
 	case uintptr:
 		return fmtrt.Arg{K: fmtrt.KUint, T: "uintptr", U: uint64(f)}
-	case float32:
-		return fmtrt.Arg{K: fmtrt.KFloat, T: "float32", Size: 32, R: float64(f)}
+	// float64 first: on JS a float32 and a float64 are the same number, and a
+	// float32 that reaches here without its description is far rarer.
 	case float64:
 		return fmtrt.Arg{K: fmtrt.KFloat, T: "float64", Size: 64, R: f}
-	case complex64:
-		return fmtrt.Arg{K: fmtrt.KComplex, T: "complex64", Size: 64, R: float64(real(f)), Im: float64(imag(f))}
+	case float32:
+		return fmtrt.Arg{K: fmtrt.KFloat, T: "float32", Size: 32, R: float64(f)}
 	case complex128:
 		return fmtrt.Arg{K: fmtrt.KComplex, T: "complex128", Size: 128, R: real(f), Im: imag(f)}
+	case complex64:
+		return fmtrt.Arg{K: fmtrt.KComplex, T: "complex64", Size: 64, R: float64(real(f)), Im: float64(imag(f))}
 	case string:
 		return fmtrt.Arg{K: fmtrt.KString, T: "string", S: f}
 	case []byte:
@@ -204,6 +247,22 @@ func describe(arg any) fmtrt.Arg {
 		return a
 	}
 	return fmtrt.Arg{K: fmtrt.KNone, V: arg}
+}
+
+// typeName is the type %T prints: the one the operand was described with, else
+// the one a registered lookup gives its value, else the one a value of the
+// standard library names itself.
+func typeName(a fmtrt.Arg) string {
+	if a.T != "" || a.V == nil {
+		return a.T
+	}
+	if d, ok := fmtrt.Lookup(a.V); ok && d.T != "" {
+		return d.T
+	}
+	if n, ok := a.V.(interface{ GofrontTypeName() string }); ok {
+		return n.GofrontTypeName()
+	}
+	return ""
 }
 
 // bytesArg describes a []byte.
@@ -481,6 +540,10 @@ func (p *pp) callMethod(a fmtrt.Arg, verb rune, method string, f func() string) 
 			p.fmt.restoreFlags(oldFlags)
 		}
 	}()
+	if method == "GoString" {
+		p.fmt.fmtS(f())
+		return
+	}
 	p.fmtString(f(), verb, a)
 }
 
@@ -490,6 +553,15 @@ func (p *pp) callMethod(a fmtrt.Arg, verb rune, method string, f func() string) 
 func (p *pp) handleMethods(a fmtrt.Arg, verb rune, ro bool) (handled bool) {
 	if p.erroring {
 		return
+	}
+	if verb == 'w' {
+		// It is invalid to use %w other than with Errorf or with a non-error arg.
+		if a.Err == nil || !p.wrapErrs {
+			p.badVerb(verb, a)
+			return true
+		}
+		// Format the error as %v.
+		verb = 'v'
 	}
 	// If we're doing Go syntax and the argument knows how to supply it, take care of it now.
 	if p.fmt.sharpV {
@@ -538,7 +610,7 @@ func (p *pp) printArg(a fmtrt.Arg, verb rune) {
 	// %T (the value's type) and %p (its address) are special; we always do them first.
 	switch verb {
 	case 'T':
-		p.fmt.fmtS(a.T)
+		p.fmt.fmtS(typeName(a))
 		return
 	case 'p':
 		p.fmtPointer(a, 'p')
@@ -863,4 +935,287 @@ func boolInt(b bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+// tooLarge reports whether the magnitude of the integer is
+// too large to be used as a formatting width or precision.
+func tooLarge(x int) bool {
+	const max int = 1e6
+	return x > max || x < -max
+}
+
+// parsenum converts ASCII to integer.  num is 0 (and isnum is false) if no number present.
+func parsenum(s string, start, end int) (num int, isnum bool, newi int) {
+	if start >= end {
+		return 0, false, end
+	}
+	for newi = start; newi < end && '0' <= s[newi] && s[newi] <= '9'; newi++ {
+		if tooLarge(num) {
+			return 0, false, end // Overflow; crazy long number most likely.
+		}
+		num = num*10 + int(s[newi]-'0')
+		isnum = true
+	}
+	return
+}
+
+// intFromArg reads the integer operand of a * width or precision.
+func intFromArg(a []any, argNum int) (num int, isInt bool, newArgNum int) {
+	newArgNum = argNum
+	if argNum < len(a) {
+		d := describe(a[argNum])
+		switch d.K {
+		case fmtrt.KInt:
+			if int64(int(d.I)) == d.I {
+				num = int(d.I)
+				isInt = true
+			}
+		case fmtrt.KUint:
+			if int64(d.U) >= 0 && uint64(int(d.U)) == d.U {
+				num = int(d.U)
+				isInt = true
+			}
+		}
+		newArgNum = argNum + 1
+		if tooLarge(num) {
+			num = 0
+			isInt = false
+		}
+	}
+	return
+}
+
+// parseArgNumber returns the value of the bracketed number, minus 1
+// (explicit argument numbers are one-indexed but we want zero-indexed).
+// The opening bracket is known to be present at format[0].
+// The returned values are the index, the number of bytes to consume
+// up to the closing paren, if present, and whether the number parsed
+// ok. The bytes to consume will be 1 if no closing paren is present.
+func parseArgNumber(format string) (index int, wid int, ok bool) {
+	// There must be at least 3 bytes: [n].
+	if len(format) < 3 {
+		return 0, 1, false
+	}
+
+	// Find closing bracket.
+	for i := 1; i < len(format); i++ {
+		if format[i] == ']' {
+			width, ok, newi := parsenum(format, 1, i)
+			if !ok || newi != i {
+				return 0, i + 1, false
+			}
+			return width - 1, i + 1, true // arg numbers are one-indexed and skip paren.
+		}
+	}
+	return 0, 1, false
+}
+
+// argNumber returns the next argument to evaluate, which is either the value of the passed-in
+// argNum or the value of the bracketed integer that begins format[i:]. It also returns
+// the new value of i, that is, the index of the next byte of the format to process.
+func (p *pp) argNumber(argNum int, format string, i int, numArgs int) (newArgNum, newi int, found bool) {
+	if len(format) <= i || format[i] != '[' {
+		return argNum, i, false
+	}
+	p.reordered = true
+	index, wid, ok := parseArgNumber(format[i:])
+	if ok && 0 <= index && index < numArgs {
+		return index, i + wid, true
+	}
+	p.goodArgNum = false
+	return argNum, i + wid, ok
+}
+
+func (p *pp) badArgNum(verb rune) {
+	p.writeString(percentBangString)
+	p.writeRune(verb)
+	p.writeString(badIndexString)
+}
+
+func (p *pp) missingArg(verb rune) {
+	p.writeString(percentBangString)
+	p.writeRune(verb)
+	p.writeString(missingString)
+}
+
+func (p *pp) doPrintf(format string, a []any) {
+	end := len(format)
+	argNum := 0         // we process one argument per non-trivial format
+	afterIndex := false // previous item in format was an index like [3].
+	p.reordered = false
+formatLoop:
+	for i := 0; i < end; {
+		p.goodArgNum = true
+		lasti := i
+		for i < end && format[i] != '%' {
+			i++
+		}
+		if i > lasti {
+			p.writeString(format[lasti:i])
+		}
+		if i >= end {
+			// done processing format string
+			break
+		}
+
+		// Process one verb
+		i++
+
+		// Do we have flags?
+		p.fmt.clearflags()
+	simpleFormat:
+		for ; i < end; i++ {
+			c := format[i]
+			switch c {
+			case '#':
+				p.fmt.sharp = true
+			case '0':
+				p.fmt.zero = true
+			case '+':
+				p.fmt.plus = true
+			case '-':
+				p.fmt.minus = true
+			case ' ':
+				p.fmt.space = true
+			default:
+				// Fast path for common case of ascii lower case simple verbs
+				// without precision or width or argument indices.
+				if 'a' <= c && c <= 'z' && argNum < len(a) {
+					switch c {
+					case 'w':
+						p.wrappedErrs = append(p.wrappedErrs, argNum)
+						fallthrough
+					case 'v':
+						// Go syntax
+						p.fmt.sharpV = p.fmt.sharp
+						p.fmt.sharp = false
+						// Struct-field syntax
+						p.fmt.plusV = p.fmt.plus
+						p.fmt.plus = false
+					}
+					p.printArg(describe(a[argNum]), rune(c))
+					argNum++
+					i++
+					continue formatLoop
+				}
+				// Format is more complex than simple flags and a verb or is malformed.
+				break simpleFormat
+			}
+		}
+
+		// Do we have an explicit argument index?
+		argNum, i, afterIndex = p.argNumber(argNum, format, i, len(a))
+
+		// Do we have width?
+		if i < end && format[i] == '*' {
+			i++
+			p.fmt.wid, p.fmt.widPresent, argNum = intFromArg(a, argNum)
+
+			if !p.fmt.widPresent {
+				p.writeString(badWidthString)
+			}
+
+			// We have a negative width, so take its value and ensure
+			// that the minus flag is set
+			if p.fmt.wid < 0 {
+				p.fmt.wid = -p.fmt.wid
+				p.fmt.minus = true
+				p.fmt.zero = false // Do not pad with zeros to the right.
+			}
+			afterIndex = false
+		} else {
+			p.fmt.wid, p.fmt.widPresent, i = parsenum(format, i, end)
+			if afterIndex && p.fmt.widPresent { // "%[3]2d"
+				p.goodArgNum = false
+			}
+		}
+
+		// Do we have precision?
+		if i+1 <= end && format[i] == '.' {
+			i++
+			if afterIndex { // "%[3].2d"
+				p.goodArgNum = false
+			}
+			argNum, i, afterIndex = p.argNumber(argNum, format, i, len(a))
+			if i < end && format[i] == '*' {
+				i++
+				p.fmt.prec, p.fmt.precPresent, argNum = intFromArg(a, argNum)
+				// Negative precision arguments don't make sense
+				if p.fmt.prec < 0 {
+					p.fmt.prec = 0
+					p.fmt.precPresent = false
+				}
+				if !p.fmt.precPresent {
+					p.writeString(badPrecString)
+				}
+				afterIndex = false
+			} else {
+				p.fmt.prec, p.fmt.precPresent, i = parsenum(format, i, end)
+				if !p.fmt.precPresent {
+					p.fmt.prec = 0
+					p.fmt.precPresent = true
+				}
+			}
+		}
+
+		if !afterIndex {
+			argNum, i, afterIndex = p.argNumber(argNum, format, i, len(a))
+		}
+
+		if i >= end {
+			p.writeString(noVerbString)
+			break
+		}
+
+		verb, size := rune(format[i]), 1
+		if verb >= utf8.RuneSelf {
+			verb, size = utf8.DecodeRuneInString(format[i:])
+		}
+		i += size
+
+		switch {
+		case verb == '%': // Percent does not absorb operands and ignores f.wid and f.prec.
+			p.writeByte('%')
+		case !p.goodArgNum:
+			p.badArgNum(verb)
+		case argNum >= len(a): // No argument left over to print for the current verb.
+			p.missingArg(verb)
+		case verb == 'w':
+			p.wrappedErrs = append(p.wrappedErrs, argNum)
+			fallthrough
+		case verb == 'v':
+			// Go syntax
+			p.fmt.sharpV = p.fmt.sharp
+			p.fmt.sharp = false
+			// Struct-field syntax
+			p.fmt.plusV = p.fmt.plus
+			p.fmt.plus = false
+			fallthrough
+		default:
+			p.printArg(describe(a[argNum]), verb)
+			argNum++
+		}
+	}
+
+	// Check for extra arguments unless the call accessed the arguments
+	// out of order, in which case it's too expensive to detect if they've all
+	// been used and arguably OK if they're not.
+	if !p.reordered && argNum < len(a) {
+		p.fmt.clearflags()
+		p.writeString(extraString)
+		for i, arg := range a[argNum:] {
+			if i > 0 {
+				p.writeString(commaSpaceString)
+			}
+			if arg == nil {
+				p.writeString(nilAngleString)
+			} else {
+				d := describe(arg)
+				p.writeString(d.T)
+				p.writeByte('=')
+				p.printArg(d, 'v')
+			}
+		}
+		p.writeByte(')')
+	}
 }

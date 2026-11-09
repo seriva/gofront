@@ -36,6 +36,7 @@
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
 import { HELPER_ERROR, HELPER_SPRINTF } from "../js/runtime.js";
+import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
 	unicodeToLowerJs,
@@ -1961,6 +1962,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			return c?.getRandomValues ? c.getRandomValues(new Uint32Array(1))[0] | 0 : (Math.random() * 4294967296) | 0;
 		},
 		"strconv_shortest": (f) => f.toExponential(),
+		"strconv_fixed": ${FIXED_FLOAT_JS},
 		"strconv_parse_decimal": (s) => Number((s ?? "").replaceAll("_", "")),
 		"str_index": (s, sub) => (s ?? "").indexOf(sub ?? ""),
 		"str_last_index": (s, sub) => (s ?? "").lastIndexOf(sub ?? ""),

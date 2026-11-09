@@ -622,6 +622,7 @@ export const expressionGenMethods = {
 					this.genExpr(expr),
 					expr._ifaceBox,
 					expr._ifacePtrFields,
+					expr.kind === "CompositeLit",
 				);
 				return this._typedNilWrap(boxed, expr);
 			} finally {
@@ -715,7 +716,9 @@ export const expressionGenMethods = {
 	},
 
 	// `js` boxed as `box` (a checker _ifaceBoxMeta kind) for an interface.
-	_ifaceBoxWrap(js, box, ptrFields) {
+	// `fresh` marks a value nothing else refers to (a composite literal), which
+	// a struct box then takes over instead of copying.
+	_ifaceBoxWrap(js, box, ptrFields, fresh = false) {
 		this.useHelper("ifaceBox");
 		const fn =
 			{
@@ -725,8 +728,10 @@ export const expressionGenMethods = {
 				map: "__ifm",
 				slice: "__ifs",
 			}[box] ?? "__ifv";
-		const extra = ptrFields?.length ? `, ${JSON.stringify(ptrFields)}` : "";
-		return `${fn}(${js}${extra})`;
+		const fields = ptrFields?.length ? JSON.stringify(ptrFields) : "";
+		if (fn === "__ifv" && fresh)
+			return `${fn}(${js}, ${fields || "null"}, true)`;
+		return `${fn}(${js}${fields ? `, ${fields}` : ""})`;
 	},
 
 	// A nil `*T` entering an interface is a typed nil: it keeps T's methods
@@ -2102,8 +2107,13 @@ export const expressionGenMethods = {
 					(sliceType.kind === "named" ? sliceType.underlying : sliceType).elem,
 				)
 			: null;
-		if (typedCtor)
+		if (typedCtor) {
+			const single = expr.args.length === 2 && expr.args[1]._spread;
+			// One source slice or string: append it as it is, not spread.
+			if (single)
+				return `__appendv((${slice}) ?? __tn(${typedCtor}), ${this._genSliceSource(expr.args[1])} ?? [])`;
 			return `__append((${slice}) ?? __tn(${typedCtor}), ${elems.join(", ")})`;
+		}
 		// A json codec grows a slice it has just made and no one else holds:
 		// pushing in place is O(1), where __append copies the whole slice.
 		if (
@@ -3309,8 +3319,10 @@ export const expressionGenMethods = {
 		}
 		if (base?.kind === "slice") {
 			const elem = base.elem?.name;
-			if (elem === "byte" || elem === "uint8")
-				return `new TextDecoder().decode(new Uint8Array(${inner}))`;
+			if (elem === "byte" || elem === "uint8") {
+				this.useHelper("u8dec");
+				return `__u8dec(${inner})`;
+			}
 			if (elem === "rune" || elem === "int" || elem === "int32") {
 				this.useHelper("runestr");
 				return `Array.from(${inner}, c => __rstr(c)).join("")`;

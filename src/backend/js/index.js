@@ -71,6 +71,7 @@ import {
 	HELPER_SV,
 	HELPER_TESTING,
 	HELPER_TO64,
+	HELPER_U8DEC,
 	HELPER_U8ENC,
 	HELPER_VA,
 	HELPER_VCLONE,
@@ -134,6 +135,7 @@ const jsBindingName = (n) =>
 const HELPER_MAP = [
 	["len", HELPER_LEN],
 	["u8enc", HELPER_U8ENC],
+	["u8dec", HELPER_U8DEC],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
 	["mklen", HELPER_MKLEN],

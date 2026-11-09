@@ -11,8 +11,9 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 
 // string -> []byte: UTF-8, except that a lone surrogate U+DC80-U+DCFF (a raw
 // byte from a \xNN escape) encodes as that single byte.
-export const HELPER_U8ENC = `var __u8enc = __u8enc || function(s) {
-  const e = new TextEncoder();
+export const HELPER_U8ENC = `var __u8e = __u8e || new TextEncoder();
+var __u8enc = __u8enc || function(s) {
+  const e = __u8e;
   if (s.isWellFormed()) return e.encode(s);
   const out = [];
   for (let i = 0; i < s.length; i++) {
@@ -23,6 +24,13 @@ export const HELPER_U8ENC = `var __u8enc = __u8enc || function(s) {
     for (const b of e.encode(String.fromCodePoint(cp))) out.push(b);
   }
   return Uint8Array.from(out);
+};`;
+
+// []byte -> string: UTF-8 with U+FFFD for invalid bytes. A typed array is
+// decoded in place; anything else is copied into one first.
+export const HELPER_U8DEC = `var __u8d = __u8d || null;
+var __u8dec = __u8dec || function(b) {
+  return (__u8d ??= new TextDecoder()).decode(ArrayBuffer.isView(b) ? b : new Uint8Array(b));
 };`;
 
 // Slice views (Go's `b[lo:hi:max]` shares the backing store).  A view of a
@@ -233,25 +241,27 @@ export const HELPER_RUNESTR = `var __rstr = __rstr || function(c) {
 export const HELPER_APPEND = `var __tn = __tn || function(c) {
   return Object.hasOwn(c, "__tnil") ? c.__tnil : Object.defineProperty(c, "__tnil", { value: Object.defineProperty(new c(0), "__nilt", { value: true }) }).__tnil;
 };
+// Append the elements of the array-like b to a typed array.
+var __tapp = __tapp || function(a, b) {
+  const c = __tcap.get(a);
+  if (c !== undefined && a.length + b.length <= c) {
+    const r = new a.constructor(a.buffer, a.byteOffset, a.length + b.length);
+    r.set(b, a.length);
+    if (c > r.length) __tcap.set(r, c);
+    return r;
+  }
+  // Grow with spare capacity so repeated appends cost O(1) amortized.
+  const n = a.length + b.length;
+  const cap = Math.max(n, a.length * 2);
+  const res = new a.constructor(new a.constructor(cap).buffer, 0, n);
+  res.set(a);
+  res.set(b, a.length);
+  __tcap.set(res, cap);
+  return res;
+};
 var __append = __append || function(a, ...b) {
   if (b.length === 0) return a !== null && a !== undefined && a.__nilt === true ? null : a;
-  if (a && ArrayBuffer.isView(a)) {
-    const c = __tcap.get(a);
-    if (c !== undefined && a.length + b.length <= c) {
-      const r = new a.constructor(a.buffer, a.byteOffset, a.length + b.length);
-      r.set(b, a.length);
-      if (c > r.length) __tcap.set(r, c);
-      return r;
-    }
-    // Grow with spare capacity so repeated appends cost O(1) amortized.
-    const n = a.length + b.length;
-    const cap = Math.max(n, a.length * 2);
-    const res = new a.constructor(new a.constructor(cap).buffer, 0, n);
-    res.set(a);
-    res.set(b, a.length);
-    __tcap.set(res, cap);
-    return res;
-  }
+  if (a && ArrayBuffer.isView(a)) return __tapp(a, b);
   const s = a ? a[__sv] : undefined;
   if (s !== undefined && s.n + b.length <= s.c) {
     for (let i = 0; i < b.length; i++) s.b[s.o + s.n + i] = b[i];
@@ -266,6 +276,11 @@ var __append = __append || function(a, ...b) {
     }
   }
   return a ? [...a, ...b] : b;
+};
+// append(a, b...) of a typed array with one source: no argument spread.
+var __appendv = __appendv || function(a, b) {
+  if (b.length === 0) return a !== null && a !== undefined && a.__nilt === true ? null : a;
+  return __tapp(a, b);
 };`;
 
 // `s = append(s, x)` in the json codecs, where the slice is a local that no
@@ -320,9 +335,9 @@ export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {
 
 // Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
 // switches can tell T from *T; tags are non-enumerable so __equal/JSON ignore them.
-export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
+export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields, fresh) {
   if (x === null || typeof x !== "object") return x;
-  const c = typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+  const c = fresh === true ? x : typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
   Object.defineProperty(c, "__v", { value: true, configurable: true });
   if (Array.isArray(ptrFields)) {
     for (const f of ptrFields) {
@@ -337,10 +352,11 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
       }
     }
   }
-  for (const k of Object.keys(c)) {
-    if (c[k] !== null && typeof c[k] === "object" && !Array.isArray(c[k]) && !ArrayBuffer.isView(c[k])) {
-      if (!c[k].__v && !c[k].__p && Object.isExtensible(c[k]) && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
-        Object.defineProperty(c[k], "__v", { value: true, configurable: true });
+  for (const k in c) {
+    const v = c[k];
+    if (v !== null && typeof v === "object" && !Array.isArray(v) && !ArrayBuffer.isView(v)) {
+      if (!v.__v && !v.__p && Object.isExtensible(v) && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
+        Object.defineProperty(v, "__v", { value: true, configurable: true });
       }
     }
   }

@@ -166,10 +166,7 @@ func main() {
 // errors.As on interface targets & errors.Is on errors.Join
 test("errors.As interface target and errors.Join traversal", () => {
 	const code = `package main
-import (
-	"errors"
-	"fmt"
-)
+import "errors"
 type customErr struct{ msg string }
 func (e *customErr) Error() string { return e.msg }
 
