@@ -2,7 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assertJsTargetsOutput,
+	assertAllTargetsOutput,
 	assertProgramOutput,
 	section,
 	summarize,
@@ -82,10 +82,10 @@ outer:
 	);
 });
 
-section("Range-over-func: labels of enclosing loops (JS)");
+section("Range-over-func: labels of enclosing loops");
 
 test("continue to an enclosing range-over-func label from a nested one", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -114,7 +114,7 @@ outer:
 });
 
 test("break to an enclosing range-over-func label from a nested one", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -143,7 +143,7 @@ outer:
 });
 
 test("labels across three nested loops and plain loops in callbacks", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -196,7 +196,7 @@ outer:
 });
 
 test("range-over-func in a closure inside a labeled loop", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -231,7 +231,7 @@ outer:
 });
 
 test("break to a labeled switch from a range-over-func loop", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"

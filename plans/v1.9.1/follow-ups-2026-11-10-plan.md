@@ -203,19 +203,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 3: WASM Codegen
 
-- [ ] Task 3.1: Resume the outer iterator on `continue outer` from a nested range-over-func loop (`H08`, WASM)
+- [x] Task 3.1: Resume the outer iterator on `continue outer` from a nested range-over-func loop (`H08`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 2.5 cases to `assertProgramOutput`; add three levels deep with `continue outer` → Go output.
   - Done when: `wasm` prints `0 0\n1 0\ndone` and `break outer` still prints `0 0\ndone`.
-- [ ] Task 3.2: Store slice and string range values through the box of an address-taken variable (`H09`)
+- [x] Task 3.2: Store slice and string range values through the box of an address-taken variable (`H09`)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. The slice repro → `20`; the string repro → `98`; the key form `for i = range s` with `&i` → `1` (`assertProgramOutput`).
   - Done when: `assertValidWasm` passes and `wasm` matches `js` for all three.
-- [ ] Task 3.3: Dispatch interface calls to methods promoted through an embedded pointer of a boxed struct value (`H10`)
+- [x] Task 3.3: Dispatch interface calls to methods promoted through an embedded pointer of a boxed struct value (`H10`)
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `H10` repro → `inner`; two levels (`type PO2 struct{ PO }`) → `inner`; a nil embedded pointer whose method checks `i == nil` → Go output (`assertProgramOutput`).
   - Done when: no `nil or unmatched type for method call` panic for any of the three.
-- [ ] Task 3.4: Name defined map types in WASM unhashable-key panics (`H16`)
+- [x] Task 3.4: Name defined map types in WASM unhashable-key panics (`H16`)
   - Files: `src/backend/wasm/emit-builtins.js`
   - Test: `test/unit/wasm/map-keys.test.js`. The `H16` repro → `runtime error: hash of unhashable type main.M` on the wasm side; the unnamed `map[string]int{}` key keeps `… map[string]int`.
   - Done when: both messages match Go exactly on `wasm`.

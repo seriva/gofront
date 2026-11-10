@@ -744,6 +744,13 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "local.set", index: info.index });
 	}
 
+	// The wasm type of the value a range assignment stores into `info`: the
+	// box's field type when the target local is boxed.
+	_rangeStoreWType(name, info) {
+		const local = this.resolveLocal(name);
+		return local?.isBoxed ? local.boxInfo.wType : info.type;
+	}
+
 	_emitRangeBoxes() {
 		const pending = this._pendingRangeBoxes ?? [];
 		this._pendingRangeBoxes = [];
@@ -1380,15 +1387,13 @@ export class StmtsEmitter {
 		return this.mod.checker?.types?.get(t.name) ?? t;
 	}
 
-	// A defined func type, or a defined map type that has methods, lives in
-	// `any` as a box (so `iter.Seq[int]` is not a plain `func(func(int) bool)`).
+	// A defined func or map type lives in `any` as a box (so `iter.Seq[int]` is
+	// not a plain `func(func(int) bool)` and `type M map[string]int` keeps its
+	// name in `%T` and unhashable-key panics).
 	_isMethodNamedRef(goType) {
 		const t = this._resolveTestTarget(goType);
 		if (t?.kind !== "named") return false;
-		return (
-			isFuncType(t, this.mod.checker) ||
-			(t.methods?.size > 0 && isMapType(t, this.mod.checker))
-		);
+		return isFuncType(t, this.mod.checker) || isMapType(t, this.mod.checker);
 	}
 
 	_emitTypeTest(targetGoType) {
@@ -2347,21 +2352,12 @@ export class StmtsEmitter {
 
 			// Assign loop var if present
 			if (idxLocalInfo) {
-				this.pushInstruction({ op: "local.get", index: idxTmp });
-				if (idxLocalInfo.type === "i64") {
-					this.pushInstruction("i64.extend_i32_s");
-				}
-				if (this.resolveLocal(lhs[0].name)) {
-					this.pushInstruction({
-						op: "local.set",
-						index: idxLocalInfo.index,
-					});
-				} else {
-					this.pushInstruction({
-						op: "global.set",
-						index: idxLocalInfo.index,
-					});
-				}
+				const name = lhs[0].name;
+				const wType = this._rangeStoreWType(name, idxLocalInfo);
+				this._emitRangeAssignStore(name, idxLocalInfo, () => {
+					this.pushInstruction({ op: "local.get", index: idxTmp });
+					if (wType === "i64") this.pushInstruction("i64.extend_i32_s");
+				});
 			}
 
 			// Emit body
@@ -2472,38 +2468,20 @@ export class StmtsEmitter {
 
 			// Assign index variable
 			if (idxLocalInfo) {
-				this.pushInstruction({ op: "local.get", index: idxTmp });
-				this.pushInstruction("i64.extend_i32_s");
-				if (this.resolveLocal(lhs[0].name)) {
-					this.pushInstruction({
-						op: "local.set",
-						index: idxLocalInfo.index,
-					});
-				} else {
-					this.pushInstruction({
-						op: "global.set",
-						index: idxLocalInfo.index,
-					});
-				}
+				this._emitRangeAssignStore(lhs[0].name, idxLocalInfo, () => {
+					this.pushInstruction({ op: "local.get", index: idxTmp });
+					this.pushInstruction("i64.extend_i32_s");
+				});
 			}
 
 			// Assign rune variable
 			if (valLocalInfo) {
-				this.pushInstruction({ op: "local.get", index: runeTmp });
-				if (valLocalInfo.type === "i64") {
-					this.pushInstruction("i64.extend_i32_u");
-				}
-				if (this.resolveLocal(lhs[1].name)) {
-					this.pushInstruction({
-						op: "local.set",
-						index: valLocalInfo.index,
-					});
-				} else {
-					this.pushInstruction({
-						op: "global.set",
-						index: valLocalInfo.index,
-					});
-				}
+				const name = lhs[1].name;
+				const wType = this._rangeStoreWType(name, valLocalInfo);
+				this._emitRangeAssignStore(name, valLocalInfo, () => {
+					this.pushInstruction({ op: "local.get", index: runeTmp });
+					if (wType === "i64") this.pushInstruction("i64.extend_i32_u");
+				});
 			}
 
 			// Body
@@ -2866,52 +2844,40 @@ export class StmtsEmitter {
 
 		// Assign idx
 		if (idxLocalInfo) {
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			if (idxLocalInfo.type === "i64") {
-				this.pushInstruction("i64.extend_i32_s");
-			}
-			if (this.resolveLocal(lhs[0].name)) {
-				this.pushInstruction({ op: "local.set", index: idxLocalInfo.index });
-			} else {
-				this.pushInstruction({
-					op: "global.set",
-					index: idxLocalInfo.index,
-				});
-			}
+			const name = lhs[0].name;
+			const wType = this._rangeStoreWType(name, idxLocalInfo);
+			this._emitRangeAssignStore(name, idxLocalInfo, () => {
+				this.pushInstruction({ op: "local.get", index: idxTmp });
+				if (wType === "i64") this.pushInstruction("i64.extend_i32_s");
+			});
 		}
 
 		// Assign val
 		if (valLocalInfo) {
-			this.pushInstruction({ op: "local.get", index: arrTmp });
-			this.pushInstruction({ op: "local.get", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({
-				op: "array.get",
-				typeIndex: arrInfo.typeIndex,
-			});
-			if (
-				isStructType(elemGoType, this.mod.checker, this.mod) &&
-				!isPointerToStruct(elemGoType, this.mod.checker, this.mod)
-			) {
-				const sInfo = this._resolveStructInfo({ _type: elemGoType });
-				if (sInfo) {
-					this.emitCloneStruct(sInfo, arrInfo.elemWType);
-				}
-			} else if (
-				elemGoType?.kind !== "pointer" &&
-				isArrayType(elemGoType, this.mod.checker)
-			) {
-				this.emitCopyArray(elemGoType);
-			}
-			if (this.resolveLocal(lhs[1].name)) {
-				this.pushInstruction({ op: "local.set", index: valLocalInfo.index });
-			} else {
+			this._emitRangeAssignStore(lhs[1].name, valLocalInfo, () => {
+				this.pushInstruction({ op: "local.get", index: arrTmp });
+				this.pushInstruction({ op: "local.get", index: offTmp });
+				this.pushInstruction({ op: "local.get", index: idxTmp });
+				this.pushInstruction("i32.add");
 				this.pushInstruction({
-					op: "global.set",
-					index: valLocalInfo.index,
+					op: "array.get",
+					typeIndex: arrInfo.typeIndex,
 				});
-			}
+				if (
+					isStructType(elemGoType, this.mod.checker, this.mod) &&
+					!isPointerToStruct(elemGoType, this.mod.checker, this.mod)
+				) {
+					const sInfo = this._resolveStructInfo({ _type: elemGoType });
+					if (sInfo) {
+						this.emitCloneStruct(sInfo, arrInfo.elemWType);
+					}
+				} else if (
+					elemGoType?.kind !== "pointer" &&
+					isArrayType(elemGoType, this.mod.checker)
+				) {
+					this.emitCopyArray(elemGoType);
+				}
+			});
 		}
 
 		// Body
@@ -3633,13 +3599,24 @@ export class StmtsEmitter {
 			this.pushInstruction("i64.eq");
 			this.pushInstruction({ op: "if", blockType: "void" });
 			if (target.role !== "break" || stmt.label !== target.label) {
-				if (this.funcDecl._isYieldClosure) {
+				const isContinue = target.role === "continue";
+				const inScope = this.controlStack.some(
+					(c) => c.label === target.label && c.role === target.role,
+				);
+				if (
+					!inScope &&
+					isContinue &&
+					this.funcDecl._isYieldClosure &&
+					target.label === this.funcDecl._forStmt?.label
+				) {
+					// `continue L` where L labels the iterator loop whose body this
+					// yield closure is: resume that iterator.
+					this.pushInstruction({ op: "i32.const", value: 1 });
+					this.pushInstruction({ op: "return" });
+				} else if (!inScope && this.funcDecl._isYieldClosure) {
 					this._propagateYieldExit(BigInt(target.tag));
 				} else {
-					const depth = this.resolveBranchDepth(
-						target.label,
-						target.role === "continue",
-					);
+					const depth = this.resolveBranchDepth(target.label, isContinue);
 					this.pushInstruction({ op: "br", depth });
 				}
 			}
