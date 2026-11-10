@@ -251,7 +251,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second
   - Files: `src/typechecker/statements.js`, `src/lower/functions.js`, `src/lower/index.js`
   - Test: `test/unit/types/dynamic-types.test.js`. With prelude `H`: `func getPair() (any, int) { return makePair() }` → `fmt.Printf("%v %T %v %d\n", v, v, ok, n)` prints `{1} main.T true 1`; named results `(v any, n int)` → same; the func-literal form → same; `func mk() (int, string) { return 7, "s" }; func get() (any, string) { return mk() }` → `7 s true` (`assertAllTargetsOutput`, so WASM must validate).
   - Done when: all four print Go's output on every target, and a forward with no interface element (`(T, int)` → `(T, int)`) emits no `__fwd$` temps in the JS output.
-- [ ] Task 5.2: Split forwarded returns inside range-over-func bodies (`H19` iterator return)
+- [x] Task 5.2: Split forwarded returns inside range-over-func bodies (`H19` iterator return)
   - Files: `src/lower/functions.js`
   - Test: `test/unit/language/range-func.test.js`. `func get() (any, int) { for range seq { return makePair() }; return nil, 0 }` → `{1} 1 true` (`assertAllTargetsOutput`); a `defer` in `get` that reads the named result sees the forwarded value.
   - Done when: both print Go's output on every target.
