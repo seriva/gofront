@@ -3,7 +3,6 @@
 // call expression dispatch (static, method, closure, package).
 
 import { hasCallOrReceive } from "../../lower/walk.js";
-import { typeStr } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import {
 	anonIfaceName,
@@ -1786,14 +1785,15 @@ export class BuiltinsEmitter {
 				this.pushInstruction("return");
 				this.pushInstruction("end");
 
-				// Check unhashable types
+				// Check unhashable types.  `goType` names the dynamic type in the
+				// panic, as Go does (`main.S`, `main.L`, `func()`).
 				const checkUnhashable = (typeIndex, goType) => {
 					this.pushInstruction({ op: "local.get", index: 0 });
 					this.pushInstruction({ op: "ref.test", typeIndex });
 					this.pushInstruction({ op: "if", blockType: "void" });
 					this.emitPanic(
 						goType
-							? `runtime error: hash of unhashable type ${typeStr(goType)}`
+							? `runtime error: hash of unhashable type ${goTypeName(goType)}`
 							: "runtime error: hash of unhashable type",
 					);
 					this.pushInstruction("end");
@@ -1802,6 +1802,10 @@ export class BuiltinsEmitter {
 				// its element as written.
 				const spelled = (t) =>
 					t?.kind === "TypeName" ? { kind: "basic", name: t.name } : t;
+				// Tagged slices (a defined slice type in an interface) are subtypes
+				// of the plain slice type, so they are tested first.
+				for (const info of this.mod.taggedSliceTypes.values())
+					checkUnhashable(info.typeIndex, info.goType);
 				for (const sliceInfo of this.mod.sliceTypes.values())
 					checkUnhashable(sliceInfo.typeIndex, {
 						kind: "slice",
@@ -1814,10 +1818,14 @@ export class BuiltinsEmitter {
 						value: mapInfo.valGoType,
 					});
 				for (const closureInfo of this.mod.closureTypes.values())
-					checkUnhashable(closureInfo.typeIndex);
+					checkUnhashable(closureInfo.typeIndex, {
+						kind: "func",
+						params: closureInfo.sig.params,
+						returns: closureInfo.sig.returns,
+					});
 				for (const box of this.mod.ifaceBoxTypes.values()) {
 					if (isUnhashableGoType(box.goType, this.mod.checker))
-						checkUnhashable(box.typeIndex);
+						checkUnhashable(box.typeIndex, box.goType);
 				}
 				for (const arrInfo of this.mod.arrayTypes.values()) {
 					if (isUnhashableGoType(arrInfo.elemGoType, this.mod.checker))

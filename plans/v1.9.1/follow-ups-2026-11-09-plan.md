@@ -209,23 +209,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 4: WASM Codegen
 
-- [ ] Task 4.1: Fix labeled `break` / `continue` unwinding through range-over-func in WASM (`G08`, WASM)
+- [x] Task 4.1: Fix labeled `break` / `continue` unwinding through range-over-func in WASM (`G08`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 3.4 cases to `assertProgramOutput`.
   - Done when: all three repros match Go on `both` and `wasm`, with no panic for `break outer`.
-- [ ] Task 4.2: Emit valid WASM for map range assignment into a boxed variable (`G09`, WASM)
+- [x] Task 4.2: Emit valid WASM for map range assignment into a boxed variable (`G09`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. Upgrade the Task 3.5 cases to `assertProgramOutput`.
   - Done when: `assertValidWasm` passes and `wasm` prints `1`.
-- [ ] Task 4.3: Name the dynamic type in WASM unhashable-key panics (`G10`, `G13` WASM)
+- [x] Task 4.3: Name the dynamic type in WASM unhashable-key panics (`G10`, `G13` WASM)
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/emit-maps.js`
   - Test: `test/unit/wasm/map-keys.test.js`. The func key → `runtime error: hash of unhashable type func()`; the struct `S` with a slice → `… main.S`; `type L []int` → `… main.L` (wasm side; the JS side follows in Task 5.4).
   - Done when: the three messages match Go exactly on `wasm`.
-- [ ] Task 4.4: Include methods promoted through embedded pointers in WASM dynamic interface checks (`G14`)
+- [x] Task 4.4: Include methods promoted through embedded pointers in WASM dynamic interface checks (`G14`)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `G14` repro → `true` (`assertProgramOutput`); a value-embedded `Inner` with a pointer-receiver `M` held as a `PO` value in `any` → `false` (Go method-set rule).
   - Done when: both match Go on `both` and `wasm`.
-- [ ] Task 4.5: Match Go-source stdlib named slices against interfaces from `any` in WASM (`G15`)
+- [x] Task 4.5: Match Go-source stdlib named slices against interfaces from `any` in WASM (`G15`)
   - Files: `src/backend/wasm/prescan.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. `var v any = sort.IntSlice{1}; _, ok := v.(sort.Interface)` → `true`; the same for `sort.StringSlice` → `true`.
   - Done when: `wasm` prints `true` for both.

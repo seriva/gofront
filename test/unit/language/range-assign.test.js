@@ -1,12 +1,12 @@
 // GoFront test suite — range assignment into address-taken variables
 
 import { fileURLToPath } from "node:url";
-import { assertJsTargetsOutput, section, summarize, test } from "../helpers.js";
+import { assertProgramOutput, section, summarize, test } from "../helpers.js";
 
-section("Range assignment: address-taken map range variables (JS)");
+section("Range assignment: address-taken map range variables");
 
 test("for _, v = range m with &v taken stores through the box", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
@@ -25,7 +25,7 @@ func main() {
 });
 
 test("for k = range m with &k taken stores the key through the box", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
@@ -44,7 +44,7 @@ func main() {
 });
 
 test("key and value both assigned into address-taken variables", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
@@ -63,7 +63,7 @@ func main() {
 });
 
 test("for k, v = range m with only &v taken still assigns k", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
@@ -83,7 +83,7 @@ func main() {
 });
 
 test("for k, v = range m with only &k taken still assigns v", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
