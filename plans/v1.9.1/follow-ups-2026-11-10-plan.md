@@ -230,7 +230,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. The `H13` repro → `nil`; non-nil `&Gen[int]{}` → `ok`; `Gen[string]` instantiation → `nil` (`assertAllTargetsOutput`).
   - Done when: no `TypeError` on `js`/`both`.
-- [ ] Task 4.3: Nil-check the receiver of `(*T).M` method expressions for value-receiver methods (`H14`)
+- [x] Task 4.3: Nil-check the receiver of `(*T).M` method expressions for value-receiver methods (`H14`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. The `H14` repro → `runtime error: invalid memory address or nil pointer dereference` (`assertAllTargetsOutput`); non-nil `f(&S{})` → `10`.
   - Done when: every target prints Go's panic message.

@@ -300,6 +300,30 @@ func main() {
 	);
 });
 
+section("Nil receivers: method expressions of value-receiver methods");
+
+test("(*T).M of a value-receiver method panics on a nil pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ v int }
+
+func (s S) V() int { return 10 }
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	f := (*S).V
+	fmt.Println(f(&S{}))
+	var s *S
+	fmt.Println(f(s))
+}
+`,
+		"10\nruntime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

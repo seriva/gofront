@@ -1232,8 +1232,15 @@ export const expressionGenMethods = {
 					return `${info.cls}.$${expr.field}`;
 			}
 			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
-			if (protoCls)
-				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(recv, ...args))`;
+			if (protoCls) {
+				// A value-receiver method reads `*recv`, which panics on nil.
+				let recv = "recv";
+				if (rt.base.methods.get(expr.field)?._ptrRecv === false) {
+					this.useHelper("nilCall");
+					recv = "__nilcall(recv)";
+				}
+				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(${recv}, ...args))`;
+			}
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
