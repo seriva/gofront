@@ -2051,14 +2051,8 @@ export const statementGenMethods = {
 		if (stmt.lhs.length === 1) {
 			if (stmt.op !== "=" && is64BitInt(stmt.lhs[0]._type)) {
 				const binOp = stmt.op.slice(0, -1);
-				let r = rhs[0];
-				if (
-					stmt.rhs[0]?._type?.kind === "untyped" &&
-					!r.endsWith("n") &&
-					/^-?\d+$/.test(r)
-				) {
-					r = `${r}n`;
-				}
+				// Same operand coercion as the statement path (`_genAssignStmt`).
+				const r = this._untypedTo64(rhs[0], stmt.rhs[0]);
 				const l = this.genExpr(stmt.lhs[0]);
 				return `${l} = ${this._gen64BitBinary(binOp, l, r, stmt.lhs[0]._type)}`;
 			}

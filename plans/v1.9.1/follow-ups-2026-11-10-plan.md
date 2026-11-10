@@ -192,7 +192,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/parser/expressions.js`
   - Test: `test/unit/compiler/lexer-parser.test.js`. `show([]func(){nil})` → `false`; `show([]func() int{func() int { return 1 }})` → `1`; `make([]func(), 3)`, `[]byte("a")` and `f([]int{1}...)` keep parsing (`assertAllTargetsOutput`).
   - Done when: no `expected ')'` parse error for either repro and the existing parser tests pass.
-- [ ] Task 2.4: Emit BigInt operands for 64-bit compound assignments in `for` post statements (`H07`)
+- [x] Task 2.4: Emit BigInt operands for 64-bit compound assignments in `for` post statements (`H07`)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/int64.test.js`. The `H07` repro → `2251799813685249`; `var n int64 = 0; for i := 0; i < 2; n -= half { i++ }` → `-4503599627370496` (`assertAllTargetsOutput`).
   - Done when: no `TypeError` on `js` or `both`, and `wasm` output is unchanged.
