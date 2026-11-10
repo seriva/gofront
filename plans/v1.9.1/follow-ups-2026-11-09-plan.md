@@ -194,7 +194,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/index.js`
   - Test: `test/unit/language/local-types.test.js`. `func a() { type Dup struct{ X int }; Dup := 1; fmt.Println(Dup) }` → `1` (`assertAllTargetsOutput`); a variant that also prints `fmt.Sprintf("%T", struct-value)` keeps `main.Dup`.
   - Done when: no `ReferenceError` on `js` or `both`, and `%T` is unchanged.
-- [ ] Task 3.3: Emit untyped constant operands of 64-bit compound assignments as BigInt (`G07`)
+- [x] Task 3.3: Emit untyped constant operands of 64-bit compound assignments as BigInt (`G07`)
   - Files: `src/backend/js/statements.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/language/int64.test.js`. `const half = 1 << 51; var b uint64 = 1; b += half` → `2251799813685249`; `int64 -= half` → `-2251799813685247`; `b |= half`, `b *= 3` → Go values (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go values.

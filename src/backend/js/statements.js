@@ -767,6 +767,14 @@ export const statementGenMethods = {
 		if (syncs) for (const s of syncs) this.line(`${s};`);
 	},
 
+	// An untyped constant operand of a 64-bit compound assignment is a Number
+	// in the output; the operator needs it as a BigInt.
+	_untypedTo64(rhsVal, rhsNode) {
+		if (rhsNode?._type?.kind !== "untyped" || rhsVal.endsWith("n"))
+			return rhsVal;
+		return /^-?\d+$/.test(rhsVal) ? `${rhsVal}n` : `BigInt(${rhsVal})`;
+	},
+
 	_genAssignStmt(stmt) {
 		this._markIndexLvalues(stmt.lhs);
 		if (stmt.op !== "=") for (const l of stmt.lhs) this._markDerefOpTarget(l);
@@ -841,14 +849,7 @@ export const statementGenMethods = {
 				const binOp = stmt.op.slice(0, -1);
 				const is64Val = is64BitInt(stmt.lhs[0]._mapValueType);
 				let rhsVal = active[0].r;
-				if (
-					is64Val &&
-					stmt.rhs[0]?._type?.kind === "untyped" &&
-					!rhsVal.endsWith("n") &&
-					/^-?\d+$/.test(rhsVal)
-				) {
-					rhsVal = `${rhsVal}n`;
-				}
+				if (is64Val) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
 				const rhsExpr = is64Val
 					? this._gen64BitBinary(
 							binOp,
@@ -881,14 +882,7 @@ export const statementGenMethods = {
 			}
 			const is64 = is64BitInt(stmt.lhs[0]._type);
 			let rhsVal = active[0].r;
-			if (
-				is64 &&
-				stmt.rhs[0]?._type?.kind === "untyped" &&
-				!rhsVal.endsWith("n") &&
-				/^-?\d+$/.test(rhsVal)
-			) {
-				rhsVal = `${rhsVal}n`;
-			}
+			if (is64) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
 			if (
 				this._needsStrictCompoundStmt(stmt, is64) &&
 				this._genStrictCompound(
