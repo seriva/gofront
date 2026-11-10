@@ -4,7 +4,7 @@
 **Status:** Draft  
 **Base branch:** main  
 **Related:** [`follow-ups-2026-11-09-plan.md`](follow-ups-2026-11-09-plan.md) (origin of every ledger entry; its Phases 7–8 are independent of this plan; execute after `follow-ups-2026-11-09-plan.md` is merged into main)  
-**Release note:** More invalid Go is now rejected with Go's error instead of building broken WebAssembly (`case nil` in `switch true`, `cap` of a struct or func, assigning an `any` to `error` without a type assertion, constraint interfaces used as ordinary types), while valid code that failed to compile now works: conversions to interface types such as `I(v)` and `interface{ M() }(v)`, and slices of funcs written directly as call arguments. Nil-pointer method calls, labeled `continue` across nested range-over-func loops, 64-bit `for` loop updates, range assignments into address-taken variables, unhashable map keys and `json.Marshal` of func arrays now behave as in Go on both JavaScript and WebAssembly, and returning or passing a multi-value call such as `return f()` into `any` results or parameters keeps the right values and types.
+**Release note:** More invalid Go is now rejected with Go's error instead of building broken WebAssembly (`case nil` in `switch true`, `cap` of a struct or func, assigning an `any` to `error` without a type assertion, constraint interfaces used as ordinary types), while valid code that failed to compile now works: conversions to interface types such as `I(v)` and `interface{ M() }(v)`, and slices of funcs written directly as call arguments. Nil-pointer method calls, labeled `continue` across nested range-over-func loops, 64-bit `for` loop updates, range assignments into address-taken variables, unhashable map keys and `json.Marshal` of func arrays now behave as in Go on both JavaScript and WebAssembly, and returning or passing a multi-value call such as `return f()` into `any` results or parameters keeps the right values and types. On JavaScript, `complex64` values built from constants now hold `float32` precision, and `fmt` calls in any value of a templ `case a, b:` render correctly.
 
 ---
 
@@ -17,6 +17,8 @@ Schedule and fix every reproducing entry of `plans/follow-ups.md` (18 entries, a
 
 Second sweep (2026-11-10, after 11-09 Phase 7 / PR #170): 1 new ledger entry, `H19`, re-probed on `feat/follow-ups-2026-11-09` @ `cbbc0020` with `.probes/h19.mjs` (same harness, `evictParseCache` per target). **It reproduces and is much wider than logged:** not a JSON bug but a general defect in forwarding a multi-value call (`return f()`, `g(f())`) into `any` results or parameters, on both backends. Scheduled in Phase 5; none deferred.
 
+Third sweep (2026-11-10, after 11-09 Phase 8 / PR #171): 2 new ledger entries, `H20`–`H21`, re-probed on `feat/follow-ups-2026-11-09` @ `49a6d842`. **Both reproduce**; `H20` is wider than logged (every `complex64` built from an untyped constant on JS, not only `complex(float32, const)`). Scheduled in Phase 6; none deferred.
+
 Grouped by subsystem:
 
 1. Typechecker checks (Phase 1).
@@ -24,12 +26,13 @@ Grouped by subsystem:
 3. WASM codegen (Phase 3).
 4. JS nil receivers, method expressions, map keys and `encoding/json` (Phase 4).
 5. Multi-value call forwarding into interfaces (Phase 5).
+6. `complex64` constants on JS and templ `case` formatters (Phase 6).
 
 Re-probe each phase's repros on its base commit before starting the phase, and drop any sub-repro that no longer reproduces. Go is not installed in the probe environment, so expected outputs come from the ledger entries (checked against go1.26 by reviewers). Diagnostics are asserted by a stable substring.
 
 **Done means:**
 
-- Every repro in Phases 1–5 is a passing test in its task's `Test:` file: programs via `assertProgramOutput` (`both` + `wasm`), or `assertAllTargetsOutput` where plain `js` packages must also match; invalid programs via `assertErrorContains` on every target.
+- Every repro in Phases 1–6 is a passing test in its task's `Test:` file: programs via `assertProgramOutput` (`both` + `wasm`), or `assertAllTargetsOutput` where plain `js` packages must also match; invalid programs via `assertErrorContains` on every target.
 - No scheduled repro emits invalid WASM (`assertValidWasm`) or throws a JS `SyntaxError`/`TypeError`.
 - Compiling the `H01` program twice in one process (`js` then `wasm`) succeeds both times (`test/unit/types/array-length.test.js`).
 - `npm test`, `npm run check` (including example type-checks) and `npm run test:e2e` pass with zero regressions; `npm run bench` stays within 3% of its result on the plan's base commit after Phase 4 (it widens static dispatch for pointer-receiver calls).
@@ -41,8 +44,8 @@ Re-probe each phase's repros on its base commit before starting the phase, and d
 
 | Category | Rule | Examples / Members | Reason (Excluded rows) |
 |---|---|---|---|
-| **In scope: core** | Every reproducing ledger defect across the parser, typechecker, JS and WASM backends and the JSON codec generator | `H01`–`H18` (Phases 1–4); `H19` (Phase 5) | |
-| **In scope: target-specific** | Fix the failing target(s) and pin the working target(s) in the same test | JS-only: `H07`, `H08` (JS side), `H11`–`H15`, `H18`. WASM-only: `H02`/`H03` invalid modules (fixed by rejecting in the typechecker), `H08` (WASM `continue`), `H09`, `H10`, `H16`. All targets: `H01`, `H04`, `H05`, `H06`, `H17`, `H19` returns. WASM-only: `H19` call arguments | |
+| **In scope: core** | Every reproducing ledger defect across the parser, typechecker, JS and WASM backends and the JSON codec generator | `H01`–`H18` (Phases 1–4); `H19` (Phase 5); `H20`–`H21` (Phase 6) | |
+| **In scope: target-specific** | Fix the failing target(s) and pin the working target(s) in the same test | JS-only: `H07`, `H08` (JS side), `H11`–`H15`, `H18`, `H20`, `H21` (templ is JS-only). WASM-only: `H02`/`H03` invalid modules (fixed by rejecting in the typechecker), `H08` (WASM `continue`), `H09`, `H10`, `H16`. All targets: `H01`, `H04`, `H05`, `H06`, `H17`, `H19` returns. WASM-only: `H19` call arguments | |
 | **Excluded: runtime / platform** | Documented JS `any` semantics stay as documented in `docs/go-compatibility.md` | Sized numbers in an `any`; `any(3) == any(3.0)` in `js` packages | No runtime type descriptors (roadmap guiding principle); no ledger entry touches them. |
 | **Excluded: runtime / platform** | Interface-to-interface assignment beyond the empty-interface source | `var r io.Reader; var rw io.ReadWriter = r` (already rejected by method-set check) | `H05` is only the `_declared` `any` → non-empty interface hole; the general method-set check already exists and is not changed. |
 | **Excluded: deferred** | Full flow-sensitive nil analysis of pointer receivers | A receiver read guarded by a non-nil condition on another variable (`if ok { return s.x }`) | Task 4.1 only makes `derefsReceiver` scope-aware and treats reads outside the unconditional body prefix as possibly skipped, which covers `H11`/`H12`. A real dataflow analysis is a feature, not a patch fix. |
@@ -87,6 +90,15 @@ Re-probed on `feat/follow-ups-2026-11-09` @ `cbbc0020` (11-09 Phase 7 merged) wi
 | Forwarded call arguments into `any` | `g(f())` where `g` takes an interface parameter boxes the forwarded struct as a pointer on WASM | `func show(v any, n int) { _, ok := v.(T); fmt.Println(v, n, ok) }; show(makePair())` → js/both `{1} 1 true`, wasm `&{1} 1 false`; method form `O{}.show(makePair())` → wasm invalid module; want `{1} 1 true`. Forward is recorded as `expr._multiForward` (`src/typechecker/expressions.js:1468`) with no per-element box marks; JS spreads (`expressions.js:1394`) and boxes per param, WASM does not. |
 | JSON codec reachability | With the split in place, the forwarded boxed type must still get a dynamic codec | After 11-09 Task 7.3, dynamic codecs are generated only for `via === "boxed"` entries, which `collectProgramTypes` (`src/lower/gen-types.js:140`) reads from `node._ifaceSrc` in the AST walk. Per-element marks that live outside the walked AST would drop `T`'s codec and print `json: unsupported type`. |
 
+### Review follow-ups (2026-11-10, third sweep)
+
+Re-probed on `feat/follow-ups-2026-11-09` @ `49a6d842` (11-09 Phase 8 merged). `H20` with `.probes/r.mjs` (`compileFiles` per target after `evictParseCache`, run); `H21` with `.probes/q.mjs` / `.probes/p.mjs` (`withTempDir` + `compileDir` + `runInDom`, as in `test/unit/compiler/templ.test.js`).
+
+| Area | Finding | Evidence & probe |
+|---|---|---|
+| JS `complex64` constants | Untyped constant components of a `complex64` keep float64 precision | `H20` `var c complex64 = complex(float32(1), 0.01); fmt.Println(imag(c) == 0.01)` → js/both `false`, wasm `true`; want `true`. Widened: `complex(0.01, float32(1))` + `real(c) == 0.01` → same; `var f float32 = 1; complex(f, 0.01)` vs `var w float32 = 0.01` → same; literal `var c complex64 = 1 + 0.01i` → same; `fmt.Println(float64(imag(c)))` → js/both `0.01`, wasm `0.009999999776482582` (Go). `complex128` → `true` everywhere. Emitted JS: `let c = { re: 1, im: 0.01 }`; literal form `{ re: { re: 1, im: 0 }.re + { re: 0, im: 0.01 }.re, … }`. Cause: `_checkBuiltinComplex` (`src/typechecker/expressions.js:1938`) returns `COMPLEX64` without tagging the untyped operand via `_tagFloat32Const` (`src/typechecker/assignability.js:234`, which drives `_genFloat32Const`, `src/backend/js/expressions.js:744`); an untyped complex constant converted to `complex64` gets only `_asComplex` (`_tagComplexConst`, `assignability.js:272`), and the `ImagLit` emitter (`expressions.js:703`) writes `expr.value` raw. (PR #171) |
+| templ `fmt` in `case` lists | A `fmt` call in any but the first value of a templ `case a, b:` is not routed to a typed formatter | `H21` `templ Case(s string, g float32) { switch s { case "a", fmt.Sprintf("%0.1f", g): <span>ok</span> } }` + `Case("1.0", 1)` → `ReferenceError: Sprintf$$fmt is not defined`; want `<span>ok</span>`. Also `case "a", "b", fmt.Sprintf(…)` and `case "a", fmt.Sprint(n)` (`n int64`) → same. Working: `fmt` call as the first case value, the switch tag, an `if` condition, a `for` body and an attribute. Cause: 11-09 Task 8.2 made `walkNodes` (`src/lower/gen-types.js:59`) visit templ's non-enumerable parsed-expression properties `TEMPL_EXPR_PROPS = ["expr", "forStmt"]`, but `TemplCase` also stores `exprs` (all values of `case a, b:`, `parseExprListTokens`, `src/parser/templ.js:89`) and the backend emits every one (`src/backend/js/templ.js:221`). The typechecker already checks them (`src/typechecker/index.js:1147`). (PR #171) |
+
 ---
 
 ## Approach
@@ -113,6 +125,8 @@ Re-probed on `feat/follow-ups-2026-11-09` @ `cbbc0020` (11-09 Phase 7 merged) wi
 - **`H18` (Task 4.5):** the JS dynamic encoder for a func-holding **array** fails with `json: unsupported type: func()` (like WASM's `EncodeDynamic`). Nil func slices and maps keep encoding `null` (11-09 Task 6.4 deviation, matches Go's `sliceEncoder`).
 - **`H19` forwarding (Phase 5):** the typechecker stops tagging the shared call node and records one mark holder per forwarded element (`call._fwdIface = [{ _ifaceSrc, _ifaceBox, _ifaceNamedType, _ifacePtrFields } | null]`) by calling `_markIfaceBox(expected[i], forwarded[i], holder_i)`. A new lowering pass `splitForwardedTuples` (next to `normalizeDefers` in `src/lower/functions.js`, run first in `lower()`) rewrites `return f()` and `g(f())` whose `_fwdIface` has any non-null holder into `__fwd$N, __fwd$M := f(); return __fwd$N, __fwd$M` / `g(__fwd$N, __fwd$M)`, copying each holder's marks onto the temp `Ident` that is now the operand. Both backends then take their existing per-value boxing path and `collectProgramTypes` sees `_ifaceSrc` on the temp idents. Forwards with no interface element keep the direct tuple path (no extra locals).
   - Rejected: teaching each backend to box tuple elements (two codegen paths, plus the iterator-return and named-result variants in each); and setting marks on the temp idents from the backend (marks must exist before codec collection).
+- **`H20` (Tasks 6.1–6.2):** reuse the 11-09 Task 8.1 mechanism (`_f32Const` → `_genFloat32Const`, compile-time `Math.fround`), no runtime rounding. `_checkBuiltinComplex` calls `_tagFloat32Const(FLOAT32, argType, arg)` for each untyped argument when the result is `COMPLEX64`. For an untyped complex constant that takes type `complex64` (`_tagComplexConst`), the typechecker sets `_c64Const` and the JS backend emits the folded constant as `{ re: fround(re), im: fround(im) }` literal text instead of the per-operand expression.
+- **`H21` (Task 6.3):** add `"exprs"` to `TEMPL_EXPR_PROPS` in `src/lower/gen-types.js`; `walkNodes` already recurses into arrays. Every pass using `walkNodes` (formatter sites, `collectProgramTypes`) then sees all case values, matching what the typechecker and backend already handle.
 
 ### 2. Invariants & Safety Bounds
 
@@ -133,6 +147,7 @@ Re-probed on `feat/follow-ups-2026-11-09` @ `cbbc0020` (11-09 Phase 7 merged) wi
 - Task 4.1: a method that dereferences the receiver unconditionally (`return s.x` as first statement) keeps the direct call (fast path).
 - Task 4.4: a hashable struct key and a string key keep working; an `[N]int` array key stays hashable.
 - Phase 5: `f()` is evaluated exactly once; the split is a statement-level rewrite, so a forward inside an `if` init, a `switch` init or a `for` post must be skipped or hoisted into a block, never duplicated (`return f()` is always a statement; `g(f())` can be nested in an expression, in which case the pass wraps it as `func() R { a, b := f(); return g(a, b) }()` only if a probe shows that nesting occurs, otherwise leaves it). Named results: `return f()` still assigns every named result before deferred calls run. `return f()` inside a range-over-func body still goes through `_genIteratorReturn` with the temps.
+- Phase 6: exact `float32` values (`complex(float32(1), 0.5)`) keep their emitted text; `complex128` and untyped complex constants used as `complex128` are unchanged; `cmplx`-style arithmetic on two `complex64` variables is out of scope (already rounded per op or not, unchanged). Task 6.3: the first case value is now reached twice (as `expr` and as `exprs[0]`); formatter registration must stay idempotent (one `gff_*` per call node).
 
 ---
 
@@ -248,3 +263,20 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`
   - Test: `test/unit/builtins/json.test.js`. The original `H19` repro → `{"A":1} <nil>`; `show2(makePair())` where `show2(v any, _ int)` marshals `v` → `{"A":1} <nil>` (`assertAllTargetsOutput`); the 11-09 Task 7.3 codec-count test (`test/unit/builtins/json-codegen-size.test.js`) is unchanged.
   - Done when: every target prints `{"A":1} <nil>` and the codec count for never-boxed types does not grow.
+
+### Phase 6: `complex64` Constants on JS and templ `case` Formatters
+
+Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, third pass, `H20`, `H21`).
+
+- [ ] Task 6.1: Round untyped constant operands of `complex()` to float32 when the result is `complex64` (`H20` builtin)
+  - Files: `src/typechecker/expressions.js`
+  - Test: `test/unit/types/complex.test.js`. `var c complex64 = complex(float32(1), 0.01); fmt.Println(imag(c) == 0.01)` → `true`; `complex(0.01, float32(1))` + `real(c) == 0.01` → `true`; `var f float32 = 1; complex(f, 0.01)` vs `var w float32 = 0.01` → `true`; `fmt.Println(float64(imag(c)))` → `0.009999999776482582` (`assertAllTargetsOutput`).
+  - Done when: all four print Go's output on every target, and `complex(1, 0.01)` as `complex128` still prints `true` for `imag(c) == 0.01`.
+- [ ] Task 6.2: Emit untyped complex constants converted to `complex64` with float32-rounded components (`H20` literal)
+  - Files: `src/typechecker/assignability.js`, `src/backend/js/expressions.js`
+  - Test: `test/unit/types/complex.test.js`. `var c complex64 = 1 + 0.01i; fmt.Println(imag(c) == 0.01, float64(imag(c)))` → `true 0.009999999776482582`; `var d complex64 = 0.1; fmt.Println(float64(real(d)))` → `0.10000000149011612` (`assertAllTargetsOutput`).
+  - Done when: both match Go on every target, and the emitted JS for a `complex128` constant is unchanged.
+- [ ] Task 6.3: Walk every value of templ `case a, b:` lists in the shared AST walker (`H21`)
+  - Files: `src/lower/gen-types.js`
+  - Test: `test/unit/compiler/templ.test.js`. The `H21` component with `Case("1.0", 1)` → `#app` innerHTML `<span>ok</span>` (`runInDom`); `case "a", "b", fmt.Sprintf("%0.1f", g):` → same; `case "a", fmt.Sprint(n)` with `n int64 = 9007199254740993` and `s = "9007199254740993"` → `<span>ok</span>`; the existing Task 8.2 (11-09) templ `fmt` tests stay green.
+  - Done when: no `Sprintf$$fmt is not defined` for any case position, and each `fmt` call gets exactly one `gff_` formatter in the JS output.
