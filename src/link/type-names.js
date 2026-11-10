@@ -55,31 +55,67 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 	const dup = new Set(
 		[...counts].filter(([k, n]) => n > 1 || reserved.has(k)).map(([k]) => k),
 	);
-	if (dup.size === 0) return false;
 	let changed = false;
 	// Inner scopes first, so an outer rename never touches a nested
-	// declaration that already has its own name.
-	const scan = (node) => {
+	// declaration that already has its own name.  `visible` holds the value
+	// names declared so far in the enclosing scopes.
+	const scan = (node, visible) => {
 		if (!node || typeof node !== "object") return;
 		if (Array.isArray(node)) {
-			node.forEach(scan);
+			const seen = new Set(visible);
 			for (let i = 0; i < node.length; i++) {
 				const d = node[i];
-				if (d?.kind !== "TypeDecl" || !dup.has(d.name)) continue;
-				const renamed = new Map([
-					[d.name, `${d.name}__L${++localTypeCounter}`],
-				]);
-				for (let j = i; j < node.length; j++)
-					renameTypeRefs(node[j], renamed, new Set(), new Set());
-				changed = true;
+				const name = d?.name;
+				scan(d, seen);
+				if (d?.kind === "TypeDecl") {
+					// A value of the same name would clash with the type in JS.
+					const stop = node.findIndex(
+						(s, j) => j > i && declaresValue(s, d.name),
+					);
+					if (dup.has(d.name) || seen.has(d.name) || stop >= 0) {
+						const renamed = new Map([
+							[d.name, `${d.name}__L${++localTypeCounter}`],
+						]);
+						const end = stop >= 0 ? stop : node.length - 1;
+						for (let j = i; j <= end; j++)
+							renameTypeRefs(
+								node[j],
+								renamed,
+								new Set(),
+								j === stop ? new Set([name]) : new Set(),
+							);
+						changed = true;
+					}
+				} else if (d) for (const n of valueNames(d)) seen.add(n);
 			}
 			return;
 		}
-		forEachChild(node, scan);
+		const here = FUNC_KINDS.has(node.kind)
+			? new Set([...visible, ...declaredParams(node)])
+			: visible;
+		forEachChild(node, (c) => scan(c, here));
 	};
 	for (const p of programs)
-		for (const d of p.decls ?? []) if (d.kind !== "TypeDecl") scan(d);
+		for (const d of p.decls ?? [])
+			if (d.kind !== "TypeDecl") scan(d, new Set());
 	return changed;
+}
+
+const VALUE_DECL_KINDS = new Set(["DefineStmt", "VarDecl", "ConstDecl"]);
+
+// Names a statement declares as values in its own scope.
+function valueNames(stmt) {
+	return VALUE_DECL_KINDS.has(stmt.kind) ? declaredNames(stmt) : [];
+}
+
+function declaresValue(stmt, name) {
+	return valueNames(stmt).includes(name);
+}
+
+function declaredParams(fn) {
+	const names = (fn.params ?? []).map((p) => p.name).filter(Boolean);
+	if (fn.recvName) names.push(fn.recvName);
+	return names;
 }
 
 // A package compiled later that declares a type this package only declares
