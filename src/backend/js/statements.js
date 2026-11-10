@@ -424,7 +424,19 @@ export const statementGenMethods = {
 				if (body?.kind === "ForStmt") body.label = labels[labels.length - 1];
 				const hoisted = this._hoistForInit(body);
 				for (const label of labels) this.line(`${label}:`);
-				this.genStmt(body);
+				// Labels in scope of the JS function being emitted (see
+				// `_emitIterTargetDispatch`).
+				const prevLabels = this._jsLabels ?? [];
+				const loop = body?.kind === "ForStmt";
+				this._jsLabels = [
+					...prevLabels,
+					...labels.map((name) => ({ name, loop })),
+				];
+				try {
+					this.genStmt(body);
+				} finally {
+					this._jsLabels = prevLabels;
+				}
 				if (hoisted) this._closeHoistedForInit();
 				break;
 			}
@@ -1794,17 +1806,31 @@ export const statementGenMethods = {
 	_emitIterTargetDispatch(targetFlag, ownLabel = null) {
 		// The loop's own label is handled inside the callback (`break` and
 		// `continue` of the range-over-func loop), and a JS `continue` cannot
-		// name the labeled block that wraps it.
-		const labels = (this._functionLabels ?? []).filter((l) => l !== ownLabel);
+		// name the labeled block that wraps it.  Only the labels of statements
+		// enclosing this loop in the same JS function are in scope (`_jsLabels`):
+		// inside another iterator's callback, the enclosing iterator loop's
+		// label is handled like a branch in its body, and any other label is
+		// passed on to the next dispatcher.
+		const inIter = this._inIteratorBody;
+		const labels = (this._jsLabels ?? []).filter((l) => l.name !== ownLabel);
 		this.line(`if (${targetFlag}) {`);
 		this.indented(() => {
-			for (const lbl of labels) {
-				this.line(`if (${targetFlag} === "break$${lbl}") break ${lbl};`);
-				this.line(`if (${targetFlag} === "continue$${lbl}") continue ${lbl};`);
+			for (const { name, loop } of labels) {
+				this.line(`if (${targetFlag} === "break$${name}") break ${name};`);
+				if (loop)
+					this.line(
+						`if (${targetFlag} === "continue$${name}") continue ${name};`,
+					);
 			}
-			if (this._inIteratorBody) {
-				this.line(`${this._iterTargetFlag} = ${targetFlag}; return false;`);
+			if (!inIter) return;
+			const encl = this._currentIterLoopLabel;
+			if (encl) {
+				this.line(`if (${targetFlag} === "continue$${encl}") return true;`);
+				this.line(
+					`if (${targetFlag} === "break$${encl}") { ${this._iterBreakFlag} = true; return false; }`,
+				);
 			}
+			this.line(`${this._iterTargetFlag} = ${targetFlag}; return false;`);
 		});
 		this.line("}");
 	},
@@ -1855,6 +1881,8 @@ export const statementGenMethods = {
 					target: this._iterTargetFlag,
 					loopLabel: this._currentIterLoopLabel,
 					loopDepth: this._iterLoopDepth,
+					innerLabels: this._innerLoopLabels,
+					jsLabels: this._jsLabels,
 				};
 				this._inIteratorBody = true;
 				this._iterBreakFlag = breakFlag;
@@ -1863,6 +1891,9 @@ export const statementGenMethods = {
 				this._iterTargetFlag = targetFlag;
 				this._currentIterLoopLabel = loopLabel;
 				this._iterLoopDepth = 0;
+				// Loops of an enclosing callback are not JS labels in this one.
+				this._innerLoopLabels = new Set();
+				this._jsLabels = [];
 
 				if (assignPreamble) assignPreamble();
 				this.genBlock(body);
@@ -1874,6 +1905,8 @@ export const statementGenMethods = {
 				this._iterTargetFlag = prev.target;
 				this._currentIterLoopLabel = prev.loopLabel;
 				this._iterLoopDepth = prev.loopDepth;
+				this._innerLoopLabels = prev.innerLabels;
+				this._jsLabels = prev.jsLabels;
 
 				this.line("return true;");
 			});

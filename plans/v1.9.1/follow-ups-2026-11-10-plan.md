@@ -196,7 +196,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/int64.test.js`. The `H07` repro → `2251799813685249`; `var n int64 = 0; for i := 0; i < 2; n -= half { i++ }` → `-4503599627370496` (`assertAllTargetsOutput`).
   - Done when: no `TypeError` on `js` or `both`, and `wasm` output is unchanged.
-- [ ] Task 2.5: Propagate labeled `break`/`continue` to enclosing range-over-func loops in JS (`H08`, JS)
+- [x] Task 2.5: Propagate labeled `break`/`continue` to enclosing range-over-func loops in JS (`H08`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-func.test.js`. Nested `continue outer` → `0 0\n1 0\ndone`; nested `break outer` → `0 0\ndone` (`assertJsTargetsOutput`; WASM `continue` pinned in Task 3.1).
   - Done when: no `SyntaxError: Undefined label` on `js`/`both` and existing range-func tests pass.
