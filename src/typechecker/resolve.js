@@ -3,6 +3,7 @@
 
 import { parseJsonTag } from "../parser/struct-tag.js";
 import { foldConstExpr } from "./const-fold.js";
+import { exprText } from "./operand-text.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
@@ -342,18 +343,24 @@ export const resolveMethods = {
 			const e = depth < 16 ? scope.lookupConstExpr(name) : null;
 			return e ? foldConstExpr(e, (n) => resolve(n, depth + 1)) : undefined;
 		};
+		let n = Number.NaN;
 		try {
 			const lit = foldConstExpr(size, resolve);
-			const n = lit ? Number(lit.value) : Number.NaN;
-			if (Number.isInteger(n) && n >= 0) return n;
+			n = lit ? Number(lit.value) : Number.NaN;
 		} catch {
 			// fall through to the checker's evaluator
 		}
 		// `[math.MaxInt8]T`: a package constant the AST folder cannot see.
-		const q = this._constIntValue(size, scope);
-		if (q === null || !Number.isInteger(q) || q < 0) return size;
+		if (!Number.isInteger(n))
+			n = this._constIntValue(size, scope) ?? Number.NaN;
+		if (!Number.isInteger(n)) return size;
 		this._useQualifiedConsts(size);
-		return q;
+		if (n >= 0) return n;
+		this.err(
+			`invalid array length ${exprText(size)} (untyped int constant ${n})`,
+			size,
+		);
+		return 0;
 	},
 
 	// `pkg.K` inside a folded array length counts as using the import.
