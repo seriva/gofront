@@ -217,7 +217,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. Upgrade the Task 3.5 cases to `assertProgramOutput`.
   - Done when: `assertValidWasm` passes and `wasm` prints `1`.
-- [ ] Task 4.3: Name the dynamic type in WASM unhashable-key panics (`G10`, `G13` WASM)
+- [x] Task 4.3: Name the dynamic type in WASM unhashable-key panics (`G10`, `G13` WASM)
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/emit-maps.js`
   - Test: `test/unit/wasm/map-keys.test.js`. The func key → `runtime error: hash of unhashable type func()`; the struct `S` with a slice → `… main.S`; `type L []int` → `… main.L` (wasm side; the JS side follows in Task 5.4).
   - Done when: the three messages match Go exactly on `wasm`.
