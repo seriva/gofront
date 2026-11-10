@@ -1,7 +1,7 @@
 # v1.9.1 Review Follow-ups (2026-11-09) — Design Plan
 
 **Version:** v1.9.1  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** [`../v1.9.0/follow-ups-2026-11-07-plan.md`](../v1.9.0/follow-ups-2026-11-07-plan.md) (origin of every ledger entry), [`../v1.9.0/runtime-pruning-plan.md`](../v1.9.0/runtime-pruning-plan.md)  
 **Release note:** Go programs behave more consistently across JavaScript and WebAssembly, fixing nil-pointer method calls, labeled loops, 64-bit constant arithmetic, interface type assertions, and generic map formatting while rejecting invalid switch cases and negative array lengths. Code generation for `encoding/json` is leaner and no longer fails on JavaScript-interop types, alongside corrections for `float32` constants, templ formatting, and WebAssembly SIMD globals.
