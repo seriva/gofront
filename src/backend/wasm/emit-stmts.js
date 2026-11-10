@@ -3633,13 +3633,24 @@ export class StmtsEmitter {
 			this.pushInstruction("i64.eq");
 			this.pushInstruction({ op: "if", blockType: "void" });
 			if (target.role !== "break" || stmt.label !== target.label) {
-				if (this.funcDecl._isYieldClosure) {
+				const isContinue = target.role === "continue";
+				const inScope = this.controlStack.some(
+					(c) => c.label === target.label && c.role === target.role,
+				);
+				if (
+					!inScope &&
+					isContinue &&
+					this.funcDecl._isYieldClosure &&
+					target.label === this.funcDecl._forStmt?.label
+				) {
+					// `continue L` where L labels the iterator loop whose body this
+					// yield closure is: resume that iterator.
+					this.pushInstruction({ op: "i32.const", value: 1 });
+					this.pushInstruction({ op: "return" });
+				} else if (!inScope && this.funcDecl._isYieldClosure) {
 					this._propagateYieldExit(BigInt(target.tag));
 				} else {
-					const depth = this.resolveBranchDepth(
-						target.label,
-						target.role === "continue",
-					);
+					const depth = this.resolveBranchDepth(target.label, isContinue);
 					this.pushInstruction({ op: "br", depth });
 				}
 			}

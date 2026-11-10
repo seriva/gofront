@@ -203,7 +203,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`â
 
 ### Phase 3: WASM Codegen
 
-- [ ] Task 3.1: Resume the outer iterator on `continue outer` from a nested range-over-func loop (`H08`, WASM)
+- [x] Task 3.1: Resume the outer iterator on `continue outer` from a nested range-over-func loop (`H08`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 2.5 cases to `assertProgramOutput`; add three levels deep with `continue outer` â†’ Go output.
   - Done when: `wasm` prints `0 0\n1 0\ndone` and `break outer` still prints `0 0\ndone`.
