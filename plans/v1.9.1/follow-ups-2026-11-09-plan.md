@@ -225,7 +225,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `G14` repro → `true` (`assertProgramOutput`); a value-embedded `Inner` with a pointer-receiver `M` held as a `PO` value in `any` → `false` (Go method-set rule).
   - Done when: both match Go on `both` and `wasm`.
-- [ ] Task 4.5: Match Go-source stdlib named slices against interfaces from `any` in WASM (`G15`)
+- [x] Task 4.5: Match Go-source stdlib named slices against interfaces from `any` in WASM (`G15`)
   - Files: `src/backend/wasm/prescan.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. `var v any = sort.IntSlice{1}; _, ok := v.(sort.Interface)` → `true`; the same for `sort.StringSlice` → `true`.
   - Done when: `wasm` prints `true` for both.

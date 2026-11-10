@@ -59,6 +59,55 @@ func main() {
 	);
 });
 
+section("WASM interface assertions: Go-source stdlib named slices");
+
+test("sort.IntSlice and sort.StringSlice satisfy sort.Interface from any", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"sort"
+)
+
+func main() {
+	var v any = sort.IntSlice{1}
+	_, ok := v.(sort.Interface)
+	fmt.Println(ok)
+	var w any = sort.StringSlice{"a"}
+	_, ok = w.(sort.Interface)
+	fmt.Println(ok)
+}
+`,
+		"true\ntrue\n",
+	);
+});
+
+test("a user-defined slice type with methods satisfies an interface from any", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ Len() int }
+
+type S []int
+
+func (s S) Len() int { return len(s) }
+
+func main() {
+	var v any = S{1}
+	_, ok := v.(I)
+	fmt.Println(ok)
+	var w any = []int{1}
+	_, ok = w.(I)
+	fmt.Println(ok)
+}
+`,
+		"true\nfalse\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

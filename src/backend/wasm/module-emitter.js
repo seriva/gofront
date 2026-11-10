@@ -1578,7 +1578,7 @@ export class ModuleEmitter {
 					tVal.underlying?.kind !== "interface"
 				) {
 					if (this.checker?.implements?.(tVal, ifaceResolved)) {
-						const box = this.getIfaceBoxType(tVal);
+						const box = this._namedValueBox(tVal);
 						if (box && !seen.has(box.typeIndex)) {
 							seen.add(box.typeIndex);
 							candidates.push({ name: tName, typeIndex: box.typeIndex });
@@ -1596,6 +1596,15 @@ export class ModuleEmitter {
 		}
 
 		return candidates;
+	}
+
+	// The WebAssembly type a value of the named non-struct type `tVal` takes
+	// inside an interface: a defined slice type is a tagged slice (see
+	// getTaggedSliceType), anything else an interface box.
+	_namedValueBox(tVal) {
+		if (!isSliceType(tVal, this.checker)) return this.getIfaceBoxType(tVal);
+		const elem = getSliceElemType(tVal, this.checker);
+		return elem ? this.getTaggedSliceType(tVal, elem) : null;
 	}
 
 	// Whether the struct value `namedType` implements `iface`, including when its

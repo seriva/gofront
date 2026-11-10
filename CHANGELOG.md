@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Fixed
-- **Go programs behave more consistently across JavaScript and WebAssembly**: a `switch` case of the wrong type, `case nil` in a tagless `switch`, `cap` of a number or bool, a negative array length, and using an `any` value as a concrete type without a type assertion now report Go's errors, and a function-local type no longer breaks an imported package type of the same name. Constraints such as `interface{ *T; M() }` now compile, and JavaScript output handles local types that share a name with a variable, 64-bit compound assignments with untyped constants, labeled breaks in range-over-func loops, and address-taken map range variables.
+- **Go programs behave more consistently across JavaScript and WebAssembly**: a `switch` case of the wrong type, `case nil` in a tagless `switch`, `cap` of a number or bool, a negative array length, and using an `any` value as a concrete type without a type assertion now report Go's errors, and a function-local type no longer breaks an imported package type of the same name. Constraints such as `interface{ *T; M() }` now compile, and JavaScript and WebAssembly output now handle local types that share a name with a variable, 64-bit compound assignments with untyped constants, labeled jumps in range-over-func loops, address-taken map range variables, unhashable map key panics, and type assertions to interfaces on values that embed a pointer or are defined slices.
 
 ## [1.9.0] - 2026-11-09
 
