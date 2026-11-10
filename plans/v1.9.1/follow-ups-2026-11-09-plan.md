@@ -209,7 +209,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 4: WASM Codegen
 
-- [ ] Task 4.1: Fix labeled `break` / `continue` unwinding through range-over-func in WASM (`G08`, WASM)
+- [x] Task 4.1: Fix labeled `break` / `continue` unwinding through range-over-func in WASM (`G08`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 3.4 cases to `assertProgramOutput`.
   - Done when: all three repros match Go on `both` and `wasm`, with no panic for `break outer`.

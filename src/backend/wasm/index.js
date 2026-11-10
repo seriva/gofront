@@ -259,6 +259,7 @@ export function compileWasmModule(
 				_isClosure: true,
 				_isYieldClosure: Boolean(node._isYieldClosure),
 				_iterStateName: node._iterStateName ?? null,
+				_forStmt: node._forStmt ?? null,
 				_funcLit: node,
 				_rootFuncDecl: rootFn,
 				_srcFile: rootFn?._srcFile ?? null,

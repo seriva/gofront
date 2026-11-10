@@ -1,12 +1,12 @@
 // GoFront test suite — labeled break/continue on range-over-func loops
 
 import { fileURLToPath } from "node:url";
-import { assertJsTargetsOutput, section, summarize, test } from "../helpers.js";
+import { assertProgramOutput, section, summarize, test } from "../helpers.js";
 
-section("Range-over-func: labeled break and continue (JS)");
+section("Range-over-func: labeled break and continue");
 
 test("break to the label of the range-over-func loop", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
@@ -29,7 +29,7 @@ outer:
 });
 
 test("continue to the label of the range-over-func loop", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
@@ -52,7 +52,7 @@ outer:
 });
 
 test("continue to the range-over-func label from a nested for", async () => {
-	await assertJsTargetsOutput(
+	await assertProgramOutput(
 		`package main
 
 import "fmt"
