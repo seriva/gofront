@@ -38,7 +38,11 @@ import {
 	unicodeToLowerJs,
 	unicodeToUpperJs,
 } from "../shared/host-unicode.js";
-import { comparesToNil, expressionGenMethods } from "./expressions.js";
+import {
+	comparesToNil,
+	derefsReceiver,
+	expressionGenMethods,
+} from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
@@ -585,10 +589,32 @@ export class CodeGen {
 				const name = d.recvType.name;
 				if (!methods.has(name)) methods.set(name, []);
 				methods.get(name).push(d);
-				if (d.recvPointer) this.nilSafeMethods.add(`${name}.${d.name}`);
 			}
 		}
+		this._markNilSafeMethods(methods);
 		return methods;
+	}
+
+	// Pointer-receiver methods that can run with a nil receiver: they compare
+	// it with nil, or never read through it (a method that does panics on nil
+	// either way, so it keeps the faster direct call). Calls to these go
+	// through the prototype (see _nilSafeMethodClass).
+	_markNilSafeMethods(methods) {
+		for (const [name, decls] of methods) {
+			const safe = new Set();
+			const ptr = decls.filter((d) => d.recvPointer);
+			for (const d of ptr) safe.add(d.name);
+			for (let changed = true; changed; ) {
+				changed = false;
+				for (const d of ptr) {
+					if (!safe.has(d.name) || comparesToNil(d.body, d.recvName)) continue;
+					if (!derefsReceiver(d.body, d.recvName, safe)) continue;
+					safe.delete(d.name);
+					changed = true;
+				}
+			}
+			for (const m of safe) this.nilSafeMethods.add(`${name}.${m}`);
+		}
 	}
 
 	_collectNamedWrappers(program, methods) {

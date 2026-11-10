@@ -81,6 +81,27 @@ func main() {
 	);
 });
 
+test("a method that only calls another nil-safe method runs on nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ n int }
+
+func (s *S) B() int { return 2 }
+
+func (s *S) A() int { return s.B() + 1 }
+
+func main() {
+	var s *S
+	fmt.Println(s.A())
+}
+`,
+		"3\n",
+	);
+});
+
 section("Nil receivers: method expressions");
 
 test("(*MyInt).Ping on a nil pointer runs", async () => {

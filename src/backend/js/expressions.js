@@ -42,6 +42,26 @@ export function comparesToNil(node, name) {
 	return someChild(node, (c) => comparesToNil(c, name));
 }
 
+// True when `node` reads through the receiver `name` (`r.f`, `r[i]`, `*r`),
+// which panics on a nil receiver anyway. Calling a method of `safe` on it is
+// not a read: that method accepts a nil receiver.
+export function derefsReceiver(node, name, safe) {
+	if (Array.isArray(node))
+		return node.some((n) => derefsReceiver(n, name, safe));
+	if (!node || typeof node !== "object") return false;
+	const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+	if (node.kind === "SelectorExpr" && isRecv(node.expr))
+		return !safe.has(node.field);
+	if (
+		(node.kind === "IndexExpr" || node.kind === "SliceExpr") &&
+		isRecv(node.expr)
+	)
+		return true;
+	if (node.kind === "UnaryExpr" && node.op === "*" && isRecv(node.operand))
+		return true;
+	return someChild(node, (c) => derefsReceiver(c, name, safe));
+}
+
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
 // True when type `t` mentions a type parameter anywhere.
