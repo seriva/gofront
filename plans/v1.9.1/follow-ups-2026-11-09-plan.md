@@ -232,7 +232,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 5: JS Nil Receivers and Map Keys
 
-- [ ] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
+- [x] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `var s *S; s.Ping(); fmt.Println("ok")` → `ok` (`assertAllTargetsOutput`); a method that checks `if s == nil { return "nil" }` → `nil`; `newT().M()` evaluates `newT` once (count side effects).
   - Done when: all targets match Go and `npm run bench` is within 3% of the `8a6b7a1` (tag `1.9.0`) baseline.

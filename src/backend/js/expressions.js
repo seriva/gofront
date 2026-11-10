@@ -1936,7 +1936,12 @@ export const expressionGenMethods = {
 		if (t?.kind !== "pointer" || t.base?.kind !== "named") return null;
 		const cls = t.base.name;
 		if (t.base.typeArgs?.length) return null;
-		if (this.nilSafeMethods?.has(`${cls}.${func.field}`)) return cls;
+		if (
+			t.base.underlying?.kind === "struct" &&
+			!this._promotedPath(func) &&
+			this.nilSafeMethods?.has(`${cls}.${func.field}`)
+		)
+			return cls;
 		// A Go-source stdlib type (`Buffer$$bytes`) is declared outside this
 		// package: its method decl tells whether it tests the receiver for nil.
 		const decl = cls.includes("$$")

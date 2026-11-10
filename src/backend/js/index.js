@@ -584,8 +584,7 @@ export class CodeGen {
 				const name = d.recvType.name;
 				if (!methods.has(name)) methods.set(name, []);
 				methods.get(name).push(d);
-				if (d.recvPointer && comparesToNil(d.body, d.recvName))
-					this.nilSafeMethods.add(`${name}.${d.name}`);
+				if (d.recvPointer) this.nilSafeMethods.add(`${name}.${d.name}`);
 			}
 		}
 		return methods;
