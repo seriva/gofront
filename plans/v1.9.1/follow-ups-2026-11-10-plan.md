@@ -259,7 +259,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second
   - Files: `src/typechecker/expressions.js`, `src/lower/functions.js`
   - Test: `test/unit/types/dynamic-types.test.js`. `show(makePair())` → `{1} 1 true`; `O{}.show(makePair())` → `{1} 1 true`; `fmt.Println(makePair())` keeps printing `{1} 1`; `defer show(makePair())` keeps printing `{1} 1 true` (`assertAllTargetsOutput`).
   - Done when: every target prints Go's output and `assertValidWasm` passes for the method form.
-- [ ] Task 5.4: Keep dynamic JSON codecs for types boxed through forwarded tuples (`H19` JSON)
+- [x] Task 5.4: Keep dynamic JSON codecs for types boxed through forwarded tuples (`H19` JSON)
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`
   - Test: `test/unit/builtins/json.test.js`. The original `H19` repro → `{"A":1} <nil>`; `show2(makePair())` where `show2(v any, _ int)` marshals `v` → `{"A":1} <nil>` (`assertAllTargetsOutput`); the 11-09 Task 7.3 codec-count test (`test/unit/builtins/json-codegen-size.test.js`) is unchanged.
   - Done when: every target prints `{"A":1} <nil>` and the codec count for never-boxed types does not grow.
