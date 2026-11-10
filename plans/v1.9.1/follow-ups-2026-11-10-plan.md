@@ -157,23 +157,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 1: Typechecker Checks
 
-- [ ] Task 1.1: Reject `case nil` against a non-nilable switch tag (`H02`)
+- [x] Task 1.1: Reject `case nil` against a non-nilable switch tag (`H02`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/switch-cases.test.js`. `switch true { case nil: }` → `assertErrorContains(…, "cannot convert nil to type bool")`; `var e error; switch e { case nil: }` and `var p *int; switch p { case nil: }` compile and run.
   - Done when: the negative case errors on `js`, `both`, `wasm` (no invalid WASM) and the positive cases print Go's output.
-- [ ] Task 1.2: Make `cap` accept only slice, array and pointer-to-array operands (`H03`)
+- [x] Task 1.2: Make `cap` accept only slice, array and pointer-to-array operands (`H03`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/cap.test.js`. `cap(s)` with `s` a struct → `"invalid argument: s (variable of type S) for cap"`; `cap(f)` with `f` a func → `"for cap"`; existing positive cases (slice, array, `&arr`, generic `S ~[]E`) stay green.
   - Done when: no target produces invalid WASM for the struct and func repros.
-- [ ] Task 1.3: Require a type assertion for `any` → non-empty interface (`H05`)
+- [x] Task 1.3: Require a type assertion for `any` → non-empty interface (`H05`)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var b any; var e error; e = b` → `"need type assertion"`; `var s fmt.Stringer = b` → same; `var c any = b`, `e = b.(error)` and `var e2 error = &MyErr{}` compile.
   - Done when: both negatives error on all targets and `npm run check` (example type-checks) passes.
-- [ ] Task 1.4: Reject constraint interfaces used as ordinary types (`H06`)
+- [x] Task 1.4: Reject constraint interfaces used as ordinary types (`H06`)
   - Files: `src/typechecker/resolve.js`, `src/typechecker/index.js`, `src/typechecker/statements.js`
   - Test: `test/unit/types/generics.test.js`. `type N interface{ ~int | ~string }; var x N` → `assertErrorContains(…, "cannot use type N outside a type constraint")`; same for a struct field `F N`, a param `func f(n N)` and `var c comparable`; `func g[T N](x T) T { return x }` with `g(3)` → `3`.
   - Done when: every negative errors on all targets and the generic positive runs.
-- [ ] Task 1.5: Count package uses in folded array lengths on cached ASTs (`H01`)
+- [x] Task 1.5: Count package uses in folded array lengths on cached ASTs (`H01`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/array-length.test.js`. Write the `H01` program to a temp dir, `compileFiles` it with `forceTarget: "js"` then `"wasm"` then `"both"` in the same process (no `evictParseCache`) → every compile has no errors and the WASM run prints `127`.
   - Done when: the second and third compiles no longer report `'math' imported and not used`, and `test/unit/compiler/packages.test.js` parse-cache tests pass.

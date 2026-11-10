@@ -71,7 +71,7 @@ function minMaxType(at) {
 // Each value is (self, name, expr, argTypes, scope) => returnType.
 const BUILTIN_CHECK = {
 	len: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
-	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
+	cap: (s, n, e, at, sc) => s._checkBuiltinLen(n, e, at, sc),
 	append: (s, _n, e, at) => {
 		const st = at[0] ?? ANY;
 		if (isArray(st)) {
@@ -1903,7 +1903,21 @@ export const expressionCheckMethods = {
 			: operandKind(operand, typeStr(type), false);
 	},
 
-	_checkBuiltinLen(name, expr, argTypes) {
+	// `cap` takes a slice or an array (a pointer to an array is dereferenced
+	// before this check). A type parameter needs a slice or array core type;
+	// one with no single core type is left to instantiation. Unknown and
+	// `any` operands (JS interop) are not judged.
+	_capOperandOk(t, scope) {
+		if (!t || t._tainted || isAny(t)) return true;
+		if (t.kind === "typeParam") {
+			const core = this._coreType(t, scope);
+			return !core || core.kind === "slice" || core.kind === "array";
+		}
+		const kind = this._deepUnderlying(t)?.kind;
+		return kind === "slice" || kind === "array";
+	},
+
+	_checkBuiltinLen(name, expr, argTypes, scope) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
 		const operand = expr.args?.[0];
 		if (expr.args?.length === 1)
@@ -1916,19 +1930,14 @@ export const expressionCheckMethods = {
 			if (expr.args.length === 1) expr.args[0] = operand;
 		}
 		if (name === "cap") {
-			if (
-				(argTypes[0]?.underlying ?? argTypes[0])?.kind === "map" ||
-				isString(argTypes[0]) ||
-				isBool(argTypes[0]) ||
-				isComplexOrNumeric(argTypes[0])
-			) {
-				this.err(
-					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
-					expr,
-				);
-			} else if (sharedInfo(argTypes[0])) {
+			if (sharedInfo(argTypes[0])) {
 				this.err(
 					`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
+					expr,
+				);
+			} else if (!this._capOperandOk(argTypes[0], scope)) {
+				this.err(
+					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
 					expr,
 				);
 			}

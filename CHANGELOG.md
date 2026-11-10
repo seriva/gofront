@@ -9,6 +9,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 - **Go programs behave more consistently across JavaScript and WebAssembly**: nil-pointer method calls, labeled loops, 64-bit constant arithmetic, interface type assertions and generic map formatting now match Go, and invalid switch cases and negative array lengths are rejected with Go's errors. In JavaScript output, `encoding/json` no longer fails on JavaScript-interop (`.d.ts`) types and generates leaner code, `float32` constants are rounded as in Go, and `fmt` calls in `.templ` files format by type; WebAssembly packages now accept package-level struct variables that hold SIMD vectors.
+- **More invalid Go is rejected instead of building broken WebAssembly**: `case nil` in a `switch` on a value that cannot be nil, `cap` of a struct or func, and constraint interfaces such as `interface{ ~int | ~string }` or `comparable` used as ordinary types now fail with Go's errors. Rebuilds in `gofront dev` no longer report a package used only in an array length, as in `[math.MaxInt8]int`, as unused.
+
+### Changed
+- **Breaking:** Like Go, assigning an `any` to `error`, `fmt.Stringer` or any other interface with methods now needs a type assertion. Add the assertion (`e = v.(error)`) where the compiler reports `need type assertion`.
 
 ## [1.9.0] - 2026-11-09
 

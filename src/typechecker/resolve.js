@@ -29,6 +29,11 @@ import {
 // instantiation is reported as a cycle.
 const MAX_INSTANTIATION_DEPTH = 32;
 
+// Type nodes in a constraint position, where a constraint interface may
+// appear. A property of the AST node, so it is shared by every checker: an
+// importing package resolves the constraints of the imported generics.
+const CONSTRAINT_POS = new WeakSet();
+
 // Two imported packages may both declare `Pt`, so the cache key of an
 // instance tells declarations apart by identity instead of by display name.
 const declIds = new WeakMap();
@@ -216,7 +221,8 @@ export const resolveMethods = {
 			case "TypeName": {
 				if (BASIC_TYPES[node.name])
 					return node.name === "any" ? DECLARED_ANY : BASIC_TYPES[node.name];
-				if (node.name === "comparable") return COMPARABLE;
+				if (node.name === "comparable")
+					return this._checkConstraintUse(COMPARABLE, node);
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
@@ -225,7 +231,7 @@ export const resolveMethods = {
 				const named = this.types.get(node.name);
 				if (named) {
 					this._useQualifiedTypeName(node, named);
-					return named;
+					return this._checkConstraintUse(named, node);
 				}
 				const jsOnly = this._jsOnlyMember(node.name);
 				if (jsOnly) return this._errJsOnly(jsOnly, node);
@@ -242,6 +248,7 @@ export const resolveMethods = {
 			case "IndexExpr":
 				return this._resolveGenericTypeName(node, scope);
 			case "TypeParam": {
+				this._markConstraintPos(node.constraint);
 				const constraint = node.constraint
 					? this.resolveTypeNode(node.constraint, scope)
 					: ANY;
@@ -265,7 +272,10 @@ export const resolveMethods = {
 			case "StructType":
 				return this._resolveStructType(node, scope);
 			case "InterfaceType":
-				return this._resolveInterfaceType(node, scope);
+				return this._checkConstraintUse(
+					this._resolveInterfaceType(node, scope),
+					node,
+				);
 			case "UnaryExpr":
 				// `new(*T)`: the parser reads the pointer type as a dereference.
 				if (node.op !== "*") return ANY;
@@ -284,10 +294,9 @@ export const resolveMethods = {
 				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
 					const qualified = `${node.expr.name}.${node.field}`;
 					if (this.types.has(qualified)) {
-						const resolved = this.resolveTypeNode(
-							{ kind: "TypeName", name: qualified },
-							scope,
-						);
+						const inner = { kind: "TypeName", name: qualified };
+						this._inheritConstraintPos(node, inner);
+						const resolved = this.resolveTypeNode(inner, scope);
 						this._useQualifiedTypeName(node, resolved);
 						return resolved;
 					}
@@ -305,6 +314,95 @@ export const resolveMethods = {
 			default:
 				return ANY;
 		}
+	},
+
+	// ── Constraint interfaces outside constraints ───────────────────
+
+	// Records a type node that sits in a constraint position (a type
+	// parameter's constraint, an interface's embedded element or union term,
+	// the right-hand side of a type declaration), where a constraint
+	// interface is allowed.
+	_markConstraintPos(node) {
+		if (!node || typeof node !== "object") return;
+		if (node.kind === "UnionConstraint") {
+			for (const term of node.terms) this._markConstraintPos(term.type);
+			return;
+		}
+		CONSTRAINT_POS.add(node);
+	},
+
+	// `inner` stands for `node` (a rewritten qualified name).
+	_inheritConstraintPos(node, inner) {
+		if (CONSTRAINT_POS.has(node)) CONSTRAINT_POS.add(inner);
+	},
+
+	// An interface's embedded elements and union terms are constraint positions.
+	_markInterfaceElements(node) {
+		for (const embed of node.embeds ?? []) this._markConstraintPos(embed);
+		this._markConstraintPos(node.unionConstraint);
+	},
+
+	// Marks the constraint positions of top-level declarations before any
+	// type resolves (constraints resolve lazily from several places).
+	_markConstraintPositions(programs) {
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (d.kind === "TypeDecl") this._markConstraintPos(d.type);
+				for (const tp of d.typeParams ?? [])
+					this._markConstraintPos(tp.constraint);
+			}
+		}
+	},
+
+	// A constraint interface (one with a type set, or comparable) resolved
+	// outside a constraint position is an error. A type whose declaration has
+	// not resolved yet is judged once every package-level type has.
+	_checkConstraintUse(type, node) {
+		if (CONSTRAINT_POS.has(node)) return type;
+		if (type?.kind === "named" && type.underlying == null) {
+			this._pendingConstraintUses.push({
+				type,
+				node,
+				file: this._currentFile,
+				source: this._currentSource,
+			});
+			return type;
+		}
+		this._reportConstraintUse(type, node);
+		return type;
+	},
+
+	_reportConstraintUse(type, node) {
+		const u = this._deepUnderlying(type);
+		if (u === COMPARABLE) {
+			this.err(
+				`cannot use type ${typeStr(type)} outside a type constraint: interface is (or embeds) comparable`,
+				node,
+			);
+		} else if (
+			u?.kind === "interface" &&
+			(u.unionConstraint || u._typeSetEmbeds)
+		) {
+			this.err(
+				`cannot use type ${typeStr(type)} outside a type constraint: interface contains type constraints`,
+				node,
+			);
+		}
+	},
+
+	_flushConstraintUses() {
+		const pending = this._pendingConstraintUses;
+		if (pending.length === 0) return;
+		this._pendingConstraintUses = [];
+		const file = this._currentFile;
+		const source = this._currentSource;
+		for (const u of pending) {
+			this._currentFile = u.file;
+			this._currentSource = u.source;
+			this._reportConstraintUse(u.type, u.node);
+		}
+		this._currentFile = file;
+		this._currentSource = source;
 	},
 
 	// `pkg.Name` when `pkg` is a Go-source package whose `js` files declare
@@ -375,9 +473,14 @@ export const resolveMethods = {
 
 	_resolveArrayTypeNode(node, scope) {
 		// Fold in place so backends that read the type node see a literal length.
-		if (!node.inferLen && node.size?.value === undefined) {
+		// The node may come from the parse cache: keep the original expression so
+		// a later compile of the same AST still counts `pkg.K` as using `pkg`
+		// and still reports an invalid length.
+		if (node._sizeExpr) this._foldArrayLen(node._sizeExpr, scope);
+		else if (!node.inferLen && node.size?.value === undefined) {
 			const n = this._foldArrayLen(node.size, scope);
-			if (typeof n === "number")
+			if (typeof n === "number") {
+				node._sizeExpr = node.size;
 				node.size = {
 					kind: "BasicLit",
 					litKind: "INT",
@@ -385,6 +488,7 @@ export const resolveMethods = {
 					_line: node.size._line,
 					_col: node.size._col,
 				};
+			}
 		}
 		return {
 			kind: "array",
@@ -496,6 +600,7 @@ export const resolveMethods = {
 	},
 
 	_resolveInterfaceType(node, scope) {
+		this._markInterfaceElements(node);
 		const methods = new Map();
 		for (const m of node.methods) {
 			const params = m.params.map((p) => this.resolveTypeNode(p.type, scope));

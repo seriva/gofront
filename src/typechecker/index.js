@@ -131,6 +131,7 @@ export class TypeChecker {
 		this._importedConsts = new Map(); // dot-imported const name -> value
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._importedTypes = new WeakSet(); // named types reached through an imported package
+		this._pendingConstraintUses = []; // constraint-interface checks waiting on a type declaration
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
@@ -385,13 +386,16 @@ export class TypeChecker {
 
 		this._checkDirectivesAndImportsPass(programs);
 		this._registerConstExprs(programs);
+		this._markConstraintPositions(programs);
 		this._collectTypesPass(programs);
+		this._flushConstraintUses();
 		this._collectFuncsPass(programs);
 		this._checkGlobalTypeNamesPass(programs);
 		this._promoteEmbeddedMethods();
 		this._collectVarsConstsPass(programs);
 		this._checkTopDeclsPass(programs);
 		this._reportInitCycles(programs);
+		this._flushConstraintUses();
 
 		if (this.target === "both") {
 			this._checkMutablePackageVars(programs);
@@ -839,6 +843,8 @@ export class TypeChecker {
 	// ── Type collection ──────────────────────────────────────────
 
 	collectType(decl) {
+		// `type N interface{ ~int }` and `type D N` declare constraints.
+		this._markConstraintPos(decl.type);
 		if (decl.typeParams && decl.isAlias) {
 			this._collectGenericAlias(decl);
 			return;
