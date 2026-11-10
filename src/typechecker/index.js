@@ -130,6 +130,7 @@ export class TypeChecker {
 		this._constExprs = new Map(); // name -> AST initializer expr
 		this._importedConsts = new Map(); // dot-imported const name -> value
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
+		this._importedTypes = new WeakSet(); // named types reached through an imported package
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
@@ -189,6 +190,7 @@ export class TypeChecker {
 			// otherwise reuse the imported placeholder. It is reached as `pkg.Pt`.
 			if (type.name === name) this.types.set(name, type);
 			this.types.set(`${pkgName}.${name}`, type);
+			this._importedTypes.add(type);
 		}
 	}
 
@@ -897,8 +899,10 @@ export class TypeChecker {
 			return;
 		}
 		const existing = this.types.get(decl.name);
+		// An imported package's type is never reused: a local declaration of
+		// the same name gets its own type and leaves `pkg.T` untouched.
 		const named =
-			existing?.kind === "named"
+			existing?.kind === "named" && !this._importedTypes.has(existing)
 				? existing
 				: { kind: "named", name: decl.name };
 		named.underlying = underlying;
@@ -917,7 +921,8 @@ export class TypeChecker {
 	}
 
 	_registerLocalTypePlaceholder(decl) {
-		if (decl.isAlias || this.types.has(decl.name)) return;
+		const prior = this.types.get(decl.name);
+		if (decl.isAlias || (prior && !this._importedTypes.has(prior))) return;
 		const placeholder = { kind: "named", name: decl.name, underlying: null };
 		this.types.set(decl.name, placeholder);
 		this.globals.define(decl.name, placeholder);
@@ -1510,6 +1515,12 @@ export class TypeChecker {
 					);
 				// `const D Duration = 1` is a BigInt in JS.
 				if (spec.type && expr) this._tag64BitNode(this.resolveType(type), expr);
+				if (spec.type && expr)
+					this._tagFloat32Const(
+						this.resolveType(type),
+						valTypes[i] ?? valTypes[0],
+						expr,
+					);
 				scope.defineConst(name, type, expr);
 			}
 		}

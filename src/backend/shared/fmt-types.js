@@ -66,6 +66,16 @@ export function goTypeName(t, specialized = null) {
 		case "map":
 		case "MapType":
 			return `map[${go(t.key)}]${go(t.value)}`;
+		case "func": {
+			const rets = (t.returns ?? []).map(go);
+			const ret =
+				rets.length === 0
+					? ""
+					: rets.length === 1
+						? ` ${rets[0]}`
+						: ` (${rets.join(", ")})`;
+			return `func(${(t.params ?? []).map(go).join(", ")})${ret}`;
+		}
 		default:
 			return "interface {}";
 	}

@@ -439,25 +439,41 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
-var __ity = __ity || function(x, t, ptr) {
+var __tfn = __tfn || function(f, t) {
+  // A defined func type tags a fresh wrapper, so the shared func keeps its own type.
+  if (typeof f !== "function" || f.__t === t) return f;
+  const w = function(...a) { return f.apply(this, a); };
+  Object.defineProperty(w, "__t", { value: t, configurable: true, writable: true });
+  return w;
+};
+var __tnm = __tnm || function(f) {
+  // The type name of a type argument's info factory, spelled as a static tag.
+  const id = f?.id;
+  return typeof id === "string" ? id.replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
+};
+var __ity = __ity || function(x, t, ptr, sl) {
+  if (t === undefined) return x;
   // The frozen nil map cannot carry a tag: a copy of it keeps its map type.
   if (x !== null && x !== undefined && x.__nilm === true && x.__t === undefined)
     return Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true }, __t: { value: t } }));
   if (x === null || x === undefined) {
     // A nil slice keeps its type as an empty tagged array (not a nil interface).
-    if (!ptr && t.charCodeAt(0) !== 91) return x;
+    if (!ptr && !sl && t.charCodeAt(0) !== 91) return x;
     const n = ptr ? {} : [];
     if (!ptr) Object.defineProperty(n, "__nils", { value: true });
     Object.defineProperty(n, "__nilp", { value: true });
     Object.defineProperty(n, "__t", { value: t });
     return n;
   }
+  // A func already tagged with another type keeps it: tag a fresh wrapper.
+  if (typeof x === "function" && x.__t !== undefined && x.__t !== t) x = __tfn(x, undefined);
   if ((typeof x === "object" || typeof x === "function") && Object.isExtensible(x))
     Object.defineProperty(x, "__t", { value: t, configurable: true, writable: true });
   return x;
 };
 var __isty = __isty || function(v, t, k, c, n) {
   if (v === null || v === undefined || (typeof v !== "object" && typeof v !== "function")) return false;
+  if (k === "namedfunc") return typeof v === "function" && v.__t === t;
   if (k === "func") return typeof v === "function" && (v.__t === undefined || t === "" || v.__t === t);
   if (v.__t !== undefined && t !== "") return v.__t === t;
   if (v.__nilp === true) return false;
@@ -707,6 +723,8 @@ var __isnm = __isnm || function(m) {
 // through `toString` to an injective encoding, and the key value is kept in
 // a table so ranging and fmt can recover it.
 export const HELPER_STRUCT_KEY = `var __kt = __kt || new Map();
+// Tags of defined slice and map types Go cannot hash, with their Go names.
+var __uht = __uht || new Map();
 var __kcl = __kcl || function(o) {
   if (o === null || typeof o !== "object") return o;
   if (typeof o.__clone === "function") return o.__clone();
@@ -753,6 +771,12 @@ var __ik = __ik || function(k, tag) {
   // A slice, map or func in an \`any\` carries its type tag: Go cannot hash it.
   if ((t === "object" || t === "function") && typeof k.__t === "string" && /^(\\[\\]|map\\[|func\\()/.test(k.__t))
     throw new Error("runtime error: hash of unhashable type " + k.__t.replace(/ void$/, ""));
+  // A struct class or defined slice/map type that Go cannot hash is marked
+  // once at its declaration, so this is one lookup per insert.
+  if (t === "object") {
+    const uh = k.constructor?.__uh ?? __uht.get(k.__t);
+    if (uh !== undefined) throw new Error("runtime error: hash of unhashable type " + uh);
+  }
   if (k !== null && t === "object" && typeof k.__gfUnbox === "function" && !k.constructor.name.endsWith("$Ptr")) {
     const v = k.__gfUnbox(), vt = typeof v;
     if (vt === "string" || vt === "number" || vt === "boolean" || vt === "bigint") {

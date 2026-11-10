@@ -106,7 +106,10 @@ const BUILTIN_CHECK = {
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
 	delete: (s, _n, e, at) => {
 		const mt = s._deepUnderlying(at[0]);
-		if (mt?.kind === "map" && e.args[1]) s._markIfaceKey(mt, e.args[1], at[1]);
+		if (mt?.kind === "map" && e.args[1]) {
+			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
+			s._markIfaceKey(mt, e.args[1], at[1]);
+		}
 		return VOID;
 	},
 	make: (s, _n, e, _at, sc) => {
@@ -134,8 +137,8 @@ const BUILTIN_CHECK = {
 	},
 	recover: () => ANY,
 	error: () => ERROR,
-	min: (_s, _n, _e, at) => minMaxType(at),
-	max: (_s, _n, _e, at) => minMaxType(at),
+	min: (s, _n, e, at) => s._checkMinMax(e, at),
+	max: (s, _n, e, at) => s._checkMinMax(e, at),
 	clear: () => VOID,
 	complex: (s, _n, e, at) => s._checkBuiltinComplex(e, at),
 	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
@@ -260,6 +263,8 @@ export const expressionCheckMethods = {
 					this._retypeUntypedShift(lt, rt, expr.right);
 					this._retypeUntypedShift(rt, lt, expr.left);
 				}
+				this._tagFloat32Const(lt, rt, expr.right);
+				this._tagFloat32Const(rt, lt, expr.left);
 				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 					expr.right._is64Bit = true;
 				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
@@ -826,6 +831,15 @@ export const expressionCheckMethods = {
 	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
 	// A named basic value is boxed first, exactly as in any interface
 	// conversion; other values are keyed as they are.
+	// Untyped constant operands take the result type, so a float32 result
+	// rounds them like the typed operands.
+	_checkMinMax(e, at) {
+		const rt = minMaxType(at);
+		for (let i = 0; i < e.args.length; i++)
+			this._tagFloat32Const(rt, at[i], e.args[i]);
+		return rt;
+	},
+
 	_markIfaceKey(mapType, node, srcType) {
 		const key = this.resolveType(mapType.key);
 		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
@@ -1070,6 +1084,8 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
+		if (this._checkIfaceConversion(srcType, targetType, expr, expr.expr))
+			return targetType;
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1139,6 +1155,8 @@ export const expressionCheckMethods = {
 	},
 
 	_checkConversionValidity(srcType, targetType, expr) {
+		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
+			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
 		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1878,6 +1896,13 @@ export const expressionCheckMethods = {
 		return null;
 	},
 
+	_capOperandKind(operand, type) {
+		const untypedConst = type?.kind === "untyped" && type.base !== "nil";
+		return untypedConst
+			? operandKind(operand, type.base, true)
+			: operandKind(operand, typeStr(type), false);
+	},
+
 	_checkBuiltinLen(name, expr, argTypes) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
 		const operand = expr.args?.[0];
@@ -1893,10 +1918,12 @@ export const expressionCheckMethods = {
 		if (name === "cap") {
 			if (
 				(argTypes[0]?.underlying ?? argTypes[0])?.kind === "map" ||
-				isString(argTypes[0])
+				isString(argTypes[0]) ||
+				isBool(argTypes[0]) ||
+				isComplexOrNumeric(argTypes[0])
 			) {
 				this.err(
-					`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
+					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
 					expr,
 				);
 			} else if (sharedInfo(argTypes[0])) {

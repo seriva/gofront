@@ -3,6 +3,7 @@
 
 import { parseJsonTag } from "../parser/struct-tag.js";
 import { foldConstExpr } from "./const-fold.js";
+import { exprText } from "./operand-text.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
@@ -342,18 +343,24 @@ export const resolveMethods = {
 			const e = depth < 16 ? scope.lookupConstExpr(name) : null;
 			return e ? foldConstExpr(e, (n) => resolve(n, depth + 1)) : undefined;
 		};
+		let n = Number.NaN;
 		try {
 			const lit = foldConstExpr(size, resolve);
-			const n = lit ? Number(lit.value) : Number.NaN;
-			if (Number.isInteger(n) && n >= 0) return n;
+			n = lit ? Number(lit.value) : Number.NaN;
 		} catch {
 			// fall through to the checker's evaluator
 		}
 		// `[math.MaxInt8]T`: a package constant the AST folder cannot see.
-		const q = this._constIntValue(size, scope);
-		if (q === null || !Number.isInteger(q) || q < 0) return size;
+		if (!Number.isInteger(n))
+			n = this._constIntValue(size, scope) ?? Number.NaN;
+		if (!Number.isInteger(n)) return size;
 		this._useQualifiedConsts(size);
-		return q;
+		if (n >= 0) return n;
+		this.err(
+			`invalid array length ${exprText(size)} (untyped int constant ${n})`,
+			size,
+		);
+		return 0;
 	},
 
 	// `pkg.K` inside a folded array length counts as using the import.
@@ -715,7 +722,11 @@ export const resolveMethods = {
 			const before = map.size;
 			for (const tp of typeParams) {
 				const arg = map.get(tp.name);
-				if (!arg || !tp.constraint) continue;
+				if (!tp.constraint) continue;
+				if (!arg) {
+					this._inferFromPointerCore(tp, typeParams, map, scope);
+					continue;
+				}
 				const terms = this._constraintTerms(tp.constraint, new Set(), scope);
 				if (terms?.length !== 1) continue;
 				const argUnder =
@@ -725,6 +736,25 @@ export const resolveMethods = {
 			}
 			if (map.size === before) break;
 		}
+	},
+
+	// An unbound type parameter whose constraint has the single exact term
+	// `*T` (`P interface{ *T; M() }`) is the pointer type, once `T` is known.
+	_inferFromPointerCore(tp, typeParams, map, scope) {
+		const terms = this._constraintTerms(tp.constraint, new Set(), scope);
+		if (terms?.length !== 1 || terms[0]?.kind !== "pointer") return;
+		const free = new Set(
+			typeParams.filter((p) => !map.has(p.name)).map((p) => p.name),
+		);
+		const inferred = this.substituteType(terms[0], map);
+		const mentionsFree = (t) =>
+			t?.kind === "typeParam"
+				? free.has(t.name)
+				: t?.kind === "pointer"
+					? mentionsFree(t.base)
+					: false;
+		if (!mentionsFree(inferred) && inferred.kind === "pointer")
+			map.set(tp.name, inferred);
 	},
 
 	_inferFromFuncPair(paramType, argType, map) {

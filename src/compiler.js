@@ -36,6 +36,7 @@ import {
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
+	registerLocalTypeOwners,
 	renameLocalTypes,
 	withOriginalTypeNames,
 } from "./link/stdlib.js";
@@ -646,7 +647,11 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
-	const locals = renameLocalTypes(programs);
+	const foreign = new Set();
+	for (const [name, owner] of owners ?? [])
+		if (owner !== pkgKey) foreign.add(name);
+	const locals = renameLocalTypes(programs, foreign);
+	registerLocalTypeOwners(programs, pkgKey, owners);
 	if (renamed.size > 0 || locals)
 		for (const p of programs) _parseCache.delete(p._path);
 	return renamed;

@@ -6,6 +6,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertProgramOutput,
@@ -934,6 +935,46 @@ func Run() string {
 error: json: unsupported type: func()
 error: json: unsupported type: map[bool]int
 error: json: unsupported type: complex128`,
+	);
+});
+
+test("Marshal of a nil slice of an unsupported element type in an any matches Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var s []func()
+	var v any = s
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+`,
+		"null <nil>\n",
+	);
+});
+
+test("Marshal of a non-nil slice of an unsupported element type in an any reports the element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	s := []func(){nil}
+	var v any = s
+	_, err := json.Marshal(v)
+	fmt.Println(err)
+}
+`,
+		"json: unsupported type: func()\n",
 	);
 });
 

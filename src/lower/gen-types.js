@@ -59,7 +59,15 @@ export function walkNodes(root, fn) {
 	}
 	fn(root);
 	forEachChild(root, (c) => walkNodes(c, fn));
+	// templ bodies keep their Go expressions in non-enumerable properties
+	// (see parser/templ.js), which forEachChild does not visit.
+	for (const name of TEMPL_EXPR_PROPS) {
+		const d = Object.getOwnPropertyDescriptor(root, name);
+		if (d && !d.enumerable) walkNodes(d.value, fn);
+	}
 }
+
+const TEMPL_EXPR_PROPS = ["expr", "forStmt"];
 
 // True when `t` mentions a type parameter (a generic declaration, or a type
 // built from one inside a generic function).
@@ -126,8 +134,9 @@ export function importsFor(qualifiers) {
 
 // Every type a closed-world generator may need to describe: the entries
 // { type, node, via } for the type arguments of generic calls (`typeArg`),
-// the type of every expression (`expr`) and the package's declared named
-// types (`declared`, node null).
+// the type of every expression (`expr`), the static type of every value
+// converted to an interface (`boxed`) and the package's declared named types
+// (`declared`, node null).
 export function collectProgramTypes(programs, checker) {
 	const found = [];
 	for (const p of programs)
@@ -136,6 +145,8 @@ export function collectProgramTypes(programs, checker) {
 				found.push({ type: defaultType(a), node, via: "typeArg" });
 			if (node._type)
 				found.push({ type: defaultType(node._type), node, via: "expr" });
+			if (node._ifaceSrc)
+				found.push({ type: defaultType(node._ifaceSrc), node, via: "boxed" });
 		});
 	for (const [name, t] of checker.types) {
 		if (t?.kind !== "named" || t.name !== name) continue;
@@ -253,6 +264,8 @@ export class TypeSpeller {
 		const byKind = {
 			basic: () => t.name !== "void" && t.name !== "nil",
 			named: () => this.spellableNamed(t, ok, seen),
+			// A JS-interop (.d.ts) type has no Go source to write.
+			namespace: () => false,
 			pointer: () => ok(t.base),
 			slice: () => ok(t.elem),
 			array: () => ok(t.elem),

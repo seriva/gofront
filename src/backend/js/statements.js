@@ -767,6 +767,14 @@ export const statementGenMethods = {
 		if (syncs) for (const s of syncs) this.line(`${s};`);
 	},
 
+	// An untyped constant operand of a 64-bit compound assignment is a Number
+	// in the output; the operator needs it as a BigInt.
+	_untypedTo64(rhsVal, rhsNode) {
+		if (rhsNode?._type?.kind !== "untyped" || rhsVal.endsWith("n"))
+			return rhsVal;
+		return /^-?\d+$/.test(rhsVal) ? `${rhsVal}n` : `BigInt(${rhsVal})`;
+	},
+
 	_genAssignStmt(stmt) {
 		this._markIndexLvalues(stmt.lhs);
 		if (stmt.op !== "=") for (const l of stmt.lhs) this._markDerefOpTarget(l);
@@ -841,14 +849,7 @@ export const statementGenMethods = {
 				const binOp = stmt.op.slice(0, -1);
 				const is64Val = is64BitInt(stmt.lhs[0]._mapValueType);
 				let rhsVal = active[0].r;
-				if (
-					is64Val &&
-					stmt.rhs[0]?._type?.kind === "untyped" &&
-					!rhsVal.endsWith("n") &&
-					/^-?\d+$/.test(rhsVal)
-				) {
-					rhsVal = `${rhsVal}n`;
-				}
+				if (is64Val) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
 				const rhsExpr = is64Val
 					? this._gen64BitBinary(
 							binOp,
@@ -881,14 +882,7 @@ export const statementGenMethods = {
 			}
 			const is64 = is64BitInt(stmt.lhs[0]._type);
 			let rhsVal = active[0].r;
-			if (
-				is64 &&
-				stmt.rhs[0]?._type?.kind === "untyped" &&
-				!rhsVal.endsWith("n") &&
-				/^-?\d+$/.test(rhsVal)
-			) {
-				rhsVal = `${rhsVal}n`;
-			}
+			if (is64) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
 			if (
 				this._needsStrictCompoundStmt(stmt, is64) &&
 				this._genStrictCompound(
@@ -1235,11 +1229,10 @@ export const statementGenMethods = {
 				this.line(`${stmt.keyword} ${stmt.label};`);
 			return;
 		}
-		if (
-			stmt.keyword === "continue" &&
-			stmt.label === this._currentIterLoopLabel
-		) {
-			this.line("return true;");
+		if (stmt.label === this._currentIterLoopLabel) {
+			if (stmt.keyword === "continue") this.line("return true;");
+			else if (stmt.keyword === "break")
+				this.line(`${this._iterBreakFlag} = true; return false;`);
 			return;
 		}
 		this.line(
@@ -1605,13 +1598,35 @@ export const statementGenMethods = {
 		this._loopDepth--;
 	},
 
-	_genIterFor(init, iterType, iteree, lhs, body) {
+	// `for _, v = range m` into an address-taken variable (or an element or
+	// field) cannot destructure into the target: bind temporaries and store
+	// through the variable's box after decoding.  Fills `stores` with the
+	// [target, temporary] pairs and returns the names to bind.
+	_rangeAssignTemps(init, names, stores) {
+		if (init.kind !== "AssignStmt") return names;
+		// `let [..]` declares every name, so once one target needs a temporary
+		// all the others go through temporaries too.
+		const needs = (n, i) => {
+			const e = init.lhs[i];
+			return n !== "_" && !(e.kind === "Ident" && !this._boxedVars.has(e.name));
+		};
+		const any = names.some(needs);
+		return names.map((n, i) => {
+			if (n === "_" || !any) return n;
+			stores.push([init.lhs[i], `__r${i}$`]);
+			return `__r${i}$`;
+		});
+	},
+
+	_genIterFor(init, iterType, iteree, lhsNames, body) {
+		const isAssign = init.kind === "AssignStmt";
+		const stores = [];
+		const lhs = this._rangeAssignTemps(init, lhsNames, stores);
 		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
 		const keyDecode = this._structKeyRange(iterType);
 		const paramKey = this._typeParamKeyRange(iterType);
 		const is64Key = this._is64BitMapRange(iterType);
 		const scalarKey = this._scalarKeyRange(iterType);
-		const isAssign = init.kind === "AssignStmt";
 		// `for _, v = range m` assigns existing variables, where a blank is a
 		// hole in the destructuring pattern; a lone blank still needs a binding.
 		const blank = isAssign && lhs.length > 1 ? "" : "_$";
@@ -1621,7 +1636,7 @@ export const statementGenMethods = {
 					? "_$"
 					: lhs[0]
 				: `[${lhs.map((n) => (n === "_" ? blank : n)).join(", ")}]`;
-		const kw = !isAssign || binding === "_$" ? "let " : "";
+		const kw = !isAssign || binding === "_$" || stores.length > 0 ? "let " : "";
 		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
 		this.indented(() => {
 			if (paramKey && lhs[0] !== "_")
@@ -1637,6 +1652,7 @@ export const statementGenMethods = {
 						: `${lhs[0]} = Number(${lhs[0]});`,
 				);
 			this._cloneMapRangeValue(init, iterType, lhs[1]);
+			for (const [e, tmp] of stores) this._emitRangeVar(e, tmp, true);
 			this.genBlock(body);
 		});
 		this.line("}");
@@ -1775,8 +1791,11 @@ export const statementGenMethods = {
 		return `__s(${iteree}).entries()`;
 	},
 
-	_emitIterTargetDispatch(targetFlag) {
-		const labels = this._functionLabels ?? [];
+	_emitIterTargetDispatch(targetFlag, ownLabel = null) {
+		// The loop's own label is handled inside the callback (`break` and
+		// `continue` of the range-over-func loop), and a JS `continue` cannot
+		// name the labeled block that wraps it.
+		const labels = (this._functionLabels ?? []).filter((l) => l !== ownLabel);
 		this.line(`if (${targetFlag}) {`);
 		this.indented(() => {
 			for (const lbl of labels) {
@@ -1860,7 +1879,7 @@ export const statementGenMethods = {
 			});
 			this.line("});");
 			this.line(`if (${retFlag}) return ${retVar};`);
-			this._emitIterTargetDispatch(targetFlag);
+			this._emitIterTargetDispatch(targetFlag, loopLabel);
 		});
 		this.line("}");
 		this._iterDepth--;

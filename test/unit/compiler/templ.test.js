@@ -1527,6 +1527,43 @@ test("for header may range over an inline struct literal", () => {
 	);
 });
 
+section("templ — fmt formatters");
+
+test("fmt.Sprintf in a templ expression formats a float32 like Go", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Row(1))
+}`,
+		"row.templ": `package main
+import "fmt"
+templ Row(g float32) {
+	<span>{ fmt.Sprintf("%0.1f", g) }</span>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assertEqual(document.querySelector("#app span").textContent, "1.0");
+});
+
+test("fmt.Sprint in a templ expression prints an int64 exactly", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Big(9007199254740993))
+}`,
+		"big.templ": `package main
+import "fmt"
+templ Big(n int64) {
+	<span>{ fmt.Sprint(n) }</span>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assertEqual(
+		document.querySelector("#app span").textContent,
+		"9007199254740993",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -1,7 +1,7 @@
 # v1.9.1 Review Follow-ups (2026-11-09) — Design Plan
 
 **Version:** v1.9.1  
-**Status:** Draft  
+**Status:** Completed (2026-11-10)  
 **Base branch:** main  
 **Related:** [`../v1.9.0/follow-ups-2026-11-07-plan.md`](../v1.9.0/follow-ups-2026-11-07-plan.md) (origin of every ledger entry), [`../v1.9.0/runtime-pruning-plan.md`](../v1.9.0/runtime-pruning-plan.md)  
 **Release note:** Go programs behave more consistently across JavaScript and WebAssembly, fixing nil-pointer method calls, labeled loops, 64-bit constant arithmetic, interface type assertions, and generic map formatting while rejecting invalid switch cases and negative array lengths. Code generation for `encoding/json` is leaner and no longer fails on JavaScript-interop types, alongside corrections for `float32` constants, templ formatting, and WebAssembly SIMD globals.
@@ -148,139 +148,140 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 1: Typechecker Checks
 
-- [ ] Task 1.1: Check `switch` cases for untyped-bool tags and reject `case nil` in tagless switches (`G01`, `G02`)
+- [x] Task 1.1: Check `switch` cases for untyped-bool tags and reject `case nil` in tagless switches (`G01`, `G02`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/switch-cases.test.js`. `switch true { case 5: }` → `assertErrorContains(…, "cannot convert 5 (untyped int constant) to type bool")`; `switch { case nil: }` → `"cannot convert nil to type bool"`; `switch true { case 1 > 0: }` and `switch { case x > 0: }` compile.
   - Done when: both negative cases error on `js`, `both`, `wasm`, and the positive cases run on all targets.
-- [ ] Task 1.2: Reject `cap` of non-slice / array / chan operands (`G03`)
+- [x] Task 1.2: Reject `cap` of non-slice / array / chan operands (`G03`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/cap.test.js`. `cap(1)` → `"invalid argument: 1 (untyped int constant) for cap"`; `cap(true)` and `n := 3; cap(n)` → `"for cap"`; `cap(s)` (slice), `cap(arr)`, `cap(&arr)` and a generic `[S ~[]E]` `cap(s)` stay valid.
   - Done when: no target produces invalid WASM for the three negative repros.
-- [ ] Task 1.3: Reject negative constant array lengths (`G05`)
+- [x] Task 1.3: Reject negative constant array lengths (`G05`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/array-length.test.js`. `var a [-1]int`, `const n = -1; var a [n]int` and `var a [math.MinInt8]int` → `assertErrorContains(…, "invalid array length")`; `[math.MaxInt8]int` → `127` (`assertAllTargetsOutput`); `[0]int` → `0`.
   - Done when: no negative-length program reaches a backend, and the JS output never contains `[object Object]`.
-- [ ] Task 1.4: Keep function-local types from rewriting imported package types (`G04`)
+- [x] Task 1.4: Keep function-local types from rewriting imported package types (`G04`)
   - Files: `src/typechecker/index.js`, `src/typechecker/statements.js`
   - Test: `test/unit/compiler/local-type-shadow.test.js` (`compileHybridProject`, for `js`, `both`, `wasm` targets of `lib`). The `G04` repro prints `{1}`; also `fmt.Sprint(Pt{true}, a.Pt{1})` → `{true} {1}`.
   - Done when: every target prints the Go output, and the existing function-local type tests (`test/unit/types/shadowing.test.js`, and the `F72` JSON case in `test/unit/builtins/json.test.js`) still pass.
 
 ### Phase 2: Typechecker `any` → Concrete Assignments
 
-- [ ] Task 2.1: Check plain assignment statements from `any` (`G21`)
+- [x] Task 2.1: Check plain assignment statements from `any` (`G21`)
   - Files: `src/typechecker/statements.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var a A; var b any = A{1}; a = b` → `assertErrorContains(…, "need type assertion")`; `var c any; c = b` and `var e error; var x any; _ = x; e = nil` compile.
   - Done when: the error is reported on all targets and `npm run check` (example type-checks) passes.
-- [ ] Task 2.2: Check comma-ok map, tuple `=` and mixed `:=` from `any` (`G22`)
+- [x] Task 2.2: Check comma-ok map, tuple `=` and mixed `:=` from `any` (`G22`)
   - Files: `src/typechecker/statements.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/any-assertion.test.js`. `a, ok = m["k"]` (`map[string]any`), `n, err = getPair()` and `var n int; n, err := getPair()` (`(any, error)`) → `"need type assertion"`; `x, ok := m["k"]` with a fresh `x` compiles.
   - Done when: all three are rejected on every target and the positive case runs.
-- [ ] Task 2.3: Reject conversions from `any` to concrete types (`G23`)
+- [x] Task 2.3: Reject conversions from `any` to concrete types (`G23`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `(*int)(x)` and `int(x)` with `x any` → `"need type assertion"`; `any(x)`, `error(nil)` and `interface{ M() }(v)` where `v` implements it compile.
   - Done when: both negative repros error on all targets.
-- [ ] Task 2.4: Bind the type-switch `default` and multi-type captures to the switch operand's type (`G24`)
+- [x] Task 2.4: Bind the type-switch `default` and multi-type captures to the switch operand's type (`G24`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/any-assertion.test.js`. `switch v := x.(type) { default: var a A = v }` → `"need type assertion"`; `case A, B: var y any = v` compiles; `default: fmt.Println(v)` prints the value on all targets.
   - Done when: the negative case errors, no target emits invalid WASM, and the existing type-switch tests pass.
 
 ### Phase 3: Parser and JS Statement Codegen
 
-- [ ] Task 3.1: Parse type-set elements next to methods in interfaces (`G17`)
+- [x] Task 3.1: Parse type-set elements next to methods in interfaces (`G17`)
   - Files: `src/parser/types.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/parser/constraint-elements.test.js`. `type Incer[T any] interface{ *T; Inc() }` (one-line and multi-line) parses; the full `bump[C]().n` repro → `2` (`assertProgramOutput`); `Incer` used as an ordinary variable type → existing `cannot use type … outside a type constraint` style error (substring `constraint`).
   - Done when: the repro prints `2` on `both` and `wasm`.
-- [ ] Task 3.2: Mangle hoisted local types that share a name with a local value (`G06`)
+- [x] Task 3.2: Mangle hoisted local types that share a name with a local value (`G06`)
   - Files: `src/backend/js/index.js`
   - Test: `test/unit/language/local-types.test.js`. `func a() { type Dup struct{ X int }; Dup := 1; fmt.Println(Dup) }` → `1` (`assertAllTargetsOutput`); a variant that also prints `fmt.Sprintf("%T", struct-value)` keeps `main.Dup`.
   - Done when: no `ReferenceError` on `js` or `both`, and `%T` is unchanged.
-- [ ] Task 3.3: Emit untyped constant operands of 64-bit compound assignments as BigInt (`G07`)
+- [x] Task 3.3: Emit untyped constant operands of 64-bit compound assignments as BigInt (`G07`)
   - Files: `src/backend/js/statements.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/language/int64.test.js`. `const half = 1 << 51; var b uint64 = 1; b += half` → `2251799813685249`; `int64 -= half` → `-2251799813685247`; `b |= half`, `b *= 3` → Go values (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go values.
-- [ ] Task 3.4: Fix labeled `break` / `continue` on range-over-func loops in JS (`G08`, JS)
+- [x] Task 3.4: Fix labeled `break` / `continue` on range-over-func loops in JS (`G08`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-func.test.js`. The three `G08` repros (`break outer` → `0\ndone`; `continue outer` → `0\n1\ndone`; nested `for` with `continue outer` → `0 0\n1 0\ndone`) via `assertJsTargetsOutput`.
   - Done when: no `SyntaxError` and the output matches on `js` and `both`. The WASM side is fixed in Task 4.1, so this test pins JS only.
-- [ ] Task 3.5: Assign ranged map values into address-taken variables through the box in JS (`G09`, JS)
+- [x] Task 3.5: Assign ranged map values into address-taken variables through the box in JS (`G09`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-assign.test.js`. The `G09` repro → `1`; the key form `for k = range m` with `&k` taken → the key (`assertJsTargetsOutput`).
   - Done when: `js` and `both` print `1`. WASM validity is covered in Task 4.2.
 
 ### Phase 4: WASM Codegen
 
-- [ ] Task 4.1: Fix labeled `break` / `continue` unwinding through range-over-func in WASM (`G08`, WASM)
+- [x] Task 4.1: Fix labeled `break` / `continue` unwinding through range-over-func in WASM (`G08`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 3.4 cases to `assertProgramOutput`.
   - Done when: all three repros match Go on `both` and `wasm`, with no panic for `break outer`.
-- [ ] Task 4.2: Emit valid WASM for map range assignment into a boxed variable (`G09`, WASM)
+- [x] Task 4.2: Emit valid WASM for map range assignment into a boxed variable (`G09`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. Upgrade the Task 3.5 cases to `assertProgramOutput`.
   - Done when: `assertValidWasm` passes and `wasm` prints `1`.
-- [ ] Task 4.3: Name the dynamic type in WASM unhashable-key panics (`G10`, `G13` WASM)
+- [x] Task 4.3: Name the dynamic type in WASM unhashable-key panics (`G10`, `G13` WASM)
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/emit-maps.js`
   - Test: `test/unit/wasm/map-keys.test.js`. The func key → `runtime error: hash of unhashable type func()`; the struct `S` with a slice → `… main.S`; `type L []int` → `… main.L` (wasm side; the JS side follows in Task 5.4).
   - Done when: the three messages match Go exactly on `wasm`.
-- [ ] Task 4.4: Include methods promoted through embedded pointers in WASM dynamic interface checks (`G14`)
+- [x] Task 4.4: Include methods promoted through embedded pointers in WASM dynamic interface checks (`G14`)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `G14` repro → `true` (`assertProgramOutput`); a value-embedded `Inner` with a pointer-receiver `M` held as a `PO` value in `any` → `false` (Go method-set rule).
   - Done when: both match Go on `both` and `wasm`.
-- [ ] Task 4.5: Match Go-source stdlib named slices against interfaces from `any` in WASM (`G15`)
+- [x] Task 4.5: Match Go-source stdlib named slices against interfaces from `any` in WASM (`G15`)
   - Files: `src/backend/wasm/prescan.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. `var v any = sort.IntSlice{1}; _, ok := v.(sort.Interface)` → `true`; the same for `sort.StringSlice` → `true`.
   - Done when: `wasm` prints `true` for both.
 
 ### Phase 5: JS Nil Receivers and Map Keys
 
-- [ ] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
+- [x] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `var s *S; s.Ping(); fmt.Println("ok")` → `ok` (`assertAllTargetsOutput`); a method that checks `if s == nil { return "nil" }` → `nil`; `newT().M()` evaluates `newT` once (count side effects).
   - Done when: all targets match Go and `npm run bench` is within 3% of the `8a6b7a1` (tag `1.9.0`) baseline.
-- [ ] Task 5.2: Lower method expressions `(*T).M` to static dispatch (`G12`)
+- [x] Task 5.2: Lower method expressions `(*T).M` to static dispatch (`G12`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type MyInt int; g := (*MyInt).Ping; g(nil-ptr)` → `1`; a struct `(*S).M` with nil → Go output.
   - Done when: no `TypeError` on `js` or `both`.
-- [ ] Task 5.3: Dispatch promoted pointer-receiver methods through nil embedded pointers (`G18`)
+- [x] Task 5.3: Dispatch promoted pointer-receiver methods through nil embedded pointers (`G18`)
   - Files: `src/backend/js/expressions.js`, `src/lower/embedding.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type P struct{ *Base }; P{}.Ptr()` → `1`; two levels of embedding → `1`.
   - Done when: all targets print `1`.
-- [ ] Task 5.4: Panic on unhashable struct and defined slice keys in `any` maps on JS (`G13` JS)
+- [x] Task 5.4: Panic on unhashable struct and defined slice keys in `any` maps on JS (`G13` JS)
   - Files: `src/backend/js/runtime.js`, `src/backend/js/index.js`
   - Test: `test/unit/wasm/map-keys.test.js`. Upgrade the Task 4.3 struct and `L` cases to `assertAllTargetsOutput`; a hashable struct key `struct{ a int }` still works.
   - Done when: every target prints Go's message, and the hashable-key case is unchanged.
 
 ### Phase 6: Dynamic Types, `%T` and `encoding/json`
 
-- [ ] Task 6.1: Tag defined func conversions with fresh wrappers and keep the type of nil defined slices in `any` on JS (`G16`)
+- [x] Task 6.1: Tag defined func conversions with fresh wrappers and keep the type of nil defined slices in `any` on JS (`G16`)
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`
   - Test: `test/unit/types/dynamic-types.test.js`. The `G16` repro → `false true`; the shared-func repro → `true false` (`assertAllTargetsOutput`).
   - Done when: JS matches WASM and Go for both repros.
-- [ ] Task 6.2: Tag maps built in generic functions with their instantiated type on JS (`G25`)
+- [x] Task 6.2: Tag maps built in generic functions with their instantiated type on JS (`G25`)
   - Files: `src/backend/js/expressions.js`, `src/backend/js/type-info.js`
   - Test: `test/unit/types/dynamic-types.test.js`. The `G25` type-switch repro → `is si` (`assertProgramOutput`); `make(map[K]V)` inside a generic function → the same.
   - Done when: JS prints `is si`.
-- [ ] Task 6.3: Print `%T` of maps instantiated in generic code (`G25b`)
+- [x] Task 6.3: Print `%T` of maps instantiated in generic code (`G25b`)
   - Files: `src/lower/fmt-formatters.js`, `src/backend/wasm/monomorph.js`
   - Test: `test/unit/stdlib/fmt-types.test.js`. `fmt.Printf("%T %T\n", pair(1, []int{2}), pair("s", 5))` → `map[int][]int map[string]int` (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go text.
-- [ ] Task 6.4: Report nil unsupported slices in `any` from `json.Marshal`, and update the docs (`G19`)
+- [x] Task 6.4: Report nil unsupported slices in `any` from `json.Marshal`, and update the docs (`G19`)
   - Files: `stdlib/internal/jsonrt/enc.go`, `src/lower/json-codecs.js`, `docs/go-compatibility.md`
   - Test: `test/unit/builtins/json.test.js` (or `test/unit/wasm/json.test.js`). `var s []func(); var v any = s; _, err := json.Marshal(v)` → `json: unsupported type: []func()` on `both` and `wasm`; the non-nil `[]func(){nil}` keeps `json: unsupported type: func()`.
+  - Deviation: Go's `sliceEncoder` writes `null` for any nil slice before it looks at the element type (and the pre-existing `json.test.js` case `show(nilFns)` expects `null <nil>`), so the test expects `null <nil>` for the nil `[]func()` on every target, not `json: unsupported type: []func()`. The fix registers func-holding slices, arrays and maps with the dynamic encoder (`isFuncComposite`), so WASM no longer reports `unsupported dynamic type`.
   - Done when: both targets print Go's error, and `docs/go-compatibility.md` states that nil-pointer method calls and `%T` of generic map instantiations behave as in Go (with no other compatibility row contradicted).
 
 ### Phase 7: `encoding/json` Codec Generation
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`, `G29`). Independent of Phases 1–6; may run first because `G26` blocks SimpleFPS.
 
-- [ ] Task 7.1: Exclude JS-interop (`namespace`) types from dynamic JSON codec spelling and collection (`G26`, dynamic site)
+- [x] Task 7.1: Exclude JS-interop (`namespace`) types from dynamic JSON codec spelling and collection (`G26`, dynamic site)
   - Files: `src/lower/json-codecs.js`, `src/lower/gen-types.js`
   - Test: `test/unit/builtins/json.test.js` (`withTempDir` + `compileDir` with a `go.d.ts`, then run). A dynamic `json.Marshal(any)` site in a program declaring structs with `GPUBuffer` fields compiles and runs without crashing; `gofront check .` and `build` succeed; dynamic types without interop fields still encode.
   - Done when: `spellable` returns `false` for `namespace` and composite types reaching it, preventing `cannot spell type kind namespace` compiler crashes on dynamic marshal sites.
-- [ ] Task 7.2: Encode nil JS-interop struct fields as `null` and reject decoding into them (`G26`, typed site)
+- [x] Task 7.2: Encode nil JS-interop struct fields as `null` and reject decoding into them (`G26`, typed site)
   - Files: `src/lower/json-codecs.js`
   - Test: `test/unit/builtins/json.test.js`. Typed `json.Marshal(Holder{Name: "x"})` with nil `Buf GPUBuffer` field encodes as `{"Name":"x","Buf":null} <nil>`; non-nil `Buf` returns error `json: unsupported type: GPUBuffer`; `*GPUBuffer`, `[]GPUBuffer` and `map[string]GPUBuffer` fields compile; `json.Unmarshal` into `Holder` returns compile error `cannot unmarshal into GPUBuffer`.
   - Done when: typed marshal sites handle nil interop fields matching 1.8.0 behavior without compiler crashes, and decode attempts produce clean diagnostics.
-- [ ] Task 7.3: Generate dynamic JSON codecs only for types that are built or boxed into an interface (`G29`)
+- [x] Task 7.3: Generate dynamic JSON codecs only for types that are built or boxed into an interface (`G29`)
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`
   - Test: `test/unit/builtins/json-codegen-size.test.js`. With a dynamic `json.Marshal(any)` site, a program with 20 declared, never-boxed struct types emits the same number of `function gfj_` definitions as the same program with none (`forceTarget: "js"`); `var t T; t.A = 1; var v any = t; json.Marshal(v)` (declared, not built) → `{"A":1}` (`assertProgramOutput`); `var v any = &T{1}` → `{"A":1}`.
   - Done when: the codec count is independent of unused declared types, every existing `test/unit/builtins/json*.test.js` case passes unchanged, and the SimpleFPS check in **Done means** is recorded in the PR body.
@@ -289,15 +290,15 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`,
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G27`, `G28`, `G30`).
 
-- [ ] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
+- [x] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/float32-consts.test.js`. The `G27` repro → `true\ntrue` (`assertAllTargetsOutput`); `var c float32 = 0.01; fmt.Println(float64(c))` → `0.009999999776482582`; `const k float32 = 0.1; var f float32 = 1; fmt.Println(f/10 == k)` → `true`; a `float64` `0.01` comparison keeps printing `true` for `0.01 == 0.01`.
   - Done when: `js`, `both` and `wasm` print the Go output, and the emitted JS for `float64` constants is unchanged.
-- [ ] Task 8.2: Route `fmt.Sprintf` and friends in `.templ` expressions through the typed formatters (`G28`)
+- [x] Task 8.2: Route `fmt.Sprintf` and friends in `.templ` expressions through the typed formatters (`G28`)
   - Files: `src/lower/fmt-formatters.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js`. `templ Row(g float32) { <span>{ fmt.Sprintf("%0.1f", g) }</span> }` mounted with `Row(1)` → `textContent` `1.0` (`runInDom`); `fmt.Sprint(n)` with `n int64` in a templ expression → the exact digits.
   - Done when: the templ output matches the same call made from a `.go` file, and the existing templ tests pass.
-- [ ] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
+- [x] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
   - Files: `src/backend/wasm/globals.js`
   - Test: `test/unit/wasm/simd.test.js`. The `G30` program (package-level `var scratch mat4c`) → `assertValidWasm` passes and prints `1` (`assertProgramOutput`); a package-level `[2]simd.F32x4` array and a nested struct holding a `mat4c` → valid modules.
   - Done when: no `struct.new … expected type v128` `CompileError` for any of the three shapes.

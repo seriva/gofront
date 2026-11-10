@@ -1,0 +1,195 @@
+// test/unit/types/any-assertion.test.js
+// A value of declared type `any` needs a type assertion before it flows into a
+// concrete type, whatever the statement form.
+
+import {
+	assertAllTargetsOutput,
+	assertErrorContains,
+	compile,
+	compileWasm,
+	section,
+	test,
+} from "../helpers.js";
+
+section("any to concrete assertions");
+
+function errorsOn(target, src) {
+	if (target === "wasm") return compileWasm(src).errors ?? [];
+	return compile(src, { target }).errors ?? [];
+}
+
+const TARGETS = ["js", "both", "wasm"];
+
+function negative(name, src, needle = "need type assertion") {
+	for (const target of TARGETS) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(errorsOn(target, src), needle);
+		});
+	}
+}
+
+function positive(name, src) {
+	for (const target of TARGETS) {
+		test(`${name} compiles (${target})`, () => {
+			const errs = errorsOn(target, src);
+			if (errs.length > 0) throw new Error(`unexpected errors: ${errs}`);
+		});
+	}
+}
+
+// Task 2.1: plain assignment
+negative(
+	"a = b with b any",
+	`package main
+type A struct{ X int }
+func main() {
+	var a A
+	var b any = A{1}
+	a = b
+	_ = a
+}`,
+);
+positive(
+	"any-to-any assignment and nil to error",
+	`package main
+func main() {
+	var b any = 1
+	var c any
+	c = b
+	var e error
+	var x any
+	_ = x
+	e = nil
+	_, _ = c, e
+}`,
+);
+
+// Task 2.2: comma-ok map, tuple =, mixed :=
+negative(
+	"comma-ok map assignment into concrete",
+	`package main
+type A struct{ X int }
+func main() {
+	m := map[string]any{"k": A{1}}
+	var a A
+	var ok bool
+	a, ok = m["k"]
+	_, _ = a, ok
+}`,
+);
+negative(
+	"tuple assignment from (any, error)",
+	`package main
+func getPair() (any, error) { return 1, nil }
+func main() {
+	var n int
+	var err error
+	n, err = getPair()
+	_, _ = n, err
+}`,
+);
+negative(
+	"mixed := redeclaration from (any, error)",
+	`package main
+func getPair() (any, error) { return 1, nil }
+func main() {
+	var n int
+	n, err := getPair()
+	_, _ = n, err
+}`,
+);
+positive(
+	"fresh comma-ok := from map[string]any",
+	`package main
+func main() {
+	m := map[string]any{"k": 1}
+	x, ok := m["k"]
+	_, _ = x, ok
+}`,
+);
+
+// Task 2.3: conversions
+negative(
+	"(*int)(x) with x any",
+	`package main
+func main() {
+	var x any
+	p := (*int)(x)
+	_ = p
+}`,
+);
+negative(
+	"int(x) with x any",
+	`package main
+func main() {
+	var x any = 1
+	n := int(x)
+	_ = n
+}`,
+);
+positive(
+	"any(x), error(nil) and interface conversions",
+	`package main
+type I interface{ M() }
+type T struct{}
+func (T) M() {}
+func main() {
+	var x any = 1
+	y := any(x)
+	e := error(nil)
+	var v I = T{}
+	i := I(v)
+	_, _, _ = y, e, i
+}`,
+);
+
+// Task 2.4: type-switch default and multi-type captures
+negative(
+	"type-switch default binding assigned to concrete",
+	`package main
+type A struct{ X int }
+type B struct{}
+func main() {
+	var x any = 3
+	switch v := x.(type) {
+	case B:
+		_ = v
+	default:
+		var a A = v
+		_ = a
+	}
+}`,
+);
+positive(
+	"multi-type capture to any",
+	`package main
+type A struct{}
+type B struct{}
+func main() {
+	var x any = A{}
+	switch v := x.(type) {
+	case A, B:
+		var y any = v
+		_ = y
+	}
+}`,
+);
+test("type-switch default prints the value on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var x any = 3
+	switch v := x.(type) {
+	case string:
+		fmt.Println("string", v)
+	default:
+		fmt.Println(v)
+	}
+}
+`,
+		"3\n",
+	);
+});
