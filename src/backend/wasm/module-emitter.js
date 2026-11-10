@@ -1560,7 +1560,7 @@ export class ModuleEmitter {
 			}
 
 			// Check struct value (boxed)
-			if (this.checker?.implements?.(namedType, ifaceResolved)) {
+			if (this._valueImplements(namedType, ifaceResolved)) {
 				const box = this.getIfaceBoxType(namedType);
 				if (box && !seen.has(box.typeIndex)) {
 					seen.add(box.typeIndex);
@@ -1596,6 +1596,24 @@ export class ModuleEmitter {
 		}
 
 		return candidates;
+	}
+
+	// Whether the struct value `namedType` implements `iface`, including when its
+	// pointer-receiver methods are promoted through an embedded pointer, which
+	// puts them in the value's method set (`struct{ *Inner }`).
+	_valueImplements(namedType, iface) {
+		const checker = this.checker;
+		if (checker?.implements?.(namedType, iface)) return true;
+		const ptr = { kind: "pointer", base: namedType };
+		if (!checker?.implements?.(ptr, iface)) return false;
+		const st = checker.resolveType(namedType.underlying);
+		const methods = st?.methods?.size ? st.methods : namedType.methods;
+		const names = [...(iface.methods?.keys() ?? [])];
+		return names.every(
+			(n) =>
+				!methods?.get(n)?._ptrRecv ||
+				checker._promotedThroughPointer(namedType, n),
+		);
 	}
 
 	// `*T` of a named scalar or slice is boxed apart from `T`.

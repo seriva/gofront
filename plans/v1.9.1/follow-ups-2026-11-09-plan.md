@@ -221,7 +221,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/emit-maps.js`
   - Test: `test/unit/wasm/map-keys.test.js`. The func key → `runtime error: hash of unhashable type func()`; the struct `S` with a slice → `… main.S`; `type L []int` → `… main.L` (wasm side; the JS side follows in Task 5.4).
   - Done when: the three messages match Go exactly on `wasm`.
-- [ ] Task 4.4: Include methods promoted through embedded pointers in WASM dynamic interface checks (`G14`)
+- [x] Task 4.4: Include methods promoted through embedded pointers in WASM dynamic interface checks (`G14`)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `G14` repro → `true` (`assertProgramOutput`); a value-embedded `Inner` with a pointer-receiver `M` held as a `PO` value in `any` → `false` (Go method-set rule).
   - Done when: both match Go on `both` and `wasm`.
