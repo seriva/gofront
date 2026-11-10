@@ -40,7 +40,7 @@ import {
 } from "../shared/host-unicode.js";
 import {
 	comparesToNil,
-	derefsReceiver,
+	derefsReceiverFirst,
 	expressionGenMethods,
 } from "./expressions.js";
 import {
@@ -596,9 +596,10 @@ export class CodeGen {
 	}
 
 	// Pointer-receiver methods that can run with a nil receiver: they compare
-	// it with nil, or never read through it (a method that does panics on nil
-	// either way, so it keeps the faster direct call). Calls to these go
-	// through the prototype (see _nilSafeMethodClass).
+	// it with nil, or do not read through it before anything could skip the
+	// read (a method that does panics on nil either way, so it keeps the
+	// faster direct call). Calls to these go through the prototype (see
+	// _nilSafeMethodClass).
 	_markNilSafeMethods(methods) {
 		for (const [name, decls] of methods) {
 			const safe = new Set();
@@ -608,7 +609,7 @@ export class CodeGen {
 				changed = false;
 				for (const d of ptr) {
 					if (!safe.has(d.name) || comparesToNil(d.body, d.recvName)) continue;
-					if (!derefsReceiver(d.body, d.recvName, safe)) continue;
+					if (!derefsReceiverFirst(d.body?.stmts, d.recvName, safe)) continue;
 					safe.delete(d.name);
 					changed = true;
 				}

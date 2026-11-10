@@ -3021,6 +3021,30 @@ null <nil>
 	);
 });
 
+test("a func array in an interface reports an unsupported type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var a [2]func()
+	var v any = a
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	var s []func()
+	var w any = s
+	b, err = json.Marshal(w)
+	fmt.Println(string(b), err)
+}
+`,
+		" json: unsupported type: func()\nnull <nil>\n",
+	);
+});
+
 section("encoding/json — anonymous struct types");
 
 test("anonymous struct types encode, decode and report errors like Go", async () => {

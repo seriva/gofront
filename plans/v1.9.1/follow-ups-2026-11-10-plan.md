@@ -222,23 +222,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 4: JS Nil Receivers, Method Expressions, Map Keys and `encoding/json`
 
-- [ ] Task 4.1: Make the JS nil-safe-method analysis scope-aware and limit unsafe marking to unconditional receiver reads (`H11`, `H12`)
+- [x] Task 4.1: Make the JS nil-safe-method analysis scope-aware and limit unsafe marking to unconditional receiver reads (`H11`, `H12`)
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `H11` → `5`; `H12` with `cond == false` → `0` (`assertAllTargetsOutput`); a method whose first statement is `return s.x` on nil → panics with Go's nil-dereference message on every target.
   - Done when: both repros match Go, and `npm run bench` is within 3% of the plan's base commit.
-- [ ] Task 4.2: Statically dispatch nil-safe methods of generic struct pointers (`H13`)
+- [x] Task 4.2: Statically dispatch nil-safe methods of generic struct pointers (`H13`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. The `H13` repro → `nil`; non-nil `&Gen[int]{}` → `ok`; `Gen[string]` instantiation → `nil` (`assertAllTargetsOutput`).
   - Done when: no `TypeError` on `js`/`both`.
-- [ ] Task 4.3: Nil-check the receiver of `(*T).M` method expressions for value-receiver methods (`H14`)
+- [x] Task 4.3: Nil-check the receiver of `(*T).M` method expressions for value-receiver methods (`H14`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. The `H14` repro → `runtime error: invalid memory address or nil pointer dereference` (`assertAllTargetsOutput`); non-nil `f(&S{})` → `10`.
   - Done when: every target prints Go's panic message.
-- [ ] Task 4.4: Panic on defined slice and map literal keys of `map[any]` on JS (`H15`)
+- [x] Task 4.4: Panic on defined slice and map literal keys of `map[any]` on JS (`H15`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/wasm/map-keys.test.js`. `m[L{1}] = 1` → `runtime error: hash of unhashable type main.L`; `m[M{}] = 1` → `… main.M` (`assertAllTargetsOutput`, relies on Task 3.4 for wasm); `m[[2]int{1, 2}] = 1` and a hashable struct key still work.
   - Done when: every target prints Go's message and hashable keys are unchanged.
-- [ ] Task 4.5: Fail `json.Marshal` of func arrays in `any` on JS, and update the docs (`H18`)
+- [x] Task 4.5: Fail `json.Marshal` of func arrays in `any` on JS, and update the docs (`H18`)
   - Files: `src/lower/json-codecs.js`, `docs/go-compatibility.md`
   - Test: `test/unit/builtins/json.test.js`. `var a [2]func(); var v any = a; json.Marshal(v)` → ` json: unsupported type: func()` (`assertAllTargetsOutput`); nil `[]func()` in `any` keeps `null <nil>`.
   - Done when: every target prints Go's error, and the `encoding/json` row of `docs/go-compatibility.md` says func arrays in an `any` fail on every target (nil func slices still encode `null`).
