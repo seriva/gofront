@@ -1086,6 +1086,14 @@ export const expressionCheckMethods = {
 		this._rejectNilConversion(srcType, targetType, expr);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.expr))
 			return targetType;
+		if (
+			srcType &&
+			targetType &&
+			!isAny(srcType) &&
+			!isAny(targetType) &&
+			this._checkIfaceTargetConversion(srcType, targetType, expr.expr)
+		)
+			return targetType;
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1154,10 +1162,25 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
+	// `I(x)` with I an interface type converts exactly when x is assignable to
+	// I, so the method-set check (and its wording) is the assignment one.
+	_checkIfaceTargetConversion(srcType, targetType, operand) {
+		// `error("msg")` builds an error value (GoFront extension).
+		if (targetType === ERROR && isString(srcType)) return false;
+		const base = this.resolveType(
+			targetType.kind === "named" ? targetType.underlying : targetType,
+		);
+		if (base?.kind !== "interface" || !operand) return false;
+		this.assertAssignable(targetType, srcType, operand, "conversion");
+		return true;
+	},
+
 	_checkConversionValidity(srcType, targetType, expr) {
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
+		if (this._checkIfaceTargetConversion(srcType, targetType, expr.args?.[0]))
+			return;
 		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
 			targetType.kind === "named" ? targetType.underlying : targetType;

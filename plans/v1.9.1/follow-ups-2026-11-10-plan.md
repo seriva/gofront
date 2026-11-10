@@ -180,7 +180,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 2: Parser, Interface Conversions and JS Statements
 
-- [ ] Task 2.1: Allow explicit conversions to interface types (`H04`)
+- [x] Task 2.1: Allow explicit conversions to interface types (`H04`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `v := I(T{}); v.M()` → `m` (`assertAllTargetsOutput`); `I(nil)` compiles; `I(T2{})` with `T2` lacking `M` → `assertErrorContains(…, "does not implement")`.
   - Done when: the positive runs on every target and the negative keeps Go's wording.
