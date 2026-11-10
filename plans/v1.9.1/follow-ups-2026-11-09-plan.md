@@ -290,15 +290,15 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`,
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G27`, `G28`, `G30`).
 
-- [ ] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
+- [x] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/float32-consts.test.js`. The `G27` repro → `true\ntrue` (`assertAllTargetsOutput`); `var c float32 = 0.01; fmt.Println(float64(c))` → `0.009999999776482582`; `const k float32 = 0.1; var f float32 = 1; fmt.Println(f/10 == k)` → `true`; a `float64` `0.01` comparison keeps printing `true` for `0.01 == 0.01`.
   - Done when: `js`, `both` and `wasm` print the Go output, and the emitted JS for `float64` constants is unchanged.
-- [ ] Task 8.2: Route `fmt.Sprintf` and friends in `.templ` expressions through the typed formatters (`G28`)
+- [x] Task 8.2: Route `fmt.Sprintf` and friends in `.templ` expressions through the typed formatters (`G28`)
   - Files: `src/lower/fmt-formatters.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js`. `templ Row(g float32) { <span>{ fmt.Sprintf("%0.1f", g) }</span> }` mounted with `Row(1)` → `textContent` `1.0` (`runInDom`); `fmt.Sprint(n)` with `n int64` in a templ expression → the exact digits.
   - Done when: the templ output matches the same call made from a `.go` file, and the existing templ tests pass.
-- [ ] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
+- [x] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
   - Files: `src/backend/wasm/globals.js`
   - Test: `test/unit/wasm/simd.test.js`. The `G30` program (package-level `var scratch mat4c`) → `assertValidWasm` passes and prints `1` (`assertProgramOutput`); a package-level `[2]simd.F32x4` array and a nested struct holding a `mat4c` → valid modules.
   - Done when: no `struct.new … expected type v128` `CompileError` for any of the three shapes.

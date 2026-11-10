@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Fixed
-- **Go programs behave more consistently across JavaScript and WebAssembly**: nil-pointer method calls, labeled loops, 64-bit constant arithmetic, interface type assertions and generic map formatting now match Go, and invalid switch cases and negative array lengths are rejected with Go's errors. In JavaScript output, `encoding/json` no longer fails on JavaScript-interop (`.d.ts`) types and generates leaner code.
+- **Go programs behave more consistently across JavaScript and WebAssembly**: nil-pointer method calls, labeled loops, 64-bit constant arithmetic, interface type assertions and generic map formatting now match Go, and invalid switch cases and negative array lengths are rejected with Go's errors. In JavaScript output, `encoding/json` no longer fails on JavaScript-interop (`.d.ts`) types and generates leaner code, `float32` constants are rounded as in Go, and `fmt` calls in `.templ` files format by type; WebAssembly packages now accept package-level struct variables that hold SIMD vectors.
 
 ## [1.9.0] - 2026-11-09
 

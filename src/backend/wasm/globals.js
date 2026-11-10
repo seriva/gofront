@@ -104,6 +104,7 @@ function _zeroFieldConst(f, mod) {
 	const w = f.wType;
 	if (w === "i64") return [{ op: "i64.const", value: 0n }];
 	if (w === "f32" || w === "f64") return [{ op: `${w}.const`, value: 0 }];
+	if (w === "v128") return [{ op: "v128.const", bytes: new Array(16).fill(0) }];
 	if (w === "externref") return [{ op: "ref.null", heapType: "extern" }];
 	if (w === "anyref") return [{ op: "ref.null", heapType: "any" }];
 	if (typeof w !== "object" || w === null)

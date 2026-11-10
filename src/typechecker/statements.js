@@ -411,6 +411,7 @@ export const statementCheckMethods = {
 				for (const e of c.list) {
 					this.checkExpr(e, caseScope);
 					this._checkCaseValue(stmt.tag, e);
+					if (stmt.tag) this._tagFloat32Const(stmt.tag._type, e._type, e);
 					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
 				}
 			}

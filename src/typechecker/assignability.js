@@ -229,6 +229,19 @@ export const assignabilityMethods = {
 		}
 	},
 
+	// An untyped numeric constant that takes type float32 is rounded to
+	// float32 in JS output (`var c float32 = 0.01`, `v == 0.01`).
+	_tagFloat32Const(target, source, node) {
+		if (!node || typeof node !== "object" || !node._const) return;
+		if (!isUntyped(source) || this._float32Base(target) !== "float32") return;
+		node._f32Const = true;
+	},
+
+	_float32Base(t) {
+		const r = t?.kind === "named" ? t.underlying : t;
+		return r?.kind === "basic" || r?.kind === "untyped" ? r.name : null;
+	},
+
 	// `var m uint64 = (1 << k) - 1`: a non-constant shift whose left operand is
 	// an untyped constant takes the type its context gives it, so codegen
 	// computes it in that type (BigInt for 64-bit integers).
@@ -275,6 +288,7 @@ export const assignabilityMethods = {
 		target = this.resolveType(target);
 		source = this.resolveType(source);
 		this._tag64BitNode(target, node);
+		this._tagFloat32Const(target, source, operand ?? node);
 		this._retypeUntypedShift(target, source, operand ?? node);
 		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
