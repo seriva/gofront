@@ -273,7 +273,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`, `G29`). Independent of Phases 1–6; may run first because `G26` blocks SimpleFPS.
 
-- [ ] Task 7.1: Exclude JS-interop (`namespace`) types from dynamic JSON codec spelling and collection (`G26`, dynamic site)
+- [x] Task 7.1: Exclude JS-interop (`namespace`) types from dynamic JSON codec spelling and collection (`G26`, dynamic site)
   - Files: `src/lower/json-codecs.js`, `src/lower/gen-types.js`
   - Test: `test/unit/builtins/json.test.js` (`withTempDir` + `compileDir` with a `go.d.ts`, then run). A dynamic `json.Marshal(any)` site in a program declaring structs with `GPUBuffer` fields compiles and runs without crashing; `gofront check .` and `build` succeed; dynamic types without interop fields still encode.
   - Done when: `spellable` returns `false` for `namespace` and composite types reaching it, preventing `cannot spell type kind namespace` compiler crashes on dynamic marshal sites.

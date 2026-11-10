@@ -1107,6 +1107,7 @@ export class JsonCodecGen extends TypeSpeller {
 		}
 		for (const { type: t, via } of this.collectedTypes()) {
 			if (via !== "declared" || mentionsTypeParam(t)) continue;
+			if (reachesInterop(t)) continue;
 			const u = under(t);
 			if (!u || u.kind === "interface" || u.kind === "func") continue;
 			this.encFn(t, false);
@@ -1114,12 +1115,15 @@ export class JsonCodecGen extends TypeSpeller {
 		}
 	}
 
+	// A struct holding a JS-interop value (a `.d.ts` interface) cannot be
+	// written as a dynamic case, so it is not spellable either.
 	spellableNamed(t, ok) {
+		if (isJsonValue(t)) return true;
 		return (
-			isJsonValue(t) ||
-			(!t.name.includes("$$") &&
-				!t.name.includes("[") &&
-				(t.typeArgs ?? []).every(ok))
+			!t.name.includes("$$") &&
+			!t.name.includes("[") &&
+			(t.typeArgs ?? []).every(ok) &&
+			!reachesInterop(t)
 		);
 	}
 
@@ -1201,6 +1205,29 @@ const isTaggedSlice = (t) =>
 
 // json.RawMessage and json.Number values can reach an interface from any
 // expression (a conversion, a field read).
+// True when `t` is, or holds through pointers, elements and struct fields, a
+// JS-interop type (a `.d.ts` interface) that has no Go source to spell.
+export function reachesInterop(t, seen = new Set()) {
+	if (!t || seen.has(t)) return false;
+	seen.add(t);
+	const u = under(t) ?? t;
+	switch (u.kind) {
+		case "namespace":
+			return true;
+		case "pointer":
+			return reachesInterop(u.base, seen);
+		case "slice":
+		case "array":
+			return reachesInterop(u.elem, seen);
+		case "map":
+			return reachesInterop(u.key, seen) || reachesInterop(u.value, seen);
+		case "struct":
+			return (u._structFields ?? []).some((f) => reachesInterop(f.type, seen));
+		default:
+			return false;
+	}
+}
+
 const isJsonValue = (t) => isRaw(t) || isNumber(t);
 
 export const isCompositeType = (t) => {

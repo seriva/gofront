@@ -253,6 +253,8 @@ export class TypeSpeller {
 		const byKind = {
 			basic: () => t.name !== "void" && t.name !== "nil",
 			named: () => this.spellableNamed(t, ok, seen),
+			// A JS-interop (.d.ts) type has no Go source to write.
+			namespace: () => false,
 			pointer: () => ok(t.base),
 			slice: () => ok(t.elem),
 			array: () => ok(t.elem),
