@@ -59,7 +59,15 @@ export function walkNodes(root, fn) {
 	}
 	fn(root);
 	forEachChild(root, (c) => walkNodes(c, fn));
+	// templ bodies keep their Go expressions in non-enumerable properties
+	// (see parser/templ.js), which forEachChild does not visit.
+	for (const name of TEMPL_EXPR_PROPS) {
+		const d = Object.getOwnPropertyDescriptor(root, name);
+		if (d && !d.enumerable) walkNodes(d.value, fn);
+	}
 }
+
+const TEMPL_EXPR_PROPS = ["expr", "forStmt"];
 
 // True when `t` mentions a type parameter (a generic declaration, or a type
 // built from one inside a generic function).
