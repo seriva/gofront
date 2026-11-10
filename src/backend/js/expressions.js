@@ -625,13 +625,27 @@ export const expressionGenMethods = {
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
+		if (
+			expr._ifaceSrc &&
+			!expr._tfnTagging &&
+			this._isTaggedFuncType(expr._ifaceSrc)
+		) {
+			// A value of a defined func type keeps that type in an interface.
+			expr._tfnTagging = true;
+			try {
+				this.useHelper("ifaceBox");
+				return `__tfn(${this.genExpr(expr)}, ${JSON.stringify(expr._ifaceSrc.name)})`;
+			} finally {
+				expr._tfnTagging = false;
+			}
+		}
 		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
 			const tag = this._dynTypeTag(expr._ifaceSrc);
 			if (tag) {
 				this.useHelper("ifaceBox");
 				expr._ityTagging = true;
 				try {
-					const ptr = expr._ifaceSrc.kind === "pointer" ? ", true" : "";
+					const ptr = this._dynTagFlags(expr._ifaceSrc);
 					return `__ity(${this.genExpr(expr)}, ${JSON.stringify(tag)}${ptr})`;
 				} finally {
 					expr._ityTagging = false;
@@ -1695,6 +1709,10 @@ export const expressionGenMethods = {
 				[...named.underlying.methods.keys()],
 				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
 			);
+		if (this._isTaggedFuncType(named)) {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(name)}, "namedfunc")`;
+		}
 		if (this._isNamedComposite(named)) {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
@@ -1821,6 +1839,10 @@ export const expressionGenMethods = {
 			targetType?.kind === "named" ? targetType.underlying : targetType;
 		if (base?.kind === "map" && this._isNilLiteral(expr.args[0]))
 			return this._nilMapZero();
+		if (this._isTaggedFuncType(targetType)) {
+			this.useHelper("ifaceBox");
+			return `__tfn(${arg}, ${JSON.stringify(targetType.name)})`;
+		}
 		if (
 			targetType?.kind === "named" &&
 			base?.kind === "basic" &&

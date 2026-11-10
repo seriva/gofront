@@ -227,7 +227,7 @@ export const typeInfoGenMethods = {
 		const tag = this._dynTypeTag(t);
 		if (!tag) return base;
 		this.useHelper("ifaceBox");
-		const ptr = t.kind === "pointer" ? ", true" : "";
+		const ptr = this._dynTagFlags(t);
 		return `(__v) => __ity(${base ? `(${base})(__v)` : "__v"}, ${JSON.stringify(tag)}${ptr})`;
 	},
 
@@ -245,6 +245,27 @@ export const typeInfoGenMethods = {
 		}
 		if (u?.kind === "slice") return "(__v) => (__v ?? [])";
 		return null;
+	},
+
+	// Extra `__ity` arguments: `, true` marks a pointer and `, false, true` a
+	// defined slice type, whose nil value keeps its type as a tagged sentinel.
+	_dynTagFlags(t) {
+		if (t?.kind === "pointer") return ", true";
+		if (this._isNamedComposite(t) && this._underlyingOf(t)?.kind === "slice")
+			return ", false, true";
+		return "";
+	},
+
+	// A defined func type whose values carry their name as a run-time tag
+	// (one with methods is boxed as a class instead).
+	_isTaggedFuncType(t) {
+		return (
+			t?.kind === "named" &&
+			!mentionsTypeParam(t) &&
+			!t.typeArgs?.length &&
+			this._underlyingOf(t)?.kind === "func" &&
+			!this._namedBoxInfo(t)
+		);
 	},
 
 	// The run-time type tag of an unnamed slice, map or non-struct pointer

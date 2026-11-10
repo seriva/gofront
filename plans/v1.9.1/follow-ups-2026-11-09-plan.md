@@ -251,7 +251,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 6: Dynamic Types, `%T` and `encoding/json`
 
-- [ ] Task 6.1: Tag defined func conversions with fresh wrappers and keep the type of nil defined slices in `any` on JS (`G16`)
+- [x] Task 6.1: Tag defined func conversions with fresh wrappers and keep the type of nil defined slices in `any` on JS (`G16`)
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`
   - Test: `test/unit/types/dynamic-types.test.js`. The `G16` repro → `false true`; the shared-func repro → `true false` (`assertAllTargetsOutput`).
   - Done when: JS matches WASM and Go for both repros.
