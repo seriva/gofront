@@ -175,6 +175,10 @@ const WASM_INTRINSICS = {
 			mod.getOrAddFuncImport("env", "fmt_ptr_id", [EXT], ["i32"]),
 		emit: (e) => {
 			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.resolveFuncIndex("__any_ref"),
+			});
 			e.pushInstruction("extern.convert_any");
 			e.pushInstruction({
 				op: "call",

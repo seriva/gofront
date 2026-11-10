@@ -702,6 +702,13 @@ export function compileWasmModule(
 			),
 		);
 	}
+	// fmt's %p identity of a reference in an `any`: a defined map or func type
+	// is boxed there, so the helper hands the host the boxed reference.
+	if (funcDecls.some((fn) => fn.intrinsic === "fmt_ptr_id")) {
+		funcDecls.push(
+			helper("__any_ref", [{ name: "a", type: ANY_T }], ANY_T, "any_ref"),
+		);
+	}
 	if (mod.hasErrorType) {
 		const errPtr = {
 			kind: "pointer",

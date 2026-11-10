@@ -11,6 +11,7 @@ import {
 	isArrayType,
 	isComplex,
 	isComplex64,
+	isFuncType,
 	isMapType,
 	isNonEmptyInterface,
 	isScalarType,
@@ -1774,6 +1775,31 @@ export class BuiltinsEmitter {
 				this.pushInstruction("end");
 
 				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction("return");
+				return;
+			}
+			case "any_ref": {
+				// A boxed defined map or func value: the reference inside the box.
+				for (const box of this.mod.ifaceBoxTypes.values()) {
+					if (
+						!isMapType(box.goType, this.mod.checker) &&
+						!isFuncType(box.goType, this.mod.checker)
+					)
+						continue;
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.test", typeIndex: box.typeIndex });
+					this.pushInstruction({ op: "if", blockType: "void" });
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.cast", typeIndex: box.typeIndex });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: box.typeIndex,
+						fieldIndex: 0,
+					});
+					this.pushInstruction("return");
+					this.pushInstruction("end");
+				}
+				this.pushInstruction({ op: "local.get", index: 0 });
 				this.pushInstruction("return");
 				return;
 			}

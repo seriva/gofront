@@ -215,7 +215,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `H10` repro → `inner`; two levels (`type PO2 struct{ PO }`) → `inner`; a nil embedded pointer whose method checks `i == nil` → Go output (`assertProgramOutput`).
   - Done when: no `nil or unmatched type for method call` panic for any of the three.
-- [ ] Task 3.4: Name defined map types in WASM unhashable-key panics (`H16`)
+- [x] Task 3.4: Name defined map types in WASM unhashable-key panics (`H16`)
   - Files: `src/backend/wasm/emit-builtins.js`
   - Test: `test/unit/wasm/map-keys.test.js`. The `H16` repro → `runtime error: hash of unhashable type main.M` on the wasm side; the unnamed `map[string]int{}` key keeps `… map[string]int`.
   - Done when: both messages match Go exactly on `wasm`.
