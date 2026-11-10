@@ -24,6 +24,7 @@ import {
 	markRedundantNilChecks,
 	normalizeDefers,
 	scanAddressTaken,
+	splitForwardedTuples,
 	takesElementAddress,
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
@@ -372,7 +373,9 @@ export class CodeGen {
 		this._precisionWarned = new Set();
 		// Defer lowering (argument/receiver hoisting, recover-target marking) is
 		// idempotent and owned by the backends: the wasm path runs it via
-		// `lower()`, the JS path here.
+		// `lower()`, the JS path here.  So is splitting multi-value calls
+		// forwarded into interfaces into temps.
+		splitForwardedTuples(program);
 		normalizeDefers(program);
 		// Strict mode: index checks the loop shape proves unnecessary are elided.
 		if (this.strict) {
