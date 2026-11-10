@@ -62,3 +62,47 @@ func main() {
 	_, _ = c, e
 }`,
 );
+
+// Task 2.2: comma-ok map, tuple =, mixed :=
+negative(
+	"comma-ok map assignment into concrete",
+	`package main
+type A struct{ X int }
+func main() {
+	m := map[string]any{"k": A{1}}
+	var a A
+	var ok bool
+	a, ok = m["k"]
+	_, _ = a, ok
+}`,
+);
+negative(
+	"tuple assignment from (any, error)",
+	`package main
+func getPair() (any, error) { return 1, nil }
+func main() {
+	var n int
+	var err error
+	n, err = getPair()
+	_, _ = n, err
+}`,
+);
+negative(
+	"mixed := redeclaration from (any, error)",
+	`package main
+func getPair() (any, error) { return 1, nil }
+func main() {
+	var n int
+	n, err := getPair()
+	_, _ = n, err
+}`,
+);
+positive(
+	"fresh comma-ok := from map[string]any",
+	`package main
+func main() {
+	m := map[string]any{"k": 1}
+	x, ok := m["k"]
+	_, _ = x, ok
+}`,
+);

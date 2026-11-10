@@ -171,7 +171,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/typechecker/statements.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var a A; var b any = A{1}; a = b` → `assertErrorContains(…, "need type assertion")`; `var c any; c = b` and `var e error; var x any; _ = x; e = nil` compile.
   - Done when: the error is reported on all targets and `npm run check` (example type-checks) passes.
-- [ ] Task 2.2: Check comma-ok map, tuple `=` and mixed `:=` from `any` (`G22`)
+- [x] Task 2.2: Check comma-ok map, tuple `=` and mixed `:=` from `any` (`G22`)
   - Files: `src/typechecker/statements.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/any-assertion.test.js`. `a, ok = m["k"]` (`map[string]any`), `n, err = getPair()` and `var n int; n, err := getPair()` (`(any, error)`) → `"need type assertion"`; `x, ok := m["k"]` with a fresh `x` compiles.
   - Done when: all three are rejected on every target and the positive case runs.

@@ -79,11 +79,34 @@ export const statementCheckMethods = {
 		return true;
 	},
 
+	_assignOperand(stmt, i) {
+		if (stmt.rhs.length === stmt.lhs.length) return stmt.rhs[i];
+		return stmt.rhs.length === 1 ? stmt.rhs[0] : undefined;
+	},
+
+	_checkRedeclAssign(target, source, stmt, i) {
+		if (!target || !source || !this._needsAssignCheck(target, source)) return;
+		this._skipIfaceMark = true;
+		this.assertAssignable(
+			target,
+			source,
+			stmt.lhs[i],
+			"assignment",
+			this._assignOperand(stmt, i),
+		);
+		this._skipIfaceMark = false;
+	},
+
 	_declareDefineVars(stmt, rhsFlat, scope) {
 		for (let i = 0; i < stmt.lhs.length; i++) {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
 			if (name === "_") continue;
-			if (scope.symbols.has(name)) stmt.lhs[i]._redecl = true;
+			if (scope.symbols.has(name)) {
+				stmt.lhs[i]._redecl = true;
+				// Redeclared variables keep their type; the value must be assignable.
+				this._checkRedeclAssign(scope.symbols.get(name), rhsFlat[i], stmt, i);
+				continue;
+			}
 			if (stmt.rhs.length === stmt.lhs.length)
 				this._checkConstDefault(
 					rhsFlat[i],
@@ -228,7 +251,7 @@ export const statementCheckMethods = {
 					r,
 					stmt.lhs[i],
 					"assignment",
-					stmt.rhs.length === lhsTypes.length ? stmt.rhs[i] : undefined,
+					this._assignOperand(stmt, i),
 				);
 				this._skipIfaceMark = false;
 			}
