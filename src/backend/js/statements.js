@@ -1169,10 +1169,21 @@ export const statementGenMethods = {
 			this.line(`${this._iterReturnFlag} = true; return false;`);
 			return;
 		}
-		const vals =
+		let vals =
 			stmt.values.length > 0
 				? stmt.values.map((v) => this._genReturnValue(v))
 				: (this.namedReturnVars ?? []);
+		const named = this.namedReturnVars ?? [];
+		if (stmt.values.length > 0 && named.length > 0) {
+			// Deferred calls read the named results after the loop returns.
+			const rhs =
+				vals.length === named.length && named.length > 1
+					? `[${vals.join(", ")}]`
+					: vals[0];
+			const lhs = named.length === 1 ? named[0] : `[${named.join(", ")}]`;
+			this.line(`${lhs} = ${rhs};`);
+			vals = named;
+		}
 		const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
 		this.line(
 			`${this._iterReturnFlag} = true; ${this._iterReturnVar} = ${stored}; return false;`,

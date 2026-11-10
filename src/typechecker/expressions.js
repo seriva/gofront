@@ -1854,6 +1854,14 @@ export const expressionCheckMethods = {
 			const node = expr._multiForward ? null : expr.args[i];
 			this.assertAssignable(targetParam, argTypes[i], node, "argument");
 		}
+		// `g(f())`: per-element box marks for lowering to split the forward.
+		if (
+			expr._multiForward &&
+			!fnType.variadic &&
+			!this._skipIfaceMark &&
+			fnType.params.length === argTypes.length
+		)
+			this._markForwardedElems(fnType.params, argTypes, expr.args[0]);
 
 		this._checkSimdLaneArgs(expr, scope);
 	},

@@ -263,6 +263,114 @@ L:
 	);
 });
 
+section("Range-over-func: forwarded multi-value returns");
+
+test("return f() inside a range-over-func body boxes a forwarded struct into any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+
+func seq(yield func(int) bool) {
+	_ = yield(0) && yield(1)
+}
+
+func get() (any, int) {
+	for range seq {
+		return makePair()
+	}
+	return nil, 0
+}
+
+func main() {
+	v, n := get()
+	_, ok := v.(T)
+	fmt.Println(v, n, ok)
+}
+`,
+		"{1} 1 true\n",
+	);
+});
+
+test("a defer sees the named result forwarded from inside a range-over-func body", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+
+func seq(yield func(int) bool) {
+	_ = yield(0) && yield(1)
+}
+
+func get() (v any, n int) {
+	defer func() {
+		_, ok := v.(T)
+		fmt.Println("defer", v, n, ok)
+	}()
+	for range seq {
+		return makePair()
+	}
+	return nil, 0
+}
+
+func main() {
+	v, n := get()
+	_, ok := v.(T)
+	fmt.Println(v, n, ok)
+}
+`,
+		"defer {1} 1 true\n{1} 1 true\n",
+	);
+});
+
+test("a defer sees named results returned from inside a range-over-func body", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+
+func seq(yield func(int) bool) {
+	_ = yield(0) && yield(1)
+}
+
+func get() (v T, n int) {
+	defer func() { fmt.Println("defer", v, n) }()
+	for range seq {
+		return makePair()
+	}
+	return T{}, 0
+}
+
+func one() (s string) {
+	defer func() { fmt.Println("defer", s) }()
+	for range seq {
+		return "x"
+	}
+	return ""
+}
+
+func main() {
+	v, n := get()
+	fmt.Println(v, n)
+	fmt.Println(one())
+}
+`,
+		"defer {1} 1\n{1} 1\ndefer x\nx\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

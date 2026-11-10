@@ -2,8 +2,10 @@
 // Dynamic types of func, slice and map values boxed into `any`.
 
 import {
+	assert,
 	assertAllTargetsOutput,
 	assertProgramOutput,
+	compile,
 	section,
 	test,
 } from "../helpers.js";
@@ -99,5 +101,219 @@ func main() {
 }
 `,
 		"si ii ia\n",
+	);
+});
+
+section("Multi-value calls forwarded into interface results");
+
+const FWD_PRELUDE = `type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+`;
+
+test("return f() boxes a forwarded struct into an any result by value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func getPair() (any, int) { return makePair() }
+
+func main() {
+	v, n := getPair()
+	_, ok := v.(T)
+	fmt.Printf("%v %T %v %d\\n", v, v, ok, n)
+}
+`,
+		"{1} main.T true 1\n",
+	);
+});
+
+test("return f() into named any results keeps the forwarded values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func getPair() (v any, n int) { return makePair() }
+
+func main() {
+	v, n := getPair()
+	_, ok := v.(T)
+	fmt.Printf("%v %T %v %d\\n", v, v, ok, n)
+}
+`,
+		"{1} main.T true 1\n",
+	);
+});
+
+test("return f() in a func literal boxes the forwarded struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func main() {
+	getPair := func() (any, int) { return makePair() }
+	v, n := getPair()
+	_, ok := v.(T)
+	fmt.Printf("%v %T %v %d\\n", v, v, ok, n)
+}
+`,
+		"{1} main.T true 1\n",
+	);
+});
+
+test("return f() forwards an int into an any result", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk() (int, string) { return 7, "s" }
+
+func get() (any, string) { return mk() }
+
+func main() {
+	v, s := get()
+	_, ok := v.(int)
+	fmt.Println(v, s, ok)
+}
+`,
+		"7 s true\n",
+	);
+});
+
+test("return f() without interface results keeps the direct tuple", async () => {
+	const src = `package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func same() (T, int) { return makePair() }
+
+func main() {
+	v, n := same()
+	fmt.Println(v, n)
+}
+`;
+	await assertAllTargetsOutput(src, "{1} 1\n");
+	const { js } = compile(src);
+	const start = js.indexOf("function same(");
+	const body = js.slice(start, js.indexOf("\n}", start));
+	assert(start >= 0 && !body.includes("__fwd$"), `unexpected temps: ${body}`);
+});
+
+test("return f() boxes a forwarded named non-struct type into a method interface", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type M int
+
+func (m M) String() string { return fmt.Sprint("m", int(m)) }
+
+func mk() (M, int) { return 3, 1 }
+
+func get() (fmt.Stringer, int) { return mk() }
+
+func main() {
+	s, n := get()
+	fmt.Println(s.String(), n)
+}
+`,
+		"m3 1\n",
+	);
+});
+
+section("Multi-value calls forwarded into interface parameters");
+
+const SHOW = `func show(v any, n int) {
+	_, ok := v.(T)
+	fmt.Println(v, n, ok)
+}
+`;
+
+test("g(f()) boxes a forwarded struct into an any parameter by value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+${SHOW}
+func main() {
+	show(makePair())
+}
+`,
+		"{1} 1 true\n",
+	);
+});
+
+test("a method call forwarding f() boxes the struct into an any parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+type O struct{}
+
+func (O) show(v any, n int) {
+	_, ok := v.(T)
+	fmt.Println(v, n, ok)
+}
+
+func main() {
+	O{}.show(makePair())
+}
+`,
+		"{1} 1 true\n",
+	);
+});
+
+test("fmt.Println and defer keep forwarding multi-value calls", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+${SHOW}
+func main() {
+	defer show(makePair())
+	fmt.Println(makePair())
+}
+`,
+		"{1} 1\n{1} 1 true\n",
+	);
+});
+
+test("g(f()) forwards into an any parameter from assignments and returns", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func box(v any, n int) any {
+	_, ok := v.(T)
+	return fmt.Sprint(v, n, ok)
+}
+
+func pass() any { return box(makePair()) }
+
+func main() {
+	s := box(makePair())
+	var t any = box(makePair())
+	s = box(makePair())
+	fmt.Println(s, t, pass())
+}
+`,
+		"{1} 1 true {1} 1 true {1} 1 true\n",
 	);
 });

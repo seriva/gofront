@@ -247,19 +247,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second pass, `H19`).
 
-- [ ] Task 5.1: Record per-element interface-box marks for forwarded tuples and split forwarded `return f()` into temps (`H19` returns)
+- [x] Task 5.1: Record per-element interface-box marks for forwarded tuples and split forwarded `return f()` into temps (`H19` returns)
   - Files: `src/typechecker/statements.js`, `src/lower/functions.js`, `src/lower/index.js`
   - Test: `test/unit/types/dynamic-types.test.js`. With prelude `H`: `func getPair() (any, int) { return makePair() }` → `fmt.Printf("%v %T %v %d\n", v, v, ok, n)` prints `{1} main.T true 1`; named results `(v any, n int)` → same; the func-literal form → same; `func mk() (int, string) { return 7, "s" }; func get() (any, string) { return mk() }` → `7 s true` (`assertAllTargetsOutput`, so WASM must validate).
   - Done when: all four print Go's output on every target, and a forward with no interface element (`(T, int)` → `(T, int)`) emits no `__fwd$` temps in the JS output.
-- [ ] Task 5.2: Split forwarded returns inside range-over-func bodies (`H19` iterator return)
+- [x] Task 5.2: Split forwarded returns inside range-over-func bodies (`H19` iterator return)
   - Files: `src/lower/functions.js`
   - Test: `test/unit/language/range-func.test.js`. `func get() (any, int) { for range seq { return makePair() }; return nil, 0 }` → `{1} 1 true` (`assertAllTargetsOutput`); a `defer` in `get` that reads the named result sees the forwarded value.
   - Done when: both print Go's output on every target.
-- [ ] Task 5.3: Split forwarded call arguments into interface parameters (`H19` call arguments)
+- [x] Task 5.3: Split forwarded call arguments into interface parameters (`H19` call arguments)
   - Files: `src/typechecker/expressions.js`, `src/lower/functions.js`
   - Test: `test/unit/types/dynamic-types.test.js`. `show(makePair())` → `{1} 1 true`; `O{}.show(makePair())` → `{1} 1 true`; `fmt.Println(makePair())` keeps printing `{1} 1`; `defer show(makePair())` keeps printing `{1} 1 true` (`assertAllTargetsOutput`).
   - Done when: every target prints Go's output and `assertValidWasm` passes for the method form.
-- [ ] Task 5.4: Keep dynamic JSON codecs for types boxed through forwarded tuples (`H19` JSON)
+- [x] Task 5.4: Keep dynamic JSON codecs for types boxed through forwarded tuples (`H19` JSON)
   - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`
   - Test: `test/unit/builtins/json.test.js`. The original `H19` repro → `{"A":1} <nil>`; `show2(makePair())` where `show2(v any, _ int)` marshals `v` → `{"A":1} <nil>` (`assertAllTargetsOutput`); the 11-09 Task 7.3 codec-count test (`test/unit/builtins/json-codegen-size.test.js`) is unchanged.
   - Done when: every target prints `{"A":1} <nil>` and the codec count for never-boxed types does not grow.

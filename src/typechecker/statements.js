@@ -319,14 +319,12 @@ export const statementCheckMethods = {
 					);
 					return;
 				}
-				for (let i = 0; i < expected.length; i++) {
-					this.assertAssignable(
-						expected[i],
-						forwarded[i],
-						stmt.values[0],
-						"return statement",
-					);
-				}
+				this._checkForwardedValues(
+					expected,
+					forwarded,
+					stmt.values[0],
+					"return statement",
+				);
 				return;
 			}
 			for (let i = 0; i < expected.length; i++) {
@@ -339,6 +337,35 @@ export const statementCheckMethods = {
 					);
 			}
 		}
+	},
+
+	// Checks each result of a forwarded multi-value call (`return f()`,
+	// `g(f())`) against its target.  Every element gets its own interface-box
+	// marks in `call._fwdIface` (null where nothing is boxed): tagging the
+	// shared call node would give every element the marks of the last one.
+	// Lowering splits such forwards into temps that carry these marks.
+	_checkForwardedValues(expected, forwarded, call, ctx) {
+		const skip = this._skipIfaceMark;
+		this._skipIfaceMark = true;
+		try {
+			for (let i = 0; i < expected.length; i++)
+				this.assertAssignable(expected[i], forwarded[i], call, ctx);
+		} finally {
+			this._skipIfaceMark = skip;
+		}
+		if (!skip) this._markForwardedElems(expected, forwarded, call);
+	},
+
+	// Records in `call._fwdIface` one interface-box mark holder per forwarded
+	// element (null where the element is not boxed), or clears it when no
+	// element enters an interface.
+	_markForwardedElems(expected, forwarded, call) {
+		const holders = expected.map((t, i) => {
+			const holder = {};
+			this._markIfaceBox(t, forwarded[i], holder);
+			return "_ifaceSrc" in holder ? holder : null;
+		});
+		call._fwdIface = holders.some(Boolean) ? holders : undefined;
 	},
 
 	_checkIfStmt(stmt, scope, returnType) {
