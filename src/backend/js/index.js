@@ -32,12 +32,17 @@ import {
 	isComplex,
 	isNumeric,
 } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import {
 	unicodeIsJs,
 	unicodeToLowerJs,
 	unicodeToUpperJs,
 } from "../shared/host-unicode.js";
-import { comparesToNil, expressionGenMethods } from "./expressions.js";
+import {
+	comparesToNil,
+	derefsReceiver,
+	expressionGenMethods,
+} from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
@@ -584,11 +589,32 @@ export class CodeGen {
 				const name = d.recvType.name;
 				if (!methods.has(name)) methods.set(name, []);
 				methods.get(name).push(d);
-				if (d.recvPointer && comparesToNil(d.body, d.recvName))
-					this.nilSafeMethods.add(`${name}.${d.name}`);
 			}
 		}
+		this._markNilSafeMethods(methods);
 		return methods;
+	}
+
+	// Pointer-receiver methods that can run with a nil receiver: they compare
+	// it with nil, or never read through it (a method that does panics on nil
+	// either way, so it keeps the faster direct call). Calls to these go
+	// through the prototype (see _nilSafeMethodClass).
+	_markNilSafeMethods(methods) {
+		for (const [name, decls] of methods) {
+			const safe = new Set();
+			const ptr = decls.filter((d) => d.recvPointer);
+			for (const d of ptr) safe.add(d.name);
+			for (let changed = true; changed; ) {
+				changed = false;
+				for (const d of ptr) {
+					if (!safe.has(d.name) || comparesToNil(d.body, d.recvName)) continue;
+					if (!derefsReceiver(d.body, d.recvName, safe)) continue;
+					safe.delete(d.name);
+					changed = true;
+				}
+			}
+			for (const m of safe) this.nilSafeMethods.add(`${name}.${m}`);
+		}
 	}
 
 	_collectNamedWrappers(program, methods) {
@@ -703,6 +729,30 @@ export class CodeGen {
 	}
 
 	genTypeDeclWithMethods(decl, methodDecls) {
+		this._genTypeDeclBody(decl, methodDecls);
+		this._genUnhashableMark(decl.name);
+	}
+
+	// Marks a defined type Go cannot hash so `__ik` can name it in the panic
+	// of an interface-keyed map insert: a struct class carries `__uh`, a
+	// defined slice or map type registers its interface tag.
+	_genUnhashableMark(name) {
+		const t = this.checker?.types.get(name);
+		if (t?.kind !== "named" || t.typeParams?.length || t.typeArgs?.length)
+			return;
+		if (!this._isUnhashableType(t)) return;
+		const goName = JSON.stringify(goTypeName(t));
+		if (this.structNames.has(name)) {
+			this.line(
+				`Object.defineProperty(${name}, "__uh", { value: ${goName} });`,
+			);
+		} else if (this._isNamedComposite(t)) {
+			this.useHelper("structKey");
+			this.line(`__uht.set(${JSON.stringify(name)}, ${goName});`);
+		}
+	}
+
+	_genTypeDeclBody(decl, methodDecls) {
 		const definedStruct =
 			decl.type.kind === "StructType" ? null : this._definedStructAst(decl);
 		if (decl.type.kind === "StructType") {
@@ -1038,7 +1088,13 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(method, embedName, valueEmbed = false, fieldName = null) {
+	_embedStub(
+		method,
+		embedName,
+		valueEmbed = false,
+		fieldName = null,
+		nilPtrRecv = false,
+	) {
 		// The field is named after the type without its package suffix
 		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
 		const field = fieldName || embedName.replace(/\$\$.*$/, "");
@@ -1046,10 +1102,18 @@ export class CodeGen {
 		// the value as the receiver.
 		if (valueEmbed)
 			return `${method}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
-		const call = this.structNames.has(embedName)
-			? `this.${field}.${method}(...__a)`
-			: `${embedName}.prototype.${method}.call(this, ...__a)`;
+		const call = this._embedStubCall(method, embedName, field, nilPtrRecv);
 		return `${method}(...__a) { return ${call}; }`;
+	}
+
+	_embedStubCall(method, embedName, field, nilPtrRecv) {
+		if (!this.structNames.has(embedName))
+			return `${embedName}.prototype.${method}.call(this, ...__a)`;
+		// A nil embedded pointer still reaches a pointer-receiver method, as in
+		// Go: call it through the prototype instead of reading it off null.
+		return nilPtrRecv
+			? `${embedName}.prototype.${method}.call(this.${field}, ...__a)`
+			: `this.${field}.${method}(...__a)`;
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {
@@ -1062,6 +1126,7 @@ export class CodeGen {
 					stub.embedName,
 					stub.valueEmbed,
 					stub.fieldName,
+					stub.nilPtrRecv,
 				),
 			);
 		}

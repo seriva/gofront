@@ -707,6 +707,8 @@ var __isnm = __isnm || function(m) {
 // through `toString` to an injective encoding, and the key value is kept in
 // a table so ranging and fmt can recover it.
 export const HELPER_STRUCT_KEY = `var __kt = __kt || new Map();
+// Tags of defined slice and map types Go cannot hash, with their Go names.
+var __uht = __uht || new Map();
 var __kcl = __kcl || function(o) {
   if (o === null || typeof o !== "object") return o;
   if (typeof o.__clone === "function") return o.__clone();
@@ -753,6 +755,12 @@ var __ik = __ik || function(k, tag) {
   // A slice, map or func in an \`any\` carries its type tag: Go cannot hash it.
   if ((t === "object" || t === "function") && typeof k.__t === "string" && /^(\\[\\]|map\\[|func\\()/.test(k.__t))
     throw new Error("runtime error: hash of unhashable type " + k.__t.replace(/ void$/, ""));
+  // A struct class or defined slice/map type that Go cannot hash is marked
+  // once at its declaration, so this is one lookup per insert.
+  if (t === "object") {
+    const uh = k.constructor?.__uh ?? __uht.get(k.__t);
+    if (uh !== undefined) throw new Error("runtime error: hash of unhashable type " + uh);
+  }
   if (k !== null && t === "object" && typeof k.__gfUnbox === "function" && !k.constructor.name.endsWith("$Ptr")) {
     const v = k.__gfUnbox(), vt = typeof v;
     if (vt === "string" || vt === "number" || vt === "boolean" || vt === "bigint") {

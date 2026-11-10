@@ -232,19 +232,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 5: JS Nil Receivers and Map Keys
 
-- [ ] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
+- [x] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `var s *S; s.Ping(); fmt.Println("ok")` → `ok` (`assertAllTargetsOutput`); a method that checks `if s == nil { return "nil" }` → `nil`; `newT().M()` evaluates `newT` once (count side effects).
   - Done when: all targets match Go and `npm run bench` is within 3% of the `8a6b7a1` (tag `1.9.0`) baseline.
-- [ ] Task 5.2: Lower method expressions `(*T).M` to static dispatch (`G12`)
+- [x] Task 5.2: Lower method expressions `(*T).M` to static dispatch (`G12`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type MyInt int; g := (*MyInt).Ping; g(nil-ptr)` → `1`; a struct `(*S).M` with nil → Go output.
   - Done when: no `TypeError` on `js` or `both`.
-- [ ] Task 5.3: Dispatch promoted pointer-receiver methods through nil embedded pointers (`G18`)
+- [x] Task 5.3: Dispatch promoted pointer-receiver methods through nil embedded pointers (`G18`)
   - Files: `src/backend/js/expressions.js`, `src/lower/embedding.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type P struct{ *Base }; P{}.Ptr()` → `1`; two levels of embedding → `1`.
   - Done when: all targets print `1`.
-- [ ] Task 5.4: Panic on unhashable struct and defined slice keys in `any` maps on JS (`G13` JS)
+- [x] Task 5.4: Panic on unhashable struct and defined slice keys in `any` maps on JS (`G13` JS)
   - Files: `src/backend/js/runtime.js`, `src/backend/js/index.js`
   - Test: `test/unit/wasm/map-keys.test.js`. Upgrade the Task 4.3 struct and `L` cases to `assertAllTargetsOutput`; a hashable struct key `struct{ a int }` still works.
   - Done when: every target prints Go's message, and the hashable-key case is unchanged.

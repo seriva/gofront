@@ -42,6 +42,26 @@ export function comparesToNil(node, name) {
 	return someChild(node, (c) => comparesToNil(c, name));
 }
 
+// True when `node` reads through the receiver `name` (`r.f`, `r[i]`, `*r`),
+// which panics on a nil receiver anyway. Calling a method of `safe` on it is
+// not a read: that method accepts a nil receiver.
+export function derefsReceiver(node, name, safe) {
+	if (Array.isArray(node))
+		return node.some((n) => derefsReceiver(n, name, safe));
+	if (!node || typeof node !== "object") return false;
+	const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+	if (node.kind === "SelectorExpr" && isRecv(node.expr))
+		return !safe.has(node.field);
+	if (
+		(node.kind === "IndexExpr" || node.kind === "SliceExpr") &&
+		isRecv(node.expr)
+	)
+		return true;
+	if (node.kind === "UnaryExpr" && node.op === "*" && isRecv(node.operand))
+		return true;
+	return someChild(node, (c) => derefsReceiver(c, name, safe));
+}
+
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
 // True when type `t` mentions a type parameter anywhere.
@@ -1121,6 +1141,14 @@ export const expressionGenMethods = {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
 			const rt = expr._methodExprRecv;
+			// `(*MyInt).M` for a pointer-receiver method of a named non-struct
+			// type: the static method takes the pointer, nil included.
+			if (rt?.kind === "pointer") {
+				const info = this._namedBoxInfo(rt.base);
+				const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
+				if (info?.methods.has(expr.field) && decl?.recvPointer)
+					return `${info.cls}.$${expr.field}`;
+			}
 			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
 			if (protoCls)
 				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(recv, ...args))`;
@@ -1936,7 +1964,12 @@ export const expressionGenMethods = {
 		if (t?.kind !== "pointer" || t.base?.kind !== "named") return null;
 		const cls = t.base.name;
 		if (t.base.typeArgs?.length) return null;
-		if (this.nilSafeMethods?.has(`${cls}.${func.field}`)) return cls;
+		if (
+			t.base.underlying?.kind === "struct" &&
+			!this._promotedPath(func) &&
+			this.nilSafeMethods?.has(`${cls}.${func.field}`)
+		)
+			return cls;
 		// A Go-source stdlib type (`Buffer$$bytes`) is declared outside this
 		// package: its method decl tells whether it tests the receiver for nil.
 		const decl = cls.includes("$$")

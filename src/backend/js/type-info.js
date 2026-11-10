@@ -272,6 +272,27 @@ export const typeInfoGenMethods = {
 		return null;
 	},
 
+	// Whether Go cannot hash a value of type `t` (it contains a slice, map or
+	// func), so using it as an interface map key panics.
+	_isUnhashableType(t, depth = 0) {
+		if (!t || depth > 8 || mentionsTypeParam(t)) return false;
+		const u = this._underlyingOf(t) ?? t;
+		switch (u.kind) {
+			case "slice":
+			case "map":
+			case "func":
+				return true;
+			case "array":
+				return this._isUnhashableType(u.elem, depth + 1);
+			case "struct":
+				return [...(u.fields?.values() ?? [])].some((f) =>
+					this._isUnhashableType(f, depth + 1),
+				);
+			default:
+				return false;
+		}
+	},
+
 	// A named slice, array or map type: its values are plain JS arrays and
 	// objects, told apart in an interface by a tag carrying the type's name.
 	_isNamedComposite(t) {
