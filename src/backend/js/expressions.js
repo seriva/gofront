@@ -1121,6 +1121,14 @@ export const expressionGenMethods = {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
 			const rt = expr._methodExprRecv;
+			// `(*MyInt).M` for a pointer-receiver method of a named non-struct
+			// type: the static method takes the pointer, nil included.
+			if (rt?.kind === "pointer") {
+				const info = this._namedBoxInfo(rt.base);
+				const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
+				if (info?.methods.has(expr.field) && decl?.recvPointer)
+					return `${info.cls}.$${expr.field}`;
+			}
 			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
 			if (protoCls)
 				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(recv, ...args))`;

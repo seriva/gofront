@@ -81,6 +81,54 @@ func main() {
 	);
 });
 
+section("Nil receivers: method expressions");
+
+test("(*MyInt).Ping on a nil pointer runs", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyInt int
+
+func (m *MyInt) Ping() int { return 1 }
+
+func main() {
+	g := (*MyInt).Ping
+	var p *MyInt
+	fmt.Println(g(p))
+}
+`,
+		"1\n",
+	);
+});
+
+test("(*S).M on a nil pointer sees a nil receiver", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ n int }
+
+func (s *S) M() string {
+	if s == nil {
+		return "nil"
+	}
+	return "set"
+}
+
+func main() {
+	f := (*S).M
+	var p *S
+	fmt.Println(f(p))
+	fmt.Println(f(&S{}))
+}
+`,
+		"nil\nset\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
