@@ -33,6 +33,9 @@ import {
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
+// Tag kinds with no nil value: `case nil` against them cannot compile.
+const NON_NILABLE_TAG_KINDS = new Set(["basic", "struct", "array"]);
+
 /** @type {ThisType<TypeChecker>} */
 export const statementCheckMethods = {
 	checkBlock(block, scope, returnType) {
@@ -434,6 +437,10 @@ export const statementCheckMethods = {
 		// `switch "foo" {` compares as the constant's default type.
 		if (isUntyped(tagType) && !isNil(tagType)) tagType = defaultType(tagType);
 		if (this._caseValueUnchecked(tagType, caseType)) return;
+		if (isNil(caseType)) {
+			this.err(`cannot convert nil to type ${typeStr(tagType)}`, e);
+			return;
+		}
 		if (isUntyped(caseType)) {
 			if (this._isUntypedAssignable(tagType, caseType)) return;
 			this.err(
@@ -475,11 +482,20 @@ export const statementCheckMethods = {
 	_caseValueUnchecked(tagType, caseType) {
 		if (!tagType || !caseType || tagType._tainted || caseType._tainted)
 			return true;
-		if (isAny(tagType) || isAny(caseType) || isNil(caseType)) return true;
+		if (isAny(tagType) || isAny(caseType)) return true;
 		if (isUntyped(tagType) || tagType.kind === "typeParam") return true;
+		if (isNil(caseType)) return this._nilCaseOk(tagType);
 		return (
 			this.resolveType(tagType.underlying ?? tagType)?.kind === "interface"
 		);
+	},
+
+	// `case nil` needs a tag with a nil value (pointer, slice, map, func,
+	// chan, interface); a basic, struct or array tag makes the caller report
+	// `cannot convert nil`.
+	_nilCaseOk(tagType) {
+		const kind = this._deepUnderlying(tagType)?.kind;
+		return !NON_NILABLE_TAG_KINDS.has(kind);
 	},
 
 	// Whether assertAssignable(target, source) reports nothing.

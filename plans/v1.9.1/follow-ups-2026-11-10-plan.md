@@ -157,7 +157,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 1: Typechecker Checks
 
-- [ ] Task 1.1: Reject `case nil` against a non-nilable switch tag (`H02`)
+- [x] Task 1.1: Reject `case nil` against a non-nilable switch tag (`H02`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/switch-cases.test.js`. `switch true { case nil: }` → `assertErrorContains(…, "cannot convert nil to type bool")`; `var e error; switch e { case nil: }` and `var p *int; switch p { case nil: }` compile and run.
   - Done when: the negative case errors on `js`, `both`, `wasm` (no invalid WASM) and the positive cases print Go's output.
