@@ -1157,7 +1157,12 @@ export class JsonCodecGen extends TypeSpeller {
 			}
 			// Slices, arrays and maps reach an interface from any expression
 			// (a function result, a variable), not only from a literal
-			if (!buildsValue(node) && !isCompositeType(t) && !isJsonValue(t))
+			if (
+				!buildsValue(node) &&
+				!isCompositeType(t) &&
+				!isFuncComposite(t) &&
+				!isJsonValue(t)
+			)
 				continue;
 			if (this.spellable(t) && under(t)?.kind !== "interface")
 				found.set(this.key(t), t);
@@ -1204,6 +1209,17 @@ export const isCompositeType = (t) => {
 		(k === "slice" || k === "array" || k === "map") &&
 		!holdsFunc(t) &&
 		(isTaggedSlice(t) || !hasSharedRepr(t))
+	);
+};
+
+// A slice, array or map holding funcs: it never encodes, but a nil one in an
+// interface still does, as `null`, and a non-nil one names the func.
+const isFuncComposite = (t) => {
+	const k = under(t)?.kind;
+	return (
+		(k === "slice" || k === "array" || k === "map") &&
+		holdsFunc(t) &&
+		!hasSharedRepr(t)
 	);
 };
 

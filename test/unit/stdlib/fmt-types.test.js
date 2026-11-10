@@ -1,12 +1,12 @@
 // test/unit/stdlib/fmt-types.test.js
 // `fmt` `%T` of types instantiated in generic code.
 
-import { assertProgramOutput, section, test } from "../helpers.js";
+import { assertAllTargetsOutput, section, test } from "../helpers.js";
 
 section("fmt %T of generic instantiations");
 
 test("%T of maps instantiated in generic code prints Go's type", async () => {
-	await assertProgramOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -22,7 +22,7 @@ func main() {
 });
 
 test("%T of a map parameter in generic code prints Go's type", async () => {
-	await assertProgramOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"

@@ -263,9 +263,10 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/lower/fmt-formatters.js`, `src/backend/wasm/monomorph.js`
   - Test: `test/unit/stdlib/fmt-types.test.js`. `fmt.Printf("%T %T\n", pair(1, []int{2}), pair("s", 5))` → `map[int][]int map[string]int` (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go text.
-- [ ] Task 6.4: Report nil unsupported slices in `any` from `json.Marshal`, and update the docs (`G19`)
+- [x] Task 6.4: Report nil unsupported slices in `any` from `json.Marshal`, and update the docs (`G19`)
   - Files: `stdlib/internal/jsonrt/enc.go`, `src/lower/json-codecs.js`, `docs/go-compatibility.md`
   - Test: `test/unit/builtins/json.test.js` (or `test/unit/wasm/json.test.js`). `var s []func(); var v any = s; _, err := json.Marshal(v)` → `json: unsupported type: []func()` on `both` and `wasm`; the non-nil `[]func(){nil}` keeps `json: unsupported type: func()`.
+  - Deviation: Go's `sliceEncoder` writes `null` for any nil slice before it looks at the element type (and the pre-existing `json.test.js` case `show(nilFns)` expects `null <nil>`), so the test expects `null <nil>` for the nil `[]func()` on every target, not `json: unsupported type: []func()`. The fix registers func-holding slices, arrays and maps with the dynamic encoder (`isFuncComposite`), so WASM no longer reports `unsupported dynamic type`.
   - Done when: both targets print Go's error, and `docs/go-compatibility.md` states that nil-pointer method calls and `%T` of generic map instantiations behave as in Go (with no other compatibility row contradicted).
 
 ### Phase 7: `encoding/json` Codec Generation
