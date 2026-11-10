@@ -79,11 +79,34 @@ export const statementCheckMethods = {
 		return true;
 	},
 
+	_assignOperand(stmt, i) {
+		if (stmt.rhs.length === stmt.lhs.length) return stmt.rhs[i];
+		return stmt.rhs.length === 1 ? stmt.rhs[0] : undefined;
+	},
+
+	_checkRedeclAssign(target, source, stmt, i) {
+		if (!target || !source || !this._needsAssignCheck(target, source)) return;
+		this._skipIfaceMark = true;
+		this.assertAssignable(
+			target,
+			source,
+			stmt.lhs[i],
+			"assignment",
+			this._assignOperand(stmt, i),
+		);
+		this._skipIfaceMark = false;
+	},
+
 	_declareDefineVars(stmt, rhsFlat, scope) {
 		for (let i = 0; i < stmt.lhs.length; i++) {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
 			if (name === "_") continue;
-			if (scope.symbols.has(name)) stmt.lhs[i]._redecl = true;
+			if (scope.symbols.has(name)) {
+				stmt.lhs[i]._redecl = true;
+				// Redeclared variables keep their type; the value must be assignable.
+				this._checkRedeclAssign(scope.symbols.get(name), rhsFlat[i], stmt, i);
+				continue;
+			}
 			if (stmt.rhs.length === stmt.lhs.length)
 				this._checkConstDefault(
 					rhsFlat[i],
@@ -195,6 +218,12 @@ export const statementCheckMethods = {
 		return this.checkExpr(e, scope);
 	},
 
+	// A source-written `any` operand still goes through assertAssignable so a
+	// concrete target reports `need type assertion`; interop `any` stays exempt.
+	_needsAssignCheck(target, source) {
+		return !isAny(target) && (!isAny(source) || !!source._declared);
+	},
+
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
@@ -215,14 +244,14 @@ export const statementCheckMethods = {
 				this._checkConstOverflow(lhsTypes[i], r, stmt.rhs[i], "assignment")
 			)
 				continue;
-			if (!isAny(lhsTypes[i]) && !isAny(r)) {
+			if (this._needsAssignCheck(lhsTypes[i], r)) {
 				this._skipIfaceMark = true;
 				this.assertAssignable(
 					lhsTypes[i],
 					r,
 					stmt.lhs[i],
 					"assignment",
-					stmt.rhs.length === lhsTypes.length ? stmt.rhs[i] : undefined,
+					this._assignOperand(stmt, i),
 				);
 				this._skipIfaceMark = false;
 			}
@@ -512,7 +541,8 @@ export const statementCheckMethods = {
 					this._markDynamicType(t, this.resolveTypeNode(t, inner));
 			}
 			if (stmt.assign) {
-				// Bind the variable to the single case type, or any for multi/default.
+				// Bind the variable to the single case type, or the switch operand's type
+				// for multi-type and default clauses, as Go does.
 				// `case nil` binds the switch expression's own type, as in Go.
 				const only = c.types?.length === 1 ? c.types[0] : null;
 				const isNilCase = only?.kind === "TypeName" && only.name === "nil";
@@ -520,7 +550,7 @@ export const statementCheckMethods = {
 					? (stmt.expr._type ?? ANY)
 					: only
 						? this.resolveTypeNode(only, inner)
-						: ANY;
+						: (stmt.expr._type ?? ANY);
 				caseScope.defineLocal(stmt.assign, bindType);
 				// The capture variable is always considered used — it's the whole
 				// point of the switch-with-assign form. Each case body uses its own

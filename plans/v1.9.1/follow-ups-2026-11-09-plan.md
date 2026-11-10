@@ -167,19 +167,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 2: Typechecker `any` → Concrete Assignments
 
-- [ ] Task 2.1: Check plain assignment statements from `any` (`G21`)
+- [x] Task 2.1: Check plain assignment statements from `any` (`G21`)
   - Files: `src/typechecker/statements.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var a A; var b any = A{1}; a = b` → `assertErrorContains(…, "need type assertion")`; `var c any; c = b` and `var e error; var x any; _ = x; e = nil` compile.
   - Done when: the error is reported on all targets and `npm run check` (example type-checks) passes.
-- [ ] Task 2.2: Check comma-ok map, tuple `=` and mixed `:=` from `any` (`G22`)
+- [x] Task 2.2: Check comma-ok map, tuple `=` and mixed `:=` from `any` (`G22`)
   - Files: `src/typechecker/statements.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/any-assertion.test.js`. `a, ok = m["k"]` (`map[string]any`), `n, err = getPair()` and `var n int; n, err := getPair()` (`(any, error)`) → `"need type assertion"`; `x, ok := m["k"]` with a fresh `x` compiles.
   - Done when: all three are rejected on every target and the positive case runs.
-- [ ] Task 2.3: Reject conversions from `any` to concrete types (`G23`)
+- [x] Task 2.3: Reject conversions from `any` to concrete types (`G23`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `(*int)(x)` and `int(x)` with `x any` → `"need type assertion"`; `any(x)`, `error(nil)` and `interface{ M() }(v)` where `v` implements it compile.
   - Done when: both negative repros error on all targets.
-- [ ] Task 2.4: Bind the type-switch `default` and multi-type captures to the switch operand's type (`G24`)
+- [x] Task 2.4: Bind the type-switch `default` and multi-type captures to the switch operand's type (`G24`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/any-assertion.test.js`. `switch v := x.(type) { default: var a A = v }` → `"need type assertion"`; `case A, B: var y any = v` compiles; `default: fmt.Println(v)` prints the value on all targets.
   - Done when: the negative case errors, no target emits invalid WASM, and the existing type-switch tests pass.

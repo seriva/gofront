@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Fixed
-- **Go programs behave more consistently across JavaScript and WebAssembly**: a `switch` case of the wrong type, `case nil` in a tagless `switch`, `cap` of a number or bool, and a negative array length now report Go's errors, and a function-local type no longer breaks an imported package type of the same name.
+- **Go programs behave more consistently across JavaScript and WebAssembly**: a `switch` case of the wrong type, `case nil` in a tagless `switch`, `cap` of a number or bool, a negative array length, and using an `any` value as a concrete type without a type assertion (in assignments, conversions and type-switch `default` clauses) now report Go's errors, and a function-local type no longer breaks an imported package type of the same name.
 
 ## [1.9.0] - 2026-11-09
 
