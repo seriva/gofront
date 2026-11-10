@@ -20,6 +20,7 @@ import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export {
 	mangleCollidingTypes,
+	registerLocalTypeOwners,
 	renameLocalTypes,
 	withOriginalTypeNames,
 } from "./type-names.js";

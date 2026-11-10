@@ -402,8 +402,7 @@ export const statementCheckMethods = {
 		}
 		let tagType = this.resolveType(tag._type);
 		// `switch "foo" {` compares as the constant's default type.
-		if (isUntyped(tagType) && !isNil(tagType) && tagType.base !== "bool")
-			tagType = defaultType(tagType);
+		if (isUntyped(tagType) && !isNil(tagType)) tagType = defaultType(tagType);
 		if (this._caseValueUnchecked(tagType, caseType)) return;
 		if (isUntyped(caseType)) {
 			if (this._isUntypedAssignable(tagType, caseType)) return;
@@ -427,7 +426,11 @@ export const statementCheckMethods = {
 	// A tagless `switch` is `switch true`, so every case must be boolean.
 	_checkTaglessCase(e, caseType) {
 		if (!caseType || caseType._tainted || caseType.kind === "typeParam") return;
-		if (isAny(caseType) || isNil(caseType) || isBool(caseType)) return;
+		if (isNil(caseType)) {
+			this.err(`cannot convert nil to type bool`, e);
+			return;
+		}
+		if (isAny(caseType) || isBool(caseType)) return;
 		if (isUntyped(caseType) && caseType.base === "bool") return;
 		const under = this.resolveType(caseType.underlying ?? caseType);
 		if (isBool(under)) return;

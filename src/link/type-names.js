@@ -37,10 +37,12 @@ export function mangleCollidingTypes(programs, pkgKey, pkgName, owners) {
 // backends key types by bare name.  A local type whose name another type of the
 // package also uses (a package-level type or a local of another function)
 // is renamed to `Name__L<n>` for its scope; `%T` and diagnostics drop the
-// suffix (see `displayTypeName`).  Returns whether anything was renamed.
+// suffix (see `displayTypeName`).  `reserved` holds type names other packages
+// own: a local type spelled like one is renamed too, so it cannot clash with
+// the imported type in the flat module.  Returns whether anything was renamed.
 let localTypeCounter = 0;
 
-export function renameLocalTypes(programs) {
+export function renameLocalTypes(programs, reserved = new Set()) {
 	const counts = new Map();
 	const count = (node) => {
 		if (!node || typeof node !== "object") return;
@@ -50,7 +52,9 @@ export function renameLocalTypes(programs) {
 		forEachChild(node, count);
 	};
 	for (const p of programs) count(p.decls);
-	const dup = new Set([...counts].filter(([, n]) => n > 1).map(([k]) => k));
+	const dup = new Set(
+		[...counts].filter(([k, n]) => n > 1 || reserved.has(k)).map(([k]) => k),
+	);
 	if (dup.size === 0) return false;
 	let changed = false;
 	// Inner scopes first, so an outer rename never touches a nested
@@ -76,6 +80,21 @@ export function renameLocalTypes(programs) {
 	for (const p of programs)
 		for (const d of p.decls ?? []) if (d.kind !== "TypeDecl") scan(d);
 	return changed;
+}
+
+// A package compiled later that declares a type this package only declares
+// inside a function is renamed by `mangleCollidingTypes`, so `Pt` of one package
+// and a local `Pt` of another never meet in the flat module.
+export function registerLocalTypeOwners(programs, pkgKey, owners) {
+	if (!owners) return;
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) return node.forEach(visit);
+		if (node.kind === "TypeDecl" && !owners.has(node.name))
+			owners.set(node.name, pkgKey);
+		forEachChild(node, visit);
+	};
+	for (const p of programs) visit(p.decls);
 }
 
 // `tparams` are type parameters in scope; `values` are names a function

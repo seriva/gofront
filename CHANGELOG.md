@@ -5,6 +5,11 @@ All notable changes to this project will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [Unreleased]
+
+### Fixed
+- **Go programs behave more consistently across JavaScript and WebAssembly**: a `switch` case of the wrong type, `case nil` in a tagless `switch`, `cap` of a number or bool, and a negative array length now report Go's errors, and a function-local type no longer breaks an imported package type of the same name.
+
 ## [1.9.0] - 2026-11-09
 
 ### Added

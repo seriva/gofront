@@ -1878,6 +1878,13 @@ export const expressionCheckMethods = {
 		return null;
 	},
 
+	_capOperandKind(operand, type) {
+		const untypedConst = type?.kind === "untyped" && type.base !== "nil";
+		return untypedConst
+			? operandKind(operand, type.base, true)
+			: operandKind(operand, typeStr(type), false);
+	},
+
 	_checkBuiltinLen(name, expr, argTypes) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
 		const operand = expr.args?.[0];
@@ -1893,10 +1900,12 @@ export const expressionCheckMethods = {
 		if (name === "cap") {
 			if (
 				(argTypes[0]?.underlying ?? argTypes[0])?.kind === "map" ||
-				isString(argTypes[0])
+				isString(argTypes[0]) ||
+				isBool(argTypes[0]) ||
+				isComplexOrNumeric(argTypes[0])
 			) {
 				this.err(
-					`invalid argument: ${exprText(expr.args?.[0])} (${operandKind(expr.args?.[0], typeStr(argTypes[0]), false)}) for cap`,
+					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
 					expr,
 				);
 			} else if (sharedInfo(argTypes[0])) {
