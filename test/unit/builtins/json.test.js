@@ -2617,10 +2617,10 @@ const GPU_DTS =
 
 // Compiles `main.go` next to a `go.d.ts` declaring GPUBuffer; returns the run
 // output, or the compile error message.
-function runWithGpu(body) {
+function runWithGpu(body, globals = {}) {
 	return withTempDir(
 		{
-			"go.d.ts": GPU_DTS,
+			"go.d.ts": `${GPU_DTS}declare function makeBuf(): GPUBuffer;\n`,
 			"main.go": `package main
 import "encoding/json"
 import "js:go.d.ts"
@@ -2628,7 +2628,7 @@ ${body}`,
 		},
 		(dir) => {
 			try {
-				return { out: runJs(compileDir(dir).js), error: "" };
+				return { out: runJs(compileDir(dir).js, globals), error: "" };
 			} catch (e) {
 				return { out: "", error: e.message };
 			}
@@ -2651,6 +2651,67 @@ func main() {
 }`);
 	assertEqual(error, "");
 	assertEqual(out, '{"A":7} true');
+});
+
+test("typed json.Marshal writes a nil interop field as null", () => {
+	const { out, error } = runWithGpu(`
+type Holder struct {
+	Name string
+	Buf  GPUBuffer
+}
+func main() {
+	b, err := json.Marshal(Holder{Name: "x"})
+	console.log(string(b), err == nil)
+}`);
+	assertEqual(error, "");
+	assertEqual(out, '{"Name":"x","Buf":null} true');
+});
+
+test("typed json.Marshal rejects a non-nil interop field by name", () => {
+	const { out, error } = runWithGpu(
+		`
+type Holder struct {
+	Name string
+	Buf  GPUBuffer
+}
+func main() {
+	_, err := json.Marshal(Holder{Name: "x", Buf: makeBuf()})
+	console.log(err.Error())
+}`,
+		{ makeBuf: () => ({ label: "b" }) },
+	);
+	assertEqual(error, "");
+	assertEqual(out, "json: unsupported type: GPUBuffer");
+});
+
+test("interop pointer, slice and map fields compile and encode nil as null", () => {
+	const { out, error } = runWithGpu(`
+type Holder struct {
+	P *GPUBuffer
+	S []GPUBuffer
+	M map[string]GPUBuffer
+	N int \`json:"n,omitempty"\`
+}
+func main() {
+	b, err := json.Marshal(Holder{})
+	console.log(string(b), err == nil)
+}`);
+	assertEqual(error, "");
+	assertEqual(out, '{"P":null,"S":null,"M":null} true');
+});
+
+test("json.Unmarshal into a struct with an interop field is a compile error", () => {
+	const { error } = runWithGpu(`
+type Holder struct {
+	Name string
+	Buf  GPUBuffer
+}
+func main() {
+	var h Holder
+	err := json.Unmarshal([]byte("{}"), &h)
+	console.log(err == nil)
+}`);
+	assertContains(error, "cannot unmarshal into GPUBuffer");
 });
 
 // ── Entry point ───────────────────────────────────────────────

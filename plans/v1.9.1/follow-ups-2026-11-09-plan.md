@@ -277,7 +277,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`,
   - Files: `src/lower/json-codecs.js`, `src/lower/gen-types.js`
   - Test: `test/unit/builtins/json.test.js` (`withTempDir` + `compileDir` with a `go.d.ts`, then run). A dynamic `json.Marshal(any)` site in a program declaring structs with `GPUBuffer` fields compiles and runs without crashing; `gofront check .` and `build` succeed; dynamic types without interop fields still encode.
   - Done when: `spellable` returns `false` for `namespace` and composite types reaching it, preventing `cannot spell type kind namespace` compiler crashes on dynamic marshal sites.
-- [ ] Task 7.2: Encode nil JS-interop struct fields as `null` and reject decoding into them (`G26`, typed site)
+- [x] Task 7.2: Encode nil JS-interop struct fields as `null` and reject decoding into them (`G26`, typed site)
   - Files: `src/lower/json-codecs.js`
   - Test: `test/unit/builtins/json.test.js`. Typed `json.Marshal(Holder{Name: "x"})` with nil `Buf GPUBuffer` field encodes as `{"Name":"x","Buf":null} <nil>`; non-nil `Buf` returns error `json: unsupported type: GPUBuffer`; `*GPUBuffer`, `[]GPUBuffer` and `map[string]GPUBuffer` fields compile; `json.Unmarshal` into `Holder` returns compile error `cannot unmarshal into GPUBuffer`.
   - Done when: typed marshal sites handle nil interop fields matching 1.8.0 behavior without compiler crashes, and decode attempts produce clean diagnostics.
