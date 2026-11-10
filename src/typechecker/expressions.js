@@ -2002,6 +2002,9 @@ export const expressionCheckMethods = {
 					expr,
 				);
 			}
+			// An untyped operand takes type float32 (`complex(f, 0.01)`).
+			this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
+			this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
 			return COMPLEX64;
 		}
 		return COMPLEX128;

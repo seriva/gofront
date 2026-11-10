@@ -268,7 +268,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, third pass, `H20`, `H21`).
 
-- [ ] Task 6.1: Round untyped constant operands of `complex()` to float32 when the result is `complex64` (`H20` builtin)
+- [x] Task 6.1: Round untyped constant operands of `complex()` to float32 when the result is `complex64` (`H20` builtin)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/complex.test.js`. `var c complex64 = complex(float32(1), 0.01); fmt.Println(imag(c) == 0.01)` → `true`; `complex(0.01, float32(1))` + `real(c) == 0.01` → `true`; `var f float32 = 1; complex(f, 0.01)` vs `var w float32 = 0.01` → `true`; `fmt.Println(float64(imag(c)))` → `0.009999999776482582` (`assertAllTargetsOutput`).
   - Done when: all four print Go's output on every target, and `complex(1, 0.01)` as `complex128` still prints `true` for `imag(c) == 0.01`.
