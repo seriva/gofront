@@ -202,7 +202,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-func.test.js`. The three `G08` repros (`break outer` → `0\ndone`; `continue outer` → `0\n1\ndone`; nested `for` with `continue outer` → `0 0\n1 0\ndone`) via `assertJsTargetsOutput`.
   - Done when: no `SyntaxError` and the output matches on `js` and `both`. The WASM side is fixed in Task 4.1, so this test pins JS only.
-- [ ] Task 3.5: Assign ranged map values into address-taken variables through the box in JS (`G09`, JS)
+- [x] Task 3.5: Assign ranged map values into address-taken variables through the box in JS (`G09`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-assign.test.js`. The `G09` repro → `1`; the key form `for k = range m` with `&k` taken → the key (`assertJsTargetsOutput`).
   - Done when: `js` and `both` print `1`. WASM validity is covered in Task 4.2.
