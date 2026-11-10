@@ -197,6 +197,82 @@ func main() {
 	);
 });
 
+section("Nil receivers: which methods take a nil receiver");
+
+test("a method that shadows its receiver name runs on a nil receiver", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Other struct{ val int }
+
+type S struct{ x int }
+
+func (s *S) M() int {
+	if true {
+		s := &Other{val: 5}
+		return s.val
+	}
+	return 0
+}
+
+func main() {
+	var s *S
+	fmt.Println(s.M())
+}
+`,
+		"5\n",
+	);
+});
+
+test("a method that reads its receiver only under a condition runs on nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ x int }
+
+func (s *S) M(cond bool) int {
+	if cond {
+		return s.x
+	}
+	return 0
+}
+
+func main() {
+	var s *S
+	fmt.Println(s.M(false))
+}
+`,
+		"0\n",
+	);
+});
+
+test("a method that reads its receiver first panics on nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ x int }
+
+func (s *S) M() int {
+	return s.x
+}
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	fmt.Println((&S{x: 3}).M())
+	var s *S
+	fmt.Println(s.M())
+}
+`,
+		"3\nruntime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

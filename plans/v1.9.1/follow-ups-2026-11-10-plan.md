@@ -222,7 +222,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 4: JS Nil Receivers, Method Expressions, Map Keys and `encoding/json`
 
-- [ ] Task 4.1: Make the JS nil-safe-method analysis scope-aware and limit unsafe marking to unconditional receiver reads (`H11`, `H12`)
+- [x] Task 4.1: Make the JS nil-safe-method analysis scope-aware and limit unsafe marking to unconditional receiver reads (`H11`, `H12`)
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `H11` → `5`; `H12` with `cond == false` → `0` (`assertAllTargetsOutput`); a method whose first statement is `return s.x` on nil → panics with Go's nil-dereference message on every target.
   - Done when: both repros match Go, and `npm run bench` is within 3% of the plan's base commit.

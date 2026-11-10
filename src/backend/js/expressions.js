@@ -42,13 +42,15 @@ export function comparesToNil(node, name) {
 	return someChild(node, (c) => comparesToNil(c, name));
 }
 
-// True when `node` reads through the receiver `name` (`r.f`, `r[i]`, `*r`),
-// which panics on a nil receiver anyway. Calling a method of `safe` on it is
-// not a read: that method accepts a nil receiver.
+// True when evaluating `node` reads through the receiver `name` (`r.f`,
+// `r[i]`, `*r`), which panics on a nil receiver anyway. Calling a method of
+// `safe` on it is not a read: that method accepts a nil receiver. A func
+// literal's body is not evaluated where it appears, so it is not searched.
 export function derefsReceiver(node, name, safe) {
 	if (Array.isArray(node))
 		return node.some((n) => derefsReceiver(n, name, safe));
-	if (!node || typeof node !== "object") return false;
+	if (!node || typeof node !== "object" || node.kind === "FuncLit")
+		return false;
 	const isRecv = (e) => e?.kind === "Ident" && e.name === name;
 	if (node.kind === "SelectorExpr" && isRecv(node.expr))
 		return !safe.has(node.field);
@@ -60,6 +62,58 @@ export function derefsReceiver(node, name, safe) {
 	if (node.kind === "UnaryExpr" && node.op === "*" && isRecv(node.operand))
 		return true;
 	return someChild(node, (c) => derefsReceiver(c, name, safe));
+}
+
+// True when `stmts` (a method body) reads through the receiver `name` before
+// anything could skip the read: only the statements that always run first
+// count, up to the first branch, loop, return or rebinding of `name`. A
+// method that does so panics on a nil receiver either way.
+export function derefsReceiverFirst(stmts, name, safe) {
+	return receiverPrefix(stmts, name, safe) === "deref";
+}
+
+// What one statement of a method body's unconditional prefix does with the
+// receiver: "deref" reads through it, "stop" may skip the rest (a branch,
+// loop, return, panic or rebinding of the name), "next" runs on.
+const binds = (lhs, name) =>
+	lhs.some((e) => e?.kind === "Ident" && e.name === name);
+const branches = (reads, ...parts) => (parts.some(reads) ? "deref" : "stop");
+const RECEIVER_STEP = {
+	Block: (s, _reads, name, safe) => receiverPrefix(s.stmts, name, safe),
+	IfStmt: (s, reads) => branches(reads, s.init, s.cond),
+	ForStmt: (s, reads) => branches(reads, s.init, s.cond),
+	SwitchStmt: (s, reads) => branches(reads, s.init, s.tag),
+	TypeSwitchStmt: (s, reads) => branches(reads, s.expr),
+	ReturnStmt: (s, reads) => branches(reads, s.values),
+	ExprStmt: (s, reads) => {
+		if (reads(s.expr)) return "deref";
+		const panics = s.expr?.kind === "CallExpr" && s.expr.func?.name === "panic";
+		return panics ? "stop" : "next";
+	},
+	DefineStmt: (s, reads, name) => {
+		if (reads(s.rhs) || reads(s.lhs.filter((e) => e?.kind !== "Ident")))
+			return "deref";
+		return binds(s.lhs, name) ? "stop" : "next";
+	},
+	IncDecStmt: (s, reads) => (reads(s.expr) ? "deref" : "next"),
+	VarDecl: (s, reads, name) => {
+		if (s.decls.some((d) => reads(d.value))) return "deref";
+		const named = (d) => d.names.some((n) => (n?.name ?? n) === name);
+		return s.decls.some(named) ? "stop" : "next";
+	},
+};
+RECEIVER_STEP.AssignStmt = RECEIVER_STEP.DefineStmt;
+
+// "deref" when the unconditional prefix of `stmts` reads through the
+// receiver, "stop" when something may skip the rest, else "next".
+function receiverPrefix(stmts, name, safe) {
+	const reads = (n) => derefsReceiver(n, name, safe);
+	for (const s of stmts ?? []) {
+		const step = RECEIVER_STEP[s?.kind];
+		const r = step ? step(s, reads, name, safe) : "stop";
+		if (r !== "next") return r;
+	}
+	return "next";
 }
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
@@ -1920,7 +1974,13 @@ export const expressionGenMethods = {
 			// prototype so a nil `this` reaches it instead of a TypeError.
 			const recv = this.genExpr(expr.func.expr);
 			const rest = this._genCallArgs(expr);
-			return `${nilSafe}.prototype.${expr.func.field}.call(${rest ? `${recv}, ${rest}` : recv})`;
+			const m = expr.func.field;
+			const viaProto = (r) =>
+				`${nilSafe}.prototype.${m}.call(${rest ? `${r}, ${rest}` : r})`;
+			// A non-nil variable keeps the direct (faster) call.
+			if (/^[\w$]+$/.test(recv))
+				return `(${recv} != null ? ${recv}.${m}(${rest}) : ${viaProto(recv)})`;
+			return viaProto(recv);
 		}
 
 		expr.func._callee = true;
