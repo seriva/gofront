@@ -150,21 +150,6 @@ const STRICT_OPS = new Set([
 	">>",
 ]);
 
-function collectFunctionLabels(node, labels = new Set()) {
-	if (!node || typeof node !== "object") return labels;
-	if (Array.isArray(node)) {
-		for (const item of node) collectFunctionLabels(item, labels);
-		return labels;
-	}
-	if (node.kind === "LabeledStmt" && node.label) labels.add(node.label);
-	if (node.kind === "ForStmt" && node.label) labels.add(node.label);
-	for (const k of Object.keys(node)) {
-		if (k.startsWith("_")) continue;
-		collectFunctionLabels(node[k], labels);
-	}
-	return labels;
-}
-
 const NAMED_ZERO_TABLE = {
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
@@ -1000,12 +985,10 @@ export const expressionGenMethods = {
 
 	_withFnCtx(body, fn) {
 		const prev = this._fnCtx;
-		const prevLabels = this._functionLabels;
-		const labels = collectFunctionLabels(
-			body,
-			new Set(this._functionLabels ?? []),
-		);
-		this._functionLabels = Array.from(labels);
+		// A function starts with no JS labels in scope (see
+		// `_emitIterTargetDispatch`).
+		const prevLabels = this._jsLabels;
+		this._jsLabels = [];
 		this._fnCtx = {
 			body,
 			mut: new Map(),
@@ -1019,7 +1002,7 @@ export const expressionGenMethods = {
 			fn();
 		} finally {
 			this._fnCtx = prev;
-			this._functionLabels = prevLabels;
+			this._jsLabels = prevLabels;
 		}
 	},
 

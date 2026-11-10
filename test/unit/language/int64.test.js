@@ -1,7 +1,13 @@
 // GoFront test suite — 64-bit compound assignments with untyped constants
 
 import { fileURLToPath } from "node:url";
-import { assertProgramOutput, section, summarize, test } from "../helpers.js";
+import {
+	assertAllTargetsOutput,
+	assertProgramOutput,
+	section,
+	summarize,
+	test,
+} from "../helpers.js";
 
 section("int64 — untyped constant operands of compound assignments");
 
@@ -77,6 +83,48 @@ func main() {
 }
 `,
 		"2251799813685249\n",
+	);
+});
+
+section("int64 — compound assignments in for post statements");
+
+test("uint64 += untyped constant in a for post statement", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const half = 1 << 51
+
+func main() {
+	var b uint64 = 1
+	for i := 0; i < 1; b += half {
+		i++
+	}
+	fmt.Println(b)
+}
+`,
+		"2251799813685249\n",
+	);
+});
+
+test("int64 -= untyped constant in a for post statement", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const half = 1 << 51
+
+func main() {
+	var n int64 = 0
+	for i := 0; i < 2; n -= half {
+		i++
+	}
+	fmt.Println(n)
+}
+`,
+		"-4503599627370496\n",
 	);
 });
 

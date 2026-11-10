@@ -402,48 +402,20 @@ export const expressionParserMethods = {
 		return { kind: "CallExpr", func: fn, args };
 	},
 
-	// Returns true if the current position looks like a composite literal argument,
-	// e.g. []int{1,2,3} or map[string]int{"a":1}.  We scan ahead past the type
-	// tokens to check whether a { follows, without advancing this.pos permanently.
+	// Returns true if the current position starts a composite literal argument,
+	// e.g. []int{1,2,3}, map[string]int{"a":1} or []func() int{f}: the type is
+	// parsed speculatively and must be followed by `{`.  The position is
+	// always restored.
 	looksLikeCompositeLitArg() {
-		let i = this.pos;
-		const src = this.tokens;
-		// Skip over the type tokens: [, ], map, [, K, ], V, ident, etc.
-		// Simple approach: skip until we hit something that can't be part of a type
-		let depth = 0;
-		while (i < src.length) {
-			const tt = src[i].type;
-			if (tt === T.LBRACKET) {
-				depth++;
-				i++;
-				continue;
-			}
-			if (tt === T.RBRACKET) {
-				depth--;
-				i++;
-				continue;
-			}
-			if (depth > 0) {
-				i++;
-				continue;
-			}
-			if (
-				tt === T.MAP ||
-				tt === T.IDENT ||
-				tt === T.DOT || // qualified types: []pkg.Type{...}
-				tt === T.STAR ||
-				tt === T.INT ||
-				tt === T.FLOAT ||
-				tt === T.STRING
-			) {
-				i++;
-				continue;
-			}
-			break;
+		const start = this.pos;
+		try {
+			this.parseType();
+			return this.check(T.LBRACE);
+		} catch {
+			return false;
+		} finally {
+			this.pos = start;
 		}
-		// Skip whitespace tokens (shouldn't exist post-lex, but be safe)
-		while (i < src.length && src[i].type === T.SEMICOLON) i++;
-		return i < src.length && src[i].type === T.LBRACE;
 	},
 
 	parseCompositeLit(typeExpr) {
@@ -587,6 +559,16 @@ export const expressionParserMethods = {
 		if (t.type === T.STRUCT) {
 			const typeExpr = this.parseStructType();
 			return this.parseCompositeLit(typeExpr);
+		}
+
+		// Interface conversion: interface{ M() }(v).  `interface{…}{` is not a
+		// composite literal in Go, so only the conversion form is accepted.
+		if (t.type === T.INTERFACE) {
+			const targetType = this.parseInterfaceType();
+			this.expect(T.LPAREN);
+			const expr = this.parseExpr();
+			this.expect(T.RPAREN);
+			return { kind: "TypeConversion", targetType, expr };
 		}
 
 		if (t.type === T.CHAN) {

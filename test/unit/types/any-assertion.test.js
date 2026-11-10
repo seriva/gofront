@@ -259,3 +259,65 @@ func main() {
 		"boom\n",
 	);
 });
+
+section("conversions to interface types");
+
+test("I(T{}) converts a concrete value to an interface", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() }
+type T struct{}
+
+func (T) M() { fmt.Println("m") }
+
+func main() {
+	v := I(T{})
+	v.M()
+}
+`,
+		"m\n",
+	);
+});
+test("I(nil), error(nil) and I(j) from a wider interface convert", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() }
+type J interface {
+	M()
+	N()
+}
+type T struct{}
+
+func (T) M() { fmt.Println("m") }
+func (T) N() {}
+
+func main() {
+	a := I(nil)
+	fmt.Println(a == nil)
+	e := error(nil)
+	fmt.Println(e == nil)
+	var j J = T{}
+	b := I(j)
+	b.M()
+}
+`,
+		"true\ntrue\nm\n",
+	);
+});
+negative(
+	"I(T2{}) with T2 missing M",
+	`package main
+type I interface{ M() }
+type T2 struct{}
+func main() {
+	v := I(T2{})
+	_ = v
+}`,
+	"does not implement",
+);

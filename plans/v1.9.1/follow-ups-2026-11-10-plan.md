@@ -180,23 +180,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
 
 ### Phase 2: Parser, Interface Conversions and JS Statements
 
-- [ ] Task 2.1: Allow explicit conversions to interface types (`H04`)
+- [x] Task 2.1: Allow explicit conversions to interface types (`H04`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `v := I(T{}); v.M()` → `m` (`assertAllTargetsOutput`); `I(nil)` compiles; `I(T2{})` with `T2` lacking `M` → `assertErrorContains(…, "does not implement")`.
   - Done when: the positive runs on every target and the negative keeps Go's wording.
-- [ ] Task 2.2: Parse `interface{…}(x)` conversion expressions (`H04b`)
+- [x] Task 2.2: Parse `interface{…}(x)` conversion expressions (`H04b`)
   - Files: `src/parser/expressions.js`
   - Test: `test/unit/parser/constraint-elements.test.js`. `v := interface{ M() }(T{}); v.M()` → `m` (`assertAllTargetsOutput`); `interface{}(3)` → prints `3`.
   - Done when: both programs parse and print Go's output on every target.
-- [ ] Task 2.3: Detect composite-literal call arguments by parsing the type speculatively (`H17`)
+- [x] Task 2.3: Detect composite-literal call arguments by parsing the type speculatively (`H17`)
   - Files: `src/parser/expressions.js`
   - Test: `test/unit/compiler/lexer-parser.test.js`. `show([]func(){nil})` → `false`; `show([]func() int{func() int { return 1 }})` → `1`; `make([]func(), 3)`, `[]byte("a")` and `f([]int{1}...)` keep parsing (`assertAllTargetsOutput`).
   - Done when: no `expected ')'` parse error for either repro and the existing parser tests pass.
-- [ ] Task 2.4: Emit BigInt operands for 64-bit compound assignments in `for` post statements (`H07`)
+- [x] Task 2.4: Emit BigInt operands for 64-bit compound assignments in `for` post statements (`H07`)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/int64.test.js`. The `H07` repro → `2251799813685249`; `var n int64 = 0; for i := 0; i < 2; n -= half { i++ }` → `-4503599627370496` (`assertAllTargetsOutput`).
   - Done when: no `TypeError` on `js` or `both`, and `wasm` output is unchanged.
-- [ ] Task 2.5: Propagate labeled `break`/`continue` to enclosing range-over-func loops in JS (`H08`, JS)
+- [x] Task 2.5: Propagate labeled `break`/`continue` to enclosing range-over-func loops in JS (`H08`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-func.test.js`. Nested `continue outer` → `0 0\n1 0\ndone`; nested `break outer` → `0 0\ndone` (`assertJsTargetsOutput`; WASM `continue` pinned in Task 3.1).
   - Done when: no `SyntaxError: Undefined label` on `js`/`both` and existing range-func tests pass.
