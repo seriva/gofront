@@ -1,7 +1,13 @@
 // GoFront test suite — WASM dynamic interface assertions from `any`
 
 import { fileURLToPath } from "node:url";
-import { assertProgramOutput, section, summarize, test } from "../helpers.js";
+import {
+	assertProgramOutput,
+	assertWasmProgramOutput,
+	section,
+	summarize,
+	test,
+} from "../helpers.js";
 
 section("WASM interface assertions: promoted methods");
 
@@ -105,6 +111,95 @@ func main() {
 }
 `,
 		"true\nfalse\n",
+	);
+});
+
+section(
+	"WASM interface dispatch: methods promoted through an embedded pointer",
+);
+
+test("calls a method promoted through an embedded pointer of a struct value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type Inner struct{}
+
+func (i *Inner) M() { fmt.Println("inner") }
+
+type PO struct{ *Inner }
+
+func main() {
+	var v any = PO{&Inner{}}
+	m, ok := v.(Mer)
+	fmt.Println(ok)
+	m.M()
+}
+`,
+		"true\ninner\n",
+	);
+});
+
+// The JS backend still treats a pointer method promoted through two levels
+// as outside the value's method set (plans/follow-ups.md).
+test("calls a method promoted through two levels of embedding", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type Inner struct{ name string }
+
+func (i *Inner) M() { fmt.Println(i.name) }
+
+type PO struct{ *Inner }
+
+type PO2 struct{ PO }
+
+func main() {
+	var v any = PO2{PO{&Inner{"inner"}}}
+	m, ok := v.(Mer)
+	fmt.Println(ok)
+	m.M()
+	var p any = &PO2{PO{&Inner{"ptr"}}}
+	p.(Mer).M()
+}
+`,
+		"true\ninner\nptr\n",
+	);
+});
+
+test("calls a promoted method with a nil embedded pointer", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type Inner struct{}
+
+func (i *Inner) M() {
+	if i == nil {
+		fmt.Println("nil inner")
+		return
+	}
+	fmt.Println("inner")
+}
+
+type PO struct{ *Inner }
+
+func main() {
+	var v any = PO{}
+	v.(Mer).M()
+}
+`,
+		"nil inner\n",
 	);
 });
 

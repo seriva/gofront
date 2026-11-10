@@ -211,7 +211,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. The slice repro → `20`; the string repro → `98`; the key form `for i = range s` with `&i` → `1` (`assertProgramOutput`).
   - Done when: `assertValidWasm` passes and `wasm` matches `js` for all three.
-- [ ] Task 3.3: Dispatch interface calls to methods promoted through an embedded pointer of a boxed struct value (`H10`)
+- [x] Task 3.3: Dispatch interface calls to methods promoted through an embedded pointer of a boxed struct value (`H10`)
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/prescan.js`
   - Test: `test/unit/wasm/iface-assert.test.js`. The `H10` repro → `inner`; two levels (`type PO2 struct{ PO }`) → `inner`; a nil embedded pointer whose method checks `i == nil` → Go output (`assertProgramOutput`).
   - Done when: no `nil or unmatched type for method call` panic for any of the three.
