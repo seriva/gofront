@@ -1037,7 +1037,13 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(method, embedName, valueEmbed = false, fieldName = null) {
+	_embedStub(
+		method,
+		embedName,
+		valueEmbed = false,
+		fieldName = null,
+		nilPtrRecv = false,
+	) {
 		// The field is named after the type without its package suffix
 		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
 		const field = fieldName || embedName.replace(/\$\$.*$/, "");
@@ -1045,10 +1051,18 @@ export class CodeGen {
 		// the value as the receiver.
 		if (valueEmbed)
 			return `${method}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
-		const call = this.structNames.has(embedName)
-			? `this.${field}.${method}(...__a)`
-			: `${embedName}.prototype.${method}.call(this, ...__a)`;
+		const call = this._embedStubCall(method, embedName, field, nilPtrRecv);
 		return `${method}(...__a) { return ${call}; }`;
+	}
+
+	_embedStubCall(method, embedName, field, nilPtrRecv) {
+		if (!this.structNames.has(embedName))
+			return `${embedName}.prototype.${method}.call(this, ...__a)`;
+		// A nil embedded pointer still reaches a pointer-receiver method, as in
+		// Go: call it through the prototype instead of reading it off null.
+		return nilPtrRecv
+			? `${embedName}.prototype.${method}.call(this.${field}, ...__a)`
+			: `this.${field}.${method}(...__a)`;
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {
@@ -1061,6 +1075,7 @@ export class CodeGen {
 					stub.embedName,
 					stub.valueEmbed,
 					stub.fieldName,
+					stub.nilPtrRecv,
 				),
 			);
 		}

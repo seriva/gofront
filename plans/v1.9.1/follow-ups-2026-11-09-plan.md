@@ -240,7 +240,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type MyInt int; g := (*MyInt).Ping; g(nil-ptr)` → `1`; a struct `(*S).M` with nil → Go output.
   - Done when: no `TypeError` on `js` or `both`.
-- [ ] Task 5.3: Dispatch promoted pointer-receiver methods through nil embedded pointers (`G18`)
+- [x] Task 5.3: Dispatch promoted pointer-receiver methods through nil embedded pointers (`G18`)
   - Files: `src/backend/js/expressions.js`, `src/lower/embedding.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type P struct{ *Base }; P{}.Ptr()` → `1`; two levels of embedding → `1`.
   - Done when: all targets print `1`.

@@ -10,6 +10,12 @@ function isPtrOnlyPromotion(rawEmbed, embed, mName, mType) {
 	return Boolean((mType ?? embed.methods?.get(mName))?._ptrRecv);
 }
 
+// A pointer-receiver method reached through an embedded pointer, which may
+// be nil.
+function isNilablePtrRecv(rawEmbed, mType) {
+	return rawEmbed.kind === "pointer" && Boolean(mType?._ptrRecv);
+}
+
 export function computeEmbeddedStubs(name, methodDecls, checker) {
 	if (!checker) return [];
 	const resolvedType = checker.types.get(name)?.underlying;
@@ -50,6 +56,7 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 					embedName,
 					fieldName,
 					ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
+					nilPtrRecv: isNilablePtrRecv(rawEmbed, mType),
 				});
 				declared.add(mName); // Prevent duplicate stubs for diamond embeds
 			}

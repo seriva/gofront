@@ -129,6 +129,53 @@ func main() {
 	);
 });
 
+section("Nil receivers: promoted through embedded pointers");
+
+test("a promoted pointer method runs through a nil embedded pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+
+func (b *Base) Ptr() int { return 1 }
+
+type P struct{ *Base }
+
+func main() {
+	fmt.Println(P{}.Ptr())
+}
+`,
+		"1\n",
+	);
+});
+
+test("a promoted pointer method runs through two embedding levels", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+
+func (b *Base) Ptr() int { return 1 }
+
+type Mid struct{ *Base }
+
+type Top struct{ Mid }
+
+func main() {
+	var t Top
+	fmt.Println(t.Ptr())
+	p := &t
+	fmt.Println(p.Ptr())
+}
+`,
+		"1\n1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
