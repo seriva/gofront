@@ -1229,11 +1229,10 @@ export const statementGenMethods = {
 				this.line(`${stmt.keyword} ${stmt.label};`);
 			return;
 		}
-		if (
-			stmt.keyword === "continue" &&
-			stmt.label === this._currentIterLoopLabel
-		) {
-			this.line("return true;");
+		if (stmt.label === this._currentIterLoopLabel) {
+			if (stmt.keyword === "continue") this.line("return true;");
+			else if (stmt.keyword === "break")
+				this.line(`${this._iterBreakFlag} = true; return false;`);
 			return;
 		}
 		this.line(
@@ -1787,8 +1786,11 @@ export const statementGenMethods = {
 		return `__s(${iteree}).entries()`;
 	},
 
-	_emitIterTargetDispatch(targetFlag) {
-		const labels = this._functionLabels ?? [];
+	_emitIterTargetDispatch(targetFlag, ownLabel = null) {
+		// The loop's own label is handled inside the callback (`break` and
+		// `continue` of the range-over-func loop), and a JS `continue` cannot
+		// name the labeled block that wraps it.
+		const labels = (this._functionLabels ?? []).filter((l) => l !== ownLabel);
 		this.line(`if (${targetFlag}) {`);
 		this.indented(() => {
 			for (const lbl of labels) {
@@ -1872,7 +1874,7 @@ export const statementGenMethods = {
 			});
 			this.line("});");
 			this.line(`if (${retFlag}) return ${retVar};`);
-			this._emitIterTargetDispatch(targetFlag);
+			this._emitIterTargetDispatch(targetFlag, loopLabel);
 		});
 		this.line("}");
 		this._iterDepth--;
