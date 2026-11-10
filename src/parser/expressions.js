@@ -589,6 +589,16 @@ export const expressionParserMethods = {
 			return this.parseCompositeLit(typeExpr);
 		}
 
+		// Interface conversion: interface{ M() }(v).  `interface{…}{` is not a
+		// composite literal in Go, so only the conversion form is accepted.
+		if (t.type === T.INTERFACE) {
+			const targetType = this.parseInterfaceType();
+			this.expect(T.LPAREN);
+			const expr = this.parseExpr();
+			this.expect(T.RPAREN);
+			return { kind: "TypeConversion", targetType, expr };
+		}
+
 		if (t.type === T.CHAN) {
 			this.err("channels are not supported in GoFront");
 		}

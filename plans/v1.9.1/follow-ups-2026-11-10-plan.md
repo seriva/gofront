@@ -184,7 +184,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `v := I(T{}); v.M()` → `m` (`assertAllTargetsOutput`); `I(nil)` compiles; `I(T2{})` with `T2` lacking `M` → `assertErrorContains(…, "does not implement")`.
   - Done when: the positive runs on every target and the negative keeps Go's wording.
-- [ ] Task 2.2: Parse `interface{…}(x)` conversion expressions (`H04b`)
+- [x] Task 2.2: Parse `interface{…}(x)` conversion expressions (`H04b`)
   - Files: `src/parser/expressions.js`
   - Test: `test/unit/parser/constraint-elements.test.js`. `v := interface{ M() }(T{}); v.M()` → `m` (`assertAllTargetsOutput`); `interface{}(3)` → prints `3`.
   - Done when: both programs parse and print Go's output on every target.
