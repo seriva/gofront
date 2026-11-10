@@ -757,10 +757,11 @@ var __pk = __pk || function(p) {
 };
 var __ik = __ik || function(k, tag) {
   const t = typeof k;
+  // A nil slice, map or func of a static type Go cannot hash panics too.
+  if (tag !== undefined && tag.charCodeAt(0) === 33) throw new Error("runtime error: hash of unhashable type " + tag.slice(1));
   if (k === null || k === undefined) return "\\u0001nil";
   if (tag !== undefined) {
     if (tag === "*") return __pk(k);
-    if (tag.charCodeAt(0) === 33) throw new Error("runtime error: hash of unhashable type " + tag.slice(1));
     if (t === "number" || t === "bigint") {
       const s = "\\u0001" + tag + ":" + String(k);
       if (!__kt.has(s)) __kt.set(s, k);

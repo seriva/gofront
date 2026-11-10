@@ -234,7 +234,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. The `H14` repro → `runtime error: invalid memory address or nil pointer dereference` (`assertAllTargetsOutput`); non-nil `f(&S{})` → `10`.
   - Done when: every target prints Go's panic message.
-- [ ] Task 4.4: Panic on defined slice and map literal keys of `map[any]` on JS (`H15`)
+- [x] Task 4.4: Panic on defined slice and map literal keys of `map[any]` on JS (`H15`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/wasm/map-keys.test.js`. `m[L{1}] = 1` → `runtime error: hash of unhashable type main.L`; `m[M{}] = 1` → `… main.M` (`assertAllTargetsOutput`, relies on Task 3.4 for wasm); `m[[2]int{1, 2}] = 1` and a hashable struct key still work.
   - Done when: every target prints Go's message and hashable keys are unchanged.

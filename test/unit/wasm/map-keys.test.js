@@ -129,6 +129,36 @@ func main() {
 	);
 });
 
+test("a defined slice literal used directly as a key panics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type L []int
+
+type M map[string]int
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	m := map[any]int{}
+	try(func() { m[L{1}] = 1 })
+	try(func() { m[M{}] = 1 })
+	var l L
+	try(func() { m[l] = 1 })
+	try(func() { m[[2]int{1, 2}] = 1 })
+	try(func() { m["s"] = 2 })
+	fmt.Println(len(m), m["s"])
+}
+`,
+		"runtime error: hash of unhashable type main.L\nruntime error: hash of unhashable type main.M\nruntime error: hash of unhashable type main.L\n<nil>\n<nil>\n2 2\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

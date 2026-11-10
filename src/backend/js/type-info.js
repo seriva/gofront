@@ -13,6 +13,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import { mentionsTypeParam } from "./expressions.js";
 
 // True when type node `node` names one of the type parameters `names`.
@@ -196,7 +197,14 @@ export const typeInfoGenMethods = {
 	// representation with `int`/`float64`/`int64`, `*` for pointers (keyed by
 	// identity) and `!type` for types Go cannot hash.
 	_ifaceKeyTag(t) {
-		if (!t || t.kind === "named" || mentionsTypeParam(t)) return null;
+		if (!t || mentionsTypeParam(t)) return null;
+		if (t.kind === "named") {
+			// A defined slice, map or func type: a literal of it carries no tag.
+			const u = this._underlyingOf(t)?.kind;
+			return u === "slice" || u === "map" || u === "func"
+				? `!${goTypeName(t)}`
+				: null;
+		}
 		if (t.kind === "pointer") return "*";
 		if (t.kind === "slice" || t.kind === "map" || t.kind === "func")
 			return `!${this._dynTypeName(t)}`;
