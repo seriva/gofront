@@ -273,6 +273,33 @@ func main() {
 	);
 });
 
+test("a method of a generic struct can test its receiver for nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Gen[T any] struct{ val T }
+
+func (g *Gen[T]) Ping() string {
+	if g == nil {
+		return "nil"
+	}
+	return "ok"
+}
+
+func main() {
+	var g *Gen[int]
+	fmt.Println(g.Ping())
+	fmt.Println((&Gen[int]{}).Ping())
+	var h *Gen[string]
+	fmt.Println(h.Ping())
+}
+`,
+		"nil\nok\nnil\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

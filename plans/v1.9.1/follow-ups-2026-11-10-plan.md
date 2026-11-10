@@ -226,7 +226,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/js/expressions.js`, `src/backend/js/index.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `H11` → `5`; `H12` with `cond == false` → `0` (`assertAllTargetsOutput`); a method whose first statement is `return s.x` on nil → panics with Go's nil-dereference message on every target.
   - Done when: both repros match Go, and `npm run bench` is within 3% of the plan's base commit.
-- [ ] Task 4.2: Statically dispatch nil-safe methods of generic struct pointers (`H13`)
+- [x] Task 4.2: Statically dispatch nil-safe methods of generic struct pointers (`H13`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. The `H13` repro → `nil`; non-nil `&Gen[int]{}` → `ok`; `Gen[string]` instantiation → `nil` (`assertAllTargetsOutput`).
   - Done when: no `TypeError` on `js`/`both`.

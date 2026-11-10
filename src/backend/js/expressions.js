@@ -2058,8 +2058,11 @@ export const expressionGenMethods = {
 		if (func?.kind !== "SelectorExpr" || func._isMethodExpr) return null;
 		const t = func.expr?._type;
 		if (t?.kind !== "pointer" || t.base?.kind !== "named") return null;
-		const cls = t.base.name;
-		if (t.base.typeArgs?.length) return null;
+		// An instance of a generic struct (`Gen[int]`) shares its class.
+		const cls = t.base.typeArgs?.length
+			? this._structClassName(t.base)
+			: t.base.name;
+		if (!cls) return null;
 		if (
 			t.base.underlying?.kind === "struct" &&
 			!this._promotedPath(func) &&
