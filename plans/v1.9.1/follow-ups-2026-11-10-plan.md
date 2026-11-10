@@ -276,7 +276,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, third 
   - Files: `src/typechecker/assignability.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/types/complex.test.js`. `var c complex64 = 1 + 0.01i; fmt.Println(imag(c) == 0.01, float64(imag(c)))` → `true 0.009999999776482582`; `var d complex64 = 0.1; fmt.Println(float64(real(d)))` → `0.10000000149011612` (`assertAllTargetsOutput`).
   - Done when: both match Go on every target, and the emitted JS for a `complex128` constant is unchanged.
-- [ ] Task 6.3: Walk every value of templ `case a, b:` lists in the shared AST walker (`H21`)
+- [x] Task 6.3: Walk every value of templ `case a, b:` lists in the shared AST walker (`H21`)
   - Files: `src/lower/gen-types.js`
   - Test: `test/unit/compiler/templ.test.js`. The `H21` component with `Case("1.0", 1)` → `#app` innerHTML `<span>ok</span>` (`runInDom`); `case "a", "b", fmt.Sprintf("%0.1f", g):` → same; `case "a", fmt.Sprint(n)` with `n int64 = 9007199254740993` and `s = "9007199254740993"` → `<span>ok</span>`; the existing Task 8.2 (11-09) templ `fmt` tests stay green.
   - Done when: no `Sprintf$$fmt is not defined` for any case position, and each `fmt` call gets exactly one `gff_` formatter in the JS output.
