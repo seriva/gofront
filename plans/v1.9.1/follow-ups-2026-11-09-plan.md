@@ -179,7 +179,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `(*int)(x)` and `int(x)` with `x any` → `"need type assertion"`; `any(x)`, `error(nil)` and `interface{ M() }(v)` where `v` implements it compile.
   - Done when: both negative repros error on all targets.
-- [ ] Task 2.4: Bind the type-switch `default` and multi-type captures to the switch operand's type (`G24`)
+- [x] Task 2.4: Bind the type-switch `default` and multi-type captures to the switch operand's type (`G24`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/any-assertion.test.js`. `switch v := x.(type) { default: var a A = v }` → `"need type assertion"`; `case A, B: var y any = v` compiles; `default: fmt.Println(v)` prints the value on all targets.
   - Done when: the negative case errors, no target emits invalid WASM, and the existing type-switch tests pass.

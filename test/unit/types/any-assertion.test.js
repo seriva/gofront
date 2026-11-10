@@ -3,6 +3,7 @@
 // concrete type, whatever the statement form.
 
 import {
+	assertAllTargetsOutput,
 	assertErrorContains,
 	compile,
 	compileWasm,
@@ -141,3 +142,54 @@ func main() {
 	_, _, _ = y, e, i
 }`,
 );
+
+// Task 2.4: type-switch default and multi-type captures
+negative(
+	"type-switch default binding assigned to concrete",
+	`package main
+type A struct{ X int }
+type B struct{}
+func main() {
+	var x any = 3
+	switch v := x.(type) {
+	case B:
+		_ = v
+	default:
+		var a A = v
+		_ = a
+	}
+}`,
+);
+positive(
+	"multi-type capture to any",
+	`package main
+type A struct{}
+type B struct{}
+func main() {
+	var x any = A{}
+	switch v := x.(type) {
+	case A, B:
+		var y any = v
+		_ = y
+	}
+}`,
+);
+test("type-switch default prints the value on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var x any = 3
+	switch v := x.(type) {
+	case string:
+		fmt.Println("string", v)
+	default:
+		fmt.Println(v)
+	}
+}
+`,
+		"3\n",
+	);
+});
