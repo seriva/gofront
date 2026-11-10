@@ -96,6 +96,59 @@ func main() {
 	);
 });
 
+test("a float32 switch case constant matches the rounded tag", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var x float32 = 0.01
+	switch x {
+	case 0.01:
+		fmt.Println("matched")
+	default:
+		fmt.Println("not matched")
+	}
+}
+`,
+		"matched\n",
+	);
+});
+
+test("delete rounds a constant key to the float32 key type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[float32]int{0.01: 42}
+	delete(m, 0.01)
+	fmt.Println(len(m))
+}
+`,
+		"0\n",
+	);
+});
+
+test("min and max round constant operands to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var x float32 = 0.02
+	fmt.Println(min(x, 0.01) == 0.01)
+	var y float32 = 0.005
+	fmt.Println(max(y, 0.01) == 0.01)
+}
+`,
+		"true\ntrue\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

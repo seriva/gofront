@@ -106,7 +106,10 @@ const BUILTIN_CHECK = {
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
 	delete: (s, _n, e, at) => {
 		const mt = s._deepUnderlying(at[0]);
-		if (mt?.kind === "map" && e.args[1]) s._markIfaceKey(mt, e.args[1], at[1]);
+		if (mt?.kind === "map" && e.args[1]) {
+			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
+			s._markIfaceKey(mt, e.args[1], at[1]);
+		}
 		return VOID;
 	},
 	make: (s, _n, e, _at, sc) => {
@@ -134,8 +137,8 @@ const BUILTIN_CHECK = {
 	},
 	recover: () => ANY,
 	error: () => ERROR,
-	min: (_s, _n, _e, at) => minMaxType(at),
-	max: (_s, _n, _e, at) => minMaxType(at),
+	min: (s, _n, e, at) => s._checkMinMax(e, at),
+	max: (s, _n, e, at) => s._checkMinMax(e, at),
 	clear: () => VOID,
 	complex: (s, _n, e, at) => s._checkBuiltinComplex(e, at),
 	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
@@ -828,6 +831,15 @@ export const expressionCheckMethods = {
 	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
 	// A named basic value is boxed first, exactly as in any interface
 	// conversion; other values are keyed as they are.
+	// Untyped constant operands take the result type, so a float32 result
+	// rounds them like the typed operands.
+	_checkMinMax(e, at) {
+		const rt = minMaxType(at);
+		for (let i = 0; i < e.args.length; i++)
+			this._tagFloat32Const(rt, at[i], e.args[i]);
+		return rt;
+	},
+
 	_markIfaceKey(mapType, node, srcType) {
 		const key = this.resolveType(mapType.key);
 		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
