@@ -255,7 +255,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second
   - Files: `src/lower/functions.js`
   - Test: `test/unit/language/range-func.test.js`. `func get() (any, int) { for range seq { return makePair() }; return nil, 0 }` → `{1} 1 true` (`assertAllTargetsOutput`); a `defer` in `get` that reads the named result sees the forwarded value.
   - Done when: both print Go's output on every target.
-- [ ] Task 5.3: Split forwarded call arguments into interface parameters (`H19` call arguments)
+- [x] Task 5.3: Split forwarded call arguments into interface parameters (`H19` call arguments)
   - Files: `src/typechecker/expressions.js`, `src/lower/functions.js`
   - Test: `test/unit/types/dynamic-types.test.js`. `show(makePair())` → `{1} 1 true`; `O{}.show(makePair())` → `{1} 1 true`; `fmt.Println(makePair())` keeps printing `{1} 1`; `defer show(makePair())` keeps printing `{1} 1 true` (`assertAllTargetsOutput`).
   - Done when: every target prints Go's output and `assertValidWasm` passes for the method form.

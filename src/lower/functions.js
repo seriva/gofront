@@ -1,7 +1,7 @@
 // src/lower/functions.js
 // Analyzes function signatures, named returns and defer structures.
 
-import { forEachChild, someChild } from "./walk.js";
+import { forEachChild, hasCallOrReceive, someChild } from "./walk.js";
 
 export function extractNamedReturns(decl) {
 	const named = decl?.returnType?._namedReturns;
@@ -306,19 +306,25 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 let fwdCounter = 0;
 
 /**
- * Splits a multi-value call forwarded into interface results (`return f()`
- * where some result is an interface) into temps:
- * `__fwd$1, __fwd$2 := f(); return __fwd$1, __fwd$2`.  The typechecker
- * records per-element interface-box marks in `call._fwdIface`; each temp
- * takes its element's marks, so both backends box it through their ordinary
- * per-value path.  Forwards with no interface element are left alone.
+ * Splits a multi-value call forwarded into interfaces into temps:
+ * `return f()` where some result is an interface becomes
+ * `__fwd$1, __fwd$2 := f(); return __fwd$1, __fwd$2`, and `g(f())` where
+ * some parameter is an interface becomes `…; g(__fwd$1, __fwd$2)`.  The
+ * typechecker records per-element interface-box marks in `call._fwdIface`;
+ * each temp takes its element's marks, so both backends box it through their
+ * ordinary per-value path.  Forwards with no interface element are left alone.
+ *
+ * `g(f())` is split only as the operand of a statement (expression
+ * statement, single-value `:=`/`=`/`var`/`return`) whose callee evaluates
+ * no call, so hoisting `f()` keeps Go's evaluation order.
  */
 export function splitForwardedTuples(programOrPrograms) {
 	fwdCounter = 0;
 	const programs = Array.isArray(programOrPrograms)
 		? programOrPrograms
 		: [programOrPrograms];
-	for (const program of programs) splitForwardsIn(program?.decls);
+	for (const program of programs)
+		for (const d of program?.decls ?? []) splitForwardsIn(d);
 }
 
 function splitForwardsIn(node) {
@@ -327,16 +333,60 @@ function splitForwardsIn(node) {
 		for (let i = 0; i < node.length; i++) {
 			const item = node[i];
 			splitForwardsIn(item);
-			const define =
-				item?.kind === "ReturnStmt" ? splitForwardedReturn(item) : null;
-			if (define) {
-				node.splice(i, 0, define);
-				i++;
-			}
+			const defines = splitForwardsInStmt(item);
+			node.splice(i, 0, ...defines);
+			i += defines.length;
 		}
 		return;
 	}
 	forEachChild(node, splitForwardsIn);
+}
+
+// The `:=` statements to insert before `stmt` (in order) after rewriting its
+// forwarded calls to read the temps.
+function splitForwardsInStmt(stmt) {
+	const defines = [];
+	const operand = statementOperand(stmt);
+	if (
+		operand?.kind === "CallExpr" &&
+		operand._multiForward &&
+		operand.args?.length === 1 &&
+		!hasCallOrReceive(operand.func)
+	) {
+		const split = forwardTemps(operand.args[0]);
+		if (split) {
+			operand.args = split.operands;
+			operand._multiForward = false;
+			defines.push(split.define);
+		}
+	}
+	if (stmt?.kind === "ReturnStmt") {
+		const define = splitForwardedReturn(stmt);
+		if (define) defines.push(define);
+	}
+	return defines;
+}
+
+// The single expression a statement evaluates last, or null.
+function statementOperand(stmt) {
+	switch (stmt?.kind) {
+		case "ExprStmt":
+			return stmt.expr;
+		case "DefineStmt":
+		case "AssignStmt":
+			return stmt.rhs?.length === 1 &&
+				stmt.lhs?.every((e) => e.kind === "Ident")
+				? stmt.rhs[0]
+				: null;
+		case "ReturnStmt":
+			return stmt.values?.length === 1 ? stmt.values[0] : null;
+		case "VarDecl":
+			return stmt.decls?.length === 1 && stmt.decls[0].value?.length === 1
+				? stmt.decls[0].value[0]
+				: null;
+		default:
+			return null;
+	}
 }
 
 // Splits one forwarded call into temps: returns the `:=` statement defining

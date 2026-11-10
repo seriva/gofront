@@ -353,7 +353,13 @@ export const statementCheckMethods = {
 		} finally {
 			this._skipIfaceMark = skip;
 		}
-		if (skip) return;
+		if (!skip) this._markForwardedElems(expected, forwarded, call);
+	},
+
+	// Records in `call._fwdIface` one interface-box mark holder per forwarded
+	// element (null where the element is not boxed), or clears it when no
+	// element enters an interface.
+	_markForwardedElems(expected, forwarded, call) {
 		const holders = expected.map((t, i) => {
 			const holder = {};
 			this._markIfaceBox(t, forwarded[i], holder);

@@ -229,3 +229,91 @@ func main() {
 		"m3 1\n",
 	);
 });
+
+section("Multi-value calls forwarded into interface parameters");
+
+const SHOW = `func show(v any, n int) {
+	_, ok := v.(T)
+	fmt.Println(v, n, ok)
+}
+`;
+
+test("g(f()) boxes a forwarded struct into an any parameter by value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+${SHOW}
+func main() {
+	show(makePair())
+}
+`,
+		"{1} 1 true\n",
+	);
+});
+
+test("a method call forwarding f() boxes the struct into an any parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+type O struct{}
+
+func (O) show(v any, n int) {
+	_, ok := v.(T)
+	fmt.Println(v, n, ok)
+}
+
+func main() {
+	O{}.show(makePair())
+}
+`,
+		"{1} 1 true\n",
+	);
+});
+
+test("fmt.Println and defer keep forwarding multi-value calls", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+${SHOW}
+func main() {
+	defer show(makePair())
+	fmt.Println(makePair())
+}
+`,
+		"{1} 1\n{1} 1 true\n",
+	);
+});
+
+test("g(f()) forwards into an any parameter from assignments and returns", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func box(v any, n int) any {
+	_, ok := v.(T)
+	return fmt.Sprint(v, n, ok)
+}
+
+func pass() any { return box(makePair()) }
+
+func main() {
+	s := box(makePair())
+	var t any = box(makePair())
+	s = box(makePair())
+	fmt.Println(s, t, pass())
+}
+`,
+		"{1} 1 true {1} 1 true {1} 1 true\n",
+	);
+});
