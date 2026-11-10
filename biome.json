@@ -16,7 +16,10 @@
 			"!example/*/app.js",
 			"!example/*/vendor.js",
 			"!coverage",
-			"!test-results"
+			"!test-results",
+			"!**/*.md",
+			"!**/*.yml",
+			"!**/*.yaml"
 		]
 	},
 	"formatter": {
