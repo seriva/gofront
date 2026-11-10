@@ -694,14 +694,16 @@ export const expressionGenMethods = {
 				}
 			}
 		}
-		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
-			const tag = this._dynTypeTag(expr._ifaceSrc);
+		{
+			const tag = this._ityTag(expr);
 			if (tag) {
 				this.useHelper("ifaceBox");
 				expr._ityTagging = true;
 				try {
 					const ptr = this._dynTagFlags(expr._ifaceSrc);
-					return `__ity(${this.genExpr(expr)}, ${JSON.stringify(tag)}${ptr})`;
+					// An array is copied before it is tagged: the copy is the value
+					// the interface holds, and it must keep the tag.
+					return `__ity(${this.genValueExpr(expr)}, ${JSON.stringify(tag)}${ptr})`;
 				} finally {
 					expr._ityTagging = false;
 				}
@@ -1010,10 +1012,18 @@ export const expressionGenMethods = {
 		}
 	},
 
+	// The type tag `expr` takes on entering an interface, or null.
+	_ityTag(expr) {
+		if (!expr._ifaceSrc || expr._ityTagging || this._isNamedBoxKind(expr))
+			return null;
+		return this._dynTypeTag(expr._ifaceSrc);
+	},
+
 	// Emits `expr` as a Go value: struct/array operands that alias existing storage are copied.
 	genValueExpr(expr) {
+		const tagged = Boolean(this._ityTag(expr));
 		const js = this.genExpr(expr);
-		if (expr._ifaceBox) return js;
+		if (expr._ifaceBox || tagged) return js;
 		if (
 			!(
 				this._aggregateBase(expr._type) || this._typeParamClone(expr._type, js)

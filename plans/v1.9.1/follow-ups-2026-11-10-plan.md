@@ -238,7 +238,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/wasm/map-keys.test.js`. `m[L{1}] = 1` → `runtime error: hash of unhashable type main.L`; `m[M{}] = 1` → `… main.M` (`assertAllTargetsOutput`, relies on Task 3.4 for wasm); `m[[2]int{1, 2}] = 1` and a hashable struct key still work.
   - Done when: every target prints Go's message and hashable keys are unchanged.
-- [ ] Task 4.5: Fail `json.Marshal` of func arrays in `any` on JS, and update the docs (`H18`)
+- [x] Task 4.5: Fail `json.Marshal` of func arrays in `any` on JS, and update the docs (`H18`)
   - Files: `src/lower/json-codecs.js`, `docs/go-compatibility.md`
   - Test: `test/unit/builtins/json.test.js`. `var a [2]func(); var v any = a; json.Marshal(v)` → ` json: unsupported type: func()` (`assertAllTargetsOutput`); nil `[]func()` in `any` keeps `null <nil>`.
   - Done when: every target prints Go's error, and the `encoding/json` row of `docs/go-compatibility.md` says func arrays in an `any` fail on every target (nil func slices still encode `null`).
