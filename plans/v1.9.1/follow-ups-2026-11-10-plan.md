@@ -4,7 +4,7 @@
 **Status:** Draft  
 **Base branch:** main  
 **Related:** [`follow-ups-2026-11-09-plan.md`](follow-ups-2026-11-09-plan.md) (origin of every ledger entry; its Phases 7–8 are independent of this plan; execute after `follow-ups-2026-11-09-plan.md` is merged into main)  
-**Release note:** More invalid Go is now rejected with Go's error instead of building broken WebAssembly (`case nil` in `switch true`, `cap` of a struct or func, assigning an `any` to `error` without a type assertion, constraint interfaces used as ordinary types), while valid code that failed to compile now works: conversions to interface types such as `I(v)` and `interface{ M() }(v)`, and slices of funcs written directly as call arguments. Nil-pointer method calls, labeled `continue` across nested range-over-func loops, 64-bit `for` loop updates, range assignments into address-taken variables, unhashable map keys and `json.Marshal` of func arrays now behave as in Go on both JavaScript and WebAssembly.
+**Release note:** More invalid Go is now rejected with Go's error instead of building broken WebAssembly (`case nil` in `switch true`, `cap` of a struct or func, assigning an `any` to `error` without a type assertion, constraint interfaces used as ordinary types), while valid code that failed to compile now works: conversions to interface types such as `I(v)` and `interface{ M() }(v)`, and slices of funcs written directly as call arguments. Nil-pointer method calls, labeled `continue` across nested range-over-func loops, 64-bit `for` loop updates, range assignments into address-taken variables, unhashable map keys and `json.Marshal` of func arrays now behave as in Go on both JavaScript and WebAssembly, and returning or passing a multi-value call such as `return f()` into `any` results or parameters keeps the right values and types.
 
 ---
 
@@ -15,18 +15,21 @@ Schedule and fix every reproducing entry of `plans/follow-ups.md` (18 entries, a
 - **18 entries reproduce** and are scheduled in Phases 1–4. The re-probe widened several: `H01` reproduces only when the same file is compiled a second time in one process (parse cache), on any target; `H02`/`H03` also cover `cap(func)`; `H05` also covers `var e fmt.Stringer = b`; `H08` `break outer` fails on JS too; `H09` also covers ranging a string; `H15` also covers a defined map literal; `H17` covers any `[]func…{…}` call argument.
 - **0 entries deferred, 0 no longer reproduce.** None is scheduled in another open plan (the only open plan, `follow-ups-2026-11-09`, has Phases 7–8 left: JSON interop codecs, `float32` constants, templ `fmt`, SIMD globals — no overlap).
 
+Second sweep (2026-11-10, after 11-09 Phase 7 / PR #170): 1 new ledger entry, `H19`, re-probed on `feat/follow-ups-2026-11-09` @ `cbbc0020` with `.probes/h19.mjs` (same harness, `evictParseCache` per target). **It reproduces and is much wider than logged:** not a JSON bug but a general defect in forwarding a multi-value call (`return f()`, `g(f())`) into `any` results or parameters, on both backends. Scheduled in Phase 5; none deferred.
+
 Grouped by subsystem:
 
 1. Typechecker checks (Phase 1).
 2. Parser, interface conversions and JS statements (Phase 2).
 3. WASM codegen (Phase 3).
 4. JS nil receivers, method expressions, map keys and `encoding/json` (Phase 4).
+5. Multi-value call forwarding into interfaces (Phase 5).
 
 Re-probe each phase's repros on its base commit before starting the phase, and drop any sub-repro that no longer reproduces. Go is not installed in the probe environment, so expected outputs come from the ledger entries (checked against go1.26 by reviewers). Diagnostics are asserted by a stable substring.
 
 **Done means:**
 
-- Every repro in Phases 1–4 is a passing test in its task's `Test:` file: programs via `assertProgramOutput` (`both` + `wasm`), or `assertAllTargetsOutput` where plain `js` packages must also match; invalid programs via `assertErrorContains` on every target.
+- Every repro in Phases 1–5 is a passing test in its task's `Test:` file: programs via `assertProgramOutput` (`both` + `wasm`), or `assertAllTargetsOutput` where plain `js` packages must also match; invalid programs via `assertErrorContains` on every target.
 - No scheduled repro emits invalid WASM (`assertValidWasm`) or throws a JS `SyntaxError`/`TypeError`.
 - Compiling the `H01` program twice in one process (`js` then `wasm`) succeeds both times (`test/unit/types/array-length.test.js`).
 - `npm test`, `npm run check` (including example type-checks) and `npm run test:e2e` pass with zero regressions; `npm run bench` stays within 3% of its result on the plan's base commit after Phase 4 (it widens static dispatch for pointer-receiver calls).
@@ -38,8 +41,8 @@ Re-probe each phase's repros on its base commit before starting the phase, and d
 
 | Category | Rule | Examples / Members | Reason (Excluded rows) |
 |---|---|---|---|
-| **In scope: core** | Every reproducing ledger defect across the parser, typechecker, JS and WASM backends and the JSON codec generator | `H01`–`H18` (Phases 1–4) | |
-| **In scope: target-specific** | Fix the failing target(s) and pin the working target(s) in the same test | JS-only: `H07`, `H08` (JS side), `H11`–`H15`, `H18`. WASM-only: `H02`/`H03` invalid modules (fixed by rejecting in the typechecker), `H08` (WASM `continue`), `H09`, `H10`, `H16`. All targets: `H01`, `H04`, `H05`, `H06`, `H17` | |
+| **In scope: core** | Every reproducing ledger defect across the parser, typechecker, JS and WASM backends and the JSON codec generator | `H01`–`H18` (Phases 1–4); `H19` (Phase 5) | |
+| **In scope: target-specific** | Fix the failing target(s) and pin the working target(s) in the same test | JS-only: `H07`, `H08` (JS side), `H11`–`H15`, `H18`. WASM-only: `H02`/`H03` invalid modules (fixed by rejecting in the typechecker), `H08` (WASM `continue`), `H09`, `H10`, `H16`. All targets: `H01`, `H04`, `H05`, `H06`, `H17`, `H19` returns. WASM-only: `H19` call arguments | |
 | **Excluded: runtime / platform** | Documented JS `any` semantics stay as documented in `docs/go-compatibility.md` | Sized numbers in an `any`; `any(3) == any(3.0)` in `js` packages | No runtime type descriptors (roadmap guiding principle); no ledger entry touches them. |
 | **Excluded: runtime / platform** | Interface-to-interface assignment beyond the empty-interface source | `var r io.Reader; var rw io.ReadWriter = r` (already rejected by method-set check) | `H05` is only the `_declared` `any` → non-empty interface hole; the general method-set check already exists and is not changed. |
 | **Excluded: deferred** | Full flow-sensitive nil analysis of pointer receivers | A receiver read guarded by a non-nil condition on another variable (`if ok { return s.x }`) | Task 4.1 only makes `derefsReceiver` scope-aware and treats reads outside the unconditional body prefix as possibly skipped, which covers `H11`/`H12`. A real dataflow analysis is a feature, not a patch fix. |
@@ -74,6 +77,16 @@ All 18 ledger entries re-probed on `feat/follow-ups-2026-11-09` @ `f966c765` wit
 | WASM map keys | Unhashable-key panic for a defined map type names the underlying type | `H16` `type M map[string]int; try(M{})` (`m[k] = 1` with `k any`) → js/both `… main.M`, wasm `… map[string]int`. Cause: `src/backend/wasm/emit-builtins.js:1788`–`1797` names `goType` by its underlying type for maps (11-09 Task 4.3 fixed slices only). (PR #168) |
 | JS `encoding/json` | `json.Marshal` of a func array in `any` encodes `null` elements | `H18` `var a [2]func(); var v any = a; json.Marshal(v)` → js/both `[null,null] <nil>`, wasm ` json: unsupported type: func()` (correct). Cause: the JS dynamic encoder for `isFuncComposite` arrays (`src/lower/json-codecs.js:1217`) treats func elements like nil slices; Go's array encoder always walks elements and fails on the first func. (PR #169) |
 
+### Review follow-ups (2026-11-10, second sweep)
+
+Re-probed on `feat/follow-ups-2026-11-09` @ `cbbc0020` (11-09 Phase 7 merged) with `.probes/h19.mjs` (`compileFiles` per target after `evictParseCache`, `WebAssembly.validate`, run). Shared prelude `H`: `type T struct{ A int }; func makePair() (T, int) { return T{1}, 1 }`. Want = Go output.
+
+| Area | Finding | Evidence & probe |
+|---|---|---|
+| Forwarded returns into `any` | `return f()` where a result of the enclosing func is an interface and the forwarded element is a struct loses the value (JS) or boxes it as a pointer (WASM); a forwarded `int` emits invalid WASM | `H19` `func getPair() (any, int) { return makePair() }; v, _ := getPair(); json.Marshal(v)` → js/both `null <nil>`, wasm `{"A":1} <nil>`; want `{"A":1} <nil>`. Widened: `v, n := getPair(); _, ok := v.(T); fmt.Printf("%v %T %v %d", v, v, ok, n)` → js/both `<nil>  false -9223372036854775808`, wasm `&{1} *main.T false 1`; want `{1} main.T true 1`. Same on named results `(v any, n int)`, in a func literal and inside a range-over-func body (js `<nil> … false`, wasm `&{1} 1 false`). `func mk() (int, string); func get() (any, string) { return mk() }` → js/both `7 s true`, wasm invalid module. Unaffected: `(error, int)` forwarding `*E` (no struct box), `(T, int)` → `(T, int)`, `defer show(makePair())` (already split into temps by `normalizeDefers`, `src/lower/functions.js:225`). Cause: `_checkReturnStmt` (`src/typechecker/statements.js:310`–`324`) calls `assertAssignable(expected[i], forwarded[i], stmt.values[0], …)` with the **same** call node for every `i`, so `_markIfaceBox` (`src/typechecker/assignability.js:303`) tags the whole call with element 0's `_ifaceSrc`/`_ifaceBox`; the JS backend then boxes the result tuple array, and the WASM backend boxes the element with the wrong representation. (PR #170) |
+| Forwarded call arguments into `any` | `g(f())` where `g` takes an interface parameter boxes the forwarded struct as a pointer on WASM | `func show(v any, n int) { _, ok := v.(T); fmt.Println(v, n, ok) }; show(makePair())` → js/both `{1} 1 true`, wasm `&{1} 1 false`; method form `O{}.show(makePair())` → wasm invalid module; want `{1} 1 true`. Forward is recorded as `expr._multiForward` (`src/typechecker/expressions.js:1468`) with no per-element box marks; JS spreads (`expressions.js:1394`) and boxes per param, WASM does not. |
+| JSON codec reachability | With the split in place, the forwarded boxed type must still get a dynamic codec | After 11-09 Task 7.3, dynamic codecs are generated only for `via === "boxed"` entries, which `collectProgramTypes` (`src/lower/gen-types.js:140`) reads from `node._ifaceSrc` in the AST walk. Per-element marks that live outside the walked AST would drop `T`'s codec and print `json: unsupported type`. |
+
 ---
 
 ## Approach
@@ -98,6 +111,8 @@ All 18 ledger entries re-probed on `feat/follow-ups-2026-11-09` @ `f966c765` wit
 - **`H14` (Task 4.3):** a method expression `(*T).M` where `M` has a value receiver lowers to `(r, …a) => T.prototype.M.call(__deref(r), …a)`, using the same nil-deref panic helper as `*p`.
 - **`H15` (Task 4.4):** `_ifaceKeyTag` returns `!<goName>` when the static key type is a defined (or unnamed) slice, map or func type, so `__ik` throws with Go's name with no runtime tag lookup.
 - **`H18` (Task 4.5):** the JS dynamic encoder for a func-holding **array** fails with `json: unsupported type: func()` (like WASM's `EncodeDynamic`). Nil func slices and maps keep encoding `null` (11-09 Task 6.4 deviation, matches Go's `sliceEncoder`).
+- **`H19` forwarding (Phase 5):** the typechecker stops tagging the shared call node and records one mark holder per forwarded element (`call._fwdIface = [{ _ifaceSrc, _ifaceBox, _ifaceNamedType, _ifacePtrFields } | null]`) by calling `_markIfaceBox(expected[i], forwarded[i], holder_i)`. A new lowering pass `splitForwardedTuples` (next to `normalizeDefers` in `src/lower/functions.js`, run first in `lower()`) rewrites `return f()` and `g(f())` whose `_fwdIface` has any non-null holder into `__fwd$N, __fwd$M := f(); return __fwd$N, __fwd$M` / `g(__fwd$N, __fwd$M)`, copying each holder's marks onto the temp `Ident` that is now the operand. Both backends then take their existing per-value boxing path and `collectProgramTypes` sees `_ifaceSrc` on the temp idents. Forwards with no interface element keep the direct tuple path (no extra locals).
+  - Rejected: teaching each backend to box tuple elements (two codegen paths, plus the iterator-return and named-result variants in each); and setting marks on the temp idents from the backend (marks must exist before codec collection).
 
 ### 2. Invariants & Safety Bounds
 
@@ -117,6 +132,7 @@ All 18 ledger entries re-probed on `feat/follow-ups-2026-11-09` @ `f966c765` wit
 - Task 2.5 / 3.1: `break inner`, plain `break`/`continue`, and `return` from two iterators deep (existing `test/unit/language/range-func.test.js`) keep working.
 - Task 4.1: a method that dereferences the receiver unconditionally (`return s.x` as first statement) keeps the direct call (fast path).
 - Task 4.4: a hashable struct key and a string key keep working; an `[N]int` array key stays hashable.
+- Phase 5: `f()` is evaluated exactly once; the split is a statement-level rewrite, so a forward inside an `if` init, a `switch` init or a `for` post must be skipped or hoisted into a block, never duplicated (`return f()` is always a statement; `g(f())` can be nested in an expression, in which case the pass wraps it as `func() R { a, b := f(); return g(a, b) }()` only if a probe shows that nesting occurs, otherwise leaves it). Named results: `return f()` still assigns every named result before deferred calls run. `return f()` inside a range-over-func body still goes through `_genIteratorReturn` with the temps.
 
 ---
 
@@ -211,3 +227,24 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/lower/json-codecs.js`, `docs/go-compatibility.md`
   - Test: `test/unit/builtins/json.test.js`. `var a [2]func(); var v any = a; json.Marshal(v)` → ` json: unsupported type: func()` (`assertAllTargetsOutput`); nil `[]func()` in `any` keeps `null <nil>`.
   - Done when: every target prints Go's error, and the `encoding/json` row of `docs/go-compatibility.md` says func arrays in an `any` fail on every target (nil func slices still encode `null`).
+
+### Phase 5: Multi-Value Call Forwarding into Interfaces
+
+Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, second pass, `H19`).
+
+- [ ] Task 5.1: Record per-element interface-box marks for forwarded tuples and split forwarded `return f()` into temps (`H19` returns)
+  - Files: `src/typechecker/statements.js`, `src/lower/functions.js`, `src/lower/index.js`
+  - Test: `test/unit/types/dynamic-types.test.js`. With prelude `H`: `func getPair() (any, int) { return makePair() }` → `fmt.Printf("%v %T %v %d\n", v, v, ok, n)` prints `{1} main.T true 1`; named results `(v any, n int)` → same; the func-literal form → same; `func mk() (int, string) { return 7, "s" }; func get() (any, string) { return mk() }` → `7 s true` (`assertAllTargetsOutput`, so WASM must validate).
+  - Done when: all four print Go's output on every target, and a forward with no interface element (`(T, int)` → `(T, int)`) emits no `__fwd$` temps in the JS output.
+- [ ] Task 5.2: Split forwarded returns inside range-over-func bodies (`H19` iterator return)
+  - Files: `src/lower/functions.js`
+  - Test: `test/unit/language/range-func.test.js`. `func get() (any, int) { for range seq { return makePair() }; return nil, 0 }` → `{1} 1 true` (`assertAllTargetsOutput`); a `defer` in `get` that reads the named result sees the forwarded value.
+  - Done when: both print Go's output on every target.
+- [ ] Task 5.3: Split forwarded call arguments into interface parameters (`H19` call arguments)
+  - Files: `src/typechecker/expressions.js`, `src/lower/functions.js`
+  - Test: `test/unit/types/dynamic-types.test.js`. `show(makePair())` → `{1} 1 true`; `O{}.show(makePair())` → `{1} 1 true`; `fmt.Println(makePair())` keeps printing `{1} 1`; `defer show(makePair())` keeps printing `{1} 1 true` (`assertAllTargetsOutput`).
+  - Done when: every target prints Go's output and `assertValidWasm` passes for the method form.
+- [ ] Task 5.4: Keep dynamic JSON codecs for types boxed through forwarded tuples (`H19` JSON)
+  - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`
+  - Test: `test/unit/builtins/json.test.js`. The original `H19` repro → `{"A":1} <nil>`; `show2(makePair())` where `show2(v any, _ int)` marshals `v` → `{"A":1} <nil>` (`assertAllTargetsOutput`); the 11-09 Task 7.3 codec-count test (`test/unit/builtins/json-codegen-size.test.js`) is unchanged.
+  - Done when: every target prints `{"A":1} <nil>` and the codec count for never-boxed types does not grow.
