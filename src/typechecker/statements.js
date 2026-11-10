@@ -195,6 +195,12 @@ export const statementCheckMethods = {
 		return this.checkExpr(e, scope);
 	},
 
+	// A source-written `any` operand still goes through assertAssignable so a
+	// concrete target reports `need type assertion`; interop `any` stays exempt.
+	_needsAssignCheck(target, source) {
+		return !isAny(target) && (!isAny(source) || !!source._declared);
+	},
+
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
@@ -215,7 +221,7 @@ export const statementCheckMethods = {
 				this._checkConstOverflow(lhsTypes[i], r, stmt.rhs[i], "assignment")
 			)
 				continue;
-			if (!isAny(lhsTypes[i]) && !isAny(r)) {
+			if (this._needsAssignCheck(lhsTypes[i], r)) {
 				this._skipIfaceMark = true;
 				this.assertAssignable(
 					lhsTypes[i],

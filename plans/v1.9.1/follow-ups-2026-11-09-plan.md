@@ -167,7 +167,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 2: Typechecker `any` → Concrete Assignments
 
-- [ ] Task 2.1: Check plain assignment statements from `any` (`G21`)
+- [x] Task 2.1: Check plain assignment statements from `any` (`G21`)
   - Files: `src/typechecker/statements.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var a A; var b any = A{1}; a = b` → `assertErrorContains(…, "need type assertion")`; `var c any; c = b` and `var e error; var x any; _ = x; e = nil` compile.
   - Done when: the error is reported on all targets and `npm run check` (example type-checks) passes.
