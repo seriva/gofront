@@ -16,11 +16,11 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v1.9.1
 
-**Theme: Review follow-ups.** Patch release fixing the 24 reproducing review follow-ups left after v1.9.0.
+**Theme: Review follow-ups.** Patch release fixing the 24 reproducing review follow-ups left after v1.9.0 and 5 regressions found while adopting 1.9.0 in SimpleFPS.
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Follow-up fixes (2026-11-09) | High | Draft | 24 defects in 6 phases: typechecker checks (`switch` cases, `cap`, negative array lengths, local vs imported types), `any` → concrete without a type assertion, parser constraint elements and JS statements (local-type TDZ, 64-bit constants, labeled range-over-func, map range into boxed vars), WASM codegen (labeled range-over-func, unhashable-key messages, interface assertions from `any`), JS nil receivers and unhashable keys, and dynamic types / `%T` / `encoding/json`. Untyped JS-interop `any` deferred. See [follow-ups-2026-11-09-plan.md](v1.9.1/follow-ups-2026-11-09-plan.md). |
+| Follow-up fixes (2026-11-09) | High | Draft | 29 defects in 8 phases: typechecker checks (`switch` cases, `cap`, negative array lengths, local vs imported types), `any` → concrete without a type assertion, parser constraint elements and JS statements (local-type TDZ, 64-bit constants, labeled range-over-func, map range into boxed vars), WASM codegen (labeled range-over-func, unhashable-key messages, interface assertions from `any`), JS nil receivers and unhashable keys, dynamic types / `%T` / `encoding/json`, JSON codec generation (`.d.ts` interop crash, codecs for every declared type), and `float32` constants in JS, templ `fmt` typing and WASM SIMD global zero values. Untyped JS-interop `any` deferred. See [follow-ups-2026-11-09-plan.md](v1.9.1/follow-ups-2026-11-09-plan.md). |
 
 ---
 

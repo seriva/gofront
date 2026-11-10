@@ -4,16 +4,18 @@
 **Status:** Draft  
 **Base branch:** main  
 **Related:** [`../v1.9.0/follow-ups-2026-11-07-plan.md`](../v1.9.0/follow-ups-2026-11-07-plan.md) (origin of every ledger entry), [`../v1.9.0/runtime-pruning-plan.md`](../v1.9.0/runtime-pruning-plan.md)  
-**Release note:** More Go programs now behave the same in JavaScript, in WebAssembly and in Go. This covers methods called on nil pointers, labeled `break` and `continue` inside `range` over a function, `int64` and `uint64` arithmetic with constants, interface checks on values in `any`, and `%T` and type switches on maps built in generic code. The compiler also rejects more programs that Go rejects, such as assigning an `any` to a concrete type without a type assertion, negative array lengths and invalid `switch` cases.
+**Release note:** More Go programs now behave the same in JavaScript, in WebAssembly and in Go. This covers methods called on nil pointers, labeled `break` and `continue` inside `range` over a function, `int64` and `uint64` arithmetic with constants, interface checks on values in `any`, and `%T` and type switches on maps built in generic code. The compiler also rejects more programs that Go rejects, such as assigning an `any` to a concrete type without a type assertion, negative array lengths and invalid `switch` cases. Packages that use `encoding/json` next to JavaScript-interop types compile again, `encoding/json` adds much less code to the JavaScript output, `float32` constants compare and format correctly in JavaScript and templ, and package-level variables holding `simd.F32x4` fields no longer produce an invalid WebAssembly module.
 
 ---
 
 ## Goal
 
-Schedule and fix every reproducing entry of `plans/follow-ups.md` (25 entries, all logged during [`follow-ups-2026-11-07-plan.md`](../v1.9.0/follow-ups-2026-11-07-plan.md) Phases 1–9) for a v1.9.1 patch release. Entries are numbered `G01`–`G25` in ledger order. Re-probed on `main` @ `56f8be6` (code-identical to `87136d5`: the release commit changes only docs, `plans/`, and `package*.json`) with `.probes/reprobe.mjs` (`compileFiles` with `forceTarget` `js`, `both`, `wasm`, plus `assertValidWasm`) and `compileHybridProject` for the multi-package `G04`.
+Schedule and fix every reproducing entry of `plans/follow-ups.md` (25 entries, all logged during [`follow-ups-2026-11-07-plan.md`](../v1.9.0/follow-ups-2026-11-07-plan.md) Phases 1–9) for a v1.9.1 patch release. Entries are numbered `G01`–`G25` in ledger order. Re-probed on `main` @ `f2adedc` (code-identical to `8a6b7a1`, the v1.9.0 release commit) with `.probes/reprobe.mjs` (`compileFiles` with `forceTarget` `js`, `both`, `wasm`, plus `assertValidWasm`) and `compileHybridProject` for the multi-package `G04`.
 - **24 entries reproduce** and are scheduled in Phases 1–6. The re-probe widened several of them: `G05` also covers literal `[-1]int`; `G08` and `G09` also fail on WASM; `G13` also gives the wrong WASM message; `G21`–`G24` emit invalid WASM; `G23` also covers `int(x)`; `G25` adds `%T` printing empty on every target.
 - **1 entry is deferred** (`G20`, untyped JS-interop values): see `Excluded: deferred`.
 - **0 entries no longer reproduce.** No entry is scheduled in another open plan, because no other plan is open.
+
+Second sweep (2026-11-10): 5 new ledger entries from the SimpleFPS 1.9.0 adoption audit, numbered `G26`–`G30` in ledger order, re-probed on `main` @ `0e80ad3` (code-identical to `8a6b7a1`, tag `1.9.0`) against tag `1.8.0` in a detached worktree. **All 5 reproduce** and are scheduled in Phases 7–8; none deferred. The re-probe narrowed `G26` and `G29` to programs with a dynamic (`any`) `json.Marshal` site or a typed site on a struct holding an interop field, and found the `G30` root cause (`_zeroFieldConst` has no `v128` case). `G26` blocks SimpleFPS from building on 1.9.0, so Phase 7 may be executed ahead of Phases 1–6 if the release needs it (no phase depends on it, and it depends on none).
 
 Grouped by subsystem:
 1. Typechecker checks (Phase 1).
@@ -22,19 +24,22 @@ Grouped by subsystem:
 4. WASM codegen (Phase 4).
 5. JS nil receivers and map keys (Phase 5).
 6. Dynamic types, `fmt` `%T` and `encoding/json` (Phase 6).
+7. `encoding/json` codec generation: interop types and reachability (Phase 7).
+8. `float32` constants, templ `fmt` and SIMD globals (Phase 8).
 
 Re-probe each phase's repros on its base commit before starting the phase, and drop any sub-repro that no longer reproduces.
 
 Go is not installed in the probe environment, so the expected outputs below come from the ledger entries, which reviewers checked against go1.26. Diagnostics are asserted by a stable substring (`need type assertion`, `invalid array length`, `for cap`, `cannot convert`) rather than full Go text.
 
 **Done means:**
-- Every repro scheduled in Phases 1–6 is a passing test in its task's `Test:` file:
+- Every repro scheduled in Phases 1–8 is a passing test in its task's `Test:` file:
   - programs: `assertProgramOutput` (`both` + `wasm`), or `assertAllTargetsOutput` where plain `js` packages must also match; `compileHybridProject` for `G04`;
   - invalid programs: `assertErrorContains` on every target.
 - No scheduled repro emits invalid WASM (`assertValidWasm`) or a JS `SyntaxError`, `ReferenceError` or `TypeError`.
 - `npm test`, `npm run check` (including the example type-checks) and `npm run test:e2e` pass with zero regressions.
-- `npm run bench` (raycast, json, fmt, particle) stays within 3% of its result on `87136d5` after Phase 5, which changes how JS calls pointer-receiver methods.
+- `npm run bench` (raycast, json, fmt, particle) stays within 3% of its result on `8a6b7a1` (tag `1.9.0`) after Phase 5, which changes how JS calls pointer-receiver methods.
 - `docs/go-compatibility.md` describes nil-receiver method calls and `%T` of generic map instantiations as matching Go (Task 6.4), and nothing in it contradicts the new behaviour.
+- With a dynamic `json.Marshal` site, the number of generated `function gfj_` codecs does not grow with declared-but-never-boxed types (Task 7.2), and SimpleFPS (`~/dev/simplefps`) passes `gofront check app/src/...` and `gofront build --pwa --release` with `app.js` reported in the Phase 7 PR body (manual cross-repo check; ledger baseline 1,273,563 B on 1.9.0, 835,581 B on 1.8.0).
 
 ---
 
@@ -42,8 +47,9 @@ Go is not installed in the probe environment, so the expected outputs below come
 
 | Category | Rule | Examples / Members | Reason (Excluded rows) |
 |---|---|---|---|
-| **In scope: core** | Every reproducing ledger defect across the parser, typechecker, JS and WASM backends, `stdlib/internal/jsonrt` and the `fmt` formatters | `G01`–`G19`, `G21`–`G25` (24 entries, Phases 1–6) | |
-| **In scope: target-specific** | Fix the failing target(s) and pin the working target(s) in the same test | JS-only: `G06`, `G07`, `G11`, `G12`, `G16`, `G18`, `G25` type switch. WASM-only: `G10`, `G14`, `G15`. Both backends: `G08`, `G09`, `G13`, `G19`, `G25b` | |
+| **In scope: core** | Every reproducing ledger defect across the parser, typechecker, JS and WASM backends, `stdlib/internal/jsonrt`, the JSON codec generator, the templ JS emitter and the `fmt` formatters | `G01`–`G19`, `G21`–`G25` (24 entries, Phases 1–6); `G26`–`G30` (5 entries, Phases 7–8) | |
+| **In scope: target-specific** | Fix the failing target(s) and pin the working target(s) in the same test | JS-only: `G06`, `G07`, `G11`, `G12`, `G16`, `G18`, `G25` type switch, `G27`, `G28`, `G29` (size measured on `js` output). WASM-only: `G10`, `G14`, `G15`, `G30`. Both backends: `G08`, `G09`, `G13`, `G19`, `G25b`, `G26` (compile-time crash) | |
+| **Excluded: runtime / platform** | A non-nil JS-interop (`.d.ts`) value has no Go type to encode | `json.Marshal` of a struct whose `.d.ts` interface field is non-nil | No Go equivalent and no runtime type descriptor. Task 7.1 only stops the compiler crash, keeps the 1.8.0 `null` for a nil field, and reports a non-nil one as `json: unsupported type: <pkg>.<Name>`, like Go does for `func` values. |
 | **Excluded: runtime / platform** | Documented JS numeric and `any` semantics stay as documented in `docs/go-compatibility.md` | Sized numbers in an `any` (row "Sized numbers in an `any`"); `any(3) == any(3.0)` in `js` packages; types another package returns through `any` print as `<nil>` (row "`fmt` of a value in an `any`") | GoFront has no runtime type descriptors (roadmap guiding principle). `G25b` is in scope only because the map type is instantiated inside the calling package's own generic code, which that docs row already promises to describe. |
 | **Excluded: deferred** | Untyped JS-interop values assigned to concrete types | `G20` `raw := localStorage.getItem("k"); var s string = raw` → compiles; want `need type assertion` only once bindings are typed | `_checkIfaceToConcrete` (`src/typechecker/assignability.js:446`) fires only for `source._declared` (an `any` written in source). DOM globals (`src/typechecker/types.js:81`) and `.d.ts` values without types are deliberately unchecked, and flagging them would break every DOM-using example (`example/preact`, `example/gom`, `example/templ`). Needs typed DOM / `.d.ts` bindings, which is a feature and not a patch fix. |
 
@@ -53,7 +59,7 @@ Go is not installed in the probe environment, so the expected outputs below come
 
 ### Review follow-ups (2026-11-09)
 
-All 25 ledger entries were re-probed on `main` @ `56f8be6`. Columns: js / both / wasm, as observed → wanted. "OK" means the program runs and prints what Go prints.
+All 25 ledger entries were re-probed on `main` @ `f2adedc` (tag `1.9.0` @ `8a6b7a1`). Columns: js / both / wasm, as observed → wanted. "OK" means the program runs and prints what Go prints.
 
 | Area | Finding | Evidence & probe |
 |---|---|---|
@@ -76,6 +82,18 @@ All 25 ledger entries were re-probed on `main` @ `56f8be6`. Columns: js / both /
 | `encoding/json` | Nil slice of an unsupported element type in `any` | `G19` `var s []func(); var v any = s; json.Marshal(v)` → js/both `<nil>`, wasm `json: unsupported type: unsupported dynamic type` (from `EncodeDynamic`, `stdlib/internal/jsonrt/enc.go:226`), want `json: unsupported type: []func()`. The non-nil `[]func(){nil}` → `json: unsupported type: func()` on all targets (matches Go). (feat/follow-ups-2026-11-07-phase-7) |
 | Typechecker interop `any` | Deferred | `G20`: see `Excluded: deferred`. Confirmed by the `source?._declared` guard at `assignability.js:447`. |
 
+### Review follow-ups (2026-11-10)
+
+Ledger entries from the SimpleFPS 1.9.0 adoption audit (all `standalone`, `Out of Scope`), re-probed on `main` @ `0e80ad3` with throwaway `.probes/` scripts (`compileFiles` per `forceTarget`, `compileHybridProgram`, `compileDir` + `runInDom`, the CLI) and a detached `1.8.0` worktree for baselines.
+
+| Area | Finding | Evidence & probe |
+|---|---|---|
+| `encoding/json` codegen | The codec generator crashes on a struct with a `.d.ts` interface field | `G26` `go.d.ts` = `declare interface GPUBuffer { label: string; destroy(): void; }`; `main.go` = `type Holder struct{ Buf GPUBuffer }` + `var v any = 1; json.Marshal(v)` → `gofront check .` exits 1 with `gofront: json: cannot spell type kind namespace` (`build` same), want `OK` (1.8.0: `OK`). Extra: typed `json.Marshal(h)` with `Holder{Name string; Buf GPUBuffer}` → same crash; 1.8.0 prints `{"Name":"x","Buf":null} <nil>`. A typed site on a type without an interop field (`var v = 1`) → `OK`. Cause: `TypeSpeller.spell` (`src/lower/gen-types.js:175`) has no `namespace` case; `addDynamicTypes` (`src/lower/json-codecs.js:1108`) registers every declared type without `spellable`, and `spellableNamed` (`json-codecs.js:1117`) never looks at struct fields. Precedent: `fmt-formatters.js:558` already skips `namespace` operands. |
+| `encoding/json` output size | A dynamic `json.Marshal` site makes the generator emit codecs for every declared type | `G29` synthetic: 50 declared `type Ti struct{ X int; Y []float32; Z map[string]int }` (used only via methods) + `var v any = Cfg{1, "x"}; json.Marshal(v)` → `js` output 426,936 B with 459 `gfj` refs; same program with 0 extra types → 357,780 B with 53 refs (+69 KB, +406 refs for types never boxed). Typed-only site (`json.Marshal(Cfg{…})`) → 8 refs regardless of type count. Ledger: SimpleFPS `app.js` 1,273,563 B (~3,085 `gfj`) vs 1.8.0 835,581 B. Cause: `addDynamicTypes` loop over `via === "declared"` (`json-codecs.js:1108`). `docs/go-compatibility.md` row `encoding/json` only promises types the package builds (composite literal, `&T{}`, `make`, `new`) or encodes elsewhere. The typechecker already marks every boxing site with `node._ifaceSrc` (`src/typechecker/assignability.js:318`). |
+| JS `float32` constants | Constants of type `float32` are emitted as unrounded float64 literals | `G27` `func score(x, i float32) float32 { return i / (x * x) }; v := score(10, 1); fmt.Println(v == 0.01); var c float32 = 0.01; fmt.Println(v == c)` → js/both `false\nfalse` (emits `v === 0.01`, `let c = 0.01`), wasm `true\ntrue`, want `true\ntrue` (Go, 1.8.0). `float32(1)/10 == k` with `const k float32 = 0.1` → `true` everywhere (folded). Emission: `_genFoldedConst` / `BasicLit` in `src/backend/js/expressions.js:636`–`648`. |
+| templ `fmt` | `fmt.Sprintf` in a `.templ` expression is not routed to the typed formatter | `G28` `templ Row(g float32) { <span>{ fmt.Sprintf("%0.1f", g) }</span> }` + `gom.Mount("#app", Row(1))` (`compileDir` + `runInDom`) → text `%!f(int=1)`, emitted `String(Sprintf$$fmt("%0.1f", g))`; the same call in `main.go` emits `gff_main_Sprintf_0("%0.1f", 1)` and prints `1.0`. Want `1.0`. Emitter: `src/backend/js/templ.js`; formatter sites: `src/lower/fmt-formatters.js` (`walkNodes` over `program.decls`). |
+| WASM SIMD globals | Package-level struct variables with `simd.F32x4` fields are zero-initialised with `i32.const` | `G30` `//gofront:target wasm`, `type mat4c struct{ c0, c1, c2, c3 simd.F32x4 }; var scratch mat4c; scratch.c0 = simd.Splat(float32(1)); println(scratch.c0.Lane(0))` → `gofront . -o out.js` succeeds, `new WebAssembly.Module(app.wasm)` → `CompileError: struct.new[0] expected type v128, found i32.const of type i32 @+174`, want a valid module printing `1`. Cause: `_zeroFieldConst` (`src/backend/wasm/globals.js:103`) handles `i64`/`f32`/`f64`/refs and falls back to `i32.const` for `v128`; the function-body path `emitZeroValue` (`src/backend/wasm/emit.js:1567`) already emits `v128.const`. |
+
 ---
 
 ## Approach
@@ -92,6 +110,11 @@ All 25 ledger entries were re-probed on `main` @ `56f8be6`. Columns: js / both /
 - **JS unhashable keys (Task 5.4):** struct classes whose fields (transitively, through arrays) contain a slice, map or func get a static `__uh = "main.S"` set at class emission, and defined slice / map / func types tag with their defined name. `__ik` throws `hash of unhashable type <name>` when it sees `k.constructor.__uh`. This is a check once per insert, with no per-field walk.
 - **JS dynamic func types (Task 6.1):** converting a func to a defined func type wraps the value in a fresh tagged function (`__tfn(f, "main.G")`) instead of tagging `f` in place. An unnamed func boxed into `any` is untagged, or tagged with its literal type, so `.(G)` fails. A nil defined slice boxed into `any` becomes a tagged nil-slice sentinel, using whatever representation `__isty` already accepts for tagged slices.
 - **Generic map tags (Tasks 6.2–6.3):** map literals and `make` inside generic functions tag the map with the instantiated type string built at run time from the `__ti` type-info arguments (`$z_K`, `$z_V` already carry names). `%T` reads the same tag on JS. On WASM, the `fmt` type-name table (`src/lower/fmt-formatters.js`) must include monomorphised map instantiations.
+- **JSON interop fields (Task 7.1):** `spellable` returns `false` for `namespace` (and any type reaching one through a struct field, element or pointer), so dynamic registration skips such types instead of crashing. A struct reached through a typed site encodes an interop field through one generated helper that writes `null` for a nil value and fails with `json: unsupported type: <pkg>.<Name>` otherwise; the field still counts for `omitempty`. Decoding into such a field is a compile error with the same wording (`cannot unmarshal into`), not a crash.
+- **JSON reachability (Task 7.2):** replace the blanket `via === "declared"` registration in `addDynamicTypes` with `via === "boxed"` entries that `collectProgramTypes` records from `node._ifaceSrc` (the static type of every value converted to an interface), plus their pointers. This keeps the `var t T; var v any = t; json.Marshal(v)` case working while dropping types never boxed, and matches the docs row. If an existing `test/unit/builtins/json*.test.js` case relies on a type that is neither built nor boxed, stop and ask (per **Blockers**) rather than widening the rule.
+- **`float32` constants (Task 8.1):** a constant expression whose type is `float32` (a typed constant, or an untyped constant converted to `float32` by assignment or comparison) is emitted as the literal of `Math.fround(value)` computed at compile time (shortest round-trip of the rounded double). No runtime `Math.fround` call, so hot paths are unchanged.
+- **templ `fmt` (Task 8.2):** the formatter-site walk in `fmt-formatters.js` must reach `TemplDecl` bodies (`TemplExpr` operands), and `templ.js` must emit the call through the same path as `.go` code so the `gff_*` formatter attached to the call node is used.
+- **SIMD global zero (Task 8.3):** `_zeroFieldConst` returns `[{ op: "v128.const", bytes: new Array(16).fill(0) }]` for `v128`, matching `emitZeroValue`.
 - **JSON (Task 6.4):** the `encoding/json` dynamic encoder emits `FailType("[]func()")`-style messages from the static element type when a typed nil slice of an unsupported element reaches `EncodeDynamic`. On JS, the nil slice in `any` must keep its type (this shares the sentinel with Task 6.1, which lands first).
 
 ### 2. Invariants & Safety Bounds
@@ -107,6 +130,9 @@ All 25 ledger entries were re-probed on `main` @ `56f8be6`. Columns: js / both /
 - Phase 2: `var e error = b` with `b any` → still `need type assertion` (interface target with methods). `var c any = b` stays valid. `x, ok := m["k"]` with a fresh `x` stays valid (it takes type `any`).
 - Phase 5: `x.M()` where `x` is a `*T` returned from a call (`newT().M()`) must evaluate `newT()` once. Use a temp or `.call` on the evaluated expression.
 - Task 4.1: `return` from inside a labeled range-over-func body nested two iterators deep keeps working (existing tests in `test/unit/language/`).
+- Task 7.1: an interop type behind a pointer (`*GPUBuffer` field), in a slice (`[]GPUBuffer`) or in a map value must not crash either. A struct without interop fields declared next to `Holder` keeps its codec.
+- Task 7.2: a type boxed only inside a generic function body is already covered by `via === "typeArg"` and must keep encoding; a type boxed in another package of the program is covered because `collectProgramTypes` walks every program.
+- Task 8.1: `float64` constants, untyped constants used as `float64`, and `float32` values that are already exact (`0.5`, `1`) keep their current emitted text. `var c float32 = 0.01; fmt.Println(float64(c))` prints `0.009999999776482582` as in Go.
 
 ---
 
@@ -198,7 +224,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 - [ ] Task 5.1: Statically dispatch pointer-receiver calls through `*T` so nil receivers work (`G11`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `var s *S; s.Ping(); fmt.Println("ok")` → `ok` (`assertAllTargetsOutput`); a method that checks `if s == nil { return "nil" }` → `nil`; `newT().M()` evaluates `newT` once (count side effects).
-  - Done when: all targets match Go and `npm run bench` is within 3% of the `87136d5` baseline.
+  - Done when: all targets match Go and `npm run bench` is within 3% of the `8a6b7a1` (tag `1.9.0`) baseline.
 - [ ] Task 5.2: Lower method expressions `(*T).M` to static dispatch (`G12`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type MyInt int; g := (*MyInt).Ping; g(nil-ptr)` → `1`; a struct `(*S).M` with nil → Go output.
@@ -227,5 +253,35 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Done when: both the JS and WASM sides print the Go text.
 - [ ] Task 6.4: Report nil unsupported slices in `any` from `json.Marshal`, and update the docs (`G19`)
   - Files: `stdlib/internal/jsonrt/enc.go`, `src/lower/json-codecs.js`, `docs/go-compatibility.md`
-  - Test: `test/unit/wasm/json.test.js`. `var s []func(); var v any = s; _, err := json.Marshal(v)` → `json: unsupported type: []func()` on `both` and `wasm`; the non-nil `[]func(){nil}` keeps `json: unsupported type: func()`.
+  - Test: `test/unit/builtins/json.test.js` (or `test/unit/wasm/json.test.js`). `var s []func(); var v any = s; _, err := json.Marshal(v)` → `json: unsupported type: []func()` on `both` and `wasm`; the non-nil `[]func(){nil}` keeps `json: unsupported type: func()`.
   - Done when: both targets print Go's error, and `docs/go-compatibility.md` states that nil-pointer method calls and `%T` of generic map instantiations behave as in Go (with no other compatibility row contradicted).
+
+### Phase 7: `encoding/json` Codec Generation
+
+Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`, `G29`). Independent of Phases 1–6; may run first because `G26` blocks SimpleFPS.
+
+- [ ] Task 7.1: Stop the JSON codec generator crashing on JS-interop (`.d.ts`) types (`G26`)
+  - Files: `src/lower/json-codecs.js`, `src/lower/gen-types.js`
+  - Test: `test/unit/builtins/json.test.js` (`withTempDir` + `compileDir` with a `go.d.ts`, then run). The `G26` repro (`var v any = 1`) compiles and prints `1`; typed `json.Marshal(Holder{Name: "x"})` with a nil `Buf GPUBuffer` field → `{"Name":"x","Buf":null} <nil>`; `*GPUBuffer`, `[]GPUBuffer` and `map[string]GPUBuffer` fields compile; a sibling `Cfg{A int}` in `any` still encodes `{"A":1}`. Run as `js` and `both` packages.
+  - Done when: no `cannot spell type kind namespace` from `gofront check` or `build` for any of these, and the outputs match 1.8.0.
+- [ ] Task 7.2: Generate dynamic JSON codecs only for types that are built or boxed into an interface (`G29`)
+  - Files: `src/lower/gen-types.js`, `src/lower/json-codecs.js`
+  - Test: `test/unit/builtins/json-codegen-size.test.js`. With a dynamic `json.Marshal(any)` site, a program with 20 declared, never-boxed struct types emits the same number of `function gfj_` definitions as the same program with none (`forceTarget: "js"`); `var t T; t.A = 1; var v any = t; json.Marshal(v)` (declared, not built) → `{"A":1}` (`assertProgramOutput`); `var v any = &T{1}` → `{"A":1}`.
+  - Done when: the codec count is independent of unused declared types, every existing `test/unit/builtins/json*.test.js` case passes unchanged, and the SimpleFPS check in **Done means** is recorded in the PR body.
+
+### Phase 8: `float32` Constants, templ `fmt` and SIMD Globals
+
+Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G27`, `G28`, `G30`).
+
+- [ ] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
+  - Files: `src/backend/js/expressions.js`
+  - Test: `test/unit/language/float32-consts.test.js`. The `G27` repro → `true\ntrue` (`assertAllTargetsOutput`); `var c float32 = 0.01; fmt.Println(float64(c))` → `0.009999999776482582`; `const k float32 = 0.1; var f float32 = 1; fmt.Println(f/10 == k)` → `true`; a `float64` `0.01` comparison keeps printing `true` for `0.01 == 0.01`.
+  - Done when: `js`, `both` and `wasm` print the Go output, and the emitted JS for `float64` constants is unchanged.
+- [ ] Task 8.2: Route `fmt.Sprintf` and friends in `.templ` expressions through the typed formatters (`G28`)
+  - Files: `src/lower/fmt-formatters.js`, `src/backend/js/templ.js`
+  - Test: `test/unit/compiler/templ.test.js`. `templ Row(g float32) { <span>{ fmt.Sprintf("%0.1f", g) }</span> }` mounted with `Row(1)` → `textContent` `1.0` (`runInDom`); `fmt.Sprint(n)` with `n int64` in a templ expression → the exact digits.
+  - Done when: the templ output matches the same call made from a `.go` file, and the existing templ tests pass.
+- [ ] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
+  - Files: `src/backend/wasm/globals.js`
+  - Test: `test/unit/wasm/simd.test.js`. The `G30` program (package-level `var scratch mat4c`) → `assertValidWasm` passes and prints `1` (`assertProgramOutput`); a package-level `[2]simd.F32x4` array and a nested struct holding a `mat4c` → valid modules.
+  - Done when: no `struct.new … expected type v128` `CompileError` for any of the three shapes.
