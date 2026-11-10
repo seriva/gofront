@@ -62,6 +62,46 @@ func main() {
 	);
 });
 
+test("for k, v = range m with only &v taken still assigns k", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]int{"a": 1}
+	var k string
+	var v int
+	p := &v
+	for k, v = range m {
+	}
+	fmt.Println(k, *p)
+}
+`,
+		"a 1\n",
+	);
+});
+
+test("for k, v = range m with only &k taken still assigns v", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]int{"a": 1}
+	var k string
+	var v int
+	p := &k
+	for k, v = range m {
+	}
+	fmt.Println(*p, v)
+}
+`,
+		"a 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

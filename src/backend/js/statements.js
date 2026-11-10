@@ -1604,11 +1604,16 @@ export const statementGenMethods = {
 	// [target, temporary] pairs and returns the names to bind.
 	_rangeAssignTemps(init, names, stores) {
 		if (init.kind !== "AssignStmt") return names;
-		return names.map((n, i) => {
+		// `let [..]` declares every name, so once one target needs a temporary
+		// all the others go through temporaries too.
+		const needs = (n, i) => {
 			const e = init.lhs[i];
-			if (n === "_" || (e.kind === "Ident" && !this._boxedVars.has(e.name)))
-				return n;
-			stores.push([e, `__r${i}$`]);
+			return n !== "_" && !(e.kind === "Ident" && !this._boxedVars.has(e.name));
+		};
+		const any = names.some(needs);
+		return names.map((n, i) => {
+			if (n === "_" || !any) return n;
+			stores.push([init.lhs[i], `__r${i}$`]);
 			return `__r${i}$`;
 		});
 	},

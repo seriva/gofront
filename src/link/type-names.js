@@ -65,7 +65,6 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 			const seen = new Set(visible);
 			for (let i = 0; i < node.length; i++) {
 				const d = node[i];
-				const name = d?.name;
 				scan(d, seen);
 				if (d?.kind === "TypeDecl") {
 					// A value of the same name would clash with the type in JS.
@@ -77,13 +76,15 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 							[d.name, `${d.name}__L${++localTypeCounter}`],
 						]);
 						const end = stop >= 0 ? stop : node.length - 1;
-						for (let j = i; j <= end; j++)
-							renameTypeRefs(
-								node[j],
-								renamed,
-								new Set(),
-								j === stop ? new Set([name]) : new Set(),
-							);
+						for (let j = i; j <= end; j++) {
+							// The shadowing declaration's own right-hand side and type
+							// are evaluated before its new value is in scope.
+							const target =
+								j === stop && node[j].kind === "DefineStmt"
+									? node[j].rhs
+									: node[j];
+							renameTypeRefs(target, renamed, new Set(), new Set());
+						}
 						changed = true;
 					}
 				} else if (d) for (const n of valueNames(d)) seen.add(n);

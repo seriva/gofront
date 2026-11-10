@@ -74,6 +74,54 @@ func main() { a() }
 	);
 });
 
+test("a local value can be initialised from the type it shadows", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Dup struct{ X int }
+	Dup := Dup{X: 42}
+	fmt.Println(Dup.X)
+}
+`,
+		"42\n",
+	);
+});
+
+test("new of the shadowed local type in the shadowing declaration", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Dup struct{ X int }
+	Dup := new(Dup)
+	fmt.Println(Dup.X)
+}
+`,
+		"0\n",
+	);
+});
+
+test("conversion to the shadowed local type in the shadowing declaration", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Dup int
+	Dup := Dup(42)
+	fmt.Println(Dup)
+}
+`,
+		"42\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
