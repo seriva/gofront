@@ -165,7 +165,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/cap.test.js`. `cap(s)` with `s` a struct → `"invalid argument: s (variable of type S) for cap"`; `cap(f)` with `f` a func → `"for cap"`; existing positive cases (slice, array, `&arr`, generic `S ~[]E`) stay green.
   - Done when: no target produces invalid WASM for the struct and func repros.
-- [ ] Task 1.3: Require a type assertion for `any` → non-empty interface (`H05`)
+- [x] Task 1.3: Require a type assertion for `any` → non-empty interface (`H05`)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var b any; var e error; e = b` → `"need type assertion"`; `var s fmt.Stringer = b` → same; `var c any = b`, `e = b.(error)` and `var e2 error = &MyErr{}` compile.
   - Done when: both negatives error on all targets and `npm run check` (example type-checks) passes.
