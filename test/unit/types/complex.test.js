@@ -532,6 +532,29 @@ func main() {
 	);
 });
 
+test("untyped complex constants converted to complex64 round to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f(c complex64) float32 { return imag(c) }
+
+func main() {
+	var c complex64 = 1 + 0.01i
+	fmt.Println(imag(c) == 0.01, float64(imag(c)))
+	var d complex64 = 0.1
+	fmt.Println(float64(real(d)))
+	var z complex128 = 1 + 0.01i
+	fmt.Println(imag(z) == 0.01, imag(z))
+	e := complex64(2 + 0.01i)
+	fmt.Println(imag(e) == 0.01, f(0.01i) == 0.01)
+}
+`,
+		"true 0.009999999776482582\n0.10000000149011612\ntrue 0.01\ntrue true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

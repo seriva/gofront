@@ -278,6 +278,17 @@ export const assignabilityMethods = {
 			!isComplex(source)
 		)
 			valueNode._asComplex = true;
+		this._tagComplex64Const(target, source, valueNode);
+	},
+
+	// An untyped constant that takes type complex64 is rounded to float32 in
+	// JS output: a real constant through `_f32Const`, a complex constant
+	// (`1 + 0.01i`) through `_c64Const`.
+	_tagComplex64Const(target, source, node) {
+		if (!node || typeof node !== "object") return;
+		if (!isComplex64(target) || !isUntyped(source)) return;
+		if (isComplex(source)) node._c64Const = true;
+		else if (node._const) node._f32Const = true;
 	},
 
 	// `operand` is the expression whose value flows in, when `node` (the

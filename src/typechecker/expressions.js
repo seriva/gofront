@@ -1114,6 +1114,8 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		// `complex64(1 + 0.01i)`: the constant's components round to float32.
+		this._tagComplex64Const(targetType, srcType, expr.expr);
 		if (tgtResolved?.kind === "slice")
 			this._rejectSeqAsSlice(srcType, expr.expr, "a slice conversion");
 		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {

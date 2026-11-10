@@ -272,7 +272,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, third 
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/complex.test.js`. `var c complex64 = complex(float32(1), 0.01); fmt.Println(imag(c) == 0.01)` → `true`; `complex(0.01, float32(1))` + `real(c) == 0.01` → `true`; `var f float32 = 1; complex(f, 0.01)` vs `var w float32 = 0.01` → `true`; `fmt.Println(float64(imag(c)))` → `0.009999999776482582` (`assertAllTargetsOutput`).
   - Done when: all four print Go's output on every target, and `complex(1, 0.01)` as `complex128` still prints `true` for `imag(c) == 0.01`.
-- [ ] Task 6.2: Emit untyped complex constants converted to `complex64` with float32-rounded components (`H20` literal)
+- [x] Task 6.2: Emit untyped complex constants converted to `complex64` with float32-rounded components (`H20` literal)
   - Files: `src/typechecker/assignability.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/types/complex.test.js`. `var c complex64 = 1 + 0.01i; fmt.Println(imag(c) == 0.01, float64(imag(c)))` → `true 0.009999999776482582`; `var d complex64 = 0.1; fmt.Println(float64(real(d)))` → `0.10000000149011612` (`assertAllTargetsOutput`).
   - Done when: both match Go on every target, and the emitted JS for a `complex128` constant is unchanged.
