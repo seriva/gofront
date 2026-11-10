@@ -188,7 +188,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/parser/expressions.js`
   - Test: `test/unit/parser/constraint-elements.test.js`. `v := interface{ M() }(T{}); v.M()` → `m` (`assertAllTargetsOutput`); `interface{}(3)` → prints `3`.
   - Done when: both programs parse and print Go's output on every target.
-- [ ] Task 2.3: Detect composite-literal call arguments by parsing the type speculatively (`H17`)
+- [x] Task 2.3: Detect composite-literal call arguments by parsing the type speculatively (`H17`)
   - Files: `src/parser/expressions.js`
   - Test: `test/unit/compiler/lexer-parser.test.js`. `show([]func(){nil})` → `false`; `show([]func() int{func() int { return 1 }})` → `1`; `make([]func(), 3)`, `[]byte("a")` and `f([]int{1}...)` keep parsing (`assertAllTargetsOutput`).
   - Done when: no `expected ')'` parse error for either repro and the existing parser tests pass.

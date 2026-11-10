@@ -1420,6 +1420,55 @@ func main() {
 	);
 });
 
+section("Parser — composite literal call arguments");
+
+test("func-element slice literals parse as call arguments", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func show(fs []func()) { fmt.Println(fs[0] != nil) }
+
+func showI(fs []func() int) { fmt.Println(fs[0]()) }
+
+func main() {
+	show([]func(){nil})
+	showI([]func() int{func() int { return 1 }})
+}
+`,
+		"false\n1\n",
+	);
+});
+
+test("bare type, conversion and spread call arguments keep parsing", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func sum(xs ...int) int {
+	t := 0
+	for _, x := range xs {
+		t += x
+	}
+	return t
+}
+
+func main() {
+	fs := make([]func(), 3)
+	fmt.Println(len(fs))
+	b := []byte("a")
+	fmt.Println(len(b))
+	fmt.Println(sum([]int{1}...))
+	m := make(map[string]func() int)
+	fmt.Println(len(m))
+}
+`,
+		"3\n1\n1\n0\n",
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
