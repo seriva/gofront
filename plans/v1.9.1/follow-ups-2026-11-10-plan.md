@@ -161,7 +161,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/switch-cases.test.js`. `switch true { case nil: }` → `assertErrorContains(…, "cannot convert nil to type bool")`; `var e error; switch e { case nil: }` and `var p *int; switch p { case nil: }` compile and run.
   - Done when: the negative case errors on `js`, `both`, `wasm` (no invalid WASM) and the positive cases print Go's output.
-- [ ] Task 1.2: Make `cap` accept only slice, array and pointer-to-array operands (`H03`)
+- [x] Task 1.2: Make `cap` accept only slice, array and pointer-to-array operands (`H03`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/cap.test.js`. `cap(s)` with `s` a struct → `"invalid argument: s (variable of type S) for cap"`; `cap(f)` with `f` a func → `"for cap"`; existing positive cases (slice, array, `&arr`, generic `S ~[]E`) stay green.
   - Done when: no target produces invalid WASM for the struct and func repros.
