@@ -220,6 +220,8 @@ export class JsonCodecGen extends TypeSpeller {
 				return `map[${this.refl(t.key)}]${this.refl(t.value)}`;
 			case "interface":
 				return t.name === "error" ? "error" : "interface {}";
+			case "namespace":
+				return t.name;
 			case "func":
 				return this.funcString(t, (x) => this.refl(x));
 			default:
@@ -273,7 +275,47 @@ export class JsonCodecGen extends TypeSpeller {
 
 	// Statements that encode the Go expression `x` of type `t`.
 	encValue(t, x, addr) {
+		if (holdsInterop(t)) return this.encInterop(t, x);
 		return [`${this.encFn(t, addr)}(e, ${x})`];
+	}
+
+	// A JS-interop value has no Go source to spell, so it is encoded where it
+	// sits: nil is `null` (an empty slice, map or array is `[]` or `{}`), and
+	// anything else fails with the type's name.
+	encInterop(t, x) {
+		const u = under(t);
+		const fail = (name) => `\te.FailType(${q(name)})`;
+		if (u.kind === "namespace")
+			return [`if ${x} == nil {`, "\te.Null()", "} else {", fail(u.name), "}"];
+		if (u.kind === "pointer")
+			return [
+				`if ${x} == nil {`,
+				"\te.Null()",
+				"} else {",
+				fail(this.refl(t)),
+				"}",
+			];
+		const [empty, elem] =
+			u.kind === "map"
+				? ["{}", holdsInterop(u.key) ? u.key : u.value]
+				: ["[]", u.elem];
+		if (u.kind === "array")
+			return [
+				`if ${u.size} == 0 {`,
+				`\te.Lit(${q(empty)})`,
+				"} else {",
+				fail(this.refl(elem)),
+				"}",
+			];
+		return [
+			`if ${x} == nil {`,
+			"\te.Null()",
+			`} else if len(${x}) == 0 {`,
+			`\te.Lit(${q(empty)})`,
+			"} else {",
+			fail(this.refl(elem)),
+			"}",
+		];
 	}
 
 	// `mt` is the type that declares the method (the pointee for a pointer).
@@ -413,6 +455,7 @@ export class JsonCodecGen extends TypeSpeller {
 		if (u.kind === "slice" || u.kind === "map") return `len(${x}) == 0`;
 		if (u.kind === "array") return u.size === 0 ? "true" : "false";
 		if (u.kind === "struct") return "false";
+		if (u.kind === "namespace") return `${x} == nil`;
 		const n = unalias(u.name);
 		if (n === "bool") return `!${x}`;
 		if (n === "string") return `${x} == ""`;
@@ -779,6 +822,9 @@ export class JsonCodecGen extends TypeSpeller {
 
 	decStruct(u, t, typ) {
 		const fields = resolveJsonFields(u);
+		for (const f of fields)
+			if (holdsInterop(f.type))
+				throw new Error(`json: cannot unmarshal into ${interopName(f.type)}`);
 		const sname = this.shortName(t);
 		const lines = [
 			"if d.Null() {",
@@ -1106,7 +1152,8 @@ export class JsonCodecGen extends TypeSpeller {
 			this.encFn(t, false);
 		}
 		for (const { type: t, via } of this.collectedTypes()) {
-			if (via !== "declared" || mentionsTypeParam(t)) continue;
+			if (via !== "boxed" || !t || mentionsTypeParam(t)) continue;
+			if (!this.spellable(t)) continue;
 			const u = under(t);
 			if (!u || u.kind === "interface" || u.kind === "func") continue;
 			this.encFn(t, false);
@@ -1114,12 +1161,15 @@ export class JsonCodecGen extends TypeSpeller {
 		}
 	}
 
+	// A struct holding a JS-interop value (a `.d.ts` interface) cannot be
+	// written as a dynamic case, so it is not spellable either.
 	spellableNamed(t, ok) {
+		if (isJsonValue(t)) return true;
 		return (
-			isJsonValue(t) ||
-			(!t.name.includes("$$") &&
-				!t.name.includes("[") &&
-				(t.typeArgs ?? []).every(ok))
+			!t.name.includes("$$") &&
+			!t.name.includes("[") &&
+			(t.typeArgs ?? []).every(ok) &&
+			!reachesInterop(t)
 		);
 	}
 
@@ -1201,6 +1251,48 @@ const isTaggedSlice = (t) =>
 
 // json.RawMessage and json.Number values can reach an interface from any
 // expression (a conversion, a field read).
+// True when `t` is, or holds through pointers, elements and struct fields, a
+// JS-interop type (a `.d.ts` interface) that has no Go source to spell.
+export function reachesInterop(t, seen = new Set(), viaStruct = true) {
+	if (!t || seen.has(t)) return false;
+	seen.add(t);
+	const u = under(t) ?? t;
+	switch (u.kind) {
+		case "namespace":
+			return true;
+		case "pointer":
+			return reachesInterop(u.base, seen, viaStruct);
+		case "slice":
+		case "array":
+			return reachesInterop(u.elem, seen, viaStruct);
+		case "map":
+			return (
+				reachesInterop(u.key, seen, viaStruct) ||
+				reachesInterop(u.value, seen, viaStruct)
+			);
+		case "struct":
+			return (
+				viaStruct &&
+				(u._structFields ?? []).some((f) => reachesInterop(f.type, seen))
+			);
+		default:
+			return false;
+	}
+}
+
+// True when a value of type `t` is, or holds through pointers and elements
+// (not through a named struct, which has its own codec), a JS-interop value.
+const holdsInterop = (t) => reachesInterop(t, new Set(), false);
+
+// The name of the JS-interop type that `t` is or wraps.
+function interopName(t) {
+	const u = under(t);
+	if (u.kind === "namespace") return u.name;
+	if (u.kind === "map")
+		return interopName(holdsInterop(u.key) ? u.key : u.value);
+	return interopName(u.base ?? u.elem);
+}
+
 const isJsonValue = (t) => isRaw(t) || isNumber(t);
 
 export const isCompositeType = (t) => {
