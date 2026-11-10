@@ -87,6 +87,9 @@ export const typeInfoGenMethods = {
 
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
+		// A map entering an interface is tagged by its instantiated type.
+		if (node._ifaceSrc?.kind === "map" && mentionsTypeParam(node._ifaceSrc))
+			return true;
 		if (node._ifaceSrc?.kind === "typeParam" && names.has(node._ifaceSrc.name))
 			return true;
 		switch (node.kind) {
@@ -254,6 +257,37 @@ export const typeInfoGenMethods = {
 		if (this._isNamedComposite(t) && this._underlyingOf(t)?.kind === "slice")
 			return ", false, true";
 		return "";
+	},
+
+	// JS expression for the run-time type tag of map type `t` that mentions
+	// type parameters, built from their type information (see `__ti`); null
+	// when some part cannot be spelled.
+	_genericMapTag(t) {
+		const part = (x) => {
+			if (!mentionsTypeParam(x)) return JSON.stringify(this._dynTypeName(x));
+			switch (x.kind) {
+				case "typeParam": {
+					const f = this._typeParamZeroFactory(x.name);
+					return f ? `__tnm(${f})` : null;
+				}
+				case "slice": {
+					const e = part(x.elem);
+					return e && `"[]" + ${e}`;
+				}
+				case "pointer": {
+					const e = part(x.base);
+					return e && `"*" + ${e}`;
+				}
+				case "map": {
+					const k = part(x.key);
+					const v = part(x.value);
+					return k && v && `"map[" + ${k} + "]" + ${v}`;
+				}
+				default:
+					return null;
+			}
+		};
+		return part(t);
 	},
 
 	// A defined func type whose values carry their name as a run-time tag

@@ -446,7 +446,13 @@ var __tfn = __tfn || function(f, t) {
   Object.defineProperty(w, "__t", { value: t, configurable: true, writable: true });
   return w;
 };
+var __tnm = __tnm || function(f) {
+  // The type name of a type argument's info factory, spelled as a static tag.
+  const id = f?.id;
+  return typeof id === "string" ? id.replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
+};
 var __ity = __ity || function(x, t, ptr, sl) {
+  if (t === undefined) return x;
   // The frozen nil map cannot carry a tag: a copy of it keeps its map type.
   if (x !== null && x !== undefined && x.__nilm === true && x.__t === undefined)
     return Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true }, __t: { value: t } }));

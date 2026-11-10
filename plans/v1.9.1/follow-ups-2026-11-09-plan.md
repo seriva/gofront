@@ -255,7 +255,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`
   - Test: `test/unit/types/dynamic-types.test.js`. The `G16` repro → `false true`; the shared-func repro → `true false` (`assertAllTargetsOutput`).
   - Done when: JS matches WASM and Go for both repros.
-- [ ] Task 6.2: Tag maps built in generic functions with their instantiated type on JS (`G25`)
+- [x] Task 6.2: Tag maps built in generic functions with their instantiated type on JS (`G25`)
   - Files: `src/backend/js/expressions.js`, `src/backend/js/type-info.js`
   - Test: `test/unit/types/dynamic-types.test.js`. The `G25` type-switch repro → `is si` (`assertProgramOutput`); `make(map[K]V)` inside a generic function → the same.
   - Done when: JS prints `is si`.

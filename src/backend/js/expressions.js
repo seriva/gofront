@@ -639,6 +639,22 @@ export const expressionGenMethods = {
 				expr._tfnTagging = false;
 			}
 		}
+		if (
+			expr._ifaceSrc?.kind === "map" &&
+			!expr._gmapTagging &&
+			mentionsTypeParam(expr._ifaceSrc)
+		) {
+			const tag = this._genericMapTag(expr._ifaceSrc);
+			if (tag) {
+				this.useHelper("ifaceBox");
+				expr._gmapTagging = true;
+				try {
+					return `__ity(${this.genExpr(expr)}, ${tag})`;
+				} finally {
+					expr._gmapTagging = false;
+				}
+			}
+		}
 		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
 			const tag = this._dynTypeTag(expr._ifaceSrc);
 			if (tag) {

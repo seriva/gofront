@@ -1,7 +1,12 @@
 // test/unit/types/dynamic-types.test.js
 // Dynamic types of func, slice and map values boxed into `any`.
 
-import { assertAllTargetsOutput, section, test } from "../helpers.js";
+import {
+	assertAllTargetsOutput,
+	assertProgramOutput,
+	section,
+	test,
+} from "../helpers.js";
 
 section("Dynamic func and slice types");
 
@@ -43,5 +48,56 @@ func main() {
 }
 `,
 		"true false\n",
+	);
+});
+
+section("Dynamic types of maps built in generic code");
+
+const SWITCH = `
+func kind(v any) string {
+	switch v.(type) {
+	case map[int]int:
+		return "ii"
+	case map[int][]int:
+		return "ia"
+	case map[string]int:
+		return "si"
+	}
+	return "?"
+}
+`;
+
+test("a map literal built in a generic function keeps its instantiated type in an any", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func pair[K comparable, V any](k K, v V) any { return map[K]V{k: v} }
+${SWITCH}
+func main() {
+	fmt.Println(kind(pair(1, 2)), kind(pair(1, []int{2})), kind(pair("s", 5)))
+	_, ok := pair("s", 5).(map[string]int)
+	_, bad := pair("s", 5).(map[int]int)
+	fmt.Println(ok, bad)
+}
+`,
+		"ii ia si\ntrue false\n",
+	);
+});
+
+test("make(map[K]V) in a generic function keeps its instantiated type in an any", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func mk[K comparable, V any]() any { return make(map[K]V) }
+${SWITCH}
+func main() {
+	fmt.Println(kind(mk[string, int]()), kind(mk[int, int]()), kind(mk[int, []int]()))
+}
+`,
+		"si ii ia\n",
 	);
 });
