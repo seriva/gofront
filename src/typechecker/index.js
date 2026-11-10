@@ -1515,6 +1515,12 @@ export class TypeChecker {
 					);
 				// `const D Duration = 1` is a BigInt in JS.
 				if (spec.type && expr) this._tag64BitNode(this.resolveType(type), expr);
+				if (spec.type && expr)
+					this._tagFloat32Const(
+						this.resolveType(type),
+						valTypes[i] ?? valTypes[0],
+						expr,
+					);
 				scope.defineConst(name, type, expr);
 			}
 		}

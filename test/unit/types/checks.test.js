@@ -140,7 +140,7 @@ func main() {
 	var x float32 = 3.14
 	console.log(x)
 }`).js;
-	assertEqual(runJs(js), "3.14");
+	assertEqual(runJs(js), "3.140000104904175");
 });
 
 test("uint64 used in function signature", () => {

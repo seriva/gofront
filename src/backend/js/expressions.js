@@ -683,6 +683,8 @@ export const expressionGenMethods = {
 				expr._ifaceBoxing = false;
 			}
 		}
+		const f32 = this._genFloat32Const(expr);
+		if (f32 !== null) return f32;
 		const folded = this._genFoldedConst(expr);
 		if (folded !== null) return folded;
 		switch (expr.kind) {
@@ -735,6 +737,19 @@ export const expressionGenMethods = {
 			if (n !== null) return n < 0n ? `(${n}n)` : `${n}n`;
 		}
 		return null;
+	},
+
+	// An untyped constant converted to float32 (`var c float32 = 0.01`) is
+	// emitted as its float32 value, or null when that changes nothing.
+	_genFloat32Const(expr) {
+		const val = expr._const;
+		if (!expr._f32Const || !val || (val.k !== "FLOAT" && val.k !== "INT"))
+			return null;
+		const n = Number(val.v);
+		if (!Number.isFinite(n)) return null;
+		const r = Math.fround(n);
+		if (r === n) return null;
+		return CONST_LITS.FLOAT(r);
 	},
 
 	// The literal for a folded constant expression (`1 << 40` →

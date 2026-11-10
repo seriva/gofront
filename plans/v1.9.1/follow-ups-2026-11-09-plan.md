@@ -290,7 +290,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G26`,
 
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G27`, `G28`, `G30`).
 
-- [ ] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
+- [x] Task 8.1: Emit `float32` constants rounded to float32 in JS (`G27`)
   - Files: `src/backend/js/expressions.js`
   - Test: `test/unit/language/float32-consts.test.js`. The `G27` repro → `true\ntrue` (`assertAllTargetsOutput`); `var c float32 = 0.01; fmt.Println(float64(c))` → `0.009999999776482582`; `const k float32 = 0.1; var f float32 = 1; fmt.Println(f/10 == k)` → `true`; a `float64` `0.01` comparison keeps printing `true` for `0.01 == 0.01`.
   - Done when: `js`, `both` and `wasm` print the Go output, and the emitted JS for `float64` constants is unchanged.
