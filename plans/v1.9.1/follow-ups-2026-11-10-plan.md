@@ -169,7 +169,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`. `var b any; var e error; e = b` → `"need type assertion"`; `var s fmt.Stringer = b` → same; `var c any = b`, `e = b.(error)` and `var e2 error = &MyErr{}` compile.
   - Done when: both negatives error on all targets and `npm run check` (example type-checks) passes.
-- [ ] Task 1.4: Reject constraint interfaces used as ordinary types (`H06`)
+- [x] Task 1.4: Reject constraint interfaces used as ordinary types (`H06`)
   - Files: `src/typechecker/resolve.js`, `src/typechecker/index.js`, `src/typechecker/statements.js`
   - Test: `test/unit/types/generics.test.js`. `type N interface{ ~int | ~string }; var x N` → `assertErrorContains(…, "cannot use type N outside a type constraint")`; same for a struct field `F N`, a param `func f(n N)` and `var c comparable`; `func g[T N](x T) T { return x }` with `g(3)` → `3`.
   - Done when: every negative errors on all targets and the generic positive runs.

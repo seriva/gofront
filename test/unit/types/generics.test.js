@@ -12,6 +12,7 @@ import {
 	compile,
 	compileDir,
 	compileHybrid,
+	compileWasm,
 	Lexer,
 	runJs,
 	section,
@@ -1844,6 +1845,93 @@ func main() {
 }
 `,
 		"7\n",
+	);
+});
+
+section("Generics — constraint interfaces outside constraints");
+
+function constraintErrorsOn(target, src) {
+	if (target === "wasm") return compileWasm(src).errors ?? [];
+	return compile(src, { target }).errors ?? [];
+}
+
+const CONSTRAINT_PRELUDE = "package main\ntype N interface{ ~int | ~string }\n";
+const CONSTRAINT_USES = [
+	[
+		"a var of constraint type",
+		`${CONSTRAINT_PRELUDE}func main() {\n\tvar x N\n\t_ = x\n}`,
+		"cannot use type N outside a type constraint",
+	],
+	[
+		"a package-level var of constraint type",
+		`${CONSTRAINT_PRELUDE}var x N\nfunc main() { _ = x }`,
+		"cannot use type N outside a type constraint",
+	],
+	[
+		"a struct field of constraint type",
+		`${CONSTRAINT_PRELUDE}type S struct{ F N }\nfunc main() { _ = S{} }`,
+		"cannot use type N outside a type constraint",
+	],
+	[
+		"a struct field naming a constraint declared later",
+		"package main\ntype S struct{ F N }\ntype N interface{ ~int | ~string }\nfunc main() { _ = S{} }",
+		"cannot use type N outside a type constraint",
+	],
+	[
+		"a param of constraint type",
+		`${CONSTRAINT_PRELUDE}func f(n N) {}\nfunc main() {}`,
+		"cannot use type N outside a type constraint",
+	],
+	[
+		"a result of constraint type",
+		`${CONSTRAINT_PRELUDE}func f() N { panic(0) }\nfunc main() {}`,
+		"cannot use type N outside a type constraint",
+	],
+	[
+		"a constraint embedding a type set",
+		"package main\ntype N interface{ ~int | ~string }\ntype E interface{ N }\nfunc main() {\n\tvar x E\n\t_ = x\n}",
+		"cannot use type E outside a type constraint",
+	],
+	[
+		"a var of type comparable",
+		"package main\nfunc main() {\n\tvar c comparable\n\t_ = c\n}",
+		"cannot use type comparable outside a type constraint",
+	],
+];
+
+for (const [name, src, want] of CONSTRAINT_USES) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(constraintErrorsOn(target, src), want);
+		});
+	}
+}
+
+test("constraint interfaces stay valid in constraint positions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type N interface{ ~int | ~string }
+
+type NM interface{ N }
+
+type D N
+
+func g[T N](x T) T { return x }
+
+func h[T NM](x T) T { return x }
+
+func k[T D](x T) T { return x }
+
+func eq[T comparable](a, b T) bool { return a == b }
+
+func main() {
+	fmt.Println(g(3), h("s"), k(4), eq(1, 1))
+}
+`,
+		"3 s 4 true\n",
 	);
 });
 
