@@ -1149,8 +1149,8 @@ export class JsonCodecGen extends TypeSpeller {
 			this.encFn(t, false);
 		}
 		for (const { type: t, via } of this.collectedTypes()) {
-			if (via !== "declared" || mentionsTypeParam(t)) continue;
-			if (reachesInterop(t)) continue;
+			if (via !== "boxed" || !t || mentionsTypeParam(t)) continue;
+			if (!this.spellable(t)) continue;
 			const u = under(t);
 			if (!u || u.kind === "interface" || u.kind === "func") continue;
 			this.encFn(t, false);
