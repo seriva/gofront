@@ -722,7 +722,11 @@ export const resolveMethods = {
 			const before = map.size;
 			for (const tp of typeParams) {
 				const arg = map.get(tp.name);
-				if (!arg || !tp.constraint) continue;
+				if (!tp.constraint) continue;
+				if (!arg) {
+					this._inferFromPointerCore(tp, typeParams, map, scope);
+					continue;
+				}
 				const terms = this._constraintTerms(tp.constraint, new Set(), scope);
 				if (terms?.length !== 1) continue;
 				const argUnder =
@@ -732,6 +736,25 @@ export const resolveMethods = {
 			}
 			if (map.size === before) break;
 		}
+	},
+
+	// An unbound type parameter whose constraint has the single exact term
+	// `*T` (`P interface{ *T; M() }`) is the pointer type, once `T` is known.
+	_inferFromPointerCore(tp, typeParams, map, scope) {
+		const terms = this._constraintTerms(tp.constraint, new Set(), scope);
+		if (terms?.length !== 1 || terms[0]?.kind !== "pointer") return;
+		const free = new Set(
+			typeParams.filter((p) => !map.has(p.name)).map((p) => p.name),
+		);
+		const inferred = this.substituteType(terms[0], map);
+		const mentionsFree = (t) =>
+			t?.kind === "typeParam"
+				? free.has(t.name)
+				: t?.kind === "pointer"
+					? mentionsFree(t.base)
+					: false;
+		if (!mentionsFree(inferred) && inferred.kind === "pointer")
+			map.set(tp.name, inferred);
 	},
 
 	_inferFromFuncPair(paramType, argType, map) {

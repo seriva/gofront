@@ -186,7 +186,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 3: Parser and JS Statement Codegen
 
-- [ ] Task 3.1: Parse type-set elements next to methods in interfaces (`G17`)
+- [x] Task 3.1: Parse type-set elements next to methods in interfaces (`G17`)
   - Files: `src/parser/types.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/parser/constraint-elements.test.js`. `type Incer[T any] interface{ *T; Inc() }` (one-line and multi-line) parses; the full `bump[C]().n` repro → `2` (`assertProgramOutput`); `Incer` used as an ordinary variable type → existing `cannot use type … outside a type constraint` style error (substring `constraint`).
   - Done when: the repro prints `2` on `both` and `wasm`.
