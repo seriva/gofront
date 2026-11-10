@@ -207,7 +207,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 2.5 cases to `assertProgramOutput`; add three levels deep with `continue outer` → Go output.
   - Done when: `wasm` prints `0 0\n1 0\ndone` and `break outer` still prints `0 0\ndone`.
-- [ ] Task 3.2: Store slice and string range values through the box of an address-taken variable (`H09`)
+- [x] Task 3.2: Store slice and string range values through the box of an address-taken variable (`H09`)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. The slice repro → `20`; the string repro → `98`; the key form `for i = range s` with `&i` → `1` (`assertProgramOutput`).
   - Done when: `assertValidWasm` passes and `wasm` matches `js` for all three.
