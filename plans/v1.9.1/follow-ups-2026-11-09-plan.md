@@ -198,7 +198,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/statements.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/language/int64.test.js`. `const half = 1 << 51; var b uint64 = 1; b += half` → `2251799813685249`; `int64 -= half` → `-2251799813685247`; `b |= half`, `b *= 3` → Go values (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go values.
-- [ ] Task 3.4: Fix labeled `break` / `continue` on range-over-func loops in JS (`G08`, JS)
+- [x] Task 3.4: Fix labeled `break` / `continue` on range-over-func loops in JS (`G08`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-func.test.js`. The three `G08` repros (`break outer` → `0\ndone`; `continue outer` → `0\n1\ndone`; nested `for` with `continue outer` → `0 0\n1 0\ndone`) via `assertJsTargetsOutput`.
   - Done when: no `SyntaxError` and the output matches on `js` and `both`. The WASM side is fixed in Task 4.1, so this test pins JS only.
