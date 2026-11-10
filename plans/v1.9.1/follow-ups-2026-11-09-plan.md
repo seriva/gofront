@@ -186,23 +186,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 3: Parser and JS Statement Codegen
 
-- [ ] Task 3.1: Parse type-set elements next to methods in interfaces (`G17`)
+- [x] Task 3.1: Parse type-set elements next to methods in interfaces (`G17`)
   - Files: `src/parser/types.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/parser/constraint-elements.test.js`. `type Incer[T any] interface{ *T; Inc() }` (one-line and multi-line) parses; the full `bump[C]().n` repro → `2` (`assertProgramOutput`); `Incer` used as an ordinary variable type → existing `cannot use type … outside a type constraint` style error (substring `constraint`).
   - Done when: the repro prints `2` on `both` and `wasm`.
-- [ ] Task 3.2: Mangle hoisted local types that share a name with a local value (`G06`)
+- [x] Task 3.2: Mangle hoisted local types that share a name with a local value (`G06`)
   - Files: `src/backend/js/index.js`
   - Test: `test/unit/language/local-types.test.js`. `func a() { type Dup struct{ X int }; Dup := 1; fmt.Println(Dup) }` → `1` (`assertAllTargetsOutput`); a variant that also prints `fmt.Sprintf("%T", struct-value)` keeps `main.Dup`.
   - Done when: no `ReferenceError` on `js` or `both`, and `%T` is unchanged.
-- [ ] Task 3.3: Emit untyped constant operands of 64-bit compound assignments as BigInt (`G07`)
+- [x] Task 3.3: Emit untyped constant operands of 64-bit compound assignments as BigInt (`G07`)
   - Files: `src/backend/js/statements.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/language/int64.test.js`. `const half = 1 << 51; var b uint64 = 1; b += half` → `2251799813685249`; `int64 -= half` → `-2251799813685247`; `b |= half`, `b *= 3` → Go values (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go values.
-- [ ] Task 3.4: Fix labeled `break` / `continue` on range-over-func loops in JS (`G08`, JS)
+- [x] Task 3.4: Fix labeled `break` / `continue` on range-over-func loops in JS (`G08`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-func.test.js`. The three `G08` repros (`break outer` → `0\ndone`; `continue outer` → `0\n1\ndone`; nested `for` with `continue outer` → `0 0\n1 0\ndone`) via `assertJsTargetsOutput`.
   - Done when: no `SyntaxError` and the output matches on `js` and `both`. The WASM side is fixed in Task 4.1, so this test pins JS only.
-- [ ] Task 3.5: Assign ranged map values into address-taken variables through the box in JS (`G09`, JS)
+- [x] Task 3.5: Assign ranged map values into address-taken variables through the box in JS (`G09`, JS)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/range-assign.test.js`. The `G09` repro → `1`; the key form `for k = range m` with `&k` taken → the key (`assertJsTargetsOutput`).
   - Done when: `js` and `both` print `1`. WASM validity is covered in Task 4.2.

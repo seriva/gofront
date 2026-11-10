@@ -329,6 +329,17 @@ export const typeParserMethods = {
 				this.semi();
 				continue;
 			}
+			// Type-set element that is not a bare name: *T, []int, map[K]V, ...
+			if (!this.check(T.IDENT)) {
+				const terms = [{ approx: false, type: this.parseType() }];
+				while (this.match(T.PIPE)) {
+					const approx = this.match(T.TILDE);
+					terms.push({ approx, type: this.parseType() });
+				}
+				unionConstraint = { kind: "UnionConstraint", terms };
+				this.semi();
+				continue;
+			}
 			const name = this.expect(T.IDENT).value;
 			if (this.check(T.LPAREN)) {
 				// Method signature: Name(params) returnType

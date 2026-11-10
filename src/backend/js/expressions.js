@@ -1875,9 +1875,25 @@ export const expressionGenMethods = {
 		const factory = this._typeParamZeroFactory(expr.func.expr._type.name);
 		if (!factory) return null;
 		this.useHelper("generics");
-		const recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
+		let recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
+		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
+		// type-parameter variable is the box, so reach the value it holds.
+		if (this._hasPointerTypeSet(expr.func.expr._type))
+			recv = `((__r) => typeof __r?.${expr.func.field} === "function" ? __r : __r?.value)(${recv})`;
 		const args = this._genCallArgs(expr);
 		return `${recv}.${expr.func.field}(${args})`;
+	},
+
+	// Whether type parameter `tp` is constrained to a single `*T` type-set term.
+	_hasPointerTypeSet(tp) {
+		const c = tp.constraint;
+		const iface = c?.kind === "named" ? c.underlying : c;
+		const terms = iface?.unionConstraint?.terms;
+		return (
+			terms?.length === 1 &&
+			(terms[0].resolved?.kind === "pointer" ||
+				terms[0].type?.kind === "PointerType")
+		);
 	},
 
 	// `(*S)(p).M()` where `p` points at another struct type: the JS object keeps
