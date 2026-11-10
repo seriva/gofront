@@ -1564,6 +1564,71 @@ templ Big(n int64) {
 	);
 });
 
+function mountCase(arg, body) {
+	return compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Case(${arg}))
+}`,
+		"case.templ": `package main
+import "fmt"
+${body}`,
+	}).js;
+}
+
+test("fmt calls in every value of a templ case list get typed formatters", () => {
+	const cases = [
+		[
+			`"1.0", 1`,
+			`templ Case(s string, g float32) {
+	switch s {
+		case "a", fmt.Sprintf("%0.1f", g):
+			<span>ok</span>
+	}
+}`,
+		],
+		[
+			`"1.0", 1`,
+			`templ Case(s string, g float32) {
+	switch s {
+		case "a", "b", fmt.Sprintf("%0.1f", g):
+			<span>ok</span>
+	}
+}`,
+		],
+		[
+			`"9007199254740993", 9007199254740993`,
+			`templ Case(s string, n int64) {
+	switch s {
+		case "a", fmt.Sprint(n):
+			<span>ok</span>
+	}
+}`,
+		],
+	];
+	for (const [arg, body] of cases) {
+		const js = mountCase(arg, body);
+		const { document } = runInDom(js, '<div id="app"></div>');
+		assertEqual(document.querySelector("#app").innerHTML, "<span>ok</span>");
+		assertEqual((js.match(/function gff_/g) ?? []).length, 1);
+	}
+});
+
+test("a fmt call as the first templ case value gets one formatter", () => {
+	const js = mountCase(
+		`"1.0", 1`,
+		`templ Case(s string, g float32) {
+	switch s {
+		case fmt.Sprintf("%0.1f", g), "a":
+			<span>ok</span>
+	}
+}`,
+	);
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assertEqual(document.querySelector("#app").innerHTML, "<span>ok</span>");
+	assertEqual((js.match(/function gff_/g) ?? []).length, 1);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

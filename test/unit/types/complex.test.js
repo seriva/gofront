@@ -506,6 +506,55 @@ func main() {
 	);
 });
 
+test("untyped constant operands of complex() round to float32 for complex64", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex64 = complex(float32(1), 0.01)
+	fmt.Println(imag(c) == 0.01)
+	d := complex(0.01, float32(1))
+	fmt.Println(real(d) == 0.01)
+	var f float32 = 1
+	var w float32 = 0.01
+	e := complex(f, 0.01)
+	fmt.Println(imag(e) == w)
+	fmt.Println(float64(imag(c)))
+	h := complex(float32(1), 0.5)
+	fmt.Println(h)
+	var z complex128 = complex(1, 0.01)
+	fmt.Println(imag(z) == 0.01)
+}
+`,
+		"true\ntrue\ntrue\n0.009999999776482582\n(1+0.5i)\ntrue\n",
+	);
+});
+
+test("untyped complex constants converted to complex64 round to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f(c complex64) float32 { return imag(c) }
+
+func main() {
+	var c complex64 = 1 + 0.01i
+	fmt.Println(imag(c) == 0.01, float64(imag(c)))
+	var d complex64 = 0.1
+	fmt.Println(float64(real(d)))
+	var z complex128 = 1 + 0.01i
+	fmt.Println(imag(z) == 0.01, imag(z))
+	e := complex64(2 + 0.01i)
+	fmt.Println(imag(e) == 0.01, f(0.01i) == 0.01)
+}
+`,
+		"true 0.009999999776482582\n0.10000000149011612\ntrue 0.01\ntrue true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

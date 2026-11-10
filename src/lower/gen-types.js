@@ -67,7 +67,7 @@ export function walkNodes(root, fn) {
 	}
 }
 
-const TEMPL_EXPR_PROPS = ["expr", "forStmt"];
+const TEMPL_EXPR_PROPS = ["expr", "exprs", "forStmt"];
 
 // True when `t` mentions a type parameter (a generic declaration, or a type
 // built from one inside a generic function).

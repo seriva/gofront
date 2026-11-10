@@ -1114,6 +1114,8 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		// `complex64(1 + 0.01i)`: the constant's components round to float32.
+		this._tagComplex64Const(targetType, srcType, expr.expr);
 		if (tgtResolved?.kind === "slice")
 			this._rejectSeqAsSlice(srcType, expr.expr, "a slice conversion");
 		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
@@ -2002,6 +2004,9 @@ export const expressionCheckMethods = {
 					expr,
 				);
 			}
+			// An untyped operand takes type float32 (`complex(f, 0.01)`).
+			this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
+			this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
 			return COMPLEX64;
 		}
 		return COMPLEX128;
