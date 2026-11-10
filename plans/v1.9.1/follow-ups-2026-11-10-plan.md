@@ -173,7 +173,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `H01`�
   - Files: `src/typechecker/resolve.js`, `src/typechecker/index.js`, `src/typechecker/statements.js`
   - Test: `test/unit/types/generics.test.js`. `type N interface{ ~int | ~string }; var x N` → `assertErrorContains(…, "cannot use type N outside a type constraint")`; same for a struct field `F N`, a param `func f(n N)` and `var c comparable`; `func g[T N](x T) T { return x }` with `g(3)` → `3`.
   - Done when: every negative errors on all targets and the generic positive runs.
-- [ ] Task 1.5: Count package uses in folded array lengths on cached ASTs (`H01`)
+- [x] Task 1.5: Count package uses in folded array lengths on cached ASTs (`H01`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/array-length.test.js`. Write the `H01` program to a temp dir, `compileFiles` it with `forceTarget: "js"` then `"wasm"` then `"both"` in the same process (no `evictParseCache`) → every compile has no errors and the WASM run prints `127`.
   - Done when: the second and third compiles no longer report `'math' imported and not used`, and `test/unit/compiler/packages.test.js` parse-cache tests pass.

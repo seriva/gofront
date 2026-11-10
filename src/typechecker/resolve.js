@@ -473,9 +473,14 @@ export const resolveMethods = {
 
 	_resolveArrayTypeNode(node, scope) {
 		// Fold in place so backends that read the type node see a literal length.
-		if (!node.inferLen && node.size?.value === undefined) {
+		// The node may come from the parse cache: keep the original expression so
+		// a later compile of the same AST still counts `pkg.K` as using `pkg`
+		// and still reports an invalid length.
+		if (node._sizeExpr) this._foldArrayLen(node._sizeExpr, scope);
+		else if (!node.inferLen && node.size?.value === undefined) {
 			const n = this._foldArrayLen(node.size, scope);
-			if (typeof n === "number")
+			if (typeof n === "number") {
+				node._sizeExpr = node.size;
 				node.size = {
 					kind: "BasicLit",
 					litKind: "INT",
@@ -483,6 +488,7 @@ export const resolveMethods = {
 					_line: node.size._line,
 					_col: node.size._col,
 				};
+			}
 		}
 		return {
 			kind: "array",

@@ -1,13 +1,18 @@
 // test/unit/types/array-length.test.js
-// Constant array lengths must be non-negative.
+// Constant array lengths must be non-negative, and a package used only in a
+// constant array length counts as used on every compile of a cached file.
 
+import { join } from "node:path";
+import { compileFiles, evictParseCache } from "../../../src/compiler.js";
 import {
 	assertAllTargetsOutput,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileWasm,
 	section,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("Array length checks");
@@ -57,4 +62,54 @@ func main() {
 `,
 		"127 0 127\n",
 	);
+});
+
+const ARRAY_LEN_ONLY_IMPORT = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	var a [math.MaxInt8]int
+	fmt.Println(len(a))
+}
+`;
+
+test("a package used only in an array length stays used on recompiles", () => {
+	withTempDir({ "main.go": ARRAY_LEN_ONLY_IMPORT }, (dir) => {
+		const goPath = join(dir, "main.go");
+		try {
+			for (const target of ["js", "wasm", "both"])
+				compileFiles([goPath], { forceTarget: target });
+		} finally {
+			evictParseCache(goPath);
+		}
+	});
+});
+
+test("a package used only in an array length runs on both targets", async () => {
+	await assertProgramOutput(ARRAY_LEN_ONLY_IMPORT, "127\n");
+});
+
+test("a negative array length is reported on recompiles", () => {
+	const src =
+		'package main\nimport "math"\nfunc main() {\n\tvar a [math.MinInt8]int\n\t_ = a\n}\n';
+	withTempDir({ "main.go": src }, (dir) => {
+		const goPath = join(dir, "main.go");
+		try {
+			for (const target of ["js", "wasm"]) {
+				let msg = "";
+				try {
+					compileFiles([goPath], { forceTarget: target });
+				} catch (e) {
+					msg = e.message;
+				}
+				assertErrorContains([{ message: msg }], "invalid array length");
+			}
+		} finally {
+			evictParseCache(goPath);
+		}
+	});
 });
