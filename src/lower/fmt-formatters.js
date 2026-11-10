@@ -559,12 +559,17 @@ class FmtGen extends TypeSpeller {
 			if (via === "declared" && !this.topLevel.has(type.name)) continue;
 			add(type);
 		}
-		// Only instances of generic types (and pointers to them): they are the
-		// types a package never spells, and any other type here would take the
-		// place of the dispatch a type parameter value already has.
-		for (const type of this.genericBodyTypes()) {
+		// Only instances of generic types (and pointers to them), and maps a
+		// generic body boxes into an interface: they are the types a package
+		// never spells, and any other type here would take the place of the
+		// dispatch a type parameter value already has.
+		for (const { type, boxed } of this.genericBodyTypes()) {
 			const base = type.kind === "pointer" ? type.base : type;
-			if (base.kind === "named" && base.typeArgs?.length > 0) add(type);
+			if (
+				(boxed && type.kind === "map") ||
+				(base.kind === "named" && base.typeArgs?.length > 0)
+			)
+				add(type);
 		}
 		return [...found.values()];
 	}
@@ -593,13 +598,25 @@ class FmtGen extends TypeSpeller {
 		while (queue.length > 0) {
 			const { decl, map } = queue.shift();
 			walkNodes(decl.body, (node) => {
-				// A type without a type parameter is found by the walk of the
-				// package already.
-				if (node._type && mentionsTypeParam(node._type))
-					out.push(defaultType(this.checker.substituteType(node._type, map)));
+				out.push(...this.bodyNodeTypes(node, map));
 				request(node, map);
 			});
 		}
+		return out;
+	}
+
+	// The types a node of an instantiated generic body adds: the node's own
+	// type once substituted (a type without a type parameter is found by the
+	// walk of the package already), and a map it boxes into an interface,
+	// which is a type of its own (a type parameter's value keeps its dispatch).
+	bodyNodeTypes(node, map) {
+		const sub = (t) => defaultType(this.checker.substituteType(t, map));
+		const out = [];
+		if (node._type && mentionsTypeParam(node._type))
+			out.push({ type: sub(node._type) });
+		const src = node._ifaceSrc;
+		if (src?.kind === "map" && mentionsTypeParam(src))
+			out.push({ type: sub(src), boxed: true });
 		return out;
 	}
 

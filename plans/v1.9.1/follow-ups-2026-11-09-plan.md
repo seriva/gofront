@@ -259,7 +259,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/expressions.js`, `src/backend/js/type-info.js`
   - Test: `test/unit/types/dynamic-types.test.js`. The `G25` type-switch repro → `is si` (`assertProgramOutput`); `make(map[K]V)` inside a generic function → the same.
   - Done when: JS prints `is si`.
-- [ ] Task 6.3: Print `%T` of maps instantiated in generic code (`G25b`)
+- [x] Task 6.3: Print `%T` of maps instantiated in generic code (`G25b`)
   - Files: `src/lower/fmt-formatters.js`, `src/backend/wasm/monomorph.js`
   - Test: `test/unit/stdlib/fmt-types.test.js`. `fmt.Printf("%T %T\n", pair(1, []int{2}), pair("s", 5))` → `map[int][]int map[string]int` (`assertProgramOutput`).
   - Done when: both the JS and WASM sides print the Go text.
