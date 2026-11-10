@@ -213,7 +213,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js`
   - Test: `test/unit/language/range-func.test.js`. Upgrade the Task 3.4 cases to `assertProgramOutput`.
   - Done when: all three repros match Go on `both` and `wasm`, with no panic for `break outer`.
-- [ ] Task 4.2: Emit valid WASM for map range assignment into a boxed variable (`G09`, WASM)
+- [x] Task 4.2: Emit valid WASM for map range assignment into a boxed variable (`G09`, WASM)
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/language/range-assign.test.js`. Upgrade the Task 3.5 cases to `assertProgramOutput`.
   - Done when: `assertValidWasm` passes and `wasm` prints `1`.

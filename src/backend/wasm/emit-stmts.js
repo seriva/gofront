@@ -720,6 +720,30 @@ export class StmtsEmitter {
 		return idx;
 	}
 
+	// Stores the value `emitValue` pushes into the variable `name` that a range
+	// assignment (`for k, v = range m`) targets: a plain local, a boxed local
+	// (its address is taken or a closure mutates it), or a global.
+	_emitRangeAssignStore(name, info, emitValue) {
+		const local = this.resolveLocal(name);
+		if (!local) {
+			emitValue();
+			this.pushInstruction({ op: "global.set", index: info.index });
+			return;
+		}
+		if (local.isBoxed) {
+			this.pushInstruction({ op: "local.get", index: local.index });
+			emitValue();
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: local.boxInfo.typeIndex,
+				fieldIndex: 0,
+			});
+			return;
+		}
+		emitValue();
+		this.pushInstruction({ op: "local.set", index: info.index });
+	}
+
 	_emitRangeBoxes() {
 		const pending = this._pendingRangeBoxes ?? [];
 		this._pendingRangeBoxes = [];
@@ -2647,46 +2671,28 @@ export class StmtsEmitter {
 
 			// Assign key variable
 			if (keyLocalInfo) {
-				this.pushInstruction({ op: "local.get", index: entryTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: mapInfo.entryTypeIndex,
-					fieldIndex: 0,
+				this._emitRangeAssignStore(lhs[0].name, keyLocalInfo, () => {
+					this.pushInstruction({ op: "local.get", index: entryTmp });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: mapInfo.entryTypeIndex,
+						fieldIndex: 0,
+					});
+					this._emitCopyMapEntry(keyType, mapInfo.keyWType);
 				});
-				this._emitCopyMapEntry(keyType, mapInfo.keyWType);
-				if (this.resolveLocal(lhs[0].name)) {
-					this.pushInstruction({
-						op: "local.set",
-						index: keyLocalInfo.index,
-					});
-				} else {
-					this.pushInstruction({
-						op: "global.set",
-						index: keyLocalInfo.index,
-					});
-				}
 			}
 
 			// Assign val variable
 			if (valLocalInfo) {
-				this.pushInstruction({ op: "local.get", index: entryTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: mapInfo.entryTypeIndex,
-					fieldIndex: 1,
+				this._emitRangeAssignStore(lhs[1].name, valLocalInfo, () => {
+					this.pushInstruction({ op: "local.get", index: entryTmp });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: mapInfo.entryTypeIndex,
+						fieldIndex: 1,
+					});
+					this._emitCopyMapEntry(valType, mapInfo.valWType);
 				});
-				this._emitCopyMapEntry(valType, mapInfo.valWType);
-				if (this.resolveLocal(lhs[1].name)) {
-					this.pushInstruction({
-						op: "local.set",
-						index: valLocalInfo.index,
-					});
-				} else {
-					this.pushInstruction({
-						op: "global.set",
-						index: valLocalInfo.index,
-					});
-				}
 			}
 
 			// Body
