@@ -1070,6 +1070,8 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
+		if (this._checkIfaceConversion(srcType, targetType, expr, expr.expr))
+			return targetType;
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1139,6 +1141,8 @@ export const expressionCheckMethods = {
 	},
 
 	_checkConversionValidity(srcType, targetType, expr) {
+		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
+			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
 		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =

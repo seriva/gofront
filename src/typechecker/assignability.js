@@ -454,6 +454,17 @@ export const assignabilityMethods = {
 		return true;
 	},
 
+	// `int(x)` and `(*T)(x)` with a source-written `any` operand need an assertion.
+	_checkIfaceConversion(srcType, targetType, expr, operand) {
+		if (!srcType?._declared || !operand || !this._isConcreteTarget(targetType))
+			return false;
+		this.err(
+			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}: need type assertion`,
+			expr,
+		);
+		return true;
+	},
+
 	_isConcreteTarget(target) {
 		if (!target || target.kind === "typeParam" || isAny(target)) return false;
 		if (isNil(target) || isUntyped(target)) return false;

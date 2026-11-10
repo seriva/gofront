@@ -175,7 +175,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/typechecker/statements.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/any-assertion.test.js`. `a, ok = m["k"]` (`map[string]any`), `n, err = getPair()` and `var n int; n, err := getPair()` (`(any, error)`) → `"need type assertion"`; `x, ok := m["k"]` with a fresh `x` compiles.
   - Done when: all three are rejected on every target and the positive case runs.
-- [ ] Task 2.3: Reject conversions from `any` to concrete types (`G23`)
+- [x] Task 2.3: Reject conversions from `any` to concrete types (`G23`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/types/any-assertion.test.js`. `(*int)(x)` and `int(x)` with `x any` → `"need type assertion"`; `any(x)`, `error(nil)` and `interface{ M() }(v)` where `v` implements it compile.
   - Done when: both negative repros error on all targets.

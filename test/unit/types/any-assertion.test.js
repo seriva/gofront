@@ -106,3 +106,38 @@ func main() {
 	_, _ = x, ok
 }`,
 );
+
+// Task 2.3: conversions
+negative(
+	"(*int)(x) with x any",
+	`package main
+func main() {
+	var x any
+	p := (*int)(x)
+	_ = p
+}`,
+);
+negative(
+	"int(x) with x any",
+	`package main
+func main() {
+	var x any = 1
+	n := int(x)
+	_ = n
+}`,
+);
+positive(
+	"any(x), error(nil) and interface conversions",
+	`package main
+type I interface{ M() }
+type T struct{}
+func (T) M() {}
+func main() {
+	var x any = 1
+	y := any(x)
+	e := error(nil)
+	var v I = T{}
+	i := I(v)
+	_, _, _ = y, e, i
+}`,
+);
