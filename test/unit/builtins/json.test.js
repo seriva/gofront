@@ -2714,6 +2714,37 @@ func main() {
 	assertContains(error, "cannot unmarshal into GPUBuffer");
 });
 
+test("json.Unmarshal into a map keyed by an interop type is a compile error", () => {
+	const { error } = runWithGpu(`
+type Holder struct {
+	M map[GPUBuffer]int
+}
+func main() {
+	var h Holder
+	err := json.Unmarshal([]byte("{}"), &h)
+	console.log(err == nil)
+}`);
+	assertContains(error, "cannot unmarshal into GPUBuffer");
+});
+
+test("json.Marshal of a map keyed by an interop type names the key type", () => {
+	const { out, error } = runWithGpu(
+		`
+type Holder struct {
+	M map[GPUBuffer]int
+}
+func main() {
+	b, err := json.Marshal(Holder{})
+	console.log(string(b), err == nil)
+	_, err = json.Marshal(Holder{M: map[GPUBuffer]int{makeBuf(): 1}})
+	console.log(err.Error())
+}`,
+		{ makeBuf: () => ({ label: "b" }) },
+	);
+	assertEqual(error, "");
+	assertEqual(out, '{"M":null} true\njson: unsupported type: GPUBuffer');
+});
+
 // ── Entry point ───────────────────────────────────────────────
 test("json.Marshal and Unmarshal with int64 Math.MaxInt64 (Task 1.3)", async () => {
 	const src = `package main

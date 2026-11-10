@@ -295,7 +295,10 @@ export class JsonCodecGen extends TypeSpeller {
 				fail(this.refl(t)),
 				"}",
 			];
-		const [empty, elem] = u.kind === "map" ? ["{}", u.value] : ["[]", u.elem];
+		const [empty, elem] =
+			u.kind === "map"
+				? ["{}", holdsInterop(u.key) ? u.key : u.value]
+				: ["[]", u.elem];
 		if (u.kind === "array")
 			return [
 				`if ${u.size} == 0 {`,
@@ -1285,7 +1288,8 @@ const holdsInterop = (t) => reachesInterop(t, new Set(), false);
 function interopName(t) {
 	const u = under(t);
 	if (u.kind === "namespace") return u.name;
-	if (u.kind === "map") return interopName(u.value);
+	if (u.kind === "map")
+		return interopName(holdsInterop(u.key) ? u.key : u.value);
 	return interopName(u.base ?? u.elem);
 }
 
