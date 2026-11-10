@@ -298,7 +298,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-10, `G27`,
   - Files: `src/lower/fmt-formatters.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js`. `templ Row(g float32) { <span>{ fmt.Sprintf("%0.1f", g) }</span> }` mounted with `Row(1)` → `textContent` `1.0` (`runInDom`); `fmt.Sprint(n)` with `n int64` in a templ expression → the exact digits.
   - Done when: the templ output matches the same call made from a `.go` file, and the existing templ tests pass.
-- [ ] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
+- [x] Task 8.3: Zero-initialise `v128` fields of package-level struct variables with `v128.const` in WASM (`G30`)
   - Files: `src/backend/wasm/globals.js`
   - Test: `test/unit/wasm/simd.test.js`. The `G30` program (package-level `var scratch mat4c`) → `assertValidWasm` passes and prints `1` (`assertProgramOutput`); a package-level `[2]simd.F32x4` array and a nested struct holding a `mat4c` → valid modules.
   - Done when: no `struct.new … expected type v128` `CompileError` for any of the three shapes.

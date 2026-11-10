@@ -1187,3 +1187,76 @@ func main() { _ = sim.Fill }
 		assertEqual(Number(m.PadLen()), 24);
 	});
 }
+
+section("WASM SIMD — package-level variables");
+
+function simdGlobals(body, exports) {
+	return compileHybridProject(
+		{
+			"pkg/g.go": `//gofront:target wasm
+package pkg
+
+import "gofront/simd"
+
+${body}
+`,
+			"main.go": `package main
+
+import "./pkg"
+
+func main() {
+	_ = pkg.Run
+}
+`,
+		},
+		{ exports },
+	);
+}
+
+test("a package-level struct variable with v128 fields is valid and zeroed", async () => {
+	const res = await simdGlobals(
+		`type mat4c struct{ c0, c1, c2, c3 simd.F32x4 }
+
+var scratch mat4c
+
+func Run() (float32, float32) {
+	before := scratch.c0.Lane(0)
+	scratch.c0 = simd.Splat(float32(1))
+	return before, scratch.c0.Lane(0)
+}`,
+		["Run"],
+	);
+	assertDeep(res.mod.Run(), [0, 1]);
+});
+
+test("a package-level array of F32x4 is valid", async () => {
+	const res = await simdGlobals(
+		`var vs [2]simd.F32x4
+
+func Run() (float32, float32) {
+	vs[1] = simd.Splat(float32(2))
+	return vs[0].Lane(1), vs[1].Lane(1)
+}`,
+		["Run"],
+	);
+	assertDeep(res.mod.Run(), [0, 2]);
+});
+
+test("a package-level struct nesting a struct with v128 fields is valid", async () => {
+	const res = await simdGlobals(
+		`type mat4c struct{ c0, c1 simd.F32x4 }
+type holder struct {
+	n int32
+	m mat4c
+}
+
+var h holder
+
+func Run() (int32, float32, float32) {
+	h.m.c1 = simd.Splat(float32(3))
+	return h.n, h.m.c0.Lane(0), h.m.c1.Lane(3)
+}`,
+		["Run"],
+	);
+	assertDeep(res.mod.Run(), [0, 0, 3]);
+});
