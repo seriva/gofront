@@ -32,6 +32,7 @@ import {
 	isComplex,
 	isNumeric,
 } from "../../typechecker/types.js";
+import { goTypeName } from "../shared/fmt-types.js";
 import {
 	unicodeIsJs,
 	unicodeToLowerJs,
@@ -702,6 +703,30 @@ export class CodeGen {
 	}
 
 	genTypeDeclWithMethods(decl, methodDecls) {
+		this._genTypeDeclBody(decl, methodDecls);
+		this._genUnhashableMark(decl.name);
+	}
+
+	// Marks a defined type Go cannot hash so `__ik` can name it in the panic
+	// of an interface-keyed map insert: a struct class carries `__uh`, a
+	// defined slice or map type registers its interface tag.
+	_genUnhashableMark(name) {
+		const t = this.checker?.types.get(name);
+		if (t?.kind !== "named" || t.typeParams?.length || t.typeArgs?.length)
+			return;
+		if (!this._isUnhashableType(t)) return;
+		const goName = JSON.stringify(goTypeName(t));
+		if (this.structNames.has(name)) {
+			this.line(
+				`Object.defineProperty(${name}, "__uh", { value: ${goName} });`,
+			);
+		} else if (this._isNamedComposite(t)) {
+			this.useHelper("structKey");
+			this.line(`__uht.set(${JSON.stringify(name)}, ${goName});`);
+		}
+	}
+
+	_genTypeDeclBody(decl, methodDecls) {
 		const definedStruct =
 			decl.type.kind === "StructType" ? null : this._definedStructAst(decl);
 		if (decl.type.kind === "StructType") {

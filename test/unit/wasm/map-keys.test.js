@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertWasmProgramOutput,
 	section,
 	summarize,
@@ -43,16 +44,34 @@ test("a func key names its parameters and results", async () => {
 });
 
 test("a struct key with a slice field names the struct", async () => {
-	await assertWasmProgramOutput(
+	await assertAllTargetsOutput(
 		keyPanic("type S struct{ s []int }", "S{}"),
 		"runtime error: hash of unhashable type main.S\n",
 	);
 });
 
 test("a defined slice key names the defined type", async () => {
-	await assertWasmProgramOutput(
+	await assertAllTargetsOutput(
 		keyPanic("type L []int", "L{1}"),
 		"runtime error: hash of unhashable type main.L\n",
+	);
+});
+
+test("a hashable struct key still works", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ a int }
+
+func main() {
+	m := map[any]int{}
+	m[S{1}] = 7
+	fmt.Println(m[S{1}], len(m))
+}
+`,
+		"7 1\n",
 	);
 });
 

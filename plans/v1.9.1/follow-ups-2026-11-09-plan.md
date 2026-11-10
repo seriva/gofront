@@ -244,7 +244,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
   - Files: `src/backend/js/expressions.js`, `src/lower/embedding.js`
   - Test: `test/unit/language/nil-receiver.test.js`. `type P struct{ *Base }; P{}.Ptr()` → `1`; two levels of embedding → `1`.
   - Done when: all targets print `1`.
-- [ ] Task 5.4: Panic on unhashable struct and defined slice keys in `any` maps on JS (`G13` JS)
+- [x] Task 5.4: Panic on unhashable struct and defined slice keys in `any` maps on JS (`G13` JS)
   - Files: `src/backend/js/runtime.js`, `src/backend/js/index.js`
   - Test: `test/unit/wasm/map-keys.test.js`. Upgrade the Task 4.3 struct and `L` cases to `assertAllTargetsOutput`; a hashable struct key `struct{ a int }` still works.
   - Done when: every target prints Go's message, and the hashable-key case is unchanged.
