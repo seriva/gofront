@@ -148,19 +148,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-09). Each 
 
 ### Phase 1: Typechecker Checks
 
-- [ ] Task 1.1: Check `switch` cases for untyped-bool tags and reject `case nil` in tagless switches (`G01`, `G02`)
+- [x] Task 1.1: Check `switch` cases for untyped-bool tags and reject `case nil` in tagless switches (`G01`, `G02`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/switch-cases.test.js`. `switch true { case 5: }` → `assertErrorContains(…, "cannot convert 5 (untyped int constant) to type bool")`; `switch { case nil: }` → `"cannot convert nil to type bool"`; `switch true { case 1 > 0: }` and `switch { case x > 0: }` compile.
   - Done when: both negative cases error on `js`, `both`, `wasm`, and the positive cases run on all targets.
-- [ ] Task 1.2: Reject `cap` of non-slice / array / chan operands (`G03`)
+- [x] Task 1.2: Reject `cap` of non-slice / array / chan operands (`G03`)
   - Files: `src/typechecker/expressions.js`
   - Test: `test/unit/builtins/cap.test.js`. `cap(1)` → `"invalid argument: 1 (untyped int constant) for cap"`; `cap(true)` and `n := 3; cap(n)` → `"for cap"`; `cap(s)` (slice), `cap(arr)`, `cap(&arr)` and a generic `[S ~[]E]` `cap(s)` stay valid.
   - Done when: no target produces invalid WASM for the three negative repros.
-- [ ] Task 1.3: Reject negative constant array lengths (`G05`)
+- [x] Task 1.3: Reject negative constant array lengths (`G05`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/array-length.test.js`. `var a [-1]int`, `const n = -1; var a [n]int` and `var a [math.MinInt8]int` → `assertErrorContains(…, "invalid array length")`; `[math.MaxInt8]int` → `127` (`assertAllTargetsOutput`); `[0]int` → `0`.
   - Done when: no negative-length program reaches a backend, and the JS output never contains `[object Object]`.
-- [ ] Task 1.4: Keep function-local types from rewriting imported package types (`G04`)
+- [x] Task 1.4: Keep function-local types from rewriting imported package types (`G04`)
   - Files: `src/typechecker/index.js`, `src/typechecker/statements.js`
   - Test: `test/unit/compiler/local-type-shadow.test.js` (`compileHybridProject`, for `js`, `both`, `wasm` targets of `lib`). The `G04` repro prints `{1}`; also `fmt.Sprint(Pt{true}, a.Pt{1})` → `{true} {1}`.
   - Done when: every target prints the Go output, and the existing function-local type tests (`test/unit/types/shadowing.test.js`, and the `F72` JSON case in `test/unit/builtins/json.test.js`) still pass.
