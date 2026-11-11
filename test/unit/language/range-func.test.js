@@ -452,6 +452,111 @@ L6:
 	);
 });
 
+section("Range-over-func: enclosing range indexes captured by the body");
+
+const SEQ = `func seq(y func(int) bool) {
+	for _, v := range []int{1, 2, 3} {
+		if !y(v) {
+			return
+		}
+	}
+}
+`;
+
+test("continue to the label of an enclosing range n loop", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${SEQ}
+func main() {
+L5:
+	for i := range 2 {
+		for x := range seq {
+			if x == 2 {
+				continue L5
+			}
+			fmt.Println(i, x)
+		}
+	}
+}
+`,
+		"0 1\n1 1\n",
+	);
+});
+
+test("unlabeled break and break to the outer label with an enclosing range n", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${SEQ}
+func main() {
+	for i := range 2 {
+		for x := range seq {
+			if x == 2 {
+				break
+			}
+			fmt.Println(i, x)
+		}
+	}
+L5:
+	for i := range 2 {
+		for x := range seq {
+			if x == 2 {
+				break L5
+			}
+			fmt.Println(i, x)
+		}
+	}
+}
+`,
+		"0 1\n1 1\n0 1\n",
+	);
+});
+
+test("an enclosing range over a slice, and int32 and uint8 indexes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${SEQ}
+func main() {
+	for i := range []int{0, 1} {
+		for x := range seq {
+			if x == 2 {
+				break
+			}
+			fmt.Println(i, x)
+		}
+	}
+	for _, v := range []string{"a", "b"} {
+		for x := range seq {
+			fmt.Println(v, x)
+			break
+		}
+	}
+	for i := range int32(2) {
+		for x := range seq {
+			fmt.Println(i, x)
+			break
+		}
+	}
+	for i := range uint8(2) {
+		for x := range seq {
+			fmt.Println(i, x)
+			break
+		}
+	}
+}
+`,
+		"0 1\n1 1\na 1\nb 1\n0 1\n1 1\n0 1\n1 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

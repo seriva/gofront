@@ -426,6 +426,10 @@ export class ExprsEmitter {
 					);
 				}
 				this.pushInstruction({ op: "local.get", index: local.index });
+				// A non-escaping `range n` index lives in an i32 local, but a
+				// closure (such as a range-over-func body) sees a Go `int`.
+				if (!field.isBoxed && local.type === "i32" && field.wType === "i64")
+					this.pushInstruction("i64.extend_i32_s");
 			}
 
 			this.pushInstruction({
