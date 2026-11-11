@@ -7,6 +7,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertJsProgramOutput,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	assertThrows,
 	compile,
@@ -2027,6 +2028,105 @@ for (const [name, src, want] of [
 		});
 	}
 }
+
+section("Explicit func type arguments");
+
+test("an explicit func type argument instantiates a generic function", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any]() any { return map[string]V{} }
+
+func zero[V any]() V {
+	var z V
+	return z
+}
+
+func main() {
+	w := mk[func(int)]()
+	_, ok := w.(map[string]int)
+	fmt.Println(ok, zero[func(int)]() == nil)
+}
+`,
+		"false true\n",
+	);
+});
+
+test("an explicit func type argument keeps its type name", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any]() any { return map[string]V{} }
+
+func main() {
+	w := mk[func(int)]()
+	fmt.Printf("%T\\n", w)
+}
+`,
+		"map[string]func(int)\n",
+	);
+});
+
+test("func type arguments with results and several parameters instantiate", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any]() any                  { return map[string]V{} }
+func pair[K comparable, V any]() any { return map[K]V{} }
+
+func main() {
+	fmt.Printf("%T\\n", mk[func(int) string]())
+	fmt.Printf("%T\\n", pair[string, func(int) bool]())
+	fmt.Printf("%T\\n", pair[int, func()]())
+}
+`,
+		"map[string]func(int) string\nmap[string]func(int) bool\nmap[int]func()\n",
+	);
+});
+
+test("func type arguments with several parameters compile on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func pair[K comparable, V any]() int {
+	var m map[K]V
+	var s []V
+	return len(m) + len(s)
+}
+
+func main() {
+	fmt.Println(pair[string, func(int) bool](), pair[int, func()]())
+}
+`,
+		"0 0\n",
+	);
+});
+
+test("an index by a called func literal still indexes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func one() int { return 1 }
+
+func main() {
+	a := []int{10, 20, 30}
+	m := map[int]string{1: "one"}
+	fmt.Println(a[one()], m[func() int { return 1 }()], a[func() int { return 2 }()])
+}
+`,
+		"20 one 30\n",
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

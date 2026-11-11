@@ -120,7 +120,7 @@ All 11 ledger entries re-probed on `main` @ `5f12880`. Columns js / both / wasm,
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2, `J01`–`J11`). Each task's `Test:` asserts the repro from `Verified Gaps`.
 
 ### Phase 1: Parser and Typechecker Selectors
-- [ ] Task 1.1: Parse explicit func type arguments (`J06`)
+- [x] Task 1.1: Parse explicit func type arguments (`J06`)
   - Files: `src/parser/declarations.js` (`parseReturnType`)
   - Test: `test/unit/types/generics.test.js`: `w := mk[func(int)]()` + `fmt.Printf("%T\n", w)` → `map[string]func(int)` (`assertProgramOutput`); `mk[func(int) string]()` and `mk[func(), int]()` (two-param `mk`) compile; `m[func() int { return 1 }()]` still indexes
   - Done when: `assertAllTargetsOutput` passes and the index-expression edge cases keep their behaviour
