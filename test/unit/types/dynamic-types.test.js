@@ -317,3 +317,31 @@ func main() {
 		"{1} 1 true {1} 1 true {1} 1 true\n",
 	);
 });
+
+section("Array values in an interface");
+
+test("arrays in an any compare element by element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	var k, k2 any = [2]int{1, 2}, [2]int{1, 2}
+	fmt.Println(k == k2)
+	var a, b any = [1]P{{1, 2}}, [1]P{{1, 2}}
+	fmt.Println(a == b)
+	var c, d any = [2]int{1, 2}, [2]int{1, 3}
+	fmt.Println(c == d, c != d)
+	var e, f any = [2]int{1, 2}, [2]int32{1, 2}
+	fmt.Println(e == f)
+	var s, t any = [2]string{"a", "b"}, [2]string{"a", "b"}
+	var u, v any = [3]int{1, 2, 3}, [2]int{1, 2}
+	fmt.Println(s == t, u == v, k == s)
+}
+`,
+		"true\ntrue\nfalse true\nfalse\ntrue false false\n",
+	);
+});
