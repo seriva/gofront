@@ -386,6 +386,22 @@ export const typeInfoGenMethods = {
 				return `map[${s(t.key)}]${s(t.value)}`;
 			case "pointer":
 				return `*${s(t.base)}`;
+			case "func": {
+				// Go's spelling: no result is `func()`, not `func() void`.
+				const rs = (t.returns ?? []).filter(
+					(r) => !(r?.kind === "basic" && r.name === "void"),
+				);
+				const ps = (t.params ?? []).map((p, i) =>
+					t.variadic && i === t.params.length - 1 ? `...${s(p)}` : s(p),
+				);
+				const res =
+					rs.length === 0
+						? ""
+						: rs.length === 1
+							? ` ${s(rs[0])}`
+							: ` (${rs.map(s).join(", ")})`;
+				return `func(${ps.join(", ")})${res}`;
+			}
 			case "struct":
 				if (t.name || !t._structFields) return typeStr(t);
 				return `struct{${t._structFields

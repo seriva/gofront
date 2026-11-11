@@ -167,7 +167,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/backend/wasm/emit-builtins.js` (`any_hash`)
   - Test: `test/unit/wasm/map-keys.test.js`: `m := map[any]int{}; m[[2]int{1, 2}] = 1; fmt.Println(len(m), m[[2]int{1, 2}])` → `1 1`; `[2]string{"a","b"}` key and `[1]int{5}` key with `m[5]` → `3 2 3` pattern from `X10b` (separate map)
   - Done when: `assertProgramOutput` passes (`both` + `wasm`); JS-only collisions with strings are not asserted (Excluded)
-- [ ] Task 3.3: Name func-bearing types for `%T` in an `any` (`I11`)
+- [x] Task 3.3: Name func-bearing types for `%T` in an `any` (`I11`)
   - Files: `src/backend/shared/fmt-types.js`, `src/backend/js/expressions.js` (`__ity` tag text), `src/backend/wasm/emit-builtins.js` (`_dynamicTypeNames`)
   - Test: `test/unit/builtins/fmt-verbs.test.js`: `%T` of `[2]func()`, `[]func()`, `[2]func(int) bool`, `map[string][2]func()` in an `any` → Go names; nil `func(int) string` in `any` → `func(int) string` on wasm (JS per probe outcome, see Approach)
   - Done when: `assertAllTargetsOutput` passes for the four composite types and `__ik`'s ` void` strip is gone or still required (commit body says which)

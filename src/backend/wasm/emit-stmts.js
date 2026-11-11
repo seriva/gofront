@@ -1381,6 +1381,9 @@ export class StmtsEmitter {
 	// is the declared type, not its underlying one: a defined string type is
 	// boxed apart from `string`, and `error` carries a method set.
 	_resolveTestTarget(t) {
+		// A composite type-switch case (`case func(int) string:`) carries the
+		// checker's type, which keys typed-nil markers like the boxed value.
+		if (t?._assertType) return t._assertType;
 		if ((t?.kind !== "TypeName" && t?.kind !== "Ident") || !t.name) return t;
 		if (t.name === "nil" || t.name === "any" || t.name === "interface{}")
 			return t;

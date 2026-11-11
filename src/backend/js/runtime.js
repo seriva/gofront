@@ -449,7 +449,7 @@ var __tfn = __tfn || function(f, t) {
 var __tnm = __tnm || function(f) {
   // The type name of a type argument's info factory, spelled as a static tag.
   const id = f?.id;
-  return typeof id === "string" ? id.replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
+  return typeof id === "string" ? id.replace(/ void\\b/g, "").replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
 };
 var __ity = __ity || function(x, t, ptr, sl) {
   if (t === undefined) return x;
@@ -771,7 +771,7 @@ var __ik = __ik || function(k, tag) {
   if (t === "number" || t === "boolean" || t === "bigint") return "\\u0001" + t + ":" + String(k);
   // A slice, map or func in an \`any\` carries its type tag: Go cannot hash it.
   if ((t === "object" || t === "function") && typeof k.__t === "string" && /^(\\[\\]|map\\[|func\\()/.test(k.__t))
-    throw new Error("runtime error: hash of unhashable type " + k.__t.replace(/ void$/, ""));
+    throw new Error("runtime error: hash of unhashable type " + k.__t);
   // A struct class or defined slice/map type that Go cannot hash is marked
   // once at its declaration, so this is one lookup per insert.
   if (t === "object") {

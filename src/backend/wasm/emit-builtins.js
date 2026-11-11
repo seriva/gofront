@@ -1560,6 +1560,15 @@ export class BuiltinsEmitter {
 					: `*${named(info.name)}`,
 			]);
 		}
+		for (const c of mod.closureTypes.values())
+			names.push([
+				c.typeIndex,
+				goTypeName({
+					kind: "func",
+					params: c.sig.params,
+					returns: c.sig.returns,
+				}),
+			]);
 		for (const box of mod.ifaceBoxTypes.values())
 			names.push([box.typeIndex, goTypeName(box.goType)]);
 		for (const info of mod.taggedSliceTypes.values())
