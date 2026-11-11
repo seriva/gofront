@@ -1,7 +1,7 @@
 # v1.9.1 Review Follow-ups (2026-11-11) — Design Plan
 
 **Version:** v1.9.1  
-**Status:** Draft  
+**Status:** Completed (2026-11-11)  
 **Base branch:** main  
 **Related:** [`follow-ups-2026-11-10-plan.md`](follow-ups-2026-11-10-plan.md) (origin of every ledger entry, PRs #173–#178; execute after `feat/follow-ups-2026-11-10` is merged into main), [`follow-ups-2026-11-09-plan.md`](follow-ups-2026-11-09-plan.md)  
 **Release note:** Interfaces that embed `comparable`, structs that satisfy an interface through an embedded pointer, and `complex64` variables set from a named complex constant now compile and run as in Go, and array values in an `any` compare equal (and work as `map[any]` keys in WebAssembly) when their elements are equal. Code that Go rejects is now rejected with a clear error instead of being accepted or misreported (converting an `any` to an interface with methods without a type assertion, ranging an `int` index into an `int32` variable, ambiguous promoted methods, an unparenthesized composite literal in an `if` header), and `switch` on a nil map, `continue` to a stacked label, `%T` of func types and nil pointers behind interfaces now behave as in Go on both JavaScript and WebAssembly.
@@ -123,73 +123,73 @@ All 14 ledger entries re-probed on `feat/follow-ups-2026-11-10` @ `dbd2d435` wit
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`–`I14`). Each task's `Test:` asserts the repro from `Verified Gaps`.
 
 ### Phase 1: Typechecker and Parser Diagnostics
-- [ ] Task 1.1: Allow `comparable` as an embedded constraint element (`I02`)
+- [x] Task 1.1: Allow `comparable` as an embedded constraint element (`I02`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/generics.test.js`: `interface{ ~int; comparable }` with `h(3)` prints `3` (`assertProgramOutput`); `interface{ comparable; M() }` with `a == b` prints `true`; negative `h([]int{})` against `interface{ comparable; ~[]int }` → `assertErrorContains(…, "does not satisfy")`; `var x interface{ comparable }` → `outside a type constraint`
   - Done when: the three positive programs run on `both` + `wasm` and both negatives report on every target (and `_reportConstraintUse` flags embedded `_comparable` interfaces as value types)
-- [ ] Task 1.2: Require a type assertion for `I(a)` with `a any` and `I` non-empty (`I03`)
+- [x] Task 1.2: Require a type assertion for `I(a)` with `a any` and `I` non-empty (`I03`)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`: `var a any; _ = I(a)` → `assertErrorContains(…, "need type assertion")` on every target; `I(a.(I))`, `I(T{})`, `I(nil)` still compile
   - Done when: the negative fails on `js`, `both`, `wasm` and the positives print as Go
-- [ ] Task 1.3: Check the range index type in range assignments (`I09`)
+- [x] Task 1.3: Check the range index type in range assignments (`I09`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/language/range-assign.test.js`: `var i int32; for i = range "abc"` and `for i = range []int{1,2}` → `assertErrorContains(…, "Cannot assign int to int32")`; `var i int32; for i = range 3` prints `2`; `var i int; for i = range "abc"` prints `2`
   - Done when: both negatives report on every target (no invalid WASM reaches the backend; index type checked strictly without `_isNumericCoercible` exception) and the positives pass `assertProgramOutput`
-- [ ] Task 1.4: Report unparenthesized composite literals in `if`/`switch`/`for` headers (`I12`)
+- [x] Task 1.4: Report unparenthesized composite literals in `if`/`switch`/`for` headers (`I12`)
   - Files: `src/parser/statements.js` (header parsing), `src/parser/expressions.js` (speculative scan helper, if needed)
   - Test: `test/unit/language/control-flow.test.js`: `if s := &Other{val: 5}; s.val > 0 {` with and without a receiver, and `Other{val: 5}` without `&` → `assertErrorContains(…, "must be parenthesized")`; `if s := (&Other{val: 5}); s.val > 0` inside `func (s *S) M()` prints `5`
   - Done when: the misleading `No field 'val' on S` / `Undefined: 's'` no longer appear for these programs and the edge cases in Approach §3 keep their current behaviour
 
 ### Phase 2: Method Sets and Embedded Promotion
-- [ ] Task 2.1: Put methods promoted through an embedded pointer in the value method set (`I05`)
+- [x] Task 2.1: Put methods promoted through an embedded pointer in the value method set (`I05`)
   - Files: `src/typechecker/index.js` (`_promoteEmbeddedInto`), `src/typechecker/assignability.js` (`implements`, if needed)
   - Test: `test/unit/language/named-type-methods.test.js`: `M` + `var w Mer = PO{&Inner{}}; w.M()` and `use(PO{&Inner{}})` print `inner` (`assertProgramOutput`); `type PV struct{ Inner }; var w Mer = PV{}` → `does not implement` (value embed, pointer method)
   - Done when: positives run on `both` + `wasm`, negative reports on every target
-- [ ] Task 2.2: Drop ambiguous promoted methods at the same depth (`I07`, typechecker)
+- [x] Task 2.2: Drop ambiguous promoted methods at the same depth (`I07`, typechecker)
   - Files: `src/typechecker/index.js`, `src/typechecker/expressions.js` (selector `ambiguous selector` error)
   - Test: `test/unit/language/named-type-methods.test.js`: `type C struct{ A; B }; var m Mer = C{}` → `assertErrorContains(…, "does not implement")`; `C{}.M()` → `ambiguous selector`; `type D struct{ C }; func (D) M() {}` with `var m Mer = D{}` compiles
   - Done when: negatives report on every target and the shadowing case runs
-- [ ] Task 2.3: Carry pointer embeds and ambiguity through JS embedded stubs (`I06`, `I07` JS)
+- [x] Task 2.3: Carry pointer embeds and ambiguity through JS embedded stubs (`I06`, `I07` JS)
   - Files: `src/lower/embedding.js`, `src/backend/js/index.js` (`_genValueMethodMeta`)
   - Test: `test/unit/language/named-type-methods.test.js`: `M` + `PO2{PO{&Inner{}}}` in `any`, `v.(Mer)` prints `true\ninner` (`assertAllTargetsOutput`); `var v any = C{}; _, ok := v.(Mer)` and `&C{}` print `false`
   - Done when: `js`, `both` and `wasm` print the Go output for these programs (wasm `C{}` part depends on Task 2.4; assert JS here with `assertJsTargetsOutput` and switch to `assertAllTargetsOutput` in Task 2.4)
-- [ ] Task 2.4: Ambiguity and typed-nil outer pointers in WASM interface dispatch (`I07` WASM, `I08`)
+- [x] Task 2.4: Ambiguity and typed-nil outer pointers in WASM interface dispatch (`I07` WASM, `I08`)
   - Files: `src/backend/wasm/module-emitter.js` (`_findPromotedMethod`), `src/backend/wasm/emit.js` (`_emitNilPtrCandidate`)
   - Test: `test/unit/wasm/interfaces.test.js`: `var v any = C{}; _, ok := v.(Mer)` → `false` on all targets; `M` + `var v any = (*PO)(nil); v.(Mer).M()` with `recover` prints `runtime error: invalid memory address or nil pointer dereference`; same for `(*PV)(nil)` with a value embed
   - Done when: `assertAllTargetsOutput` passes for all three programs, including the Task 2.3 `C{}` program
 
 ### Phase 3: Arrays and Func Types in `any`
-- [ ] Task 3.1: Compare array values in an `any` element-wise (`I10` `==`)
+- [x] Task 3.1: Compare array values in an `any` element-wise (`I10` `==`)
   - Files: `src/backend/js/runtime.js` (`__ifeq`), `src/backend/wasm/emit-builtins.js` (`any_eq`)
   - Test: `test/unit/types/dynamic-types.test.js`: `var k, k2 any = [2]int{1,2}, [2]int{1,2}; fmt.Println(k == k2)` → `true`; `[1]P{{1,2}}` pair → `true`; `[2]int{1,2}` vs `[2]int{1,3}` → `false`; `[2]int` vs `[2]int32` with equal elements → `false`
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 3.2: Hash array keys of `map[any]` element-wise on WASM (`I10` map keys)
+- [x] Task 3.2: Hash array keys of `map[any]` element-wise on WASM (`I10` map keys)
   - Files: `src/backend/wasm/emit-builtins.js` (`any_hash`)
   - Test: `test/unit/wasm/map-keys.test.js`: `m := map[any]int{}; m[[2]int{1, 2}] = 1; fmt.Println(len(m), m[[2]int{1, 2}])` → `1 1`; `[2]string{"a","b"}` key and `[1]int{5}` key with `m[5]` → `3 2 3` pattern from `X10b` (separate map)
   - Done when: `assertProgramOutput` passes (`both` + `wasm`); JS-only collisions with strings are not asserted (Excluded)
-- [ ] Task 3.3: Name func-bearing types for `%T` in an `any` (`I11`)
+- [x] Task 3.3: Name func-bearing types for `%T` in an `any` (`I11`)
   - Files: `src/backend/shared/fmt-types.js`, `src/backend/js/expressions.js` (`__ity` tag text), `src/backend/wasm/emit-builtins.js` (`_dynamicTypeNames`)
   - Test: `test/unit/builtins/fmt-verbs.test.js`: `%T` of `[2]func()`, `[]func()`, `[2]func(int) bool`, `map[string][2]func()` in an `any` → Go names; nil `func(int) string` in `any` → `func(int) string` on wasm (JS per probe outcome, see Approach)
   - Done when: `assertAllTargetsOutput` passes for the four composite types and `__ik`'s ` void` strip is gone or still required (commit body says which)
 
 ### Phase 4: Statement and Constant Codegen, Docs
-- [ ] Task 4.1: Match `case nil` against a nil map tag in JS `switch` (`I01`)
+- [x] Task 4.1: Match `case nil` against a nil map tag in JS `switch` (`I01`)
   - Files: `src/backend/js/statements.js` (`genSwitch` / `_switchTagAndCases`)
   - Test: `test/unit/types/switch-cases.test.js`: `var m map[string]int; switch m { case nil: fmt.Println("m nil") }` → `m nil`; `m := map[string]int{}` with `default` → `non-nil`; defined map type `type MM map[string]int` → `m nil`
   - Done when: `assertAllTargetsOutput` passes (using helper `__isnm`)
-- [ ] Task 4.2: Treat every stacked label as the range-over-func loop's own label in JS (`I04`)
+- [x] Task 4.2: Treat every stacked label as the range-over-func loop's own label in JS (`I04`)
   - Files: `src/backend/js/statements.js` (`LabeledStmt` case, `_genIteratorBranchStmt`, `_emitIterTargetDispatch`)
   - Test: `test/unit/language/range-func.test.js`: `L1: L2: for x := range seq { _ = x; continue L1 }` → `done`; `break L1` with a seq that honours `yield`'s result → `1\ndone`; `continue L2` → same as `continue L1`
   - Done when: `assertAllTargetsOutput` passes and no JS `SyntaxError`
-- [ ] Task 4.3: Box forwarded tuple elements into interface parameters in nested WASM calls (`I13`)
+- [x] Task 4.3: Box forwarded tuple elements into interface parameters in nested WASM calls (`I13`)
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitStaticCall`, `_multiForward` branch at `:1326`; also the method-call path in `src/backend/wasm/method-expr.js:351` if a probe shows `O{}.check(makePair())` nested)
   - Test: `test/unit/types/dynamic-types.test.js` (next to the 11-10 Phase 5 `makePair` tests): `if check(makePair())`, `var g = check(makePair())` and `wrap(check(makePair()))` → `ok` / `true true`; `check(makePair()) && side()` evaluates `makePair` before `side`
   - Done when: `assertProgramOutput` passes on `both` + `wasm`
-- [ ] Task 4.4: Emit named untyped complex constants into `complex64` with float32 components (`I14`)
+- [x] Task 4.4: Emit named untyped complex constants into `complex64` with float32 components (`I14`)
   - Files: `src/backend/js/expressions.js` (`complexConstParts` / `_genComplex64Const`), `src/backend/wasm/emit-exprs.js` (complex constant / `ImagLit` emission, `:269`, `:1513`)
   - Test: `test/unit/types/complex.test.js`: `const k = 1 + 0.01i; var c complex64 = k; imag(c) == 0.01` → `true`; `complex64(k)`, `d = k` → `true`; `const k2 = 2i; var c complex64 = k2; fmt.Println(c)` → `(0+2i)`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
-- [ ] Task 4.5: Align `docs/go-compatibility.md` with the fixed behaviour
+- [x] Task 4.5: Align `docs/go-compatibility.md` with the fixed behaviour
   - Files: `docs/go-compatibility.md`
   - Test: none (docs only; no doc-consistency test exists). Check: `grep -n 'nil or unmatched type for method call' docs/go-compatibility.md` returns no match; the dev-loop reviewer checks the rest per `AGENTS.md` **Docs**
   - Done when: the "Runtime panics" row (`:99`) no longer says WASM interface calls report `interface conversion: nil or unmatched type for method call` (all nil-receiver cases now report the nil-dereference message; a call on a nil interface value reports it too), and no row contradicts Phases 1–4 (`comparable` embeds, `%T` of func types, array equality in `any`)

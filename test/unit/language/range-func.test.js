@@ -371,6 +371,87 @@ func main() {
 	);
 });
 
+test("stacked labels all name the range-over-func loop", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func seq(yield func(int) bool) {
+	for i := 1; i <= 3; i++ {
+		if !yield(i) {
+			return
+		}
+	}
+}
+
+func once(yield func(int) bool) { yield(1) }
+
+func main() {
+L0:
+LA:
+	for x := range once {
+		_ = x
+		if x == 2 {
+			continue LA
+		}
+		continue L0
+	}
+	fmt.Println("done")
+	n := 0
+L1:
+L2:
+	for x := range seq {
+		n += x
+		if x == 2 {
+			continue L2
+		}
+		continue L1
+	}
+	fmt.Println(n)
+L3:
+L4:
+	for x := range seq {
+		fmt.Println(x)
+		if x == 2 {
+			continue L4
+		}
+		break L3
+	}
+	fmt.Println("done")
+L5:
+L6:
+	for x := range seq {
+		for y := range seq {
+			if y == 2 {
+				continue L5
+			}
+			if y == 9 {
+				break L6
+			}
+			fmt.Println(x, y)
+		}
+	}
+	for x := range seq {
+	L7:
+	L8:
+		for i := 0; i < 3; i++ {
+			if i == 1 {
+				continue L7
+			}
+			if i == 9 {
+				continue L8
+			}
+			fmt.Println("in", x, i)
+		}
+		break
+	}
+}
+`,
+		"done\n6\n1\ndone\n1 1\n2 1\n3 1\nin 1 0\nin 1 2\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

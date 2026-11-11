@@ -4,8 +4,11 @@
 import { fileURLToPath } from "node:url";
 import { HELPER_STRUCT_KEY } from "../../../src/backend/js/runtime.js";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
+	assertJsTargetsOutput,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	instantiateWasm,
@@ -1559,6 +1562,94 @@ func main() {
 
 -128 2147483648 9 (1+2i) (1+2i)
 `,
+	);
+});
+
+section("fmt %T of func types in an any");
+
+test("%T names arrays, slices and maps of funcs in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var f [2]func()
+	var w any = f
+	fmt.Printf("%T\\n", w)
+	var s []func()
+	w = s
+	fmt.Printf("%T\\n", w)
+	var g [2]func(int) bool
+	w = g
+	fmt.Printf("%T\\n", w)
+	var mm map[string][2]func()
+	w = mm
+	fmt.Printf("%T\\n", w)
+	w = map[string][2]func(){}
+	fmt.Printf("%T\\n", w)
+}
+`,
+		"[2]func()\n[]func()\n[2]func(int) bool\nmap[string][2]func()\nmap[string][2]func()\n",
+	);
+});
+
+test("a nil func in an any keeps its type in WASM", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var h func(int) string
+	var w any = h
+	fmt.Printf("%T %v\\n", w, w == nil)
+	switch x := w.(type) {
+	case func(int) string:
+		fmt.Println("func", x == nil)
+	default:
+		fmt.Println("default")
+	}
+}
+`,
+		"func(int) string false\nfunc true\n",
+	);
+});
+
+test("failed assertions name func types as Go does", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func try(w any) {
+	defer func() { fmt.Println(recover()) }()
+	_ = w.(int)
+}
+
+func main() {
+	try(func(int) string { return "" })
+	try(func() {})
+}
+`,
+		"interface conversion: interface {} is func(int) string, not int\ninterface conversion: interface {} is func(), not int\n",
+	);
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(w any) {
+	defer func() { fmt.Println(recover()) }()
+	_ = w.(int)
+}
+
+func main() {
+	try([2]func(){})
+	try([]func(){})
+}
+`,
+		"interface conversion: interface {} is [2]func(), not int\ninterface conversion: interface {} is []func(), not int\n",
 	);
 });
 

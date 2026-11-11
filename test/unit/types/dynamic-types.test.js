@@ -317,3 +317,79 @@ func main() {
 		"{1} 1 true {1} 1 true {1} 1 true\n",
 	);
 });
+
+test("g(f()) nested in a larger expression boxes the forwarded struct", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func check(v any, n int) bool {
+	t, ok := v.(T)
+	return ok && t.A == 1 && n == 1
+}
+
+func wrap(b bool) bool { return b }
+
+func pair() (T, int) {
+	fmt.Println("pair")
+	return makePair()
+}
+
+func side() bool {
+	fmt.Println("side")
+	return true
+}
+
+type O struct{}
+
+func (O) check(v any, n int) bool {
+	_, ok := v.(T)
+	return ok && n == 1
+}
+
+var g = check(makePair())
+
+func main() {
+	if check(makePair()) {
+		fmt.Println("ok")
+	} else {
+		fmt.Println("fail")
+	}
+	fmt.Println(g, wrap(check(makePair())))
+	fmt.Println(check(pair()) && side())
+	fmt.Println(wrap(O{}.check(makePair())))
+}
+`,
+		"ok\ntrue true\npair\nside\ntrue\ntrue\n",
+	);
+});
+
+section("Array values in an interface");
+
+test("arrays in an any compare element by element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	var k, k2 any = [2]int{1, 2}, [2]int{1, 2}
+	fmt.Println(k == k2)
+	var a, b any = [1]P{{1, 2}}, [1]P{{1, 2}}
+	fmt.Println(a == b)
+	var c, d any = [2]int{1, 2}, [2]int{1, 3}
+	fmt.Println(c == d, c != d)
+	var e, f any = [2]int{1, 2}, [2]int32{1, 2}
+	fmt.Println(e == f)
+	var s, t any = [2]string{"a", "b"}, [2]string{"a", "b"}
+	var u, v any = [3]int{1, 2, 3}, [2]int{1, 2}
+	fmt.Println(s == t, u == v, k == s)
+}
+`,
+		"true\ntrue\nfalse true\nfalse\ntrue false false\n",
+	);
+});

@@ -594,23 +594,25 @@ const COMPLEX_CONST_OPS = {
 };
 
 // The [re, im] value of an untyped complex constant expression built from
-// literals, or null (a named complex constant has no folded value).
-function complexConstParts(e) {
-	if (!e || typeof e !== "object") return null;
-	if (e.kind === "ParenExpr") return complexConstParts(e.expr);
+// literals and named constants, or null.
+function complexConstParts(e, depth = 0) {
+	if (!e || typeof e !== "object" || depth > 32) return null;
+	if (e.kind === "ParenExpr") return complexConstParts(e.expr, depth + 1);
+	// A named complex constant has no folded value: fold its initializer.
+	if (e._complexInit) return complexConstParts(e._complexInit, depth + 1);
 	if (e.kind === "ImagLit") return [0, Number(e.value)];
 	const val = e._const;
 	if (val && (val.k === "FLOAT" || val.k === "INT")) return [Number(val.v), 0];
-	if (e.kind === "UnaryExpr") return complexConstNeg(e);
+	if (e.kind === "UnaryExpr") return complexConstNeg(e, depth);
 	const op = e.kind === "BinaryExpr" ? COMPLEX_CONST_OPS[e.op] : null;
-	const a = op && complexConstParts(e.left);
-	const b = a && complexConstParts(e.right);
+	const a = op && complexConstParts(e.left, depth + 1);
+	const b = a && complexConstParts(e.right, depth + 1);
 	return b ? op(a, b) : null;
 }
 
-function complexConstNeg(e) {
+function complexConstNeg(e, depth) {
 	if (e.op !== "-" && e.op !== "+") return null;
-	const c = complexConstParts(e.operand);
+	const c = complexConstParts(e.operand, depth + 1);
 	return c && e.op === "-" ? [-c[0], -c[1]] : c;
 }
 

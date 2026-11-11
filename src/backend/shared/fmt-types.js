@@ -67,7 +67,10 @@ export function goTypeName(t, specialized = null) {
 		case "MapType":
 			return `map[${go(t.key)}]${go(t.value)}`;
 		case "func": {
-			const rets = (t.returns ?? []).map(go);
+			// A func without results is `func()`, not `func() void`.
+			const rets = (t.returns ?? [])
+				.filter((r) => !(r?.kind === "basic" && r.name === "void"))
+				.map(go);
 			const ret =
 				rets.length === 0
 					? ""

@@ -321,3 +321,47 @@ func main() {
 }`,
 	"does not implement",
 );
+
+// I(a) with a declared any and I non-empty needs an assertion, like the
+// assignment form.
+negative(
+	"I(a) with a any and I non-empty",
+	`package main
+type I interface{ M() }
+func main() {
+	var a any
+	_ = I(a)
+}`,
+	"cannot convert a (variable of type any) to type I: need type assertion",
+);
+negative(
+	"an interface literal conversion of a declared any",
+	`package main
+func main() {
+	var a any
+	_ = interface{ M() }(a)
+}`,
+);
+
+test("I(a.(I)), I(T{}), I(nil) and any(a) still convert", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() }
+type T struct{}
+
+func (T) M() { fmt.Println("m") }
+
+func main() {
+	var a any = T{}
+	I(a.(I)).M()
+	I(T{}).M()
+	fmt.Println(I(nil) == nil)
+	fmt.Println(any(a) != nil)
+}
+`,
+		"m\nm\ntrue\ntrue\n",
+	);
+});

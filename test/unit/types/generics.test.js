@@ -1935,6 +1935,99 @@ func main() {
 	);
 });
 
+section("comparable embedded in a constraint interface");
+
+test("interface{ ~int; comparable } constrains a type parameter", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type NM interface {
+	~int
+	comparable
+}
+
+func h[T NM](x T) T { return x }
+
+func main() {
+	fmt.Println(h(3))
+}
+`,
+		"3\n",
+	);
+});
+
+test("interface{ comparable; ~int | ~string } constrains a type parameter", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type CS interface {
+	comparable
+	~int | ~string
+}
+
+func same[T CS](a, b T) bool { return a == b }
+
+func main() {
+	fmt.Println(same(1, 1), same("a", "b"))
+}
+`,
+		"true false\n",
+	);
+});
+
+test("interface{ comparable; M() } allows == in the body", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type CM interface {
+	comparable
+	M()
+}
+
+type T struct{ n int }
+
+func (T) M() {}
+
+func eq[V CM](a, b V) bool { return a == b }
+
+func main() {
+	fmt.Println(eq(T{1}, T{1}))
+}
+`,
+		"true\n",
+	);
+});
+
+for (const [name, src, want] of [
+	[
+		"[]int against interface{ comparable; ~[]int }",
+		"package main\ntype CS interface {\n\tcomparable\n\t~[]int\n}\nfunc h[T CS](x T) T { return x }\nfunc main() { _ = h([]int{}) }",
+		"does not satisfy",
+	],
+	[
+		"a var of type interface{ comparable }",
+		"package main\nfunc main() {\n\tvar x interface{ comparable }\n\t_ = x\n}",
+		"outside a type constraint",
+	],
+	[
+		"a var of a named interface embedding comparable",
+		"package main\ntype C interface {\n\tcomparable\n\tM()\n}\nfunc main() {\n\tvar x C\n\t_ = x\n}",
+		"outside a type constraint",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(constraintErrorsOn(target, src), want);
+		});
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -1393,6 +1393,41 @@ export class BuiltinsEmitter {
 		this.releaseTemp(closureTmp, closureWType);
 	}
 
+	// `g(f())` that lowering left unsplit (it splits only statement operands):
+	// f's results go into locals, and g is called with idents carrying each
+	// element's interface-box marks, so each is boxed like any argument. Also
+	// used for method calls, whose argument path expects one value per
+	// parameter. Only when g's callee evaluates no call, so f() still runs
+	// before anything else the call evaluates.
+	_splitForwardedArgs(call) {
+		if (!call._multiForward || call.args?.length !== 1) return null;
+		const inner = call.args[0];
+		const types = inner?._type?.types;
+		if (!Array.isArray(types) || types.length === 0) return null;
+		const holders =
+			inner._fwdIface?.length === types.length ? inner._fwdIface : null;
+		const isMethod =
+			call.func?.kind === "SelectorExpr" &&
+			call.func.expr?._type?.kind !== "namespace";
+		if (!holders && !isMethod) return null;
+		if (hasCallOrReceive(call.func)) return null;
+		this.emitExpr(inner, null);
+		this._fwdArgCounter = (this._fwdArgCounter ?? 0) + 1;
+		const names = types.map((_, i) => `__fwdarg$${this._fwdArgCounter}$${i}`);
+		const locals = types.map((t, i) =>
+			this.allocLocal(names[i], this.toWasmType(t), t, true),
+		);
+		for (let i = locals.length - 1; i >= 0; i--)
+			this.pushInstruction({ op: "local.set", index: locals[i] });
+		const args = names.map((name, i) => ({
+			kind: "Ident",
+			name,
+			_type: types[i],
+			...(holders?.[i] ?? {}),
+		}));
+		return { ...call, args, _multiForward: false };
+	}
+
 	emitCallExpr(call, targetWasmType = null) {
 		if (call._isTypeConversion) {
 			this.emitTypeConversion({
@@ -1409,6 +1444,12 @@ export class BuiltinsEmitter {
 		}
 
 		if (this._emitBuiltinCall(call, targetWasmType)) {
+			return;
+		}
+
+		const forwarded = this._splitForwardedArgs(call);
+		if (forwarded) {
+			this.emitCallExpr(forwarded, targetWasmType);
 			return;
 		}
 
@@ -1560,6 +1601,15 @@ export class BuiltinsEmitter {
 					: `*${named(info.name)}`,
 			]);
 		}
+		for (const c of mod.closureTypes.values())
+			names.push([
+				c.typeIndex,
+				goTypeName({
+					kind: "func",
+					params: c.sig.params,
+					returns: c.sig.returns,
+				}),
+			]);
 		for (const box of mod.ifaceBoxTypes.values())
 			names.push([box.typeIndex, goTypeName(box.goType)]);
 		for (const info of mod.taggedSliceTypes.values())
@@ -1657,6 +1707,123 @@ export class BuiltinsEmitter {
 		this.emitRuntimePanicThrow();
 	}
 
+	// `any_eq` arm for two arrays of one wasm array type (an array stored in
+	// an interface is the array ref itself): equal lengths and elements.
+	_emitAnyArrayEqArm(arrInfo) {
+		const ref = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		for (const idx of [0, 1]) {
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({ op: "ref.test", typeIndex: arrInfo.typeIndex });
+		}
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		const a1 = this.allocLocal(null, ref);
+		const a2 = this.allocLocal(null, ref);
+		for (const [src, dst] of [
+			[0, a1],
+			[1, a2],
+		]) {
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "ref.cast", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction({ op: "local.set", index: dst });
+		}
+		const len = this.allocLocal(null, "i32");
+		this.pushInstruction({ op: "local.get", index: a1 });
+		this.pushInstruction("array.len");
+		this.pushInstruction({ op: "local.tee", index: len });
+		this.pushInstruction({ op: "local.get", index: a2 });
+		this.pushInstruction("array.len");
+		this.pushInstruction("i32.ne");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+		const i = this.allocLocal(null, "i32");
+		const e1 = this.allocLocal(null, arrInfo.elemWType);
+		const e2 = this.allocLocal(null, arrInfo.elemWType);
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction("i32.ge_u");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+		for (const [arr, dst] of [
+			[a1, e1],
+			[a2, e2],
+		]) {
+			this.pushInstruction({ op: "local.get", index: arr });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction({ op: "local.set", index: dst });
+		}
+		this.emitKeyEq(e1, e2, arrInfo.elemGoType);
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+	}
+
+	// `any_hash` arm for an array: the wasm array type, then each element,
+	// as `emitKeyHash` combines a static array key (so equal arrays under
+	// `any_eq` hash equal).
+	_emitAnyArrayHashArm(arrInfo) {
+		const ref = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.test", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		const arr = this.allocLocal(null, ref);
+		const h = this.allocLocal(null, "i32");
+		const i = this.allocLocal(null, "i32");
+		const e = this.allocLocal(null, arrInfo.elemWType);
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.cast", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: arr });
+		this.pushInstruction({ op: "i32.const", value: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: h });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction("array.len");
+		this.pushInstruction("i32.ge_u");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: e });
+		this.pushInstruction({ op: "local.get", index: h });
+		this.pushInstruction({ op: "i32.const", value: 31 });
+		this.pushInstruction("i32.mul");
+		this.emitKeyHash(e, arrInfo.elemGoType);
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: h });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: h });
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+	}
+
 	emitRuntimeHelper(fn) {
 		const errInfo = this.mod.getStructType(ERROR_STRUCT);
 		switch (fn._isRuntimeHelper) {
@@ -1733,6 +1900,12 @@ export class BuiltinsEmitter {
 					this.emitKeyEq(f1, f2, box.goType);
 					this.pushInstruction("return");
 					this.pushInstruction("end");
+				}
+
+				// Arrays compare element by element.
+				for (const a of [...this.mod.arrayTypes.values()]) {
+					if (!isUnhashableGoType(a.elemGoType, this.mod.checker))
+						this._emitAnyArrayEqArm(a);
 				}
 
 				// Strings
@@ -1880,6 +2053,12 @@ export class BuiltinsEmitter {
 					this.pushInstruction("i32.add");
 					this.pushInstruction("return");
 					this.pushInstruction("end");
+				}
+
+				// Arrays hash element by element.
+				for (const a of [...this.mod.arrayTypes.values()]) {
+					if (!isUnhashableGoType(a.elemGoType, this.mod.checker))
+						this._emitAnyArrayHashArm(a);
 				}
 
 				// Check string

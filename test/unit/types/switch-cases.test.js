@@ -107,3 +107,37 @@ func main() {
 		"e nil\np nil\ns nil\nf nil\n",
 	);
 });
+
+test("case nil matches a nil map tag on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MM map[string]int
+
+func main() {
+	var m map[string]int
+	switch m {
+	case nil:
+		fmt.Println("m nil")
+	}
+	m2 := map[string]int{}
+	switch m2 {
+	case nil:
+		fmt.Println("m2 nil")
+	default:
+		fmt.Println("non-nil")
+	}
+	var mm MM
+	switch mm {
+	case nil:
+		fmt.Println("mm nil")
+	default:
+		fmt.Println("mm non-nil")
+	}
+}
+`,
+		"m nil\nnon-nil\nmm nil\n",
+	);
+});

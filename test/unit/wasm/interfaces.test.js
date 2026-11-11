@@ -1493,3 +1493,67 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true false false true\ntrue false false true\nfalse");
 });
+
+section("Promoted methods in interface dispatch");
+
+test("an ambiguous promoted method fails the assertion on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type A struct{}
+
+func (A) M() {}
+
+type B struct{}
+
+func (B) M() {}
+
+type C struct {
+	A
+	B
+}
+
+func main() {
+	var v any = C{}
+	_, ok := v.(Mer)
+	fmt.Println(ok)
+}
+`,
+		"false\n",
+	);
+});
+
+for (const [name, decls] of [
+	[
+		"a pointer embed",
+		'type Inner struct{}\n\nfunc (i *Inner) M() { fmt.Println("inner") }\n\ntype PO struct{ *Inner }',
+	],
+	[
+		"a value embed",
+		'type Inner struct{}\n\nfunc (i Inner) M() { fmt.Println("inner") }\n\ntype PO struct{ Inner }',
+	],
+]) {
+	test(`a promoted method call on a nil outer pointer through ${name} is a nil dereference`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+${decls}
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var v any = (*PO)(nil)
+	v.(Mer).M()
+}
+`,
+			"runtime error: invalid memory address or nil pointer dereference\n",
+		);
+	});
+}

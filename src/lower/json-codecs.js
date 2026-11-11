@@ -1306,7 +1306,7 @@ export const isCompositeType = (t) => {
 
 // A slice, array or map holding funcs: it never encodes, but a nil one in an
 // interface still does, as `null`, and a non-nil one names the func.
-const isFuncComposite = (t) => {
+export const isFuncComposite = (t) => {
 	const k = under(t)?.kind;
 	return (
 		(k === "slice" || k === "array" || k === "map") &&

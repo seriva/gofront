@@ -29,6 +29,7 @@ import {
 	isBool,
 	isVoid,
 	NATIVES,
+	promotedMethods,
 	Scope,
 	TAINTED_ANY,
 	TypeCheckError,
@@ -98,6 +99,44 @@ const JS_BUILTIN_CLASSES = new Set([
 	"WeakMap",
 	"WebAssembly",
 ]);
+
+// The promoted-method entry for candidate `cand`, reusing `prev` when
+// nothing changed so the method keeps its identity across passes. A pointer
+// method reached through an embedded pointer is in the value method set.
+function promotedEntry(cand, prev) {
+	if (cand.ambiguous) return { depth: cand.depth, ambiguous: true };
+	if (
+		!prev?.ambiguous &&
+		prev?.source === cand.source &&
+		prev.viaPtr === cand.viaPtr &&
+		prev.depth === cand.depth
+	)
+		return prev;
+	const mType =
+		cand.viaPtr && cand.source?._ptrRecv
+			? { ...cand.source, _ptrRecv: false }
+			: cand.source;
+	return { ...cand, mType };
+}
+
+// Replaces the promoted methods `old` with `next` in `methods`, leaving
+// the struct's own methods alone; returns whether anything changed.
+function applyPromotions(methods, old, next, isOwn) {
+	let changed = old.size !== next.size;
+	for (const [mName, prev] of old) {
+		const entry = next.get(mName);
+		if (entry?.mType) continue;
+		if (prev.mType && !isOwn(mName)) methods.delete(mName);
+		if (entry?.ambiguous !== prev.ambiguous || entry?.depth !== prev.depth)
+			changed = true;
+	}
+	for (const [mName, entry] of next) {
+		if (entry.ambiguous) continue;
+		if (old.get(mName)?.mType !== entry.mType) changed = true;
+		methods.set(mName, entry.mType);
+	}
+	return changed;
+}
 
 export class TypeChecker {
 	constructor() {
@@ -804,40 +843,81 @@ export class TypeChecker {
 			}
 		}
 		const count = () =>
-			structs.reduce(
-				(n, st) => n + (st?.methods?.size ?? 0) + (st?.fields?.size ?? 0),
-				0,
-			);
+			structs.reduce((n, st) => n + (st?.fields?.size ?? 0), 0);
 		let before;
+		let changed;
 		do {
 			before = count();
-			for (const st of structs) this._promoteEmbeddedInto(st);
-		} while (count() !== before);
+			changed = false;
+			for (const st of structs)
+				if (this._promoteEmbeddedInto(st)) changed = true;
+		} while (changed || count() !== before);
 	}
 
+	// Recomputes the methods `struct` gets from its embedded fields, as Go's
+	// method set: the shallowest method of each name wins, a method declared
+	// on the struct itself shadows every promoted one, and a pointer method
+	// reached through an embedded pointer belongs to the value method set.
+	// Returns whether the promoted methods changed.
 	_promoteEmbeddedInto(struct) {
-		if (struct?.kind !== "struct" || !struct._embeds) return;
-		for (const embed of struct._embeds) {
-			const inner = embed.kind === "pointer" ? embed.base : embed;
-			const base = inner.kind === "named" ? inner.underlying : inner;
+		if (struct?.kind !== "struct" || !struct._embeds) return false;
+		const old = promotedMethods.get(struct) ?? new Map();
+		const best = new Map();
+		for (const embed of struct._embeds)
+			this._offerEmbedMethods(struct, embed, best);
+		if (best.size === 0 && old.size === 0) return false;
+		struct.methods ??= new Map();
+		// A method declared on the struct (or set since the last pass) is
+		// not one this pass promoted.
+		const isOwn = (mName) =>
+			struct.methods.has(mName) &&
+			struct.methods.get(mName) !== old.get(mName)?.mType;
+		const next = new Map();
+		for (const [mName, cand] of best)
+			if (!isOwn(mName)) next.set(mName, promotedEntry(cand, old.get(mName)));
+		promotedMethods.set(struct, next);
+		return applyPromotions(struct.methods, old, next, isOwn);
+	}
+
+	// Adds the methods one embedded field offers to `best` (name -> the
+	// shallowest candidate), and copies its fields into the embedder.
+	_offerEmbedMethods(struct, embed, best) {
+		const isPtr = embed.kind === "pointer";
+		const inner = isPtr ? embed.base : embed;
+		const base = inner.kind === "named" ? inner.underlying : inner;
+		// Two candidates at the same depth make the name ambiguous, as does
+		// an ambiguous name of the embedded type.
+		const offer = (name, depth, source, viaPtr, ambiguous = false) => {
+			const cur = best.get(name);
+			if (!cur || depth < cur.depth)
+				best.set(name, { depth, source, viaPtr, ambiguous });
+			else if (depth === cur.depth) cur.ambiguous = true;
+		};
+		if (base?.kind === "struct") {
 			// Fields of an embedded type declared after the embedder were not
 			// there when the embedder's fields were collected.
-			if (base?.kind === "struct" && struct.fields)
+			if (struct.fields)
 				for (const [k, v] of base.fields)
 					if (!struct.fields.has(k)) struct.fields.set(k, v);
-			// A named non-struct type (`time.Duration`) keeps its methods on
-			// the named type itself.
-			const methods =
-				base?.kind === "struct"
-					? base.methods
-					: inner.kind === "named" && base?.kind !== "interface"
-						? inner.methods
-						: null;
-			if (!methods) continue;
-			for (const [mName, mType] of methods.entries()) {
-				if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
+			const innerPromoted = promotedMethods.get(base);
+			for (const [mName, mType] of base.methods ?? []) {
+				const p = innerPromoted?.get(mName);
+				offer(
+					mName,
+					1 + (p?.depth ?? 0),
+					p?.source ?? mType,
+					isPtr || Boolean(p?.viaPtr),
+				);
 			}
+			for (const [mName, p] of innerPromoted ?? [])
+				if (p.ambiguous) offer(mName, 1 + p.depth, null, false, true);
+			return;
 		}
+		// A named non-struct type (`time.Duration`) keeps its methods on the
+		// named type itself.
+		if (inner.kind === "named" && base?.kind !== "interface")
+			for (const [mName, mType] of inner.methods ?? [])
+				offer(mName, 1, mType, isPtr);
 	}
 
 	// ── Type collection ──────────────────────────────────────────
