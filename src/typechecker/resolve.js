@@ -12,6 +12,7 @@ import {
 	DECLARED_ANY,
 	defaultType,
 	displayTypeName,
+	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
 	isTypedArraySlice,
@@ -1098,6 +1099,8 @@ export const resolveMethods = {
 
 	_fieldTypeStruct(base, baseType, field, node) {
 		if (base.fields?.has(field)) {
+			if (isAmbiguousFieldSelector(base, field))
+				return this._errAmbiguousSelector(baseType, field, node);
 			if (
 				field.startsWith("_") &&
 				(baseType?.name?.startsWith("strings.") ||
@@ -1111,11 +1114,8 @@ export const resolveMethods = {
 			return base.fields.get(field);
 		}
 		if (base.methods?.has(field)) return base.methods.get(field);
-		if (isAmbiguousPromotion(base, field)) {
-			const text = exprText(node?.expr);
-			const recv = text === "expression" ? typeStr(baseType) : text;
-			return this.err(`ambiguous selector ${recv}.${field}`, node);
-		}
+		if (isAmbiguousPromotion(base, field))
+			return this._errAmbiguousSelector(baseType, field, node);
 		const typeName = baseType?.name || base.name;
 		if (typeName) {
 			const dName = displayTypeName(typeName);
@@ -1138,6 +1138,12 @@ export const resolveMethods = {
 			}
 		}
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
+	},
+
+	_errAmbiguousSelector(baseType, field, node) {
+		const text = exprText(node?.expr);
+		const recv = text === "expression" ? typeStr(baseType) : text;
+		return this.err(`ambiguous selector ${recv}.${field}`, node);
 	},
 
 	_fieldTypeInterface(base, baseType, field, node) {

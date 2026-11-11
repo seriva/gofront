@@ -626,6 +626,52 @@ export function embeddedFieldName(f) {
 		.replace(/\$\$.*$/, "");
 }
 
+// Whether `st` declares `name` itself: a field of that name or an embedded
+// field named after its type.
+function declaresField(st, name) {
+	return (st._structFields ?? []).some((f) =>
+		f.embedded ? embeddedFieldName(f) === name : f.names?.includes(name),
+	);
+}
+
+// The shallowest depth at which `struct` promotes a field `name` from its
+// embedded types, and how many promotion paths reach it at that depth:
+// { depth, count }, or null when no embedded type offers one.
+function promotedFieldDepth(struct, name, path = new Set()) {
+	if (path.has(struct)) return null;
+	path.add(struct);
+	let best = null;
+	for (const e of struct._embeds ?? []) {
+		const inner = e?.kind === "pointer" ? e.base : e;
+		const st = inner?.kind === "named" ? inner.underlying : inner;
+		if (st?.kind !== "struct" || !st._structFields) continue;
+		const sub = declaresField(st, name)
+			? { depth: 0, count: 1 }
+			: promotedFieldDepth(st, name, path);
+		if (!sub) continue;
+		const depth = 1 + sub.depth;
+		if (!best || depth < best.depth) best = { depth, count: sub.count };
+		else if (depth === best.depth) best.count += sub.count;
+	}
+	path.delete(struct);
+	return best;
+}
+
+// Whether selecting `name` on `struct`, whose flattened field map has it, is
+// ambiguous: two promotion paths reach a field of that name at the same
+// shallowest depth, or a field and a method promoted at that depth do. A
+// field declared on the struct itself and a method declared on it always win.
+export function isAmbiguousFieldSelector(struct, name) {
+	if (declaresField(struct, name)) return false;
+	const promoted = promotedMethods.get(struct)?.get(name);
+	if (struct.methods?.has(name) && promoted?.mType !== struct.methods.get(name))
+		return false;
+	const field = promotedFieldDepth(struct, name);
+	if (!field) return false;
+	if (!promoted || field.depth < promoted.depth) return field.count > 1;
+	return field.depth === promoted.depth || promoted.ambiguous === true;
+}
+
 // A function-local type shadowed by another type is renamed `Name__L<n>`.
 export const LOCAL_TYPE_SUFFIX = /__L\d+/;
 

@@ -227,12 +227,14 @@ export const declarationParseMethods = {
 			this.check(T.EOF)
 		)
 			return null;
-		// Inside a type expression (e.g. func type in a tuple or a type-switch
-		// `case func():`), `,`, `)` and `:` also end the type
+		// Inside a type expression (e.g. func type in a tuple, a type-switch
+		// `case func():` or a type argument `f[func(int)]`), `,`, `)`, `]` and
+		// `:` also end the type
 		if (
 			inTypeExpr &&
 			(this.check(T.COMMA) ||
 				this.check(T.RPAREN) ||
+				this.check(T.RBRACKET) ||
 				this.check(T.COLON) ||
 				this.check(T.STRING) ||
 				this.check(T.ASSIGN))

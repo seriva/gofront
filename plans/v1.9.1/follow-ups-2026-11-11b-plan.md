@@ -120,15 +120,15 @@ All 11 ledger entries re-probed on `main` @ `5f12880`. Columns js / both / wasm,
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2, `J01`–`J11`). Each task's `Test:` asserts the repro from `Verified Gaps`.
 
 ### Phase 1: Parser and Typechecker Selectors
-- [ ] Task 1.1: Parse explicit func type arguments (`J06`)
+- [x] Task 1.1: Parse explicit func type arguments (`J06`)
   - Files: `src/parser/declarations.js` (`parseReturnType`)
   - Test: `test/unit/types/generics.test.js`: `w := mk[func(int)]()` + `fmt.Printf("%T\n", w)` → `map[string]func(int)` (`assertProgramOutput`); `mk[func(int) string]()` and `mk[func(), int]()` (two-param `mk`) compile; `m[func() int { return 1 }()]` still indexes
   - Done when: `assertAllTargetsOutput` passes and the index-expression edge cases keep their behaviour
-- [ ] Task 1.2: Track promoted field depth (`J03`, field vs method)
+- [x] Task 1.2: Track promoted field depth (`J03`, field vs method)
   - Files: `src/typechecker/index.js` (`_offerEmbedMethods`, `_promoteEmbeddedInto`), `src/typechecker/resolve.js` (`_fieldTypeStruct`)
   - Test: `test/unit/language/named-type-methods.test.js`: `type A struct{ M int }; type B struct{}; func (B) M() {}; type C struct{ A; B }; fmt.Println(C{}.M)` → `assertErrorContains(…, "ambiguous selector")`; shallower field over deeper method prints `0`; outer-declared field `M` shadows both
   - Done when: negative reports on every target and positives pass `assertAllTargetsOutput`
-- [ ] Task 1.3: Report two promoted fields at the same depth as ambiguous (`J03`, field vs field)
+- [x] Task 1.3: Report two promoted fields at the same depth as ambiguous (`J03`, field vs field)
   - Files: `src/typechecker/index.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/language/named-type-methods.test.js`: `type A struct{ X int }; type B struct{ X int }; type C struct{ A; B }; c.X` → `assertErrorContains(…, "ambiguous selector c.X")`; `c.A.X` prints `0`; ambiguous `X` never selected compiles
   - Done when: negative reports on every target, positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples
