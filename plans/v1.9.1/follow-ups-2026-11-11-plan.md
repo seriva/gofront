@@ -189,7 +189,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/backend/js/expressions.js` (`complexConstParts` / `_genComplex64Const`), `src/backend/wasm/emit-exprs.js` (complex constant / `ImagLit` emission, `:269`, `:1513`)
   - Test: `test/unit/types/complex.test.js`: `const k = 1 + 0.01i; var c complex64 = k; imag(c) == 0.01` → `true`; `complex64(k)`, `d = k` → `true`; `const k2 = 2i; var c complex64 = k2; fmt.Println(c)` → `(0+2i)`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
-- [ ] Task 4.5: Align `docs/go-compatibility.md` with the fixed behaviour
+- [x] Task 4.5: Align `docs/go-compatibility.md` with the fixed behaviour
   - Files: `docs/go-compatibility.md`
   - Test: none (docs only; no doc-consistency test exists). Check: `grep -n 'nil or unmatched type for method call' docs/go-compatibility.md` returns no match; the dev-loop reviewer checks the rest per `AGENTS.md` **Docs**
   - Done when: the "Runtime panics" row (`:99`) no longer says WASM interface calls report `interface conversion: nil or unmatched type for method call` (all nil-receiver cases now report the nil-dereference message; a call on a nil interface value reports it too), and no row contradicts Phases 1–4 (`comparable` embeds, `%T` of func types, array equality in `any`)
