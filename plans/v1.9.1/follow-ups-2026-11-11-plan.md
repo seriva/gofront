@@ -135,7 +135,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/language/range-assign.test.js`: `var i int32; for i = range "abc"` and `for i = range []int{1,2}` → `assertErrorContains(…, "Cannot assign int to int32")`; `var i int32; for i = range 3` prints `2`; `var i int; for i = range "abc"` prints `2`
   - Done when: both negatives report on every target (no invalid WASM reaches the backend; index type checked strictly without `_isNumericCoercible` exception) and the positives pass `assertProgramOutput`
-- [ ] Task 1.4: Report unparenthesized composite literals in `if`/`switch`/`for` headers (`I12`)
+- [x] Task 1.4: Report unparenthesized composite literals in `if`/`switch`/`for` headers (`I12`)
   - Files: `src/parser/statements.js` (header parsing), `src/parser/expressions.js` (speculative scan helper, if needed)
   - Test: `test/unit/language/control-flow.test.js`: `if s := &Other{val: 5}; s.val > 0 {` with and without a receiver, and `Other{val: 5}` without `&` → `assertErrorContains(…, "must be parenthesized")`; `if s := (&Other{val: 5}); s.val > 0` inside `func (s *S) M()` prints `5`
   - Done when: the misleading `No field 'val' on S` / `Undefined: 's'` no longer appear for these programs and the edge cases in Approach §3 keep their current behaviour
