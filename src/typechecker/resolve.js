@@ -374,7 +374,7 @@ export const resolveMethods = {
 
 	_reportConstraintUse(type, node) {
 		const u = this._deepUnderlying(type);
-		if (u === COMPARABLE) {
+		if (u === COMPARABLE || (u?.kind === "interface" && u._comparable)) {
 			this.err(
 				`cannot use type ${typeStr(type)} outside a type constraint: interface is (or embeds) comparable`,
 				node,
@@ -616,24 +616,12 @@ export const resolveMethods = {
 		// Embedded interfaces that carry a type set (`interface{ Integer }`):
 		// kept so type-parameter operator checks can follow them.
 		const typeSetEmbeds = [];
-		if (node.embeds) {
-			for (const embed of node.embeds) {
-				const resolved = this.resolveTypeNode(embed, scope);
-				const base =
-					resolved?.kind === "named" ? resolved.underlying : resolved;
-				if (base?.kind === "interface") {
-					for (const [mName, mType] of base.methods) {
-						if (!methods.has(mName)) methods.set(mName, mType);
-					}
-					if (base.unionConstraint || base._typeSetEmbeds)
-						typeSetEmbeds.push(base);
-				} else if (!isAny(resolved)) {
-					this.err(
-						`cannot embed non-interface type ${typeStr(resolved)}`,
-						embed,
-					);
-				}
-			}
+		// `interface{ comparable; ... }`: the type set is restricted to
+		// comparable types (directly or through an embedded constraint).
+		let comparable = false;
+		for (const embed of node.embeds ?? []) {
+			if (this._mergeInterfaceEmbed(embed, scope, methods, typeSetEmbeds))
+				comparable = true;
 		}
 		const result = { kind: "interface", methods };
 		if (node.unionConstraint) {
@@ -641,7 +629,26 @@ export const resolveMethods = {
 			result._unionScope = scope;
 		}
 		if (typeSetEmbeds.length > 0) result._typeSetEmbeds = typeSetEmbeds;
+		if (comparable) result._comparable = true;
 		return result;
+	},
+
+	// Folds one embedded element of an interface into `methods` and
+	// `typeSetEmbeds`; returns true when it makes the interface comparable-only.
+	_mergeInterfaceEmbed(embed, scope, methods, typeSetEmbeds) {
+		const resolved = this.resolveTypeNode(embed, scope);
+		const base = resolved?.kind === "named" ? resolved.underlying : resolved;
+		if (base === COMPARABLE) return true;
+		if (base?.kind !== "interface") {
+			if (!isAny(resolved))
+				this.err(`cannot embed non-interface type ${typeStr(resolved)}`, embed);
+			return false;
+		}
+		for (const [mName, mType] of base.methods) {
+			if (!methods.has(mName)) methods.set(mName, mType);
+		}
+		if (base.unionConstraint || base._typeSetEmbeds) typeSetEmbeds.push(base);
+		return Boolean(base._comparable);
 	},
 
 	// ── Generics — substitution, instantiation, inference ────────────
@@ -942,7 +949,36 @@ export const resolveMethods = {
 		this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
 	},
 
+	// Go's comparability: slices, maps and funcs are not comparable, nor are
+	// arrays and structs that contain them.
+	_isComparable(t, seen = new Set()) {
+		const base = t?.kind === "named" ? t.underlying : t;
+		if (!base || seen.has(base)) return true;
+		seen.add(base);
+		switch (base.kind) {
+			case "slice":
+			case "map":
+			case "func":
+				return false;
+			case "array":
+				return this._isComparable(base.elem, seen);
+			case "struct":
+				return [...(base.fields?.values() ?? [])].every((f) =>
+					this._isComparable(f, seen),
+				);
+			default:
+				return true;
+		}
+	},
+
 	_checkInterfaceConstraint(typeArg, base, constraint, node) {
+		if (base._comparable && !this._isComparable(typeArg)) {
+			this.err(
+				`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
+				node,
+			);
+			return;
+		}
 		if (base.methods.size === 0 && !base.unionConstraint) return;
 		if (base.unionConstraint) {
 			this.checkConstraint(typeArg, base.unionConstraint, node);

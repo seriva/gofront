@@ -123,7 +123,7 @@ All 14 ledger entries re-probed on `feat/follow-ups-2026-11-10` @ `dbd2d435` wit
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`–`I14`). Each task's `Test:` asserts the repro from `Verified Gaps`.
 
 ### Phase 1: Typechecker and Parser Diagnostics
-- [ ] Task 1.1: Allow `comparable` as an embedded constraint element (`I02`)
+- [x] Task 1.1: Allow `comparable` as an embedded constraint element (`I02`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/generics.test.js`: `interface{ ~int; comparable }` with `h(3)` prints `3` (`assertProgramOutput`); `interface{ comparable; M() }` with `a == b` prints `true`; negative `h([]int{})` against `interface{ comparable; ~[]int }` → `assertErrorContains(…, "does not satisfy")`; `var x interface{ comparable }` → `outside a type constraint`
   - Done when: the three positive programs run on `both` + `wasm` and both negatives report on every target (and `_reportConstraintUse` flags embedded `_comparable` interfaces as value types)
