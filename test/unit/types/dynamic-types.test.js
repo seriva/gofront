@@ -623,6 +623,34 @@ func main() {
 	);
 });
 
+test("[]any and []interface{} are the same dynamic type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func main() {
+	var a any = []any{1}
+	_, ok1 := a.([]any)
+	_, ok2 := a.([]interface{})
+	var b any = []interface{}{1}
+	_, ok3 := b.([]any)
+	_, ok4 := b.([]interface{})
+	fmt.Println(ok1, ok2, ok3, ok4)
+	var c any = []error{errors.New("x")}
+	_, ok5 := c.([]any)
+	_, ok6 := c.([]interface{})
+	_, ok7 := c.([]error)
+	fmt.Println(ok5, ok6, ok7)
+}
+`,
+		"true true true true\nfalse false true\n",
+	);
+});
+
 test("failed assertions name array lengths and element types", async () => {
 	await assertAllTargetsOutput(
 		`package main

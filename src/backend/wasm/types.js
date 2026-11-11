@@ -561,8 +561,9 @@ export function isTaggedSliceType(goType, checker = null) {
 		else break;
 	}
 	// A slice of a method interface (`[]error`) is a slice of `anyref` like
-	// `[]any`, and `[]fmt.Stringer` another one.
-	if (elem?.kind === "interface") return true;
+	// `[]any`, and `[]fmt.Stringer` another one.  `[]any` and `[]interface{}`
+	// are the same type, so neither is tagged.
+	if (isNonEmptyInterface(elem, checker)) return true;
 	return elem?.kind === "basic" && TAGGED_SLICE_ELEMS.has(elem.name);
 }
 
