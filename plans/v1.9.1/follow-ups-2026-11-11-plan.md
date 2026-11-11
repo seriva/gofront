@@ -149,7 +149,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/typechecker/index.js`, `src/typechecker/expressions.js` (selector `ambiguous selector` error)
   - Test: `test/unit/language/named-type-methods.test.js`: `type C struct{ A; B }; var m Mer = C{}` → `assertErrorContains(…, "does not implement")`; `C{}.M()` → `ambiguous selector`; `type D struct{ C }; func (D) M() {}` with `var m Mer = D{}` compiles
   - Done when: negatives report on every target and the shadowing case runs
-- [ ] Task 2.3: Carry pointer embeds and ambiguity through JS embedded stubs (`I06`, `I07` JS)
+- [x] Task 2.3: Carry pointer embeds and ambiguity through JS embedded stubs (`I06`, `I07` JS)
   - Files: `src/lower/embedding.js`, `src/backend/js/index.js` (`_genValueMethodMeta`)
   - Test: `test/unit/language/named-type-methods.test.js`: `M` + `PO2{PO{&Inner{}}}` in `any`, `v.(Mer)` prints `true\ninner` (`assertAllTargetsOutput`); `var v any = C{}; _, ok := v.(Mer)` and `&C{}` print `false`
   - Done when: `js`, `both` and `wasm` print the Go output for these programs (wasm `C{}` part depends on Task 2.4; assert JS here with `assertJsTargetsOutput` and switch to `assertAllTargetsOutput` in Task 2.4)

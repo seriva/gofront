@@ -5,6 +5,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
@@ -1050,6 +1051,54 @@ func main() {
 }
 `,
 		"d\na\na\n",
+	);
+});
+
+section("Promoted method sets in interface assertions");
+
+test("a pointer method two embeds above the pointer is in the value's method set", async () => {
+	await assertAllTargetsOutput(
+		`${PTR_EMBED_PRELUDE}
+type PO2 struct{ PO }
+
+func main() {
+	var v any = PO2{PO{&Inner{}}}
+	m, ok := v.(Mer)
+	fmt.Println(ok)
+	m.M()
+	_, ok = v.(interface{ M() })
+	fmt.Println(ok)
+}
+`,
+		"true\ninner\ntrue\n",
+	);
+});
+
+test("an ambiguous promoted method fails interface assertions", async () => {
+	await assertJsTargetsOutput(
+		`${AMBIGUOUS_PRELUDE}
+type X struct{ A }
+
+type Y struct{ A }
+
+type Z struct {
+	X
+	Y
+}
+
+func main() {
+	var v any = C{}
+	_, ok := v.(Mer)
+	fmt.Println(ok)
+	v = &C{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+	v = Z{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+}
+`,
+		"false\nfalse\nfalse\n",
 	);
 });
 

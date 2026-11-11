@@ -609,6 +609,14 @@ export function isAmbiguousPromotion(struct, name) {
 	return promotedMethods.get(struct)?.get(name)?.ambiguous === true;
 }
 
+// The ambiguous method names of `struct` (see isAmbiguousPromotion).
+export function ambiguousPromotions(struct) {
+	const names = [];
+	for (const [name, p] of promotedMethods.get(struct) ?? [])
+		if (p.ambiguous) names.push(name);
+	return names;
+}
+
 export function embeddedFieldName(f) {
 	const ast = f.astType?.kind === "PointerType" ? f.astType.base : f.astType;
 	const t = f.type?.kind === "pointer" ? f.type.base : f.type;
