@@ -1557,3 +1557,196 @@ func main() {
 		);
 	});
 }
+
+section("Methods promoted from embedded interfaces");
+
+const IFACE_EMBED_PRELUDE = `package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type T struct{}
+
+func (T) M() { fmt.Println("T.M") }
+
+type S struct{ Mer }
+`;
+
+test("an embedded interface's methods are called directly and through the interface", async () => {
+	await assertAllTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	var m Mer = S{T{}}
+	m.M()
+	S{T{}}.M()
+	p := &S{T{}}
+	p.M()
+	var v any = S{T{}}
+	_, ok := v.(Mer)
+	fmt.Println(ok)
+	v.(Mer).M()
+	v = &S{T{}}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+}
+`,
+		"T.M\nT.M\nT.M\ntrue\nT.M\ntrue\n",
+	);
+});
+
+test("an embedded error interface gives the struct an Error method", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type W struct{ error }
+
+func main() {
+	var e error = W{errors.New("x")}
+	fmt.Println(e.Error())
+	fmt.Println(W{errors.New("y")}.Error())
+	fmt.Println(e)
+}
+`,
+		"x\ny\nx\n",
+	);
+});
+
+test("embedded interface methods keep their arguments and results", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Adder interface {
+	Add(a, b int) int
+	Name() string
+}
+
+type Calc struct{ base int }
+
+func (c Calc) Add(a, b int) int { return c.base + a + b }
+func (c Calc) Name() string      { return "calc" }
+
+type Wrapped struct{ Adder }
+
+type Outer struct{ Wrapped }
+
+func use(a Adder) { fmt.Println(a.Name(), a.Add(1, 2)) }
+
+func main() {
+	w := Wrapped{Calc{10}}
+	use(w)
+	fmt.Println(w.Add(3, 4), w.Name())
+	o := Outer{w}
+	use(o)
+	fmt.Println(o.Add(5, 6), o.Name())
+}
+`,
+		"calc 13\n17 calc\ncalc 13\n21 calc\n",
+	);
+});
+
+test("a method promoted from a nil embedded interface is a nil dereference", async () => {
+	await assertAllTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var m Mer = S{}
+	m.M()
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
+test("a method promoted through a nil embedded interface in a direct call is a nil dereference", async () => {
+	await assertAllTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	S{}.M()
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
+section("Value methods promoted through a nil embedded pointer");
+
+const NIL_EMBED_PRELUDE = `package main
+
+import "fmt"
+
+type VMer interface{ VM() }
+`;
+
+for (const [name, inner] of [
+	["an empty Inner", "type Inner struct{}"],
+	["an Inner with a field", "type Inner struct{ n int }"],
+]) {
+	test(`a value method through a nil embedded pointer to ${name} panics`, async () => {
+		await assertAllTargetsOutput(
+			`${NIL_EMBED_PRELUDE}
+${inner}
+
+func (i Inner) VM() { fmt.Println("inner") }
+
+type PO struct{ *Inner }
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var v any = PO{}
+	v.(VMer).VM()
+}
+`,
+			"runtime error: invalid memory address or nil pointer dereference\n",
+		);
+	});
+}
+
+test("a value method through a nil pointer two embeds down panics", async () => {
+	await assertAllTargetsOutput(
+		`${NIL_EMBED_PRELUDE}
+type Inner struct{ n int }
+
+func (i Inner) VM() { fmt.Println("inner") }
+
+type PO struct{ *Inner }
+
+type PO2 struct{ PO }
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var v any = PO2{PO{}}
+	v.(VMer).VM()
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
+test("a value method through a non-nil embedded pointer runs", async () => {
+	await assertAllTargetsOutput(
+		`${NIL_EMBED_PRELUDE}
+type Inner struct{ n int }
+
+func (i Inner) VM() { fmt.Println("inner") }
+
+type PO struct{ *Inner }
+
+func main() {
+	var v any = PO{&Inner{}}
+	v.(VMer).VM()
+	var w VMer = &PO{&Inner{}}
+	w.VM()
+}
+`,
+		"inner\ninner\n",
+	);
+});

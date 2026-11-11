@@ -19,6 +19,24 @@ function isNilablePtrRecv(rawEmbed, mType) {
 	return rawEmbed.kind === "pointer" && Boolean(mType?._ptrRecv);
 }
 
+// An embedded interface (named, literal or `error`) forwards each method of
+// its method set to the interface value in the field.
+function pushInterfaceStubs(stubs, declared, iface, fieldName) {
+	for (const mName of iface.methods?.keys() ?? []) {
+		if (declared.has(mName)) continue;
+		stubs.push({ methodName: mName, fieldName, ifaceEmbed: true });
+		declared.add(mName);
+	}
+}
+
+function pushValueEmbedStubs(stubs, declared, embed, embedName, fieldName) {
+	for (const [mName, mType] of embed.methods?.entries() ?? []) {
+		if (declared.has(mName) || mType?._ptrRecv) continue;
+		stubs.push({ methodName: mName, embedName, fieldName, valueEmbed: true });
+		declared.add(mName);
+	}
+}
+
 export function computeEmbeddedStubs(name, methodDecls, checker) {
 	if (!checker) return [];
 	const resolvedType = checker.types.get(name)?.underlying;
@@ -36,24 +54,19 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 	for (const [i, rawEmbed] of resolvedType._embeds.entries()) {
 		const fieldName = embedded[i] ? embeddedFieldName(embedded[i]) : null;
 		const embed = rawEmbed.kind === "pointer" ? rawEmbed.base : rawEmbed;
+		const embedBase = embed.kind === "named" ? embed.underlying : embed;
+		if (embedBase?.kind === "interface") {
+			if (rawEmbed.kind !== "pointer" && fieldName)
+				pushInterfaceStubs(stubs, declared, embedBase, fieldName);
+			continue;
+		}
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) continue;
-		const embedBase = embed.kind === "named" ? embed.underlying : embed;
 		if (embedBase?.kind !== "struct" || !embedBase.methods) {
 			// A named non-struct type (`time.Duration`) promotes its value
 			// methods; the stub passes the embedded value as the receiver.
-			if (rawEmbed.kind === "pointer" || embedBase?.kind === "interface")
-				continue;
-			for (const [mName, mType] of embed.methods?.entries() ?? []) {
-				if (declared.has(mName) || mType?._ptrRecv) continue;
-				stubs.push({
-					methodName: mName,
-					embedName,
-					fieldName,
-					valueEmbed: true,
-				});
-				declared.add(mName);
-			}
+			if (rawEmbed.kind !== "pointer")
+				pushValueEmbedStubs(stubs, declared, embed, embedName, fieldName);
 			continue;
 		}
 

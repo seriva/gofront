@@ -1098,7 +1098,11 @@ export class CodeGen {
 		valueEmbed = false,
 		fieldName = null,
 		nilPtrRecv = false,
+		ifaceEmbed = false,
 	) {
+		// An embedded interface forwards to the interface value in its field.
+		if (ifaceEmbed)
+			return `${method}(...__a) { return this.${fieldName}.${method}(...__a); }`;
 		// The field is named after the type without its package suffix
 		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
 		const field = fieldName || embedName.replace(/\$\$.*$/, "");
@@ -1131,6 +1135,7 @@ export class CodeGen {
 					stub.valueEmbed,
 					stub.fieldName,
 					stub.nilPtrRecv,
+					stub.ifaceEmbed,
 				),
 			);
 		}
