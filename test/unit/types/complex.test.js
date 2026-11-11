@@ -555,6 +555,42 @@ func main() {
 	);
 });
 
+test("a named complex constant takes float32 components in complex64", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const k = 1 + 0.01i
+const k2 = 2i
+const k3 = 1 + 0.5i
+const k4 = k * 2
+
+func main() {
+	var c complex64 = k
+	fmt.Println(imag(c) == 0.01)
+	e := complex64(k)
+	fmt.Println(imag(e) == 0.01)
+	var d complex64
+	d = k
+	fmt.Println(imag(d) == 0.01)
+	var f complex64 = k2
+	fmt.Println(f)
+	var g complex128 = k
+	fmt.Println(imag(g) == 0.01, g)
+	var h complex64 = k3
+	fmt.Println(h)
+	var j complex64 = k4
+	fmt.Println(imag(j) == 0.02)
+	const local = 3 + 0.01i
+	var l complex64 = local
+	fmt.Println(imag(l) == 0.01)
+}
+`,
+		"true\ntrue\ntrue\n(0+2i)\ntrue (1+0.01i)\n(1+0.5i)\ntrue\ntrue\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

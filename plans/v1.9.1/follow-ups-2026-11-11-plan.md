@@ -185,7 +185,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitStaticCall`, `_multiForward` branch at `:1326`; also the method-call path in `src/backend/wasm/method-expr.js:351` if a probe shows `O{}.check(makePair())` nested)
   - Test: `test/unit/types/dynamic-types.test.js` (next to the 11-10 Phase 5 `makePair` tests): `if check(makePair())`, `var g = check(makePair())` and `wrap(check(makePair()))` → `ok` / `true true`; `check(makePair()) && side()` evaluates `makePair` before `side`
   - Done when: `assertProgramOutput` passes on `both` + `wasm`
-- [ ] Task 4.4: Emit named untyped complex constants into `complex64` with float32 components (`I14`)
+- [x] Task 4.4: Emit named untyped complex constants into `complex64` with float32 components (`I14`)
   - Files: `src/backend/js/expressions.js` (`complexConstParts` / `_genComplex64Const`), `src/backend/wasm/emit-exprs.js` (complex constant / `ImagLit` emission, `:269`, `:1513`)
   - Test: `test/unit/types/complex.test.js`: `const k = 1 + 0.01i; var c complex64 = k; imag(c) == 0.01` → `true`; `complex64(k)`, `d = k` → `true`; `const k2 = 2i; var c complex64 = k2; fmt.Println(c)` → `(0+2i)`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program

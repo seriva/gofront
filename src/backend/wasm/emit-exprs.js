@@ -1575,6 +1575,13 @@ export class ExprsEmitter {
 			this._emitNilValue(ident._type, targetWasmType);
 			return;
 		}
+		// A named untyped complex constant that takes type complex64 is built
+		// from its initializer, like a complex literal, not read from its
+		// complex128 global.
+		if (ident._complexInit && this._isComplex64Target(targetWasmType)) {
+			this.emitExpr(ident._complexInit, targetWasmType);
+			return;
+		}
 
 		const localInfo = this.resolveLocal(ident.name);
 		if (localInfo) {
