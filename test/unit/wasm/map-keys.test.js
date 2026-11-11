@@ -57,6 +57,60 @@ test("a defined slice key names the defined type", async () => {
 	);
 });
 
+test("a defined map key names the defined type", async () => {
+	await assertAllTargetsOutput(
+		keyPanic("type M map[string]int", "M{}"),
+		"runtime error: hash of unhashable type main.M\n",
+	);
+});
+
+test("an unnamed map key names the map type", async () => {
+	await assertAllTargetsOutput(
+		keyPanic("type M map[string]int", "map[string]int{}"),
+		"runtime error: hash of unhashable type map[string]int\n",
+	);
+});
+
+test("a defined map in an interface keeps its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type M map[string]int
+
+func show(v any) {
+	switch x := v.(type) {
+	case map[string]int:
+		fmt.Println("plain", len(x))
+	case M:
+		fmt.Println("M", len(x), x["a"])
+	}
+}
+
+func main() {
+	var v any = M{"a": 1}
+	fmt.Printf("%v %T\\n", v, v)
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	show(v)
+	show(map[string]int{"b": 2})
+	m := v.(M)
+	m["c"] = 3
+	fmt.Println(len(v.(M)))
+	var n M
+	var w any = n
+	fmt.Println(w == nil, w.(M) == nil)
+	fmt.Println(fmt.Sprintf("%p", v) == fmt.Sprintf("%p", m), fmt.Sprintf("%p", v) == fmt.Sprintf("%p", M{}))
+}
+`,
+		'map[a:1] main.M\n{"a":1} <nil>\nM 1 1\nplain 1\n2\nfalse true\ntrue false\n',
+	);
+});
+
 test("a hashable struct key still works", async () => {
 	await assertAllTargetsOutput(
 		`package main
@@ -72,6 +126,36 @@ func main() {
 }
 `,
 		"7 1\n",
+	);
+});
+
+test("a defined slice literal used directly as a key panics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type L []int
+
+type M map[string]int
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	m := map[any]int{}
+	try(func() { m[L{1}] = 1 })
+	try(func() { m[M{}] = 1 })
+	var l L
+	try(func() { m[l] = 1 })
+	try(func() { m[[2]int{1, 2}] = 1 })
+	try(func() { m["s"] = 2 })
+	fmt.Println(len(m), m["s"])
+}
+`,
+		"runtime error: hash of unhashable type main.L\nruntime error: hash of unhashable type main.M\nruntime error: hash of unhashable type main.L\n<nil>\n<nil>\n2 2\n",
 	);
 });
 

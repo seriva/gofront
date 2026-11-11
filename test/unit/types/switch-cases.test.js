@@ -1,6 +1,6 @@
 // test/unit/types/switch-cases.test.js
 // Switch case checks: an untyped-bool tag still checks its cases, and a
-// tagless switch rejects `case nil`.
+// switch on a non-nilable tag (tagless or not) rejects `case nil`.
 
 import {
 	assertAllTargetsOutput,
@@ -28,6 +28,16 @@ const NEGATIVE = [
 		"switch { case nil: }",
 		"package main\nfunc main() {\n\tswitch {\n\tcase nil:\n\t}\n}",
 		"cannot convert nil to type bool",
+	],
+	[
+		"switch true { case nil: }",
+		"package main\nfunc main() {\n\tswitch true {\n\tcase nil:\n\t}\n}",
+		"cannot convert nil to type bool",
+	],
+	[
+		"switch n { case nil: } on int",
+		"package main\nfunc main() {\n\tn := 1\n\tswitch n {\n\tcase nil:\n\t}\n}",
+		"cannot convert nil to type int",
 	],
 ];
 
@@ -62,5 +72,38 @@ func main() {
 }
 `,
 		"a\nb\nc\n",
+	);
+});
+
+test("case nil on nilable tags stays valid on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var e error
+	switch e {
+	case nil:
+		fmt.Println("e nil")
+	}
+	var p *int
+	switch p {
+	case nil:
+		fmt.Println("p nil")
+	}
+	var s []int
+	switch s {
+	case nil:
+		fmt.Println("s nil")
+	}
+	var f func()
+	switch f {
+	case nil:
+		fmt.Println("f nil")
+	}
+}
+`,
+		"e nil\np nil\ns nil\nf nil\n",
 	);
 });

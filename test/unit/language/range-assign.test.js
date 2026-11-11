@@ -102,6 +102,120 @@ func main() {
 	);
 });
 
+section("Range assignment: address-taken slice and string range variables");
+
+test("for _, v = range s with &v taken stores through the box", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := []int{10, 20}
+	var v int
+	p := &v
+	for _, v = range s {
+	}
+	fmt.Println(*p)
+}
+`,
+		"20\n",
+	);
+});
+
+test("for _, r = range str with &r taken stores through the box", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var r rune
+	p := &r
+	for _, r = range "ab" {
+	}
+	fmt.Println(*p)
+}
+`,
+		"98\n",
+	);
+});
+
+test("for i = range s with &i taken stores through the box", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := []int{10, 20}
+	var i int
+	p := &i
+	for i = range s {
+	}
+	fmt.Println(*p)
+}
+`,
+		"1\n",
+	);
+});
+
+test("for i, v = range str with &i and &v taken stores both", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var i int
+	var r rune
+	pi, pr := &i, &r
+	for i, r = range "xé" {
+	}
+	fmt.Println(*pi, *pr)
+}
+`,
+		"1 233\n",
+	);
+});
+
+test("for i, v = range array with &v taken stores through the box", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := [3]int{1, 2, 3}
+	var i, v int
+	pi, pv := &i, &v
+	for i, v = range a {
+	}
+	fmt.Println(*pi, *pv)
+}
+`,
+		"2 3\n",
+	);
+});
+
+test("for i = range n with &i taken stores through the box", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var i int
+	p := &i
+	for i = range 3 {
+	}
+	fmt.Println(*p)
+}
+`,
+		"2\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

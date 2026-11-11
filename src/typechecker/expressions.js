@@ -71,7 +71,7 @@ function minMaxType(at) {
 // Each value is (self, name, expr, argTypes, scope) => returnType.
 const BUILTIN_CHECK = {
 	len: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
-	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
+	cap: (s, n, e, at, sc) => s._checkBuiltinLen(n, e, at, sc),
 	append: (s, _n, e, at) => {
 		const st = at[0] ?? ANY;
 		if (isArray(st)) {
@@ -1086,6 +1086,14 @@ export const expressionCheckMethods = {
 		this._rejectNilConversion(srcType, targetType, expr);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.expr))
 			return targetType;
+		if (
+			srcType &&
+			targetType &&
+			!isAny(srcType) &&
+			!isAny(targetType) &&
+			this._checkIfaceTargetConversion(srcType, targetType, expr.expr)
+		)
+			return targetType;
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1106,6 +1114,8 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		// `complex64(1 + 0.01i)`: the constant's components round to float32.
+		this._tagComplex64Const(targetType, srcType, expr.expr);
 		if (tgtResolved?.kind === "slice")
 			this._rejectSeqAsSlice(srcType, expr.expr, "a slice conversion");
 		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
@@ -1154,10 +1164,25 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
+	// `I(x)` with I an interface type converts exactly when x is assignable to
+	// I, so the method-set check (and its wording) is the assignment one.
+	_checkIfaceTargetConversion(srcType, targetType, operand) {
+		// `error("msg")` builds an error value (GoFront extension).
+		if (targetType === ERROR && isString(srcType)) return false;
+		const base = this.resolveType(
+			targetType.kind === "named" ? targetType.underlying : targetType,
+		);
+		if (base?.kind !== "interface" || !operand) return false;
+		this.assertAssignable(targetType, srcType, operand, "conversion");
+		return true;
+	},
+
 	_checkConversionValidity(srcType, targetType, expr) {
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
+		if (this._checkIfaceTargetConversion(srcType, targetType, expr.args?.[0]))
+			return;
 		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
 			targetType.kind === "named" ? targetType.underlying : targetType;
@@ -1831,6 +1856,14 @@ export const expressionCheckMethods = {
 			const node = expr._multiForward ? null : expr.args[i];
 			this.assertAssignable(targetParam, argTypes[i], node, "argument");
 		}
+		// `g(f())`: per-element box marks for lowering to split the forward.
+		if (
+			expr._multiForward &&
+			!fnType.variadic &&
+			!this._skipIfaceMark &&
+			fnType.params.length === argTypes.length
+		)
+			this._markForwardedElems(fnType.params, argTypes, expr.args[0]);
 
 		this._checkSimdLaneArgs(expr, scope);
 	},
@@ -1903,7 +1936,21 @@ export const expressionCheckMethods = {
 			: operandKind(operand, typeStr(type), false);
 	},
 
-	_checkBuiltinLen(name, expr, argTypes) {
+	// `cap` takes a slice or an array (a pointer to an array is dereferenced
+	// before this check). A type parameter needs a slice or array core type;
+	// one with no single core type is left to instantiation. Unknown and
+	// `any` operands (JS interop) are not judged.
+	_capOperandOk(t, scope) {
+		if (!t || t._tainted || isAny(t)) return true;
+		if (t.kind === "typeParam") {
+			const core = this._coreType(t, scope);
+			return !core || core.kind === "slice" || core.kind === "array";
+		}
+		const kind = this._deepUnderlying(t)?.kind;
+		return kind === "slice" || kind === "array";
+	},
+
+	_checkBuiltinLen(name, expr, argTypes, scope) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
 		const operand = expr.args?.[0];
 		if (expr.args?.length === 1)
@@ -1916,19 +1963,14 @@ export const expressionCheckMethods = {
 			if (expr.args.length === 1) expr.args[0] = operand;
 		}
 		if (name === "cap") {
-			if (
-				(argTypes[0]?.underlying ?? argTypes[0])?.kind === "map" ||
-				isString(argTypes[0]) ||
-				isBool(argTypes[0]) ||
-				isComplexOrNumeric(argTypes[0])
-			) {
-				this.err(
-					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
-					expr,
-				);
-			} else if (sharedInfo(argTypes[0])) {
+			if (sharedInfo(argTypes[0])) {
 				this.err(
 					`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
+					expr,
+				);
+			} else if (!this._capOperandOk(argTypes[0], scope)) {
+				this.err(
+					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
 					expr,
 				);
 			}
@@ -1962,6 +2004,9 @@ export const expressionCheckMethods = {
 					expr,
 				);
 			}
+			// An untyped operand takes type float32 (`complex(f, 0.01)`).
+			this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
+			this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
 			return COMPLEX64;
 		}
 		return COMPLEX128;

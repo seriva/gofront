@@ -1330,61 +1330,50 @@ export class ModuleEmitter {
 			}
 
 			// Promoted methods on sName
-			if (sInfo.embeds && sInfo.embeds.length > 0) {
-				for (const embed of sInfo.embeds) {
-					const embedType = embed.typeName ?? embed.name;
-					const embedMethodName = `${embedType}.${methodName}`;
-					if (this.funcMap.has(embedMethodName)) {
-						const fIdx = this.resolveFuncIndex(embedMethodName);
-						const paramGoTypes = this.getFuncParamGoTypes(embedMethodName);
-						const paramWTypes = this.getFuncParamTypes(embedMethodName);
-						const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
-						const embedSInfo = this.getStructType(embedType);
+			const promoted = this._findPromotedMethod(sInfo, methodName);
+			if (promoted) {
+				const { embedType, embedPath, viaPointer } = promoted;
+				const embedMethodName = `${embedType}.${methodName}`;
+				const fIdx = this.resolveFuncIndex(embedMethodName);
+				const paramGoTypes = this.getFuncParamGoTypes(embedMethodName);
+				const paramWTypes = this.getFuncParamTypes(embedMethodName);
+				const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
+				const embedSInfo = this.getStructType(embedType);
 
-						const ptrKey = `ptr:${sName}`;
-						if (!seenKeys.has(ptrKey)) {
-							seenKeys.add(ptrKey);
-							candidates.push({
-								recvTypeName: sName,
-								testTypeIndex: sInfo.typeIndex,
-								isBoxedValue: false,
-								needsValueDeref: !isPtrRecv,
-								embedPath: [
-									{
-										parentTypeIndex: sInfo.typeIndex,
-										fieldIndex: embed.fieldIndex,
-									},
-								],
-								funcIndex: fIdx,
-								targetParamTypes: paramWTypes,
-								targetRecvWType: paramWTypes[0],
-								structInfo: embedSInfo,
-							});
-						}
+				const ptrKey = `ptr:${sName}`;
+				if (!seenKeys.has(ptrKey)) {
+					seenKeys.add(ptrKey);
+					candidates.push({
+						recvTypeName: sName,
+						testTypeIndex: sInfo.typeIndex,
+						isBoxedValue: false,
+						needsValueDeref: !isPtrRecv,
+						embedPath,
+						funcIndex: fIdx,
+						targetParamTypes: paramWTypes,
+						targetRecvWType: paramWTypes[0],
+						structInfo: embedSInfo,
+					});
+				}
 
-						if (!isPtrRecv) {
-							const box = this.getIfaceBoxType({ kind: "named", name: sName });
-							const valKey = `val:${sName}`;
-							if (box && !seenKeys.has(valKey)) {
-								seenKeys.add(valKey);
-								candidates.push({
-									recvTypeName: sName,
-									testTypeIndex: box.typeIndex,
-									isBoxedValue: true,
-									needsValueDeref: false,
-									embedPath: [
-										{
-											parentTypeIndex: sInfo.typeIndex,
-											fieldIndex: embed.fieldIndex,
-										},
-									],
-									funcIndex: fIdx,
-									targetParamTypes: paramWTypes,
-									targetRecvWType: paramWTypes[0],
-									structInfo: embedSInfo,
-								});
-							}
-						}
+				// A pointer-receiver method is in the value's method set only
+				// when it is reached through an embedded pointer.
+				if (!isPtrRecv || viaPointer) {
+					const box = this.getIfaceBoxType({ kind: "named", name: sName });
+					const valKey = `val:${sName}`;
+					if (box && !seenKeys.has(valKey)) {
+						seenKeys.add(valKey);
+						candidates.push({
+							recvTypeName: sName,
+							testTypeIndex: box.typeIndex,
+							isBoxedValue: true,
+							needsValueDeref: false,
+							embedPath,
+							funcIndex: fIdx,
+							targetParamTypes: paramWTypes,
+							targetRecvWType: paramWTypes[0],
+							structInfo: embedSInfo,
+						});
 					}
 				}
 			}
@@ -1493,6 +1482,45 @@ export class ModuleEmitter {
 		}
 
 		return candidates;
+	}
+
+	// The shallowest embedded type of `sInfo` (any depth) that declares
+	// `methodName`: its name, the field path to reach it from an `sInfo`
+	// struct, and whether that path goes through an embedded pointer.
+	_findPromotedMethod(sInfo, methodName) {
+		let level = [{ info: sInfo, path: [], viaPointer: false }];
+		const seen = new Set([sInfo]);
+		while (level.length > 0) {
+			const next = [];
+			for (const { info, path, viaPointer } of level) {
+				for (const embed of info.embeds ?? []) {
+					const embedType = embed.typeName ?? embed.name;
+					const goType = info.fields?.[embed.fieldIndex]?.goType;
+					const isPtr =
+						goType?.kind === "PointerType" || goType?.kind === "pointer";
+					const step = {
+						path: [
+							...path,
+							{ parentTypeIndex: info.typeIndex, fieldIndex: embed.fieldIndex },
+						],
+						viaPointer: viaPointer || isPtr,
+					};
+					if (this.funcMap.has(`${embedType}.${methodName}`))
+						return {
+							embedType,
+							embedPath: step.path,
+							viaPointer: step.viaPointer,
+						};
+					const inner = this.structTypes.get(embedType);
+					if (inner && !seen.has(inner)) {
+						seen.add(inner);
+						next.push({ info: inner, ...step });
+					}
+				}
+			}
+			level = next;
+		}
+		return null;
 	}
 
 	// A value-receiver method of a named scalar is also in the method set of

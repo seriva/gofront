@@ -42,13 +42,15 @@ export function comparesToNil(node, name) {
 	return someChild(node, (c) => comparesToNil(c, name));
 }
 
-// True when `node` reads through the receiver `name` (`r.f`, `r[i]`, `*r`),
-// which panics on a nil receiver anyway. Calling a method of `safe` on it is
-// not a read: that method accepts a nil receiver.
+// True when evaluating `node` reads through the receiver `name` (`r.f`,
+// `r[i]`, `*r`), which panics on a nil receiver anyway. Calling a method of
+// `safe` on it is not a read: that method accepts a nil receiver. A func
+// literal's body is not evaluated where it appears, so it is not searched.
 export function derefsReceiver(node, name, safe) {
 	if (Array.isArray(node))
 		return node.some((n) => derefsReceiver(n, name, safe));
-	if (!node || typeof node !== "object") return false;
+	if (!node || typeof node !== "object" || node.kind === "FuncLit")
+		return false;
 	const isRecv = (e) => e?.kind === "Ident" && e.name === name;
 	if (node.kind === "SelectorExpr" && isRecv(node.expr))
 		return !safe.has(node.field);
@@ -60,6 +62,58 @@ export function derefsReceiver(node, name, safe) {
 	if (node.kind === "UnaryExpr" && node.op === "*" && isRecv(node.operand))
 		return true;
 	return someChild(node, (c) => derefsReceiver(c, name, safe));
+}
+
+// True when `stmts` (a method body) reads through the receiver `name` before
+// anything could skip the read: only the statements that always run first
+// count, up to the first branch, loop, return or rebinding of `name`. A
+// method that does so panics on a nil receiver either way.
+export function derefsReceiverFirst(stmts, name, safe) {
+	return receiverPrefix(stmts, name, safe) === "deref";
+}
+
+// What one statement of a method body's unconditional prefix does with the
+// receiver: "deref" reads through it, "stop" may skip the rest (a branch,
+// loop, return, panic or rebinding of the name), "next" runs on.
+const binds = (lhs, name) =>
+	lhs.some((e) => e?.kind === "Ident" && e.name === name);
+const branches = (reads, ...parts) => (parts.some(reads) ? "deref" : "stop");
+const RECEIVER_STEP = {
+	Block: (s, _reads, name, safe) => receiverPrefix(s.stmts, name, safe),
+	IfStmt: (s, reads) => branches(reads, s.init, s.cond),
+	ForStmt: (s, reads) => branches(reads, s.init, s.cond),
+	SwitchStmt: (s, reads) => branches(reads, s.init, s.tag),
+	TypeSwitchStmt: (s, reads) => branches(reads, s.expr),
+	ReturnStmt: (s, reads) => branches(reads, s.values),
+	ExprStmt: (s, reads) => {
+		if (reads(s.expr)) return "deref";
+		const panics = s.expr?.kind === "CallExpr" && s.expr.func?.name === "panic";
+		return panics ? "stop" : "next";
+	},
+	DefineStmt: (s, reads, name) => {
+		if (reads(s.rhs) || reads(s.lhs.filter((e) => e?.kind !== "Ident")))
+			return "deref";
+		return binds(s.lhs, name) ? "stop" : "next";
+	},
+	IncDecStmt: (s, reads) => (reads(s.expr) ? "deref" : "next"),
+	VarDecl: (s, reads, name) => {
+		if (s.decls.some((d) => reads(d.value))) return "deref";
+		const named = (d) => d.names.some((n) => (n?.name ?? n) === name);
+		return s.decls.some(named) ? "stop" : "next";
+	},
+};
+RECEIVER_STEP.AssignStmt = RECEIVER_STEP.DefineStmt;
+
+// "deref" when the unconditional prefix of `stmts` reads through the
+// receiver, "stop" when something may skip the rest, else "next".
+function receiverPrefix(stmts, name, safe) {
+	const reads = (n) => derefsReceiver(n, name, safe);
+	for (const s of stmts ?? []) {
+		const step = RECEIVER_STEP[s?.kind];
+		const r = step ? step(s, reads, name, safe) : "stop";
+		if (r !== "next") return r;
+	}
+	return "next";
 }
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
@@ -149,21 +203,6 @@ const STRICT_OPS = new Set([
 	"<<",
 	">>",
 ]);
-
-function collectFunctionLabels(node, labels = new Set()) {
-	if (!node || typeof node !== "object") return labels;
-	if (Array.isArray(node)) {
-		for (const item of node) collectFunctionLabels(item, labels);
-		return labels;
-	}
-	if (node.kind === "LabeledStmt" && node.label) labels.add(node.label);
-	if (node.kind === "ForStmt" && node.label) labels.add(node.label);
-	for (const k of Object.keys(node)) {
-		if (k.startsWith("_")) continue;
-		collectFunctionLabels(node[k], labels);
-	}
-	return labels;
-}
 
 const NAMED_ZERO_TABLE = {
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
@@ -542,6 +581,39 @@ function hasTypeParamType(t) {
 	).includes('"typeParam"');
 }
 
+// Complex constant arithmetic on [re, im] pairs.
+const COMPLEX_CONST_OPS = {
+	"+": (a, b) => [a[0] + b[0], a[1] + b[1]],
+	"-": (a, b) => [a[0] - b[0], a[1] - b[1]],
+	"*": (a, b) => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]],
+	"/": (a, b) => {
+		const d = b[0] * b[0] + b[1] * b[1];
+		if (d === 0) return null;
+		return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d];
+	},
+};
+
+// The [re, im] value of an untyped complex constant expression built from
+// literals, or null (a named complex constant has no folded value).
+function complexConstParts(e) {
+	if (!e || typeof e !== "object") return null;
+	if (e.kind === "ParenExpr") return complexConstParts(e.expr);
+	if (e.kind === "ImagLit") return [0, Number(e.value)];
+	const val = e._const;
+	if (val && (val.k === "FLOAT" || val.k === "INT")) return [Number(val.v), 0];
+	if (e.kind === "UnaryExpr") return complexConstNeg(e);
+	const op = e.kind === "BinaryExpr" ? COMPLEX_CONST_OPS[e.op] : null;
+	const a = op && complexConstParts(e.left);
+	const b = a && complexConstParts(e.right);
+	return b ? op(a, b) : null;
+}
+
+function complexConstNeg(e) {
+	if (e.op !== "-" && e.op !== "+") return null;
+	const c = complexConstParts(e.operand);
+	return c && e.op === "-" ? [-c[0], -c[1]] : c;
+}
+
 export const expressionGenMethods = {
 	genExpr(expr) {
 		if (expr._asComplex && !expr._complexWrapping) {
@@ -655,14 +727,16 @@ export const expressionGenMethods = {
 				}
 			}
 		}
-		if (expr._ifaceSrc && !expr._ityTagging && !this._isNamedBoxKind(expr)) {
-			const tag = this._dynTypeTag(expr._ifaceSrc);
+		{
+			const tag = this._ityTag(expr);
 			if (tag) {
 				this.useHelper("ifaceBox");
 				expr._ityTagging = true;
 				try {
 					const ptr = this._dynTagFlags(expr._ifaceSrc);
-					return `__ity(${this.genExpr(expr)}, ${JSON.stringify(tag)}${ptr})`;
+					// An array is copied before it is tagged: the copy is the value
+					// the interface holds, and it must keep the tag.
+					return `__ity(${this.genValueExpr(expr)}, ${JSON.stringify(tag)}${ptr})`;
 				} finally {
 					expr._ityTagging = false;
 				}
@@ -685,6 +759,8 @@ export const expressionGenMethods = {
 		}
 		const f32 = this._genFloat32Const(expr);
 		if (f32 !== null) return f32;
+		const c64 = this._genComplex64Const(expr);
+		if (c64 !== null) return c64;
 		const folded = this._genFoldedConst(expr);
 		if (folded !== null) return folded;
 		switch (expr.kind) {
@@ -750,6 +826,18 @@ export const expressionGenMethods = {
 		const r = Math.fround(n);
 		if (r === n) return null;
 		return CONST_LITS.FLOAT(r);
+	},
+
+	// An untyped complex constant that takes type complex64
+	// (`var c complex64 = 1 + 0.01i`) is emitted as its folded value with
+	// float32 components, or null when it cannot be folded here.
+	_genComplex64Const(expr) {
+		if (!expr._c64Const) return null;
+		const c = complexConstParts(expr);
+		if (!c) return null;
+		const re = CONST_LITS.FLOAT(Math.fround(c[0]));
+		const im = CONST_LITS.FLOAT(Math.fround(c[1]));
+		return re === null || im === null ? null : `{ re: ${re}, im: ${im} }`;
 	},
 
 	// The literal for a folded constant expression (`1 << 40` →
@@ -971,10 +1059,18 @@ export const expressionGenMethods = {
 		}
 	},
 
+	// The type tag `expr` takes on entering an interface, or null.
+	_ityTag(expr) {
+		if (!expr._ifaceSrc || expr._ityTagging || this._isNamedBoxKind(expr))
+			return null;
+		return this._dynTypeTag(expr._ifaceSrc);
+	},
+
 	// Emits `expr` as a Go value: struct/array operands that alias existing storage are copied.
 	genValueExpr(expr) {
+		const tagged = Boolean(this._ityTag(expr));
 		const js = this.genExpr(expr);
-		if (expr._ifaceBox) return js;
+		if (expr._ifaceBox || tagged) return js;
 		if (
 			!(
 				this._aggregateBase(expr._type) || this._typeParamClone(expr._type, js)
@@ -1000,12 +1096,10 @@ export const expressionGenMethods = {
 
 	_withFnCtx(body, fn) {
 		const prev = this._fnCtx;
-		const prevLabels = this._functionLabels;
-		const labels = collectFunctionLabels(
-			body,
-			new Set(this._functionLabels ?? []),
-		);
-		this._functionLabels = Array.from(labels);
+		// A function starts with no JS labels in scope (see
+		// `_emitIterTargetDispatch`).
+		const prevLabels = this._jsLabels;
+		this._jsLabels = [];
 		this._fnCtx = {
 			body,
 			mut: new Map(),
@@ -1019,7 +1113,7 @@ export const expressionGenMethods = {
 			fn();
 		} finally {
 			this._fnCtx = prev;
-			this._functionLabels = prevLabels;
+			this._jsLabels = prevLabels;
 		}
 	},
 
@@ -1195,8 +1289,15 @@ export const expressionGenMethods = {
 					return `${info.cls}.$${expr.field}`;
 			}
 			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
-			if (protoCls)
-				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(recv, ...args))`;
+			if (protoCls) {
+				// A value-receiver method reads `*recv`, which panics on nil.
+				let recv = "recv";
+				if (rt.base.methods.get(expr.field)?._ptrRecv === false) {
+					this.useHelper("nilCall");
+					recv = "__nilcall(recv)";
+				}
+				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(${recv}, ...args))`;
+			}
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
@@ -1937,7 +2038,13 @@ export const expressionGenMethods = {
 			// prototype so a nil `this` reaches it instead of a TypeError.
 			const recv = this.genExpr(expr.func.expr);
 			const rest = this._genCallArgs(expr);
-			return `${nilSafe}.prototype.${expr.func.field}.call(${rest ? `${recv}, ${rest}` : recv})`;
+			const m = expr.func.field;
+			const viaProto = (r) =>
+				`${nilSafe}.prototype.${m}.call(${rest ? `${r}, ${rest}` : r})`;
+			// A non-nil variable keeps the direct (faster) call.
+			if (/^[\w$]+$/.test(recv))
+				return `(${recv} != null ? ${recv}.${m}(${rest}) : ${viaProto(recv)})`;
+			return viaProto(recv);
 		}
 
 		expr.func._callee = true;
@@ -2015,8 +2122,11 @@ export const expressionGenMethods = {
 		if (func?.kind !== "SelectorExpr" || func._isMethodExpr) return null;
 		const t = func.expr?._type;
 		if (t?.kind !== "pointer" || t.base?.kind !== "named") return null;
-		const cls = t.base.name;
-		if (t.base.typeArgs?.length) return null;
+		// An instance of a generic struct (`Gen[int]`) shares its class.
+		const cls = t.base.typeArgs?.length
+			? this._structClassName(t.base)
+			: t.base.name;
+		if (!cls) return null;
 		if (
 			t.base.underlying?.kind === "struct" &&
 			!this._promotedPath(func) &&

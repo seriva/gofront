@@ -3021,6 +3021,30 @@ null <nil>
 	);
 });
 
+test("a func array in an interface reports an unsupported type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var a [2]func()
+	var v any = a
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	var s []func()
+	var w any = s
+	b, err = json.Marshal(w)
+	fmt.Println(string(b), err)
+}
+`,
+		" json: unsupported type: func()\nnull <nil>\n",
+	);
+});
+
 section("encoding/json — anonymous struct types");
 
 test("anonymous struct types encode, decode and report errors like Go", async () => {
@@ -3608,6 +3632,94 @@ func main() {
 }
 `,
 		'{"a":1}\n{"B":"x"}\n',
+	);
+});
+
+section("encoding/json: values boxed through forwarded multi-value calls");
+
+test("a struct returned through a forwarded call into any encodes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+
+func getPair() (any, int) { return makePair() }
+
+func main() {
+	v, _ := getPair()
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+`,
+		'{"A":1} <nil>\n',
+	);
+});
+
+test("a struct passed through a forwarded call into an any parameter encodes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+
+func show2(v any, _ int) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show2(makePair())
+}
+`,
+		'{"A":1} <nil>\n',
+	);
+});
+
+test("a struct built only by a var reaches any through forwarded calls and encodes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A int }
+
+func makePair() (T, int) {
+	var t T
+	t.A = 1
+	return t, 1
+}
+
+func getPair() (any, int) { return makePair() }
+
+func show2(v any, _ int) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	v, _ := getPair()
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+	show2(makePair())
+}
+`,
+		'{"A":1} <nil>\n{"A":1} <nil>\n',
 	);
 });
 

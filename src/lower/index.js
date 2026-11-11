@@ -16,7 +16,12 @@ import { scanAddressTaken } from "./boxing.js";
 import { analyzeCaptures } from "./captures.js";
 import { computeEmbeddedStubs } from "./embedding.js";
 import { paramEscapes } from "./escape.js";
-import { extractNamedReturns, hasDefer, normalizeDefers } from "./functions.js";
+import {
+	extractNamedReturns,
+	hasDefer,
+	normalizeDefers,
+	splitForwardedTuples,
+} from "./functions.js";
 import { computeGlobalAnalysis } from "./globals.js";
 import { OwnershipContext, takesElementAddress } from "./ownership.js";
 
@@ -83,6 +88,7 @@ export function lower(programOrPrograms, checker = null) {
 		? programOrPrograms
 		: [programOrPrograms];
 
+	splitForwardedTuples(programs);
 	normalizeDefers(programs);
 
 	res.elemAddrTaken = programs.some((p) => takesElementAddress(p?.decls));

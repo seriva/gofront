@@ -67,7 +67,7 @@ export function walkNodes(root, fn) {
 	}
 }
 
-const TEMPL_EXPR_PROPS = ["expr", "forStmt"];
+const TEMPL_EXPR_PROPS = ["expr", "exprs", "forStmt"];
 
 // True when `t` mentions a type parameter (a generic declaration, or a type
 // built from one inside a generic function).
@@ -147,6 +147,12 @@ export function collectProgramTypes(programs, checker) {
 				found.push({ type: defaultType(node._type), node, via: "expr" });
 			if (node._ifaceSrc)
 				found.push({ type: defaultType(node._ifaceSrc), node, via: "boxed" });
+			// A multi-value call forwarded into interfaces (`return f()`,
+			// `g(f())`) keeps one mark holder per element until lowering
+			// splits it.
+			for (const h of node._fwdIface ?? [])
+				if (h?._ifaceSrc)
+					found.push({ type: defaultType(h._ifaceSrc), node, via: "boxed" });
 		});
 	for (const [name, t] of checker.types) {
 		if (t?.kind !== "named" || t.name !== name) continue;

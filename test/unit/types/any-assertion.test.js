@@ -193,3 +193,131 @@ func main() {
 		"3\n",
 	);
 });
+
+// any to a non-empty interface
+negative(
+	"e = b with b any and e error",
+	`package main
+func main() {
+	var b any
+	var e error
+	e = b
+	_ = e
+}`,
+	"cannot use b (variable of type any) as error value in assignment: need type assertion",
+);
+negative(
+	"var s fmt.Stringer = b with b any",
+	`package main
+import "fmt"
+func main() {
+	var b any
+	var s fmt.Stringer = b
+	_ = s
+}`,
+);
+negative(
+	"any passed to a user interface parameter",
+	`package main
+type I interface{ M() }
+func use(i I) { _ = i }
+func main() {
+	var b any
+	use(b)
+}`,
+);
+positive(
+	"any to any, asserted any to error, concrete to error",
+	`package main
+type MyErr struct{}
+func (*MyErr) Error() string { return "e" }
+func main() {
+	var b any
+	var c any = b
+	var e error
+	e, _ = b.(error)
+	var e2 error = &MyErr{}
+	_, _, _ = c, e, e2
+}`,
+);
+test("asserting any to error runs on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func main() {
+	var b any = errors.New("boom")
+	var e error
+	e = b.(error)
+	fmt.Println(e)
+}
+`,
+		"boom\n",
+	);
+});
+
+section("conversions to interface types");
+
+test("I(T{}) converts a concrete value to an interface", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() }
+type T struct{}
+
+func (T) M() { fmt.Println("m") }
+
+func main() {
+	v := I(T{})
+	v.M()
+}
+`,
+		"m\n",
+	);
+});
+test("I(nil), error(nil) and I(j) from a wider interface convert", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() }
+type J interface {
+	M()
+	N()
+}
+type T struct{}
+
+func (T) M() { fmt.Println("m") }
+func (T) N() {}
+
+func main() {
+	a := I(nil)
+	fmt.Println(a == nil)
+	e := error(nil)
+	fmt.Println(e == nil)
+	var j J = T{}
+	b := I(j)
+	b.M()
+}
+`,
+		"true\ntrue\nm\n",
+	);
+});
+negative(
+	"I(T2{}) with T2 missing M",
+	`package main
+type I interface{ M() }
+type T2 struct{}
+func main() {
+	v := I(T2{})
+	_ = v
+}`,
+	"does not implement",
+);

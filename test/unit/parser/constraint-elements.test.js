@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertProgramOutput,
 	Lexer,
 	Parser,
@@ -59,6 +60,41 @@ func main() {
 }
 `,
 		"2\n",
+	);
+});
+
+section("Interface literal conversions");
+
+test("interface{ M() }(T{}) converts and calls M", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{}
+
+func (T) M() { fmt.Println("m") }
+
+func main() {
+	v := interface{ M() }(T{})
+	v.M()
+}
+`,
+		"m\n",
+	);
+});
+
+test("interface{}(3) prints 3", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	fmt.Println(interface{}(3))
+}
+`,
+		"3\n",
 	);
 });
 

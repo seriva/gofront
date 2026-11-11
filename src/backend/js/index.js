@@ -24,6 +24,7 @@ import {
 	markRedundantNilChecks,
 	normalizeDefers,
 	scanAddressTaken,
+	splitForwardedTuples,
 	takesElementAddress,
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
@@ -40,7 +41,7 @@ import {
 } from "../shared/host-unicode.js";
 import {
 	comparesToNil,
-	derefsReceiver,
+	derefsReceiverFirst,
 	expressionGenMethods,
 } from "./expressions.js";
 import {
@@ -372,7 +373,9 @@ export class CodeGen {
 		this._precisionWarned = new Set();
 		// Defer lowering (argument/receiver hoisting, recover-target marking) is
 		// idempotent and owned by the backends: the wasm path runs it via
-		// `lower()`, the JS path here.
+		// `lower()`, the JS path here.  So is splitting multi-value calls
+		// forwarded into interfaces into temps.
+		splitForwardedTuples(program);
 		normalizeDefers(program);
 		// Strict mode: index checks the loop shape proves unnecessary are elided.
 		if (this.strict) {
@@ -596,9 +599,10 @@ export class CodeGen {
 	}
 
 	// Pointer-receiver methods that can run with a nil receiver: they compare
-	// it with nil, or never read through it (a method that does panics on nil
-	// either way, so it keeps the faster direct call). Calls to these go
-	// through the prototype (see _nilSafeMethodClass).
+	// it with nil, or do not read through it before anything could skip the
+	// read (a method that does panics on nil either way, so it keeps the
+	// faster direct call). Calls to these go through the prototype (see
+	// _nilSafeMethodClass).
 	_markNilSafeMethods(methods) {
 		for (const [name, decls] of methods) {
 			const safe = new Set();
@@ -608,7 +612,7 @@ export class CodeGen {
 				changed = false;
 				for (const d of ptr) {
 					if (!safe.has(d.name) || comparesToNil(d.body, d.recvName)) continue;
-					if (!derefsReceiver(d.body, d.recvName, safe)) continue;
+					if (!derefsReceiverFirst(d.body?.stmts, d.recvName, safe)) continue;
 					safe.delete(d.name);
 					changed = true;
 				}

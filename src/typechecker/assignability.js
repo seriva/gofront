@@ -278,6 +278,17 @@ export const assignabilityMethods = {
 			!isComplex(source)
 		)
 			valueNode._asComplex = true;
+		this._tagComplex64Const(target, source, valueNode);
+	},
+
+	// An untyped constant that takes type complex64 is rounded to float32 in
+	// JS output: a real constant through `_f32Const`, a complex constant
+	// (`1 + 0.01i`) through `_c64Const`.
+	_tagComplex64Const(target, source, node) {
+		if (!node || typeof node !== "object") return;
+		if (!isComplex64(target) || !isUntyped(source)) return;
+		if (isComplex(source)) node._c64Const = true;
+		else if (node._const) node._f32Const = true;
 	},
 
 	// `operand` is the expression whose value flows in, when `node` (the
@@ -456,11 +467,13 @@ export const assignabilityMethods = {
 	},
 
 	// An interface-typed operand needs an explicit type assertion before it can
-	// flow into a concrete (non-interface) type.
+	// flow into a concrete (non-interface) type, or into an interface with
+	// methods (`var e error = b` with `b any`).
 	_checkIfaceToConcrete(target, source, node, ctx, operand) {
 		if (!source?._declared || !operand || typeof operand !== "object")
 			return false;
-		if (!this._isConcreteTarget(target)) return false;
+		if (!this._isConcreteTarget(target) && !this._isMethodIfaceTarget(target))
+			return false;
 		this.err(
 			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}: need type assertion`,
 			node,
@@ -477,6 +490,15 @@ export const assignabilityMethods = {
 			expr,
 		);
 		return true;
+	},
+
+	// An interface type (named or literal) with at least one method.
+	_isMethodIfaceTarget(target) {
+		if (!target || isAny(target)) return false;
+		const base = this.resolveType(
+			target.kind === "named" ? target.underlying : target,
+		);
+		return base?.kind === "interface" && base.methods?.size > 0;
 	},
 
 	_isConcreteTarget(target) {
