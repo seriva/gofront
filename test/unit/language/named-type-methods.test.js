@@ -8,6 +8,7 @@ import {
 	assertProgramOutput,
 	compile,
 	compileHybrid,
+	compileWasm,
 	runJs,
 	section,
 	summarize,
@@ -922,6 +923,60 @@ func main() {
 		"3 {3}\n",
 	);
 });
+
+section("Methods promoted through embedded pointers");
+
+const PTR_EMBED_PRELUDE = `package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type Inner struct{}
+
+func (i *Inner) M() { fmt.Println("inner") }
+
+type PO struct{ *Inner }
+`;
+
+function promotionErrorsOn(target, src) {
+	if (target === "wasm") return compileWasm(src).errors ?? [];
+	return compile(src, { target }).errors ?? [];
+}
+
+test("a struct value embedding *Inner satisfies Mer with Inner's pointer method", async () => {
+	await assertProgramOutput(
+		`${PTR_EMBED_PRELUDE}
+func use(m Mer) { m.M() }
+
+func main() {
+	var w Mer = PO{&Inner{}}
+	w.M()
+	use(PO{&Inner{}})
+}
+`,
+		"inner\ninner\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a struct value embedding Inner lacks Inner's pointer method (${target})`, () => {
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`${PTR_EMBED_PRELUDE}
+type PV struct{ Inner }
+
+func main() {
+	var w Mer = PV{}
+	_ = w
+}
+`,
+			),
+			"PV does not implement Mer",
+		);
+	});
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

@@ -596,6 +596,13 @@ export function typeStr(t) {
 
 // The field an embedded type declares is named after the type as written, so
 // an alias (`type A = Base; struct{ A }`) gives the field `A`.
+// Per struct type, the methods promoted into its method set from embedded
+// fields: name -> { depth, viaPtr, source, mType }. `depth` counts embeds
+// from the struct, `viaPtr` is set when an embed on the path is a pointer
+// and `source` is the method as declared. Kept outside the struct object so
+// a copy of the struct (`type S Base`) does not share it.
+export const promotedMethods = new WeakMap();
+
 export function embeddedFieldName(f) {
 	const ast = f.astType?.kind === "PointerType" ? f.astType.base : f.astType;
 	const t = f.type?.kind === "pointer" ? f.type.base : f.type;

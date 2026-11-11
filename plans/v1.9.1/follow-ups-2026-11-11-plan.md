@@ -141,7 +141,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Done when: the misleading `No field 'val' on S` / `Undefined: 's'` no longer appear for these programs and the edge cases in Approach §3 keep their current behaviour
 
 ### Phase 2: Method Sets and Embedded Promotion
-- [ ] Task 2.1: Put methods promoted through an embedded pointer in the value method set (`I05`)
+- [x] Task 2.1: Put methods promoted through an embedded pointer in the value method set (`I05`)
   - Files: `src/typechecker/index.js` (`_promoteEmbeddedInto`), `src/typechecker/assignability.js` (`implements`, if needed)
   - Test: `test/unit/language/named-type-methods.test.js`: `M` + `var w Mer = PO{&Inner{}}; w.M()` and `use(PO{&Inner{}})` print `inner` (`assertProgramOutput`); `type PV struct{ Inner }; var w Mer = PV{}` → `does not implement` (value embed, pointer method)
   - Done when: positives run on `both` + `wasm`, negative reports on every target
