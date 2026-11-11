@@ -127,7 +127,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/generics.test.js`: `interface{ ~int; comparable }` with `h(3)` prints `3` (`assertProgramOutput`); `interface{ comparable; M() }` with `a == b` prints `true`; negative `h([]int{})` against `interface{ comparable; ~[]int }` → `assertErrorContains(…, "does not satisfy")`; `var x interface{ comparable }` → `outside a type constraint`
   - Done when: the three positive programs run on `both` + `wasm` and both negatives report on every target (and `_reportConstraintUse` flags embedded `_comparable` interfaces as value types)
-- [ ] Task 1.2: Require a type assertion for `I(a)` with `a any` and `I` non-empty (`I03`)
+- [x] Task 1.2: Require a type assertion for `I(a)` with `a any` and `I` non-empty (`I03`)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`: `var a any; _ = I(a)` → `assertErrorContains(…, "need type assertion")` on every target; `I(a.(I))`, `I(T{})`, `I(nil)` still compile
   - Done when: the negative fails on `js`, `both`, `wasm` and the positives print as Go

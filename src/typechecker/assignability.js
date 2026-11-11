@@ -481,9 +481,14 @@ export const assignabilityMethods = {
 		return true;
 	},
 
-	// `int(x)` and `(*T)(x)` with a source-written `any` operand need an assertion.
+	// `int(x)`, `(*T)(x)` and `I(x)` (I with methods) with a source-written
+	// `any` operand need an assertion.
 	_checkIfaceConversion(srcType, targetType, expr, operand) {
-		if (!srcType?._declared || !operand || !this._isConcreteTarget(targetType))
+		if (!srcType?._declared || !operand) return false;
+		if (
+			!this._isConcreteTarget(targetType) &&
+			!this._isMethodIfaceTarget(targetType)
+		)
 			return false;
 		this.err(
 			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}: need type assertion`,
