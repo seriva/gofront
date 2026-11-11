@@ -173,23 +173,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Done when: `assertAllTargetsOutput` passes for the four composite types and `__ik`'s ` void` strip is gone or still required (commit body says which)
 
 ### Phase 4: Statement and Constant Codegen, Docs
-- [ ] Task 4.1: Match `case nil` against a nil map tag in JS `switch` (`I01`)
+- [x] Task 4.1: Match `case nil` against a nil map tag in JS `switch` (`I01`)
   - Files: `src/backend/js/statements.js` (`genSwitch` / `_switchTagAndCases`)
   - Test: `test/unit/types/switch-cases.test.js`: `var m map[string]int; switch m { case nil: fmt.Println("m nil") }` → `m nil`; `m := map[string]int{}` with `default` → `non-nil`; defined map type `type MM map[string]int` → `m nil`
   - Done when: `assertAllTargetsOutput` passes (using helper `__isnm`)
-- [ ] Task 4.2: Treat every stacked label as the range-over-func loop's own label in JS (`I04`)
+- [x] Task 4.2: Treat every stacked label as the range-over-func loop's own label in JS (`I04`)
   - Files: `src/backend/js/statements.js` (`LabeledStmt` case, `_genIteratorBranchStmt`, `_emitIterTargetDispatch`)
   - Test: `test/unit/language/range-func.test.js`: `L1: L2: for x := range seq { _ = x; continue L1 }` → `done`; `break L1` with a seq that honours `yield`'s result → `1\ndone`; `continue L2` → same as `continue L1`
   - Done when: `assertAllTargetsOutput` passes and no JS `SyntaxError`
-- [ ] Task 4.3: Box forwarded tuple elements into interface parameters in nested WASM calls (`I13`)
+- [x] Task 4.3: Box forwarded tuple elements into interface parameters in nested WASM calls (`I13`)
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitStaticCall`, `_multiForward` branch at `:1326`; also the method-call path in `src/backend/wasm/method-expr.js:351` if a probe shows `O{}.check(makePair())` nested)
   - Test: `test/unit/types/dynamic-types.test.js` (next to the 11-10 Phase 5 `makePair` tests): `if check(makePair())`, `var g = check(makePair())` and `wrap(check(makePair()))` → `ok` / `true true`; `check(makePair()) && side()` evaluates `makePair` before `side`
   - Done when: `assertProgramOutput` passes on `both` + `wasm`
-- [ ] Task 4.4: Emit named untyped complex constants into `complex64` with float32 components (`I14`)
+- [x] Task 4.4: Emit named untyped complex constants into `complex64` with float32 components (`I14`)
   - Files: `src/backend/js/expressions.js` (`complexConstParts` / `_genComplex64Const`), `src/backend/wasm/emit-exprs.js` (complex constant / `ImagLit` emission, `:269`, `:1513`)
   - Test: `test/unit/types/complex.test.js`: `const k = 1 + 0.01i; var c complex64 = k; imag(c) == 0.01` → `true`; `complex64(k)`, `d = k` → `true`; `const k2 = 2i; var c complex64 = k2; fmt.Println(c)` → `(0+2i)`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
-- [ ] Task 4.5: Align `docs/go-compatibility.md` with the fixed behaviour
+- [x] Task 4.5: Align `docs/go-compatibility.md` with the fixed behaviour
   - Files: `docs/go-compatibility.md`
   - Test: none (docs only; no doc-consistency test exists). Check: `grep -n 'nil or unmatched type for method call' docs/go-compatibility.md` returns no match; the dev-loop reviewer checks the rest per `AGENTS.md` **Docs**
   - Done when: the "Runtime panics" row (`:99`) no longer says WASM interface calls report `interface conversion: nil or unmatched type for method call` (all nil-receiver cases now report the nil-dereference message; a call on a nil interface value reports it too), and no row contradicts Phases 1–4 (`comparable` embeds, `%T` of func types, array equality in `any`)

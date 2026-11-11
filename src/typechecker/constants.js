@@ -15,7 +15,14 @@ import {
 	INT_RANGES,
 	intConst,
 } from "./const-fold.js";
-import { defaultType, isAny, typeStr, VOID } from "./types.js";
+import {
+	defaultType,
+	isAny,
+	isComplex,
+	isUntyped,
+	typeStr,
+	VOID,
+} from "./types.js";
 
 // Basic type names usable as conversion functions (`int32(x)`).
 const BASIC_CONVERSIONS = new Set([
@@ -58,6 +65,18 @@ export const constantCheckMethods = {
 		return i === null ? null : Number(i);
 	},
 
+	// A named untyped complex constant has no folded value (`_const`): its
+	// initializer goes on the identifier as `_complexInit`, so the backends
+	// can fold it where it takes type complex64.
+	_noteComplexConstInit(expr, scope) {
+		if (expr.kind !== "Ident" || !isUntyped(expr._type)) return;
+		if (!isComplex(expr._type)) return;
+		const owner = scope.lookupScope(expr.name);
+		if (!owner?._consts.has(expr.name)) return;
+		const init = owner.lookupConstExpr(expr.name);
+		if (init) expr._complexInit = init;
+	},
+
 	// Raw evaluation result, memoized on checked nodes: a value, a value with
 	// `overflow`, `{ error }`, or null.
 	_constRaw(expr, scope) {
@@ -83,6 +102,7 @@ export const constantCheckMethods = {
 	// overflow / division by zero once per node.
 	_noteConst(expr, scope) {
 		if (!CONST_KINDS.has(expr.kind)) return;
+		this._noteComplexConstInit(expr, scope ?? this.globals);
 		const raw = this._constRaw(expr, scope);
 		expr._const = raw && !raw.overflow && !raw.error ? raw : null;
 		if (!raw || expr._constReported) return;

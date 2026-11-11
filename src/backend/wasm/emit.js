@@ -213,6 +213,35 @@ export class FunctionEmitter {
 		return targets;
 	}
 
+	// Outer stacked labels (`a: b: for`) alias the innermost one. Collected
+	// once per root function so the yield closures of a range-over-func loop
+	// (emitted by their own emitter) resolve them too.
+	_stackedLabelAlias(label) {
+		const root = this.rootFuncDecl;
+		if (root && !root._labelAliases) {
+			const aliases = new Map();
+			const scan = (node) => {
+				if (!node || typeof node !== "object") return;
+				if (Array.isArray(node)) {
+					for (const item of node) scan(item);
+					return;
+				}
+				if (node.kind === "LabeledStmt" && node.body?.kind === "LabeledStmt") {
+					let inner = node.body;
+					while (inner.body?.kind === "LabeledStmt") inner = inner.body;
+					aliases.set(node.label, inner.label);
+				}
+				for (const k of Object.keys(node)) {
+					if (k.startsWith("_")) continue;
+					scan(node[k]);
+				}
+			};
+			scan(root.body);
+			root._labelAliases = aliases;
+		}
+		return root?._labelAliases?.get(label) ?? this._labelAliases?.get(label);
+	}
+
 	_findLabelTarget(label, role) {
 		for (const target of this.rootFuncDecl?._labelTargets?.values() ?? []) {
 			if (target.label === label && target.role === role) return target;

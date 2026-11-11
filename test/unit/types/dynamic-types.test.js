@@ -318,6 +318,54 @@ func main() {
 	);
 });
 
+test("g(f()) nested in a larger expression boxes the forwarded struct", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+${FWD_PRELUDE}
+func check(v any, n int) bool {
+	t, ok := v.(T)
+	return ok && t.A == 1 && n == 1
+}
+
+func wrap(b bool) bool { return b }
+
+func pair() (T, int) {
+	fmt.Println("pair")
+	return makePair()
+}
+
+func side() bool {
+	fmt.Println("side")
+	return true
+}
+
+type O struct{}
+
+func (O) check(v any, n int) bool {
+	_, ok := v.(T)
+	return ok && n == 1
+}
+
+var g = check(makePair())
+
+func main() {
+	if check(makePair()) {
+		fmt.Println("ok")
+	} else {
+		fmt.Println("fail")
+	}
+	fmt.Println(g, wrap(check(makePair())))
+	fmt.Println(check(pair()) && side())
+	fmt.Println(wrap(O{}.check(makePair())))
+}
+`,
+		"ok\ntrue true\npair\nside\ntrue\ntrue\n",
+	);
+});
+
 section("Array values in an interface");
 
 test("arrays in an any compare element by element", async () => {
