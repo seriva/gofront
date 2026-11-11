@@ -672,3 +672,56 @@ func main() {
 		"interface conversion: interface {} is [3]int, not int\ninterface conversion: interface {} is [2]string, not int\ninterface conversion: interface {} is [][2]int, not int\ninterface conversion: interface {} is []func(int) (string, error), not int\n",
 	);
 });
+
+section("Multi-value calls forwarded into interface methods");
+
+const IFACE_FWD = `type T struct{ A int }
+
+func makePair() (T, int) { return T{1}, 1 }
+
+type C interface{ check(v any, n int) bool }
+
+type O struct{}
+
+func (*O) check(v any, n int) bool {
+	_, ok := v.(T)
+	return ok && n == 1
+}
+
+func wrap(b bool) bool { return b }
+`;
+
+test("a forwarded call spreads into an interface method call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${IFACE_FWD}
+func main() {
+	var c C = &O{}
+	fmt.Println(wrap(c.check(makePair())))
+	x := c.check(makePair())
+	fmt.Println(x)
+}
+`,
+		"true\ntrue\n",
+	);
+});
+
+test("a forwarded call into a nil interface method reports the nil dereference", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${IFACE_FWD}
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var c C
+	fmt.Println(wrap(c.check(makePair())))
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});

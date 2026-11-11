@@ -2280,9 +2280,7 @@ export const expressionGenMethods = {
 			// TypeError with a different message.
 			this.useHelper("nilCall");
 			const recv = this.genExpr(expr.func.expr);
-			const args = expr.args
-				.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
-				.join(", ");
+			const args = this._genCallArgs(expr);
 			return `__nilcall(${recv}).${expr.func.field}(${args})`;
 		}
 		return undefined;
