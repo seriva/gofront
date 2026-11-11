@@ -1726,6 +1726,54 @@ export class BuiltinsEmitter {
 		this.pushInstruction("end");
 	}
 
+	// `any_hash` arm for an array: the wasm array type, then each element,
+	// as `emitKeyHash` combines a static array key (so equal arrays under
+	// `any_eq` hash equal).
+	_emitAnyArrayHashArm(arrInfo) {
+		const ref = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.test", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		const arr = this.allocLocal(null, ref);
+		const h = this.allocLocal(null, "i32");
+		const i = this.allocLocal(null, "i32");
+		const e = this.allocLocal(null, arrInfo.elemWType);
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.cast", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: arr });
+		this.pushInstruction({ op: "i32.const", value: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: h });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction("array.len");
+		this.pushInstruction("i32.ge_u");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: e });
+		this.pushInstruction({ op: "local.get", index: h });
+		this.pushInstruction({ op: "i32.const", value: 31 });
+		this.pushInstruction("i32.mul");
+		this.emitKeyHash(e, arrInfo.elemGoType);
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: h });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: h });
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+	}
+
 	emitRuntimeHelper(fn) {
 		const errInfo = this.mod.getStructType(ERROR_STRUCT);
 		switch (fn._isRuntimeHelper) {
@@ -1955,6 +2003,12 @@ export class BuiltinsEmitter {
 					this.pushInstruction("i32.add");
 					this.pushInstruction("return");
 					this.pushInstruction("end");
+				}
+
+				// Arrays hash element by element.
+				for (const a of [...this.mod.arrayTypes.values()]) {
+					if (!isUnhashableGoType(a.elemGoType, this.mod.checker))
+						this._emitAnyArrayHashArm(a);
 				}
 
 				// Check string
