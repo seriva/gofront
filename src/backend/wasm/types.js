@@ -536,8 +536,8 @@ const TAGGED_SLICE_ELEMS = new Set([
 	"rune",
 ]);
 
-// True for a defined slice type or a slice of booleans or integers of at
-// most 32 bits.  In an
+// True for a defined slice type, a slice of booleans or integers of at most
+// 32 bits, or a slice of a method interface.  In an
 // interface such a value carries a per-Go-type tag (see getTaggedSliceType).
 export function isTaggedSliceType(goType, checker = null) {
 	if (!isSliceType(goType, checker)) return false;
@@ -560,6 +560,10 @@ export function isTaggedSliceType(goType, checker = null) {
 			};
 		else break;
 	}
+	// A slice of a method interface (`[]error`) is a slice of `anyref` like
+	// `[]any`, and `[]fmt.Stringer` another one.  `[]any` and `[]interface{}`
+	// are the same type, so neither is tagged.
+	if (isNonEmptyInterface(elem, checker)) return true;
 	return elem?.kind === "basic" && TAGGED_SLICE_ELEMS.has(elem.name);
 }
 

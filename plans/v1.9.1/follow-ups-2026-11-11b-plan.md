@@ -152,15 +152,15 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2
   - Done when: `assertAllTargetsOutput` passes and no raw `RuntimeError` escapes
 
 ### Phase 3: WASM Dynamic Types in `any`
-- [ ] Task 3.1: Keep named array and slice identity in an `any` (`J05`)
+- [x] Task 3.1: Keep named array and slice identity in an `any` (`J05`)
   - Files: `src/backend/wasm/emit-exprs.js` (interface boxing), `src/backend/wasm/module-emitter.js` (box selection), `src/backend/wasm/emit-builtins.js` (`any_eq`/`any_hash` arms, if needed)
   - Test: `test/unit/types/dynamic-types.test.js`: `type A [2]int` → `k.([2]int)`, `k == any([2]int{1,2})` → `false false`; type switch `case [2]int … case A` → `A`; `type S []int` + `k.([]int)` → `false`, `k.(S)` → `true`; `map[any]int{A{1,2}: 1}[[2]int{1,2}]` → `0`
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 3.2: Match generic maps and slices of funcs in an `any` (`J07`)
+- [x] Task 3.2: Match generic maps and slices of funcs in an `any` (`J07`)
   - Files: `src/backend/wasm/monomorph.js` and/or `src/backend/wasm/module-emitter.js` (per probe at task start)
   - Test: `test/unit/types/dynamic-types.test.js`: `mk(func() {})` returning `map[string]V{}` → `map[string]func() true`; returning `[]V{v}` → `[]func() true`; `V=int` stays `map[string]int true`
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 3.3: Name arrays and slices of funcs in WASM assertion panics (`J08`)
+- [x] Task 3.3: Name arrays and slices of funcs in WASM assertion panics (`J08`)
   - Files: `src/backend/wasm/emit-builtins.js` (`_dynamicTypeNames`), `src/backend/wasm/module-emitter.js` (record array Go types / func-slice tags)
   - Test: `test/unit/types/dynamic-types.test.js`: `var w any = [2]int{}; _ = w.(int)` with `recover` → `interface conversion: interface {} is [2]int, not int`; `[]func(){}` → `… is []func(), not int`; `var w any = []func(){}; _, ok := w.([]any)` → `false`
   - Done when: `assertAllTargetsOutput` passes

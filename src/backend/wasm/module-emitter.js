@@ -38,6 +38,7 @@ export class ModuleEmitter {
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
 		this.taggedSliceTypes = new Map(); // Go slice type key -> tagged info
+		this.anyArrayTypes = new Map(); // Go array type key -> array stored in an any
 		this.mapTypes = new Map(); // wType key -> map info
 		this.mapTypesByIndex = new Map(); // typeIndex -> map info
 		this.mapBucketsType = null; // shared (array (mut i32))
@@ -505,6 +506,18 @@ export class ModuleEmitter {
 		return arrInfo;
 	}
 
+	// Records an unnamed array type stored in an interface.  Arrays of equal
+	// length and element representation share one wasm array type, so the
+	// Go type is only known here, for the name in a failed assertion.
+	noteArrayInAny(goType) {
+		let t = goType;
+		for (let i = 0; i < 16 && t && t.kind !== "array"; i++)
+			t = t.underlying ?? this.checker?.types?.get(t.name);
+		if (typeof t?.size !== "number") return;
+		const key = goTypeKey(t);
+		if (!this.anyArrayTypes.has(key)) this.anyArrayTypes.set(key, t);
+	}
+
 	getSliceType(elemGoType) {
 		const elemWType = toWasmType(elemGoType, this.checker, this);
 		const key =
@@ -576,6 +589,7 @@ export class ModuleEmitter {
 		const known = this.taggedSliceTypes.get(key);
 		if (known) return known;
 		const base = this.getSliceType(elemGoType);
+		const root = this.getTaggedSliceRoot(base);
 		const tagIndex = this.taggedSliceTypes.size + 1;
 		const tagTypeIndex = this._getTotalTypeCount();
 		this._pushType({
@@ -589,7 +603,7 @@ export class ModuleEmitter {
 		this._pushType({
 			form: "struct",
 			sub: true,
-			superTypeIndex: base.typeIndex,
+			superTypeIndex: root.typeIndex,
 			fields: [
 				...base.typeEntry.fields,
 				{
@@ -601,6 +615,23 @@ export class ModuleEmitter {
 		const info = { key, typeIndex, tagTypeIndex, base, goType: sliceGoType };
 		this.taggedSliceTypes.set(key, info);
 		return info;
+	}
+
+	// The common supertype of every tagged subtype of the slice type `base`.  An
+	// unnamed `[]int` in an interface is the bare slice type, which every
+	// tagged subtype (`type S []int`) also passes `ref.test` for; testing
+	// "base and not root" is what keeps `any(S{}).([]int)` from matching.
+	getTaggedSliceRoot(base) {
+		if (base.tagRoot) return base.tagRoot;
+		const typeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			sub: true,
+			superTypeIndex: base.typeIndex,
+			fields: [...base.typeEntry.fields],
+		});
+		base.tagRoot = { typeIndex };
+		return base.tagRoot;
 	}
 
 	getSliceTypeByIndex(typeIndex) {

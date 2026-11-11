@@ -5,6 +5,7 @@ import {
 	assert,
 	assertAllTargetsOutput,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	section,
 	test,
@@ -391,5 +392,283 @@ func main() {
 }
 `,
 		"true\ntrue\nfalse true\nfalse\ntrue false false\n",
+	);
+});
+
+section("Named array and slice identity in an interface");
+
+test("a named array in an any is not the unnamed array", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+
+func main() {
+	var k any = A{1, 2}
+	_, ok := k.([2]int)
+	var j any = [2]int{1, 2}
+	fmt.Println(ok, k == j)
+	_, ok2 := k.(A)
+	fmt.Println(ok2, k == any(A{1, 2}), k == any(A{1, 3}))
+	_, ok3 := j.(A)
+	fmt.Println(ok3)
+}
+`,
+		"false false\ntrue true false\nfalse\n",
+	);
+});
+
+test("type switch tells a named array from its unnamed type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+
+func name(v any) string {
+	switch v.(type) {
+	case [2]int:
+		return "unnamed"
+	case A:
+		return "A"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name(A{1, 2}), name([2]int{1, 2}), name(1))
+}
+`,
+		"A unnamed other\n",
+	);
+});
+
+test("a named slice in an any is not the unnamed slice", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S []int
+
+func main() {
+	var k any = S{1}
+	_, ok := k.([]int)
+	_, ok2 := k.(S)
+	var j any = []int{1}
+	_, ok3 := j.(S)
+	fmt.Println(ok, ok2, ok3)
+}
+`,
+		"false true false\n",
+	);
+});
+
+test("a named array in an any prints, copies and compares like an array", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+
+func main() {
+	var k any = A{1, 2}
+	fmt.Printf("%v %T\\n", k, k)
+	arr := A{3, 4}
+	var j any = arr
+	arr[0] = 0
+	fmt.Println(j, arr)
+	b := k.(A)
+	b[0] = 9
+	fmt.Println(k, b, k == any(A{1, 2}))
+}
+`,
+		"[1 2] main.A\n[3 4] [0 4]\n[1 2] [9 2] true\n",
+	);
+});
+
+test("a type switch tells a named slice from its unnamed type in either order", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S []int
+
+func a(v any) string {
+	switch v.(type) {
+	case []int:
+		return "[]int"
+	case S:
+		return "S"
+	}
+	return "other"
+}
+
+func b(v any) string {
+	switch v.(type) {
+	case S:
+		return "S"
+	case []int:
+		return "[]int"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(a(S{1}), a([]int{1}), b(S{1}), b([]int{1}), a(nil))
+}
+`,
+		"S []int S []int other\n",
+	);
+});
+
+// The `js` target keeps its documented map-key stringification, so the two
+// keys share a slot there.
+test("named and unnamed arrays are distinct map[any] keys", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+
+func main() {
+	m := map[any]int{A{1, 2}: 1}
+	fmt.Println(m[[2]int{1, 2}], m[A{1, 2}])
+}
+`,
+		"0 1\n",
+	);
+});
+
+section("Generic maps and slices of funcs in an interface");
+
+test("a generic map or slice of funcs matches its type in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any](v V) any { return map[string]V{} }
+func mks[V any](v V) any { return []V{v} }
+
+func main() {
+	w := mk(func() {})
+	_, ok := w.(map[string]func())
+	fmt.Printf("%T %v\\n", w, ok)
+	s := mks(func() {})
+	_, ok2 := s.([]func())
+	fmt.Printf("%T %v\\n", s, ok2)
+	n := mk(1)
+	_, ok3 := n.(map[string]int)
+	fmt.Printf("%T %v\\n", n, ok3)
+}
+`,
+		"map[string]func() true\n[]func() true\nmap[string]int true\n",
+	);
+});
+
+section("Assertion panic names for arrays and slices of funcs");
+
+test("failed assertions name arrays and slices of funcs", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(w any) {
+	defer func() { fmt.Println(recover()) }()
+	_ = w.(int)
+}
+
+func main() {
+	try([2]int{})
+	try([]func(){})
+	var w any = []func(){}
+	_, ok := w.([]any)
+	fmt.Println(ok)
+}
+`,
+		"interface conversion: interface {} is [2]int, not int\ninterface conversion: interface {} is []func(), not int\nfalse\n",
+	);
+});
+
+test("a slice of a method interface is not a slice of any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func main() {
+	var a any = []error{errors.New("x")}
+	_, ok := a.([]any)
+	_, ok2 := a.([]error)
+	_, ok3 := a.([]fmt.Stringer)
+	var b any = []any{1}
+	_, ok4 := b.([]any)
+	_, ok5 := b.([]error)
+	fmt.Println(ok, ok2, ok3, ok4, ok5)
+	fmt.Println(a.([]error)[0])
+}
+`,
+		"false true false true false\nx\n",
+	);
+});
+
+test("[]any and []interface{} are the same dynamic type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func main() {
+	var a any = []any{1}
+	_, ok1 := a.([]any)
+	_, ok2 := a.([]interface{})
+	var b any = []interface{}{1}
+	_, ok3 := b.([]any)
+	_, ok4 := b.([]interface{})
+	fmt.Println(ok1, ok2, ok3, ok4)
+	var c any = []error{errors.New("x")}
+	_, ok5 := c.([]any)
+	_, ok6 := c.([]interface{})
+	_, ok7 := c.([]error)
+	fmt.Println(ok5, ok6, ok7)
+}
+`,
+		"true true true true\nfalse false true\n",
+	);
+});
+
+test("failed assertions name array lengths and element types", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(w any) {
+	defer func() { fmt.Println(recover()) }()
+	_ = w.(int)
+}
+
+func main() {
+	try([3]int{})
+	try([2]string{})
+	try([][2]int{})
+	try([]func(int) (string, error){})
+}
+`,
+		"interface conversion: interface {} is [3]int, not int\ninterface conversion: interface {} is [2]string, not int\ninterface conversion: interface {} is [][2]int, not int\ninterface conversion: interface {} is []func(int) (string, error), not int\n",
 	);
 });

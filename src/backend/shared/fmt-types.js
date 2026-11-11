@@ -62,7 +62,8 @@ export function goTypeName(t, specialized = null) {
 			return `[]${go(t.elem)}`;
 		case "array":
 		case "ArrayType":
-			return `[${t.size ?? 0}]${go(t.elem)}`;
+			// A parsed array type carries its length as a literal node.
+			return `[${typeof t.size === "object" ? (t.size?.value ?? 0) : (t.size ?? 0)}]${go(t.elem)}`;
 		case "map":
 		case "MapType":
 			return `map[${go(t.key)}]${go(t.value)}`;
@@ -78,6 +79,21 @@ export function goTypeName(t, specialized = null) {
 						? ` ${rets[0]}`
 						: ` (${rets.join(", ")})`;
 			return `func(${(t.params ?? []).map(go).join(", ")})${ret}`;
+		}
+		case "FuncType": {
+			// A parsed func type: parameters and the result as written.
+			const rt = t.returnType;
+			const rets = !rt ? [] : rt.kind === "TupleType" ? rt.types : [rt];
+			const ret =
+				rets.length === 0
+					? ""
+					: rets.length === 1
+						? ` ${go(rets[0])}`
+						: ` (${rets.map(go).join(", ")})`;
+			const params = (t.params ?? []).map((p) =>
+				p.variadic ? `...${go(p.type)}` : go(p.type),
+			);
+			return `func(${params.join(", ")})${ret}`;
 		}
 		default:
 			return "interface {}";

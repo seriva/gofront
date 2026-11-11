@@ -1390,13 +1390,18 @@ export class StmtsEmitter {
 		return this.mod.checker?.types?.get(t.name) ?? t;
 	}
 
-	// A defined func or map type lives in `any` as a box (so `iter.Seq[int]` is
-	// not a plain `func(func(int) bool)` and `type M map[string]int` keeps its
-	// name in `%T` and unhashable-key panics).
+	// A defined func, map or array type lives in `any` as a box (so
+	// `iter.Seq[int]` is not a plain `func(func(int) bool)`, `type M
+	// map[string]int` keeps its name in `%T` and unhashable-key panics, and
+	// `type A [2]int` is not a `[2]int` in a type switch).
 	_isMethodNamedRef(goType) {
 		const t = this._resolveTestTarget(goType);
 		if (t?.kind !== "named") return false;
-		return isFuncType(t, this.mod.checker) || isMapType(t, this.mod.checker);
+		return (
+			isFuncType(t, this.mod.checker) ||
+			isMapType(t, this.mod.checker) ||
+			isArrayType(t, this.mod.checker)
+		);
 	}
 
 	_emitTypeTest(targetGoType) {
@@ -1455,11 +1460,23 @@ export class StmtsEmitter {
 
 		if (isSliceType(targetGoType, this.mod.checker)) {
 			const elem = this._getSliceElemType(targetGoType);
-			const sInfo = isTaggedSliceType(targetGoType, this.mod.checker)
-				? this.mod.getTaggedSliceType(targetGoType, elem)
-				: this.mod.getSliceType(elem);
+			if (isTaggedSliceType(targetGoType, this.mod.checker)) {
+				const tagged = this.mod.getTaggedSliceType(targetGoType, elem);
+				this.pushInstruction({ op: "ref.test", typeIndex: tagged.typeIndex });
+				return;
+			}
+			const sInfo = this.mod.getSliceType(elem);
 			if (sInfo) {
+				// The unnamed slice type is the bare one, not a tagged subtype.
+				const root = this.mod.getTaggedSliceRoot(sInfo);
+				const tmp = this.acquireTemp("anyref");
+				this.pushInstruction({ op: "local.tee", index: tmp });
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
+				this.pushInstruction({ op: "local.get", index: tmp });
+				this.pushInstruction({ op: "ref.test", typeIndex: root.typeIndex });
+				this.pushInstruction("i32.eqz");
+				this.pushInstruction("i32.and");
+				this.releaseTemp(tmp, "anyref");
 				return;
 			}
 		}
