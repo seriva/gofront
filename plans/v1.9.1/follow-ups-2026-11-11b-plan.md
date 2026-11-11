@@ -1,7 +1,7 @@
 # v1.9.1 Review Follow-ups (2026-11-11, round 2) — Design Plan
 
 **Version:** v1.9.1  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** [`follow-ups-2026-11-11-plan.md`](follow-ups-2026-11-11-plan.md) (origin of every ledger entry, PRs #180–#183, merged into main as #184), [`follow-ups-2026-11-10-plan.md`](follow-ups-2026-11-10-plan.md)  
 **Release note:** Structs that embed an interface (`struct{ error }`) now get its methods, explicit func type arguments (`f[func(int)]()`) parse, and WebAssembly builds no longer produce invalid modules for range assignments into an `any` or for a range-over-func loop nested in a `range` loop. Named array and slice types keep their identity in an `any` on WebAssembly, `complex64` arithmetic and typed constants keep float32 precision in JavaScript, and a field or method promoted from two embedded types at the same depth is now reported as an ambiguous selector, as in Go.  
