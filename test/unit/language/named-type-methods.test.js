@@ -978,6 +978,81 @@ func main() {
 	});
 }
 
+section("Ambiguous promoted methods");
+
+const AMBIGUOUS_PRELUDE = `package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type A struct{}
+
+func (A) M() { fmt.Println("a") }
+
+type B struct{}
+
+func (B) M() { fmt.Println("b") }
+
+type C struct {
+	A
+	B
+}
+`;
+
+for (const [name, body, want] of [
+	[
+		"a method two embeds declare at the same depth is not in the method set",
+		"func main() {\n\tvar m Mer = C{}\n\t_ = m\n}\n",
+		"C does not implement Mer",
+	],
+	[
+		"calling a method two embeds declare at the same depth",
+		"func main() {\n\tC{}.M()\n}\n",
+		"ambiguous selector",
+	],
+	[
+		"calling an ambiguous method through a pointer",
+		"func main() {\n\tc := &C{}\n\tc.M()\n}\n",
+		"ambiguous selector c.M",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				promotionErrorsOn(target, AMBIGUOUS_PRELUDE + body),
+				want,
+			);
+		});
+	}
+}
+
+test("a shallower method shadows ambiguous deeper ones", async () => {
+	await assertProgramOutput(
+		`${AMBIGUOUS_PRELUDE}
+type D struct{ C }
+
+func (D) M() { fmt.Println("d") }
+
+type F struct{ B }
+
+type E struct {
+	A
+	F
+}
+
+func main() {
+	var m Mer = D{}
+	m.M()
+	m = E{}
+	m.M()
+	E{}.M()
+}
+`,
+		"d\na\na\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

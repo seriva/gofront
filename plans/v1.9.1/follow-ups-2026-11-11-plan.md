@@ -145,7 +145,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/typechecker/index.js` (`_promoteEmbeddedInto`), `src/typechecker/assignability.js` (`implements`, if needed)
   - Test: `test/unit/language/named-type-methods.test.js`: `M` + `var w Mer = PO{&Inner{}}; w.M()` and `use(PO{&Inner{}})` print `inner` (`assertProgramOutput`); `type PV struct{ Inner }; var w Mer = PV{}` → `does not implement` (value embed, pointer method)
   - Done when: positives run on `both` + `wasm`, negative reports on every target
-- [ ] Task 2.2: Drop ambiguous promoted methods at the same depth (`I07`, typechecker)
+- [x] Task 2.2: Drop ambiguous promoted methods at the same depth (`I07`, typechecker)
   - Files: `src/typechecker/index.js`, `src/typechecker/expressions.js` (selector `ambiguous selector` error)
   - Test: `test/unit/language/named-type-methods.test.js`: `type C struct{ A; B }; var m Mer = C{}` → `assertErrorContains(…, "does not implement")`; `C{}.M()` → `ambiguous selector`; `type D struct{ C }; func (D) M() {}` with `var m Mer = D{}` compiles
   - Done when: negatives report on every target and the shadowing case runs

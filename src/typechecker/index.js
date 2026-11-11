@@ -104,7 +104,9 @@ const JS_BUILTIN_CLASSES = new Set([
 // nothing changed so the method keeps its identity across passes. A pointer
 // method reached through an embedded pointer is in the value method set.
 function promotedEntry(cand, prev) {
+	if (cand.ambiguous) return { depth: cand.depth, ambiguous: true };
 	if (
+		!prev?.ambiguous &&
 		prev?.source === cand.source &&
 		prev.viaPtr === cand.viaPtr &&
 		prev.depth === cand.depth
@@ -115,6 +117,25 @@ function promotedEntry(cand, prev) {
 			? { ...cand.source, _ptrRecv: false }
 			: cand.source;
 	return { ...cand, mType };
+}
+
+// Replaces the promoted methods `old` with `next` in `methods`, leaving
+// the struct's own methods alone; returns whether anything changed.
+function applyPromotions(methods, old, next, isOwn) {
+	let changed = old.size !== next.size;
+	for (const [mName, prev] of old) {
+		const entry = next.get(mName);
+		if (entry?.mType) continue;
+		if (prev.mType && !isOwn(mName)) methods.delete(mName);
+		if (entry?.ambiguous !== prev.ambiguous || entry?.depth !== prev.depth)
+			changed = true;
+	}
+	for (const [mName, entry] of next) {
+		if (entry.ambiguous) continue;
+		if (old.get(mName)?.mType !== entry.mType) changed = true;
+		methods.set(mName, entry.mType);
+	}
+	return changed;
 }
 
 export class TypeChecker {
@@ -854,18 +875,8 @@ export class TypeChecker {
 		const next = new Map();
 		for (const [mName, cand] of best)
 			if (!isOwn(mName)) next.set(mName, promotedEntry(cand, old.get(mName)));
-		let changed = old.size !== next.size;
-		for (const mName of old.keys())
-			if (!next.has(mName)) {
-				if (!isOwn(mName)) struct.methods.delete(mName);
-				changed = true;
-			}
-		for (const [mName, entry] of next) {
-			if (old.get(mName)?.mType !== entry.mType) changed = true;
-			struct.methods.set(mName, entry.mType);
-		}
 		promotedMethods.set(struct, next);
-		return changed;
+		return applyPromotions(struct.methods, old, next, isOwn);
 	}
 
 	// Adds the methods one embedded field offers to `best` (name -> the
@@ -874,9 +885,13 @@ export class TypeChecker {
 		const isPtr = embed.kind === "pointer";
 		const inner = isPtr ? embed.base : embed;
 		const base = inner.kind === "named" ? inner.underlying : inner;
-		const offer = (name, depth, source, viaPtr) => {
+		// Two candidates at the same depth make the name ambiguous, as does
+		// an ambiguous name of the embedded type.
+		const offer = (name, depth, source, viaPtr, ambiguous = false) => {
 			const cur = best.get(name);
-			if (!cur || depth < cur.depth) best.set(name, { depth, source, viaPtr });
+			if (!cur || depth < cur.depth)
+				best.set(name, { depth, source, viaPtr, ambiguous });
+			else if (depth === cur.depth) cur.ambiguous = true;
 		};
 		if (base?.kind === "struct") {
 			// Fields of an embedded type declared after the embedder were not
@@ -894,6 +909,8 @@ export class TypeChecker {
 					isPtr || Boolean(p?.viaPtr),
 				);
 			}
+			for (const [mName, p] of innerPromoted ?? [])
+				if (p.ambiguous) offer(mName, 1 + p.depth, null, false, true);
 			return;
 		}
 		// A named non-struct type (`time.Duration`) keeps its methods on the

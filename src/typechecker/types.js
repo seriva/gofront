@@ -603,6 +603,12 @@ export function typeStr(t) {
 // a copy of the struct (`type S Base`) does not share it.
 export const promotedMethods = new WeakMap();
 
+// Two embedded fields at the same, shallowest depth declare method `name`,
+// so it is in neither method set of `struct` and selecting it is an error.
+export function isAmbiguousPromotion(struct, name) {
+	return promotedMethods.get(struct)?.get(name)?.ambiguous === true;
+}
+
 export function embeddedFieldName(f) {
 	const ast = f.astType?.kind === "PointerType" ? f.astType.base : f.astType;
 	const t = f.type?.kind === "pointer" ? f.type.base : f.type;
