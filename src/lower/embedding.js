@@ -1,7 +1,10 @@
 // src/lower/embedding.js
 // Computes promoted methods and delegation stubs for embedded structs.
 
-import { embeddedFieldName } from "../typechecker/types.js";
+import {
+	ambiguousPromotions,
+	embeddedFieldName,
+} from "../typechecker/types.js";
 
 // A method promoted from an embedded struct value but declared on its
 // pointer receiver is outside the method set of the outer struct's value.
@@ -21,7 +24,12 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 	const resolvedType = checker.types.get(name)?.underlying;
 	if (resolvedType?.kind !== "struct" || !resolvedType._embeds) return [];
 
-	const declared = new Set(methodDecls.map((m) => m.name));
+	// A method two embeds declare at the same depth is in neither method set:
+	// no stub, so the value does not satisfy an interface that needs it.
+	const declared = new Set([
+		...methodDecls.map((m) => m.name),
+		...ambiguousPromotions(resolvedType),
+	]);
 	const stubs = [];
 
 	const embedded = (resolvedType._structFields ?? []).filter((f) => f.embedded);

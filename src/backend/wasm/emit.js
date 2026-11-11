@@ -1480,9 +1480,12 @@ export class FunctionEmitter {
 	// A typed nil `*S` inside the interface is a marker object (see
 	// getNilBoxType): a pointer-receiver method runs with a nil receiver, as in
 	// Go; a value-receiver or promoted method must read through the nil pointer.
+	// A promoted candidate tests the outer struct but carries the embedded
+	// struct's info, so it is recognised by its embed path.
 	_emitNilPtrCandidate(cand, fn, recvLocal) {
 		if (cand.isBoxedValue || !cand.structInfo) return;
-		if (cand.testTypeIndex !== cand.structInfo.typeIndex) return;
+		if (!cand.embedPath && cand.testTypeIndex !== cand.structInfo.typeIndex)
+			return;
 		const nilBox = this.mod.getNilBoxType({
 			kind: "pointer",
 			base: { kind: "named", name: cand.recvTypeName },

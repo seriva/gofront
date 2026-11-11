@@ -8,6 +8,7 @@ import {
 	assertProgramOutput,
 	compile,
 	compileHybrid,
+	compileWasm,
 	runJs,
 	section,
 	summarize,
@@ -920,6 +921,183 @@ func main() {
 }
 `,
 		"3 {3}\n",
+	);
+});
+
+section("Methods promoted through embedded pointers");
+
+const PTR_EMBED_PRELUDE = `package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type Inner struct{}
+
+func (i *Inner) M() { fmt.Println("inner") }
+
+type PO struct{ *Inner }
+`;
+
+function promotionErrorsOn(target, src) {
+	if (target === "wasm") return compileWasm(src).errors ?? [];
+	return compile(src, { target }).errors ?? [];
+}
+
+test("a struct value embedding *Inner satisfies Mer with Inner's pointer method", async () => {
+	await assertProgramOutput(
+		`${PTR_EMBED_PRELUDE}
+func use(m Mer) { m.M() }
+
+func main() {
+	var w Mer = PO{&Inner{}}
+	w.M()
+	use(PO{&Inner{}})
+}
+`,
+		"inner\ninner\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`a struct value embedding Inner lacks Inner's pointer method (${target})`, () => {
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`${PTR_EMBED_PRELUDE}
+type PV struct{ Inner }
+
+func main() {
+	var w Mer = PV{}
+	_ = w
+}
+`,
+			),
+			"PV does not implement Mer",
+		);
+	});
+}
+
+section("Ambiguous promoted methods");
+
+const AMBIGUOUS_PRELUDE = `package main
+
+import "fmt"
+
+type Mer interface{ M() }
+
+type A struct{}
+
+func (A) M() { fmt.Println("a") }
+
+type B struct{}
+
+func (B) M() { fmt.Println("b") }
+
+type C struct {
+	A
+	B
+}
+`;
+
+for (const [name, body, want] of [
+	[
+		"a method two embeds declare at the same depth is not in the method set",
+		"func main() {\n\tvar m Mer = C{}\n\t_ = m\n}\n",
+		"C does not implement Mer",
+	],
+	[
+		"calling a method two embeds declare at the same depth",
+		"func main() {\n\tC{}.M()\n}\n",
+		"ambiguous selector",
+	],
+	[
+		"calling an ambiguous method through a pointer",
+		"func main() {\n\tc := &C{}\n\tc.M()\n}\n",
+		"ambiguous selector c.M",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				promotionErrorsOn(target, AMBIGUOUS_PRELUDE + body),
+				want,
+			);
+		});
+	}
+}
+
+test("a shallower method shadows ambiguous deeper ones", async () => {
+	await assertProgramOutput(
+		`${AMBIGUOUS_PRELUDE}
+type D struct{ C }
+
+func (D) M() { fmt.Println("d") }
+
+type F struct{ B }
+
+type E struct {
+	A
+	F
+}
+
+func main() {
+	var m Mer = D{}
+	m.M()
+	m = E{}
+	m.M()
+	E{}.M()
+}
+`,
+		"d\na\na\n",
+	);
+});
+
+section("Promoted method sets in interface assertions");
+
+test("a pointer method two embeds above the pointer is in the value's method set", async () => {
+	await assertAllTargetsOutput(
+		`${PTR_EMBED_PRELUDE}
+type PO2 struct{ PO }
+
+func main() {
+	var v any = PO2{PO{&Inner{}}}
+	m, ok := v.(Mer)
+	fmt.Println(ok)
+	m.M()
+	_, ok = v.(interface{ M() })
+	fmt.Println(ok)
+}
+`,
+		"true\ninner\ntrue\n",
+	);
+});
+
+test("an ambiguous promoted method fails interface assertions", async () => {
+	await assertAllTargetsOutput(
+		`${AMBIGUOUS_PRELUDE}
+type X struct{ A }
+
+type Y struct{ A }
+
+type Z struct {
+	X
+	Y
+}
+
+func main() {
+	var v any = C{}
+	_, ok := v.(Mer)
+	fmt.Println(ok)
+	v = &C{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+	v = Z{}
+	_, ok = v.(Mer)
+	fmt.Println(ok)
+}
+`,
+		"false\nfalse\nfalse\n",
 	);
 });
 

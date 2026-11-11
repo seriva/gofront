@@ -12,6 +12,7 @@ import {
 	DECLARED_ANY,
 	defaultType,
 	displayTypeName,
+	isAmbiguousPromotion,
 	isAny,
 	isTypedArraySlice,
 	Scope,
@@ -1110,6 +1111,11 @@ export const resolveMethods = {
 			return base.fields.get(field);
 		}
 		if (base.methods?.has(field)) return base.methods.get(field);
+		if (isAmbiguousPromotion(base, field)) {
+			const text = exprText(node?.expr);
+			const recv = text === "expression" ? typeStr(baseType) : text;
+			return this.err(`ambiguous selector ${recv}.${field}`, node);
+		}
 		const typeName = baseType?.name || base.name;
 		if (typeName) {
 			const dName = displayTypeName(typeName);
