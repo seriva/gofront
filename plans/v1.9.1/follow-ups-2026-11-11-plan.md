@@ -153,7 +153,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`â
   - Files: `src/lower/embedding.js`, `src/backend/js/index.js` (`_genValueMethodMeta`)
   - Test: `test/unit/language/named-type-methods.test.js`: `M` + `PO2{PO{&Inner{}}}` in `any`, `v.(Mer)` prints `true\ninner` (`assertAllTargetsOutput`); `var v any = C{}; _, ok := v.(Mer)` and `&C{}` print `false`
   - Done when: `js`, `both` and `wasm` print the Go output for these programs (wasm `C{}` part depends on Task 2.4; assert JS here with `assertJsTargetsOutput` and switch to `assertAllTargetsOutput` in Task 2.4)
-- [ ] Task 2.4: Ambiguity and typed-nil outer pointers in WASM interface dispatch (`I07` WASM, `I08`)
+- [x] Task 2.4: Ambiguity and typed-nil outer pointers in WASM interface dispatch (`I07` WASM, `I08`)
   - Files: `src/backend/wasm/module-emitter.js` (`_findPromotedMethod`), `src/backend/wasm/emit.js` (`_emitNilPtrCandidate`)
   - Test: `test/unit/wasm/interfaces.test.js`: `var v any = C{}; _, ok := v.(Mer)` â†’ `false` on all targets; `M` + `var v any = (*PO)(nil); v.(Mer).M()` with `recover` prints `runtime error: invalid memory address or nil pointer dereference`; same for `(*PV)(nil)` with a value embed
   - Done when: `assertAllTargetsOutput` passes for all three programs, including the Task 2.3 `C{}` program

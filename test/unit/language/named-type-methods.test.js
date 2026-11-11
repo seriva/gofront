@@ -5,7 +5,6 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
-	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
@@ -1075,7 +1074,7 @@ func main() {
 });
 
 test("an ambiguous promoted method fails interface assertions", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`${AMBIGUOUS_PRELUDE}
 type X struct{ A }
 

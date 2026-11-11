@@ -1486,12 +1486,14 @@ export class ModuleEmitter {
 
 	// The shallowest embedded type of `sInfo` (any depth) that declares
 	// `methodName`: its name, the field path to reach it from an `sInfo`
-	// struct, and whether that path goes through an embedded pointer.
+	// struct, and whether that path goes through an embedded pointer. Null
+	// when two embeds at that depth declare it (ambiguous, as in Go).
 	_findPromotedMethod(sInfo, methodName) {
 		let level = [{ info: sInfo, path: [], viaPointer: false }];
 		const seen = new Set([sInfo]);
 		while (level.length > 0) {
 			const next = [];
+			const hits = [];
 			for (const { info, path, viaPointer } of level) {
 				for (const embed of info.embeds ?? []) {
 					const embedType = embed.typeName ?? embed.name;
@@ -1505,19 +1507,22 @@ export class ModuleEmitter {
 						],
 						viaPointer: viaPointer || isPtr,
 					};
-					if (this.funcMap.has(`${embedType}.${methodName}`))
-						return {
+					if (this.funcMap.has(`${embedType}.${methodName}`)) {
+						hits.push({
 							embedType,
 							embedPath: step.path,
 							viaPointer: step.viaPointer,
-						};
-					const inner = this.structTypes.get(embedType);
-					if (inner && !seen.has(inner)) {
-						seen.add(inner);
-						next.push({ info: inner, ...step });
+						});
+						continue;
 					}
+					// A type reached twice at one depth stays twice in the next
+					// level, so a diamond's method is ambiguous there too.
+					const inner = this.structTypes.get(embedType);
+					if (inner && !seen.has(inner)) next.push({ info: inner, ...step });
 				}
 			}
+			if (hits.length > 0) return hits.length === 1 ? hits[0] : null;
+			for (const n of next) seen.add(n.info);
 			level = next;
 		}
 		return null;
