@@ -110,6 +110,9 @@ export class ExprsEmitter {
 			if (this._isMethodNamedRef(goType)) {
 				const box = this.mod.getIfaceBoxType(this._resolveTestTarget(goType));
 				this._emitRawExpr(expr, box.wType);
+				// An array stored in an interface is a copy.
+				if (isArrayType(box.goType, this.mod.checker))
+					this._emitCopyIfValue(expr, goType, box.wType);
 				this._emitBoxValue(box);
 				return;
 			}
@@ -123,8 +126,10 @@ export class ExprsEmitter {
 				const refWType = this.toWasmType(goType);
 				this._emitRawExpr(expr, refWType);
 				// An array stored in an interface is a copy.
-				if (isArrayType(goType, this.mod.checker))
+				if (isArrayType(goType, this.mod.checker)) {
 					this._emitCopyIfValue(expr, goType, refWType);
+					this.mod.noteArrayInAny(goType);
+				}
 				if (isTaggedSliceType(goType, this.mod.checker))
 					this._emitTagSlice(goType, refWType);
 				if (
