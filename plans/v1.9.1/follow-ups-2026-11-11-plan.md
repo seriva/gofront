@@ -1,7 +1,7 @@
 # v1.9.1 Review Follow-ups (2026-11-11) — Design Plan
 
 **Version:** v1.9.1  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** [`follow-ups-2026-11-10-plan.md`](follow-ups-2026-11-10-plan.md) (origin of every ledger entry, PRs #173–#178; execute after `feat/follow-ups-2026-11-10` is merged into main), [`follow-ups-2026-11-09-plan.md`](follow-ups-2026-11-09-plan.md)  
 **Release note:** Interfaces that embed `comparable`, structs that satisfy an interface through an embedded pointer, and `complex64` variables set from a named complex constant now compile and run as in Go, and array values in an `any` compare equal (and work as `map[any]` keys in WebAssembly) when their elements are equal. Code that Go rejects is now rejected with a clear error instead of being accepted or misreported (converting an `any` to an interface with methods without a type assertion, ranging an `int` index into an `int32` variable, ambiguous promoted methods, an unparenthesized composite literal in an `if` header), and `switch` on a nil map, `continue` to a stacked label, `%T` of func types and nil pointers behind interfaces now behave as in Go on both JavaScript and WebAssembly.
