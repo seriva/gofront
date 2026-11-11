@@ -173,7 +173,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Done when: `assertAllTargetsOutput` passes for the four composite types and `__ik`'s ` void` strip is gone or still required (commit body says which)
 
 ### Phase 4: Statement and Constant Codegen, Docs
-- [ ] Task 4.1: Match `case nil` against a nil map tag in JS `switch` (`I01`)
+- [x] Task 4.1: Match `case nil` against a nil map tag in JS `switch` (`I01`)
   - Files: `src/backend/js/statements.js` (`genSwitch` / `_switchTagAndCases`)
   - Test: `test/unit/types/switch-cases.test.js`: `var m map[string]int; switch m { case nil: fmt.Println("m nil") }` → `m nil`; `m := map[string]int{}` with `default` → `non-nil`; defined map type `type MM map[string]int` → `m nil`
   - Done when: `assertAllTargetsOutput` passes (using helper `__isnm`)

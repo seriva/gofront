@@ -2116,6 +2116,11 @@ export const statementGenMethods = {
 		return `[${lhs.join(", ")}] = ${r}`;
 	},
 
+	_isMapTag(tag) {
+		const t = tag._type?.kind === "named" ? tag._type.underlying : tag._type;
+		return t?.kind === "map" || tag._coreType?.kind === "map";
+	},
+
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
 		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
@@ -2128,6 +2133,21 @@ export const statementGenMethods = {
 			return {
 				tag: "true",
 				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
+			};
+		}
+		if (stmt.tag && this._isMapTag(stmt.tag)) {
+			// A nil map is a sentinel object in JS, not `null`: `case nil`
+			// goes through `__isnm`, as `m == nil` does.
+			this.useHelper(this.strict ? "nilMap" : "nm");
+			this._swCounter = (this._swCounter ?? 0) + 1;
+			const tmp = `__sw${this._swCounter}`;
+			this.line(`const ${tmp} = ${tag};`);
+			return {
+				tag: "true",
+				caseExpr: (e) =>
+					this._isNilLiteral(e)
+						? `__isnm(${tmp})`
+						: `${tmp} === ${this.genExpr(e)}`,
 			};
 		}
 		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
@@ -2182,7 +2202,8 @@ export const statementGenMethods = {
 		} else if (
 			stmt.tag &&
 			(this._isStructOrArrayType(stmt.tag._type) ||
-				this._isIfaceType(stmt.tag._type))
+				this._isIfaceType(stmt.tag._type) ||
+				this._isMapTag(stmt.tag))
 		) {
 			// The tag temporary is a `const`, which cannot directly follow a label.
 			this.line("{");
