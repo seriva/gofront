@@ -10,7 +10,7 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v2.0.0
 
-**Theme: Future Evolution (On Hold).** The native Go engine rewrite ([`plans/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md)) is shelved in favor of keeping the pure Node.js ESM compiler architecture lean, fast, and maintainable.
+**Theme: Web platform evolution (Draft).** Compile-time asset embedding (`//go:embed`), fast incremental watch rebuilds, whole-program dead-code elimination, typed web APIs (`gofront/dom`, `gofront/canvas`) and reactive `gom` signals in `.templ`, keeping the pure Node.js ESM compiler (the native Go engine rewrite is dropped). Concept sketch, to be audited with `/design-plan`, in [`plans/v2.0.0/web-platform-evolution-plan.md`](v2.0.0/web-platform-evolution-plan.md).
 
 ---
 
