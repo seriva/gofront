@@ -142,11 +142,11 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2
   - Files: `src/lower/embedding.js` (`computeEmbeddedStubs`), `src/backend/js/index.js` (stub emission, if needed)
   - Test: `test/unit/language/named-type-methods.test.js`: `var m Mer = S{T{}}; m.M(); S{T{}}.M()` → `T.M\nT.M`; `type W struct{ error }; var e error = W{errors.New("x")}; fmt.Println(e.Error())` → `x`; `W{}.Error()` with `recover` → nil-dereference message (`assertJsTargetsOutput`)
   - Done when: `js` and `both` print the Go output (switch to `assertAllTargetsOutput` in Task 2.3)
-- [ ] Task 2.3: Dispatch through embedded interface fields in WASM (`J02` WASM)
+- [x] Task 2.3: Dispatch through embedded interface fields in WASM (`J02` WASM)
   - Files: `src/backend/wasm/module-emitter.js` (`_findPromotedMethod`), `src/backend/wasm/emit.js` (candidate call), `src/backend/wasm/method-expr.js` (direct call, if needed)
   - Test: `test/unit/wasm/interfaces.test.js`: the Task 2.2 programs plus `v.(Mer)` on `any(S{T{}})` → `true`
   - Done when: `assertAllTargetsOutput` passes for every Task 2.2/2.3 program
-- [ ] Task 2.4: Panic on value methods promoted through a nil embedded pointer in WASM (`J04`)
+- [x] Task 2.4: Panic on value methods promoted through a nil embedded pointer in WASM (`J04`)
   - Files: `src/backend/wasm/emit.js` (embed-path walk in interface dispatch)
   - Test: `test/unit/wasm/interfaces.test.js`: `var v any = PO{}; v.(VMer).VM()` with `recover`, for empty `Inner` and `Inner struct{ n int }`, and nested `PO2{PO{}}` → `runtime error: invalid memory address or nil pointer dereference`; non-nil `PO{&Inner{}}` → `inner`
   - Done when: `assertAllTargetsOutput` passes and no raw `RuntimeError` escapes

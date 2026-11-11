@@ -1463,31 +1463,9 @@ export class FunctionEmitter {
 					typeIndex: cand.testTypeIndex,
 					fieldIndex: 0,
 				});
-				if (cand.embedPath) {
-					for (const step of cand.embedPath) {
-						if (step.castTypeIndex) {
-							this.pushInstruction({
-								op: "ref.cast",
-								typeIndex: step.castTypeIndex,
-							});
-						}
-						this.pushInstruction({
-							op: "struct.get",
-							typeIndex: step.parentTypeIndex,
-							fieldIndex: step.fieldIndex,
-						});
-					}
-				}
+				if (cand.embedPath) this._emitEmbedPath(cand);
 			} else {
-				if (cand.embedPath) {
-					for (const step of cand.embedPath) {
-						this.pushInstruction({
-							op: "struct.get",
-							typeIndex: step.parentTypeIndex,
-							fieldIndex: step.fieldIndex,
-						});
-					}
-				}
+				if (cand.embedPath) this._emitEmbedPath(cand);
 				if (cand.needsValueDeref && cand.structInfo) {
 					this.emitCloneStruct(cand.structInfo, cand.targetRecvWType);
 				}
@@ -1498,12 +1476,49 @@ export class FunctionEmitter {
 				this.pushInstruction({ op: "local.get", index: p });
 			}
 
-			this.pushInstruction({ op: "call", funcIndex: cand.funcIndex });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: cand.selfDispatch ? fn._globalFuncIndex : cand.funcIndex,
+			});
 			this.pushInstruction("return");
 			this.pushInstruction("end");
 		}
 
 		emitMiss("interface conversion: nil or unmatched type for method call");
+	}
+
+	// Walks `cand.embedPath` from the embedder on the stack to the embedded
+	// value. A step through a nil embedded pointer panics, except that the last
+	// step may be nil for a pointer-receiver method (`nilCheckLast` is unset).
+	_emitEmbedPath(cand) {
+		const steps = cand.embedPath;
+		for (const [i, step] of steps.entries()) {
+			if (step.castTypeIndex) {
+				this.pushInstruction({ op: "ref.cast", typeIndex: step.castTypeIndex });
+			}
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: step.parentTypeIndex,
+				fieldIndex: step.fieldIndex,
+			});
+			if (step.ptrWType && (i < steps.length - 1 || cand.nilCheckLast))
+				this._emitNilPanicIfNull(step.ptrWType);
+		}
+	}
+
+	// Panics with a nil dereference when the reference on the stack is null,
+	// leaving it on the stack otherwise.
+	_emitNilPanicIfNull(wType) {
+		const tmp = this.acquireTemp(wType);
+		this.pushInstruction({ op: "local.tee", index: tmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.emitPanic(
+			"runtime error: invalid memory address or nil pointer dereference",
+		);
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.releaseTemp(tmp, wType);
 	}
 
 	// A typed nil `*S` inside the interface is a marker object (see

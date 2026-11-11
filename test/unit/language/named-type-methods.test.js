@@ -5,7 +5,6 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
-	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
@@ -1266,7 +1265,7 @@ var _ = errors.New
 `;
 
 test("a struct embedding an interface satisfies it and has its methods (typecheck)", () => {
-	for (const target of ["js", "both"])
+	for (const target of ["js", "both", "wasm"])
 		assertEqual(
 			(
 				compile(
@@ -1312,7 +1311,7 @@ func main() {
 }
 
 test("an outer method shadows the embedded interface's", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`${IFACE_EMBED_PRELUDE}
 type O struct{ Mer }
 
@@ -1329,8 +1328,8 @@ func main() {
 	);
 });
 
-test("methods of an embedded interface run on the embedded value (js)", async () => {
-	await assertJsTargetsOutput(
+test("methods of an embedded interface run on the embedded value", async () => {
+	await assertAllTargetsOutput(
 		`${IFACE_EMBED_PRELUDE}
 func main() {
 	var m Mer = S{T{}}
@@ -1344,8 +1343,8 @@ func main() {
 	);
 });
 
-test("calling a method through a nil embedded interface panics (js)", async () => {
-	await assertJsTargetsOutput(
+test("calling a method through a nil embedded interface panics", async () => {
+	await assertAllTargetsOutput(
 		`${IFACE_EMBED_PRELUDE}
 func main() {
 	defer func() { fmt.Println(recover()) }()

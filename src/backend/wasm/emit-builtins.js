@@ -1265,14 +1265,17 @@ export class BuiltinsEmitter {
 		for (const embed of structInfo.embeds ?? []) {
 			const typeName = embed.typeName ?? embed.name;
 			const methodName = `${typeName}.${method}`;
+			const ifaceType = structInfo.fields[embed.fieldIndex]?.goType;
+			if (this.mod.embeddedInterfaceHas(ifaceType, method))
+				return { chain: [{ structInfo, embed }], ifaceType };
 			if (this.mod.resolveFuncIndex(methodName) !== null)
 				return { chain: [{ structInfo, embed }], methodName };
 			const inner = this.mod.getStructType(typeName);
 			const deeper = inner && this._findEmbeddedMethod(inner, method, seen);
 			if (deeper)
 				return {
+					...deeper,
 					chain: [{ structInfo, embed }, ...deeper.chain],
-					methodName: deeper.methodName,
 				};
 		}
 		return null;
@@ -1283,10 +1286,19 @@ export class BuiltinsEmitter {
 		if (!structInfo) return false;
 		const found = this._findEmbeddedMethod(structInfo, func.field);
 		if (!found) return false;
-		const { chain, methodName } = found;
-		const subIdx = this.mod.resolveFuncIndex(methodName);
-		const targetParamTypes = this.mod.getFuncParamTypes(methodName);
+		const { chain, methodName, ifaceType } = found;
+		// A method promoted from an embedded interface is dispatched on the
+		// interface value the last embed holds.
+		const dispatchName = ifaceType
+			? `__dispatch_${this._getReceiverTypeName(ifaceType)}_${func.field}`
+			: null;
+		const subName = dispatchName ?? methodName;
+		const subIdx = this.mod.resolveFuncIndex(subName);
+		if (subIdx === null)
+			throw new Error(`internal: no interface dispatcher ${subName}`);
+		const targetParamTypes = this.mod.getFuncParamTypes(subName);
 		const valueRecv =
+			!ifaceType &&
 			this.mod.getFuncParamGoTypes(methodName)[0]?.kind !== "pointer";
 		this.emitExpr(func.expr, this.toWasmType(recvType));
 		this._emitNilCheck(func.expr._type);
