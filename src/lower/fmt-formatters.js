@@ -34,7 +34,7 @@ import {
 	under,
 	walkNodes,
 } from "./gen-types.js";
-import { holdsFunc, isCompositeType } from "./json-codecs.js";
+import { holdsFunc, isCompositeType, isFuncComposite } from "./json-codecs.js";
 
 const FMT_PATH = "fmt";
 const RT_PATH = "internal/fmtrt";
@@ -643,11 +643,12 @@ class FmtGen extends TypeSpeller {
 		if (isInterface(t) || under(t)?.kind === "interface") return false;
 		if (t.kind === "basic") return false;
 		if (t.kind === "func") return true;
-		if (holdsFunc(t)) return false;
 		// An unnamed array or map of small integers would shadow its look-alikes
-		// in the type switch (see SHARED_REPR in json-codecs).
+		// in the type switch (see SHARED_REPR in json-codecs). One holding
+		// funcs is still described, so `%T` names it.
 		if (t.kind === "array" || t.kind === "map" || t.kind === "slice")
-			return isCompositeType(t);
+			return isCompositeType(t) || isFuncComposite(t);
+		if (holdsFunc(t)) return false;
 		return true;
 	}
 

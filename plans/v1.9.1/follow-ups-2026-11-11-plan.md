@@ -159,15 +159,15 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Done when: `assertAllTargetsOutput` passes for all three programs, including the Task 2.3 `C{}` program
 
 ### Phase 3: Arrays and Func Types in `any`
-- [ ] Task 3.1: Compare array values in an `any` element-wise (`I10` `==`)
+- [x] Task 3.1: Compare array values in an `any` element-wise (`I10` `==`)
   - Files: `src/backend/js/runtime.js` (`__ifeq`), `src/backend/wasm/emit-builtins.js` (`any_eq`)
   - Test: `test/unit/types/dynamic-types.test.js`: `var k, k2 any = [2]int{1,2}, [2]int{1,2}; fmt.Println(k == k2)` → `true`; `[1]P{{1,2}}` pair → `true`; `[2]int{1,2}` vs `[2]int{1,3}` → `false`; `[2]int` vs `[2]int32` with equal elements → `false`
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 3.2: Hash array keys of `map[any]` element-wise on WASM (`I10` map keys)
+- [x] Task 3.2: Hash array keys of `map[any]` element-wise on WASM (`I10` map keys)
   - Files: `src/backend/wasm/emit-builtins.js` (`any_hash`)
   - Test: `test/unit/wasm/map-keys.test.js`: `m := map[any]int{}; m[[2]int{1, 2}] = 1; fmt.Println(len(m), m[[2]int{1, 2}])` → `1 1`; `[2]string{"a","b"}` key and `[1]int{5}` key with `m[5]` → `3 2 3` pattern from `X10b` (separate map)
   - Done when: `assertProgramOutput` passes (`both` + `wasm`); JS-only collisions with strings are not asserted (Excluded)
-- [ ] Task 3.3: Name func-bearing types for `%T` in an `any` (`I11`)
+- [x] Task 3.3: Name func-bearing types for `%T` in an `any` (`I11`)
   - Files: `src/backend/shared/fmt-types.js`, `src/backend/js/expressions.js` (`__ity` tag text), `src/backend/wasm/emit-builtins.js` (`_dynamicTypeNames`)
   - Test: `test/unit/builtins/fmt-verbs.test.js`: `%T` of `[2]func()`, `[]func()`, `[2]func(int) bool`, `map[string][2]func()` in an `any` → Go names; nil `func(int) string` in `any` → `func(int) string` on wasm (JS per probe outcome, see Approach)
   - Done when: `assertAllTargetsOutput` passes for the four composite types and `__ik`'s ` void` strip is gone or still required (commit body says which)

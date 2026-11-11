@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assertAllTargetsOutput,
+	assertProgramOutput,
 	assertWasmProgramOutput,
 	section,
 	summarize,
@@ -156,6 +157,57 @@ func main() {
 }
 `,
 		"runtime error: hash of unhashable type main.L\nruntime error: hash of unhashable type main.M\nruntime error: hash of unhashable type main.L\n<nil>\n<nil>\n2 2\n",
+	);
+});
+
+test("array keys of a map[any] are found again by value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[any]int{}
+	m[[2]int{1, 2}] = 1
+	fmt.Println(len(m), m[[2]int{1, 2}])
+	a, b := 1, 2
+	m[[2]int{a, b}]++
+	k := [2]int{a, b}
+	_, ok := m[[2]int{2, 1}]
+	fmt.Println(len(m), m[k], ok)
+	n := map[any]int{}
+	n[[2]string{"a", "b"}] = 3
+	n[[1]int{5}] = 2
+	n[5] = 3
+	fmt.Println(len(n), n[[1]int{5}], n[[2]string{"a", "b"}])
+	delete(n, [1]int{5})
+	fmt.Println(len(n), n[5])
+}
+`,
+		"1 1\n1 2 false\n3 2 3\n2 3\n",
+	);
+});
+
+test("many array keys of a map[any] hash by their elements", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X, Y int }
+
+func main() {
+	m := map[any]int{}
+	for i := 0; i < 200; i++ {
+		m[[2]int{i, i * 2}] = i
+	}
+	m[[1]P{{1, 2}}] = 7
+	m[[2]float64{0, 1}] = 8
+	m[[1]any{"x"}] = 9
+	fmt.Println(len(m), m[[2]int{150, 300}], m[[1]P{{1, 2}}], m[[2]float64{0, 1}], m[[1]any{"x"}])
+}
+`,
+		"203 150 7 8 9\n",
 	);
 });
 
