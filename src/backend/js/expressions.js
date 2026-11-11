@@ -16,6 +16,7 @@ import {
 	is64BitUnsigned,
 	isAny,
 	isComplex,
+	isComplex64,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
 	typeStr,
@@ -3237,20 +3238,36 @@ export const expressionGenMethods = {
 		const r = this._genComplexOperand(expr.right);
 		switch (expr.op) {
 			case "+":
-				return `{ re: ${l}.re + ${r}.re, im: ${l}.im + ${r}.im }`;
 			case "-":
-				return `{ re: ${l}.re - ${r}.re, im: ${l}.im - ${r}.im }`;
 			case "*":
-				this.useHelper("cmul");
-				return `__cmul(${l}, ${r})`;
 			case "/":
-				this.useHelper("cdiv");
-				return `__cdiv(${l}, ${r})`;
+				return this._genComplexArith(expr.op, l, r, isComplex64(expr._type));
 			case "==":
 				return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
 			case "!=":
 				return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
 		}
+	},
+
+	// `l op r` for complex operands.  A complex64 result has float32
+	// components, as in Go (where the arithmetic runs in float64 and the
+	// result is narrowed).
+	_genComplexArith(op, l, r, is64) {
+		let re;
+		let im;
+		let call = null;
+		if (op === "+" || op === "-") {
+			re = `${l}.re ${op} ${r}.re`;
+			im = `${l}.im ${op} ${r}.im`;
+		} else {
+			const helper = op === "*" ? "cmul" : "cdiv";
+			this.useHelper(helper);
+			call = `__${helper}(${l}, ${r})`;
+		}
+		if (!is64) return call ?? `{ re: ${re}, im: ${im} }`;
+		if (call)
+			return `((__z) => ({ re: Math.fround(__z.re), im: Math.fround(__z.im) }))(${call})`;
+		return `{ re: Math.fround(${re}), im: Math.fround(${im}) }`;
 	},
 
 	_genBinaryExpr(expr) {

@@ -19,6 +19,7 @@ import {
 	defaultType,
 	isAny,
 	isComplex,
+	isComplex64,
 	isUntyped,
 	typeStr,
 	VOID,
@@ -68,13 +69,18 @@ export const constantCheckMethods = {
 	// A named untyped complex constant has no folded value (`_const`): its
 	// initializer goes on the identifier as `_complexInit`, so the backends
 	// can fold it where it takes type complex64.
+	// A named `complex64` constant is tagged `_c64Const` as well, so a use
+	// takes float32 components as in Go.
 	_noteComplexConstInit(expr, scope) {
-		if (expr.kind !== "Ident" || !isUntyped(expr._type)) return;
-		if (!isComplex(expr._type)) return;
+		if (expr.kind !== "Ident") return;
+		const typed64 = !isUntyped(expr._type) && isComplex64(expr._type);
+		if (!typed64 && !(isUntyped(expr._type) && isComplex(expr._type))) return;
 		const owner = scope.lookupScope(expr.name);
 		if (!owner?._consts.has(expr.name)) return;
 		const init = owner.lookupConstExpr(expr.name);
-		if (init) expr._complexInit = init;
+		if (!init) return;
+		expr._complexInit = init;
+		if (typed64) expr._c64Const = true;
 	},
 
 	// Raw evaluation result, memoized on checked nodes: a value, a value with

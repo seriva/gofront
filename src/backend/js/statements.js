@@ -13,6 +13,7 @@ import {
 import {
 	is64BitInt,
 	isComplex,
+	isComplex64,
 	isTypedArraySlice,
 } from "../../typechecker/types.js";
 
@@ -1143,27 +1144,16 @@ export const statementGenMethods = {
 		}
 		const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
 		const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
-		let result;
-		switch (baseOp) {
-			case "+":
-				result = `{ re: ${lhsRead}.re + ${rhsExpr}.re, im: ${lhsRead}.im + ${rhsExpr}.im }`;
-				break;
-			case "-":
-				result = `{ re: ${lhsRead}.re - ${rhsExpr}.re, im: ${lhsRead}.im - ${rhsExpr}.im }`;
-				break;
-			case "*":
-				this.useHelper("cmul");
-				result = `__cmul(${lhsRead}, ${rhsExpr})`;
-				break;
-			case "/":
-				this.useHelper("cdiv");
-				result = `__cdiv(${lhsRead}, ${rhsExpr})`;
-				break;
-			default:
-				throw new Error(
-					`unsupported complex compound assignment operator: ${stmt.op}`,
-				);
-		}
+		if (!["+", "-", "*", "/"].includes(baseOp))
+			throw new Error(
+				`unsupported complex compound assignment operator: ${stmt.op}`,
+			);
+		const result = this._genComplexArith(
+			baseOp,
+			lhsRead,
+			rhsExpr,
+			isComplex64(l._type),
+		);
 		this.line(`${lhsTarget} = ${result};`);
 	},
 

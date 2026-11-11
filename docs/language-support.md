@@ -23,7 +23,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | Feature | Status |
 |---|---|
 | Structs + methods (value & pointer receivers) | ✓ <!-- fixture: package main; type S struct { N int }; func (s S) Val() int { return s.N }; func (s *S) Inc() { s.N++ }; func Main() int { s := S{41}; (&s).Inc(); return s.Val() } --> |
-| Embedded structs (flattened fields + promoted methods) | ✓ <!-- fixture: package main; type Inner struct { X int }; func (i Inner) Get() int { return i.X }; type Outer struct { Inner }; func Main() int { o := Outer{Inner: Inner{X: 42}}; return o.X } --> |
+| Embedded structs (flattened fields + promoted methods) | ✓ — an embedded interface (`struct{ error }`) promotes its methods too, and a name that two embedded types provide at the same depth is an `ambiguous selector` <!-- fixture: package main; type Inner struct { X int }; func (i Inner) Get() int { return i.X }; type Outer struct { Inner }; func Main() int { o := Outer{Inner: Inner{X: 42}}; return o.X } --> |
 | Anonymous struct types | ✓ — compile to plain JS objects <!-- fixture: package main; func Main() int { s := struct { X int }{X: 42}; return s.X } --> |
 | Interfaces (with embedding) | ✓ <!-- fixture: package main; type Reader interface { Read() int }; type ReadCloser interface { Reader; Close() int }; type Impl struct { V int }; func (i Impl) Read() int { return i.V }; func (i Impl) Close() int { return 0 }; func Main() int { var rc ReadCloser = Impl{42}; return rc.Read() } --> |
 | Slices (`append`, `len`, `make`) | ✓ <!-- fixture: package main; func Main() int { s := make([]int, 0, 2); s = append(s, 10, 32); return len(s)*100 + s[0] + s[1] } --> |
