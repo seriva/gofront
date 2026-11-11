@@ -1,7 +1,7 @@
 # v1.9.1 Review Follow-ups (2026-11-10) — Design Plan
 
 **Version:** v1.9.1  
-**Status:** In Progress  
+**Status:** Completed (2026-11-11)  
 **Base branch:** main  
 **Related:** [`follow-ups-2026-11-09-plan.md`](follow-ups-2026-11-09-plan.md) (origin of every ledger entry; its Phases 7–8 are independent of this plan; execute after `follow-ups-2026-11-09-plan.md` is merged into main)  
 **Release note:** More invalid Go is now rejected with Go's error instead of building broken WebAssembly (`case nil` in `switch true`, `cap` of a struct or func, assigning an `any` to `error` without a type assertion, constraint interfaces used as ordinary types), while valid code that failed to compile now works: conversions to interface types such as `I(v)` and `interface{ M() }(v)`, and slices of funcs written directly as call arguments. Nil-pointer method calls, labeled `continue` across nested range-over-func loops, 64-bit `for` loop updates, range assignments into address-taken variables, unhashable map keys and `json.Marshal` of func arrays now behave as in Go on both JavaScript and WebAssembly, and returning or passing a multi-value call such as `return f()` into `any` results or parameters keeps the right values and types. On JavaScript, `complex64` values built from constants now hold `float32` precision, and `fmt` calls in any value of a templ `case a, b:` render correctly.
