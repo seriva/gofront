@@ -181,7 +181,7 @@ export const statementParserMethods = {
 		let cond;
 		// if init; cond { } — use noCompLit to avoid "{" being parsed as composite literal
 		const first = this.parseSimpleStmtRaw(true);
-		this._rejectHeaderCompositeLit("if", 0);
+		this._rejectHeaderCompositeLit("if", 0, first);
 		// Only treat as "init; cond" if semicolon is followed by a non-brace token
 		if (this.check(T.SEMICOLON) && this.peek2().type !== T.LBRACE) {
 			this.advance(); // consume ;
@@ -218,7 +218,7 @@ export const statementParserMethods = {
 		let first = null;
 		if (!this.check(T.SEMICOLON)) {
 			first = this.parseSimpleStmtRaw(true);
-			this._rejectHeaderCompositeLit("for", 1);
+			this._rejectHeaderCompositeLit("for", 1, first);
 
 			if (this.check(T.LBRACE)) {
 				// for k, v := range expr { }  — range stmt ends right before {
@@ -258,9 +258,11 @@ export const statementParserMethods = {
 	// the body, so Go requires the literal to be parenthesized.  Reported when
 	// the brace pair holds no statement tokens, is followed by an explicit `;`,
 	// and the header then continues to its body `{` (with at most `semis`
-	// further `;`, one for a `for` post statement).
-	_rejectHeaderCompositeLit(keyword, semis) {
+	// further `;`, one for a `for` post statement).  A bare expression or a
+	// range clause before the `{` (`if ok { f() };`) means it is the body.
+	_rejectHeaderCompositeLit(keyword, semis, first) {
 		if (!this.check(T.LBRACE)) return;
+		if (first?.kind === "ExprStmt" || this.isRangeStmt(first)) return;
 		const prev = this.tokens[this.pos - 1]?.type;
 		if (prev !== T.IDENT && prev !== T.RBRACKET) return;
 		const close = this._closingBrace(this.pos);
@@ -317,7 +319,7 @@ export const statementParserMethods = {
 		let tag = null;
 		if (!this.check(T.LBRACE)) {
 			const first = this.parseSimpleStmtRaw(true);
-			this._rejectHeaderCompositeLit("switch", 0);
+			this._rejectHeaderCompositeLit("switch", 0, first);
 			if (this.match(T.SEMICOLON)) {
 				init = first;
 				if (!this.check(T.LBRACE))

@@ -859,6 +859,37 @@ func main() {
 	);
 });
 
+for (const [name, stmts] of [
+	[
+		"if ok { f() }; then a block",
+		'\tif ok { f() };\n\t{\n\t\tprintln("block")\n\t}',
+	],
+	[
+		"if ok { f() }; then a map literal",
+		'\tif ok { f() }; a := map[string]int{"a": 1}\n\t_ = a',
+	],
+	[
+		"for ok { f() }; then a block",
+		'\tfor ok { f(); break };\n\t{\n\t\tprintln("block")\n\t}',
+	],
+	[
+		"switch ok {}; then a block",
+		'\tswitch ok {};\n\t{\n\t\tprintln("block")\n\t}',
+	],
+	[
+		"for range { f() }; then a block",
+		'\t_ = ok\n\tfor _, v := range []int{1} { _ = v };\n\t{\n\t\tprintln("block")\n\t}',
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} still compiles (${target})`, () => {
+			const src = `package main\nfunc f() {}\nfunc main() {\n\tok := true\n${stmts}\n}`;
+			const errs = headerErrorsOn(target, src);
+			assertEqual(errs.map((e) => e.message).join("; "), "");
+		});
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
