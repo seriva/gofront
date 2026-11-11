@@ -134,11 +134,11 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2
   - Done when: negative reports on every target, positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples
 
 ### Phase 2: Embedded Interfaces and Embedded Nil Pointers
-- [ ] Task 2.1: Promote an embedded interface's methods in the typechecker (`J02`)
+- [x] Task 2.1: Promote an embedded interface's methods in the typechecker (`J02`)
   - Files: `src/typechecker/index.js` (`_offerEmbedMethods`)
   - Test: `test/unit/language/named-type-methods.test.js`: `type S struct{ Mer }; var m Mer = S{T{}}` and `S{T{}}.M()` type-check (`compile(…).errors` empty on every target); `struct{ Mer; B }` with `B.M` at depth 1 → `ambiguous selector`
   - Done when: the positives type-check and the negative reports on every target (backend runs are asserted in 2.2/2.3)
-- [ ] Task 2.2: Forward embedded interface methods in JS (`J02` JS)
+- [x] Task 2.2: Forward embedded interface methods in JS (`J02` JS)
   - Files: `src/lower/embedding.js` (`computeEmbeddedStubs`), `src/backend/js/index.js` (stub emission, if needed)
   - Test: `test/unit/language/named-type-methods.test.js`: `var m Mer = S{T{}}; m.M(); S{T{}}.M()` → `T.M\nT.M`; `type W struct{ error }; var e error = W{errors.New("x")}; fmt.Println(e.Error())` → `x`; `W{}.Error()` with `recover` → nil-dereference message (`assertJsTargetsOutput`)
   - Done when: `js` and `both` print the Go output (switch to `assertAllTargetsOutput` in Task 2.3)

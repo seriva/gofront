@@ -5,6 +5,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
@@ -1240,6 +1241,119 @@ func main() {
 			),
 			"ambiguous selector c.X",
 		);
+});
+
+section("Embedded interfaces");
+
+const IFACE_EMBED_PRELUDE = `package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type Mer interface{ M() }
+
+type T struct{}
+
+func (T) M() { fmt.Println("T.M") }
+
+type S struct{ Mer }
+
+type W struct{ error }
+
+var _ = errors.New
+`;
+
+test("a struct embedding an interface satisfies it and has its methods (typecheck)", () => {
+	for (const target of ["js", "both"])
+		assertEqual(
+			(
+				compile(
+					`${IFACE_EMBED_PRELUDE}
+func main() {
+	var m Mer = S{T{}}
+	m.M()
+	S{T{}}.M()
+	var e error = W{errors.New("x")}
+	fmt.Println(e.Error())
+}
+`,
+					{ target },
+				).errors ?? []
+			).length,
+			0,
+		);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`an interface embed and a struct embed with the same method at depth 1 are ambiguous (${target})`, () => {
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`${IFACE_EMBED_PRELUDE}
+type B struct{}
+
+func (B) M() {}
+
+type AB struct {
+	Mer
+	B
+}
+
+func main() {
+	AB{}.M()
+}
+`,
+			),
+			"ambiguous selector",
+		);
+	});
+}
+
+test("an outer method shadows the embedded interface's", async () => {
+	await assertJsTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+type O struct{ Mer }
+
+func (O) M() { fmt.Println("O.M") }
+
+func main() {
+	var m Mer = O{T{}}
+	m.M()
+	O{T{}}.M()
+	O{T{}}.Mer.M()
+}
+`,
+		"O.M\nO.M\nT.M\n",
+	);
+});
+
+test("methods of an embedded interface run on the embedded value (js)", async () => {
+	await assertJsTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	var m Mer = S{T{}}
+	m.M()
+	S{T{}}.M()
+	var e error = W{errors.New("x")}
+	fmt.Println(e.Error())
+}
+`,
+		"T.M\nT.M\nx\n",
+	);
+});
+
+test("calling a method through a nil embedded interface panics (js)", async () => {
+	await assertJsTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	W{}.Error()
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
 });
 
 section("Promoted method sets in interface assertions");
