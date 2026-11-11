@@ -181,7 +181,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/backend/js/statements.js` (`LabeledStmt` case, `_genIteratorBranchStmt`, `_emitIterTargetDispatch`)
   - Test: `test/unit/language/range-func.test.js`: `L1: L2: for x := range seq { _ = x; continue L1 }` → `done`; `break L1` with a seq that honours `yield`'s result → `1\ndone`; `continue L2` → same as `continue L1`
   - Done when: `assertAllTargetsOutput` passes and no JS `SyntaxError`
-- [ ] Task 4.3: Box forwarded tuple elements into interface parameters in nested WASM calls (`I13`)
+- [x] Task 4.3: Box forwarded tuple elements into interface parameters in nested WASM calls (`I13`)
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitStaticCall`, `_multiForward` branch at `:1326`; also the method-call path in `src/backend/wasm/method-expr.js:351` if a probe shows `O{}.check(makePair())` nested)
   - Test: `test/unit/types/dynamic-types.test.js` (next to the 11-10 Phase 5 `makePair` tests): `if check(makePair())`, `var g = check(makePair())` and `wrap(check(makePair()))` → `ok` / `true true`; `check(makePair()) && side()` evaluates `makePair` before `side`
   - Done when: `assertProgramOutput` passes on `both` + `wasm`

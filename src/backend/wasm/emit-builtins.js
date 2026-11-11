@@ -1393,6 +1393,41 @@ export class BuiltinsEmitter {
 		this.releaseTemp(closureTmp, closureWType);
 	}
 
+	// `g(f())` that lowering left unsplit (it splits only statement operands):
+	// f's results go into locals, and g is called with idents carrying each
+	// element's interface-box marks, so each is boxed like any argument. Also
+	// used for method calls, whose argument path expects one value per
+	// parameter. Only when g's callee evaluates no call, so f() still runs
+	// before anything else the call evaluates.
+	_splitForwardedArgs(call) {
+		if (!call._multiForward || call.args?.length !== 1) return null;
+		const inner = call.args[0];
+		const types = inner?._type?.types;
+		if (!Array.isArray(types) || types.length === 0) return null;
+		const holders =
+			inner._fwdIface?.length === types.length ? inner._fwdIface : null;
+		const isMethod =
+			call.func?.kind === "SelectorExpr" &&
+			call.func.expr?._type?.kind !== "namespace";
+		if (!holders && !isMethod) return null;
+		if (hasCallOrReceive(call.func)) return null;
+		this.emitExpr(inner, null);
+		this._fwdArgCounter = (this._fwdArgCounter ?? 0) + 1;
+		const names = types.map((_, i) => `__fwdarg$${this._fwdArgCounter}$${i}`);
+		const locals = types.map((t, i) =>
+			this.allocLocal(names[i], this.toWasmType(t), t, true),
+		);
+		for (let i = locals.length - 1; i >= 0; i--)
+			this.pushInstruction({ op: "local.set", index: locals[i] });
+		const args = names.map((name, i) => ({
+			kind: "Ident",
+			name,
+			_type: types[i],
+			...(holders?.[i] ?? {}),
+		}));
+		return { ...call, args, _multiForward: false };
+	}
+
 	emitCallExpr(call, targetWasmType = null) {
 		if (call._isTypeConversion) {
 			this.emitTypeConversion({
@@ -1409,6 +1444,12 @@ export class BuiltinsEmitter {
 		}
 
 		if (this._emitBuiltinCall(call, targetWasmType)) {
+			return;
+		}
+
+		const forwarded = this._splitForwardedArgs(call);
+		if (forwarded) {
+			this.emitCallExpr(forwarded, targetWasmType);
 			return;
 		}
 
