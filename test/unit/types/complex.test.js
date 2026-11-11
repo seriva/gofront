@@ -591,6 +591,92 @@ func main() {
 	);
 });
 
+section("Complex: complex64 keeps float32 components in JavaScript");
+
+test("a typed complex64 constant and complex64 arithmetic round to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const kt complex64 = 1 + 0.01i
+
+func main() {
+	var c complex64 = 2
+	x := c * (1 + 0.01i)
+	fmt.Println(imag(kt) == 0.01, imag(x) == 0.02)
+}
+`,
+		"true true\n",
+	);
+});
+
+test("complex64 addition, subtraction, multiplication and division follow float32 results", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex64 = 2
+	var d complex64 = 1 + 0.1i
+	s := c + (1 + 0.01i)
+	fmt.Println(real(s), imag(s))
+	t := c - (1 + 0.01i)
+	fmt.Println(real(t), imag(t))
+	m := d * d
+	fmt.Println(real(m), imag(m))
+	q := c / (1 + 0.01i)
+	fmt.Println(real(q), imag(q))
+	fmt.Println(d * (3 + 0.7i))
+}
+`,
+		"3 0.01\n1 -0.01\n0.99 0.2\n1.9998 -0.019998\n(2.93+1i)\n",
+	);
+});
+
+test("complex64 compound assignment and local typed constants keep float32 components", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	const kt complex64 = 1 + 0.01i
+	var c complex64 = 2
+	c *= 1 + 0.01i
+	fmt.Println(imag(c) == 0.02, imag(kt) == 0.01)
+	var d complex64 = 2
+	d /= 1 + 0.01i
+	fmt.Println(real(d), imag(d))
+	d += kt
+	d -= kt
+	fmt.Println(real(d), imag(d))
+}
+`,
+		"true true\n1.9998 -0.019998\n1.9998 -0.019998\n",
+	);
+});
+
+test("complex128 arithmetic keeps full precision", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const k complex128 = 1 + 0.01i
+
+func main() {
+	var c complex128 = 2
+	x := c * (1 + 0.01i)
+	fmt.Println(imag(k) == 0.01, imag(x) == 0.02, x)
+	fmt.Println(c * c, c + (1 + 0.01i))
+}
+`,
+		"true true (2+0.02i)\n(4+0i) (3+0.01i)\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

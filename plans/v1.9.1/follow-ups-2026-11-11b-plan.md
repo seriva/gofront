@@ -166,19 +166,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2
   - Done when: `assertAllTargetsOutput` passes
 
 ### Phase 4: Statement and Call Codegen, Docs
-- [ ] Task 4.1: Box range assignments into interface-typed variables in WASM (`J01`)
+- [x] Task 4.1: Box range assignments into interface-typed variables in WASM (`J01`)
   - Files: `src/backend/wasm/emit-stmts.js` (`_emitRangeAssignStore` and its callers)
   - Test: `test/unit/language/range-assign.test.js`: `var a any; for a = range []int{5, 6}` → `1`; `for _, a = range []int{5, 6}` → `6`; `for a, b = range "hi"` → `1 105`; `for a, b = range map[string]int{"k": 3}` → `k 3`; `for a = range 3` → `2`; `var s fmt.Stringer` target with a `Stringer` slice element
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
-- [ ] Task 4.2: Convert captured range indexes into range-over-func closure environments in WASM (`J09`)
+- [x] Task 4.2: Convert captured range indexes into range-over-func closure environments in WASM (`J09`)
   - Files: `src/backend/wasm/emit.js` (yield-closure environment capture)
   - Test: `test/unit/language/range-func.test.js`: `L5: for i := range 2 { for x := range seq { if x == 2 { continue L5 }; fmt.Println(i, x) } }` → `0 1\n1 1`; unlabeled `break` variant; outer `range []int{0, 1}` variant; `break L5` → `0 1`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 4.3: Spread forwarded tuples in nil-checked interface method calls in JS (`J10`)
+- [x] Task 4.3: Spread forwarded tuples in nil-checked interface method calls in JS (`J10`)
   - Files: `src/backend/js/expressions.js` (strict interface-call path)
   - Test: `test/unit/types/dynamic-types.test.js` (next to the 11-11 `makePair` tests): `var c C = &O{}; fmt.Println(wrap(c.check(makePair())))` → `true`; `x := c.check(makePair())` → `true`; nil `c` → nil-dereference message
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 4.4: Round typed `complex64` constants and `complex64` arithmetic to float32 in JS (`J11`)
+- [x] Task 4.4: Round typed `complex64` constants and `complex64` arithmetic to float32 in JS (`J11`)
   - Files: `src/typechecker/assignability.js` (`_c64Const` tagging), `src/backend/js/expressions.js` (`_genComplexBinary`), `docs/go-compatibility.md` ("Complex constants" row, only if it no longer matches)
   - Test: `test/unit/types/complex.test.js`: `const kt complex64 = 1 + 0.01i; var c complex64 = 2; x := c * (1 + 0.01i); fmt.Println(imag(kt) == 0.01, imag(x) == 0.02)` → `true true`; `c + (1 + 0.01i)`, `c / (1 + 0.01i)` match Go's float32 results; `complex128` arithmetic prints unchanged
   - Done when: `assertAllTargetsOutput` passes and `docs/go-compatibility.md` contradicts none of Phases 1–4

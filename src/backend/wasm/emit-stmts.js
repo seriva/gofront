@@ -722,17 +722,26 @@ export class StmtsEmitter {
 
 	// Stores the value `emitValue` pushes into the variable `name` that a range
 	// assignment (`for k, v = range m`) targets: a plain local, a boxed local
-	// (its address is taken or a closure mutates it), or a global.
-	_emitRangeAssignStore(name, info, emitValue) {
+	// (its address is taken or a closure mutates it), or a global.  When the
+	// target is an interface, `valueGoType` is the Go type of the ranged
+	// element and the value is boxed into the interface representation;
+	// `emitValue` is then called with the wasm type of `valueGoType`.
+	_emitRangeAssignStore(name, info, emitValue, valueGoType = null) {
 		const local = this.resolveLocal(name);
+		const boxIface =
+			valueGoType && this._rangeStoreWType(name, info) === "anyref";
+		const pushValue = () => {
+			if (boxIface) this._emitRangeValueToAny(emitValue, valueGoType);
+			else emitValue();
+		};
 		if (!local) {
-			emitValue();
+			pushValue();
 			this.pushInstruction({ op: "global.set", index: info.index });
 			return;
 		}
 		if (local.isBoxed) {
 			this.pushInstruction({ op: "local.get", index: local.index });
-			emitValue();
+			pushValue();
 			this.pushInstruction({
 				op: "struct.set",
 				typeIndex: local.boxInfo.typeIndex,
@@ -740,8 +749,28 @@ export class StmtsEmitter {
 			});
 			return;
 		}
-		emitValue();
+		pushValue();
 		this.pushInstruction({ op: "local.set", index: info.index });
+	}
+
+	// Pushes a ranged element of Go type `goType` as an interface value.
+	// `emitValue(wType)` pushes the element in the wasm type of `goType`; an
+	// element that is already an interface needs no boxing.
+	_emitRangeValueToAny(emitValue, goType) {
+		const wType = this.toWasmType(goType);
+		if (wType === "anyref") {
+			emitValue(wType);
+			return;
+		}
+		const name = `__rangeval$${this.tempCounter++}`;
+		const idx = this.allocLocal(name, wType, goType, true);
+		emitValue(wType);
+		this.pushInstruction({ op: "local.set", index: idx });
+		this.emitExpr(
+			{ kind: "Ident", name, _type: goType, _parTmp: true },
+			"anyref",
+		);
+		this.locals.delete(name);
 	}
 
 	// The wasm type of the value a range assignment stores into `info`: the
@@ -2374,10 +2403,19 @@ export class StmtsEmitter {
 			if (idxLocalInfo) {
 				const name = lhs[0].name;
 				const wType = this._rangeStoreWType(name, idxLocalInfo);
-				this._emitRangeAssignStore(name, idxLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: idxTmp });
-					if (wType === "i64") this.pushInstruction("i64.extend_i32_s");
-				});
+				const idxGoType =
+					iterType?.kind === "untyped"
+						? { kind: "basic", name: "int" }
+						: iterType;
+				this._emitRangeAssignStore(
+					name,
+					idxLocalInfo,
+					(want = wType) => {
+						this.pushInstruction({ op: "local.get", index: idxTmp });
+						if (want === "i64") this.pushInstruction("i64.extend_i32_s");
+					},
+					idxGoType,
+				);
 			}
 
 			// Emit body
@@ -2488,20 +2526,30 @@ export class StmtsEmitter {
 
 			// Assign index variable
 			if (idxLocalInfo) {
-				this._emitRangeAssignStore(lhs[0].name, idxLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: idxTmp });
-					this.pushInstruction("i64.extend_i32_s");
-				});
+				this._emitRangeAssignStore(
+					lhs[0].name,
+					idxLocalInfo,
+					() => {
+						this.pushInstruction({ op: "local.get", index: idxTmp });
+						this.pushInstruction("i64.extend_i32_s");
+					},
+					{ kind: "basic", name: "int" },
+				);
 			}
 
 			// Assign rune variable
 			if (valLocalInfo) {
 				const name = lhs[1].name;
 				const wType = this._rangeStoreWType(name, valLocalInfo);
-				this._emitRangeAssignStore(name, valLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: runeTmp });
-					if (wType === "i64") this.pushInstruction("i64.extend_i32_u");
-				});
+				this._emitRangeAssignStore(
+					name,
+					valLocalInfo,
+					(want = wType) => {
+						this.pushInstruction({ op: "local.get", index: runeTmp });
+						if (want === "i64") this.pushInstruction("i64.extend_i32_u");
+					},
+					{ kind: "basic", name: "int32" },
+				);
 			}
 
 			// Body
@@ -2669,28 +2717,38 @@ export class StmtsEmitter {
 
 			// Assign key variable
 			if (keyLocalInfo) {
-				this._emitRangeAssignStore(lhs[0].name, keyLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: entryTmp });
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: mapInfo.entryTypeIndex,
-						fieldIndex: 0,
-					});
-					this._emitCopyMapEntry(keyType, mapInfo.keyWType);
-				});
+				this._emitRangeAssignStore(
+					lhs[0].name,
+					keyLocalInfo,
+					() => {
+						this.pushInstruction({ op: "local.get", index: entryTmp });
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: mapInfo.entryTypeIndex,
+							fieldIndex: 0,
+						});
+						this._emitCopyMapEntry(keyType, mapInfo.keyWType);
+					},
+					keyType,
+				);
 			}
 
 			// Assign val variable
 			if (valLocalInfo) {
-				this._emitRangeAssignStore(lhs[1].name, valLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: entryTmp });
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: mapInfo.entryTypeIndex,
-						fieldIndex: 1,
-					});
-					this._emitCopyMapEntry(valType, mapInfo.valWType);
-				});
+				this._emitRangeAssignStore(
+					lhs[1].name,
+					valLocalInfo,
+					() => {
+						this.pushInstruction({ op: "local.get", index: entryTmp });
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: mapInfo.entryTypeIndex,
+							fieldIndex: 1,
+						});
+						this._emitCopyMapEntry(valType, mapInfo.valWType);
+					},
+					valType,
+				);
 			}
 
 			// Body
@@ -2866,38 +2924,48 @@ export class StmtsEmitter {
 		if (idxLocalInfo) {
 			const name = lhs[0].name;
 			const wType = this._rangeStoreWType(name, idxLocalInfo);
-			this._emitRangeAssignStore(name, idxLocalInfo, () => {
-				this.pushInstruction({ op: "local.get", index: idxTmp });
-				if (wType === "i64") this.pushInstruction("i64.extend_i32_s");
-			});
+			this._emitRangeAssignStore(
+				name,
+				idxLocalInfo,
+				(want = wType) => {
+					this.pushInstruction({ op: "local.get", index: idxTmp });
+					if (want === "i64") this.pushInstruction("i64.extend_i32_s");
+				},
+				{ kind: "basic", name: "int" },
+			);
 		}
 
 		// Assign val
 		if (valLocalInfo) {
-			this._emitRangeAssignStore(lhs[1].name, valLocalInfo, () => {
-				this.pushInstruction({ op: "local.get", index: arrTmp });
-				this.pushInstruction({ op: "local.get", index: offTmp });
-				this.pushInstruction({ op: "local.get", index: idxTmp });
-				this.pushInstruction("i32.add");
-				this.pushInstruction({
-					op: "array.get",
-					typeIndex: arrInfo.typeIndex,
-				});
-				if (
-					isStructType(elemGoType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(elemGoType, this.mod.checker, this.mod)
-				) {
-					const sInfo = this._resolveStructInfo({ _type: elemGoType });
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, arrInfo.elemWType);
+			this._emitRangeAssignStore(
+				lhs[1].name,
+				valLocalInfo,
+				() => {
+					this.pushInstruction({ op: "local.get", index: arrTmp });
+					this.pushInstruction({ op: "local.get", index: offTmp });
+					this.pushInstruction({ op: "local.get", index: idxTmp });
+					this.pushInstruction("i32.add");
+					this.pushInstruction({
+						op: "array.get",
+						typeIndex: arrInfo.typeIndex,
+					});
+					if (
+						isStructType(elemGoType, this.mod.checker, this.mod) &&
+						!isPointerToStruct(elemGoType, this.mod.checker, this.mod)
+					) {
+						const sInfo = this._resolveStructInfo({ _type: elemGoType });
+						if (sInfo) {
+							this.emitCloneStruct(sInfo, arrInfo.elemWType);
+						}
+					} else if (
+						elemGoType?.kind !== "pointer" &&
+						isArrayType(elemGoType, this.mod.checker)
+					) {
+						this.emitCopyArray(elemGoType);
 					}
-				} else if (
-					elemGoType?.kind !== "pointer" &&
-					isArrayType(elemGoType, this.mod.checker)
-				) {
-					this.emitCopyArray(elemGoType);
-				}
-			});
+				},
+				elemGoType,
+			);
 		}
 
 		// Body

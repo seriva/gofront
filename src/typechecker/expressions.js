@@ -265,6 +265,8 @@ export const expressionCheckMethods = {
 				}
 				this._tagFloat32Const(lt, rt, expr.right);
 				this._tagFloat32Const(rt, lt, expr.left);
+				this._tagComplex64Const(lt, rt, expr.right);
+				this._tagComplex64Const(rt, lt, expr.left);
 				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 					expr.right._is64Bit = true;
 				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
