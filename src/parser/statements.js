@@ -2,6 +2,57 @@
 
 import { T } from "../lexer/tokens.js";
 
+// Statement keywords: none of them can appear inside a composite literal or a
+// statement header's expressions.
+const STMT_KEYWORDS = new Set([
+	T.VAR,
+	T.CONST,
+	T.TYPE,
+	T.IF,
+	T.ELSE,
+	T.FOR,
+	T.RETURN,
+	T.BREAK,
+	T.CONTINUE,
+	T.SWITCH,
+	T.CASE,
+	T.DEFAULT,
+	T.SELECT,
+	T.DEFER,
+	T.GO,
+	T.FALLTHROUGH,
+]);
+
+// Tokens that only appear in statements: a brace pair holding one at its top
+// level is a block, not a composite literal.
+const STMT_ONLY_TOKENS = new Set([
+	...STMT_KEYWORDS,
+	T.SEMICOLON,
+	T.ASSIGN,
+	T.DEFINE,
+	T.PLUS_ASSIGN,
+	T.MINUS_ASSIGN,
+	T.STAR_ASSIGN,
+	T.SLASH_ASSIGN,
+	T.PERCENT_ASSIGN,
+	T.AMP_ASSIGN,
+	T.PIPE_ASSIGN,
+	T.AND_NOT_ASSIGN,
+	T.CARET_ASSIGN,
+	T.LSHIFT_ASSIGN,
+	T.RSHIFT_ASSIGN,
+	T.INC,
+	T.DEC,
+]);
+
+const OPEN_BRACKETS = new Set([T.LBRACE, T.LPAREN, T.LBRACKET]);
+const CLOSE_BRACKETS = new Set([T.RBRACE, T.RPAREN, T.RBRACKET]);
+
+function bracketDelta(tt) {
+	if (OPEN_BRACKETS.has(tt)) return 1;
+	return CLOSE_BRACKETS.has(tt) ? -1 : 0;
+}
+
 // Method-name dispatch for pure-delegation cases in _parseStmt.
 const PARSE_STMT_DELEGATE = {
 	[T.VAR]: "parseVarDecl",
@@ -130,6 +181,7 @@ export const statementParserMethods = {
 		let cond;
 		// if init; cond { } — use noCompLit to avoid "{" being parsed as composite literal
 		const first = this.parseSimpleStmtRaw(true);
+		this._rejectHeaderCompositeLit("if", 0, first);
 		// Only treat as "init; cond" if semicolon is followed by a non-brace token
 		if (this.check(T.SEMICOLON) && this.peek2().type !== T.LBRACE) {
 			this.advance(); // consume ;
@@ -166,6 +218,7 @@ export const statementParserMethods = {
 		let first = null;
 		if (!this.check(T.SEMICOLON)) {
 			first = this.parseSimpleStmtRaw(true);
+			this._rejectHeaderCompositeLit("for", 1, first);
 
 			if (this.check(T.LBRACE)) {
 				// for k, v := range expr { }  — range stmt ends right before {
@@ -201,6 +254,59 @@ export const statementParserMethods = {
 		return { kind: "ForStmt", init: first, cond, post, body };
 	},
 
+	// `if s := &T{f: 1}; s.f > 0 {`: in a header, `{` after a type name opens
+	// the body, so Go requires the literal to be parenthesized.  Reported when
+	// the brace pair holds no statement tokens, is followed by an explicit `;`,
+	// and the header then continues to its body `{` (with at most `semis`
+	// further `;`, one for a `for` post statement).  A bare expression or a
+	// range clause before the `{` (`if ok { f() };`) means it is the body.
+	_rejectHeaderCompositeLit(keyword, semis, first) {
+		if (!this.check(T.LBRACE)) return;
+		if (first?.kind === "ExprStmt" || this.isRangeStmt(first)) return;
+		const prev = this.tokens[this.pos - 1]?.type;
+		if (prev !== T.IDENT && prev !== T.RBRACKET) return;
+		const close = this._closingBrace(this.pos);
+		if (close < 0) return;
+		const semi = this.tokens[close + 1];
+		if (semi?.type !== T.SEMICOLON || !this._isExplicitSemi(semi)) return;
+		if (!this._headerContinues(close + 2, semis)) return;
+		this.err(`composite literal in ${keyword} header must be parenthesized`);
+	},
+
+	// Index of the `}` matching the `{` at `open`, or -1 when the pair holds a
+	// statement-only token at its top level (then it is a block).
+	_closingBrace(open) {
+		let depth = 0;
+		for (let i = open; i < this.tokens.length; i++) {
+			const tt = this.tokens[i].type;
+			depth += bracketDelta(tt);
+			if (depth === 0) return tt === T.RBRACE ? i : -1;
+			if (tt === T.EOF || (depth === 1 && STMT_ONLY_TOKENS.has(tt))) return -1;
+		}
+		return -1;
+	},
+
+	_isExplicitSemi(tok) {
+		if (!this.source) return false;
+		this._sourceLines ??= this.source.split("\n");
+		return this._sourceLines[tok.line - 1]?.[tok.col - 1] === ";";
+	},
+
+	// Whether the tokens from `i` reach a top-level `{` (the body) without a
+	// statement keyword and with at most `semis` semicolons on the way.
+	_headerContinues(i, semis) {
+		let depth = 0;
+		for (; i < this.tokens.length; i++) {
+			const tt = this.tokens[i].type;
+			if (tt === T.LBRACE && depth === 0) return true;
+			depth += bracketDelta(tt);
+			if (tt === T.SEMICOLON && depth === 0) semis--;
+			if (depth < 0 || semis < 0) return false;
+			if (tt === T.EOF || STMT_KEYWORDS.has(tt)) return false;
+		}
+		return false;
+	},
+
 	isRangeStmt(stmt) {
 		if (!stmt) return false;
 		if (stmt.kind !== "DefineStmt" && stmt.kind !== "AssignStmt") return false;
@@ -213,6 +319,7 @@ export const statementParserMethods = {
 		let tag = null;
 		if (!this.check(T.LBRACE)) {
 			const first = this.parseSimpleStmtRaw(true);
+			this._rejectHeaderCompositeLit("switch", 0, first);
 			if (this.match(T.SEMICOLON)) {
 				init = first;
 				if (!this.check(T.LBRACE))

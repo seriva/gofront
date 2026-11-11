@@ -752,6 +752,144 @@ func main() {
 	);
 });
 
+section("Unparenthesized composite literals in statement headers");
+
+function headerErrorsOn(target, src) {
+	try {
+		if (target === "wasm") return compileWasm(src).errors ?? [];
+		return compile(src, { target }).errors ?? [];
+	} catch (e) {
+		return [{ message: e.message }];
+	}
+}
+
+const HEADER_PRELUDE =
+	"package main\ntype Other struct{ val int }\ntype S struct{}\n";
+
+for (const [name, body] of [
+	[
+		"if s := &Other{...}; in a method on *S",
+		"func (s *S) M() int {\n\tif s := &Other{val: 5}; s.val > 0 {\n\t\treturn s.val\n\t}\n\treturn 0\n}\nfunc main() { _ = (&S{}).M() }",
+	],
+	[
+		"if s := &Other{...}; in a plain function",
+		"func f() int {\n\tif s := &Other{val: 5}; s.val > 0 {\n\t\treturn s.val\n\t}\n\treturn 0\n}\nfunc main() { _ = f() }",
+	],
+	[
+		"if o := Other{...}; without &",
+		"func f() int {\n\tif o := Other{val: 5}; o.val > 0 {\n\t\treturn o.val\n\t}\n\treturn 0\n}\nfunc main() { _ = f() }",
+	],
+	[
+		"switch o := Other{...}; o.val",
+		"func main() {\n\tswitch o := Other{1}; o.val {\n\tcase 1:\n\t}\n}",
+	],
+	[
+		"for o := Other{...}; o.val < 3; o.val++",
+		"func main() {\n\tfor o := Other{1}; o.val < 3; o.val++ {\n\t}\n}",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} must be parenthesized (${target})`, () => {
+			const errs = headerErrorsOn(target, HEADER_PRELUDE + body);
+			assertErrorContains(errs, "must be parenthesized");
+		});
+	}
+}
+
+test("a parenthesized composite literal in an if header shadows the receiver", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Other struct{ val int }
+type S struct{}
+
+func (s *S) M() int {
+	if s := (&Other{val: 5}); s.val > 0 {
+		return s.val
+	}
+	return 0
+}
+
+func main() {
+	fmt.Println((&S{}).M())
+}
+`,
+		"5\n",
+	);
+});
+
+test("headers that are not composite literals keep parsing", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ n int }
+
+func (t T) f() int { return t.n }
+
+func get() bool { return true }
+
+func main() {
+	t := T{1}
+	if x := get(); x {
+		fmt.Println("x")
+	}
+	if (T{1}) == t {
+		fmt.Println("eq")
+	}
+	for _, v := range []T{{2}} {
+		fmt.Println(v.n)
+	}
+	switch x := (T{3}).f(); x {
+	case 3:
+		fmt.Println("three")
+	}
+	ok := true
+	if ok { fmt.Println("one-line") }; fmt.Println("after")
+	if ok {
+		fmt.Println("body")
+	}
+	fmt.Println(t.n)
+}
+`,
+		"x\neq\n2\nthree\none-line\nafter\nbody\n1\n",
+	);
+});
+
+for (const [name, stmts] of [
+	[
+		"if ok { f() }; then a block",
+		'\tif ok { f() };\n\t{\n\t\tprintln("block")\n\t}',
+	],
+	[
+		"if ok { f() }; then a map literal",
+		'\tif ok { f() }; a := map[string]int{"a": 1}\n\t_ = a',
+	],
+	[
+		"for ok { f() }; then a block",
+		'\tfor ok { f(); break };\n\t{\n\t\tprintln("block")\n\t}',
+	],
+	[
+		"switch ok {}; then a block",
+		'\tswitch ok {};\n\t{\n\t\tprintln("block")\n\t}',
+	],
+	[
+		"for range { f() }; then a block",
+		'\t_ = ok\n\tfor _, v := range []int{1} { _ = v };\n\t{\n\t\tprintln("block")\n\t}',
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} still compiles (${target})`, () => {
+			const src = `package main\nfunc f() {}\nfunc main() {\n\tok := true\n${stmts}\n}`;
+			const errs = headerErrorsOn(target, src);
+			assertEqual(errs.map((e) => e.message).join("; "), "");
+		});
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

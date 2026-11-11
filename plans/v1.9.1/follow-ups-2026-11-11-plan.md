@@ -123,19 +123,19 @@ All 14 ledger entries re-probed on `feat/follow-ups-2026-11-10` @ `dbd2d435` wit
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`–`I14`). Each task's `Test:` asserts the repro from `Verified Gaps`.
 
 ### Phase 1: Typechecker and Parser Diagnostics
-- [ ] Task 1.1: Allow `comparable` as an embedded constraint element (`I02`)
+- [x] Task 1.1: Allow `comparable` as an embedded constraint element (`I02`)
   - Files: `src/typechecker/resolve.js`
   - Test: `test/unit/types/generics.test.js`: `interface{ ~int; comparable }` with `h(3)` prints `3` (`assertProgramOutput`); `interface{ comparable; M() }` with `a == b` prints `true`; negative `h([]int{})` against `interface{ comparable; ~[]int }` → `assertErrorContains(…, "does not satisfy")`; `var x interface{ comparable }` → `outside a type constraint`
   - Done when: the three positive programs run on `both` + `wasm` and both negatives report on every target (and `_reportConstraintUse` flags embedded `_comparable` interfaces as value types)
-- [ ] Task 1.2: Require a type assertion for `I(a)` with `a any` and `I` non-empty (`I03`)
+- [x] Task 1.2: Require a type assertion for `I(a)` with `a any` and `I` non-empty (`I03`)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`: `var a any; _ = I(a)` → `assertErrorContains(…, "need type assertion")` on every target; `I(a.(I))`, `I(T{})`, `I(nil)` still compile
   - Done when: the negative fails on `js`, `both`, `wasm` and the positives print as Go
-- [ ] Task 1.3: Check the range index type in range assignments (`I09`)
+- [x] Task 1.3: Check the range index type in range assignments (`I09`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/language/range-assign.test.js`: `var i int32; for i = range "abc"` and `for i = range []int{1,2}` → `assertErrorContains(…, "Cannot assign int to int32")`; `var i int32; for i = range 3` prints `2`; `var i int; for i = range "abc"` prints `2`
   - Done when: both negatives report on every target (no invalid WASM reaches the backend; index type checked strictly without `_isNumericCoercible` exception) and the positives pass `assertProgramOutput`
-- [ ] Task 1.4: Report unparenthesized composite literals in `if`/`switch`/`for` headers (`I12`)
+- [x] Task 1.4: Report unparenthesized composite literals in `if`/`switch`/`for` headers (`I12`)
   - Files: `src/parser/statements.js` (header parsing), `src/parser/expressions.js` (speculative scan helper, if needed)
   - Test: `test/unit/language/control-flow.test.js`: `if s := &Other{val: 5}; s.val > 0 {` with and without a receiver, and `Other{val: 5}` without `&` → `assertErrorContains(…, "must be parenthesized")`; `if s := (&Other{val: 5}); s.val > 0` inside `func (s *S) M()` prints `5`
   - Done when: the misleading `No field 'val' on S` / `Undefined: 's'` no longer appear for these programs and the edge cases in Approach §3 keep their current behaviour
