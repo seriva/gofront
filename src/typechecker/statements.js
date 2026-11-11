@@ -24,6 +24,7 @@ import {
 	isAny,
 	isBool,
 	isNil,
+	isString,
 	isUntyped,
 	isVoid,
 	iteratorYieldParams,
@@ -292,7 +293,32 @@ export const statementCheckMethods = {
 			}
 		}
 		const lhsTypes = stmt.lhs.map((e) => this._checkAssignLhsType(e, scope));
+		// A rejected range index is not checked again as an ordinary value.
+		if (this._checkRangeIndexAssign(stmt, lhsTypes))
+			rhsFlat = [ANY, ...rhsFlat.slice(1)];
 		this._checkAssignTypes(stmt, rhsFlat, lhsTypes);
+	},
+
+	// The index of a string, slice or array range is a typed `int`: Go assigns
+	// it only to `int` (or an interface), never to another integer type.
+	_checkRangeIndexAssign(stmt, lhsTypes) {
+		const range = stmt.rhs[0];
+		const lhs = stmt.lhs[0];
+		if (range?.kind !== "RangeExpr" || range._isIterator) return false;
+		if (!lhs || (lhs.kind === "Ident" && lhs.name === "_")) return false;
+		const target = lhsTypes[0];
+		if (!target || isAny(target) || typeStr(target) === "int") return false;
+		const coll = this.resolveType(range.expr._coreType ?? range.expr._type);
+		const cu =
+			coll?.kind === "named" ? this.resolveType(coll.underlying) : coll;
+		if (!isString(cu) && cu?.kind !== "slice" && cu?.kind !== "array")
+			return false;
+		const tu = this.resolveType(
+			target.kind === "named" ? target.underlying : target,
+		);
+		if (tu?.kind === "interface") return false;
+		this.err(`Cannot assign int to ${typeStr(target)}`, lhs);
+		return true;
 	},
 
 	_checkReturnStmt(stmt, scope, returnType) {

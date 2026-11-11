@@ -131,7 +131,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/any-assertion.test.js`: `var a any; _ = I(a)` → `assertErrorContains(…, "need type assertion")` on every target; `I(a.(I))`, `I(T{})`, `I(nil)` still compile
   - Done when: the negative fails on `js`, `both`, `wasm` and the positives print as Go
-- [ ] Task 1.3: Check the range index type in range assignments (`I09`)
+- [x] Task 1.3: Check the range index type in range assignments (`I09`)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/language/range-assign.test.js`: `var i int32; for i = range "abc"` and `for i = range []int{1,2}` → `assertErrorContains(…, "Cannot assign int to int32")`; `var i int32; for i = range 3` prints `2`; `var i int; for i = range "abc"` prints `2`
   - Done when: both negatives report on every target (no invalid WASM reaches the backend; index type checked strictly without `_isNumericCoercible` exception) and the positives pass `assertProgramOutput`

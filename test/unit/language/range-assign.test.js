@@ -1,7 +1,15 @@
 // GoFront test suite — range assignment into address-taken variables
 
 import { fileURLToPath } from "node:url";
-import { assertProgramOutput, section, summarize, test } from "../helpers.js";
+import {
+	assertErrorContains,
+	assertProgramOutput,
+	compile,
+	compileWasm,
+	section,
+	summarize,
+	test,
+} from "../helpers.js";
 
 section("Range assignment: address-taken map range variables");
 
@@ -213,6 +221,67 @@ func main() {
 }
 `,
 		"2\n",
+	);
+});
+
+section("Range assignment: the index of a string, slice or array range is int");
+
+function rangeErrorsOn(target, src) {
+	if (target === "wasm") return compileWasm(src).errors ?? [];
+	return compile(src, { target }).errors ?? [];
+}
+
+for (const [name, src, want] of [
+	[
+		"for i = range s with i int32 and s a string",
+		'package main\nfunc main() {\n\tvar i int32\n\tfor i = range "abc" {\n\t\t_ = i\n\t}\n}',
+		"Cannot assign int to int32",
+	],
+	[
+		"for i = range s with i int32 and s a slice",
+		"package main\nfunc main() {\n\tvar i int32\n\tfor i = range []int{1, 2} {\n\t\t_ = i\n\t}\n}",
+		"Cannot assign int to int32",
+	],
+	[
+		"for i = range a with i int32 and a an array pointer",
+		"package main\nfunc main() {\n\ta := [2]int{1, 2}\n\tvar i int32\n\tfor i = range &a {\n\t\t_ = i\n\t}\n}",
+		"Cannot assign int to int32",
+	],
+	[
+		"for i, _ = range s with i a defined int type",
+		'package main\ntype MyInt int\nfunc main() {\n\tvar i MyInt\n\tfor i, _ = range []string{"a"} {\n\t\t_ = i\n\t}\n}',
+		"Cannot assign int to MyInt",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(rangeErrorsOn(target, src), want);
+		});
+	}
+}
+
+test("range 3 into int32, a string range into int and map keys still assign", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var i int32
+	for i = range 3 {
+	}
+	fmt.Println(i)
+	var j int
+	for j = range "abc" {
+	}
+	fmt.Println(j)
+	var k string
+	for k = range map[string]int{"a": 1} {
+	}
+	fmt.Println(k)
+}
+`,
+		"2\n2\na\n",
 	);
 });
 
