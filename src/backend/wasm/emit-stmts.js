@@ -3744,7 +3744,7 @@ export class StmtsEmitter {
 	}
 
 	emitBranchStmt(stmt) {
-		const alias = stmt.label && this._labelAliases?.get(stmt.label);
+		const alias = stmt.label && this._stackedLabelAlias(stmt.label);
 		if (alias) stmt = { ...stmt, label: alias };
 		if (this._tryEmitYieldBranch(stmt)) return;
 		const isContinue = stmt.keyword === "continue";

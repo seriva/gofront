@@ -421,7 +421,10 @@ export const statementGenMethods = {
 					labels.push(body.label);
 					body = body.body;
 				}
-				if (body?.kind === "ForStmt") body.label = labels[labels.length - 1];
+				if (body?.kind === "ForStmt") {
+					body.label = labels[labels.length - 1];
+					body.labels = labels;
+				}
 				const hoisted = this._hoistForInit(body);
 				for (const label of labels) this.line(`${label}:`);
 				// Labels in scope of the JS function being emitted (see
@@ -1252,7 +1255,7 @@ export const statementGenMethods = {
 				this.line(`${stmt.keyword} ${stmt.label};`);
 			return;
 		}
-		if (stmt.label === this._currentIterLoopLabel) {
+		if (this._currentIterLoopLabels?.includes(stmt.label)) {
 			if (stmt.keyword === "continue") this.line("return true;");
 			else if (stmt.keyword === "break")
 				this.line(`${this._iterBreakFlag} = true; return false;`);
@@ -1376,10 +1379,8 @@ export const statementGenMethods = {
 		const isInner = this._inIteratorBody;
 		if (isInner) {
 			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
-			if (stmt.label) {
-				this._innerLoopLabels = this._innerLoopLabels ?? new Set();
-				this._innerLoopLabels.add(stmt.label);
-			}
+			this._innerLoopLabels = this._innerLoopLabels ?? new Set();
+			for (const l of this._loopLabels(stmt)) this._innerLoopLabels.add(l);
 		}
 		try {
 			if (this.isRangeFor(stmt)) {
@@ -1407,7 +1408,7 @@ export const statementGenMethods = {
 		} finally {
 			if (isInner) {
 				this._iterLoopDepth--;
-				if (stmt.label) this._innerLoopLabels.delete(stmt.label);
+				for (const l of this._loopLabels(stmt)) this._innerLoopLabels.delete(l);
 			}
 		}
 	},
@@ -1814,7 +1815,12 @@ export const statementGenMethods = {
 		return `__s(${iteree}).entries()`;
 	},
 
-	_emitIterTargetDispatch(targetFlag, ownLabel = null) {
+	// Every label of a loop: stacked labels (`a: b: for ...`) all name it.
+	_loopLabels(stmt) {
+		return stmt.labels ?? (stmt.label ? [stmt.label] : []);
+	},
+
+	_emitIterTargetDispatch(targetFlag, ownLabels = []) {
 		// The loop's own label is handled inside the callback (`break` and
 		// `continue` of the range-over-func loop), and a JS `continue` cannot
 		// name the labeled block that wraps it.  Only the labels of statements
@@ -1823,7 +1829,9 @@ export const statementGenMethods = {
 		// label is handled like a branch in its body, and any other label is
 		// passed on to the next dispatcher.
 		const inIter = this._inIteratorBody;
-		const labels = (this._jsLabels ?? []).filter((l) => l.name !== ownLabel);
+		const labels = (this._jsLabels ?? []).filter(
+			(l) => !ownLabels.includes(l.name),
+		);
 		this.line(`if (${targetFlag}) {`);
 		this.indented(() => {
 			for (const { name, loop } of labels) {
@@ -1834,8 +1842,7 @@ export const statementGenMethods = {
 					);
 			}
 			if (!inIter) return;
-			const encl = this._currentIterLoopLabel;
-			if (encl) {
+			for (const encl of this._currentIterLoopLabels ?? []) {
 				this.line(`if (${targetFlag} === "continue$${encl}") return true;`);
 				this.line(
 					`if (${targetFlag} === "break$${encl}") { ${this._iterBreakFlag} = true; return false; }`,
@@ -1851,7 +1858,7 @@ export const statementGenMethods = {
 		paramsStr,
 		body,
 		assignPreamble = null,
-		loopLabel = null,
+		loopLabels = [],
 	) {
 		let iteree = this.genExpr(itereeExpr);
 		if (itereeExpr.kind === "FuncLit") {
@@ -1890,7 +1897,7 @@ export const statementGenMethods = {
 					ret: this._iterReturnFlag,
 					retVar: this._iterReturnVar,
 					target: this._iterTargetFlag,
-					loopLabel: this._currentIterLoopLabel,
+					loopLabels: this._currentIterLoopLabels,
 					loopDepth: this._iterLoopDepth,
 					innerLabels: this._innerLoopLabels,
 					jsLabels: this._jsLabels,
@@ -1900,7 +1907,7 @@ export const statementGenMethods = {
 				this._iterReturnFlag = retFlag;
 				this._iterReturnVar = retVar;
 				this._iterTargetFlag = targetFlag;
-				this._currentIterLoopLabel = loopLabel;
+				this._currentIterLoopLabels = loopLabels;
 				this._iterLoopDepth = 0;
 				// Loops of an enclosing callback are not JS labels in this one.
 				this._innerLoopLabels = new Set();
@@ -1914,7 +1921,7 @@ export const statementGenMethods = {
 				this._iterReturnFlag = prev.ret;
 				this._iterReturnVar = prev.retVar;
 				this._iterTargetFlag = prev.target;
-				this._currentIterLoopLabel = prev.loopLabel;
+				this._currentIterLoopLabels = prev.loopLabels;
 				this._iterLoopDepth = prev.loopDepth;
 				this._innerLoopLabels = prev.innerLabels;
 				this._jsLabels = prev.jsLabels;
@@ -1923,7 +1930,7 @@ export const statementGenMethods = {
 			});
 			this.line("});");
 			this.line(`if (${retFlag}) return ${retVar};`);
-			this._emitIterTargetDispatch(targetFlag, loopLabel);
+			this._emitIterTargetDispatch(targetFlag, loopLabels);
 		});
 		this.line("}");
 		this._iterDepth--;
@@ -1958,7 +1965,7 @@ export const statementGenMethods = {
 				params,
 				stmt.body,
 				assignPreamble,
-				stmt.label ?? null,
+				this._loopLabels(stmt),
 			);
 			return;
 		}
@@ -1983,7 +1990,7 @@ export const statementGenMethods = {
 			params,
 			stmt.body,
 			clonePreamble,
-			stmt.label ?? null,
+			this._loopLabels(stmt),
 		);
 	},
 
@@ -1994,7 +2001,7 @@ export const statementGenMethods = {
 			"",
 			stmt.body,
 			null,
-			stmt.label ?? null,
+			this._loopLabels(stmt),
 		);
 	},
 

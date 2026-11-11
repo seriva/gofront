@@ -177,7 +177,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11, `I01`�
   - Files: `src/backend/js/statements.js` (`genSwitch` / `_switchTagAndCases`)
   - Test: `test/unit/types/switch-cases.test.js`: `var m map[string]int; switch m { case nil: fmt.Println("m nil") }` → `m nil`; `m := map[string]int{}` with `default` → `non-nil`; defined map type `type MM map[string]int` → `m nil`
   - Done when: `assertAllTargetsOutput` passes (using helper `__isnm`)
-- [ ] Task 4.2: Treat every stacked label as the range-over-func loop's own label in JS (`I04`)
+- [x] Task 4.2: Treat every stacked label as the range-over-func loop's own label in JS (`I04`)
   - Files: `src/backend/js/statements.js` (`LabeledStmt` case, `_genIteratorBranchStmt`, `_emitIterTargetDispatch`)
   - Test: `test/unit/language/range-func.test.js`: `L1: L2: for x := range seq { _ = x; continue L1 }` → `done`; `break L1` with a seq that honours `yield`'s result → `1\ndone`; `continue L2` → same as `continue L1`
   - Done when: `assertAllTargetsOutput` passes and no JS `SyntaxError`
