@@ -2,8 +2,10 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertErrorContains,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	compileWasm,
 	section,
@@ -282,6 +284,130 @@ func main() {
 }
 `,
 		"2\n2\na\n",
+	);
+});
+
+section("Range assignment: targets of interface type");
+
+test("an index or value assigned into a declared any is boxed", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any
+	for a = range []int{5, 6} {
+	}
+	fmt.Println(a)
+	for _, a = range []int{5, 6} {
+	}
+	fmt.Println(a)
+	for a = range 3 {
+	}
+	fmt.Println(a)
+	for _, a = range [2]string{"x", "y"} {
+	}
+	fmt.Println(a)
+}
+`,
+		"1\n6\n2\ny\n",
+	);
+});
+
+test("string and map ranges assign into any targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a, b any
+	for a, b = range "hi" {
+	}
+	fmt.Println(a, b)
+	for a, b = range map[string]int{"k": 3} {
+	}
+	fmt.Println(a, b)
+	var s any
+	for s = range map[string]int{"k": 3} {
+	}
+	_, isStr := s.(string)
+	fmt.Println(s, isStr)
+}
+`,
+		"1 105\nk 3\nk true\n",
+	);
+});
+
+test("range assigns into fmt.Stringer and error targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type N int
+
+func (n N) String() string { return fmt.Sprintf("N%d", int(n)) }
+
+func main() {
+	var s fmt.Stringer
+	for _, s = range []fmt.Stringer{N(1), N(2)} {
+	}
+	fmt.Println(s)
+	var e error
+	for _, e = range []error{errors.New("a"), errors.New("b")} {
+	}
+	fmt.Println(e)
+}
+`,
+		"N2\nb\n",
+	);
+});
+
+test("a range over a slice of a defined type assigns into fmt.Stringer on WebAssembly", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type N int
+
+func (n N) String() string { return fmt.Sprintf("N%d", int(n)) }
+
+func main() {
+	var s fmt.Stringer
+	for _, s = range []N{3, 4} {
+	}
+	fmt.Println(s)
+}
+`,
+		"N4\n",
+	);
+});
+
+test("a captured any target and a ranged any keep boxing", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any
+	f := func() { fmt.Println(a) }
+	for _, a = range []int{7, 8} {
+	}
+	f()
+	p := &a
+	for a = range 4 {
+	}
+	fmt.Println(*p)
+}
+`,
+		"8\n3\n",
 	);
 });
 
