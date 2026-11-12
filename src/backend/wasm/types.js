@@ -498,6 +498,7 @@ function isReplaceableRef(goType, checker) {
 	return (
 		isSliceType(goType, checker) ||
 		isMapType(goType, checker) ||
+		isComplex(goType) ||
 		t?.kind === "pointer" ||
 		t?.kind === "PointerType"
 	);

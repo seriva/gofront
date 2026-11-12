@@ -146,6 +146,20 @@ function deferCalleeMayRecover(funcExpr, ctx) {
 	return true;
 }
 
+const NUMERIC_BASIC =
+	/^(u?int(8|16|32|64)?|uintptr|float(32|64)|complex(64|128))$/;
+
+// The type of the temporary that holds deferred argument `a`: an untyped
+// constant takes its basic numeric parameter's type (`defer f(2)` with a
+// `float64` or `complex128` parameter), as it does in a direct call.
+function deferTempType(funcType, a, argType) {
+	if (argType?.kind !== "untyped") return argType;
+	const param = funcType?.params?.[a];
+	return param?.kind === "basic" && NUMERIC_BASIC.test(param.name)
+		? param
+		: argType;
+}
+
 function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 	if (stmt.call?.kind !== "CallExpr") return 0;
 	const call = stmt.call;
@@ -248,16 +262,32 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 			} else {
 				defargCounter++;
 				const tempName = `__defarg$${defargCounter}`;
+				const tempType = deferTempType(call.func?._type, a, arg._type);
 				tempIdents.push({
 					kind: "Ident",
 					name: tempName,
-					_type: arg._type,
+					_type: tempType,
 				});
-				tempStmts.push({
-					kind: "DefineStmt",
-					lhs: [{ kind: "Ident", name: tempName, _type: arg._type }],
-					rhs: [arg],
-				});
+				tempStmts.push(
+					tempType === arg._type
+						? {
+								kind: "DefineStmt",
+								lhs: [{ kind: "Ident", name: tempName, _type: tempType }],
+								rhs: [arg],
+							}
+						: {
+								// Declared with the parameter's type so the lowered code
+								// type-checks again with the constant converted.
+								kind: "VarDecl",
+								decls: [
+									{
+										names: [tempName],
+										type: { kind: "TypeName", name: tempType.name },
+										value: [arg],
+									},
+								],
+							},
+				);
 			}
 		}
 	}
