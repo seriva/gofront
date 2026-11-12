@@ -149,9 +149,33 @@ function deferCalleeMayRecover(funcExpr, ctx) {
 const NUMERIC_BASIC =
 	/^(u?int(8|16|32|64)?|uintptr|float(32|64)|complex(64|128))$/;
 
+// A constant argument (`2.5`, `"a"`, `nil`, `k` for a constant `k`, `-1`)
+// has no value to capture at the `defer` statement, so it stays in the
+// deferred call, where it takes the callee's parameter type exactly as in a
+// direct call.  Hoisting it into a temporary would default its type (`float64`,
+// `int`) and reject a defined-type, interface, pointer or generic parameter.
+function isDeferConstant(arg) {
+	if (arg?.kind === "BasicLit" && arg.litKind === "NIL") return true;
+	if (arg?._type?.kind !== "untyped") return false;
+	if (arg._const) return true;
+	switch (arg.kind) {
+		case "BasicLit":
+		case "ImagLit":
+			return true;
+		case "ParenExpr":
+			return isDeferConstant(arg.expr);
+		case "UnaryExpr":
+			return isDeferConstant(arg.operand);
+		case "BinaryExpr":
+			return isDeferConstant(arg.left) && isDeferConstant(arg.right);
+		default:
+			return false;
+	}
+}
+
 // The type of the temporary that holds deferred argument `a`: an untyped
-// constant takes its basic numeric parameter's type (`defer f(2)` with a
-// `float64` or `complex128` parameter), as it does in a direct call.
+// non-constant value takes its basic numeric parameter's type, as it does in
+// a direct call.
 function deferTempType(funcType, a, argType) {
 	if (argType?.kind !== "untyped") return argType;
 	const param = funcType?.params?.[a];
@@ -259,6 +283,8 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 					lhs: tupleLhs,
 					rhs: [arg],
 				});
+			} else if (isDeferConstant(arg)) {
+				tempIdents.push(arg);
 			} else {
 				defargCounter++;
 				const tempName = `__defarg$${defargCounter}`;

@@ -1,16 +1,53 @@
 // test/unit/wasm/defer_recover.test.js
 // Tests for Task H4.4: Defer & Recover in WASM backend and JS-strict parity.
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { compileFiles, evictParseCache } from "../../../src/compiler.js";
 import {
 	assertAllTargetsOutput,
 	assertEqual,
+	assertJsTargetsOutput,
 	assertProgramOutput,
+	assertValidWasm,
 	compileHybrid,
 	compileWasm,
 	runWasm,
 	section,
 	test,
 } from "../helpers.js";
+
+// Compiles `source` twice on one path for each target, as `gofront dev` does
+// when the file is unchanged: the second type-check sees the lowered syntax
+// tree the first compile left in the parse cache, so a deferred call's
+// hoisted temporaries must type-check again.
+function assertRecompiles(source) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-defer-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		for (const target of ["js", "both", "wasm"]) {
+			try {
+				compileFiles([goPath], { forceTarget: target });
+				const second = compileFiles([goPath], { forceTarget: target });
+				if (target === "wasm") assertValidWasm(second.wasm);
+			} catch (e) {
+				throw new Error(`${target}: second compile failed: ${e.message}`);
+			} finally {
+				evictParseCache(goPath);
+			}
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+// `assertAllTargetsOutput` plus a second compile of the same file.
+async function assertDeferOutput(source, expected) {
+	await assertAllTargetsOutput(source, expected);
+	assertRecompiles(source);
+}
 
 section("WASM Defer — LIFO Execution Order");
 
@@ -841,4 +878,107 @@ func main() {
 }
 `;
 	await assertAllTargetsOutput(src, "body\n2 3 1\n");
+});
+
+section("WASM Defer — constants and nil for the callee's parameter");
+
+test("untyped constants take a defined parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyFloat float64
+type MyInt int
+type MyS string
+
+func f(x MyFloat, n MyInt, s MyS) { fmt.Println(x, n, s) }
+
+func main() {
+	defer f(2.5, 3, "a")
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n2.5 3 a\n");
+});
+
+test("a named constant and a constant expression take the parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyFloat float64
+
+const k = 1.5
+
+func f(x MyFloat, y MyFloat) { fmt.Println(x, y) }
+
+func main() {
+	defer f(k, k*2+1)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n1.5 4\n");
+});
+
+test("an untyped bool value is computed at the defer statement", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(b bool) { fmt.Println(b) }
+
+func main() {
+	x := 1
+	defer f(x == 1)
+	x = 2
+}
+`;
+	await assertDeferOutput(src, "true\n");
+});
+
+test("defer f(nil) for every nilable parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+func fp(p *int)               { fmt.Println("ptr", p == nil) }
+func fs(p fmt.Stringer)       { fmt.Println("stringer", p == nil) }
+func fe(p error)              { fmt.Println("error", p == nil) }
+func fa(p any)                { fmt.Println("any", p == nil) }
+func fl(p []int)              { fmt.Println("slice", p == nil) }
+func fm(p map[string]int)     { fmt.Println("map", p == nil) }
+func ff(p func())             { fmt.Println("func", p == nil) }
+
+func main() {
+	defer fp(nil)
+	defer fs(nil)
+	defer fe(nil)
+	defer fa(nil)
+	defer fl(nil)
+	defer fm(nil)
+	defer ff(nil)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(
+		src,
+		"body\nfunc true\nmap true\nslice true\nany true\nerror true\nstringer true\nptr true\n",
+	);
+});
+
+test("a typed nil variable is still evaluated at the defer statement", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(p *int) { fmt.Println(p == nil) }
+
+func main() {
+	var p *int
+	defer f(p)
+	v := 1
+	p = &v
+}
+`;
+	await assertDeferOutput(src, "true\n");
 });
