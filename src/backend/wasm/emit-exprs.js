@@ -2513,10 +2513,26 @@ export class ExprsEmitter {
 		this.releaseTemp(bTmp, arrWType);
 	}
 
+	// Equality of two complex values on the stack -> i32.
+	_emitComplexElemEq(goType, wType) {
+		const info = this.mod.getComplexType(
+			isComplex64(goType) ? "complex64" : "complex128",
+		);
+		const bTmp = this.acquireTemp(wType);
+		const aTmp = this.acquireTemp(wType);
+		this.pushInstruction({ op: "local.set", index: bTmp });
+		this.pushInstruction({ op: "local.set", index: aTmp });
+		this._emitComplexEq(aTmp, bTmp, info, info.elemWType, "==");
+		this.releaseTemp(aTmp, wType);
+		this.releaseTemp(bTmp, wType);
+	}
+
 	// Equality of two array elements on the stack -> i32.
 	_emitElemEq(goType, wType) {
 		if (this._isValueArray(goType)) {
 			this._emitArrayEq(goType);
+		} else if (isComplex(goType)) {
+			this._emitComplexElemEq(goType, wType);
 		} else if (
 			isStructType(goType, this.mod.checker, this.mod) &&
 			!isPointerToStruct(goType, this.mod.checker, this.mod)

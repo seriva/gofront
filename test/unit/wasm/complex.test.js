@@ -572,3 +572,52 @@ func main() {
 `;
 	await assertAllTargetsOutput(src, "(1+2i) (1+2i)\n(0+5i)\n(0+6i)\n");
 });
+
+section("WASM Complex — switch on a complex tag");
+
+test("switch on a complex tag with constant and complex cases", async () => {
+	const src = `package main
+
+import "fmt"
+
+func kind(c complex128) string {
+	switch c {
+	case 2:
+		return "two"
+	case 2i:
+		return "two i"
+	case 2, 3i:
+		return "list"
+	case complex(1, 1):
+		return "one plus i"
+	default:
+		return "other"
+	}
+}
+
+func main() {
+	var c complex128 = 2
+	switch c {
+	case 2:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	fmt.Println(kind(2), kind(2i), kind(3i), kind(complex(1, 1)), kind(5))
+	var h complex64 = 1.5
+	switch h {
+	case 1.5:
+		fmt.Println("half")
+	}
+	switch h {
+	case 1:
+		fmt.Println("one")
+	}
+	fmt.Println("done")
+}
+`;
+	await assertAllTargetsOutput(
+		src,
+		"hit\ntwo two i list one plus i other\nhalf\ndone\n",
+	);
+});

@@ -272,7 +272,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
   - Files: `src/backend/wasm/emit-stmts.js` (assignment and compound assignment through `*p`)
   - Test: `test/unit/wasm/complex.test.js`: `p := &c; *p = 9` → `(9+0i)`; `*p += 2`; `**q = 9`; `complex64` `*p = 9`; `*m["a"] = 4` (map of `*complex128`); `p.c = 2` unchanged (`assertWasmProgramOutput` plus `assertValidWasm`; the same programs run on JS via `assertAllTargetsOutput`)
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 7.2: Compare a complex `switch` tag with constant and complex cases in WASM (`K06` switch)
+- [x] Task 7.2: Compare a complex `switch` tag with constant and complex cases in WASM (`K06` switch)
   - Files: `src/backend/wasm/emit-stmts.js` (`emitSwitchStmt` case comparison)
   - Test: `test/unit/wasm/complex.test.js`: `var c complex128 = 2; switch c { case 2: … }` → hit; `case 2i`, `case 2, 3i`, `complex64` tag with `case 1.5`; default branch; no match
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds

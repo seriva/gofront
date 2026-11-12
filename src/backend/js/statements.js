@@ -2151,6 +2151,19 @@ export const statementGenMethods = {
 				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
 			};
 		}
+		if (stmt.tag && isComplex(stmt.tag._type)) {
+			// A complex tag is an object: cases compare its parts.
+			this._swCounter = (this._swCounter ?? 0) + 1;
+			const tmp = `__sw${this._swCounter}`;
+			this.line(`const ${tmp} = ${tag};`);
+			return {
+				tag: "true",
+				caseExpr: (e) => {
+					const c = this._genComplexOperand(e);
+					return `(${tmp}.re === ${c}.re && ${tmp}.im === ${c}.im)`;
+				},
+			};
+		}
 		if (stmt.tag && this._isMapTag(stmt.tag)) {
 			// A nil map is a sentinel object in JS, not `null`: `case nil`
 			// goes through `__isnm`, as `m == nil` does.
@@ -2219,6 +2232,7 @@ export const statementGenMethods = {
 			stmt.tag &&
 			(this._isStructOrArrayType(stmt.tag._type) ||
 				this._isIfaceType(stmt.tag._type) ||
+				isComplex(stmt.tag._type) ||
 				this._isMapTag(stmt.tag))
 		) {
 			// The tag temporary is a `const`, which cannot directly follow a label.
