@@ -146,9 +146,6 @@ function deferCalleeMayRecover(funcExpr, ctx) {
 	return true;
 }
 
-const NUMERIC_BASIC =
-	/^(u?int(8|16|32|64)?|uintptr|float(32|64)|complex(64|128))$/;
-
 // A constant argument (`2.5`, `"a"`, `nil`, `k` for a constant `k`, `-1`)
 // has no value to capture at the `defer` statement, so it stays in the
 // deferred call, where it takes the callee's parameter type exactly as in a
@@ -173,18 +170,54 @@ function isDeferConstant(arg) {
 	}
 }
 
+// A package-level basic or defined type a temporary can be declared with by
+// its name; other parameter types (qualified, generic, composite) are not
+// hoisted with a declared type.
+function isNamedScalarParam(t) {
+	if (t?.kind === "basic")
+		return t.name !== "any" && /^[A-Za-z_]\w*$/.test(t.name ?? "");
+	return (
+		t?.kind === "named" &&
+		t.underlying?.kind === "basic" &&
+		!t.typeArgs?.length &&
+		/^[A-Za-z_]\w*$/.test(t.name ?? "")
+	);
+}
+
+// A non-constant untyped expression (`1 << n`) the typechecker already gave
+// its parameter's type: it is still untyped when the lowered code is checked
+// again, so its temporary needs that type declared.
+function isRetypedUntyped(e) {
+	if (!e || e._const) return false;
+	switch (e.kind) {
+		case "ParenExpr":
+			return isRetypedUntyped(e.expr);
+		case "UnaryExpr":
+			return isRetypedUntyped(e.operand);
+		case "BinaryExpr":
+			if (e.op === "<<" || e.op === ">>") return Boolean(e.left?._const);
+			return isRetypedUntyped(e.left) || isRetypedUntyped(e.right);
+		default:
+			return false;
+	}
+}
+
 // The type of the temporary that holds deferred argument `a`: an untyped
-// non-constant value takes its basic numeric parameter's type, as it does in
-// a direct call.  A variadic call's trailing arguments take the element type.
-function deferTempType(funcType, a, argType) {
-	if (argType?.kind !== "untyped") return argType;
+// non-constant value (a shift, a comparison) takes its basic or defined
+// scalar parameter's type, as it does in a direct call.  A variadic call's
+// trailing arguments take the element type.
+function deferTempType(funcType, a, arg) {
+	const argType = arg._type;
+	if (argType?.kind !== "untyped" && !isRetypedUntyped(arg)) return argType;
 	const params = funcType?.params;
 	let param = params?.[a];
-	if (funcType?.variadic && a >= params.length - 1)
-		param = params[params.length - 1]?.elem;
-	return param?.kind === "basic" && NUMERIC_BASIC.test(param.name)
-		? param
-		: argType;
+	if (funcType?.variadic && a >= params.length - 1) {
+		// The last parameter's type is the element type (a slice only when
+		// a table spells it that way).
+		param = params[params.length - 1];
+		if (!isNamedScalarParam(param)) param = param?.elem;
+	}
+	return isNamedScalarParam(param) ? param : argType;
 }
 
 function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
@@ -291,7 +324,7 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 			} else {
 				defargCounter++;
 				const tempName = `__defarg$${defargCounter}`;
-				const tempType = deferTempType(call.func?._type, a, arg._type);
+				const tempType = deferTempType(call.func?._type, a, arg);
 				tempIdents.push({
 					kind: "Ident",
 					name: tempName,
@@ -300,7 +333,8 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 					...(arg._spread && { _spread: true }),
 				});
 				tempStmts.push(
-					tempType === arg._type
+					tempType === arg._type &&
+						!(isRetypedUntyped(arg) && isNamedScalarParam(tempType))
 						? {
 								kind: "DefineStmt",
 								lhs: [{ kind: "Ident", name: tempName, _type: tempType }],

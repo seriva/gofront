@@ -413,7 +413,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
   - Files: `src/typechecker/expressions.js` (binary comparison and logical result types), `src/typechecker/assignability.js` (untyped bool into a defined bool type, if needed)
   - Test: `test/unit/language/defined-bool.test.js` (new): `type B bool; func f(b B)`: `f(x == 1)`, `var b B = x == 1`, `b = x < 2`, `return x == 1`, `S{x == 1}`, `map[string]B{"a": x == 1}`, `f(x == 1 && y == 2)` print `true`; `var u = x == 1` and `x == 1` into `any` print `bool`; negative (`assertErrorContains(…, "Cannot assign")` on every target): a typed `bool` variable and `!b`/`a && b` of typed bools into `B`, `x == 1` into `type MyI int`
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples and the Go-source stdlib
-- [ ] Task 10.2: Type deferred non-constant untyped arguments by the parameter (`M01` defer)
+- [x] Task 10.2: Type deferred non-constant untyped arguments by the parameter (`M01` defer)
   - Files: `src/lower/functions.js` (`deferTempType`, temp declaration)
   - Test: `test/unit/wasm/defer_recover.test.js`: `defer f(x == 1)` with `B` and `bool` parameters, a method callee, `...B`, a closure parameter → `true`; `defer f(1 << n)` with `int8`, `uint8`, `int64`, and an `any` parameter (`int 8`); every program also compiles its file twice with `compileFiles` on one path
   - Done when: `assertAllTargetsOutput` passes and the second compile no longer reports `Cannot assign int to int8` or `Cannot assign bool to B`
