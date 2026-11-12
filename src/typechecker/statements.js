@@ -228,10 +228,26 @@ export const statementCheckMethods = {
 		return !isAny(target) && (!isAny(source) || !!source._declared);
 	},
 
+	// A range assignment (`for _, s = range xs`) stores each key and element
+	// into an existing variable; one of interface type boxes the value as
+	// any other conversion does. The box is recorded on a holder, not on the
+	// target, which codegen also reads as an assignable expression.
+	_markRangeAssignBox(stmt, i, target, source) {
+		if (stmt.rhs[0]?.kind !== "RangeExpr" || !target || !source) return;
+		const holder = {};
+		this._markIfaceBox(
+			this.resolveType(target),
+			this.resolveType(source),
+			holder,
+		);
+		if (holder._ifaceBox) stmt.lhs[i]._rangeBox = holder;
+	},
+
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
 			const r = rhsFlat[i] ?? ANY;
+			this._markRangeAssignBox(stmt, i, lhsTypes[i], r);
 			if (stmt.rhs.length === lhsTypes.length && lhsTypes[i] && r)
 				this._markIfaceBox(
 					this.resolveType(lhsTypes[i]),

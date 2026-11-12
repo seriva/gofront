@@ -1454,10 +1454,26 @@ export const statementGenMethods = {
 		return `${this._genAssignLhsExpr(e)} = `;
 	},
 
+	// The value a range assignment stores into an interface-typed variable,
+	// boxed as in any conversion to an interface.
+	_boxRangeAssigned(e, valueJs) {
+		const box = e._rangeBox;
+		if (!box) return valueJs;
+		if (this._isNamedBoxKind(box))
+			return this._genNamedIfaceBox(
+				valueJs,
+				box._ifaceNamedType,
+				box._ifaceBox === "named_ptr",
+			);
+		this.useHelper("ifaceBox");
+		return this._ifaceBoxWrap(valueJs, box._ifaceBox, box._ifacePtrFields);
+	},
+
 	_emitRangeVar(e, valueJs, isAssign) {
 		if (!e) return;
 		const target = this._rangeVarTarget(e, isAssign);
 		if (target === null) return;
+		if (isAssign) valueJs = this._boxRangeAssigned(e, valueJs);
 		if (typeof target === "string") {
 			this.line(`${target}${valueJs};`);
 			return;
@@ -1622,7 +1638,10 @@ export const statementGenMethods = {
 		// all the others go through temporaries too.
 		const needs = (n, i) => {
 			const e = init.lhs[i];
-			return n !== "_" && !(e.kind === "Ident" && !this._boxedVars.has(e.name));
+			return (
+				n !== "_" &&
+				(e._rangeBox || !(e.kind === "Ident" && !this._boxedVars.has(e.name)))
+			);
 		};
 		const any = names.some(needs);
 		return names.map((n, i) => {
