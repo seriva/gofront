@@ -250,7 +250,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
   - Done when: `assertAllTargetsOutput` passes
 
 ### Phase 6: WASM Dynamic Types in `any` (second sweep)
-- [ ] Task 6.1: Keep array identity by Go type in an `any` (`K03` arrays)
+- [x] Task 6.1: Keep array identity by Go type in an `any` (`K03` arrays)
   - Files: `src/backend/wasm/emit-exprs.js` (interface boxing), `src/backend/wasm/module-emitter.js` (box selection), `src/backend/wasm/emit-builtins.js` (`any_eq`/`any_hash`/`_dynamicTypeNames`, if needed)
   - Test: `test/unit/types/dynamic-types.test.js`: `[2]int64` asserted as `[2]int` → `false`; `[2]int32` vs `[2]uint8`; `[2]A` (`type A [2]int`) vs `[2][2]int`; type switch `case [2]int … case [2]int64` on a `[2]int64` → `int64`; `map[any]int{[2]int{1,2}: 1}` lookup with a separately built `[2]int{1,2}` → `1` and with `[2]int64{1,2}` → `0` (WASM only)
   - Done when: `assertAllTargetsOutput` passes (the `map[any]` lookup with `[2]int64` is a WASM-only assertion because JS stringifies keys)

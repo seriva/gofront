@@ -1584,9 +1584,7 @@ export class BuiltinsEmitter {
 	}
 
 	// Every `[wasm type index, Go type name]` an `any` can hold in this module,
-	// more specific types last so they overwrite their supertypes.  An array
-	// entry has a third element, its length: `[2]int` and `[3]int` share a
-	// wasm type.
+	// more specific types last so they overwrite their supertypes.
 	_dynamicTypeNames() {
 		const named = (name) => {
 			const i = name.indexOf("$$");
@@ -1615,8 +1613,6 @@ export class BuiltinsEmitter {
 					: `*${named(info.name)}`,
 			]);
 		}
-		for (const t of mod.anyArrayTypes.values())
-			names.push([mod.getArrayType(t.elem).typeIndex, goTypeName(t), t.size]);
 		for (const c of mod.closureTypes.values())
 			names.push([
 				c.typeIndex,
@@ -1658,27 +1654,16 @@ export class BuiltinsEmitter {
 		const dyn = this.allocLocal(null, "externref");
 		strConst("interface {}");
 		this.pushInstruction({ op: "local.set", index: dyn });
-		const when = (typeIndex, text, len) => {
+		const when = (typeIndex, text) => {
 			this.pushInstruction({ op: "local.get", index: 0 });
 			this.pushInstruction({ op: "ref.test", typeIndex });
-			if (len !== undefined) {
-				this.pushInstruction({ op: "if", blockType: "i32" });
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({ op: "ref.cast", typeIndex });
-				this.pushInstruction("array.len");
-				this.pushInstruction({ op: "i32.const", value: len });
-				this.pushInstruction("i32.eq");
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("end");
-			}
 			this.pushInstruction({ op: "if", blockType: "void" });
 			strConst(text);
 			this.pushInstruction({ op: "local.set", index: dyn });
 			this.pushInstruction("end");
 		};
-		for (const [typeIndex, text, len] of this._dynamicTypeNames())
-			when(typeIndex, text, len);
+		for (const [typeIndex, text] of this._dynamicTypeNames())
+			when(typeIndex, text);
 		this.pushInstruction({ op: "local.get", index: 0 });
 		this.pushInstruction({
 			op: "call",

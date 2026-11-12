@@ -725,3 +725,99 @@ func main() {
 		"runtime error: invalid memory address or nil pointer dereference\n",
 	);
 });
+
+section("Array identity by Go type in an interface");
+
+test("arrays that share a wasm type are distinct types in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+
+func main() {
+	var a any = [2]int64{1, 2}
+	_, ok1 := a.([2]int)
+	_, ok2 := a.([2]int64)
+	var b any = [2]int32{1, 2}
+	_, ok3 := b.([2]uint8)
+	_, ok4 := b.([2]int32)
+	var c any = [2]A{}
+	_, ok5 := c.([2][2]int)
+	_, ok6 := c.([2]A)
+	var d any = [2]int{1, 2}
+	_, ok7 := d.([2]int)
+	_, ok8 := d.([3]int)
+	fmt.Println(ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8)
+}
+`,
+		"false true false true false true true false\n",
+	);
+});
+
+test("a type switch picks the array by Go type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func name(v any) string {
+	switch x := v.(type) {
+	case [2]int:
+		return fmt.Sprint("int ", x[0])
+	case [2]int64:
+		return fmt.Sprint("int64 ", x[1])
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name([2]int64{1, 2}), name([2]int{3, 4}), name([2]uint{}))
+}
+`,
+		"int64 2 int 3 other\n",
+	);
+});
+
+test("arrays of different element types are distinct map[any] keys", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[any]int{[2]int{1, 2}: 1}
+	fmt.Println(m[[2]int{1, 2}], m[[2]int64{1, 2}], m[[2]int{1, 3}])
+}
+`,
+		"1 0 0\n",
+	);
+});
+
+test("arrays in an any still print, copy, compare and name themselves", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(w any) {
+	defer func() { fmt.Println(recover()) }()
+	_ = w.(int)
+}
+
+func main() {
+	arr := [2]int64{3, 4}
+	var j any = arr
+	arr[0] = 0
+	fmt.Printf("%v %T %v\\n", j, j, arr)
+	b := j.([2]int64)
+	b[1] = 9
+	fmt.Println(j, b, j == any([2]int64{3, 4}), j == any([2]int{3, 4}))
+	try([2]int32{})
+	try([3]uint8{})
+}
+`,
+		"[3 4] [2]int64 [0 4]\n[3 4] [3 9] true false\ninterface conversion: interface {} is [2]int32, not int\ninterface conversion: interface {} is [3]uint8, not int\n",
+	);
+});

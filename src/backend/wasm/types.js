@@ -407,6 +407,24 @@ export function goTypeKey(t) {
 	if (t.kind === "map" || t.kind === "MapType") {
 		return `map_${goTypeKey(t.key ?? t.keyType)}_${goTypeKey(t.value ?? t.val ?? t.elem ?? t.valueType ?? t.valType)}`;
 	}
+	// Func types differ by signature (`[2]func()` is not `[2]func(int) bool`).
+	// A checker func lists the element type of a variadic parameter, like a
+	// parsed `FuncType`.
+	if (t.kind === "func" || t.kind === "FuncType") {
+		const parsed = t.kind === "FuncType";
+		const params = (t.params ?? []).map((p) => goTypeKey(parsed ? p.type : p));
+		const variadic = parsed ? t.params?.at(-1)?.variadic : t.variadic;
+		const rets = parsed
+			? t.returnType
+				? [t.returnType]
+				: []
+			: (t.returns ?? []).filter(
+					(r) => !(r?.kind === "basic" && r.name === "void"),
+				);
+		return `fn_${variadic ? "v" : ""}${params.join(",")}_${rets.map(goTypeKey).join(",")}`;
+	}
+	if (t.kind === "tuple" || t.kind === "TupleType")
+		return `tup_${(t.types ?? []).map(goTypeKey).join(",")}`;
 	if (t.kind === "struct" || t.kind === "StructType") {
 		if (t.name) return t.name;
 		const rawFields = [];
