@@ -1017,7 +1017,7 @@ export const expressionCheckMethods = {
 			return;
 		}
 		const t = operand?._type;
-		if (!this._isNonIntegerType(t)) return;
+		if (!this._isNonIntegerType(t, scope)) return;
 		this.err(
 			`invalid argument: ${what} ${exprText(operand)} (${operandKind(operand, typeStr(t), false)}) must be integer`,
 			operand,
@@ -1026,11 +1026,19 @@ export const expressionCheckMethods = {
 
 	// Whether `t` is a type (or a defined type over one) that is not an
 	// integer: a float, complex, bool, string, `any`, struct, pointer, slice,
-	// map, func, array or interface.  Untyped constants are judged by
+	// map, func, array, interface or a type parameter whose type set is not
+	// all integers.  Untyped constants are judged by
 	// `_nonIntegerConst`, so only untyped non-integers that reach here
 	// (`s[a == b]`) count.
-	_isNonIntegerType(t) {
+	_isNonIntegerType(t, scope) {
 		if (!t || t._tainted) return false;
+		// A type parameter is an integer only when every type in its type set
+		// is (`~int | ~uint8`); `any`, `comparable` and method-only
+		// constraints have no integer type set.
+		if (t.kind === "typeParam") {
+			const terms = this._constraintTerms(t.constraint, new Set(), scope);
+			return !(terms?.length > 0 && terms.every(isInteger));
+		}
 		if (t.kind === "untyped")
 			return (
 				t.base === "bool" || t.base === "string" || t.base === "complex128"

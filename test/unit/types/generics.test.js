@@ -2196,6 +2196,109 @@ func main() {
 	});
 }
 
+section(
+	"Generics — type-parameter index and size operands need integer type sets",
+);
+
+{
+	const operandProgram = (
+		constraintDecl,
+		constraint,
+		use,
+		call,
+	) => `package main
+
+import "fmt"
+
+${constraintDecl}
+func f[T ${constraint}](i T) {
+	s := []int{1, 2, 3}
+	_ = s
+	${use}
+}
+
+func main() {
+	${call}
+	fmt.Println("ok")
+}
+`;
+	const NON_INT_USES = [
+		"_ = s[i]",
+		"_ = s[:i]",
+		"_ = make([]int, i)",
+		"_ = make(map[string]int, i)",
+	];
+	for (const [name, decl, constraint, arg] of [
+		["any", "", "any", "1"],
+		["comparable", "", "comparable", "1"],
+		["fmt.Stringer", "", "fmt.Stringer", "nil"],
+		["~int | ~string", "", "~int | ~string", "1"],
+		["~float64", "", "~float64", "1.5"],
+		[
+			"a named interface with ~float64",
+			"type F interface{ ~float64 }",
+			"F",
+			"1.5",
+		],
+	]) {
+		for (const use of NON_INT_USES) {
+			for (const target of ["js", "wasm"]) {
+				for (const called of [true, false]) {
+					test(`[T ${name}] ${use} is rejected, ${called ? "called" : "never called"} (${target})`, () => {
+						const src = operandProgram(
+							decl,
+							constraint,
+							use,
+							called ? `f(${arg})` : "",
+						);
+						const { errors } =
+							target === "wasm" ? compileWasm(src) : compile(src, { target });
+						assertErrorContains(errors ?? [], "must be integer");
+					});
+				}
+			}
+		}
+	}
+
+	test("a non-integer type-parameter index reports once when instantiated on wasm", () => {
+		const { errors } = compileWasm(
+			operandProgram("", "~float64", "_ = s[i]", "f(1.5)"),
+		);
+		const n =
+			(errors ?? [])
+				.map((e) => e.message)
+				.join("\n")
+				.split("must be integer").length - 1;
+		assertEqual(n, 1);
+	});
+
+	test("integer type sets index and size (js, both, wasm)", async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type Int interface{ ~int | ~int64 }
+type MyInt int
+
+func at[T ~int](s []string, i T) string { return s[i] }
+func small[T ~int | ~uint8](s []string, i T) []string { return s[:i] }
+func mk[T Int](n T) int { return len(make([]int, n)) + cap(make([]int, 0, n)) }
+func keyed[K comparable, V any](m map[K]V, k K) V { return m[k] }
+func elem[T any](xs []T, i int) T { return xs[i] }
+
+func main() {
+	s := []string{"a", "b", "c"}
+	fmt.Println(at(s, MyInt(1)), small(s, uint8(2)), mk(MyInt(3)), mk(2))
+	fmt.Println(keyed(map[string]int{"x": 7}, "x"), keyed(map[any]int{1.5: 8}, 1.5))
+	fmt.Println(elem([]string{"p", "q"}, 1))
+}
+`,
+			"b [a b] 6 4\n7 8\nq\n",
+		);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
