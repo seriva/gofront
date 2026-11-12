@@ -351,7 +351,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
 
 ### Phase 9: Range Assignment Targets, JS Assertions and Equality, Generic Arrays
-- [ ] Task 9.1: Store range assignments into index, selector and deref targets in WASM (`L01`)
+- [x] Task 9.1: Store range assignments into index, selector and deref targets in WASM (`L01`)
   - Files: `src/backend/wasm/emit-stmts.js` (`_emitRangeAssignStore` and its callers)
   - Test: `test/unit/language/range-assign.test.js`: `out := make([]fmt.Stringer, 1); for _, out[0] = range []N{3, 4} {}` → `N4`; map entry `m["a"]`; struct field `s.v`; `*p`; `[]any` element from `[]int` → `4`; `[]int` element → `4`; key form `for out[0] = range []int{3, 4}` → `1`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
