@@ -26,13 +26,17 @@ function isStdlibCall(call) {
 }
 
 function packCallArgs(call) {
-	if (call._multiForward || isStdlibCall(call)) return false;
+	// A call node can be reachable twice (`defer f(x)` lowers to a wrapper
+	// whose body lists the same call under `stmts` and `list`): pack it once.
+	if (call._variadicPacked || call._multiForward || isStdlibCall(call))
+		return false;
 	const fn = variadicFuncType(call.func?._type);
 	if (!fn) return false;
 	const n = fn.params.length;
 	const args = call.args ?? [];
 	if (args.length === n && args[n - 1]?._spread) {
 		args[n - 1]._spread = false;
+		call._variadicPacked = true;
 		return true;
 	}
 	if (args.length < n - 1) return false;
@@ -62,6 +66,7 @@ function packCallArgs(call) {
 			_col: call._col,
 		},
 	];
+	call._variadicPacked = true;
 	return true;
 }
 

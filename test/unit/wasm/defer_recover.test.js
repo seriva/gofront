@@ -1055,3 +1055,105 @@ func main() {
 `;
 	await assertDeferJsOutput(src, "body 5 []\n[]\n[9 2]\n[1 2]\n");
 });
+
+section("WASM Defer — variadic callees on every target");
+
+test("a deferred call of a variadic float64 function", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...float64) { fmt.Println(ys) }
+
+func main() {
+	x := 4.0
+	defer f(x)
+	x = 5
+	fmt.Println("body", x)
+}
+`;
+	await assertDeferOutput(src, "body 5\n[4]\n");
+});
+
+test("a deferred call of a variadic int function with none, one, many and spread arguments", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...int)        { fmt.Println("f", ys) }
+func g(a int, ys ...int) { fmt.Println("g", a, ys) }
+
+func main() {
+	s := []int{7, 8, 9}
+	defer f()
+	defer f(1)
+	defer f(1, 2, 3)
+	defer f(s...)
+	defer g(0)
+	defer g(0, 5)
+	defer g(0, s...)
+	s[0] = 70
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(
+		src,
+		"body\ng 0 [70 8 9]\ng 0 [5]\ng 0 []\nf [70 8 9]\nf [1 2 3]\nf [1]\nf []\n",
+	);
+});
+
+test("a deferred call of a variadic string function", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...string) { fmt.Println(len(ys), ys) }
+
+func main() {
+	u := []string{"x", "y"}
+	defer f("a", "b", "c")
+	defer f(u...)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n2 [x y]\n3 [a b c]\n");
+});
+
+test("a deferred call of a variadic any function and fmt.Println", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...any) { fmt.Println(len(ys), ys) }
+
+func main() {
+	defer f(1, "a")
+	defer fmt.Println("x", 1)
+	defer fmt.Printf("%d-%s\\n", 2, "b")
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n2-b\nx 1\n2 [1 a]\n");
+});
+
+test("deferred variadic method and func literal calls", async () => {
+	const src = `package main
+
+import "fmt"
+
+type T struct{ n int }
+
+func (t T) m(ys ...int)   { fmt.Println("m", t.n, ys) }
+func (t *T) p(ys ...int)  { fmt.Println("p", t.n, ys) }
+
+func main() {
+	tv := T{n: 1}
+	defer tv.m(1, 2)
+	defer tv.p(3)
+	defer func(ys ...int) { fmt.Println("lit", ys) }(1, 2)
+	defer func(ys ...int) { fmt.Println("lit", ys) }()
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\nlit []\nlit [1 2]\np 1 [3]\nm 1 [1 2]\n");
+});
