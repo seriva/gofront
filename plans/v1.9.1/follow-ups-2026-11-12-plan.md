@@ -483,7 +483,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth s
   - Files: `src/typechecker/expressions.js` (index and `make` argument checks)
   - Test: `test/unit/language/array-length.test.js`: `s[1 == 1]`, `s["a"]`, `make([]int, 1 == 1)`, `make([]int, "a")`, `make([]int, 2, 1.5)` → `assertErrorContains(…, "must be integer")` on every target; positives `s[1.0]`, `make([]int, 2.0)`, `s['\x01']` run
   - Done when: negatives report on every target and positives pass `assertAllTargetsOutput`
-- [ ] Task 12.4: Check range-over-func assignments against the target type (`N05`)
+- [x] Task 12.4: Check range-over-func assignments against the target type (`N05`)
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`)
   - Test: `test/unit/language/range-assign.test.js`: `var s string; for s = range seq {}` (`seq` yields `int`) → `assertErrorContains(…, "Cannot assign int to string")` on every target; `float64`, `int64`, `fmt.Stringer` (`int` does not implement), `out[0]` string element, two-value `for s, v = range seq2`; positives: `any`, an implementing `fmt.Stringer`, matching `int` still run
   - Done when: negatives report on every target (no invalid WASM) and positives pass `assertAllTargetsOutput`

@@ -695,7 +695,29 @@ export const statementCheckMethods = {
 			if (e.kind === "Ident" && e.name === "_") return;
 			const target = this.checkExpr(e, scope);
 			this._markRangeTargetBox(e, target, yieldParams[i]);
+			this._checkRangeIterAssignable(e, target, yieldParams[i]);
 		});
+	},
+
+	// The yielded value is assigned to the target, so it must be assignable
+	// to it (`for s = range seq` with `s string` and `seq` yielding `int`).
+	// The lenient `float64 = int` pair of plain assignments is reported here:
+	// the iterator loop stores the yielded value without converting it.
+	_checkRangeIterAssignable(node, target, source) {
+		if (!target || !source) return;
+		const t = this.resolveType(target);
+		const v = this.resolveType(source);
+		if (this._isNumericCoercible(t, v)) {
+			this.err(`Cannot assign ${typeStr(v)} to ${typeStr(t)}`, node);
+			return;
+		}
+		if (!this._needsAssignCheck(target, source)) return;
+		this._skipIfaceMark = true;
+		try {
+			this.assertAssignable(target, source, node, "assignment");
+		} finally {
+			this._skipIfaceMark = false;
+		}
 	},
 
 	_checkRangeIterStmt(initStmt, scope, _returnType) {
