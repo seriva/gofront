@@ -448,7 +448,7 @@ var __tfn = __tfn || function(f, t) {
 };
 var __tnm = __tnm || function(f) {
   // The type name of a type argument's info factory, spelled as a static tag.
-  const id = f?.id;
+  const id = f?.nm ?? f?.id;
   return typeof id === "string" ? id.replace(/ void\\b/g, "").replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
 };
 var __ity = __ity || function(x, t, ptr, sl) {
@@ -621,9 +621,9 @@ var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
 var __tbox = __tbox || function(f, x) {
   return f && f.b ? f.b(x) : x;
 };
-var __ti = __ti || function(f, k, id, is, u, b, fb) {
+var __ti = __ti || function(f, k, id, is, u, b, fb, nm) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm;
   return g;
 };
 var __tar = __tar || function(f, op, a, b) {

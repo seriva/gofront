@@ -262,7 +262,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/module-emitter.js`, `docs/go-compatibility.md` (`encoding/json` row sentence about maps and arrays that "can encode as one another", only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `map[string]int64` asserted as `map[string]int` → `false`; `map[int]string` vs `map[int64]string`; same-type assertion → `true`; `%T` of each; `encoding/json` of an `any` holding `[2]byte` and `[2]bool` encodes each as itself (if the docs sentence is removed)
   - Done when: `assertAllTargetsOutput` passes and the docs `encoding/json` row contradicts nothing from Tasks 6.1–6.3
-- [ ] Task 6.4: Print and name slices that generic code boxes into an `any` (`K04`)
+- [x] Task 6.4: Print and name slices that generic code boxes into an `any` (`K04`)
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_markIfaceBox` for types containing a type parameter) and/or `src/backend/wasm/monomorph.js`, `docs/go-compatibility.md` (`fmt` of a value in an `any` row: `%T` of generic slices, like the map sentence)
   - Test: `test/unit/types/dynamic-types.test.js`: `func mk[V any](v V) any { return []V{v} }`: `fmt.Println(mk(3))` → `[3]`, `%T` → `[]int`; `V=string`; `V=func(a int, b ...string) (int, error)` → `%T` `[]func(int, ...string) (int, error)`; `V` a struct; `map[string]V` and non-generic `[]int` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause

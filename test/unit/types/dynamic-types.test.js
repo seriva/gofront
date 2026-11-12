@@ -989,3 +989,61 @@ func main() {
 		'[1,2] <nil>\n[true,false] <nil>\n{"a":1} <nil>\n{"a":true} <nil>\n',
 	);
 });
+
+section("Slices that generic code boxes into an interface");
+
+test("fmt prints and names a slice built in a generic function", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func mk[V any](v V) any { return []V{v} }
+func mkm[V any](v V) any { return map[string]V{"a": v} }
+
+func main() {
+	w := mk(3)
+	fmt.Println(w)
+	fmt.Printf("%T\\n", w)
+	s := mk("x")
+	fmt.Println(s)
+	fmt.Printf("%T\\n", s)
+	f := mk(func(a int, b ...string) (int, error) { return 0, nil })
+	fmt.Printf("%T\\n", f)
+	t := mk(T{1})
+	fmt.Printf("%T %v\\n", t, t)
+	m := mkm(3)
+	fmt.Printf("%T %v\\n", m, m)
+}
+`,
+		"[3]\n[]int\n[x]\n[]string\n[]func(int, ...string) (int, error)\n[]main.T [{1}]\nmap[string]int map[a:3]\n",
+	);
+});
+
+test("a slice built in a generic function matches its type in a type switch", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any](v V) any { return []V{v} }
+
+func name(v any) string {
+	switch v.(type) {
+	case []int:
+		return "int"
+	case []string:
+		return "string"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name(mk(1)), name(mk("a")), name(mk(1.5)), name([]int{1}))
+}
+`,
+		"int string other int\n",
+	);
+});

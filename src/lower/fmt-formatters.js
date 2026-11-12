@@ -137,6 +137,12 @@ const returnsString = (m) => {
 	);
 };
 
+// A map or slice type: one that generic code boxes into an interface is not
+// spelled in the package, so the formatter lookup must describe it.
+function isMapOrSlice(t) {
+	return t?.kind === "map" || t?.kind === "slice";
+}
+
 class FmtGen extends TypeSpeller {
 	constructor(checker, pkgName, qualifiers, programs, formatted = false) {
 		super(pkgName, qualifiers, programs);
@@ -559,14 +565,14 @@ class FmtGen extends TypeSpeller {
 			if (via === "declared" && !this.topLevel.has(type.name)) continue;
 			add(type);
 		}
-		// Only instances of generic types (and pointers to them), and maps a
+		// Only instances of generic types (and pointers to them), and maps and slices a
 		// generic body boxes into an interface: they are the types a package
 		// never spells, and any other type here would take the place of the
 		// dispatch a type parameter value already has.
 		for (const { type, boxed } of this.genericBodyTypes()) {
 			const base = type.kind === "pointer" ? type.base : type;
 			if (
-				(boxed && type.kind === "map") ||
+				(boxed && isMapOrSlice(type)) ||
 				(base.kind === "named" && base.typeArgs?.length > 0)
 			)
 				add(type);
@@ -615,7 +621,7 @@ class FmtGen extends TypeSpeller {
 		if (node._type && mentionsTypeParam(node._type))
 			out.push({ type: sub(node._type) });
 		const src = node._ifaceSrc;
-		if (src?.kind === "map" && mentionsTypeParam(src))
+		if (isMapOrSlice(src) && mentionsTypeParam(src))
 			out.push({ type: sub(src), boxed: true });
 		return out;
 	}
