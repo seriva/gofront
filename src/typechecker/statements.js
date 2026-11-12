@@ -692,7 +692,7 @@ export const statementCheckMethods = {
 	// interface type boxes the value as any other conversion does.
 	_checkRangeIterAssignVars(lhs, scope, yieldParams = []) {
 		lhs.forEach((e, i) => {
-			if (e.kind !== "Ident" || e.name === "_") return;
+			if (e.kind === "Ident" && e.name === "_") return;
 			const target = this.checkExpr(e, scope);
 			this._markRangeTargetBox(e, target, yieldParams[i]);
 		});

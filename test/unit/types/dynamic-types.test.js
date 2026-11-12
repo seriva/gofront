@@ -1244,3 +1244,111 @@ for (const target of ["js", "both", "wasm"]) {
 		});
 	}
 }
+
+test("maps and arrays of booleans and small integers print and name their type in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[string]bool{"a": true}
+	fmt.Printf("%T|%v\\n", a, a)
+	var b any = [2]bool{true, false}
+	fmt.Printf("%T|%v\\n", b, b)
+	var c any = map[rune]string{'a': "x"}
+	fmt.Printf("%T|%v\\n", c, c)
+	var d any = map[int32]bool{1: true}
+	fmt.Printf("%T|%v\\n", d, d)
+	var e any = map[int8]int{1: 2}
+	fmt.Printf("%T|%v\\n", e, e)
+	var f any = map[bool]int{true: 2}
+	fmt.Printf("%T|%v\\n", f, f)
+	var g any = [2]int32{1, 2}
+	fmt.Printf("%T|%v\\n", g, g)
+	var h any = [2]uint8{1, 2}
+	fmt.Printf("%T|%v\\n", h, h)
+	m := make(map[string]bool)
+	m["z"] = true
+	var i any = m
+	fmt.Printf("%T|%v\\n", i, i)
+	var arr [2]bool
+	var j any = arr
+	fmt.Printf("%T|%v\\n", j, j)
+	var k any = make(map[int8]bool)
+	fmt.Printf("%T|%v\\n", k, k)
+}
+`,
+		"map[string]bool|map[a:true]\n[2]bool|[true false]\nmap[int32]string|map[97:x]\nmap[int32]bool|map[1:true]\nmap[int8]int|map[1:2]\nmap[bool]int|map[true:2]\n[2]int32|[1 2]\n[2]uint8|[1 2]\nmap[string]bool|map[z:true]\n[2]bool|[false false]\nmap[int8]bool|map[]\n",
+	);
+});
+
+test("small-element maps and arrays keep their identity in assertions and type switches", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func show(a any) {
+	switch x := a.(type) {
+	case [2]bool:
+		fmt.Println("bool", x)
+	case [2]uint8:
+		fmt.Println("u8", x)
+	case [2]int32:
+		fmt.Println("i32", x)
+	case map[string]bool:
+		fmt.Println("mb", x)
+	case map[string]int8:
+		fmt.Println("mi8", x)
+	case map[string]int:
+		fmt.Println("mi", x)
+	}
+}
+
+func main() {
+	show([2]bool{true, false})
+	show([2]uint8{1, 2})
+	show([2]int32{1, 2})
+	show(map[string]bool{"a": true})
+	show(map[string]int8{"a": 3})
+	show(map[string]int{"a": 3})
+	var a any = map[string]bool{"a": true}
+	_, ok := a.(map[string]int)
+	_, ok2 := a.(map[string]bool)
+	fmt.Println(ok, ok2)
+	var b any = [2]uint8{}
+	_, ok = b.([2]int32)
+	fmt.Println(ok)
+}
+`,
+		"bool [true false]\nu8 [1 2]\ni32 [1 2]\nmb map[a:true]\nmi8 map[a:3]\nmi map[a:3]\nfalse true\nfalse\n",
+	);
+});
+
+test("int, string and float32 element composites and slices in an any are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any](v V) any { return [2]V{v, v} }
+
+func main() {
+	var a any = map[string]int{"a": 1}
+	fmt.Printf("%T|%v\\n", a, a)
+	var b any = [2]string{"a", "b"}
+	fmt.Printf("%T|%v\\n", b, b)
+	var c any = [2]float32{1, 2}
+	fmt.Printf("%T|%v\\n", c, c)
+	var d any = []bool{true}
+	fmt.Printf("%T|%v\\n", d, d)
+	var e any = []int32{1}
+	fmt.Printf("%T|%v\\n", e, e)
+	g := mk(true)
+	fmt.Printf("%T|%v\\n", g, g)
+}
+`,
+		"map[string]int|map[a:1]\n[2]string|[a b]\n[2]float32|[1 2]\n[]bool|[true]\n[]int32|[1]\n[2]bool|[true true]\n",
+	);
+});
