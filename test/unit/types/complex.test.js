@@ -725,6 +725,118 @@ func main() {
 	);
 });
 
+section("Complex: equality evaluates each operand once");
+
+const HEAD = `package main
+
+import "fmt"
+`;
+
+test("a switch on a complex value calls the case expression once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex128 = 1
+	switch c {
+	case next():
+		fmt.Println("hit", calls)
+	}
+}
+`,
+		"hit 1\n",
+	);
+});
+
+test("== and != call a complex operand once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex128 = 1
+	fmt.Println(c == next(), calls)
+	calls = 0
+	fmt.Println(c != next(), calls)
+	calls = 0
+	fmt.Println(next() == c, calls)
+	calls = 0
+	fmt.Println(next() != next(), calls)
+}
+`,
+		"true 1\nfalse 1\ntrue 1\nfalse 2\n",
+	);
+});
+
+test("complex64 equality calls an operand once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex64 = 1
+	next64 := func() complex64 {
+		calls++
+		return 1
+	}
+	fmt.Println(c == next64(), calls)
+}
+`,
+		"true 1\n",
+	);
+});
+
+test("a case list with a call evaluates it once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex128 = 1
+	switch c {
+	case 2, next():
+		fmt.Println("hit", calls)
+	}
+}
+`,
+		"hit 1\n",
+	);
+});
+
+test("complex equality results are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := complex(1, 2)
+	b := complex(1, 2)
+	c := complex(1, 3)
+	fmt.Println(a == b, a != b, a == c, a != c, a == complex(1, 2))
+}
+`,
+		"true false false true true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

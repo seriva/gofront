@@ -780,7 +780,35 @@ export class StmtsEmitter {
 		return local?.isBoxed ? local.boxInfo.wType : info.type;
 	}
 
+	// `for _, out[0] = range xs`: an index, selector or dereference target is
+	// not a variable the loop can store into directly.  Each such target gets
+	// a hidden local that the loop writes (so conversions and interface
+	// boxing work as for a variable), and `_emitRangeBoxes` assigns it to the
+	// real target at the top of the body.  Returns `lhs` with those targets
+	// replaced by identifiers of the hidden locals.
+	_bindRangeAssignTargets(lhs) {
+		return lhs.map((node) => {
+			if (!node || node.kind === "Ident" || !node._type) return node;
+			const name = `__rangetarget$${this.tempCounter++}`;
+			const wType = this.toWasmType(node._type);
+			this.allocLocal(name, wType, node._type, true);
+			if (!this._pendingRangeTargets) this._pendingRangeTargets = [];
+			this._pendingRangeTargets.push({ node, name, goType: node._type });
+			return { kind: "Ident", name, _type: node._type };
+		});
+	}
+
 	_emitRangeBoxes() {
+		const targets = this._pendingRangeTargets ?? [];
+		this._pendingRangeTargets = [];
+		for (const { node, name, goType } of targets) {
+			this._emitAssignSingle(
+				node,
+				{ kind: "Ident", name, _type: goType, _parTmp: true },
+				"=",
+			);
+			this.locals.delete(name);
+		}
 		const pending = this._pendingRangeBoxes ?? [];
 		this._pendingRangeBoxes = [];
 		for (const { name, idx, wType, goType } of pending) {
@@ -2267,7 +2295,9 @@ export class StmtsEmitter {
 		const rangeExpr =
 			stmt.cond?.kind === "RangeExpr" ? stmt.cond : stmt.init.rhs[0];
 		const isAssign = stmt.init?.kind === "AssignStmt";
-		const lhs = stmt.init?.lhs ?? [];
+		const lhs = isAssign
+			? this._bindRangeAssignTargets(stmt.init.lhs)
+			: (stmt.init?.lhs ?? []);
 		const iterExpr = rangeExpr.expr;
 		const iterType = iterExpr._type;
 

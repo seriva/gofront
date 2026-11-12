@@ -1047,3 +1047,90 @@ func main() {
 		"int string other int\n",
 	);
 });
+
+section("Nil defined slices asserted out of an any");
+
+test("a nil defined slice asserted out of an any is nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S []int
+type M map[string]int
+
+func main() {
+	var s S
+	var a any = s
+	ns, _ := a.(S)
+	fmt.Println(ns == nil, len(ns))
+	ns2 := a.(S)
+	fmt.Println(ns2 == nil, len(ns2))
+	switch v := a.(type) {
+	case S:
+		fmt.Println(v == nil, len(v))
+	}
+	var m M
+	var b any = m
+	nm, _ := b.(M)
+	fmt.Println(nm == nil, len(nm))
+}
+`,
+		"true 0\ntrue 0\ntrue 0\ntrue 0\n",
+	);
+});
+
+test("a non-nil defined slice asserted out of an any is not nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S []int
+
+func main() {
+	var a any = S{1}
+	ns, _ := a.(S)
+	fmt.Println(ns == nil, len(ns))
+	var e any = S{}
+	es := e.(S)
+	fmt.Println(es == nil, len(es))
+}
+`,
+		"false 1\nfalse 0\n",
+	);
+});
+
+section("Arrays built in generic code and boxed into an any");
+
+test("an array literal built in a generic function prints and names its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func mkArr[V any](v V) any { return [2]V{v, v} }
+func mkVar[V any](v V) any {
+	var x [2]V
+	x[0] = v
+	return x
+}
+
+func main() {
+	fmt.Printf("%T %v\\n", mkArr(5), mkArr(5))
+	fmt.Printf("%T %v\\n", mkArr("a"), mkArr("a"))
+	fmt.Printf("%T %v\\n", mkArr(T{1}), mkArr(T{1}))
+	fmt.Printf("%T %v\\n", mkVar(5), mkVar(5))
+	fmt.Println(mkVar("z"))
+	_, ok := mkArr(5).([2]int)
+	_, bad := mkArr(5).([2]string)
+	fmt.Println(ok, bad)
+	var plain any = [2]int{1, 2}
+	fmt.Printf("%T %v\\n", plain, plain)
+}
+`,
+		"[2]int [5 5]\n[2]string [a a]\n[2]main.T [{1} {1}]\n[2]int [5 0]\n[z ]\ntrue false\n[2]int [1 2]\n",
+	);
+});

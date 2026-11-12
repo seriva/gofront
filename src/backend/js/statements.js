@@ -1960,12 +1960,11 @@ export const statementGenMethods = {
 						const isStruct =
 							this._isStructType(yType) ||
 							this._isStructType(stmt.init.lhs[i]?._type);
-						if (isStruct) {
-							this.useHelper("sclone");
-							this.line(`${lhs[i]} = __sclone(${cbParams[i]});`);
-						} else {
-							this.line(`${lhs[i]} = ${cbParams[i]};`);
-						}
+						if (isStruct) this.useHelper("sclone");
+						const value = isStruct ? `__sclone(${cbParams[i]})` : cbParams[i];
+						this.line(
+							`${lhs[i]} = ${this._boxRangeAssigned(stmt.init.lhs[i], value)};`,
+						);
 					}
 				}
 			};
@@ -2158,10 +2157,13 @@ export const statementGenMethods = {
 			this.line(`const ${tmp} = ${tag};`);
 			return {
 				tag: "true",
-				caseExpr: (e) => {
-					const c = this._genComplexOperand(e);
-					return `(${tmp}.re === ${c}.re && ${tmp}.im === ${c}.im)`;
-				},
+				caseExpr: (e) =>
+					this._genComplexEquality(
+						"===",
+						"&&",
+						tmp,
+						this._genComplexOperand(e),
+					),
 			};
 		}
 		if (stmt.tag && this._isMapTag(stmt.tag)) {

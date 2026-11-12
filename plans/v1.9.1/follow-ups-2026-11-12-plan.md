@@ -351,23 +351,23 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
 
 ### Phase 9: Range Assignment Targets, JS Assertions and Equality, Generic Arrays
-- [ ] Task 9.1: Store range assignments into index, selector and deref targets in WASM (`L01`)
+- [x] Task 9.1: Store range assignments into index, selector and deref targets in WASM (`L01`)
   - Files: `src/backend/wasm/emit-stmts.js` (`_emitRangeAssignStore` and its callers)
   - Test: `test/unit/language/range-assign.test.js`: `out := make([]fmt.Stringer, 1); for _, out[0] = range []N{3, 4} {}` → `N4`; map entry `m["a"]`; struct field `s.v`; `*p`; `[]any` element from `[]int` → `4`; `[]int` element → `4`; key form `for out[0] = range []int{3, 4}` → `1`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 9.2: Box range-over-func assignments into interface variables in JS (`L02`)
+- [x] Task 9.2: Box range-over-func assignments into interface variables in JS (`L02`)
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`), `src/backend/js/statements.js` (iterator loop store)
   - Test: `test/unit/language/range-assign.test.js`: `for s = range seq {}` into `fmt.Stringer` → `N10`; two-value `for k, s = range seq2` → `1 N10`; into `any` with `s.(N)` → `true`; define form unchanged
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 9.3: Unbox a nil defined slice as nil in JS (`L03`)
+- [x] Task 9.3: Unbox a nil defined slice as nil in JS (`L03`)
   - Files: `src/backend/js/expressions.js` (assertion / type-switch unboxing; exact site per probe)
   - Test: `test/unit/types/dynamic-types.test.js`: `type S []int; var s S; var a any = s; ns, _ := a.(S); fmt.Println(ns == nil, len(ns))` → `true 0`; type switch `case S: v == nil` → `true`; `ns := a.(S)`; non-nil `S{1}` and nil `type M map[string]int` unchanged
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 9.4: Print and name arrays that generic code boxes into an `any` (`L04`)
+- [x] Task 9.4: Print and name arrays that generic code boxes into an `any` (`L04`)
   - Files: per probe at task start: the code Task 6.4 changed for slices (`src/typechecker/assignability.js` / `src/backend/js/index.js` fmt tag) and/or `src/backend/wasm/monomorph.js`; `docs/go-compatibility.md` (`fmt` of a value in an `any` row)
   - Test: `test/unit/types/dynamic-types.test.js`: `func mkArr[V any](v V) any { return [2]V{v, v} }`: `fmt.Printf("%T %v\n", mkArr(5), mkArr(5))` → `[2]int [5 5]`; `V=string`; `var x [2]V; x[0] = v; return x`; `V` a struct; non-generic arrays unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 9.5: Evaluate each complex equality operand once in JS (`L06`)
+- [x] Task 9.5: Evaluate each complex equality operand once in JS (`L06`)
   - Files: `src/backend/js/expressions.js` (`_genComplexBinary`), `src/backend/js/runtime.js` or the helper registry (equality helper, if used)
   - Test: `test/unit/types/complex.test.js`: `switch c { case next(): … }` → `hit 1`; `c == next()`, `c != next()`, `next() == c` call count `1`; `complex64`; case list `case 1, next():`; results for equal/unequal values unchanged
   - Done when: `assertAllTargetsOutput` passes

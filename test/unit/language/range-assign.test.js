@@ -6,6 +6,7 @@ import {
 	assertErrorContains,
 	assertJsProgramOutput,
 	assertProgramOutput,
+	assertValidWasm,
 	assertWasmProgramOutput,
 	compile,
 	compileWasm,
@@ -501,7 +502,7 @@ func main() {
 });
 
 test("range assignment into an element of an interface slice boxes the value", async () => {
-	await assertJsProgramOutput(
+	await assertAllTargetsOutput(
 		`${RANGE_BOX_PRELUDE}
 func main() {
 	out := make([]fmt.Stringer, 1)
@@ -511,6 +512,161 @@ func main() {
 }
 `,
 		"N4\n",
+	);
+});
+
+section("Range assignment: non-identifier targets");
+
+for (const [name, decls, body, want] of [
+	[
+		"map entry",
+		"m := map[string]N{}",
+		'for _, m["a"] = range []N{3, 4} {\n\t}\n\tfmt.Println(m["a"])',
+		"N4\n",
+	],
+	[
+		"struct field",
+		"var s struct{ v int }",
+		"for _, s.v = range []int{3, 4} {\n\t}\n\tfmt.Println(s.v)",
+		"4\n",
+	],
+	[
+		"pointer deref",
+		"x := 0\n\tp := &x",
+		"for _, *p = range []int{3, 4} {\n\t}\n\tfmt.Println(x)",
+		"4\n",
+	],
+	[
+		"any slice element from ints",
+		"out := make([]any, 1)",
+		"for _, out[0] = range []int{3, 4} {\n\t}\n\tfmt.Println(out[0])",
+		"4\n",
+	],
+	[
+		"int slice element",
+		"out := make([]int, 1)",
+		"for _, out[0] = range []int{3, 4} {\n\t}\n\tfmt.Println(out[0])",
+		"4\n",
+	],
+	[
+		"key into a slice element",
+		"out := make([]int, 1)",
+		"for out[0] = range []int{3, 4} {\n\t}\n\tfmt.Println(out[0])",
+		"1\n",
+	],
+	[
+		"key and value into elements",
+		"ks := make([]int, 1)\n\tvs := make([]string, 1)",
+		'for ks[0], vs[0] = range []string{"a", "b"} {\n\t}\n\tfmt.Println(ks[0], vs[0])',
+		"1 b\n",
+	],
+	[
+		"stringer slice element from a map",
+		"out := make([]fmt.Stringer, 1)",
+		'for _, out[0] = range map[string]N{"a": 3} {\n\t}\n\tfmt.Println(out[0])',
+		"N3\n",
+	],
+]) {
+	test(`range assignment into a ${name}`, async () => {
+		await assertAllTargetsOutput(
+			`${RANGE_BOX_PRELUDE}
+func main() {
+	${decls}
+	${body}
+}
+`,
+			want,
+		);
+	});
+}
+
+test("range assignment into an element builds a valid WASM module", () => {
+	const { wasm, errors } = compileWasm(`package main
+
+func main() {
+	out := make([]int, 1)
+	for _, out[0] = range []int{3, 4} {
+	}
+	_ = out
+}
+`);
+	if (errors.length > 0) throw new Error(errors[0].message);
+	assertValidWasm(wasm);
+});
+
+section("Range assignment: range-over-func into interface variables");
+
+const ITER_PRELUDE = `${RANGE_BOX_PRELUDE}
+func seq(yield func(N) bool) {
+	yield(N(10))
+}
+
+func seq2(yield func(int, N) bool) {
+	yield(1, N(10))
+}
+`;
+
+test("range-over-func assignment into a Stringer boxes the value", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var s fmt.Stringer
+	for s = range seq {
+	}
+	fmt.Println(s)
+}
+`,
+		"N10\n",
+	);
+});
+
+test("two-value range-over-func assignment boxes the second value", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var k int
+	var s fmt.Stringer
+	for k, s = range seq2 {
+	}
+	fmt.Println(k, s)
+}
+`,
+		"1 N10\n",
+	);
+});
+
+test("range-over-func assignment into an any keeps the defined type", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var a any
+	for a = range seq {
+	}
+	_, ok := a.(N)
+	fmt.Println(ok)
+	var k any
+	var v any
+	for k, v = range seq2 {
+	}
+	_, okv := v.(N)
+	fmt.Println(k, okv)
+}
+`,
+		"true\n1 true\n",
+	);
+});
+
+test("range-over-func define form is unchanged", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	for s := range seq {
+		var x fmt.Stringer = s
+		fmt.Println(x)
+	}
+}
+`,
+		"N10\n",
 	);
 });
 

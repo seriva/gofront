@@ -272,9 +272,9 @@ export const typeInfoGenMethods = {
 		return "";
 	},
 
-	// JS expression for the run-time type tag of map type `t` that mentions
-	// type parameters, built from their type information (see `__ti`); null
-	// when some part cannot be spelled.
+	// JS expression for the run-time type tag of a map, slice or array type `t`
+	// that mentions type parameters, built from their type information (see
+	// `__ti`); null when some part cannot be spelled.
 	_genericMapTag(t) {
 		const part = (x) => {
 			if (!mentionsTypeParam(x)) return JSON.stringify(this._dynTypeName(x));
@@ -286,6 +286,10 @@ export const typeInfoGenMethods = {
 				case "slice": {
 					const e = part(x.elem);
 					return e && `"[]" + ${e}`;
+				}
+				case "array": {
+					const e = part(x.elem);
+					return e && `"[${x.size}]" + ${e}`;
 				}
 				case "pointer": {
 					const e = part(x.base);

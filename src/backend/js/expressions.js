@@ -119,10 +119,14 @@ function receiverPrefix(stmts, name, safe) {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
-// True for a map or slice type that mentions a type parameter: one that
-// generic code boxes into an interface is tagged by its instantiated type.
+// True for a map, slice or array type that mentions a type parameter: one
+// that generic code boxes into an interface is tagged by its instantiated
+// type.
 export function isGenericComposite(t) {
-	return (t?.kind === "map" || t?.kind === "slice") && mentionsTypeParam(t);
+	return (
+		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		mentionsTypeParam(t)
+	);
 }
 
 // True when type `t` mentions a type parameter anywhere.
@@ -1910,7 +1914,10 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
-		if (typeNode?._assertType?.kind === "slice") {
+		if (
+			typeNode?._assertType?.kind === "slice" ||
+			this._isNamedSliceTypeNode(typeNode)
+		) {
 			// A nil slice in an interface is a tagged empty array.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
@@ -1920,6 +1927,16 @@ export const expressionGenMethods = {
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
 		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+	},
+
+	// A type name that denotes a defined slice type (`type S []int`).
+	_isNamedSliceTypeNode(typeNode) {
+		if (typeNode?.kind !== "TypeName") return false;
+		const named = this.checker?.types.get(typeNode.name);
+		return (
+			this._isNamedComposite(named) &&
+			this._underlyingOf(named)?.kind === "slice"
+		);
 	},
 
 	_isStructPtrTypeNode(typeNode) {
@@ -3245,10 +3262,19 @@ export const expressionGenMethods = {
 			case "/":
 				return this._genComplexArith(expr.op, l, r, isComplex64(expr._type));
 			case "==":
-				return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
+				return this._genComplexEquality("===", "&&", l, r);
 			case "!=":
-				return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
+				return this._genComplexEquality("!==", "||", l, r);
 		}
+	},
+
+	// `l == r` / `l != r` on complex operands: each component reads both
+	// operands, so an operand that calls a function is bound once first.
+	_genComplexEquality(cmp, join, l, r) {
+		const pure = (js) => !js.includes("(");
+		if (pure(l) && pure(r))
+			return `(${l}.re ${cmp} ${r}.re ${join} ${l}.im ${cmp} ${r}.im)`;
+		return `((__a, __b) => __a.re ${cmp} __b.re ${join} __a.im ${cmp} __b.im)(${l}, ${r})`;
 	},
 
 	// `l op r` for complex operands.  A complex64 result has float32
