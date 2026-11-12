@@ -1655,7 +1655,7 @@ export const expressionGenMethods = {
 			if (!expr._lvalue) return this._genMapIndexExpr(expr, base, idx);
 			return `${this._genMapWriteBase(base)}[${idx}]`;
 		}
-		if (this._is64BitInt(expr.index?._type)) idx = `Number(${idx})`;
+		idx = this._asIndexNumber(idx, expr.index?._type);
 		const checked = this._genStrictIndex(expr, base, idx);
 		if (checked) return checked;
 		if (this._isStringExprType(exprType) && !expr._lvalue)
@@ -1712,14 +1712,10 @@ export const expressionGenMethods = {
 	_genSliceExpr(expr) {
 		const base = this.genExpr(expr.expr);
 		const lo = expr.low
-			? this._is64BitInt(expr.low._type)
-				? `Number(${this.genExpr(expr.low)})`
-				: this.genExpr(expr.low)
+			? this._asIndexNumber(this.genExpr(expr.low), expr.low._type)
 			: "0";
 		const hi = expr.high
-			? this._is64BitInt(expr.high._type)
-				? `Number(${this.genExpr(expr.high)})`
-				: this.genExpr(expr.high)
+			? this._asIndexNumber(this.genExpr(expr.high), expr.high._type)
 			: "undefined";
 		if (this._isStringExprType(expr.expr._type))
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
@@ -1734,7 +1730,7 @@ export const expressionGenMethods = {
 		if (expr._selfReslice && !isTypedArraySlice(expr.expr._type))
 			return `__reslice(${base}, ${lo}, ${hi})`;
 		const max = expr.max
-			? `, ${this._is64BitInt(expr.max._type) ? `Number(${this.genExpr(expr.max)})` : this.genExpr(expr.max)}`
+			? `, ${this._asIndexNumber(this.genExpr(expr.max), expr.max._type)}`
 			: "";
 		return `__slice(${base}, ${lo}, ${hi}${max})`;
 	},
@@ -2461,8 +2457,7 @@ export const expressionGenMethods = {
 		const resolvedKind = madeType?.kind;
 		if (typeNode.kind === "SliceType" || resolvedKind === "slice") {
 			let n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
-			if (expr.args[1] && this._is64BitInt(expr.args[1]._type))
-				n = `Number(${n})`;
+			if (expr.args[1]) n = this._asIndexNumber(n, expr.args[1]._type);
 			// A negative length or capacity panics with Go's message.
 			n = this._guardMakeSize(n, "__mkn");
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
@@ -2478,8 +2473,8 @@ export const expressionGenMethods = {
 			// make([]T, n, cap) allocates cap elements and returns a view of
 			// the first n (`__mkslice`), so append within cap shares them.
 			let capArg = expr.args[2] ? this.genExpr(expr.args[2]) : null;
-			if (capArg && expr.args[2] && this._is64BitInt(expr.args[2]._type))
-				capArg = `Number(${capArg})`;
+			if (capArg && expr.args[2])
+				capArg = this._asIndexNumber(capArg, expr.args[2]._type);
 			if (capArg) {
 				this.useHelper("slice");
 				capArg = this._guardMakeSize(capArg, "__mkc");
@@ -3768,6 +3763,19 @@ export const expressionGenMethods = {
 
 	_is64BitInt(t) {
 		return is64BitInt(t);
+	},
+
+	// Whether a value of type `t` can be a BigInt at run time: a 64-bit
+	// integer, or a type parameter whose type set holds one (`~int | ~int64`).
+	_mayBeBigInt(t) {
+		if (t?.kind !== "typeParam") return is64BitInt(t);
+		const terms = this.checker?._constraintTerms(t.constraint, new Set());
+		return terms?.some(is64BitInt) === true;
+	},
+
+	// `code` as a JS number for an index, slice bound or `make` size.
+	_asIndexNumber(code, t) {
+		return this._mayBeBigInt(t) ? `Number(${code})` : code;
 	},
 
 	// float32 arithmetic rounds through Math.fround and arithmetic on a type

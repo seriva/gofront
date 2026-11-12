@@ -2299,6 +2299,41 @@ func main() {
 	});
 }
 
+section("Generics — 64-bit type-parameter index and size operands");
+
+test("an int64 or uint64 type-parameter make size, index and bound run (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Int interface{ ~int | ~int64 | ~uint64 }
+
+func mk[T Int](n T) int { return len(make([]int, n)) }
+func mkCap[T Int](n T) int { return cap(make([]int, 0, n)) }
+func mkMap[T Int](n T) int { return len(make(map[string]int, n)) }
+func at[T Int](s []string, n T) string { return s[n] }
+func hi[T Int](s []string, n T) []string { return s[:n] }
+func lo[T Int](s []string, n T) []string { return s[n:] }
+func both[T Int](s []string, n T) []string { return s[n-1 : n+1 : n+1] }
+func str[T Int](s string, n T) byte { return s[n] }
+
+func main() {
+	s := []string{"a", "b", "c", "d"}
+	fmt.Println(mk(int64(3)), mk(uint64(2)), mk(4))
+	fmt.Println(mkCap(int64(3)), mkCap(uint64(2)), mkCap(4))
+	fmt.Println(mkMap(int64(3)), mkMap(uint64(2)), mkMap(4))
+	fmt.Println(at(s, int64(1)), at(s, uint64(2)), at(s, 3))
+	fmt.Println(hi(s, int64(1)), hi(s, uint64(2)), hi(s, 3))
+	fmt.Println(lo(s, int64(1)), lo(s, uint64(2)), lo(s, 3))
+	fmt.Println(both(s, int64(2)), both(s, uint64(3)), both(s, 1))
+	fmt.Println(str("xyz", int64(1)), str("xyz", uint64(2)), str("xyz", 0))
+}
+`,
+		"3 2 4\n3 2 4\n0 0 0\nb c d\n[a] [a b] [a b c]\n[b c d] [c d] [d]\n[b c] [c d] [a b]\n121 122 120\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
