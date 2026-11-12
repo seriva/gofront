@@ -1425,9 +1425,13 @@ export class StmtsEmitter {
 	// `type A [2]int` is not a `[2]int` in a type switch).
 	_isMethodNamedRef(goType) {
 		const t = this._resolveTestTarget(goType);
-		if (t && isArrayType(t, this.mod.checker)) return true;
+		if (
+			t &&
+			(isArrayType(t, this.mod.checker) || isMapType(t, this.mod.checker))
+		)
+			return true;
 		if (t?.kind !== "named") return false;
-		return isFuncType(t, this.mod.checker) || isMapType(t, this.mod.checker);
+		return isFuncType(t, this.mod.checker);
 	}
 
 	_emitTypeTest(targetGoType) {
@@ -1505,17 +1509,6 @@ export class StmtsEmitter {
 				this.releaseTemp(tmp, "anyref");
 				return;
 			}
-		}
-
-		// A map lives in `any` as its bare map struct.
-		if (isMapType(targetGoType, this.mod.checker)) {
-			const { keyType, valType } = getMapKeyValTypes(
-				targetGoType,
-				this.mod.checker,
-			);
-			const mInfo = this.mod.getMapType(keyType, valType);
-			this._emitRefTestOrNil(targetGoType, mInfo.typeIndex);
-			return;
 		}
 
 		// Scalar types
@@ -1654,16 +1647,6 @@ export class StmtsEmitter {
 				});
 				return;
 			}
-		}
-
-		if (isMapType(targetGoType, this.mod.checker)) {
-			const { keyType, valType } = getMapKeyValTypes(
-				targetGoType,
-				this.mod.checker,
-			);
-			const mInfo = this.mod.getMapType(keyType, valType);
-			this._emitRefCastOrNil(targetGoType, mInfo.typeIndex);
-			return;
 		}
 
 		// Scalar types

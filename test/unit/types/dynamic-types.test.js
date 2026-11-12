@@ -892,3 +892,100 @@ func main() {
 		"interface conversion: interface {} is []int64, not []int\n",
 	);
 });
+
+section("Map identity by Go type in an interface");
+
+test("maps with key or value types that share a wasm type are distinct in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[string]int64{"a": 1}
+	_, ok1 := a.(map[string]int)
+	_, ok2 := a.(map[string]int64)
+	var b any = map[int]string{1: "x"}
+	_, ok3 := b.(map[int64]string)
+	_, ok4 := b.(map[int]string)
+	var c any = map[string]int{"a": 1}
+	_, ok5 := c.(map[string]int)
+	_, ok6 := c.(map[string]uint)
+	fmt.Println(ok1, ok2, ok3, ok4, ok5, ok6)
+	fmt.Println(a.(map[string]int64)["a"], b.(map[int]string)[1], c.(map[string]int)["a"])
+}
+`,
+		"false true false true true false\n1 x 1\n",
+	);
+});
+
+test("%T and a type switch name each map by its Go type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func name(v any) string {
+	switch v.(type) {
+	case map[string]int:
+		return "int"
+	case map[string]int64:
+		return "int64"
+	}
+	return "other"
+}
+
+func main() {
+	var a any = map[string]int64{}
+	var b any = map[int]string{}
+	var c any = map[string]int{}
+	fmt.Printf("%T %T %T\\n", a, b, c)
+	fmt.Println(name(a), name(c), name(b))
+}
+`,
+		"map[string]int64 map[int]string map[string]int\nint64 int other\n",
+	);
+});
+
+test("a nil map in an any keeps its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var m map[string]int64
+	var a any = m
+	_, ok1 := a.(map[string]int)
+	got, ok2 := a.(map[string]int64)
+	fmt.Println(a == nil, ok1, ok2, got == nil)
+}
+`,
+		"false false true true\n",
+	);
+});
+
+test("json encodes arrays and maps in an any as their own types", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func show(v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show([2]byte{1, 2})
+	show([2]bool{true, false})
+	show(map[string]int8{"a": 1})
+	show(map[string]bool{"a": true})
+}
+`,
+		'[1,2] <nil>\n[true,false] <nil>\n{"a":1} <nil>\n{"a":true} <nil>\n',
+	);
+});
