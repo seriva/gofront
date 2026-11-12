@@ -46,6 +46,17 @@ const CONST_KINDS = new Set([
 	"SelectorExpr",
 ]);
 
+// Describes a constant that is not integer-valued (`float64 constant`), or
+// null for an integer, an untyped float with an integer value, or a rune.
+function nonIntegerConstKind(v) {
+	if (v.k === "INT") return null;
+	if (v.k === "FLOAT") {
+		if (v.t) return `${v.t} constant`;
+		return constIntValue(v) === null ? "untyped float constant" : null;
+	}
+	return `${v.k.toLowerCase()} constant`;
+}
+
 const NEGATIVE_SHIFT_ERROR = "invalid shift count: negative shift count";
 
 /** @type {ThisType<import('./index.js').TypeChecker>} */
@@ -55,6 +66,23 @@ export const constantCheckMethods = {
 	_constValue(expr, scope = null) {
 		const raw = this._constRaw(expr, scope ?? this.globals);
 		return raw && !raw.overflow && !raw.error ? raw : null;
+	},
+
+	// What makes `expr` a constant that cannot be an array length, index or
+	// size (`untyped bool constant`, `untyped nil`), or null when it is an
+	// integer constant or not a constant at all.
+	_nonIntegerConst(expr, scope = null) {
+		let e = expr;
+		while (e?.kind === "ParenExpr") e = e.expr;
+		if (e?.kind === "ImagLit") return "untyped complex constant";
+		if (e?.kind === "BasicLit" && e.litKind === "NIL") return "untyped nil";
+		let v = null;
+		try {
+			v = this._constValue(expr, scope);
+		} catch {
+			// not a constant the evaluator understands
+		}
+		return v ? nonIntegerConstKind(v) : null;
 	},
 
 	// Integer value of an integer (or untyped integral float) constant as a

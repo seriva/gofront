@@ -1326,6 +1326,142 @@ func main() {
 	);
 });
 
+test("maps of funcs with bool or small-integer keys are named in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[bool]func(){}
+	fmt.Printf("%T\\n", a)
+	var b any = map[int32]func(int) string{}
+	fmt.Printf("%T\\n", b)
+	var c any = map[uint8]func(){}
+	fmt.Printf("%T\\n", c)
+	var d any = map[rune]func(){}
+	fmt.Printf("%T\\n", d)
+	var e any = map[bool][]func(){}
+	fmt.Printf("%T\\n", e)
+	var f any = map[bool]map[bool]func(){}
+	fmt.Printf("%T\\n", f)
+	var g any = map[string]map[bool]func(){}
+	fmt.Printf("%T\\n", g)
+	var h any = map[bool]func(int){}
+	fmt.Printf("%T\\n", h)
+}
+`,
+		"map[bool]func()\nmap[int32]func(int) string\nmap[uint8]func()\nmap[int32]func()\nmap[bool][]func()\nmap[bool]map[bool]func()\nmap[string]map[bool]func()\nmap[bool]func(int)\n",
+	);
+});
+
+test("a map of funcs with a bool key keeps its exact type in assertions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[bool]func(){}
+	_, ok := a.(map[bool]func())
+	_, ok2 := a.(map[bool]func(int))
+	_, ok3 := a.(map[string]func())
+	fmt.Println(ok, ok2, ok3)
+}
+`,
+		"true false false\n",
+	);
+});
+
+test("maps of funcs with string keys and maps of pointers with bool keys are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[string]func(){}
+	var b any = map[bool]*int{}
+	fmt.Printf("%T %T\\n", a, b)
+}
+`,
+		"map[string]func() map[bool]*int\n",
+	);
+});
+
+const GEN_BOX = `package main
+
+import "fmt"
+
+func gen[T any](v T) any { return v }
+
+func show(a any) { fmt.Printf("%T|%v\\n", a, a) }
+
+type S struct{ A int }
+`;
+
+for (const [name, body, want] of [
+	[
+		"a bool map then an int map",
+		'show(gen(map[string]bool{"a": true}))\n\tshow(gen(map[string]int{"a": 1}))',
+		"map[string]bool|map[a:true]\nmap[string]int|map[a:1]\n",
+	],
+	[
+		"an int map then a bool map",
+		'show(gen(map[string]int{"a": 1}))\n\tshow(gen(map[string]bool{"a": true}))',
+		"map[string]int|map[a:1]\nmap[string]bool|map[a:true]\n",
+	],
+	[
+		"a string-keyed map then an int-keyed map",
+		'show(gen(map[string]int{"a": 1}))\n\tshow(gen(map[int]string{1: "x"}))',
+		"map[string]int|map[a:1]\nmap[int]string|map[1:x]\n",
+	],
+	[
+		"an int array then a string array",
+		'show(gen([2]int{1, 2}))\n\tshow(gen([2]string{"a", "b"}))',
+		"[2]int|[1 2]\n[2]string|[a b]\n",
+	],
+	[
+		"two maps of one type",
+		'show(gen(map[string]int{"a": 1}))\n\tshow(gen(map[string]int{"b": 2}))',
+		"map[string]int|map[a:1]\nmap[string]int|map[b:2]\n",
+	],
+	[
+		"slices and struct pointers",
+		'show(gen([]int{1}))\n\tshow(gen([]string{"a"}))\n\tshow(gen(&S{4}))',
+		"[]int|[1]\n[]string|[a]\n*main.S|&{4}\n",
+	],
+	[
+		"a nil map stays nil",
+		"var m map[string]int\n\tn := gen(m)\n\t_, ok := n.(map[string]int)\n\tfmt.Println(ok)\n\tshow(n)",
+		"true\nmap[string]int|map[]\n",
+	],
+]) {
+	test(`generic code boxes ${name} with each call's own type`, async () => {
+		await assertAllTargetsOutput(
+			`${GEN_BOX}\nfunc main() {\n\t${body}\n}\n`,
+			want,
+		);
+	});
+}
+
+test("generic boxing keeps the exact type in assertions", async () => {
+	await assertAllTargetsOutput(
+		`${GEN_BOX}
+func main() {
+	a := gen(map[string]bool{"a": true})
+	b := gen([2]string{"p", "q"})
+	_, ok1 := a.(map[string]int)
+	_, ok2 := a.(map[string]bool)
+	_, ok3 := b.([2]int)
+	_, ok4 := b.([2]string)
+	fmt.Println(ok1, ok2, ok3, ok4)
+}
+`,
+		"false true false true\n",
+	);
+});
+
 test("int, string and float32 element composites and slices in an any are unchanged", async () => {
 	await assertAllTargetsOutput(
 		`package main

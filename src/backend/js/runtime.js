@@ -311,11 +311,21 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   if (x === null || typeof x !== "object") return x;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return x;
+  // A copy keeps the hidden tags (__t, __map, ...) that name the value's type
+  // in an interface: the generic code boxes the value first and copies after.
+  const keep = (v, c) => {
+    for (const k of Object.getOwnPropertyNames(v)) {
+      const d = Object.getOwnPropertyDescriptor(v, k);
+      if (!d.enumerable && k !== "length") Object.defineProperty(c, k, d);
+    }
+    return c;
+  };
   const cp = (v) => {
     if (v === null || typeof v !== "object") return v;
-    if (Array.isArray(v)) return v.map(cp);
+    if (v.__nilm === true) return v;
+    if (Array.isArray(v)) return keep(v, v.map(cp));
     if (typeof v.__clone === "function") return v.__clone();
-    return Object.assign(Object.create(Object.getPrototypeOf(v)), v);
+    return keep(v, Object.assign(Object.create(Object.getPrototypeOf(v)), v));
   };
   return cp(x);
 };`;

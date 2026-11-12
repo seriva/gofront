@@ -821,6 +821,94 @@ func main() {
 	});
 }
 
+section("Range-over-func assignment: the yielded value must fit the target");
+
+const YIELD_PRELUDE = `package main
+
+import "fmt"
+
+type N int
+
+func (n N) String() string { return "N" }
+
+func seqI(yield func(int) bool) { yield(1) }
+func seqN(yield func(N) bool) { yield(1) }
+func seqII(yield func(int, int) bool) { yield(1, 2) }
+
+`;
+
+function iterErrors(target, body) {
+	const src = `${YIELD_PRELUDE}func main() {\n\t${body}\n}\n`;
+	return target === "wasm"
+		? compileWasm(src).errors
+		: compile(src, { target }).errors;
+}
+
+for (const [name, body, want] of [
+	[
+		"string",
+		"var s string\n\tfor s = range seqI {\n\t}\n\t_ = s",
+		"Cannot assign int to string",
+	],
+	[
+		"float64",
+		"var s float64\n\tfor s = range seqI {\n\t}\n\t_ = s",
+		"Cannot assign int to float64",
+	],
+	[
+		"int64",
+		"var s int64\n\tfor s = range seqI {\n\t}\n\t_ = s",
+		"Cannot assign int to int64",
+	],
+	[
+		"fmt.Stringer",
+		"var s fmt.Stringer\n\tfor s = range seqI {\n\t}\n\t_ = s",
+		"int does not implement fmt.Stringer",
+	],
+	[
+		"a string slice element",
+		'out := []string{""}\n\tfor out[0] = range seqI {\n\t}\n\t_ = out',
+		"Cannot assign int to string",
+	],
+	[
+		"the two-value form",
+		"var s string\n\tvar v int\n\tfor s, v = range seqII {\n\t}\n\t_, _ = s, v",
+		"Cannot assign int to string",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`assigning an int yield to ${name} is rejected (${target})`, () => {
+			assertErrorContains(iterErrors(target, body), want);
+		});
+	}
+}
+
+for (const [name, body, want] of [
+	["any", "var s any\n\tfor s = range seqI {\n\t}\n\tfmt.Println(s)", "1\n"],
+	[
+		"an implementing fmt.Stringer",
+		"var s fmt.Stringer\n\tfor s = range seqN {\n\t}\n\tfmt.Println(s)",
+		"N\n",
+	],
+	[
+		"a matching int",
+		"var s int\n\tfor s = range seqI {\n\t}\n\tfmt.Println(s)",
+		"1\n",
+	],
+	[
+		"the two-value form of matching ints",
+		"var s, v int\n\tfor s, v = range seqII {\n\t}\n\tfmt.Println(s, v)",
+		"1 2\n",
+	],
+]) {
+	test(`assigning a yield into ${name} runs (js, both, wasm)`, async () => {
+		await assertAllTargetsOutput(
+			`${YIELD_PRELUDE}func main() {\n\t${body}\n}\n`,
+			want,
+		);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

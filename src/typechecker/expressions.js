@@ -126,6 +126,8 @@ const BUILTIN_CHECK = {
 		// `make(S, n)` with S a type parameter makes its core type.
 		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
 		if (core) ta._coreType = core;
+		for (const size of e.args.slice(1, 3))
+			s._checkIntegerConstOperand(size, "size", sc);
 		return made;
 	},
 	new: (s, _n, e, _at, sc) => {
@@ -889,6 +891,8 @@ export const expressionCheckMethods = {
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
+		if (btu.kind !== "map")
+			this._checkIntegerConstOperand(expr.index, "index", scope);
 		if (btu.kind === "slice" || btu.kind === "array") {
 			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
@@ -978,15 +982,28 @@ export const expressionCheckMethods = {
 		return t.base;
 	},
 
+	// An index, slice bound or `make` size that is a constant must be an
+	// integer (`s[1 == 1]`, `make([]int, "a")`).
+	_checkIntegerConstOperand(operand, what, scope) {
+		const kind = this._nonIntegerConst(operand, scope);
+		if (kind)
+			this.err(
+				`invalid argument: ${what} ${exprText(operand)} (${kind}) must be integer`,
+				operand,
+			);
+	},
+
 	_checkSliceExpr(expr, scope) {
 		const bt = this._derefArrayPtr(
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		if (expr.low) this.checkExpr(expr.low, scope);
-		if (expr.high) this.checkExpr(expr.high, scope);
-		if (expr.max) this.checkExpr(expr.max, scope);
+		for (const bound of [expr.low, expr.high, expr.max]) {
+			if (!bound) continue;
+			this.checkExpr(bound, scope);
+			this._checkIntegerConstOperand(bound, "index", scope);
+		}
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);

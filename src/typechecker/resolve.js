@@ -464,6 +464,18 @@ export const resolveMethods = {
 		return 0;
 	},
 
+	// An array length must be an integer constant: `[1 == 1]T`, `["a"]T`,
+	// `[nil]T`, `[2.5]T`, `[2i]T` and a typed float constant are rejected.
+	_reportNonIntegerArrayLen(size, scope) {
+		const what = this._nonIntegerConst(size, scope);
+		if (!what) return false;
+		this.err(
+			`invalid array length ${exprText(size)} (${what}): must be integer`,
+			size,
+		);
+		return true;
+	},
+
 	// `pkg.K` inside a folded array length counts as using the import.
 	_useQualifiedConsts(node) {
 		if (!node || typeof node !== "object") return;
@@ -475,6 +487,15 @@ export const resolveMethods = {
 	},
 
 	_resolveArrayTypeNode(node, scope) {
+		if (
+			!node.inferLen &&
+			this._reportNonIntegerArrayLen(node._sizeExpr ?? node.size, scope)
+		)
+			return {
+				kind: "array",
+				size: 0,
+				elem: this.resolveTypeNode(node.elem, scope),
+			};
 		// Fold in place so backends that read the type node see a literal length.
 		// The node may come from the parse cache: keep the original expression so
 		// a later compile of the same AST still counts `pkg.K` as using `pkg`

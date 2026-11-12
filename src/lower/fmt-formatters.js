@@ -34,7 +34,7 @@ import {
 	under,
 	walkNodes,
 } from "./gen-types.js";
-import { holdsFunc, isFuncComposite } from "./json-codecs.js";
+import { holdsFunc } from "./json-codecs.js";
 
 const FMT_PATH = "fmt";
 const RT_PATH = "internal/fmtrt";
@@ -649,11 +649,11 @@ class FmtGen extends TypeSpeller {
 		if (isInterface(t) || under(t)?.kind === "interface") return false;
 		if (t.kind === "basic") return false;
 		if (t.kind === "func") return true;
-		// An array or map is boxed by its Go type, so one of small integers or
-		// booleans no longer shadows its look-alikes in the type switch. One
-		// holding funcs is still described, so `%T` names it.
+		// An array, map or slice is boxed by its Go type, so one with small
+		// integer or boolean keys or elements no longer shadows its look-alikes in
+		// the type switch. One holding funcs is described too, so `%T` names it.
 		if (t.kind === "array" || t.kind === "map" || t.kind === "slice")
-			return !holdsFunc(t) || isFuncComposite(t);
+			return true;
 		if (holdsFunc(t)) return false;
 		return true;
 	}

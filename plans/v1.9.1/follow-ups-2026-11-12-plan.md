@@ -471,27 +471,27 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
 
 ### Phase 12: Typechecker Conformance and Generic `fmt` Tags
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth sweep, `N01`–`N05`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, fifth sweep)).
-- [ ] Task 12.1: Keep the defined bool type through `&&` and `||` (`N01`)
+- [x] Task 12.1: Keep the defined bool type through `&&` and `||` (`N01`)
   - Files: `src/typechecker/expressions.js` (binary logical result type), `src/typechecker/types.js` (`LOG_OPS` use)
   - Test: `test/unit/language/defined-bool.test.js`: `var b3 B = b1 && b2` → `false`; `||`; `f(b1 && b2)`; `return b1 && b2`; `c := b1 && b2` with `%T` → `main.B`; negatives (`assertErrorContains(…, "mismatched types")` or `Cannot assign` on every target): `var c bool = b1 && b2`, `b1 && c` with `c bool`
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples and the Go-source stdlib
-- [ ] Task 12.2: Reject non-integer constant array lengths (`N02` lengths)
+- [x] Task 12.2: Reject non-integer constant array lengths (`N02` lengths)
   - Files: `src/typechecker/resolve.js` (`_foldArrayLen`)
   - Test: `test/unit/language/array-length.test.js` (new): `[1 == 1]int`, `["a"]int`, `[nil]int`, `const c = true; [c]int`, `[2.5]int`, `const c float64 = 2; [c]int`, `[2i]int`, `[1 == 1]int{}`, `type A [1 == 1]int` → `assertErrorContains(…, "invalid array length")` on every target; positives `[2.0]int`, `['\x03']int`, `[N * 2]int`, `[math.MaxInt8]byte` print their lengths
   - Done when: negatives report on every target, positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples
-- [ ] Task 12.3: Reject non-integer constant indexes and `make` sizes (`N02` index and make)
+- [x] Task 12.3: Reject non-integer constant indexes and `make` sizes (`N02` index and make)
   - Files: `src/typechecker/expressions.js` (index and `make` argument checks)
   - Test: `test/unit/language/array-length.test.js`: `s[1 == 1]`, `s["a"]`, `make([]int, 1 == 1)`, `make([]int, "a")`, `make([]int, 2, 1.5)` → `assertErrorContains(…, "must be integer")` on every target; positives `s[1.0]`, `make([]int, 2.0)`, `s['\x01']` run
   - Done when: negatives report on every target and positives pass `assertAllTargetsOutput`
-- [ ] Task 12.4: Check range-over-func assignments against the target type (`N05`)
+- [x] Task 12.4: Check range-over-func assignments against the target type (`N05`)
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`)
   - Test: `test/unit/language/range-assign.test.js`: `var s string; for s = range seq {}` (`seq` yields `int`) → `assertErrorContains(…, "Cannot assign int to string")` on every target; `float64`, `int64`, `fmt.Stringer` (`int` does not implement), `out[0]` string element, two-value `for s, v = range seq2`; positives: `any`, an implementing `fmt.Stringer`, matching `int` still run
   - Done when: negatives report on every target (no invalid WASM) and positives pass `assertAllTargetsOutput`
-- [ ] Task 12.5: Name maps with small keys and func values in an `any` (`N03`)
+- [x] Task 12.5: Name maps with small keys and func values in an `any` (`N03`)
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_ifaceBoxMeta` / func-valued map classification) and/or `src/backend/js/index.js`, `src/backend/wasm/module-emitter.js`; `docs/go-compatibility.md` (`fmt` of a value in an `any` row, only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `%T` of `map[bool]func()`, `map[int32]func(int) string`, `map[uint8]func()`, `map[rune]func()`, `map[bool][]func()`, `map[bool]map[bool]func()` → the Go spelling; assertion to the exact type `true`, to `map[bool]func(int)` `false`; `map[string]func()` and `map[bool]*int` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 12.6: Tag each generic boxing of a map or array with its own instantiation in JS (`N04`)
+- [x] Task 12.6: Tag each generic boxing of a map or array with its own instantiation in JS (`N04`)
   - Files: per probe at task start: `src/backend/js/runtime.js` (`__ity` / `__vclone`) and `src/backend/js/index.js` or `src/backend/js/expressions.js` (where the generic tag is chosen)
   - Test: `test/unit/types/dynamic-types.test.js`: `gen(map[string]bool{"a": true})` then `gen(map[string]int{"a": 1})` → `map[string]bool|map[a:true]` and `map[string]int|map[a:1]` in both orders; `gen(map[string]int)` then `gen(map[int]string)`; `gen([2]int{1, 2})` then `gen([2]string{"a", "b"})`; same type twice; slices and `*S` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
