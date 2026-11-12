@@ -1910,7 +1910,10 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
-		if (typeNode?._assertType?.kind === "slice") {
+		if (
+			typeNode?._assertType?.kind === "slice" ||
+			this._isNamedSliceTypeNode(typeNode)
+		) {
 			// A nil slice in an interface is a tagged empty array.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
@@ -1920,6 +1923,16 @@ export const expressionGenMethods = {
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
 		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+	},
+
+	// A type name that denotes a defined slice type (`type S []int`).
+	_isNamedSliceTypeNode(typeNode) {
+		if (typeNode?.kind !== "TypeName") return false;
+		const named = this.checker?.types.get(typeNode.name);
+		return (
+			this._isNamedComposite(named) &&
+			this._underlyingOf(named)?.kind === "slice"
+		);
 	},
 
 	_isStructPtrTypeNode(typeNode) {

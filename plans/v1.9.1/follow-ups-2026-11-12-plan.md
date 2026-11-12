@@ -359,7 +359,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`), `src/backend/js/statements.js` (iterator loop store)
   - Test: `test/unit/language/range-assign.test.js`: `for s = range seq {}` into `fmt.Stringer` → `N10`; two-value `for k, s = range seq2` → `1 N10`; into `any` with `s.(N)` → `true`; define form unchanged
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 9.3: Unbox a nil defined slice as nil in JS (`L03`)
+- [x] Task 9.3: Unbox a nil defined slice as nil in JS (`L03`)
   - Files: `src/backend/js/expressions.js` (assertion / type-switch unboxing; exact site per probe)
   - Test: `test/unit/types/dynamic-types.test.js`: `type S []int; var s S; var a any = s; ns, _ := a.(S); fmt.Println(ns == nil, len(ns))` → `true 0`; type switch `case S: v == nil` → `true`; `ns := a.(S)`; non-nil `S{1}` and nil `type M map[string]int` unchanged
   - Done when: `assertAllTargetsOutput` passes

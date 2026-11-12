@@ -1047,3 +1047,56 @@ func main() {
 		"int string other int\n",
 	);
 });
+
+section("Nil defined slices asserted out of an any");
+
+test("a nil defined slice asserted out of an any is nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S []int
+type M map[string]int
+
+func main() {
+	var s S
+	var a any = s
+	ns, _ := a.(S)
+	fmt.Println(ns == nil, len(ns))
+	ns2 := a.(S)
+	fmt.Println(ns2 == nil, len(ns2))
+	switch v := a.(type) {
+	case S:
+		fmt.Println(v == nil, len(v))
+	}
+	var m M
+	var b any = m
+	nm, _ := b.(M)
+	fmt.Println(nm == nil, len(nm))
+}
+`,
+		"true 0\ntrue 0\ntrue 0\ntrue 0\n",
+	);
+});
+
+test("a non-nil defined slice asserted out of an any is not nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S []int
+
+func main() {
+	var a any = S{1}
+	ns, _ := a.(S)
+	fmt.Println(ns == nil, len(ns))
+	var e any = S{}
+	es := e.(S)
+	fmt.Println(es == nil, len(es))
+}
+`,
+		"false 1\nfalse 0\n",
+	);
+});
