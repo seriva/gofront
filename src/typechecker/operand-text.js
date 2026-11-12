@@ -16,6 +16,7 @@ function litText(node) {
 const PRINTERS = {
 	Ident: (n) => n.name,
 	BasicLit: litText,
+	ImagLit: (n) => `${n.value}i`,
 	ParenExpr: (n) => `(${exprText(n.expr)})`,
 	SelectorExpr: (n) => `${exprText(n.expr)}.${n.field}`,
 	UnaryExpr: (n) => `${n.op}${exprText(n.operand)}`,

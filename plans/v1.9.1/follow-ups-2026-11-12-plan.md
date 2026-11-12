@@ -475,7 +475,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth s
   - Files: `src/typechecker/expressions.js` (binary logical result type), `src/typechecker/types.js` (`LOG_OPS` use)
   - Test: `test/unit/language/defined-bool.test.js`: `var b3 B = b1 && b2` → `false`; `||`; `f(b1 && b2)`; `return b1 && b2`; `c := b1 && b2` with `%T` → `main.B`; negatives (`assertErrorContains(…, "mismatched types")` or `Cannot assign` on every target): `var c bool = b1 && b2`, `b1 && c` with `c bool`
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples and the Go-source stdlib
-- [ ] Task 12.2: Reject non-integer constant array lengths (`N02` lengths)
+- [x] Task 12.2: Reject non-integer constant array lengths (`N02` lengths)
   - Files: `src/typechecker/resolve.js` (`_foldArrayLen`)
   - Test: `test/unit/language/array-length.test.js` (new): `[1 == 1]int`, `["a"]int`, `[nil]int`, `const c = true; [c]int`, `[2.5]int`, `const c float64 = 2; [c]int`, `[2i]int`, `[1 == 1]int{}`, `type A [1 == 1]int` → `assertErrorContains(…, "invalid array length")` on every target; positives `[2.0]int`, `['\x03']int`, `[N * 2]int`, `[math.MaxInt8]byte` print their lengths
   - Done when: negatives report on every target, positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples
