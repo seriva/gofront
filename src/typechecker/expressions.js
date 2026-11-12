@@ -44,6 +44,7 @@ import {
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
+	UNTYPED_RUNE,
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
@@ -179,7 +180,7 @@ export const expressionCheckMethods = {
 			case "BasicLit": {
 				switch (expr.litKind) {
 					case "INT":
-						return UNTYPED_INT;
+						return expr.rune ? UNTYPED_RUNE : UNTYPED_INT;
 					case "FLOAT":
 						return UNTYPED_FLOAT;
 					case "STRING":

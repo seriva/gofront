@@ -417,7 +417,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
   - Files: `src/lower/functions.js` (`deferTempType`, temp declaration)
   - Test: `test/unit/wasm/defer_recover.test.js`: `defer f(x == 1)` with `B` and `bool` parameters, a method callee, `...B`, a closure parameter → `true`; `defer f(1 << n)` with `int8`, `uint8`, `int64`, and an `any` parameter (`int 8`); every program also compiles its file twice with `compileFiles` on one path
   - Done when: `assertAllTargetsOutput` passes and the second compile no longer reports `Cannot assign int to int8` or `Cannot assign bool to B`
-- [ ] Task 10.3: Give an untyped rune constant the type `rune` (`M02`)
+- [x] Task 10.3: Give an untyped rune constant the type `rune` (`M02`)
   - Files: `src/typechecker/types.js` or `src/typechecker/constants.js` (default type of an untyped rune; exact site per probe), `src/backend/wasm/emit-exprs.js` (only if boxing still reports `int` after the typechecker change), `docs/go-compatibility.md` (`Sized numbers in an any` row, if it needs the rune wording)
   - Test: `test/unit/types/dynamic-types.test.js`: `f('a')` into `any` → `%T` `int32` on `wasm` (`assertWasmProgramOutput`) and `int` on js/both (documented), `a.(rune)` → `true` and `case rune:` hit on wasm, `r := 'x'; var i int32 = r` prints `120` on all targets, `var i int = r` → `assertErrorContains(…, "Cannot assign")` on every target, `const r = 'x'`, `'a' + 'b'`, `[]any{'a'}`; rune arithmetic, `string(r)`, `%c`/`%q`/`%U`/`%d` unchanged
   - Done when: the programs pass, the negative reports on every target, and `npm run check` type-checks every example and Go-source stdlib package (code that mixed `rune` and `int` is fixed in this task and named in the commit body)

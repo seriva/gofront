@@ -178,7 +178,7 @@ package main
 import "math/bits"
 
 func Rotate64(x uint64, k int32) uint64 {
-    return bits.RotateLeft64(x, k)
+    return bits.RotateLeft64(x, int(k))
 }
 
 func Main() {

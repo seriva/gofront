@@ -32,6 +32,7 @@ import {
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
+	UNTYPED_RUNE,
 } from "./types.js";
 
 // Unnamed type literal kinds for Go's "identical underlying types" assignability rule.
@@ -72,6 +73,12 @@ function logicalResultType(lt, rt) {
 	if (rt?.kind === "untyped" && isBool(lt)) return lt;
 	if (lt?.kind === "untyped" && isBool(rt)) return rt;
 	return BOOL;
+}
+
+// Two untyped numeric operands combine to the later of int, rune, float.
+function untypedIntegerKind(isFloat, lt, rt) {
+	if (isFloat) return UNTYPED_FLOAT;
+	return lt.rune || rt.rune ? UNTYPED_RUNE : UNTYPED_INT;
 }
 
 /** @type {ThisType<TypeChecker>} */
@@ -176,7 +183,7 @@ export const assignabilityMethods = {
 		const rFloat = rName === "float32" || rName === "float64";
 		const isFloat = lFloat || rFloat;
 		if (lt.kind === "untyped" && rt.kind === "untyped")
-			return isFloat ? UNTYPED_FLOAT : UNTYPED_INT;
+			return untypedIntegerKind(isFloat, lt, rt);
 		if (lt.kind === "untyped")
 			return isFloat && rt.name !== "float64" && rt.name !== "float32"
 				? FLOAT64
@@ -649,12 +656,7 @@ export const assignabilityMethods = {
 	_isNumericCoercible(target, source) {
 		if (target.kind !== "basic" || source.kind !== "basic") return false;
 		const pair = `${target.name}:${source.name}`;
-		return (
-			pair === "float64:int" ||
-			// rune was historically int in GoFront; keep rune/int interchangeable.
-			pair === "int:int32" ||
-			pair === "int32:int"
-		);
+		return pair === "float64:int";
 	},
 
 	// The lenient numeric pairs: accepted, except that a generic call result

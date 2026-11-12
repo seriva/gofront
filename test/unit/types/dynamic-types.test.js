@@ -4,9 +4,12 @@
 import {
 	assert,
 	assertAllTargetsOutput,
+	assertErrorContains,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
+	compileWasm,
 	section,
 	test,
 } from "../helpers.js";
@@ -1134,3 +1137,110 @@ func main() {
 		"[2]int [5 5]\n[2]string [a a]\n[2]main.T [{1} {1}]\n[2]int [5 0]\n[z ]\ntrue false\n[2]int [1 2]\n",
 	);
 });
+
+section("An untyped rune constant has type rune");
+
+test("a rune literal, constant and sum box as int32 in an any on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+const k = 'x'
+
+func f(x any) { fmt.Printf("%T\\n", x) }
+
+func main() {
+	f('a')
+	f(k)
+	f('a' + 'b')
+	r := 'x'
+	f(r)
+	xs := []any{'a'}
+	fmt.Printf("%T\\n", xs[0])
+	var a any = 'a'
+	_, ok := a.(rune)
+	_, notInt := a.(int)
+	fmt.Println(ok, notInt)
+	switch a.(type) {
+	case int:
+		fmt.Println("int")
+	case rune:
+		fmt.Println("rune")
+	}
+}
+`,
+		"int32\nint32\nint32\nint32\nint32\ntrue false\nrune\n",
+	);
+});
+
+test("a rune literal in an any reports int in JavaScript, as documented", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f(x any) { fmt.Printf("%T\\n", x) }
+
+func main() {
+	f('a')
+}
+`,
+		"int\n",
+	);
+});
+
+test("rune constants and arithmetic behave as before on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const k = 'x'
+
+func main() {
+	r := 'x'
+	var i int32 = r
+	fmt.Println(i, k, 'a'+'b', k+1, r+1, r*2, -r)
+	fmt.Println(string(r), string(k))
+	fmt.Printf("%c %q %U %d\\n", r, r, r, r)
+	var f float64 = 'a'
+	var by byte = 'a'
+	var u uint = 'b'
+	fmt.Println(f, by, u)
+	m := map[rune]int{'a': 1}
+	fmt.Println(m['a'])
+	for _, c := range "hé" {
+		fmt.Println(c == 'é', c-'a')
+	}
+	s := "abc"
+	fmt.Println(s[0] == 'a', s[1]-'a'+'A')
+	switch r {
+	case 'x':
+		fmt.Println("sw")
+	}
+}
+`,
+		"120 120 195 121 121 240 -120\nx x\nx 'x' U+0078 120\n97 97 98\n1\nfalse 7\ntrue 136\ntrue 66\nsw\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [name, body] of [
+		["a rune variable into an int", "r := 'x'\n\tvar i int = r\n\t_ = i"],
+		["an int variable into a rune", "n := 1\n\tvar r rune = n\n\t_ = r"],
+		[
+			"a rune constant sum into an int variable",
+			"const r = 'a'\n\tn := r\n\tvar i int = n\n\t_ = i",
+		],
+	]) {
+		test(`${name} is rejected (${target})`, () => {
+			const src = `package main\n\nfunc main() {\n\t${body}\n}\n`;
+			const errors =
+				target === "wasm"
+					? compileWasm(src).errors
+					: compile(src, { target }).errors;
+			assertErrorContains(errors, "Cannot assign");
+		});
+	}
+}
