@@ -233,14 +233,19 @@ export const statementCheckMethods = {
 	// any other conversion does. The box is recorded on a holder, not on the
 	// target, which codegen also reads as an assignable expression.
 	_markRangeAssignBox(stmt, i, target, source) {
-		if (stmt.rhs[0]?.kind !== "RangeExpr" || !target || !source) return;
+		if (stmt.rhs[0]?.kind !== "RangeExpr") return;
+		this._markRangeTargetBox(stmt.lhs[i], target, source);
+	},
+
+	_markRangeTargetBox(node, target, source) {
+		if (!target || !source) return;
 		const holder = {};
 		this._markIfaceBox(
 			this.resolveType(target),
 			this.resolveType(source),
 			holder,
 		);
-		if (holder._ifaceBox) stmt.lhs[i]._rangeBox = holder;
+		if (holder._ifaceBox) node._rangeBox = holder;
 	},
 
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
@@ -683,10 +688,14 @@ export const statementCheckMethods = {
 		}
 	},
 
-	_checkRangeIterAssignVars(lhs, scope) {
-		for (const e of lhs) {
-			if (e.kind === "Ident" && e.name !== "_") this.checkExpr(e, scope);
-		}
+	// Each yielded value is stored into an existing variable; one of
+	// interface type boxes the value as any other conversion does.
+	_checkRangeIterAssignVars(lhs, scope, yieldParams = []) {
+		lhs.forEach((e, i) => {
+			if (e.kind !== "Ident" || e.name === "_") return;
+			const target = this.checkExpr(e, scope);
+			this._markRangeTargetBox(e, target, yieldParams[i]);
+		});
 	},
 
 	_checkRangeIterStmt(initStmt, scope, _returnType) {
@@ -711,7 +720,7 @@ export const statementCheckMethods = {
 
 		if (initStmt.kind === "DefineStmt")
 			this._bindRangeIterDefineVars(lhs, info, scope);
-		else this._checkRangeIterAssignVars(lhs, scope);
+		else this._checkRangeIterAssignVars(lhs, scope, info.yieldParams);
 		return info;
 	},
 };

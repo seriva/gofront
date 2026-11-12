@@ -594,6 +594,82 @@ func main() {
 	assertValidWasm(wasm);
 });
 
+section("Range assignment: range-over-func into interface variables");
+
+const ITER_PRELUDE = `${RANGE_BOX_PRELUDE}
+func seq(yield func(N) bool) {
+	yield(N(10))
+}
+
+func seq2(yield func(int, N) bool) {
+	yield(1, N(10))
+}
+`;
+
+test("range-over-func assignment into a Stringer boxes the value", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var s fmt.Stringer
+	for s = range seq {
+	}
+	fmt.Println(s)
+}
+`,
+		"N10\n",
+	);
+});
+
+test("two-value range-over-func assignment boxes the second value", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var k int
+	var s fmt.Stringer
+	for k, s = range seq2 {
+	}
+	fmt.Println(k, s)
+}
+`,
+		"1 N10\n",
+	);
+});
+
+test("range-over-func assignment into an any keeps the defined type", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var a any
+	for a = range seq {
+	}
+	_, ok := a.(N)
+	fmt.Println(ok)
+	var k any
+	var v any
+	for k, v = range seq2 {
+	}
+	_, okv := v.(N)
+	fmt.Println(k, okv)
+}
+`,
+		"true\n1 true\n",
+	);
+});
+
+test("range-over-func define form is unchanged", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	for s := range seq {
+		var x fmt.Stringer = s
+		fmt.Println(x)
+	}
+}
+`,
+		"N10\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

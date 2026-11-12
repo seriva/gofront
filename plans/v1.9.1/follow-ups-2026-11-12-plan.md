@@ -355,7 +355,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Files: `src/backend/wasm/emit-stmts.js` (`_emitRangeAssignStore` and its callers)
   - Test: `test/unit/language/range-assign.test.js`: `out := make([]fmt.Stringer, 1); for _, out[0] = range []N{3, 4} {}` → `N4`; map entry `m["a"]`; struct field `s.v`; `*p`; `[]any` element from `[]int` → `4`; `[]int` element → `4`; key form `for out[0] = range []int{3, 4}` → `1`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 9.2: Box range-over-func assignments into interface variables in JS (`L02`)
+- [x] Task 9.2: Box range-over-func assignments into interface variables in JS (`L02`)
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`), `src/backend/js/statements.js` (iterator loop store)
   - Test: `test/unit/language/range-assign.test.js`: `for s = range seq {}` into `fmt.Stringer` → `N10`; two-value `for k, s = range seq2` → `1 N10`; into `any` with `s.(N)` → `true`; define form unchanged
   - Done when: `assertAllTargetsOutput` passes
