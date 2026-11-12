@@ -540,7 +540,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 sixth s
   - Files: per probe at task start: `src/backend/js/runtime.js` (`__ity` / struct box helpers) and `src/backend/js/expressions.js` or `src/backend/js/index.js` (where the generic tag is chosen)
   - Test: `test/unit/types/dynamic-types.test.js`: `gen(&S{4})` then `gen(S{5})` → `*main.S|&{4}` then `main.S|{5}`, in both orders and alternating three calls; `v.(S)` `true` and `v.(*S)` `false` for the value result, the reverse for the pointer; two struct types; non-generic boxing unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 13.4: Fold `len` and `cap` of arrays as array lengths (`P04`)
+- [x] Task 13.4: Fold `len` and `cap` of arrays as array lengths (`P04`)
   - Files: `src/typechecker/resolve.js` (`_foldArrayLen`, array length resolution), `docs/language-support.md` (array length row, only if it no longer matches)
   - Test: `test/unit/language/array-length.test.js`: package-level `var base [3]int; var a [len(base)]int` → `3`; `cap(base)`; `const n = len([2]int{}); var a [n]int`; `type A [len(base)]int`; local `var base [3]int; var a [len(base)]int` compiles and prints `3` (no unused-variable error); negatives `[len(slice)]int` and `[len(f())]int` → `assertErrorContains(…, "invalid array length")` on every target
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples

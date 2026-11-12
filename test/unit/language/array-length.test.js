@@ -167,6 +167,83 @@ test("an integer index of any integer type runs (js, both, wasm)", async () => {
 	);
 });
 
+section("Array length: len and cap of an array are constants");
+
+test("len and cap of package and local arrays size arrays (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var base [3]int
+var a [len(base)]int
+var b [cap(base)]byte
+var later [len(after)]int
+var after = [...]string{"x", "y"}
+
+const n = len([2]int{})
+
+type A [len(base)]int
+
+func main() {
+	var c [n]int
+	var d A
+	var local [4]int
+	var e [len(local)]int
+	p := &local
+	var f [len(p)]int
+	fmt.Println(len(a), len(b), len(c), len(d), len(e), len(f), len(later))
+}
+`,
+		"3 3 2 3 4 4 2\n",
+	);
+});
+
+test("a constant built from cap of a later package array works (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const k = cap(base)
+
+type B [k * 2]int
+
+var base = [3]int{}
+
+func main() {
+	fmt.Println(len(B{}), k)
+}
+`,
+		"6 3\n",
+	);
+});
+
+for (const [name, decls, body] of [
+	["[len(slice)]int", "", "s := []int{1}\n\tvar a [len(s)]int\n\t_ = a"],
+	[
+		"[len(f())]int",
+		"func f() [3]int { return [3]int{} }\n",
+		"var a [len(f())]int\n\t_ = a",
+	],
+	["[n]int with a variable", "", "n := 3\n\tvar a [n]int\n\t_ = a"],
+	["[cap(slice)]int", "var base []int\n", "var a [cap(base)]int\n\t_ = a"],
+	[
+		"type A [len(f())]int",
+		"func f() [3]int { return [3]int{} }\ntype A [len(f())]int\n",
+		"",
+	],
+]) {
+	for (const target of TARGETS) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				errorsOn(target, program(body, decls)),
+				"invalid array length",
+			);
+		});
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

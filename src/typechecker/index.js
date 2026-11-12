@@ -431,6 +431,7 @@ export class TypeChecker {
 
 		this._checkDirectivesAndImportsPass(programs);
 		this._registerConstExprs(programs);
+		this._registerVarSpecs(programs);
 		this._markConstraintPositions(programs);
 		this._collectTypesPass(programs);
 		this._flushConstraintUses();
@@ -756,6 +757,19 @@ export class TypeChecker {
 				}
 			}
 		}
+	}
+
+	// Package variables by name, so an array length such as `[len(base)]T`
+	// can use the type of one that is declared later.
+	_registerVarSpecs(programs) {
+		this._pkgVarSpecs = new Map();
+		for (const p of programs)
+			for (const d of p.decls)
+				if (d.kind === "VarDecl")
+					for (const spec of d.decls)
+						spec.names.forEach((name, index) => {
+							this._pkgVarSpecs.set(name, { spec, index, busy: false });
+						});
 	}
 
 	_collectVarsConstsPass(programs) {
