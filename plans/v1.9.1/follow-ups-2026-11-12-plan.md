@@ -491,7 +491,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth s
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_ifaceBoxMeta` / func-valued map classification) and/or `src/backend/js/index.js`, `src/backend/wasm/module-emitter.js`; `docs/go-compatibility.md` (`fmt` of a value in an `any` row, only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `%T` of `map[bool]func()`, `map[int32]func(int) string`, `map[uint8]func()`, `map[rune]func()`, `map[bool][]func()`, `map[bool]map[bool]func()` → the Go spelling; assertion to the exact type `true`, to `map[bool]func(int)` `false`; `map[string]func()` and `map[bool]*int` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 12.6: Tag each generic boxing of a map or array with its own instantiation in JS (`N04`)
+- [x] Task 12.6: Tag each generic boxing of a map or array with its own instantiation in JS (`N04`)
   - Files: per probe at task start: `src/backend/js/runtime.js` (`__ity` / `__vclone`) and `src/backend/js/index.js` or `src/backend/js/expressions.js` (where the generic tag is chosen)
   - Test: `test/unit/types/dynamic-types.test.js`: `gen(map[string]bool{"a": true})` then `gen(map[string]int{"a": 1})` → `map[string]bool|map[a:true]` and `map[string]int|map[a:1]` in both orders; `gen(map[string]int)` then `gen(map[int]string)`; `gen([2]int{1, 2})` then `gen([2]string{"a", "b"})`; same type twice; slices and `*S` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause

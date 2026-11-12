@@ -1389,6 +1389,79 @@ func main() {
 	);
 });
 
+const GEN_BOX = `package main
+
+import "fmt"
+
+func gen[T any](v T) any { return v }
+
+func show(a any) { fmt.Printf("%T|%v\\n", a, a) }
+
+type S struct{ A int }
+`;
+
+for (const [name, body, want] of [
+	[
+		"a bool map then an int map",
+		'show(gen(map[string]bool{"a": true}))\n\tshow(gen(map[string]int{"a": 1}))',
+		"map[string]bool|map[a:true]\nmap[string]int|map[a:1]\n",
+	],
+	[
+		"an int map then a bool map",
+		'show(gen(map[string]int{"a": 1}))\n\tshow(gen(map[string]bool{"a": true}))',
+		"map[string]int|map[a:1]\nmap[string]bool|map[a:true]\n",
+	],
+	[
+		"a string-keyed map then an int-keyed map",
+		'show(gen(map[string]int{"a": 1}))\n\tshow(gen(map[int]string{1: "x"}))',
+		"map[string]int|map[a:1]\nmap[int]string|map[1:x]\n",
+	],
+	[
+		"an int array then a string array",
+		'show(gen([2]int{1, 2}))\n\tshow(gen([2]string{"a", "b"}))',
+		"[2]int|[1 2]\n[2]string|[a b]\n",
+	],
+	[
+		"two maps of one type",
+		'show(gen(map[string]int{"a": 1}))\n\tshow(gen(map[string]int{"b": 2}))',
+		"map[string]int|map[a:1]\nmap[string]int|map[b:2]\n",
+	],
+	[
+		"slices and struct pointers",
+		'show(gen([]int{1}))\n\tshow(gen([]string{"a"}))\n\tshow(gen(&S{4}))',
+		"[]int|[1]\n[]string|[a]\n*main.S|&{4}\n",
+	],
+	[
+		"a nil map stays nil",
+		"var m map[string]int\n\tn := gen(m)\n\t_, ok := n.(map[string]int)\n\tfmt.Println(ok)\n\tshow(n)",
+		"true\nmap[string]int|map[]\n",
+	],
+]) {
+	test(`generic code boxes ${name} with each call's own type`, async () => {
+		await assertAllTargetsOutput(
+			`${GEN_BOX}\nfunc main() {\n\t${body}\n}\n`,
+			want,
+		);
+	});
+}
+
+test("generic boxing keeps the exact type in assertions", async () => {
+	await assertAllTargetsOutput(
+		`${GEN_BOX}
+func main() {
+	a := gen(map[string]bool{"a": true})
+	b := gen([2]string{"p", "q"})
+	_, ok1 := a.(map[string]int)
+	_, ok2 := a.(map[string]bool)
+	_, ok3 := b.([2]int)
+	_, ok4 := b.([2]string)
+	fmt.Println(ok1, ok2, ok3, ok4)
+}
+`,
+		"false true false true\n",
+	);
+});
+
 test("int, string and float32 element composites and slices in an any are unchanged", async () => {
 	await assertAllTargetsOutput(
 		`package main
