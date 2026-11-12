@@ -528,7 +528,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth s
 
 ### Phase 13: Typechecker Conformance and Generic Struct Tags
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 sixth sweep, `P01`–`P04`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, sixth sweep)).
-- [ ] Task 13.1: Require an integer type for index, slice-bound and `make` size operands (`P01`)
+- [x] Task 13.1: Require an integer type for index, slice-bound and `make` size operands (`P01`)
   - Files: `src/typechecker/expressions.js` (index, slice-bound and `make` argument checks)
   - Test: `test/unit/language/array-length.test.js`: `s[f]`, `a[f] = 2`, `"abc"[f]`, `s[:f]`, `s[0:1:f]`, `make([]int, f)`, `make([]int, 1, f)`, `make(map[string]int, f)` with `f := 1.5`, and a `float32`, `complex128`, `string`, `bool` and `any` index → `assertErrorContains(…, "must be integer")` on every target; positives with `uint8`, `type MyI int`, `byte`, `rune` indexes and a float map key run
   - Done when: negatives report on every target (no invalid WASM, no garbage output), positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples and the Go-source stdlib

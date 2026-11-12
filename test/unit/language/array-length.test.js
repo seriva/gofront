@@ -120,6 +120,53 @@ for (const [name, body, want] of [
 	});
 }
 
+section("Index and make size: a typed operand must be an integer");
+
+const TYPED = "s := []int{1, 2, 3}\n\tvar a [3]int\n\t_, _ = s, a\n\t";
+
+for (const [name, body] of [
+	["s[f] with a float64", "f := 1.5\n\t_ = s[f]"],
+	["a[f] = 2 with a float64", "f := 1.5\n\ta[f] = 2"],
+	["a string index by a float64", 'f := 1.5\n\t_ = "abc"[f]'],
+	["s[:f]", "f := 1.5\n\t_ = s[:f]"],
+	["s[0:1:f]", "f := 1.5\n\t_ = s[0:1:f]"],
+	["make([]int, f)", "f := 1.5\n\t_ = make([]int, f)"],
+	["make([]int, 1, f)", "f := 1.5\n\t_ = make([]int, 1, f)"],
+	["make(map[string]int, f)", "f := 1.5\n\t_ = make(map[string]int, f)"],
+	["a float32 index", "var f float32 = 1\n\t_ = s[f]"],
+	["a complex128 index", "var f complex128 = 1\n\t_ = s[f]"],
+	["a string index", 'f := "a"\n\t_ = s[f]'],
+	["a bool index", "f := true\n\t_ = s[f]"],
+	["an any index", "var f any = 1\n\t_ = s[f]"],
+	["a bool comparison index", "x := 1\n\t_ = s[x == 1]"],
+	["a defined float index", "type F float64\n\tvar f F = 1\n\t_ = s[f]"],
+]) {
+	for (const target of TARGETS) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				errorsOn(target, program(`${TYPED}${body}`)),
+				"must be integer",
+			);
+		});
+	}
+}
+
+test("an integer index of any integer type runs (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		program(
+			`${TYPED}type MyI int
+	var u8 uint8 = 1
+	var my MyI = 2
+	var b byte = 0
+	r := 'a' - 'a' + 1
+	m := map[float64]string{1.5: "x"}
+	f := 1.5
+	fmt.Println(s[u8], s[my], s[b], s[r], s[:my], make([]int, u8), m[f])`,
+		),
+		"2 3 1 2 [1 2] [0] x\nok\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
