@@ -911,6 +911,8 @@ export const resolveMethods = {
 	_inferFromStructuredPair(paramType, argType, map) {
 		if (paramType.kind === "slice" && argType.kind === "slice")
 			this._inferFromPair(paramType.elem, argType.elem, map);
+		if (paramType.kind === "array" && argType.kind === "array")
+			this._inferFromPair(paramType.elem, argType.elem, map);
 		if (paramType.kind === "pointer" && argType.kind === "pointer")
 			this._inferFromPair(paramType.base, argType.base, map);
 		if (paramType.kind === "map" && argType.kind === "map") {

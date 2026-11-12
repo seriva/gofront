@@ -532,7 +532,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 sixth s
   - Files: `src/typechecker/expressions.js` (index, slice-bound and `make` argument checks)
   - Test: `test/unit/language/array-length.test.js`: `s[f]`, `a[f] = 2`, `"abc"[f]`, `s[:f]`, `s[0:1:f]`, `make([]int, f)`, `make([]int, 1, f)`, `make(map[string]int, f)` with `f := 1.5`, and a `float32`, `complex128`, `string`, `bool` and `any` index → `assertErrorContains(…, "must be integer")` on every target; positives with `uint8`, `type MyI int`, `byte`, `rune` indexes and a float map key run
   - Done when: negatives report on every target (no invalid WASM, no garbage output), positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples and the Go-source stdlib
-- [ ] Task 13.2: Infer type arguments from array parameters (`P02`)
+- [x] Task 13.2: Infer type arguments from array parameters (`P02`)
   - Files: `src/typechecker/resolve.js` (`_inferFromPair`)
   - Test: `test/unit/types/generics.test.js`: `func arr[V any](a [2]V) any { return a }; arr([2]int{1, 2})` → `[2]int`; `[2][2]V`, `*[2]V`, `[2][]V`, `func first[V any](a [2]V) V` → `a`; two instantiations (`[2]int`, `[2]string`); `arr([3]int{})` → `assertErrorContains` (length mismatch) on every target; a slice argument for an array parameter is an error
   - Done when: `assertAllTargetsOutput` passes for the positives and the negatives report on every target
