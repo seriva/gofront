@@ -341,7 +341,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Files: `src/lower/functions.js`, `src/backend/wasm/monomorph.js` (only if the probe at task start shows the instantiated signature is lost there)
   - Test: `test/unit/wasm/defer_recover.test.js`: `func id[T any](x T, y complex128) {…}; defer id(1, 2)` → `1 (2+0i)`; `defer id("a", 2)` with a `float64` parameter → `a 2`; `defer id[int](1, 2)` unchanged
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 8.3: Hoist variadic and spread deferred arguments correctly (`L05` lowering, JS)
+- [x] Task 8.3: Hoist variadic and spread deferred arguments correctly (`L05` lowering, JS)
   - Files: `src/lower/functions.js` (`normalizeDeferStmt`)
   - Test: `test/unit/wasm/defer_recover.test.js` (JS targets via `assertJsTargetsOutput`): `s := []int{1, 2}; defer f(s...)` → `[1 2]`; `defer f(0, s...)` → `0 [1 2 3]`; `[]string` spread → `[a b]`; arguments evaluated at the `defer` statement (`x` changed afterwards); no-argument variadic defer
   - Done when: `assertJsTargetsOutput` passes and the output no longer contains `-9223372036854775808`

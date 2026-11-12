@@ -175,10 +175,13 @@ function isDeferConstant(arg) {
 
 // The type of the temporary that holds deferred argument `a`: an untyped
 // non-constant value takes its basic numeric parameter's type, as it does in
-// a direct call.
+// a direct call.  A variadic call's trailing arguments take the element type.
 function deferTempType(funcType, a, argType) {
 	if (argType?.kind !== "untyped") return argType;
-	const param = funcType?.params?.[a];
+	const params = funcType?.params;
+	let param = params?.[a];
+	if (funcType?.variadic && a >= params.length - 1)
+		param = params[params.length - 1]?.elem;
 	return param?.kind === "basic" && NUMERIC_BASIC.test(param.name)
 		? param
 		: argType;
@@ -293,6 +296,8 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 					kind: "Ident",
 					name: tempName,
 					_type: tempType,
+					// A spread argument stays one: the call gets the slice itself.
+					...(arg._spread && { _spread: true }),
 				});
 				tempStmts.push(
 					tempType === arg._type

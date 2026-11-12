@@ -22,12 +22,12 @@ import {
 // when the file is unchanged: the second type-check sees the lowered syntax
 // tree the first compile left in the parse cache, so a deferred call's
 // hoisted temporaries must type-check again.
-function assertRecompiles(source) {
+function assertRecompiles(source, targets = ["js", "both", "wasm"]) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-defer-"));
 	try {
 		const goPath = join(dir, "main.go");
 		writeFileSync(goPath, source);
-		for (const target of ["js", "both", "wasm"]) {
+		for (const target of targets) {
 			try {
 				compileFiles([goPath], { forceTarget: target });
 				const second = compileFiles([goPath], { forceTarget: target });
@@ -47,6 +47,13 @@ function assertRecompiles(source) {
 async function assertDeferOutput(source, expected) {
 	await assertAllTargetsOutput(source, expected);
 	assertRecompiles(source);
+}
+
+// The same for programs only the JS targets (`js` and the JS side of `both`)
+// run correctly.
+async function assertDeferJsOutput(source, expected) {
+	await assertJsTargetsOutput(source, expected);
+	assertRecompiles(source, ["js", "both"]);
 }
 
 section("WASM Defer — LIFO Execution Order");
@@ -1001,4 +1008,50 @@ func main() {
 }
 `;
 	await assertDeferOutput(src, "body\n1 (2+0i)\na 2\n1 (2+0i)\n");
+});
+
+section("Defer — variadic and spread arguments (JS targets)");
+
+test("a spread argument of a deferred call stays a slice", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...int)               { fmt.Println(ys) }
+func g(a int, ys ...int)        { fmt.Println(a, ys) }
+func h(ys ...string)            { fmt.Println(ys) }
+
+func main() {
+	s := []int{1, 2}
+	defer f(s...)
+	t := []int{1, 2, 3}
+	defer g(0, t...)
+	u := []string{"a", "b"}
+	defer h(u...)
+	fmt.Println("body")
+}
+`;
+	await assertDeferJsOutput(src, "body\n[a b]\n0 [1 2 3]\n[1 2]\n");
+});
+
+test("deferred variadic arguments are evaluated at the defer statement", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...int) { fmt.Println(ys) }
+
+func main() {
+	x := 1
+	defer f(x, x+1)
+	x = 5
+	s := []int{1, 2}
+	defer f(s...)
+	s[0] = 9
+	s = nil
+	defer f()
+	fmt.Println("body", x, s)
+}
+`;
+	await assertDeferJsOutput(src, "body 5 []\n[]\n[9 2]\n[1 2]\n");
 });
