@@ -3,9 +3,8 @@
 **Version:** v1.6.0 (design spans v1.5.0 → v1.6.0, see [Phased Roadmap](#phased-roadmap))  
 **Status:** Completed (2026-10-10) — full hybrid completed in the JS compiler as v1.6.0, before the v2.0.0 Go port. Remaining gaps closed in [v1.6.1](../v1.6.1/wasm-gaps-plan.md).  
 **Depends on:** [`plans/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (MVP: `src/lower/`, targets, strict mode, encoder, core subset, boundary v1).  
-**Followed by:** [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), which ports the finished JS + WASM compiler to Go with byte-identical output.
 
-This document is the **full design** of the hybrid model. v1.5.0 implements a core subset in the JS compiler and v1.6.0 completes it there, still in the JS compiler (`src/backend/wasm/`). v2.0.0 then ports the whole thing to Go without new features.
+This document is the **full design** of the hybrid model. v1.5.0 implements a core subset in the JS compiler and v1.6.0 completes it there, still in the JS compiler (`src/backend/wasm/`).
 
 ---
 
@@ -307,7 +306,6 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 |---|---|---|
 | **v1.5.0** (JS compiler) | `src/lower/` extraction, targets + diagnostics, JS strict mode, encoder + WAT, core subset (scalars, structs, pointers, methods, arrays, slices, strings, `any`, closures, `panic`), boundary v1 (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), simplefps `mathx` (both) + `collision` (wasm), **go/no-go benchmark** | [`plans/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) |
 | **v1.6.0** (JS compiler, this document) | The rest of the hybrid (phases below) | — |
-| **v2.0.0** (Go engine) | Port of the complete JS + WASM compiler to Go, with **byte-identical JS and `.wasm` output** as oracle gates. No new WASM features. | [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) |
 
 ---
 

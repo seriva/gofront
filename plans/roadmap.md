@@ -10,7 +10,7 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v2.0.0
 
-**Theme: Web platform evolution (Draft).** Compile-time asset embedding (`//go:embed`), fast incremental watch rebuilds, whole-program dead-code elimination, typed web APIs (`gofront/dom`, `gofront/canvas`) and reactive `gom` signals in `.templ`, keeping the pure Node.js ESM compiler (the native Go engine rewrite is dropped). Concept sketch, to be audited with `/design-plan`, in [`plans/v2.0.0/web-platform-evolution-plan.md`](v2.0.0/web-platform-evolution-plan.md).
+**Theme: Web platform evolution (Draft).** Compile-time asset embedding (`//go:embed`), fast incremental watch rebuilds, whole-program dead-code elimination, typed web APIs (`gofront/dom`, `gofront/canvas`) and reactive `gom` signals in `.templ`, keeping the pure Node.js ESM compiler architecture. Design plan in [`plans/v2.0.0/web-platform-evolution-plan.md`](v2.0.0/web-platform-evolution-plan.md).
 
 ---
 
@@ -103,7 +103,7 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v1.6.0
 
-**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`), so the whole hybrid is done before the v2.0.0 rewrite: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Unblocked by the v1.5.1 go/no-go (hybrid = 1.17× JS, GO). Design document in [`plans/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
+**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`): the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Unblocked by the v1.5.1 go/no-go (hybrid = 1.17× JS, GO). Design document in [`plans/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
@@ -132,7 +132,7 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v1.5.0
 
-**Theme: WASM MVP — hybrid targets in the JS compiler.** First per-package WebAssembly (WasmGC) output in the existing compiler, so the hybrid model is validated with real numbers before the native rewrite. Extracts a shared `src/lower/` step (JS output byte-identical), adds `//gofront:target wasm | both` with targeted diagnostics, JS strict numeric mode for `both` packages, a core-subset WASM backend with a dependency-free encoder, and generated JS facades. Ends with the simplefps `mathx`/`collision` split and a go/no-go raycast benchmark. Design document in [`plans/v1.5.0/wasm-mvp-plan.md`](v1.5.0/wasm-mvp-plan.md).
+**Theme: WASM MVP — hybrid targets in the JS compiler.** First per-package WebAssembly (WasmGC) output in the compiler, validating the hybrid model with real numbers. Extracts a shared `src/lower/` step (JS output byte-identical), adds `//gofront:target wasm | both` with targeted diagnostics, JS strict numeric mode for `both` packages, a core-subset WASM backend with a dependency-free encoder, and generated JS facades. Ends with the simplefps `mathx`/`collision` split and a go/no-go raycast benchmark. Design document in [`plans/v1.5.0/wasm-mvp-plan.md`](v1.5.0/wasm-mvp-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|

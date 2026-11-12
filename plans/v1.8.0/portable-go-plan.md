@@ -3,7 +3,7 @@
 **Version:** v1.8.0
 **Status:** Completed (2026-10-28); simplification phases 8–11 added and completed 2026-10-27  
 **Base branch:** main
-**Related:** Depends on v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`; built in Phase 4, removed again by D2), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan. The v2.0.0 native Go engine ([`native-go-engine.md`](../v2.0.0/native-go-engine.md)) is shelved, so v1.8.0 is no longer a JS-engine feature freeze.
+**Related:** Depends on v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`; built in Phase 4, removed again by D2), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan.
 
 ---
 
@@ -222,7 +222,7 @@ Today every stdlib member is implemented twice: a JS shim in [`src/backend/js/st
 
 Instead, pure packages are written **in GoFront Go** and shipped in `runtime/stdlib/<import path>/*.go` with `//gofront:target both`:
 
-- **Location.** `runtime/stdlib/` sits next to the shared runtime helpers, not under `src/`. v1.8.0 is the last JS-engine feature release, and the [v2.0.0 native engine](../v2.0.0/native-go-engine.md) embeds these same files instead of porting them. Every file starts with `//go:build gofront`, so the Go toolchain ignores them once the repository becomes a Go module.
+- **Location.** `runtime/stdlib/` sits next to the shared runtime helpers, not under `src/`. Every file starts with `//go:build gofront`, so the Go toolchain ignores them once the repository becomes a Go module.
 
 - **Resolution.** [`resolver.js`](../../src/resolver.js) resolves `container/heap` and similar paths to the embedded source directory before it checks `STDLIB_PACKAGES`. Typings come from type-checking that source, so there are no hand-written signatures in [`src/typechecker/stdlib/`](../../src/typechecker/stdlib/).
 - **Overlays.** A Go-source directory may also extend an existing emitter-backed package. Its declarations merge into the same namespace. Examples: `sort.Sort`/`sort.Interface` on top of `sort`, and `simd.Vec3x4` on top of the `F32x4` intrinsics. A name defined both ways fails the stdlib self-test.
@@ -1485,8 +1485,8 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 
 ### Phase 7.2: Baseline verification and changelog
 
-- [x] **Task 7.4** — Confirm the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest), and declare the JS-engine feature freeze.
-  - Landed: confirmed the v2.0.0 baseline against what v1.8.0 actually shipped: Go-source standard library packages in `stdlib/` and the coverage manifest in `stdlib/manifest.json` (51 conformance fixtures, 2,746 unit tests, 0 gaps in covered packages), `gofront/simd` completed and retained as experimental per promotion gate decision (`F32x4`, `Mask32x4`, lane operations, comparisons, shuffles, slice load/store helpers; SoA structs dropped to `simplefps`), and declared the JS-engine feature freeze in `plans/v2.0.0/native-go-engine.md`.
+- [x] **Task 7.4** — Confirm the v1.8.0 baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest).
+  - Landed: confirmed the baseline against what v1.8.0 actually shipped: Go-source standard library packages in `stdlib/` and the coverage manifest in `stdlib/manifest.json` (51 conformance fixtures, 2,746 unit tests, 0 gaps in covered packages), `gofront/simd` completed and retained as experimental per promotion gate decision (`F32x4`, `Mask32x4`, lane operations, comparisons, shuffles, slice load/store helpers; SoA structs dropped to `simplefps`).
 - [x] **Task 7.6** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, type declarations named after JavaScript globals now rejected (Task 0.19d), unknown string escapes now a lexer error (Task 0.21)) and [`roadmap.md`](../roadmap.md).
   - Landed: updated `CHANGELOG.md` with explicit breaking-change entries for `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, rejected type declarations named after JS globals, and unknown string escape lexer errors; updated `plans/roadmap.md` with completed v1.8.0 areas (`WASM language parity`, `Go-source stdlib`, `Coverage manifest & conformance`, `iter, cmp`, `Member completion`, `bufio, net/url, context`, `New pure packages`, `SIMD completion & promotion gate` marked experimental, `encoding/json everywhere`, `Review follow-ups`), baseline notes, and the JS-engine feature freeze declaration.
 
@@ -1612,7 +1612,7 @@ No gate-only tasks: `/dev-loop` runs the suites per phase and the Phase 10 tasks
 
 - [x] **Task 11.2 — User docs, CHANGELOG and roadmap for the simplification**
   - Files: `docs/go-compatibility.md`, `docs/hybrid-wasm.md`, `README.md`, `CHANGELOG.md`, `plans/roadmap.md`, this plan's header
-  - Do: in `go-compatibility.md` and `hybrid-wasm.md`, describe the scalar-pointer rule for `wasm`/`both` (D5) with a short before/after example and update the `%p` row (Task 11.1); the package lists were already trimmed by Tasks 9.3 and 9.4. In `CHANGELOG.md` `## [Unreleased]`, drop the pruned packages and the D4 members (`unicode` range tables, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*`, `strconv.*ToGraphic`) from the "Expanded standard library" entry, reword the pointer entry to say scalar field/element pointers are `js`-only, remove any JS-engine feature-freeze wording, and keep each breaking change as its own `**Breaking:**` entry. Mark the Phase 8–11 rows ✅ in the roadmap and set this plan's status to Done. (`plans/v2.0.0/native-go-engine.md` was already shelved on 2026-10-27.)
+  - Do: in `go-compatibility.md` and `hybrid-wasm.md`, describe the scalar-pointer rule for `wasm`/`both` (D5) with a short before/after example and update the `%p` row (Task 11.1); the package lists were already trimmed by Tasks 9.3 and 9.4. In `CHANGELOG.md` `## [Unreleased]`, drop the pruned packages and the D4 members (`unicode` range tables, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*`, `strconv.*ToGraphic`) from the "Expanded standard library" entry, reword the pointer entry to say scalar field/element pointers are `js`-only, and keep each breaking change as its own `**Breaking:**` entry. Mark the Phase 8–11 rows ✅ in the roadmap and set this plan's status to Done.
   - Test: `npm run check`
   - Done when: `grep -rnE "plans/|bufio|net/url|encoding/csv|container/|math/cmplx" docs README.md CHANGELOG.md` returns only intentional "not supported"/"removed" mentions; CHANGELOG follows the AGENTS.md changelog rules; roadmap rows for Phases 8–11 are ✅.
 
