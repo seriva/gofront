@@ -471,7 +471,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
 
 ### Phase 12: Typechecker Conformance and Generic `fmt` Tags
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth sweep, `N01`–`N05`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, fifth sweep)).
-- [ ] Task 12.1: Keep the defined bool type through `&&` and `||` (`N01`)
+- [x] Task 12.1: Keep the defined bool type through `&&` and `||` (`N01`)
   - Files: `src/typechecker/expressions.js` (binary logical result type), `src/typechecker/types.js` (`LOG_OPS` use)
   - Test: `test/unit/language/defined-bool.test.js`: `var b3 B = b1 && b2` → `false`; `||`; `f(b1 && b2)`; `return b1 && b2`; `c := b1 && b2` with `%T` → `main.B`; negatives (`assertErrorContains(…, "mismatched types")` or `Cannot assign` on every target): `var c bool = b1 && b2`, `b1 && c` with `c bool`
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples and the Go-source stdlib

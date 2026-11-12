@@ -99,6 +99,60 @@ func main() {
 	);
 });
 
+section("Defined bool: && and || keep the operand type");
+
+const LOGIC_PRELUDE = `package main
+
+import "fmt"
+
+type B bool
+
+func f(b B) { fmt.Println(b) }
+`;
+
+for (const [name, body, want] of [
+	[
+		"var b3 B = b1 && b2",
+		"var b1, b2 B = true, false\n\tvar b3 B = b1 && b2\n\tfmt.Println(b3)",
+		"false\n",
+	],
+	[
+		"var b3 B = b1 || b2",
+		"var b1, b2 B = true, false\n\tvar b3 B = b1 || b2\n\tfmt.Println(b3)",
+		"true\n",
+	],
+	[
+		"call argument f(b1 && b2)",
+		"var b1, b2 B = true, true\n\tf(b1 && b2)",
+		"true\n",
+	],
+	[
+		"c := b1 && b2 has type B",
+		'var b1, b2 B = true, true\n\tc := b1 && b2\n\tfmt.Printf("%T\\n", c)',
+		"main.B\n",
+	],
+]) {
+	test(`${name} (js, both, wasm)`, async () => {
+		await assertAllTargetsOutput(
+			`${LOGIC_PRELUDE}\nfunc main() {\n\t${body}\n}\n`,
+			want,
+		);
+	});
+}
+
+test("return b1 && b2 into a defined bool result", async () => {
+	await assertAllTargetsOutput(
+		`${LOGIC_PRELUDE}
+func g(a, b B) B { return a && b }
+
+func main() {
+	f(g(true, false))
+}
+`,
+		"false\n",
+	);
+});
+
 function errorsOn(target, src) {
 	if (target === "wasm") return compileWasm(src).errors ?? [];
 	return compile(src, { target }).errors ?? [];
@@ -123,6 +177,38 @@ for (const [name, body] of [
 					`package main\n\ntype B bool\ntype MyI int\n\nfunc main() {\n\t${body}\n}\n`,
 				),
 				"Cannot assign",
+			);
+		});
+	}
+}
+
+section("Defined bool: mixing bool types in && and || is rejected");
+
+for (const [name, body, want] of [
+	[
+		"a && b of defined bools into a bool",
+		"var b1, b2 B = true, false\n\tvar c bool = b1 && b2\n\t_ = c",
+		"Cannot assign",
+	],
+	[
+		"B && bool variable",
+		"var b1 B = true\n\tc := true\n\t_ = b1 && c",
+		"mismatched types",
+	],
+	[
+		"bool || B variable",
+		"var b1 B = true\n\tc := true\n\t_ = c || b1",
+		"mismatched types",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				errorsOn(
+					target,
+					`package main\n\ntype B bool\n\nfunc main() {\n\t${body}\n}\n`,
+				),
+				want,
 			);
 		});
 	}

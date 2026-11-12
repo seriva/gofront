@@ -68,10 +68,12 @@ const UNTYPED_COMPAT = {
 
 // `&&` and `||` of two untyped bools stay untyped; a typed operand (including
 // a defined bool type) gives its type, as in Go.
+// Two typed operands must have the same type, and the result has it.
 function logicalResultType(lt, rt) {
 	if (lt?.kind === "untyped" && rt?.kind === "untyped") return UNTYPED_BOOL;
 	if (rt?.kind === "untyped" && isBool(lt)) return lt;
 	if (lt?.kind === "untyped" && isBool(rt)) return rt;
+	if (isBool(lt) && isBool(rt) && typeStr(lt) === typeStr(rt)) return lt;
 	return BOOL;
 }
 
@@ -89,8 +91,21 @@ export const assignabilityMethods = {
 		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
 			return this._binaryResultTypeTypeParam(op, lt, rt);
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
-		if (LOG_OPS.has(op)) return logicalResultType(lt, rt);
+		if (LOG_OPS.has(op)) {
+			this._checkLogicalOperands(lt, rt, node);
+			return logicalResultType(lt, rt);
+		}
 		return this._binaryResultTypeNonComplex(op, lt, rt, node);
+	},
+
+	// `B && bool` mixes two distinct bool types, which Go rejects.
+	_checkLogicalOperands(lt, rt, node) {
+		if (!node || lt?.kind === "untyped" || rt?.kind === "untyped") return;
+		if (!isBool(lt) || !isBool(rt) || typeStr(lt) === typeStr(rt)) return;
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
+			node,
+		);
 	},
 
 	_binaryResultTypeTypeParam(op, lt, rt) {
