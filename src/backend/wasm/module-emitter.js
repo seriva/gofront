@@ -38,7 +38,6 @@ export class ModuleEmitter {
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
 		this.taggedSliceTypes = new Map(); // Go slice type key -> tagged info
-		this.anyArrayTypes = new Map(); // Go array type key -> array stored in an any
 		this.mapTypes = new Map(); // wType key -> map info
 		this.mapTypesByIndex = new Map(); // typeIndex -> map info
 		this.mapBucketsType = null; // shared (array (mut i32))
@@ -504,18 +503,6 @@ export class ModuleEmitter {
 		const arrInfo = { typeIndex, typeEntry, elemWType, elemGoType };
 		this.arrayTypes.set(key, arrInfo);
 		return arrInfo;
-	}
-
-	// Records an unnamed array type stored in an interface.  Arrays of equal
-	// length and element representation share one wasm array type, so the
-	// Go type is only known here, for the name in a failed assertion.
-	noteArrayInAny(goType) {
-		let t = goType;
-		for (let i = 0; i < 16 && t && t.kind !== "array"; i++)
-			t = t.underlying ?? this.checker?.types?.get(t.name);
-		if (typeof t?.size !== "number") return;
-		const key = goTypeKey(t);
-		if (!this.anyArrayTypes.has(key)) this.anyArrayTypes.set(key, t);
 	}
 
 	getSliceType(elemGoType) {

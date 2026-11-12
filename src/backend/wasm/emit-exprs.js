@@ -105,8 +105,10 @@ export class ExprsEmitter {
 				return;
 			}
 
-			// A defined func or map type with methods is boxed to keep its identity,
-			// so interface dispatch can tell it from the plain func or map type.
+			// A defined func type, and every array and map type, is boxed to keep
+			// its identity: arrays and maps share one wasm type across Go types
+			// (`[2]int` and `[2]int64`), and a defined func type has methods that
+			// interface dispatch must tell from the plain func type.
 			if (this._isMethodNamedRef(goType)) {
 				const box = this.mod.getIfaceBoxType(this._resolveTestTarget(goType));
 				this._emitRawExpr(expr, box.wType);
@@ -119,23 +121,13 @@ export class ExprsEmitter {
 
 			if (
 				isSliceType(goType, this.mod.checker) ||
-				isArrayType(goType, this.mod.checker) ||
-				isFuncType(goType, this.mod.checker) ||
-				isMapType(goType, this.mod.checker)
+				isFuncType(goType, this.mod.checker)
 			) {
 				const refWType = this.toWasmType(goType);
 				this._emitRawExpr(expr, refWType);
-				// An array stored in an interface is a copy.
-				if (isArrayType(goType, this.mod.checker)) {
-					this._emitCopyIfValue(expr, goType, refWType);
-					this.mod.noteArrayInAny(goType);
-				}
 				if (isTaggedSliceType(goType, this.mod.checker))
 					this._emitTagSlice(goType, refWType);
-				if (
-					isFuncType(goType, this.mod.checker) ||
-					isMapType(goType, this.mod.checker)
-				)
+				if (isFuncType(goType, this.mod.checker))
 					this._emitNilAwareAny(goType, expr);
 				return;
 			}

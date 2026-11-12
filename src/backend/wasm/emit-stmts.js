@@ -1425,12 +1425,13 @@ export class StmtsEmitter {
 	// `type A [2]int` is not a `[2]int` in a type switch).
 	_isMethodNamedRef(goType) {
 		const t = this._resolveTestTarget(goType);
+		if (
+			t &&
+			(isArrayType(t, this.mod.checker) || isMapType(t, this.mod.checker))
+		)
+			return true;
 		if (t?.kind !== "named") return false;
-		return (
-			isFuncType(t, this.mod.checker) ||
-			isMapType(t, this.mod.checker) ||
-			isArrayType(t, this.mod.checker)
-		);
+		return isFuncType(t, this.mod.checker);
 	}
 
 	_emitTypeTest(targetGoType) {
@@ -1510,26 +1511,6 @@ export class StmtsEmitter {
 			}
 		}
 
-		if (isArrayType(targetGoType, this.mod.checker)) {
-			const elem = this._getArrayElemType(targetGoType);
-			const aInfo = this.mod.getArrayType(elem);
-			if (aInfo) {
-				this._emitArrayTypeTest(targetGoType, aInfo);
-				return;
-			}
-		}
-
-		// A map lives in `any` as its bare map struct.
-		if (isMapType(targetGoType, this.mod.checker)) {
-			const { keyType, valType } = getMapKeyValTypes(
-				targetGoType,
-				this.mod.checker,
-			);
-			const mInfo = this.mod.getMapType(keyType, valType);
-			this._emitRefTestOrNil(targetGoType, mInfo.typeIndex);
-			return;
-		}
-
 		// Scalar types
 		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
@@ -1539,32 +1520,6 @@ export class StmtsEmitter {
 
 		this.pushInstruction("drop");
 		this.pushInstruction({ op: "i32.const", value: 1 });
-	}
-
-	// `[3]int` and `[2]int` share one wasm array type, so the test also compares
-	// the length.
-	_emitArrayTypeTest(goType, aInfo) {
-		let t = goType?._assertType ?? goType;
-		for (let i = 0; i < 16 && t && t.kind !== "array"; i++)
-			t = t.underlying ?? this.mod.checker?.types?.get(t.name);
-		const size = typeof t?.size === "number" ? t.size : null;
-		if (size === null) {
-			this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
-			return;
-		}
-		const tmp = this.acquireTemp("anyref");
-		this.pushInstruction({ op: "local.tee", index: tmp });
-		this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
-		this.pushInstruction({ op: "if", blockType: "i32" });
-		this.pushInstruction({ op: "local.get", index: tmp });
-		this.pushInstruction({ op: "ref.cast", typeIndex: aInfo.typeIndex });
-		this.pushInstruction("array.len");
-		this.pushInstruction({ op: "i32.const", value: size });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction("end");
-		this.releaseTemp(tmp, "anyref");
 	}
 
 	// Whether the interface value on the stack holds a type implementing the
@@ -1692,28 +1647,6 @@ export class StmtsEmitter {
 				});
 				return;
 			}
-		}
-
-		if (isArrayType(targetGoType, this.mod.checker)) {
-			const elem = this._getArrayElemType(targetGoType);
-			const aInfo = this.mod.getArrayType(elem);
-			if (aInfo) {
-				this.pushInstruction({
-					op: "ref.cast_null",
-					typeIndex: aInfo.typeIndex,
-				});
-				return;
-			}
-		}
-
-		if (isMapType(targetGoType, this.mod.checker)) {
-			const { keyType, valType } = getMapKeyValTypes(
-				targetGoType,
-				this.mod.checker,
-			);
-			const mInfo = this.mod.getMapType(keyType, valType);
-			this._emitRefCastOrNil(targetGoType, mInfo.typeIndex);
-			return;
 		}
 
 		// Scalar types

@@ -119,6 +119,12 @@ function receiverPrefix(stmts, name, safe) {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
+// True for a map or slice type that mentions a type parameter: one that
+// generic code boxes into an interface is tagged by its instantiated type.
+export function isGenericComposite(t) {
+	return (t?.kind === "map" || t?.kind === "slice") && mentionsTypeParam(t);
+}
+
 // True when type `t` mentions a type parameter anywhere.
 export function mentionsTypeParam(t, depth = 0) {
 	if (!t || depth > 16) return false;
@@ -714,11 +720,7 @@ export const expressionGenMethods = {
 				expr._tfnTagging = false;
 			}
 		}
-		if (
-			expr._ifaceSrc?.kind === "map" &&
-			!expr._gmapTagging &&
-			mentionsTypeParam(expr._ifaceSrc)
-		) {
+		if (isGenericComposite(expr._ifaceSrc) && !expr._gmapTagging) {
 			const tag = this._genericMapTag(expr._ifaceSrc);
 			if (tag) {
 				this.useHelper("ifaceBox");

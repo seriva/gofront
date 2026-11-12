@@ -250,19 +250,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
   - Done when: `assertAllTargetsOutput` passes
 
 ### Phase 6: WASM Dynamic Types in `any` (second sweep)
-- [ ] Task 6.1: Keep array identity by Go type in an `any` (`K03` arrays)
+- [x] Task 6.1: Keep array identity by Go type in an `any` (`K03` arrays)
   - Files: `src/backend/wasm/emit-exprs.js` (interface boxing), `src/backend/wasm/module-emitter.js` (box selection), `src/backend/wasm/emit-builtins.js` (`any_eq`/`any_hash`/`_dynamicTypeNames`, if needed)
   - Test: `test/unit/types/dynamic-types.test.js`: `[2]int64` asserted as `[2]int` → `false`; `[2]int32` vs `[2]uint8`; `[2]A` (`type A [2]int`) vs `[2][2]int`; type switch `case [2]int … case [2]int64` on a `[2]int64` → `int64`; `map[any]int{[2]int{1,2}: 1}` lookup with a separately built `[2]int{1,2}` → `1` and with `[2]int64{1,2}` → `0` (WASM only)
   - Done when: `assertAllTargetsOutput` passes (the `map[any]` lookup with `[2]int64` is a WASM-only assertion because JS stringifies keys)
-- [ ] Task 6.2: Tag slices of 64-bit integers per Go type in an `any` (`K03` slices)
+- [x] Task 6.2: Tag slices of 64-bit integers per Go type in an `any` (`K03` slices)
   - Files: `src/backend/wasm/types.js` (`TAGGED_SLICE_ELEMS`), `src/backend/wasm/module-emitter.js` (tag registration, if needed)
   - Test: `test/unit/types/dynamic-types.test.js`: `[]int64{1}` in an `any` asserted as `[]int` → `false`, as `[]uint64` → `false`; `[]uint` vs `[]uint64`; `[]int{1}` asserted as `[]int` → `true`; `[]float32` vs `[]float64` stays `false`; assertion-panic names `[]int64`
   - Done when: `assertAllTargetsOutput` passes and `node test/perf/zero-alloc.js` results are unchanged
-- [ ] Task 6.3: Box maps with ambiguous key or value types by Go type in an `any` (`K03` maps)
+- [x] Task 6.3: Box maps with ambiguous key or value types by Go type in an `any` (`K03` maps)
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/module-emitter.js`, `docs/go-compatibility.md` (`encoding/json` row sentence about maps and arrays that "can encode as one another", only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `map[string]int64` asserted as `map[string]int` → `false`; `map[int]string` vs `map[int64]string`; same-type assertion → `true`; `%T` of each; `encoding/json` of an `any` holding `[2]byte` and `[2]bool` encodes each as itself (if the docs sentence is removed)
   - Done when: `assertAllTargetsOutput` passes and the docs `encoding/json` row contradicts nothing from Tasks 6.1–6.3
-- [ ] Task 6.4: Print and name slices that generic code boxes into an `any` (`K04`)
+- [x] Task 6.4: Print and name slices that generic code boxes into an `any` (`K04`)
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_markIfaceBox` for types containing a type parameter) and/or `src/backend/wasm/monomorph.js`, `docs/go-compatibility.md` (`fmt` of a value in an `any` row: `%T` of generic slices, like the map sentence)
   - Test: `test/unit/types/dynamic-types.test.js`: `func mk[V any](v V) any { return []V{v} }`: `fmt.Println(mk(3))` → `[3]`, `%T` → `[]int`; `V=string`; `V=func(a int, b ...string) (int, error)` → `%T` `[]func(int, ...string) (int, error)`; `V` a struct; `map[string]V` and non-generic `[]int` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause

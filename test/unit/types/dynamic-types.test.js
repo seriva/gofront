@@ -725,3 +725,325 @@ func main() {
 		"runtime error: invalid memory address or nil pointer dereference\n",
 	);
 });
+
+section("Array identity by Go type in an interface");
+
+test("arrays that share a wasm type are distinct types in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+
+func main() {
+	var a any = [2]int64{1, 2}
+	_, ok1 := a.([2]int)
+	_, ok2 := a.([2]int64)
+	var b any = [2]int32{1, 2}
+	_, ok3 := b.([2]uint8)
+	_, ok4 := b.([2]int32)
+	var c any = [2]A{}
+	_, ok5 := c.([2][2]int)
+	_, ok6 := c.([2]A)
+	var d any = [2]int{1, 2}
+	_, ok7 := d.([2]int)
+	_, ok8 := d.([3]int)
+	fmt.Println(ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8)
+}
+`,
+		"false true false true false true true false\n",
+	);
+});
+
+test("a type switch picks the array by Go type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func name(v any) string {
+	switch x := v.(type) {
+	case [2]int:
+		return fmt.Sprint("int ", x[0])
+	case [2]int64:
+		return fmt.Sprint("int64 ", x[1])
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name([2]int64{1, 2}), name([2]int{3, 4}), name([2]uint{}))
+}
+`,
+		"int64 2 int 3 other\n",
+	);
+});
+
+test("arrays of different element types are distinct map[any] keys", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[any]int{[2]int{1, 2}: 1}
+	fmt.Println(m[[2]int{1, 2}], m[[2]int64{1, 2}], m[[2]int{1, 3}])
+}
+`,
+		"1 0 0\n",
+	);
+});
+
+test("arrays in an any still print, copy, compare and name themselves", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(w any) {
+	defer func() { fmt.Println(recover()) }()
+	_ = w.(int)
+}
+
+func main() {
+	arr := [2]int64{3, 4}
+	var j any = arr
+	arr[0] = 0
+	fmt.Printf("%v %T %v\\n", j, j, arr)
+	b := j.([2]int64)
+	b[1] = 9
+	fmt.Println(j, b, j == any([2]int64{3, 4}), j == any([2]int{3, 4}))
+	try([2]int32{})
+	try([3]uint8{})
+}
+`,
+		"[3 4] [2]int64 [0 4]\n[3 4] [3 9] true false\ninterface conversion: interface {} is [2]int32, not int\ninterface conversion: interface {} is [3]uint8, not int\n",
+	);
+});
+
+section("Slices of 64-bit integers in an interface");
+
+test("slices of 64-bit integers are tagged per Go type in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = []int64{1}
+	_, ok1 := a.([]int)
+	_, ok2 := a.([]uint64)
+	_, ok3 := a.([]int64)
+	var b any = []uint{1}
+	_, ok4 := b.([]uint64)
+	_, ok5 := b.([]uint)
+	var c any = []int{1}
+	_, ok6 := c.([]int)
+	_, ok7 := c.([]int64)
+	var d any = []float32{1}
+	_, ok8 := d.([]float64)
+	fmt.Println(ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8)
+	fmt.Println(c.([]int)[0], a.([]int64)[0])
+}
+`,
+		"false false true false true true false false\n1 1\n",
+	);
+});
+
+test("a type switch picks the slice of 64-bit integers by Go type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func name(v any) string {
+	switch v.(type) {
+	case []int:
+		return "int"
+	case []int64:
+		return "int64"
+	case []uint64:
+		return "uint64"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name([]int64{1}), name([]int{1}), name([]uint64{1}), name([]uint{1}))
+}
+`,
+		"int64 int uint64 other\n",
+	);
+});
+
+test("a failed assertion names a slice of 64-bit integers", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var a any = []int64{1}
+	_ = a.([]int)
+}
+`,
+		"interface conversion: interface {} is []int64, not []int\n",
+	);
+});
+
+section("Map identity by Go type in an interface");
+
+test("maps with key or value types that share a wasm type are distinct in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[string]int64{"a": 1}
+	_, ok1 := a.(map[string]int)
+	_, ok2 := a.(map[string]int64)
+	var b any = map[int]string{1: "x"}
+	_, ok3 := b.(map[int64]string)
+	_, ok4 := b.(map[int]string)
+	var c any = map[string]int{"a": 1}
+	_, ok5 := c.(map[string]int)
+	_, ok6 := c.(map[string]uint)
+	fmt.Println(ok1, ok2, ok3, ok4, ok5, ok6)
+	fmt.Println(a.(map[string]int64)["a"], b.(map[int]string)[1], c.(map[string]int)["a"])
+}
+`,
+		"false true false true true false\n1 x 1\n",
+	);
+});
+
+test("%T and a type switch name each map by its Go type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func name(v any) string {
+	switch v.(type) {
+	case map[string]int:
+		return "int"
+	case map[string]int64:
+		return "int64"
+	}
+	return "other"
+}
+
+func main() {
+	var a any = map[string]int64{}
+	var b any = map[int]string{}
+	var c any = map[string]int{}
+	fmt.Printf("%T %T %T\\n", a, b, c)
+	fmt.Println(name(a), name(c), name(b))
+}
+`,
+		"map[string]int64 map[int]string map[string]int\nint64 int other\n",
+	);
+});
+
+test("a nil map in an any keeps its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var m map[string]int64
+	var a any = m
+	_, ok1 := a.(map[string]int)
+	got, ok2 := a.(map[string]int64)
+	fmt.Println(a == nil, ok1, ok2, got == nil)
+}
+`,
+		"false false true true\n",
+	);
+});
+
+test("json encodes arrays and maps in an any as their own types", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func show(v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(string(b), err)
+}
+
+func main() {
+	show([2]byte{1, 2})
+	show([2]bool{true, false})
+	show(map[string]int8{"a": 1})
+	show(map[string]bool{"a": true})
+}
+`,
+		'[1,2] <nil>\n[true,false] <nil>\n{"a":1} <nil>\n{"a":true} <nil>\n',
+	);
+});
+
+section("Slices that generic code boxes into an interface");
+
+test("fmt prints and names a slice built in a generic function", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func mk[V any](v V) any { return []V{v} }
+func mkm[V any](v V) any { return map[string]V{"a": v} }
+
+func main() {
+	w := mk(3)
+	fmt.Println(w)
+	fmt.Printf("%T\\n", w)
+	s := mk("x")
+	fmt.Println(s)
+	fmt.Printf("%T\\n", s)
+	f := mk(func(a int, b ...string) (int, error) { return 0, nil })
+	fmt.Printf("%T\\n", f)
+	t := mk(T{1})
+	fmt.Printf("%T %v\\n", t, t)
+	m := mkm(3)
+	fmt.Printf("%T %v\\n", m, m)
+}
+`,
+		"[3]\n[]int\n[x]\n[]string\n[]func(int, ...string) (int, error)\n[]main.T [{1}]\nmap[string]int map[a:3]\n",
+	);
+});
+
+test("a slice built in a generic function matches its type in a type switch", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any](v V) any { return []V{v} }
+
+func name(v any) string {
+	switch v.(type) {
+	case []int:
+		return "int"
+	case []string:
+		return "string"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name(mk(1)), name(mk("a")), name(mk(1.5)), name([]int{1}))
+}
+`,
+		"int string other int\n",
+	);
+});
