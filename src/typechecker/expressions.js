@@ -162,6 +162,7 @@ const NON_INTEGER_KINDS = new Set([
 	"func",
 	"array",
 	"interface",
+	"simd",
 ]);
 
 // Basic types that are never valid as an index, slice bound or `make` size.
@@ -1026,8 +1027,8 @@ export const expressionCheckMethods = {
 
 	// Whether `t` is a type (or a defined type over one) that is not an
 	// integer: a float, complex, bool, string, `any`, struct, pointer, slice,
-	// map, func, array, interface or a type parameter whose type set is not
-	// all integers.  Untyped constants are judged by
+	// map, func, array, interface, simd vector or a type parameter whose type
+	// set is not all integers.  Untyped constants are judged by
 	// `_nonIntegerConst`, so only untyped non-integers that reach here
 	// (`s[a == b]`) count.
 	_isNonIntegerType(t, scope) {

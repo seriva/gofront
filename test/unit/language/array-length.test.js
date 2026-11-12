@@ -220,6 +220,41 @@ for (const [name, decls, decl] of OPERANDS) {
 	}
 }
 
+for (const vec of ["simd.F32x4", "simd.Mask32x4"]) {
+	for (const target of TARGETS) {
+		test(`a ${vec} as an index, bound or size is rejected (${target})`, () => {
+			const src = `package main
+
+import "gofront/simd"
+
+func main() {
+	s := []int{1, 2, 3}
+	var a [3]int
+	pa := &a
+	_, _, _ = s, a, pa
+	var v ${vec}
+	_ = v
+	${OPERAND_USES.map((u) => u.replace(/\bx\b/, "v")).join("\n\t")}
+}
+`;
+			const errors = errorsOn(target, src);
+			assertErrorContains(
+				errors,
+				`invalid argument: index v (variable of type ${vec}) must be integer`,
+			);
+			const hits =
+				errors
+					.map((e) => e.message)
+					.join("\n")
+					.split("must be integer").length - 1;
+			if (hits !== OPERAND_USES.length)
+				throw new Error(
+					`expected ${OPERAND_USES.length} "must be integer" errors, got ${hits}: ${errors.map((e) => e.message).join("; ")}`,
+				);
+		});
+	}
+}
+
 test("integer-like indexes, bounds and sizes still run (js, both, wasm)", async () => {
 	await assertAllTargetsOutput(
 		program(
