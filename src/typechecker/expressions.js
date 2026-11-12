@@ -153,6 +153,17 @@ const BUILTIN_CHECK = {
 	imag: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
 };
 
+// Type kinds that are never valid as an index, slice bound or `make` size.
+const NON_INTEGER_KINDS = new Set([
+	"struct",
+	"pointer",
+	"slice",
+	"map",
+	"func",
+	"array",
+	"interface",
+]);
+
 // Basic types that are never valid as an index, slice bound or `make` size.
 const NON_INTEGER_BASICS = new Set([
 	"float32",
@@ -1013,19 +1024,20 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	// Whether `t` is a basic type (or a defined type over one) that is not an
-	// integer: a float, complex, bool, string or `any`.  Untyped constants
-	// are judged by `_nonIntegerConst`, so only untyped non-integers that
-	// reach here (`s[a == b]`) count.
+	// Whether `t` is a type (or a defined type over one) that is not an
+	// integer: a float, complex, bool, string, `any`, struct, pointer, slice,
+	// map, func, array or interface.  Untyped constants are judged by
+	// `_nonIntegerConst`, so only untyped non-integers that reach here
+	// (`s[a == b]`) count.
 	_isNonIntegerType(t) {
 		if (!t || t._tainted) return false;
 		if (t.kind === "untyped")
 			return (
 				t.base === "bool" || t.base === "string" || t.base === "complex128"
 			);
-		let u = t;
-		while (u?.kind === "named") u = u.underlying;
-		return u?.kind === "basic" && NON_INTEGER_BASICS.has(u.name);
+		const u = this._deepUnderlying(t);
+		if (u?.kind === "basic") return NON_INTEGER_BASICS.has(u.name);
+		return NON_INTEGER_KINDS.has(u?.kind);
 	},
 
 	_checkSliceExpr(expr, scope) {

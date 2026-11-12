@@ -563,7 +563,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 sixth s
 
 ### Phase 14: Non-Integer Operand Types
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 seventh sweep, `Q01`). Its `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, seventh sweep)).
-- [ ] Task 14.1: Reject every non-integer operand type for index, slice-bound and `make` sizes (`Q01`)
+- [x] Task 14.1: Reject every non-integer operand type for index, slice-bound and `make` sizes (`Q01`)
   - Files: `src/typechecker/expressions.js` (`_isNonIntegerType`, `NON_INTEGER_BASICS`)
   - Test: `test/unit/language/array-length.test.js`: `var x S` (named struct), unnamed struct, pointer, slice, map, func, array, `interface{}`, `error`, named interface and `fmt.Stringer` as the index of a slice, array, string and pointer to array, as `s[:x]`, `s[x:]`, `s[0:1:x]`, as `make([]int, x)`, `make([]int, 1, x)`, `make(map[string]int, x)` → `assertErrorContains(…, "must be integer")` on every target; `any` still rejected; positives (`int`, `uint8`, `byte`, `rune`, `type E int`, `len(s)-1`, map index with struct/pointer/`any` keys) run via `assertAllTargetsOutput`
   - Done when: negatives report on every target (no wrong output, no invalid WASM), positives pass, and `npm run check` type-checks every example and the Go-source stdlib

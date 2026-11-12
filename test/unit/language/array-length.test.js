@@ -167,6 +167,82 @@ test("an integer index of any integer type runs (js, both, wasm)", async () => {
 	);
 });
 
+section("Index and make size: non-basic operand types are rejected");
+
+// [name, package-level declarations, var declaration of x]
+const OPERANDS = [
+	["a named struct", "type S struct{ n int }", "var x S"],
+	["an unnamed struct", "", "var x struct{ n int }"],
+	["a pointer", "", "var x *int"],
+	["a slice", "", "var x []int"],
+	["a map", "", "var x map[string]int"],
+	["a func", "", "var x func()"],
+	["an array", "", "var x [2]int"],
+	["an empty interface", "", "var x interface{}"],
+	["an error", "", "var x error"],
+	["a named interface", "type I interface{ M() }", "var x I"],
+	["a fmt.Stringer", "", "var x fmt.Stringer"],
+	["an any", "", "var x any"],
+];
+
+const OPERAND_USES = [
+	"_ = s[x]",
+	"_ = a[x]",
+	'_ = "abc"[x]',
+	"_ = pa[x]",
+	"_ = s[:x]",
+	"_ = s[x:]",
+	"_ = s[0:1:x]",
+	"_ = make([]int, x)",
+	"_ = make([]int, 1, x)",
+	"_ = make(map[string]int, x)",
+];
+
+const OPERAND_SETUP =
+	"s := []int{1, 2, 3}\n\tvar a [3]int\n\tpa := &a\n\t_, _, _ = s, a, pa\n\t";
+
+for (const [name, decls, decl] of OPERANDS) {
+	for (const target of TARGETS) {
+		test(`${name} as an index, bound or size is rejected (${target})`, () => {
+			const body = `${OPERAND_SETUP}${decl}\n\t_ = x\n\t${OPERAND_USES.join("\n\t")}`;
+			const errors = errorsOn(target, program(body, decls));
+			assertErrorContains(errors, "must be integer");
+			const hits =
+				errors
+					.map((e) => e.message)
+					.join("\n")
+					.split("must be integer").length - 1;
+			if (hits !== OPERAND_USES.length)
+				throw new Error(
+					`expected ${OPERAND_USES.length} "must be integer" errors, got ${hits}: ${errors.map((e) => e.message).join("; ")}`,
+				);
+		});
+	}
+}
+
+test("integer-like indexes, bounds and sizes still run (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		program(
+			`${SLICE}type E int
+	var e E = 1
+	var u uint8 = 2
+	var b byte = 0
+	r := 'b' - 'a'
+	type S struct{ n int }
+	ms := map[S]string{{1}: "s"}
+	p := &e
+	mp := map[*E]string{p: "p"}
+	ma := map[any]string{3: "a"}
+	mi := map[fmt.Stringer]string{}
+	_ = mi
+	fmt.Println(s[len(s)-1], s[e], s[u], s[b], s[r], s[:e], s[e:], s[0:1:e+1])
+	fmt.Println(len(make([]int, e)), cap(make([]int, 0, u)), len(make(map[string]int, e)))
+	fmt.Println(ms[S{1}], mp[p], ma[3])`,
+		),
+		"3 2 3 1 2 [1] [2 3] [1]\n1 2 0\ns p a\nok\n",
+	);
+});
+
 section("Array length: len and cap of an array are constants");
 
 test("len and cap of package and local arrays size arrays (js, both, wasm)", async () => {
