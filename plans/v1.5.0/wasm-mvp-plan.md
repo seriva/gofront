@@ -3,13 +3,13 @@
 **Version:** v1.5.0  
 **Status:** Completed (2026-10-06) — go/no-go number publishes with v1.5.1  
 **Baseline:** v1.4.0 JS compiler (`src/`)  
-**Continues in:** [`plans/v1.5.1/wasm-codegen-perf-plan.md`](../v1.5.1/wasm-codegen-perf-plan.md) (codegen performance, gates Phase 6c) → [`plans/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
+**Continues in:** [`plans/v1.5.1/wasm-codegen-perf-plan.md`](../v1.5.1/wasm-codegen-perf-plan.md) (codegen performance, gates Phase 6c) → [`plans/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler)
 
 ---
 
 ## Goal
 
-Ship the first version of **per-package WebAssembly output** in the existing JS compiler, so GoFront can transpile to JS *and* compile to WasmGC in the same app, before the native Go rewrite.
+Ship the first version of **per-package WebAssembly output** in the existing JS compiler, so GoFront can transpile to JS *and* compile to WasmGC in the same app.
 
 The release answers one question with real numbers: **is the hybrid model worth it?** It does that by moving simplefps's heaviest compute (octree + trimesh raycasting) to WASM and its math types to a `both` package, then benchmarking against the JS-only build.
 

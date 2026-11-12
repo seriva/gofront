@@ -1,9 +1,8 @@
 # WASM Gap Closing — Design Plan
 
 **Version:** v1.6.1
-**Status:** Complete
-**Depends on:** [`plans/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md)
-**Followed by:** [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), which then ports the v1.6.1 WASM backend instead of v1.6.0.
+**Status:** Complete  
+**Depends on:** [`plans/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md)  
 
 ---
 

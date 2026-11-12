@@ -3,14 +3,14 @@
 **Version:** v1.9.0  
 **Status:** Completed (2026-11-05)  
 **Base branch:** `main`  
-**Related:** [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md), [`../v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md)  
+**Related:** [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md), [`follow-ups-2026-11-03-plan.md`](follow-ups-2026-11-03-plan.md)  
 **Release note:** `strings.Builder` and `math` now compile from Go source in `stdlib/` with registered native fast paths, `encoding/json` shares one compile-time codec pipeline (`src/lower/json-codecs.js` + `stdlib/internal/jsonrt`) across JavaScript and WebAssembly at ~2× the throughput of the former JS-only emitter, and reflection-style `binary.Read`/`Write`/`Size` and `fmt.Sscan`/`Sscanf`/`Sscanln` are retired in favor of explicit `binary.ByteOrder` / `Append*` / `Put*` methods and `strconv` parsers.
 
 ---
 
 ## Goal
 
-Finish shrinking the Node.js compiler (`src/`) before the self-hosted Go port (`plans/v2.0.0/native-go-engine.md`) by cutting another **~4,500 lines** of bespoke backend emitter, runtime helper, and type-table code out of `src/`. After [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md) moved 19 standard library packages into `stdlib/`, five pockets of duplicate or low-value compiler machinery remained in `src/`:
+Finish shrinking the Node.js compiler (`src/`) by cutting another **~4,500 lines** of bespoke backend emitter, runtime helper, and type-table code out of `src/`. After [`stdlib-in-go-plan.md`](stdlib-in-go-plan.md) moved 19 standard library packages into `stdlib/`, five pockets of duplicate or low-value compiler machinery remained in `src/`:
 
 1. **15 dead methods (~285 lines)** across `src/backend/wasm/`, `src/backend/js/`, and `src/lower/ownership.js` left behind by earlier stdlib and ownership refactors.
 2. **Unused reflection-style `binary.{Read,Write,Size}` and `fmt.Sscan*` (~1,150 lines)** across WASM/JS emitters and runtime helpers — unused by `simplefps`, `website`, and `example/`, and responsible for recurring struct-alignment, 64-bit BigInt, and format-scanner bugs.

@@ -15,7 +15,7 @@
 
 ## Goal
 
-v1.9.0, which moves the stdlib to Go, still has to land on this source tree, and the tree stays the long-term home of the compiler now that the native Go port is shelved. This plan prepares the tree for v1.9.0, and fixes these problems in it today:
+v1.9.0, which moves the stdlib to Go, still has to land on this source tree, and the tree stays the long-term home of the compiler. This plan prepares the tree for v1.9.0, and fixes these problems in it today:
 - an architecture gate with holes in it
 - a WASM backend that also drives the whole pipeline and reaches into the JS backend
 - JS codegen that runs the parser
@@ -37,7 +37,7 @@ The large WASM stdlib files (`wasm/stdlib/core.js` at 10,069 lines, `bytes.js` a
   - `src/index.js` ≤ 220 (today 371).
   - `src/backend/js/templ.js` does not import the parser.
 - **Repo and package:** `git ls-files 'example/*/app.js' 'example/*/app.wasm'` is empty. The root `package.json` has no `gofront` block. CI (`npm test`, `test:e2e`, Pages deploy) passes from a clean checkout.
-- **Plan paths:** every repository path cited in `plans/v1.9.0/stdlib-in-go-plan.md` and `plans/roadmap.md` that refers to today's tree exists after this plan. The shelved `plans/v2.0.0/native-go-engine.md` is left as it is. Paths that a plan creates itself (for example `src/backend/js/natives.js`) are exempt. Checked by `test/unit/compiler/plan-paths.test.js`.
+- **Plan paths:** every repository path cited in `plans/v1.9.0/stdlib-in-go-plan.md` and `plans/roadmap.md` that refers to today's tree exists after this plan. Paths that a plan creates itself (for example `src/backend/js/natives.js`) are exempt. Checked by `test/unit/compiler/plan-paths.test.js`.
 
 ---
 
@@ -90,7 +90,7 @@ All probes ran at `ade5edb` on `feat/portable-go`, using a throwaway `git worktr
 | v1.9.0 overlap | The v1.9.0 plan (on `main`, 2026-10-23) migrates `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `bytes`, `io`, `strings`, encodings, `sha256`, `bits`, `rand`, `sync`, `time` and `strconv` to Go. It targets `wasm/stdlib/` 20,717 → ≤ 8,000 lines. 14 of its task lines edit `wasm/stdlib/core.js`, 8 the typechecker `core`/`extended` tables, 2 `wasm/stdlib/bytes.js` (deleted in Task 5.2) | `git show main:plans/v1.9.0/stdlib-in-go-plan.md`, `grep -c` per path |
 | v1.9.0 stale paths | The v1.9.0 plan predates PR #53 and this plan. It cites `runtime/stdlib/` 29 times, plus `src/lexer.js`, `src/cli-core.js`, `src/compiler.js` (`checkStdlibPrograms`), `src/backend/wasm/index.js` sites, `test/e2e/perf/` (4) and "add to `TEST_FILES`" | `grep -c` per path on the same file |
 | Manifest in the npm package *(obsolete: deleted by portable-go Task 8.1)* | `stdlib/manifest.json` (377,470 bytes) is shipped because `files` includes `stdlib/`, but no runtime code loads it (`src/` only mentions it in comments). It is 11% of the unpacked package (3.43 MB) and about 23 KB of the 617 KB tarball | `npm pack --dry-run --json --ignore-scripts` → 159 files, unpacked 3,432,186, tarball 616,821 |
-| Other stale paths *(mostly obsolete: v2.0.0 shelved 2026-10-27; roadmap rewritten)* | The roadmap's v2.0.0 theme and `native-go-engine.md:92` say the *v1.8.0* stdlib is in `runtime/stdlib/` (moved to `stdlib/` by PR #53, `b34b52f`). The roadmap's v1.8.0 row says `src/stdlib/go/`. `native-go-engine.md` §1.1 describes the *v2.0.0* target layout with `runtime/stdlib/`, which is a design choice and not stale | `grep -n 'runtime/stdlib\|src/stdlib/go' plans/roadmap.md plans/v2.0.0/native-go-engine.md` |
+| Other stale paths *(mostly obsolete: roadmap rewritten)* | The roadmap's v1.8.0 row says `src/stdlib/go/` (moved to `stdlib/` by PR #53, `b34b52f`) | `grep -n 'runtime/stdlib\|src/stdlib/go' plans/roadmap.md` |
 | Perf in `e2e/` | `test/e2e/perf/` holds Node/V8 scripts, not Playwright specs. Playwright skips them only because each project's `testMatch` names its specs. Referenced by `package.json` `test`/`bench`, `docs/hybrid-wasm.md:385`, and the v1.9.0 plan | `playwright.config.js:4,15-35` |
 | Example config in root | The root `package.json` has a 30-line `gofront.vendor` block that only serves `example/preact`. `project-config.js` already reads `gofront.json` from a project root, and vendor destinations must lie inside it | `src/project-config.js:2-19`. Probe: `prep` with the root config and with a temporary `example/preact/gofront.json` → both `no bundler found`, because `esbuild` (a declared devDependency) is not installed locally. The byte comparison happens in Task 2.4 after `npm ci` |
 | Committed build output | `example/*/app.js` (6) and `example/hybrid/app.wasm` are tracked, stale (rebuilding at HEAD changes 6 of 7) and touched by 40 commits. Nothing reads them from git | Worktree `npm run build && git status --short example` → 6 `M` |
@@ -374,7 +374,6 @@ Only paths change. No task, scope or number in those plans is edited.
 - [x] Task 7.2: Roadmap paths
   - Files: `plans/roadmap.md`
     - Any JS-engine source path the roadmap cites matches the new layout (`src/cli/`, `src/lexer/`, `src/link/`, `test/perf/`).
-    - `plans/v2.0.0/native-go-engine.md` is shelved and keeps its historical paths.
   - Test: new `test/unit/compiler/plan-paths.test.js`: every backticked `src/…`, `stdlib/…`, `test/…` and `scripts/…` path in `plans/roadmap.md` exists, except an explicit list of paths a plan creates itself
   - Done when: the test passes
 - [x] Task 7.3: v1.9.0 plan paths

@@ -3,7 +3,6 @@
 **Version:** v1.6.1  
 **Status:** Complete (2026-10-18)  
 **Depends on:** [`plans/v1.6.1/wasm-gaps-plan.md`](wasm-gaps-plan.md)  
-**Followed by:** [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md)
 
 ---
 
