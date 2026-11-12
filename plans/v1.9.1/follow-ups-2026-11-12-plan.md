@@ -536,7 +536,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 sixth s
   - Files: `src/typechecker/resolve.js` (`_inferFromPair`)
   - Test: `test/unit/types/generics.test.js`: `func arr[V any](a [2]V) any { return a }; arr([2]int{1, 2})` → `[2]int`; `[2][2]V`, `*[2]V`, `[2][]V`, `func first[V any](a [2]V) V` → `a`; two instantiations (`[2]int`, `[2]string`); `arr([3]int{})` → `assertErrorContains` (length mismatch) on every target; a slice argument for an array parameter is an error
   - Done when: `assertAllTargetsOutput` passes for the positives and the negatives report on every target
-- [ ] Task 13.3: Keep the value type when JS generic code boxes a struct after a pointer (`P03`)
+- [x] Task 13.3: Keep the value type when JS generic code boxes a struct after a pointer (`P03`)
   - Files: per probe at task start: `src/backend/js/runtime.js` (`__ity` / struct box helpers) and `src/backend/js/expressions.js` or `src/backend/js/index.js` (where the generic tag is chosen)
   - Test: `test/unit/types/dynamic-types.test.js`: `gen(&S{4})` then `gen(S{5})` → `*main.S|&{4}` then `main.S|{5}`, in both orders and alternating three calls; `v.(S)` `true` and `v.(*S)` `false` for the value result, the reverse for the pointer; two struct types; non-generic boxing unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause

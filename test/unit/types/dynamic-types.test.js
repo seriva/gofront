@@ -1488,3 +1488,75 @@ func main() {
 		"map[string]int|map[a:1]\n[2]string|[a b]\n[2]float32|[1 2]\n[]bool|[true]\n[]int32|[1]\n[2]bool|[true true]\n",
 	);
 });
+
+section("Struct values and pointers boxed by generic code");
+
+const GEN_STRUCT_PRELUDE = `package main
+
+import "fmt"
+
+type S struct{ n int }
+type T struct{ n int }
+
+func gen[V any](v V) any { return v }
+
+func show(label string, x any) {
+	_, isV := x.(S)
+	_, isP := x.(*S)
+	fmt.Printf("%s %T|%v %v %v\\n", label, x, x, isV, isP)
+}
+`;
+
+test("a pointer boxed first does not make a later struct value a pointer", async () => {
+	await assertAllTargetsOutput(
+		`${GEN_STRUCT_PRELUDE}
+func main() {
+	show("p", gen(&S{4}))
+	show("v", gen(S{5}))
+}
+`,
+		"p *main.S|&{4} false true\nv main.S|{5} true false\n",
+	);
+});
+
+test("a struct value boxed first keeps its type before a pointer", async () => {
+	await assertAllTargetsOutput(
+		`${GEN_STRUCT_PRELUDE}
+func main() {
+	show("v", gen(S{5}))
+	show("p", gen(&S{4}))
+}
+`,
+		"v main.S|{5} true false\np *main.S|&{4} false true\n",
+	);
+});
+
+test("alternating generic struct and pointer boxes keep their own types", async () => {
+	await assertAllTargetsOutput(
+		`${GEN_STRUCT_PRELUDE}
+func main() {
+	show("a", gen(&S{1}))
+	show("b", gen(S{2}))
+	show("c", gen(&S{3}))
+	show("d", gen(S{4}))
+	fmt.Printf("%T|%v\\n", gen(T{6}), gen(T{6}))
+	fmt.Printf("%T|%v\\n", gen(&T{7}), gen(&T{7}))
+}
+`,
+		"a *main.S|&{1} false true\nb main.S|{2} true false\nc *main.S|&{3} false true\nd main.S|{4} true false\nmain.T|{6}\n*main.T|&{7}\n",
+	);
+});
+
+test("non-generic struct and pointer boxes are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`${GEN_STRUCT_PRELUDE}
+func main() {
+	var p any = &S{4}
+	var v any = S{5}
+	show("p", p)
+	show("v", v)
+}
+`,
+		"p *main.S|&{4} false true\nv main.S|{5} true false\n",
+	);
+});
