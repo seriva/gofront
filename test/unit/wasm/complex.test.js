@@ -509,3 +509,66 @@ func Main() int {
 	assertEqual(res.wasmRes, 1n);
 	assertEqual(res.jsRes, 1);
 });
+
+section("WASM Complex — untyped constants through a pointer");
+
+test("untyped constant stored through a complex pointer", async () => {
+	const src = `package main
+
+import "fmt"
+
+type H struct{ c complex128 }
+
+func main() {
+	var c complex128
+	p := &c
+	*p = 9
+	fmt.Println(c)
+	*p += 2
+	fmt.Println(c)
+	q := &p
+	**q = 9
+	fmt.Println(c)
+	var d complex64
+	r := &d
+	*r = 9
+	fmt.Println(d)
+	*r += 1.5
+	fmt.Println(d)
+	var e complex128
+	m := map[string]*complex128{"a": &e}
+	*m["a"] = 4
+	fmt.Println(e)
+	h := &H{}
+	h.c = 2
+	fmt.Println(h.c)
+}
+`;
+	await assertAllTargetsOutput(
+		src,
+		"(9+0i)\n(11+0i)\n(9+0i)\n(9+0i)\n(10.5+0i)\n(4+0i)\n(2+0i)\n",
+	);
+});
+
+test("complex pointers alias their variable and read back", async () => {
+	const src = `package main
+
+import "fmt"
+
+func set(p *complex128, v complex128) { *p = v }
+
+func main() {
+	var c complex128
+	p := &c
+	set(p, complex(1, 2))
+	fmt.Println(c, *p)
+	c = 5i
+	fmt.Println(*p)
+	n := new(complex128)
+	*n = 3
+	*n *= 2i
+	fmt.Println(*n)
+}
+`;
+	await assertAllTargetsOutput(src, "(1+2i) (1+2i)\n(0+5i)\n(0+6i)\n");
+});

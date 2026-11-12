@@ -268,7 +268,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`â
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
 
 ### Phase 7: WASM Untyped Complex Constants
-- [ ] Task 7.1: Convert untyped constants stored through a complex pointer in WASM (`K06` stores)
+- [x] Task 7.1: Convert untyped constants stored through a complex pointer in WASM (`K06` stores)
   - Files: `src/backend/wasm/emit-stmts.js` (assignment and compound assignment through `*p`)
   - Test: `test/unit/wasm/complex.test.js`: `p := &c; *p = 9` â†’ `(9+0i)`; `*p += 2`; `**q = 9`; `complex64` `*p = 9`; `*m["a"] = 4` (map of `*complex128`); `p.c = 2` unchanged (`assertWasmProgramOutput` plus `assertValidWasm`; the same programs run on JS via `assertAllTargetsOutput`)
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
