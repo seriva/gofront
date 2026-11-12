@@ -1326,6 +1326,69 @@ func main() {
 	);
 });
 
+test("maps of funcs with bool or small-integer keys are named in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[bool]func(){}
+	fmt.Printf("%T\\n", a)
+	var b any = map[int32]func(int) string{}
+	fmt.Printf("%T\\n", b)
+	var c any = map[uint8]func(){}
+	fmt.Printf("%T\\n", c)
+	var d any = map[rune]func(){}
+	fmt.Printf("%T\\n", d)
+	var e any = map[bool][]func(){}
+	fmt.Printf("%T\\n", e)
+	var f any = map[bool]map[bool]func(){}
+	fmt.Printf("%T\\n", f)
+	var g any = map[string]map[bool]func(){}
+	fmt.Printf("%T\\n", g)
+	var h any = map[bool]func(int){}
+	fmt.Printf("%T\\n", h)
+}
+`,
+		"map[bool]func()\nmap[int32]func(int) string\nmap[uint8]func()\nmap[int32]func()\nmap[bool][]func()\nmap[bool]map[bool]func()\nmap[string]map[bool]func()\nmap[bool]func(int)\n",
+	);
+});
+
+test("a map of funcs with a bool key keeps its exact type in assertions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[bool]func(){}
+	_, ok := a.(map[bool]func())
+	_, ok2 := a.(map[bool]func(int))
+	_, ok3 := a.(map[string]func())
+	fmt.Println(ok, ok2, ok3)
+}
+`,
+		"true false false\n",
+	);
+});
+
+test("maps of funcs with string keys and maps of pointers with bool keys are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = map[string]func(){}
+	var b any = map[bool]*int{}
+	fmt.Printf("%T %T\\n", a, b)
+}
+`,
+		"map[string]func() map[bool]*int\n",
+	);
+});
+
 test("int, string and float32 element composites and slices in an any are unchanged", async () => {
 	await assertAllTargetsOutput(
 		`package main

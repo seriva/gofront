@@ -487,7 +487,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth s
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`)
   - Test: `test/unit/language/range-assign.test.js`: `var s string; for s = range seq {}` (`seq` yields `int`) → `assertErrorContains(…, "Cannot assign int to string")` on every target; `float64`, `int64`, `fmt.Stringer` (`int` does not implement), `out[0]` string element, two-value `for s, v = range seq2`; positives: `any`, an implementing `fmt.Stringer`, matching `int` still run
   - Done when: negatives report on every target (no invalid WASM) and positives pass `assertAllTargetsOutput`
-- [ ] Task 12.5: Name maps with small keys and func values in an `any` (`N03`)
+- [x] Task 12.5: Name maps with small keys and func values in an `any` (`N03`)
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_ifaceBoxMeta` / func-valued map classification) and/or `src/backend/js/index.js`, `src/backend/wasm/module-emitter.js`; `docs/go-compatibility.md` (`fmt` of a value in an `any` row, only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `%T` of `map[bool]func()`, `map[int32]func(int) string`, `map[uint8]func()`, `map[rune]func()`, `map[bool][]func()`, `map[bool]map[bool]func()` → the Go spelling; assertion to the exact type `true`, to `map[bool]func(int)` `false`; `map[string]func()` and `map[bool]*int` unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
