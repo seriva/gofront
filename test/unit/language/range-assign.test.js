@@ -743,6 +743,84 @@ func main() {
 	});
 }
 
+section("Range assignment: a deref target counts as a use");
+
+test("range-over-func assignment through a pointer used nowhere else compiles", async () => {
+	await assertAllTargetsOutput(
+		`${ITER_PRELUDE}
+func main() {
+	var v fmt.Stringer
+	p := &v
+	for *p = range seq {
+	}
+	fmt.Println(v)
+}
+`,
+		"N10\n",
+	);
+});
+
+test("range-over-func assignment through an int pointer used nowhere else compiles", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func seq(yield func(int) bool) {
+	yield(5)
+}
+
+func main() {
+	var v int
+	p := &v
+	for *p = range seq {
+	}
+	fmt.Println(v)
+}
+`,
+		"5\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`an unused pointer without a range loop still reports declared and not used (${target})`, () => {
+		const src = `package main
+
+func main() {
+	var v int
+	p := &v
+}
+`;
+		const errors =
+			target === "wasm"
+				? compileWasm(src).errors
+				: compile(src, { target }).errors;
+		assertErrorContains(errors, "'p' declared and not used");
+	});
+
+	test(`an unused pointer next to a range-over-func loop on another target still reports it (${target})`, () => {
+		const src = `package main
+
+func seq(yield func(int) bool) {
+	yield(5)
+}
+
+func main() {
+	var v, w int
+	p := &v
+	q := &w
+	for *p = range seq {
+	}
+}
+`;
+		const errors =
+			target === "wasm"
+				? compileWasm(src).errors
+				: compile(src, { target }).errors;
+		assertErrorContains(errors, "'q' declared and not used");
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

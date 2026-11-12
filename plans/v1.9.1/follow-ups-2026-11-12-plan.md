@@ -431,7 +431,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`), `src/backend/js/statements.js` (iterator loop store)
   - Test: `test/unit/language/range-assign.test.js`: `for out[0] = range seq {}` into `[]fmt.Stringer` → `N10`; struct field `s.v` → `N10`; map entry `m["a"]` → `N10`; deref `*p` (with `p` used afterwards) → `N10`; `[]any` element with `.(N)` → `true`; two-value `for ks[0], out[0] = range seq2` → `1 N10`; struct yield value and `[]int` element unchanged
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 11.3: Count `*p` as a use in range-over-func assignment targets (`M05`)
+- [x] Task 11.3: Count `*p` as a use in range-over-func assignment targets (`M05`)
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`)
   - Test: `test/unit/language/range-assign.test.js`: `var v fmt.Stringer; p := &v; for *p = range seq {}; fmt.Println(v)` compiles and prints `N10`; `var v int; p := &v; for *p = range seq {}` with `p` otherwise unused compiles; an unused `p` with no loop still reports `declared and not used`
   - Done when: `assertAllTargetsOutput` passes and the negative keeps its message on every target
