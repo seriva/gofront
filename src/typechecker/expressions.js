@@ -44,6 +44,7 @@ import {
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
+	UNTYPED_RUNE,
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
@@ -179,7 +180,7 @@ export const expressionCheckMethods = {
 			case "BasicLit": {
 				switch (expr.litKind) {
 					case "INT":
-						return UNTYPED_INT;
+						return expr.rune ? UNTYPED_RUNE : UNTYPED_INT;
 					case "FLOAT":
 						return UNTYPED_FLOAT;
 					case "STRING":
@@ -322,7 +323,8 @@ export const expressionCheckMethods = {
 
 	_checkBoolUnaryOp(ot, expr) {
 		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
-		return BOOL;
+		// `!` keeps an untyped or defined bool type.
+		return isBool(ot) ? ot : BOOL;
 	},
 
 	_checkNumericUnaryOp(ot, expr) {

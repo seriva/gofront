@@ -323,6 +323,9 @@ export const UNTYPED_INT = { kind: "untyped", base: "int" };
 export const UNTYPED_FLOAT = { kind: "untyped", base: "float64" };
 export const UNTYPED_STRING = { kind: "untyped", base: "string" };
 export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
+// An untyped rune constant is an untyped integer whose default type is
+// `rune`; every `base === "int"` rule applies to it unchanged.
+export const UNTYPED_RUNE = { kind: "untyped", base: "int", rune: true };
 
 // ── Complex types ────────────────────────────────────────────
 export const COMPLEX128 = { kind: "basic", name: "complex128" };
@@ -530,7 +533,7 @@ export function defaultType(t) {
 	if (t?.kind !== "untyped") return t;
 	switch (t.base) {
 		case "int":
-			return INT;
+			return t.rune ? RUNE : INT;
 		case "float64":
 			return FLOAT64;
 		case "string":
@@ -551,7 +554,7 @@ export function typeStr(t) {
 		case "basic":
 			return t.name;
 		case "untyped":
-			return `untyped ${t.base}`;
+			return t.rune ? "untyped rune" : `untyped ${t.base}`;
 		case "slice":
 			return `[]${typeStr(t.elem)}`;
 		case "shared":

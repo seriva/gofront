@@ -133,7 +133,10 @@ export class ExprsEmitter {
 			}
 
 			// Scalar type -> box into struct
-			const scalarType = goType ?? { kind: "basic", name: "int" };
+			// An untyped rune constant boxes as `rune` (int32), like Go.
+			const scalarType = goType?.rune
+				? { kind: "basic", name: "int32" }
+				: (goType ?? { kind: "basic", name: "int" });
 			const box = this.mod.getIfaceBoxType(scalarType);
 			this._emitRawExpr(expr, box.wType);
 			this._emitBoxValue(box);

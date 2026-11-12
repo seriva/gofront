@@ -466,7 +466,9 @@ export const expressionParserMethods = {
 		// Literals
 		if (t.type === T.INT) {
 			this.advance();
-			return { kind: "BasicLit", litKind: "INT", value: t.value };
+			const lit = { kind: "BasicLit", litKind: "INT", value: t.value };
+			if (t.rune) lit.rune = true;
+			return lit;
 		}
 		if (t.type === T.FLOAT) {
 			this.advance();

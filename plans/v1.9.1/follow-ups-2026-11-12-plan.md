@@ -409,15 +409,15 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
 
 ### Phase 10: Untyped Constants and Comparisons
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth sweep, `M01`–`M05`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, fourth sweep)).
-- [ ] Task 10.1: Treat comparison results as untyped bools (`M01`)
+- [x] Task 10.1: Treat comparison results as untyped bools (`M01`)
   - Files: `src/typechecker/expressions.js` (binary comparison and logical result types), `src/typechecker/assignability.js` (untyped bool into a defined bool type, if needed)
   - Test: `test/unit/language/defined-bool.test.js` (new): `type B bool; func f(b B)`: `f(x == 1)`, `var b B = x == 1`, `b = x < 2`, `return x == 1`, `S{x == 1}`, `map[string]B{"a": x == 1}`, `f(x == 1 && y == 2)` print `true`; `var u = x == 1` and `x == 1` into `any` print `bool`; negative (`assertErrorContains(…, "Cannot assign")` on every target): a typed `bool` variable and `!b`/`a && b` of typed bools into `B`, `x == 1` into `type MyI int`
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples and the Go-source stdlib
-- [ ] Task 10.2: Type deferred non-constant untyped arguments by the parameter (`M01` defer)
+- [x] Task 10.2: Type deferred non-constant untyped arguments by the parameter (`M01` defer)
   - Files: `src/lower/functions.js` (`deferTempType`, temp declaration)
   - Test: `test/unit/wasm/defer_recover.test.js`: `defer f(x == 1)` with `B` and `bool` parameters, a method callee, `...B`, a closure parameter → `true`; `defer f(1 << n)` with `int8`, `uint8`, `int64`, and an `any` parameter (`int 8`); every program also compiles its file twice with `compileFiles` on one path
   - Done when: `assertAllTargetsOutput` passes and the second compile no longer reports `Cannot assign int to int8` or `Cannot assign bool to B`
-- [ ] Task 10.3: Give an untyped rune constant the type `rune` (`M02`)
+- [x] Task 10.3: Give an untyped rune constant the type `rune` (`M02`)
   - Files: `src/typechecker/types.js` or `src/typechecker/constants.js` (default type of an untyped rune; exact site per probe), `src/backend/wasm/emit-exprs.js` (only if boxing still reports `int` after the typechecker change), `docs/go-compatibility.md` (`Sized numbers in an any` row, if it needs the rune wording)
   - Test: `test/unit/types/dynamic-types.test.js`: `f('a')` into `any` → `%T` `int32` on `wasm` (`assertWasmProgramOutput`) and `int` on js/both (documented), `a.(rune)` → `true` and `case rune:` hit on wasm, `r := 'x'; var i int32 = r` prints `120` on all targets, `var i int = r` → `assertErrorContains(…, "Cannot assign")` on every target, `const r = 'x'`, `'a' + 'b'`, `[]any{'a'}`; rune arithmetic, `string(r)`, `%c`/`%q`/`%U`/`%d` unchanged
   - Done when: the programs pass, the negative reports on every target, and `npm run check` type-checks every example and Go-source stdlib package (code that mixed `rune` and `int` is fixed in this task and named in the commit body)

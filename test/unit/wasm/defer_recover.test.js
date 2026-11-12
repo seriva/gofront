@@ -1157,3 +1157,72 @@ func main() {
 `;
 	await assertDeferOutput(src, "body\nlit []\nlit [1 2]\np 1 [3]\nm 1 [1 2]\n");
 });
+
+section("Deferred non-constant untyped arguments take the parameter's type");
+
+const DEFER_BOOL_PRELUDE = `package main
+
+import "fmt"
+
+type B bool
+
+func f(b B)        { fmt.Println("f", b) }
+func fb(b bool)    { fmt.Println("fb", b) }
+func fa(a any)     { fmt.Printf("fa %T %v\\n", a, a) }
+func fv(bs ...B)   { fmt.Println("fv", bs) }
+
+type T struct{}
+
+func (T) m(b B) { fmt.Println("m", b) }
+
+`;
+
+test("defer f(x == 1) with defined and plain bool parameters", async () => {
+	await assertDeferOutput(
+		`${DEFER_BOOL_PRELUDE}func main() {
+	x := 1
+	defer f(x == 1)
+	defer fb(x == 2)
+	defer fa(x == 1)
+}
+`,
+		"fa bool true\nfb false\nf true\n",
+	);
+});
+
+test("defer with a comparison for a method, variadic and closure parameter", async () => {
+	await assertDeferOutput(
+		`${DEFER_BOOL_PRELUDE}func main() {
+	x := 1
+	var t T
+	defer t.m(x == 1)
+	defer fv(x == 1, x < 0)
+	defer func(b B) { fmt.Println("lit", b) }(x == 1)
+}
+`,
+		"lit true\nfv [true false]\nm true\n",
+	);
+});
+
+test("defer f(1 << n) takes int8, uint8, int64 and any parameters", async () => {
+	await assertDeferOutput(
+		`package main
+
+import "fmt"
+
+func a(z int8)   { fmt.Println("int8", z) }
+func b(z uint8)  { fmt.Println("uint8", z) }
+func c(z int64)  { fmt.Println("int64", z) }
+func d(z any)    { fmt.Printf("%T %v\\n", z, z) }
+
+func main() {
+	n := 3
+	defer a(1 << n)
+	defer b(1 << n)
+	defer c(1 << n)
+	defer d(1 << n)
+}
+`,
+		"int 8\nint64 8\nuint8 8\nint8 8\n",
+	);
+});

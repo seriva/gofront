@@ -637,6 +637,7 @@ export class Lexer {
 			}
 			if (ch === "'") {
 				this.push(T.INT, this.readRuneLiteral(), l, c);
+				this.tokens[this.tokens.length - 1].rune = true;
 				continue;
 			}
 

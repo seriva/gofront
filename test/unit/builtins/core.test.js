@@ -549,7 +549,7 @@ test("[]rune result is a regular slice (supports range)", () => {
 func main() {
 	sum := 0
 	for _, r := range []rune("ABC") {
-		sum += r
+		sum += int(r)
 	}
 	console.log(sum)
 }`).js;
