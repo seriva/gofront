@@ -367,7 +367,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Files: per probe at task start: the code Task 6.4 changed for slices (`src/typechecker/assignability.js` / `src/backend/js/index.js` fmt tag) and/or `src/backend/wasm/monomorph.js`; `docs/go-compatibility.md` (`fmt` of a value in an `any` row)
   - Test: `test/unit/types/dynamic-types.test.js`: `func mkArr[V any](v V) any { return [2]V{v, v} }`: `fmt.Printf("%T %v\n", mkArr(5), mkArr(5))` → `[2]int [5 5]`; `V=string`; `var x [2]V; x[0] = v; return x`; `V` a struct; non-generic arrays unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 9.5: Evaluate each complex equality operand once in JS (`L06`)
+- [x] Task 9.5: Evaluate each complex equality operand once in JS (`L06`)
   - Files: `src/backend/js/expressions.js` (`_genComplexBinary`), `src/backend/js/runtime.js` or the helper registry (equality helper, if used)
   - Test: `test/unit/types/complex.test.js`: `switch c { case next(): … }` → `hit 1`; `c == next()`, `c != next()`, `next() == c` call count `1`; `complex64`; case list `case 1, next():`; results for equal/unequal values unchanged
   - Done when: `assertAllTargetsOutput` passes

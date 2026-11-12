@@ -3262,10 +3262,19 @@ export const expressionGenMethods = {
 			case "/":
 				return this._genComplexArith(expr.op, l, r, isComplex64(expr._type));
 			case "==":
-				return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
+				return this._genComplexEquality("===", "&&", l, r);
 			case "!=":
-				return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
+				return this._genComplexEquality("!==", "||", l, r);
 		}
+	},
+
+	// `l == r` / `l != r` on complex operands: each component reads both
+	// operands, so an operand that calls a function is bound once first.
+	_genComplexEquality(cmp, join, l, r) {
+		const pure = (js) => !js.includes("(");
+		if (pure(l) && pure(r))
+			return `(${l}.re ${cmp} ${r}.re ${join} ${l}.im ${cmp} ${r}.im)`;
+		return `((__a, __b) => __a.re ${cmp} __b.re ${join} __a.im ${cmp} __b.im)(${l}, ${r})`;
 	},
 
 	// `l op r` for complex operands.  A complex64 result has float32

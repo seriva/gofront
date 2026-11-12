@@ -2157,10 +2157,13 @@ export const statementGenMethods = {
 			this.line(`const ${tmp} = ${tag};`);
 			return {
 				tag: "true",
-				caseExpr: (e) => {
-					const c = this._genComplexOperand(e);
-					return `(${tmp}.re === ${c}.re && ${tmp}.im === ${c}.im)`;
-				},
+				caseExpr: (e) =>
+					this._genComplexEquality(
+						"===",
+						"&&",
+						tmp,
+						this._genComplexOperand(e),
+					),
 			};
 		}
 		if (stmt.tag && this._isMapTag(stmt.tag)) {
