@@ -7,6 +7,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-12
+
 ### Fixed
 - **Go programs behave more consistently across JavaScript and WebAssembly**: nil-pointer method calls, labeled loops, 64-bit constant arithmetic, interface type assertions and generic map formatting now match Go, and invalid switch cases and negative array lengths are rejected with Go's errors. In JavaScript output, `encoding/json` no longer fails on JavaScript-interop (`.d.ts`) types and generates leaner code, `float32` constants are rounded as in Go, and `fmt` calls in `.templ` files format by type; WebAssembly packages now accept package-level struct variables that hold SIMD vectors.
 - **More valid Go compiles and behaves like Go**: conversions to interface types such as `I(v)` and `interface{ M() }(v)` and slices of funcs written directly as call arguments now compile, and `gofront dev` no longer reports a package used only in an array length as unused. Nil-pointer method calls, labeled `break` and `continue` across nested range-over-func loops, range loops that assign to address-taken variables, multi-value calls such as `return f()` into `any`, 64-bit loop updates, `complex64` constants, templ `case a, b:` lists and several map-key, `%T`, embedded-method and `encoding/json` edge cases now give Go's results on JavaScript and WebAssembly alike ([details](docs/go-compatibility.md)).
