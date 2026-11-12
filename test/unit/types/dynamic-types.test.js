@@ -1100,3 +1100,37 @@ func main() {
 		"false 1\nfalse 0\n",
 	);
 });
+
+section("Arrays built in generic code and boxed into an any");
+
+test("an array literal built in a generic function prints and names its type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A int }
+
+func mkArr[V any](v V) any { return [2]V{v, v} }
+func mkVar[V any](v V) any {
+	var x [2]V
+	x[0] = v
+	return x
+}
+
+func main() {
+	fmt.Printf("%T %v\\n", mkArr(5), mkArr(5))
+	fmt.Printf("%T %v\\n", mkArr("a"), mkArr("a"))
+	fmt.Printf("%T %v\\n", mkArr(T{1}), mkArr(T{1}))
+	fmt.Printf("%T %v\\n", mkVar(5), mkVar(5))
+	fmt.Println(mkVar("z"))
+	_, ok := mkArr(5).([2]int)
+	_, bad := mkArr(5).([2]string)
+	fmt.Println(ok, bad)
+	var plain any = [2]int{1, 2}
+	fmt.Printf("%T %v\\n", plain, plain)
+}
+`,
+		"[2]int [5 5]\n[2]string [a a]\n[2]main.T [{1} {1}]\n[2]int [5 0]\n[z ]\ntrue false\n[2]int [1 2]\n",
+	);
+});

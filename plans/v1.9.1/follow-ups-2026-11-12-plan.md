@@ -363,7 +363,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Files: `src/backend/js/expressions.js` (assertion / type-switch unboxing; exact site per probe)
   - Test: `test/unit/types/dynamic-types.test.js`: `type S []int; var s S; var a any = s; ns, _ := a.(S); fmt.Println(ns == nil, len(ns))` → `true 0`; type switch `case S: v == nil` → `true`; `ns := a.(S)`; non-nil `S{1}` and nil `type M map[string]int` unchanged
   - Done when: `assertAllTargetsOutput` passes
-- [ ] Task 9.4: Print and name arrays that generic code boxes into an `any` (`L04`)
+- [x] Task 9.4: Print and name arrays that generic code boxes into an `any` (`L04`)
   - Files: per probe at task start: the code Task 6.4 changed for slices (`src/typechecker/assignability.js` / `src/backend/js/index.js` fmt tag) and/or `src/backend/wasm/monomorph.js`; `docs/go-compatibility.md` (`fmt` of a value in an `any` row)
   - Test: `test/unit/types/dynamic-types.test.js`: `func mkArr[V any](v V) any { return [2]V{v, v} }`: `fmt.Printf("%T %v\n", mkArr(5), mkArr(5))` → `[2]int [5 5]`; `V=string`; `var x [2]V; x[0] = v; return x`; `V` a struct; non-generic arrays unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
