@@ -621,3 +621,32 @@ func main() {
 		"hit\ntwo two i list one plus i other\nhalf\ndone\n",
 	);
 });
+
+section("WASM Complex — deferred calls with complex parameters");
+
+test("untyped constants passed to deferred calls with complex parameters", async () => {
+	const src = `package main
+
+import "fmt"
+
+type T struct{ n int }
+
+func (t T) m(z complex128) { fmt.Println("m", t.n, z) }
+
+func p(z complex128) { fmt.Println("p", z) }
+
+func main() {
+	t := T{7}
+	defer t.m(2)
+	defer func(z complex128) { fmt.Println("lit", z) }(2)
+	defer func(z complex64) { fmt.Println("c64", z) }(1.5)
+	defer p(2)
+	defer p(3i)
+	fmt.Println("body")
+}
+`;
+	await assertAllTargetsOutput(
+		src,
+		"body\np (0+3i)\np (2+0i)\nc64 (1.5+0i)\nlit (2+0i)\nm 7 (2+0i)\n",
+	);
+});

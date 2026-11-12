@@ -276,7 +276,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
   - Files: `src/backend/wasm/emit-stmts.js` (`emitSwitchStmt` case comparison)
   - Test: `test/unit/wasm/complex.test.js`: `var c complex128 = 2; switch c { case 2: … }` → hit; `case 2i`, `case 2, 3i`, `complex64` tag with `case 1.5`; default branch; no match
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 7.3: Convert untyped constants passed to deferred calls with complex parameters in WASM (`K06` defer)
+- [x] Task 7.3: Convert untyped constants passed to deferred calls with complex parameters in WASM (`K06` defer)
   - Files: `src/backend/wasm/emit.js` (`emitDeferStmt`)
   - Test: `test/unit/wasm/complex.test.js`: `func p(z complex128) { fmt.Println(z) }; defer p(2)` → `(2+0i)`; `defer func(z complex128) { … }(2)`; `defer t.m(2)`; `complex64` parameter with `1.5`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds

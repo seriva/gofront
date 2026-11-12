@@ -825,3 +825,20 @@ func main() {
 		"boom\ntrue\n",
 	);
 });
+
+section("WASM Defer — untyped constant arguments");
+
+test("untyped constants take the parameter type of a deferred call", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(x float64, n int8, s float32) { fmt.Println(x, n, s) }
+
+func main() {
+	defer f(2, 3, 1)
+	fmt.Println("body")
+}
+`;
+	await assertAllTargetsOutput(src, "body\n2 3 1\n");
+});
