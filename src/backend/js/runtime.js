@@ -324,7 +324,7 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
     if (v === null || typeof v !== "object") return v;
     if (v.__nilm === true) return v;
     if (Array.isArray(v)) return keep(v, v.map(cp));
-    if (typeof v.__clone === "function") return v.__clone();
+    if (typeof v.__clone === "function") return keep(v, v.__clone());
     return keep(v, Object.assign(Object.create(Object.getPrototypeOf(v)), v));
   };
   return cp(x);

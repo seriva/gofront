@@ -16,6 +16,7 @@ import {
 	intConst,
 } from "./const-fold.js";
 import {
+	compositeLitMaxIndex,
 	defaultType,
 	isAny,
 	isComplex,
@@ -24,6 +25,18 @@ import {
 	typeStr,
 	VOID,
 } from "./types.js";
+
+// True when evaluating `node` runs a call or a channel receive (conversions
+// excluded): such an operand makes `len` of an array a non-constant.
+function hasCallOrReceive(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(hasCallOrReceive);
+	if (node.kind === "CallExpr" && !node._isTypeConversion) return true;
+	if (node.kind === "UnaryExpr" && node.op === "<-") return true;
+	return Object.keys(node).some(
+		(key) => key.charCodeAt(0) !== 95 && hasCallOrReceive(node[key]),
+	);
+}
 
 // Basic type names usable as conversion functions (`int32(x)`).
 const BASIC_CONVERSIONS = new Set([
@@ -182,7 +195,13 @@ export const constantCheckMethods = {
 
 	_evalConstIdent(expr, scope) {
 		const owner = scope.lookupScope(expr.name);
-		if (!owner?._consts.has(expr.name)) return null;
+		// A constant declared after the type that uses it (`type B [k]int`) has
+		// no symbol yet, but its initializer is registered.
+		if (!owner) {
+			const early = scope.lookupConstExpr(expr.name);
+			return early ? this._constValue(early, scope) : null;
+		}
+		if (!owner._consts.has(expr.name)) return null;
 		const init = owner.lookupConstExpr(expr.name);
 		const v = init
 			? this._constValue(init, owner)
@@ -213,6 +232,8 @@ export const constantCheckMethods = {
 		const fn = expr.func;
 		if (fn?.kind !== "Ident" || scope.lookup(fn.name)?.kind !== "builtin")
 			return null;
+		const arrayLen = this._constArrayLen(fn.name, expr.args, scope);
+		if (arrayLen !== null) return intConst(BigInt(arrayLen));
 		const vals = (expr.args ?? []).map((a) => this._constValue(a, scope));
 		if (vals.length === 0 || vals.some((v) => !v)) return null;
 		if (fn.name === "min" || fn.name === "max")
@@ -220,6 +241,53 @@ export const constantCheckMethods = {
 		// GoFront strings use UTF-16 code units on both backends.
 		const isLen = fn.name === "len" && vals[0].k === "STRING";
 		return isLen ? intConst(BigInt(vals[0].v.length)) : null;
+	},
+
+	// A package variable named in an array length may be declared after the
+	// type (or variable) that uses it, so it is not defined yet: its declared
+	// type, or the type of its composite literal, is resolved from the spec.
+	_earlyPackageVarType(arg, scope) {
+		let e = arg;
+		while (e?.kind === "ParenExpr") e = e.expr;
+		if (e?.kind !== "Ident") return null;
+		// An untyped package variable is `any` until its initializer is typed.
+		const known = scope.lookup(e.name);
+		if (known && !isAny(known)) return null;
+		const entry = this._pkgVarSpecs?.get(e.name);
+		if (!entry || entry.busy) return null;
+		const { spec, index } = entry;
+		const lit = spec.value?.[index];
+		const typeNode =
+			spec.type ?? (lit?.kind === "CompositeLit" ? lit.typeExpr : null);
+		if (!typeNode) return null;
+		entry.busy = true;
+		try {
+			const t = this.resolveTypeNode(typeNode, this.globals);
+			// `[...]T{...}`: the length is the literal's highest index + 1.
+			return t?.kind === "array" && t.size === null && lit?.elems
+				? { ...t, size: compositeLitMaxIndex(lit.elems) + 1 }
+				: t;
+		} finally {
+			entry.busy = false;
+		}
+	},
+
+	// `len(a)` and `cap(a)` of an array (or pointer to an array) are constants
+	// unless `a` contains a function call or channel receive; `a` itself is not
+	// evaluated.  Returns the length, or null.
+	_constArrayLen(name, args, scope) {
+		if ((name !== "len" && name !== "cap") || args?.length !== 1) return null;
+		const arg = args[0];
+		if (hasCallOrReceive(arg)) return null;
+		let t = this._earlyPackageVarType(arg, scope);
+		if (!t) {
+			if (arg._type === undefined) this.checkExpr(arg, scope);
+			t = arg._type;
+		}
+		t = this.resolveType(t);
+		if (t?.kind === "pointer") t = this.resolveType(t.base);
+		if (t?.kind === "named") t = this.resolveType(t.underlying);
+		return t?.kind === "array" && Number.isInteger(t.size) ? t.size : null;
 	},
 
 	// Target type of a conversion call (`MyInt(x)`, `int32(x)`), or null.

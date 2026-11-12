@@ -730,7 +730,9 @@ export const expressionGenMethods = {
 				this.useHelper("ifaceBox");
 				expr._gmapTagging = true;
 				try {
-					return `__ity(${this.genExpr(expr)}, ${tag})`;
+					// An array is copied before it is tagged: a copy made after
+					// `__ity` (`.map`) would drop the tag.
+					return `__ity(${this.genValueExpr(expr)}, ${tag})`;
 				} finally {
 					expr._gmapTagging = false;
 				}
@@ -1077,7 +1079,11 @@ export const expressionGenMethods = {
 
 	// Emits `expr` as a Go value: struct/array operands that alias existing storage are copied.
 	genValueExpr(expr) {
-		const tagged = Boolean(this._ityTag(expr));
+		const tagged =
+			Boolean(this._ityTag(expr)) ||
+			(isGenericComposite(expr._ifaceSrc) &&
+				!expr._gmapTagging &&
+				Boolean(this._genericMapTag(expr._ifaceSrc)));
 		const js = this.genExpr(expr);
 		if (expr._ifaceBox || tagged) return js;
 		if (

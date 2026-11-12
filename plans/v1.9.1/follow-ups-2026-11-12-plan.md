@@ -528,19 +528,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fifth s
 
 ### Phase 13: Typechecker Conformance and Generic Struct Tags
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 sixth sweep, `P01`–`P04`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, sixth sweep)).
-- [ ] Task 13.1: Require an integer type for index, slice-bound and `make` size operands (`P01`)
+- [x] Task 13.1: Require an integer type for index, slice-bound and `make` size operands (`P01`)
   - Files: `src/typechecker/expressions.js` (index, slice-bound and `make` argument checks)
   - Test: `test/unit/language/array-length.test.js`: `s[f]`, `a[f] = 2`, `"abc"[f]`, `s[:f]`, `s[0:1:f]`, `make([]int, f)`, `make([]int, 1, f)`, `make(map[string]int, f)` with `f := 1.5`, and a `float32`, `complex128`, `string`, `bool` and `any` index → `assertErrorContains(…, "must be integer")` on every target; positives with `uint8`, `type MyI int`, `byte`, `rune` indexes and a float map key run
   - Done when: negatives report on every target (no invalid WASM, no garbage output), positives pass `assertAllTargetsOutput`, and `npm run check` type-checks the examples and the Go-source stdlib
-- [ ] Task 13.2: Infer type arguments from array parameters (`P02`)
+- [x] Task 13.2: Infer type arguments from array parameters (`P02`)
   - Files: `src/typechecker/resolve.js` (`_inferFromPair`)
   - Test: `test/unit/types/generics.test.js`: `func arr[V any](a [2]V) any { return a }; arr([2]int{1, 2})` → `[2]int`; `[2][2]V`, `*[2]V`, `[2][]V`, `func first[V any](a [2]V) V` → `a`; two instantiations (`[2]int`, `[2]string`); `arr([3]int{})` → `assertErrorContains` (length mismatch) on every target; a slice argument for an array parameter is an error
   - Done when: `assertAllTargetsOutput` passes for the positives and the negatives report on every target
-- [ ] Task 13.3: Keep the value type when JS generic code boxes a struct after a pointer (`P03`)
+- [x] Task 13.3: Keep the value type when JS generic code boxes a struct after a pointer (`P03`)
   - Files: per probe at task start: `src/backend/js/runtime.js` (`__ity` / struct box helpers) and `src/backend/js/expressions.js` or `src/backend/js/index.js` (where the generic tag is chosen)
   - Test: `test/unit/types/dynamic-types.test.js`: `gen(&S{4})` then `gen(S{5})` → `*main.S|&{4}` then `main.S|{5}`, in both orders and alternating three calls; `v.(S)` `true` and `v.(*S)` `false` for the value result, the reverse for the pointer; two struct types; non-generic boxing unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 13.4: Fold `len` and `cap` of arrays as array lengths (`P04`)
+- [x] Task 13.4: Fold `len` and `cap` of arrays as array lengths (`P04`)
   - Files: `src/typechecker/resolve.js` (`_foldArrayLen`, array length resolution), `docs/language-support.md` (array length row, only if it no longer matches)
   - Test: `test/unit/language/array-length.test.js`: package-level `var base [3]int; var a [len(base)]int` → `3`; `cap(base)`; `const n = len([2]int{}); var a [n]int`; `type A [len(base)]int`; local `var base [3]int; var a [len(base)]int` compiles and prints `3` (no unused-variable error); negatives `[len(slice)]int` and `[len(f())]int` → `assertErrorContains(…, "invalid array length")` on every target
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples

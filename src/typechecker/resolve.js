@@ -3,7 +3,7 @@
 
 import { parseJsonTag } from "../parser/struct-tag.js";
 import { foldConstExpr } from "./const-fold.js";
-import { exprText } from "./operand-text.js";
+import { exprText, operandKind } from "./operand-text.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
@@ -454,7 +454,10 @@ export const resolveMethods = {
 		// `[math.MaxInt8]T`: a package constant the AST folder cannot see.
 		if (!Number.isInteger(n))
 			n = this._constIntValue(size, scope) ?? Number.NaN;
-		if (!Number.isInteger(n)) return size;
+		if (!Number.isInteger(n)) {
+			this._reportNonConstantArrayLen(size, scope);
+			return size;
+		}
 		this._useQualifiedConsts(size);
 		if (n >= 0) return n;
 		this.err(
@@ -462,6 +465,17 @@ export const resolveMethods = {
 			size,
 		);
 		return 0;
+	},
+
+	// A length that is not a constant at all (`[len(s)]T` with a slice, `[n]T`
+	// with a variable) cannot size an array.  The operand's type is checked
+	// first, so it counts as used.
+	_reportNonConstantArrayLen(size, scope) {
+		if (size._type === undefined) this.checkExpr(size, scope);
+		this.err(
+			`invalid array length ${exprText(size)} (${operandKind(size, typeStr(size._type), false)}): must be constant`,
+			size,
+		);
 	},
 
 	// An array length must be an integer constant: `[1 == 1]T`, `["a"]T`,
@@ -910,6 +924,8 @@ export const resolveMethods = {
 
 	_inferFromStructuredPair(paramType, argType, map) {
 		if (paramType.kind === "slice" && argType.kind === "slice")
+			this._inferFromPair(paramType.elem, argType.elem, map);
+		if (paramType.kind === "array" && argType.kind === "array")
 			this._inferFromPair(paramType.elem, argType.elem, map);
 		if (paramType.kind === "pointer" && argType.kind === "pointer")
 			this._inferFromPair(paramType.base, argType.base, map);

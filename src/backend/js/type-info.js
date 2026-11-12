@@ -255,6 +255,12 @@ export const typeInfoGenMethods = {
 			this.useHelper("ifaceBox");
 			return "(__v) => __ifp(__v)";
 		}
+		// A struct value is marked as a value, so a pointer boxed earlier by the
+		// same generic code does not make it read as `*T`.
+		if (u?.kind === "struct" && t.kind !== "pointer") {
+			this.useHelper("ifaceBox");
+			return "(__v) => __ifv(__v)";
+		}
 		if (u?.kind === "map") {
 			this.useHelper("ifaceBox");
 			return "(__v) => __ifm(__v)";

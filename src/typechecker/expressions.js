@@ -153,6 +153,17 @@ const BUILTIN_CHECK = {
 	imag: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
 };
 
+// Basic types that are never valid as an index, slice bound or `make` size.
+const NON_INTEGER_BASICS = new Set([
+	"float32",
+	"float64",
+	"complex64",
+	"complex128",
+	"bool",
+	"string",
+	"any",
+]);
+
 // Method-name dispatch for _checkExpr — string values add no static call edges.
 const CHECK_EXPR_DELEGATE = {
 	UnaryExpr: "_checkUnaryExpr",
@@ -984,13 +995,37 @@ export const expressionCheckMethods = {
 
 	// An index, slice bound or `make` size that is a constant must be an
 	// integer (`s[1 == 1]`, `make([]int, "a")`).
+	// A typed operand must have an integer type too (`s[f]` with `f float64`).
 	_checkIntegerConstOperand(operand, what, scope) {
 		const kind = this._nonIntegerConst(operand, scope);
-		if (kind)
+		if (kind) {
 			this.err(
 				`invalid argument: ${what} ${exprText(operand)} (${kind}) must be integer`,
 				operand,
 			);
+			return;
+		}
+		const t = operand?._type;
+		if (!this._isNonIntegerType(t)) return;
+		this.err(
+			`invalid argument: ${what} ${exprText(operand)} (${operandKind(operand, typeStr(t), false)}) must be integer`,
+			operand,
+		);
+	},
+
+	// Whether `t` is a basic type (or a defined type over one) that is not an
+	// integer: a float, complex, bool, string or `any`.  Untyped constants
+	// are judged by `_nonIntegerConst`, so only untyped non-integers that
+	// reach here (`s[a == b]`) count.
+	_isNonIntegerType(t) {
+		if (!t || t._tainted) return false;
+		if (t.kind === "untyped")
+			return (
+				t.base === "bool" || t.base === "string" || t.base === "complex128"
+			);
+		let u = t;
+		while (u?.kind === "named") u = u.underlying;
+		return u?.kind === "basic" && NON_INTEGER_BASICS.has(u.name);
 	},
 
 	_checkSliceExpr(expr, scope) {

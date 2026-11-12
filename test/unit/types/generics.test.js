@@ -2128,6 +2128,74 @@ func main() {
 	);
 });
 
+section("Generics — type arguments inferred from array parameters");
+
+test("arr[V](a [2]V) infers V from [2]int and [2]string", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func arr[V any](a [2]V) any { return a }
+
+func main() {
+	fmt.Printf("%T %v\\n", arr([2]int{1, 2}), arr([2]int{1, 2}))
+	fmt.Printf("%T %v\\n", arr([2]string{"a", "b"}), arr([2]string{"a", "b"}))
+}
+`,
+		"[2]int [1 2]\n[2]string [a b]\n",
+	);
+});
+
+test("V is inferred through nested, pointer and slice-of-array forms", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func nest[V any](a [2][2]V) any { return a }
+func ptr[V any](a *[2]V) any { return a }
+func sl[V any](a [2][]V) any { return a }
+func first[V any](a [2]V) V { return a[0] }
+
+func main() {
+	x := [2]int{5, 6}
+	fmt.Printf("%T\\n", nest([2][2]int{}))
+	fmt.Printf("%T\\n", ptr(&x))
+	fmt.Printf("%T\\n", sl([2][]int{}))
+	fmt.Println(first([2]string{"a", "b"}), first(x))
+}
+`,
+		"[2][2]int\n*[2]int\n[2][]int\na 5\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	const gen = `package main
+
+import "fmt"
+
+func arr[V any](a [2]V) any { return a }
+
+func main() {
+	fmt.Println(arr(ARG))
+}
+`;
+	const errs = (arg) => {
+		const src = gen.replace("ARG", arg);
+		return (
+			(target === "wasm" ? compileWasm(src) : compile(src, { target }))
+				.errors ?? []
+		);
+	};
+	test(`an array of the wrong length is rejected (${target})`, () => {
+		assertErrorContains(errs("[3]int{}"), "different array lengths");
+	});
+	test(`a slice for an array parameter is rejected (${target})`, () => {
+		assertErrorContains(errs("[]int{1, 2}"), "Cannot infer type arguments");
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
