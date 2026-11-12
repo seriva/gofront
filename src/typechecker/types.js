@@ -672,6 +672,18 @@ export function isAmbiguousFieldSelector(struct, name) {
 	return field.depth === promoted.depth || promoted.ambiguous === true;
 }
 
+// Whether selecting `name` on `struct`, whose flattened field map has it,
+// reaches a method promoted at a shallower depth than the field (Go's depth
+// rule): the method is selected and the deeper field is shadowed.
+export function isMethodPromotedOverField(struct, name) {
+	if (declaresField(struct, name)) return false;
+	const promoted = promotedMethods.get(struct)?.get(name);
+	if (!promoted?.mType || promoted.ambiguous) return false;
+	if (struct.methods?.get(name) !== promoted.mType) return false;
+	const field = promotedFieldDepth(struct, name);
+	return field !== null && promoted.depth < field.depth;
+}
+
 // A function-local type shadowed by another type is renamed `Name__L<n>`.
 export const LOCAL_TYPE_SUFFIX = /__L\d+/;
 

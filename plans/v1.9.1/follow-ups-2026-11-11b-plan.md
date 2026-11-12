@@ -232,19 +232,19 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-11 round 2
 
 ### Phase 5: Promoted Methods over Fields, JS Constant and Range Conversions
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`–`K07`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12)).
-- [ ] Task 5.1: Resolve a method promoted shallower than a same-named field in the typechecker (`K01`)
+- [x] Task 5.1: Resolve a method promoted shallower than a same-named field in the typechecker (`K01`)
   - Files: `src/typechecker/types.js` (promotion depth helper), `src/typechecker/resolve.js` (`_fieldTypeStruct` and selector/method lookup)
   - Test: `test/unit/language/named-type-methods.test.js`: `type In struct{ M int }; type A struct{ In }; type B struct{}; func (B) M() string { return "m" }; type C struct{ A; B }; fmt.Println(C{}.M())` → `m`; `f := c.M; f()` → `m`; field at depth 1 over method at depth 2 prints `0`; two depth-1 candidates still `ambiguous selector`
   - Done when: the positives type-check on every target (`compile(…).errors` empty) and the ambiguity negatives keep their message
-- [ ] Task 5.2: Call the winning promoted method through the JS class (`K01` JS)
+- [x] Task 5.2: Call the winning promoted method through the JS class (`K01` JS)
   - Files: `src/lower/embedding.js` (`computeEmbeddedStubs`), `src/backend/js/index.js` (class emission, if needed)
   - Test: `test/unit/language/named-type-methods.test.js`: Task 5.1 program plus `type I interface{ M() string }; var i I = C{}; fmt.Println(i.M(), C{}.M())` → `m m`; explicit path `C{}.A.In.M` → `0`
   - Done when: `assertAllTargetsOutput` passes for every Task 5.1/5.2 program
-- [ ] Task 5.3: Convert untyped constants appended to complex slices (`K05`)
+- [x] Task 5.3: Convert untyped constants appended to complex slices (`K05`)
   - Files: `src/typechecker/expressions.js` (`BUILTIN_CHECK.append`), `docs/go-compatibility.md` ("Complex constants" row)
   - Test: `test/unit/types/complex.test.js`: `append(c, 7)` → `[(7+0i)]`; `append(c, 7.5, 2)`; `[]complex64` `append(c, 1+0.01i)` with `imag(c[0]) == 0.01` → `true`; named `type Zs []complex128`; spread `append(b, a...)` and `append(c, 3i)` unchanged
   - Done when: `assertAllTargetsOutput` passes and the docs row no longer lists `append` as an exception (it says what differs from Go after this task, or the row is removed if nothing does)
-- [ ] Task 5.4: Box range assignments into interface-typed variables in JS (`K07`)
+- [x] Task 5.4: Box range assignments into interface-typed variables in JS (`K07`)
   - Files: `src/typechecker/statements.js` (mark the range assignment's boxing), `src/backend/js/statements.js` (`_emitRangeVar`)
   - Test: `test/unit/language/range-assign.test.js`: `for _, s = range []N{3, 4} {}` into `fmt.Stringer` → `N4`; map value → `N3`; map key (`range map[N]bool{5: true}`) → `N5`; `type S string` → `Sb`; into `any` with `_, ok := s.(N)` → `true`; struct/pointer elements and `for _, v := range … { s = v }` unchanged
   - Done when: `assertAllTargetsOutput` passes

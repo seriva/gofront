@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertAllTargetsOutput,
 	assertErrorContains,
+	assertJsProgramOutput,
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
@@ -408,6 +409,108 @@ func main() {
 }
 `,
 		"8\n3\n",
+	);
+});
+
+section("Range assignment: into interface-typed variables");
+
+const RANGE_BOX_PRELUDE = `package main
+
+import "fmt"
+
+type N int
+
+func (n N) String() string { return fmt.Sprintf("N%d", int(n)) }
+
+type S string
+
+func (s S) String() string { return "S" + string(s) }
+
+type P struct{ X int }
+
+func (p P) String() string { return fmt.Sprintf("P%d", p.X) }
+`;
+
+for (const [name, body, want] of [
+	[
+		"slice element",
+		"for _, s = range []N{3, 4} {\n\t}\n\tfmt.Println(s)",
+		"N4\n",
+	],
+	[
+		"map value",
+		'for _, s = range map[string]N{"a": 3} {\n\t}\n\tfmt.Println(s)',
+		"N3\n",
+	],
+	[
+		"map key",
+		"for s = range map[N]bool{5: true} {\n\t}\n\tfmt.Println(s)",
+		"N5\n",
+	],
+	[
+		"defined string element",
+		'for _, s = range []S{"a", "b"} {\n\t}\n\tfmt.Println(s)',
+		"Sb\n",
+	],
+	[
+		"struct element",
+		"for _, s = range []P{{1}, {2}} {\n\t}\n\tfmt.Println(s)",
+		"P2\n",
+	],
+	[
+		"pointer element",
+		"for _, s = range []*P{{1}, {2}} {\n\t}\n\tfmt.Println(s)",
+		"P2\n",
+	],
+	[
+		"define form stored afterwards",
+		"for _, v := range []N{3, 4} {\n\t\ts = v\n\t}\n\tfmt.Println(s)",
+		"N4\n",
+	],
+]) {
+	test(`range assignment of a ${name} into a fmt.Stringer`, async () => {
+		await assertAllTargetsOutput(
+			`${RANGE_BOX_PRELUDE}
+func main() {
+	var s fmt.Stringer
+	${body}
+}
+`,
+			want,
+		);
+	});
+}
+
+test("range assignment into an any keeps the defined type", async () => {
+	await assertAllTargetsOutput(
+		`${RANGE_BOX_PRELUDE}
+func main() {
+	var a any
+	for _, a = range []N{3, 4} {
+	}
+	_, ok := a.(N)
+	fmt.Println(ok, a)
+	for a = range map[S]bool{"k": true} {
+	}
+	_, ok = a.(S)
+	fmt.Println(ok)
+}
+`,
+		"true N4\ntrue\n",
+	);
+});
+
+test("range assignment into an element of an interface slice boxes the value", async () => {
+	await assertJsProgramOutput(
+		`${RANGE_BOX_PRELUDE}
+func main() {
+	out := make([]fmt.Stringer, 1)
+	for _, out[0] = range []N{3, 4} {
+	}
+	fmt.Println(out[0])
+}
+`,
+		"N4\n",
 	);
 });
 
