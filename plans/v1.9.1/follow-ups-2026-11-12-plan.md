@@ -423,7 +423,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
   - Done when: the programs pass, the negative reports on every target, and `npm run check` type-checks every example and Go-source stdlib package (code that mixed `rune` and `int` is fixed in this task and named in the commit body)
 
 ### Phase 11: `fmt` of Small-Element Composites and Range-over-func Targets
-- [ ] Task 11.1: Print and name maps and arrays with `bool` or small-integer keys and elements in an `any` (`M04`)
+- [x] Task 11.1: Print and name maps and arrays with `bool` or small-integer keys and elements in an `any` (`M04`)
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_ifaceBoxMeta` / `_classifyIfaceBox`) and/or `src/backend/js/index.js` (fmt tag), `src/backend/wasm/module-emitter.js` (box/name registration), `docs/go-compatibility.md` (`fmt` of a value in an `any` row, only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `var a any = map[string]bool{"a": true}; fmt.Printf("%T|%v\n", a, a)` → `map[string]bool|map[a:true]`; `[2]bool`, `map[rune]string`, `map[int32]bool`, `map[int8]int`, `map[bool]int`, `[2]int32`, `[2]uint8`, by literal, by variable and by `make`; `map[string]bool` asserted as `map[string]int` → `false`; `int`/`string`/`float32` element composites and slices unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
