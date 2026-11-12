@@ -31,6 +31,7 @@ import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
 	BROWSER_GLOBALS,
 	isComplex,
+	isMethodPromotedOverField,
 	isNumeric,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
@@ -870,8 +871,11 @@ export class CodeGen {
 		if (this.checker) {
 			const resolved = this.checker.types.get(name)?.underlying;
 			if (resolved?.kind === "struct") {
-				for (const [fName, fType] of resolved.fields.entries())
+				for (const [fName, fType] of resolved.fields.entries()) {
+					// A method promoted shallower shadows the deeper field.
+					if (isMethodPromotedOverField(resolved, fName)) continue;
 					fields.push({ name: fName, zero: this.zeroValueForType(fType) });
+				}
 			}
 		} else {
 			for (const f of structTypeAst.fields) {
@@ -891,8 +895,10 @@ export class CodeGen {
 			const fields = [];
 			// Cached per type name, so never bound to the current generic body.
 			this._withTypeParamZeros(null, () => {
-				for (const [name, type] of resolved.fields.entries())
+				for (const [name, type] of resolved.fields.entries()) {
+					if (isMethodPromotedOverField(resolved, name)) continue;
 					fields.push({ name, zero: this.zeroValueForType(type) });
+				}
 			});
 			this.structFields.set(typeName, fields);
 			return fields;

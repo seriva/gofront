@@ -15,6 +15,7 @@ import {
 	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
+	isMethodPromotedOverField,
 	isTypedArraySlice,
 	Scope,
 	TAINTED_ANY,
@@ -1098,6 +1099,8 @@ export const resolveMethods = {
 	},
 
 	_fieldTypeStruct(base, baseType, field, node) {
+		if (base.fields?.has(field) && isMethodPromotedOverField(base, field))
+			return base.methods.get(field);
 		if (base.fields?.has(field)) {
 			if (isAmbiguousFieldSelector(base, field))
 				return this._errAmbiguousSelector(baseType, field, node);

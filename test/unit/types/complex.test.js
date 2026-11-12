@@ -677,6 +677,54 @@ func main() {
 	);
 });
 
+section("Complex: append of untyped constants");
+
+test("append converts untyped constants to the complex element type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Zs []complex128
+
+func main() {
+	var c []complex128
+	c = append(c, 7)
+	fmt.Println(c)
+	c = append(c, 7.5, 2)
+	fmt.Println(c)
+	var z Zs
+	z = append(z, 3)
+	fmt.Println(z)
+	var d []complex128
+	d = append(d, 3i)
+	d = append(d, c...)
+	fmt.Println(d)
+}
+`,
+		"[(7+0i)]\n[(7+0i) (7.5+0i) (2+0i)]\n[(3+0i)]\n[(0+3i) (7+0i) (7.5+0i) (2+0i)]\n",
+	);
+});
+
+test("append rounds a complex64 constant to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c []complex64
+	c = append(c, 1+0.01i)
+	var x complex64 = 1 + 0.01i
+	fmt.Println(imag(c[0]) == 0.01, imag(c[0]) == imag(x))
+	c = append(c, 2)
+	fmt.Println(c[1])
+}
+`,
+		"true true\n(2+0i)\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

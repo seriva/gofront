@@ -93,6 +93,11 @@ const BUILTIN_CHECK = {
 					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
 				if (!e.args[i]._spread && at[i]) {
 					if (is64) e.args[i]._is64Bit = true;
+					s._tagComplexConst(
+						s.resolveType(sb.elem),
+						s.resolveType(at[i]),
+						e.args[i],
+					);
 					s._markIfaceBox(
 						s.resolveType(sb.elem),
 						s.resolveType(at[i]),

@@ -1403,6 +1403,125 @@ func main() {
 	);
 });
 
+section("Promoted methods shadow deeper fields");
+
+const DEPTH_PRELUDE = `package main
+
+import "fmt"
+
+type In struct{ M int }
+
+type A struct{ In }
+
+type B struct{}
+
+func (B) M() string { return "m" }
+
+type C struct {
+	A
+	B
+}
+
+type I interface{ M() string }
+`;
+
+test("a method promoted shallower than a same-named field is selected", async () => {
+	await assertAllTargetsOutput(
+		`${DEPTH_PRELUDE}
+func main() {
+	fmt.Println(C{}.M())
+	c := C{}
+	f := c.M
+	fmt.Println(f())
+	p := &c
+	fmt.Println(p.M())
+}
+`,
+		"m\nm\nm\n",
+	);
+});
+
+test("a shallower promoted method satisfies an interface", async () => {
+	await assertAllTargetsOutput(
+		`${DEPTH_PRELUDE}
+func main() {
+	var i I = C{}
+	fmt.Println(i.M(), C{}.M())
+	var v any = C{}
+	_, ok := v.(I)
+	fmt.Println(ok)
+}
+`,
+		"m m\ntrue\n",
+	);
+});
+
+test("the deeper field stays reachable through its explicit path", async () => {
+	await assertAllTargetsOutput(
+		`${DEPTH_PRELUDE}
+func main() {
+	c := C{}
+	c.A.In.M = 7
+	fmt.Println(C{}.A.In.M, c.A.In.M, c.M())
+}
+`,
+		"0 7 m\n",
+	);
+});
+
+test("a field promoted shallower than a same-named method wins", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type In struct{}
+
+func (In) M() string { return "m" }
+
+type A struct{ In }
+
+type B struct{ M int }
+
+type C struct {
+	A
+	B
+}
+
+func main() {
+	fmt.Println(C{}.M)
+}
+`,
+		"0\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`two methods promoted at the same depth over a field stay ambiguous (${target})`, () => {
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`${DEPTH_PRELUDE}
+type D struct{}
+
+func (D) M() string { return "d" }
+
+type E struct {
+	B
+	D
+	A
+}
+
+func main() {
+	fmt.Println(E{}.M())
+}
+`,
+			),
+			"ambiguous selector",
+		);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
