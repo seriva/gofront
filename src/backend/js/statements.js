@@ -13,6 +13,7 @@ import {
 import {
 	is64BitInt,
 	isComplex,
+	isComplex64,
 	isTypedArraySlice,
 } from "../../typechecker/types.js";
 
@@ -1143,27 +1144,16 @@ export const statementGenMethods = {
 		}
 		const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
 		const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
-		let result;
-		switch (baseOp) {
-			case "+":
-				result = `{ re: ${lhsRead}.re + ${rhsExpr}.re, im: ${lhsRead}.im + ${rhsExpr}.im }`;
-				break;
-			case "-":
-				result = `{ re: ${lhsRead}.re - ${rhsExpr}.re, im: ${lhsRead}.im - ${rhsExpr}.im }`;
-				break;
-			case "*":
-				this.useHelper("cmul");
-				result = `__cmul(${lhsRead}, ${rhsExpr})`;
-				break;
-			case "/":
-				this.useHelper("cdiv");
-				result = `__cdiv(${lhsRead}, ${rhsExpr})`;
-				break;
-			default:
-				throw new Error(
-					`unsupported complex compound assignment operator: ${stmt.op}`,
-				);
-		}
+		if (!["+", "-", "*", "/"].includes(baseOp))
+			throw new Error(
+				`unsupported complex compound assignment operator: ${stmt.op}`,
+			);
+		const result = this._genComplexArith(
+			baseOp,
+			lhsRead,
+			rhsExpr,
+			isComplex64(l._type),
+		);
 		this.line(`${lhsTarget} = ${result};`);
 	},
 
@@ -1464,10 +1454,26 @@ export const statementGenMethods = {
 		return `${this._genAssignLhsExpr(e)} = `;
 	},
 
+	// The value a range assignment stores into an interface-typed variable,
+	// boxed as in any conversion to an interface.
+	_boxRangeAssigned(e, valueJs) {
+		const box = e._rangeBox;
+		if (!box) return valueJs;
+		if (this._isNamedBoxKind(box))
+			return this._genNamedIfaceBox(
+				valueJs,
+				box._ifaceNamedType,
+				box._ifaceBox === "named_ptr",
+			);
+		this.useHelper("ifaceBox");
+		return this._ifaceBoxWrap(valueJs, box._ifaceBox, box._ifacePtrFields);
+	},
+
 	_emitRangeVar(e, valueJs, isAssign) {
 		if (!e) return;
 		const target = this._rangeVarTarget(e, isAssign);
 		if (target === null) return;
+		if (isAssign) valueJs = this._boxRangeAssigned(e, valueJs);
 		if (typeof target === "string") {
 			this.line(`${target}${valueJs};`);
 			return;
@@ -1632,7 +1638,10 @@ export const statementGenMethods = {
 		// all the others go through temporaries too.
 		const needs = (n, i) => {
 			const e = init.lhs[i];
-			return n !== "_" && !(e.kind === "Ident" && !this._boxedVars.has(e.name));
+			return (
+				n !== "_" &&
+				(e._rangeBox || !(e.kind === "Ident" && !this._boxedVars.has(e.name)))
+			);
 		};
 		const any = names.some(needs);
 		return names.map((n, i) => {
@@ -1939,7 +1948,8 @@ export const statementGenMethods = {
 	genIteratorFor(stmt) {
 		const range = stmt.init.rhs[0];
 		const isAssign = stmt.init.kind === "AssignStmt";
-		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
+		// A non-identifier target is stored through _emitRangeVar, not by name.
+		const lhs = stmt.init.lhs.map((e) => e.name ?? "_$target");
 		const yieldTypes = range._yieldParams ?? [];
 		if (isAssign) {
 			const cbParams = lhs.map((_, i) => `__p${i}`);
@@ -1951,12 +1961,9 @@ export const statementGenMethods = {
 						const isStruct =
 							this._isStructType(yType) ||
 							this._isStructType(stmt.init.lhs[i]?._type);
-						if (isStruct) {
-							this.useHelper("sclone");
-							this.line(`${lhs[i]} = __sclone(${cbParams[i]});`);
-						} else {
-							this.line(`${lhs[i]} = ${cbParams[i]};`);
-						}
+						if (isStruct) this.useHelper("sclone");
+						const value = isStruct ? `__sclone(${cbParams[i]})` : cbParams[i];
+						this._emitRangeVar(stmt.init.lhs[i], value, true);
 					}
 				}
 			};
@@ -2142,6 +2149,22 @@ export const statementGenMethods = {
 				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
 			};
 		}
+		if (stmt.tag && isComplex(stmt.tag._type)) {
+			// A complex tag is an object: cases compare its parts.
+			this._swCounter = (this._swCounter ?? 0) + 1;
+			const tmp = `__sw${this._swCounter}`;
+			this.line(`const ${tmp} = ${tag};`);
+			return {
+				tag: "true",
+				caseExpr: (e) =>
+					this._genComplexEquality(
+						"===",
+						"&&",
+						tmp,
+						this._genComplexOperand(e),
+					),
+			};
+		}
 		if (stmt.tag && this._isMapTag(stmt.tag)) {
 			// A nil map is a sentinel object in JS, not `null`: `case nil`
 			// goes through `__isnm`, as `m == nil` does.
@@ -2210,6 +2233,7 @@ export const statementGenMethods = {
 			stmt.tag &&
 			(this._isStructOrArrayType(stmt.tag._type) ||
 				this._isIfaceType(stmt.tag._type) ||
+				isComplex(stmt.tag._type) ||
 				this._isMapTag(stmt.tag))
 		) {
 			// The tag temporary is a `const`, which cannot directly follow a label.

@@ -12,6 +12,7 @@ import {
 	FLOAT64,
 	is64BitInt,
 	isAny,
+	isBool,
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
@@ -27,9 +28,11 @@ import {
 	SIZED_INT_NAMES,
 	STRING,
 	typeStr,
+	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
+	UNTYPED_RUNE,
 } from "./types.js";
 
 // Unnamed type literal kinds for Go's "identical underlying types" assignability rule.
@@ -63,6 +66,23 @@ const UNTYPED_COMPAT = {
 	complex128: new Set(["complex128", "complex64"]),
 };
 
+// `&&` and `||` of two untyped bools stay untyped; a typed operand (including
+// a defined bool type) gives its type, as in Go.
+// Two typed operands must have the same type, and the result has it.
+function logicalResultType(lt, rt) {
+	if (lt?.kind === "untyped" && rt?.kind === "untyped") return UNTYPED_BOOL;
+	if (rt?.kind === "untyped" && isBool(lt)) return lt;
+	if (lt?.kind === "untyped" && isBool(rt)) return rt;
+	if (isBool(lt) && isBool(rt) && typeStr(lt) === typeStr(rt)) return lt;
+	return BOOL;
+}
+
+// Two untyped numeric operands combine to the later of int, rune, float.
+function untypedIntegerKind(isFloat, lt, rt) {
+	if (isFloat) return UNTYPED_FLOAT;
+	return lt.rune || rt.rune ? UNTYPED_RUNE : UNTYPED_INT;
+}
+
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
@@ -71,12 +91,26 @@ export const assignabilityMethods = {
 		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
 			return this._binaryResultTypeTypeParam(op, lt, rt);
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
-		if (LOG_OPS.has(op)) return BOOL;
+		if (LOG_OPS.has(op)) {
+			this._checkLogicalOperands(lt, rt, node);
+			return logicalResultType(lt, rt);
+		}
 		return this._binaryResultTypeNonComplex(op, lt, rt, node);
 	},
 
+	// `B && bool` mixes two distinct bool types, which Go rejects.
+	_checkLogicalOperands(lt, rt, node) {
+		if (!node || lt?.kind === "untyped" || rt?.kind === "untyped") return;
+		if (!isBool(lt) || !isBool(rt) || typeStr(lt) === typeStr(rt)) return;
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
+			node,
+		);
+	},
+
 	_binaryResultTypeTypeParam(op, lt, rt) {
-		if (CMP_OPS.has(op) || LOG_OPS.has(op)) return BOOL;
+		if (CMP_OPS.has(op)) return UNTYPED_BOOL;
+		if (LOG_OPS.has(op)) return BOOL;
 		return lt?.kind === "typeParam" ? lt : rt;
 	},
 
@@ -137,7 +171,8 @@ export const assignabilityMethods = {
 		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
 		this._checkIntegerCmpKinds(op, lt, rt, node);
 		this._checkEqualityComparable(op, lt, rt, node);
-		return BOOL;
+		// A comparison is an untyped bool: it also fits a defined bool type.
+		return UNTYPED_BOOL;
 	},
 
 	_binaryResultTypeComplex(op, lt, rt, node) {
@@ -163,7 +198,7 @@ export const assignabilityMethods = {
 		const rFloat = rName === "float32" || rName === "float64";
 		const isFloat = lFloat || rFloat;
 		if (lt.kind === "untyped" && rt.kind === "untyped")
-			return isFloat ? UNTYPED_FLOAT : UNTYPED_INT;
+			return untypedIntegerKind(isFloat, lt, rt);
 		if (lt.kind === "untyped")
 			return isFloat && rt.name !== "float64" && rt.name !== "float32"
 				? FLOAT64
@@ -636,12 +671,7 @@ export const assignabilityMethods = {
 	_isNumericCoercible(target, source) {
 		if (target.kind !== "basic" || source.kind !== "basic") return false;
 		const pair = `${target.name}:${source.name}`;
-		return (
-			pair === "float64:int" ||
-			// rune was historically int in GoFront; keep rune/int interchangeable.
-			pair === "int:int32" ||
-			pair === "int32:int"
-		);
+		return pair === "float64:int";
 	},
 
 	// The lenient numeric pairs: accepted, except that a generic call result

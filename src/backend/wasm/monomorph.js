@@ -73,9 +73,20 @@ function rawTypeKey(t) {
 	if (t.kind === "map" || t.kind === "MapType") {
 		return `map_${typeKey(t.key)}_${typeKey(t.value)}`;
 	}
-	if (t.kind === "func" || t.kind === "FuncType") {
+	if (t.kind === "func") {
 		const params = (t.params ?? []).map(typeKey).join("_");
-		const rets = (t.returns ?? []).map(typeKey).join("_");
+		const rets = (t.returns ?? [])
+			.filter((r) => !(r?.kind === "basic" && r.name === "void"))
+			.map(typeKey)
+			.join("_");
+		return `fn_${params}_ret_${rets}`;
+	}
+	if (t.kind === "FuncType") {
+		const params = (t.params ?? []).map((p) => typeKey(p.type)).join("_");
+		const rt = t.returnType;
+		const rets = rt
+			? (rt.kind === "TupleType" ? rt.types : [rt]).map(typeKey).join("_")
+			: "";
 		return `fn_${params}_ret_${rets}`;
 	}
 	if (t.name) return t.name;
@@ -135,7 +146,30 @@ export function typeToTypeNode(t) {
 		};
 	}
 	if (t.kind === "typeParam") return { kind: "TypeName", name: t.name };
+	// Without this a func type argument fell through to `any`, so a
+	// `map[string]V` built in `mk[func()]` was a `map[string]any`.
+	if (t.kind === "func") return funcTypeNode(t);
 	return { kind: "TypeName", name: t.name ?? "any" };
+}
+
+// A checker func type as a `FuncType` node (several results as a `TupleType`).
+function funcTypeNode(t) {
+	// A variadic func lists its last parameter by element type.
+	const params = (t.params ?? []).map((p, i, all) => ({
+		name: "_",
+		type: typeToTypeNode(p),
+		variadic: !!t.variadic && i === all.length - 1,
+	}));
+	const rets = (t.returns ?? []).filter(
+		(r) => !(r?.kind === "basic" && r.name === "void"),
+	);
+	// Several results come as one tuple type or as a list.
+	const results = rets.length === 1 && rets[0]?.types ? rets[0].types : rets;
+	let returnType = null;
+	if (results.length === 1) returnType = typeToTypeNode(results[0]);
+	else if (results.length > 1)
+		returnType = { kind: "TupleType", types: results.map(typeToTypeNode) };
+	return { kind: "FuncType", params, returnType };
 }
 
 // Replaces the type parameters inside a checker type (`[]E`, `map[K]V`,

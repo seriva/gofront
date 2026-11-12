@@ -381,7 +381,10 @@ export class SharedEmitter {
 			store(lhs[1], valLocalInfo);
 		}
 
-		if (bodyBlock) this.emitBlock(bodyBlock);
+		if (bodyBlock) {
+			this._emitRangeBoxes();
+			this.emitBlock(bodyBlock);
+		}
 
 		this.pushInstruction("end");
 		this.pushInstruction({ op: "local.get", index: idxTmp });

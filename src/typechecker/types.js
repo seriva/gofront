@@ -323,6 +323,9 @@ export const UNTYPED_INT = { kind: "untyped", base: "int" };
 export const UNTYPED_FLOAT = { kind: "untyped", base: "float64" };
 export const UNTYPED_STRING = { kind: "untyped", base: "string" };
 export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
+// An untyped rune constant is an untyped integer whose default type is
+// `rune`; every `base === "int"` rule applies to it unchanged.
+export const UNTYPED_RUNE = { kind: "untyped", base: "int", rune: true };
 
 // ── Complex types ────────────────────────────────────────────
 export const COMPLEX128 = { kind: "basic", name: "complex128" };
@@ -530,7 +533,7 @@ export function defaultType(t) {
 	if (t?.kind !== "untyped") return t;
 	switch (t.base) {
 		case "int":
-			return INT;
+			return t.rune ? RUNE : INT;
 		case "float64":
 			return FLOAT64;
 		case "string":
@@ -551,7 +554,7 @@ export function typeStr(t) {
 		case "basic":
 			return t.name;
 		case "untyped":
-			return `untyped ${t.base}`;
+			return t.rune ? "untyped rune" : `untyped ${t.base}`;
 		case "slice":
 			return `[]${typeStr(t.elem)}`;
 		case "shared":
@@ -624,6 +627,64 @@ export function embeddedFieldName(f) {
 		.split(".")
 		.pop()
 		.replace(/\$\$.*$/, "");
+}
+
+// Whether `st` declares `name` itself: a field of that name or an embedded
+// field named after its type.
+function declaresField(st, name) {
+	return (st._structFields ?? []).some((f) =>
+		f.embedded ? embeddedFieldName(f) === name : f.names?.includes(name),
+	);
+}
+
+// The shallowest depth at which `struct` promotes a field `name` from its
+// embedded types, and how many promotion paths reach it at that depth:
+// { depth, count }, or null when no embedded type offers one.
+function promotedFieldDepth(struct, name, path = new Set()) {
+	if (path.has(struct)) return null;
+	path.add(struct);
+	let best = null;
+	for (const e of struct._embeds ?? []) {
+		const inner = e?.kind === "pointer" ? e.base : e;
+		const st = inner?.kind === "named" ? inner.underlying : inner;
+		if (st?.kind !== "struct" || !st._structFields) continue;
+		const sub = declaresField(st, name)
+			? { depth: 0, count: 1 }
+			: promotedFieldDepth(st, name, path);
+		if (!sub) continue;
+		const depth = 1 + sub.depth;
+		if (!best || depth < best.depth) best = { depth, count: sub.count };
+		else if (depth === best.depth) best.count += sub.count;
+	}
+	path.delete(struct);
+	return best;
+}
+
+// Whether selecting `name` on `struct`, whose flattened field map has it, is
+// ambiguous: two promotion paths reach a field of that name at the same
+// shallowest depth, or a field and a method promoted at that depth do. A
+// field declared on the struct itself and a method declared on it always win.
+export function isAmbiguousFieldSelector(struct, name) {
+	if (declaresField(struct, name)) return false;
+	const promoted = promotedMethods.get(struct)?.get(name);
+	if (struct.methods?.has(name) && promoted?.mType !== struct.methods.get(name))
+		return false;
+	const field = promotedFieldDepth(struct, name);
+	if (!field) return false;
+	if (!promoted || field.depth < promoted.depth) return field.count > 1;
+	return field.depth === promoted.depth || promoted.ambiguous === true;
+}
+
+// Whether selecting `name` on `struct`, whose flattened field map has it,
+// reaches a method promoted at a shallower depth than the field (Go's depth
+// rule): the method is selected and the deeper field is shadowed.
+export function isMethodPromotedOverField(struct, name) {
+	if (declaresField(struct, name)) return false;
+	const promoted = promotedMethods.get(struct)?.get(name);
+	if (!promoted?.mType || promoted.ambiguous) return false;
+	if (struct.methods?.get(name) !== promoted.mType) return false;
+	const field = promotedFieldDepth(struct, name);
+	return field !== null && promoted.depth < field.depth;
 }
 
 // A function-local type shadowed by another type is renamed `Name__L<n>`.

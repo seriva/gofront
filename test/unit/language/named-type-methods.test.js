@@ -1053,6 +1053,308 @@ func main() {
 	);
 });
 
+section("Ambiguous promoted fields");
+
+const FIELD_AMBIGUOUS_PRELUDE = `package main
+
+import "fmt"
+
+type A struct{ M int }
+
+type B struct{}
+
+func (B) M() {}
+
+type C struct {
+	A
+	B
+}
+
+type FA struct{ X int }
+
+type FB struct{ X int }
+
+type FC struct {
+	FA
+	FB
+}
+`;
+
+for (const [name, body, want] of [
+	[
+		"a field and a method promoted at the same depth",
+		"func main() {\n\tfmt.Println(C{}.M)\n}\n",
+		"ambiguous selector",
+	],
+	[
+		"selecting a field and a method promoted at the same depth by name",
+		"func main() {\n\tc := C{}\n\tfmt.Println(c.M)\n}\n",
+		"ambiguous selector c.M",
+	],
+	[
+		"two fields promoted at the same depth",
+		"func main() {\n\tc := FC{}\n\tfmt.Println(c.X)\n}\n",
+		"ambiguous selector c.X",
+	],
+	[
+		"assigning to a field promoted twice at the same depth",
+		"func main() {\n\tc := FC{}\n\tc.X = 1\n\tfmt.Println(c.FA.X)\n}\n",
+		"ambiguous selector c.X",
+	],
+	[
+		"reading a field promoted twice through a pointer",
+		"func main() {\n\tc := &FC{}\n\tfmt.Println(c.X)\n}\n",
+		"ambiguous selector c.X",
+	],
+]) {
+	for (const target of ["js", "both", "wasm"]) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				promotionErrorsOn(target, FIELD_AMBIGUOUS_PRELUDE + body),
+				want,
+			);
+		});
+	}
+}
+
+test("an ambiguous promoted field that is never selected compiles", async () => {
+	await assertAllTargetsOutput(
+		`${FIELD_AMBIGUOUS_PRELUDE}
+func main() {
+	c := FC{FA{1}, FB{2}}
+	d := C{}
+	fmt.Println(c.FA.X, c.FB.X, d.A.M)
+	c.FB.X = 5
+	fmt.Println(c.FA.X, c.FB.X)
+}
+`,
+		"1 2 0\n1 5\n",
+	);
+});
+
+test("a shallower promoted field shadows a deeper method", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type In struct{}
+
+func (In) M() {}
+
+type A struct{ M int }
+
+type B struct{ In }
+
+type C struct {
+	A
+	B
+}
+
+func main() {
+	c := C{}
+	c.M = 4
+	fmt.Println(c.M)
+}
+`,
+		"4\n",
+	);
+});
+
+test("a field declared on the outer struct shadows promoted ones", async () => {
+	await assertAllTargetsOutput(
+		`${FIELD_AMBIGUOUS_PRELUDE}
+type FD struct {
+	FA
+	FB
+	X string
+}
+
+type MD struct {
+	A
+	B
+	M string
+}
+
+func main() {
+	d := FD{X: "own"}
+	m := MD{M: "own"}
+	fmt.Println(d.X, d.FA.X, m.M, m.A.M)
+}
+`,
+		"own 0 own 0\n",
+	);
+});
+
+test("a field and a method at different depths through a named embed pick the shallower", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Deep struct{ X int }
+
+type Mid struct{ Deep }
+
+type Top struct {
+	FA
+	Mid
+}
+
+type FA struct{ X int }
+
+func main() {
+	t := Top{FA{7}, Mid{Deep{9}}}
+	fmt.Println(t.X, t.Mid.X)
+}
+`,
+		"7 9\n",
+	);
+});
+
+test("two embeds reaching the same deeper field are ambiguous", () => {
+	for (const target of ["js", "both", "wasm"])
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`package main
+
+import "fmt"
+
+type D struct{ X int }
+
+type A struct{ D }
+
+type B struct{ D }
+
+type C struct {
+	A
+	B
+}
+
+func main() {
+	c := C{}
+	fmt.Println(c.X)
+}
+`,
+			),
+			"ambiguous selector c.X",
+		);
+});
+
+section("Embedded interfaces");
+
+const IFACE_EMBED_PRELUDE = `package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type Mer interface{ M() }
+
+type T struct{}
+
+func (T) M() { fmt.Println("T.M") }
+
+type S struct{ Mer }
+
+type W struct{ error }
+
+var _ = errors.New
+`;
+
+test("a struct embedding an interface satisfies it and has its methods (typecheck)", () => {
+	for (const target of ["js", "both", "wasm"])
+		assertEqual(
+			(
+				compile(
+					`${IFACE_EMBED_PRELUDE}
+func main() {
+	var m Mer = S{T{}}
+	m.M()
+	S{T{}}.M()
+	var e error = W{errors.New("x")}
+	fmt.Println(e.Error())
+}
+`,
+					{ target },
+				).errors ?? []
+			).length,
+			0,
+		);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`an interface embed and a struct embed with the same method at depth 1 are ambiguous (${target})`, () => {
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`${IFACE_EMBED_PRELUDE}
+type B struct{}
+
+func (B) M() {}
+
+type AB struct {
+	Mer
+	B
+}
+
+func main() {
+	AB{}.M()
+}
+`,
+			),
+			"ambiguous selector",
+		);
+	});
+}
+
+test("an outer method shadows the embedded interface's", async () => {
+	await assertAllTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+type O struct{ Mer }
+
+func (O) M() { fmt.Println("O.M") }
+
+func main() {
+	var m Mer = O{T{}}
+	m.M()
+	O{T{}}.M()
+	O{T{}}.Mer.M()
+}
+`,
+		"O.M\nO.M\nT.M\n",
+	);
+});
+
+test("methods of an embedded interface run on the embedded value", async () => {
+	await assertAllTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	var m Mer = S{T{}}
+	m.M()
+	S{T{}}.M()
+	var e error = W{errors.New("x")}
+	fmt.Println(e.Error())
+}
+`,
+		"T.M\nT.M\nx\n",
+	);
+});
+
+test("calling a method through a nil embedded interface panics", async () => {
+	await assertAllTargetsOutput(
+		`${IFACE_EMBED_PRELUDE}
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	W{}.Error()
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
 section("Promoted method sets in interface assertions");
 
 test("a pointer method two embeds above the pointer is in the value's method set", async () => {
@@ -1100,6 +1402,125 @@ func main() {
 		"false\nfalse\nfalse\n",
 	);
 });
+
+section("Promoted methods shadow deeper fields");
+
+const DEPTH_PRELUDE = `package main
+
+import "fmt"
+
+type In struct{ M int }
+
+type A struct{ In }
+
+type B struct{}
+
+func (B) M() string { return "m" }
+
+type C struct {
+	A
+	B
+}
+
+type I interface{ M() string }
+`;
+
+test("a method promoted shallower than a same-named field is selected", async () => {
+	await assertAllTargetsOutput(
+		`${DEPTH_PRELUDE}
+func main() {
+	fmt.Println(C{}.M())
+	c := C{}
+	f := c.M
+	fmt.Println(f())
+	p := &c
+	fmt.Println(p.M())
+}
+`,
+		"m\nm\nm\n",
+	);
+});
+
+test("a shallower promoted method satisfies an interface", async () => {
+	await assertAllTargetsOutput(
+		`${DEPTH_PRELUDE}
+func main() {
+	var i I = C{}
+	fmt.Println(i.M(), C{}.M())
+	var v any = C{}
+	_, ok := v.(I)
+	fmt.Println(ok)
+}
+`,
+		"m m\ntrue\n",
+	);
+});
+
+test("the deeper field stays reachable through its explicit path", async () => {
+	await assertAllTargetsOutput(
+		`${DEPTH_PRELUDE}
+func main() {
+	c := C{}
+	c.A.In.M = 7
+	fmt.Println(C{}.A.In.M, c.A.In.M, c.M())
+}
+`,
+		"0 7 m\n",
+	);
+});
+
+test("a field promoted shallower than a same-named method wins", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type In struct{}
+
+func (In) M() string { return "m" }
+
+type A struct{ In }
+
+type B struct{ M int }
+
+type C struct {
+	A
+	B
+}
+
+func main() {
+	fmt.Println(C{}.M)
+}
+`,
+		"0\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`two methods promoted at the same depth over a field stay ambiguous (${target})`, () => {
+		assertErrorContains(
+			promotionErrorsOn(
+				target,
+				`${DEPTH_PRELUDE}
+type D struct{}
+
+func (D) M() string { return "d" }
+
+type E struct {
+	B
+	D
+	A
+}
+
+func main() {
+	fmt.Println(E{}.M())
+}
+`,
+			),
+			"ambiguous selector",
+		);
+	});
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

@@ -119,6 +119,12 @@ function promotedEntry(cand, prev) {
 	return { ...cand, mType };
 }
 
+// Offers every method of the embedded interface `iface` at depth 1.
+function offerInterfaceMethods(iface, offer) {
+	for (const [mName, mType] of iface.methods ?? [])
+		offer(mName, 1, mType, false);
+}
+
 // Replaces the promoted methods `old` with `next` in `methods`, leaving
 // the struct's own methods alone; returns whether anything changed.
 function applyPromotions(methods, old, next, isOwn) {
@@ -425,6 +431,7 @@ export class TypeChecker {
 
 		this._checkDirectivesAndImportsPass(programs);
 		this._registerConstExprs(programs);
+		this._registerVarSpecs(programs);
 		this._markConstraintPositions(programs);
 		this._collectTypesPass(programs);
 		this._flushConstraintUses();
@@ -752,6 +759,19 @@ export class TypeChecker {
 		}
 	}
 
+	// Package variables by name, so an array length such as `[len(base)]T`
+	// can use the type of one that is declared later.
+	_registerVarSpecs(programs) {
+		this._pkgVarSpecs = new Map();
+		for (const p of programs)
+			for (const d of p.decls)
+				if (d.kind === "VarDecl")
+					for (const spec of d.decls)
+						spec.names.forEach((name, index) => {
+							this._pkgVarSpecs.set(name, { spec, index, busy: false });
+						});
+	}
+
 	_collectVarsConstsPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
@@ -894,30 +914,42 @@ export class TypeChecker {
 			else if (depth === cur.depth) cur.ambiguous = true;
 		};
 		if (base?.kind === "struct") {
-			// Fields of an embedded type declared after the embedder were not
-			// there when the embedder's fields were collected.
-			if (struct.fields)
-				for (const [k, v] of base.fields)
-					if (!struct.fields.has(k)) struct.fields.set(k, v);
-			const innerPromoted = promotedMethods.get(base);
-			for (const [mName, mType] of base.methods ?? []) {
-				const p = innerPromoted?.get(mName);
-				offer(
-					mName,
-					1 + (p?.depth ?? 0),
-					p?.source ?? mType,
-					isPtr || Boolean(p?.viaPtr),
-				);
-			}
-			for (const [mName, p] of innerPromoted ?? [])
-				if (p.ambiguous) offer(mName, 1 + p.depth, null, false, true);
+			this._offerStructEmbed(struct, base, isPtr, offer);
+			return;
+		}
+		// An embedded interface (named, literal or `error`) promotes every
+		// method of its method set, as a value method.
+		if (base?.kind === "interface") {
+			if (!isPtr) offerInterfaceMethods(base, offer);
 			return;
 		}
 		// A named non-struct type (`time.Duration`) keeps its methods on the
 		// named type itself.
-		if (inner.kind === "named" && base?.kind !== "interface")
+		if (inner.kind === "named")
 			for (const [mName, mType] of inner.methods ?? [])
 				offer(mName, 1, mType, isPtr);
+	}
+
+	// Offers the methods of the embedded struct `base`, and copies its fields
+	// into the embedder.
+	_offerStructEmbed(struct, base, isPtr, offer) {
+		// Fields of an embedded type declared after the embedder were not
+		// there when the embedder's fields were collected.
+		if (struct.fields)
+			for (const [k, v] of base.fields)
+				if (!struct.fields.has(k)) struct.fields.set(k, v);
+		const innerPromoted = promotedMethods.get(base);
+		for (const [mName, mType] of base.methods ?? []) {
+			const p = innerPromoted?.get(mName);
+			offer(
+				mName,
+				1 + (p?.depth ?? 0),
+				p?.source ?? mType,
+				isPtr || Boolean(p?.viaPtr),
+			);
+		}
+		for (const [mName, p] of innerPromoted ?? [])
+			if (p.ambiguous) offer(mName, 1 + p.depth, null, false, true);
 	}
 
 	// ── Type collection ──────────────────────────────────────────

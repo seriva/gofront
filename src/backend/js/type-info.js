@@ -14,7 +14,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
-import { mentionsTypeParam } from "./expressions.js";
+import { isGenericComposite, mentionsTypeParam } from "./expressions.js";
 
 // True when type node `node` names one of the type parameters `names`.
 function typeNodeMentions(node, names) {
@@ -88,9 +88,8 @@ export const typeInfoGenMethods = {
 
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
-		// A map entering an interface is tagged by its instantiated type.
-		if (node._ifaceSrc?.kind === "map" && mentionsTypeParam(node._ifaceSrc))
-			return true;
+		// A map or slice entering an interface is tagged by its instantiated type.
+		if (isGenericComposite(node._ifaceSrc)) return true;
 		if (node._ifaceSrc?.kind === "typeParam" && names.has(node._ifaceSrc.name))
 			return true;
 		switch (node.kind) {
@@ -184,12 +183,18 @@ export const typeInfoGenMethods = {
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t) ?? this._ptrMethodBox(t);
 		const fmtBox = this._fmtBoxFor(t);
-		const tail = fmtBox
-			? `, ${box ?? "null"}, ${fmtBox}`
-			: box
-				? `, ${box}`
-				: "";
+		const tail = this._typeInfoTail(t, box, fmtBox);
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
+	},
+
+	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`).  `typeStr`
+	// drops the `...` of a variadic func type, so a func type also carries its
+	// spelled name (see `__tnm`).
+	_typeInfoTail(t, box, fmtBox) {
+		if (t.kind === "func")
+			return `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${JSON.stringify(this._dynTypeName(t))}`;
+		if (fmtBox) return `, ${box ?? "null"}, ${fmtBox}`;
+		return box ? `, ${box}` : "";
 	},
 
 	// How `__ik` tells the dynamic type of an interface map key apart where
@@ -250,6 +255,12 @@ export const typeInfoGenMethods = {
 			this.useHelper("ifaceBox");
 			return "(__v) => __ifp(__v)";
 		}
+		// A struct value is marked as a value, so a pointer boxed earlier by the
+		// same generic code does not make it read as `*T`.
+		if (u?.kind === "struct" && t.kind !== "pointer") {
+			this.useHelper("ifaceBox");
+			return "(__v) => __ifv(__v)";
+		}
 		if (u?.kind === "map") {
 			this.useHelper("ifaceBox");
 			return "(__v) => __ifm(__v)";
@@ -267,9 +278,9 @@ export const typeInfoGenMethods = {
 		return "";
 	},
 
-	// JS expression for the run-time type tag of map type `t` that mentions
-	// type parameters, built from their type information (see `__ti`); null
-	// when some part cannot be spelled.
+	// JS expression for the run-time type tag of a map, slice or array type `t`
+	// that mentions type parameters, built from their type information (see
+	// `__ti`); null when some part cannot be spelled.
 	_genericMapTag(t) {
 		const part = (x) => {
 			if (!mentionsTypeParam(x)) return JSON.stringify(this._dynTypeName(x));
@@ -281,6 +292,10 @@ export const typeInfoGenMethods = {
 				case "slice": {
 					const e = part(x.elem);
 					return e && `"[]" + ${e}`;
+				}
+				case "array": {
+					const e = part(x.elem);
+					return e && `"[${x.size}]" + ${e}`;
 				}
 				case "pointer": {
 					const e = part(x.base);

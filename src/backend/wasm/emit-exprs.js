@@ -105,38 +105,38 @@ export class ExprsEmitter {
 				return;
 			}
 
-			// A defined func or map type with methods is boxed to keep its identity,
-			// so interface dispatch can tell it from the plain func or map type.
+			// A defined func type, and every array and map type, is boxed to keep
+			// its identity: arrays and maps share one wasm type across Go types
+			// (`[2]int` and `[2]int64`), and a defined func type has methods that
+			// interface dispatch must tell from the plain func type.
 			if (this._isMethodNamedRef(goType)) {
 				const box = this.mod.getIfaceBoxType(this._resolveTestTarget(goType));
 				this._emitRawExpr(expr, box.wType);
+				// An array stored in an interface is a copy.
+				if (isArrayType(box.goType, this.mod.checker))
+					this._emitCopyIfValue(expr, goType, box.wType);
 				this._emitBoxValue(box);
 				return;
 			}
 
 			if (
 				isSliceType(goType, this.mod.checker) ||
-				isArrayType(goType, this.mod.checker) ||
-				isFuncType(goType, this.mod.checker) ||
-				isMapType(goType, this.mod.checker)
+				isFuncType(goType, this.mod.checker)
 			) {
 				const refWType = this.toWasmType(goType);
 				this._emitRawExpr(expr, refWType);
-				// An array stored in an interface is a copy.
-				if (isArrayType(goType, this.mod.checker))
-					this._emitCopyIfValue(expr, goType, refWType);
 				if (isTaggedSliceType(goType, this.mod.checker))
 					this._emitTagSlice(goType, refWType);
-				if (
-					isFuncType(goType, this.mod.checker) ||
-					isMapType(goType, this.mod.checker)
-				)
+				if (isFuncType(goType, this.mod.checker))
 					this._emitNilAwareAny(goType, expr);
 				return;
 			}
 
 			// Scalar type -> box into struct
-			const scalarType = goType ?? { kind: "basic", name: "int" };
+			// An untyped rune constant boxes as `rune` (int32), like Go.
+			const scalarType = goType?.rune
+				? { kind: "basic", name: "int32" }
+				: (goType ?? { kind: "basic", name: "int" });
 			const box = this.mod.getIfaceBoxType(scalarType);
 			this._emitRawExpr(expr, box.wType);
 			this._emitBoxValue(box);
@@ -421,6 +421,10 @@ export class ExprsEmitter {
 					);
 				}
 				this.pushInstruction({ op: "local.get", index: local.index });
+				// A non-escaping `range n` index lives in an i32 local, but a
+				// closure (such as a range-over-func body) sees a Go `int`.
+				if (!field.isBoxed && local.type === "i32" && field.wType === "i64")
+					this.pushInstruction("i64.extend_i32_s");
 			}
 
 			this.pushInstruction({
@@ -1653,10 +1657,17 @@ export class ExprsEmitter {
 		throw new Error(`Unresolved identifier: ${ident.name}`);
 	}
 
+	// Unary arithmetic on a complex value; `&c` and `*p` of one only move
+	// its pointer.
+	_isComplexArith(expr, op, operand) {
+		if (op === "&" || op === "*") return false;
+		return isComplex(expr._type) || isComplex(operand._type);
+	}
+
 	emitUnaryExpr(expr, targetWasmType = null) {
 		const { op, operand } = expr;
 
-		if (isComplex(expr._type) || isComplex(operand._type)) {
+		if (this._isComplexArith(expr, op, operand)) {
 			this._emitComplexUnary(expr, op, operand, targetWasmType);
 			return;
 		}
@@ -1777,19 +1788,25 @@ export class ExprsEmitter {
 		}
 	}
 
+	// True when a pointer to a `t` variable is the value's own reference (an
+	// array or struct) rather than a box around it (scalars and complex).
+	_isOwnPointerValue(t) {
+		if (this._isValueArray(t)) return true;
+		return (
+			t?.kind !== "pointer" &&
+			!isComplex(t) &&
+			isStructType(t, this.mod.checker, this.mod) &&
+			!isPointerToStruct(t, this.mod.checker, this.mod)
+		);
+	}
+
 	_emitAddressOf(operand) {
 		if (operand.kind === "Ident") {
 			const loc = this.resolveLocal(operand.name);
 			if (loc?.isBoxed) {
 				this.pushInstruction({ op: "local.get", index: loc.index });
 				// A pointer to an array or struct is its reference itself.
-				const t = loc.goType;
-				if (
-					this._isValueArray(t) ||
-					(t?.kind !== "pointer" &&
-						isStructType(t, this.mod.checker, this.mod) &&
-						!isPointerToStruct(t, this.mod.checker, this.mod))
-				)
+				if (this._isOwnPointerValue(loc.goType))
 					this.pushInstruction({
 						op: "struct.get",
 						typeIndex: loc.boxInfo.typeIndex,
@@ -1838,7 +1855,8 @@ export class ExprsEmitter {
 	// The struct a `*operand` reads or writes, or null when the operand points
 	// at something else: `*pp` with `pp **T` loads a pointer, not a struct.
 	_derefStructInfo(operand) {
-		if (this._isPointerGoType(this._ptrBaseType(operand._type))) return null;
+		const base = this._ptrBaseType(operand._type);
+		if (this._isPointerGoType(base) || isComplex(base)) return null;
 		return this._resolveStructInfo(operand);
 	}
 
@@ -2498,10 +2516,26 @@ export class ExprsEmitter {
 		this.releaseTemp(bTmp, arrWType);
 	}
 
+	// Equality of two complex values on the stack -> i32.
+	_emitComplexElemEq(goType, wType) {
+		const info = this.mod.getComplexType(
+			isComplex64(goType) ? "complex64" : "complex128",
+		);
+		const bTmp = this.acquireTemp(wType);
+		const aTmp = this.acquireTemp(wType);
+		this.pushInstruction({ op: "local.set", index: bTmp });
+		this.pushInstruction({ op: "local.set", index: aTmp });
+		this._emitComplexEq(aTmp, bTmp, info, info.elemWType, "==");
+		this.releaseTemp(aTmp, wType);
+		this.releaseTemp(bTmp, wType);
+	}
+
 	// Equality of two array elements on the stack -> i32.
 	_emitElemEq(goType, wType) {
 		if (this._isValueArray(goType)) {
 			this._emitArrayEq(goType);
+		} else if (isComplex(goType)) {
+			this._emitComplexElemEq(goType, wType);
 		} else if (
 			isStructType(goType, this.mod.checker, this.mod) &&
 			!isPointerToStruct(goType, this.mod.checker, this.mod)

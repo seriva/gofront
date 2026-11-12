@@ -3,7 +3,7 @@
 
 import { parseJsonTag } from "../parser/struct-tag.js";
 import { foldConstExpr } from "./const-fold.js";
-import { exprText } from "./operand-text.js";
+import { exprText, operandKind } from "./operand-text.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
@@ -12,8 +12,10 @@ import {
 	DECLARED_ANY,
 	defaultType,
 	displayTypeName,
+	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
+	isMethodPromotedOverField,
 	isTypedArraySlice,
 	Scope,
 	TAINTED_ANY,
@@ -452,7 +454,10 @@ export const resolveMethods = {
 		// `[math.MaxInt8]T`: a package constant the AST folder cannot see.
 		if (!Number.isInteger(n))
 			n = this._constIntValue(size, scope) ?? Number.NaN;
-		if (!Number.isInteger(n)) return size;
+		if (!Number.isInteger(n)) {
+			this._reportNonConstantArrayLen(size, scope);
+			return size;
+		}
 		this._useQualifiedConsts(size);
 		if (n >= 0) return n;
 		this.err(
@@ -460,6 +465,29 @@ export const resolveMethods = {
 			size,
 		);
 		return 0;
+	},
+
+	// A length that is not a constant at all (`[len(s)]T` with a slice, `[n]T`
+	// with a variable) cannot size an array.  The operand's type is checked
+	// first, so it counts as used.
+	_reportNonConstantArrayLen(size, scope) {
+		if (size._type === undefined) this.checkExpr(size, scope);
+		this.err(
+			`invalid array length ${exprText(size)} (${operandKind(size, typeStr(size._type), false)}): must be constant`,
+			size,
+		);
+	},
+
+	// An array length must be an integer constant: `[1 == 1]T`, `["a"]T`,
+	// `[nil]T`, `[2.5]T`, `[2i]T` and a typed float constant are rejected.
+	_reportNonIntegerArrayLen(size, scope) {
+		const what = this._nonIntegerConst(size, scope);
+		if (!what) return false;
+		this.err(
+			`invalid array length ${exprText(size)} (${what}): must be integer`,
+			size,
+		);
+		return true;
 	},
 
 	// `pkg.K` inside a folded array length counts as using the import.
@@ -473,6 +501,15 @@ export const resolveMethods = {
 	},
 
 	_resolveArrayTypeNode(node, scope) {
+		if (
+			!node.inferLen &&
+			this._reportNonIntegerArrayLen(node._sizeExpr ?? node.size, scope)
+		)
+			return {
+				kind: "array",
+				size: 0,
+				elem: this.resolveTypeNode(node.elem, scope),
+			};
 		// Fold in place so backends that read the type node see a literal length.
 		// The node may come from the parse cache: keep the original expression so
 		// a later compile of the same AST still counts `pkg.K` as using `pkg`
@@ -888,6 +925,8 @@ export const resolveMethods = {
 	_inferFromStructuredPair(paramType, argType, map) {
 		if (paramType.kind === "slice" && argType.kind === "slice")
 			this._inferFromPair(paramType.elem, argType.elem, map);
+		if (paramType.kind === "array" && argType.kind === "array")
+			this._inferFromPair(paramType.elem, argType.elem, map);
 		if (paramType.kind === "pointer" && argType.kind === "pointer")
 			this._inferFromPair(paramType.base, argType.base, map);
 		if (paramType.kind === "map" && argType.kind === "map") {
@@ -941,13 +980,59 @@ export const resolveMethods = {
 	},
 
 	_checkUnionConstraint(typeArg, constraint, node) {
-		for (const term of constraint.terms) {
-			if (term.approx) return;
-			const termType =
-				term.resolved ?? this.resolveTypeNode(term.type, this.globals);
-			if (typeStr(typeArg) === typeStr(termType)) return;
-		}
+		if (typeArg?._tainted || this._unionAccepts(typeArg, constraint, new Set()))
+			return;
 		this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
+	},
+
+	// Whether `typeArg` is in the type set of a union: some term holds it.
+	// `scope` resolves the names its terms mention.
+	_unionAccepts(typeArg, union, active, scope = this.globals) {
+		return union.terms.some((term) => {
+			// `~[]E` may mention a type parameter that is not in `scope`, so an
+			// approximation term is resolved (and compared) only when it names
+			// a type.
+			if (!term.resolved && term.approx && term.type?.kind !== "TypeName")
+				return true;
+			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
+			return this._termAccepts(typeArg, t, term.approx, active);
+		});
+	},
+
+	// One union term: a named interface contributes its own type set
+	// (`S | U` with `type S interface{ ~int }`), `~T` any type with the
+	// underlying type of `T`, and `T` exactly `T`.
+	_termAccepts(typeArg, t, approx, active) {
+		const base =
+			t?.kind === "named"
+				? (this.resolveType(t.underlying) ?? t.underlying)
+				: t;
+		if (base?.kind === "interface")
+			return this._interfaceAccepts(typeArg, base, active);
+		if (!approx) return typeStr(typeArg) === typeStr(t);
+		const want = this._deepUnderlying(t);
+		if (typeArg?.kind === "typeParam" || want?.kind !== "basic") return true;
+		return typeStr(this._deepUnderlying(typeArg)) === typeStr(want);
+	},
+
+	// An interface's type set is the intersection of its own union and the
+	// type sets of the interfaces it embeds; one with neither holds every type.
+	_interfaceAccepts(typeArg, iface, active) {
+		if (active.has(iface)) return true;
+		active.add(iface);
+		const ok =
+			(!iface.unionConstraint ||
+				this._unionAccepts(
+					typeArg,
+					iface.unionConstraint,
+					active,
+					iface._unionScope ?? this.globals,
+				)) &&
+			(iface._typeSetEmbeds ?? []).every((e) =>
+				this._interfaceAccepts(typeArg, e, active),
+			);
+		active.delete(iface);
+		return ok;
 	},
 
 	// Go's comparability: slices, maps and funcs are not comparable, nor are
@@ -1097,7 +1182,11 @@ export const resolveMethods = {
 	},
 
 	_fieldTypeStruct(base, baseType, field, node) {
+		if (base.fields?.has(field) && isMethodPromotedOverField(base, field))
+			return base.methods.get(field);
 		if (base.fields?.has(field)) {
+			if (isAmbiguousFieldSelector(base, field))
+				return this._errAmbiguousSelector(baseType, field, node);
 			if (
 				field.startsWith("_") &&
 				(baseType?.name?.startsWith("strings.") ||
@@ -1111,11 +1200,8 @@ export const resolveMethods = {
 			return base.fields.get(field);
 		}
 		if (base.methods?.has(field)) return base.methods.get(field);
-		if (isAmbiguousPromotion(base, field)) {
-			const text = exprText(node?.expr);
-			const recv = text === "expression" ? typeStr(baseType) : text;
-			return this.err(`ambiguous selector ${recv}.${field}`, node);
-		}
+		if (isAmbiguousPromotion(base, field))
+			return this._errAmbiguousSelector(baseType, field, node);
 		const typeName = baseType?.name || base.name;
 		if (typeName) {
 			const dName = displayTypeName(typeName);
@@ -1138,6 +1224,12 @@ export const resolveMethods = {
 			}
 		}
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
+	},
+
+	_errAmbiguousSelector(baseType, field, node) {
+		const text = exprText(node?.expr);
+		const recv = text === "expression" ? typeStr(baseType) : text;
+		return this.err(`ambiguous selector ${recv}.${field}`, node);
 	},
 
 	_fieldTypeInterface(base, baseType, field, node) {

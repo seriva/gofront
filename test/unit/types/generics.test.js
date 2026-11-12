@@ -7,6 +7,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertJsProgramOutput,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	assertThrows,
 	compile,
@@ -429,7 +430,7 @@ func main() { adopt(Fish{}) }`);
 	assertErrorContains(errors, "does not satisfy constraint");
 });
 
-test("approx constraint (~int) accepts any type — no error", () => {
+test("approx constraint (~int) accepts a matching type — no error", () => {
 	const { errors } = compile(`package main
 type Num interface { ~int }
 func double[T Num](v T) T { return v + v }
@@ -2024,6 +2025,361 @@ for (const [name, src, want] of [
 	for (const target of ["js", "both", "wasm"]) {
 		test(`${name} is rejected (${target})`, () => {
 			assertErrorContains(constraintErrorsOn(target, src), want);
+		});
+	}
+}
+
+section("Explicit func type arguments");
+
+test("an explicit func type argument instantiates a generic function", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any]() any { return map[string]V{} }
+
+func zero[V any]() V {
+	var z V
+	return z
+}
+
+func main() {
+	w := mk[func(int)]()
+	_, ok := w.(map[string]int)
+	fmt.Println(ok, zero[func(int)]() == nil)
+}
+`,
+		"false true\n",
+	);
+});
+
+test("an explicit func type argument keeps its type name", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any]() any { return map[string]V{} }
+
+func main() {
+	w := mk[func(int)]()
+	fmt.Printf("%T\\n", w)
+}
+`,
+		"map[string]func(int)\n",
+	);
+});
+
+test("func type arguments with results and several parameters instantiate", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func mk[V any]() any                  { return map[string]V{} }
+func pair[K comparable, V any]() any { return map[K]V{} }
+
+func main() {
+	fmt.Printf("%T\\n", mk[func(int) string]())
+	fmt.Printf("%T\\n", pair[string, func(int) bool]())
+	fmt.Printf("%T\\n", pair[int, func()]())
+}
+`,
+		"map[string]func(int) string\nmap[string]func(int) bool\nmap[int]func()\n",
+	);
+});
+
+test("func type arguments with several parameters compile on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func pair[K comparable, V any]() int {
+	var m map[K]V
+	var s []V
+	return len(m) + len(s)
+}
+
+func main() {
+	fmt.Println(pair[string, func(int) bool](), pair[int, func()]())
+}
+`,
+		"0 0\n",
+	);
+});
+
+test("an index by a called func literal still indexes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func one() int { return 1 }
+
+func main() {
+	a := []int{10, 20, 30}
+	m := map[int]string{1: "one"}
+	fmt.Println(a[one()], m[func() int { return 1 }()], a[func() int { return 2 }()])
+}
+`,
+		"20 one 30\n",
+	);
+});
+
+section("Generics — type arguments inferred from array parameters");
+
+test("arr[V](a [2]V) infers V from [2]int and [2]string", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func arr[V any](a [2]V) any { return a }
+
+func main() {
+	fmt.Printf("%T %v\\n", arr([2]int{1, 2}), arr([2]int{1, 2}))
+	fmt.Printf("%T %v\\n", arr([2]string{"a", "b"}), arr([2]string{"a", "b"}))
+}
+`,
+		"[2]int [1 2]\n[2]string [a b]\n",
+	);
+});
+
+test("V is inferred through nested, pointer and slice-of-array forms", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func nest[V any](a [2][2]V) any { return a }
+func ptr[V any](a *[2]V) any { return a }
+func sl[V any](a [2][]V) any { return a }
+func first[V any](a [2]V) V { return a[0] }
+
+func main() {
+	x := [2]int{5, 6}
+	fmt.Printf("%T\\n", nest([2][2]int{}))
+	fmt.Printf("%T\\n", ptr(&x))
+	fmt.Printf("%T\\n", sl([2][]int{}))
+	fmt.Println(first([2]string{"a", "b"}), first(x))
+}
+`,
+		"[2][2]int\n*[2]int\n[2][]int\na 5\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	const gen = `package main
+
+import "fmt"
+
+func arr[V any](a [2]V) any { return a }
+
+func main() {
+	fmt.Println(arr(ARG))
+}
+`;
+	const errs = (arg) => {
+		const src = gen.replace("ARG", arg);
+		return (
+			(target === "wasm" ? compileWasm(src) : compile(src, { target }))
+				.errors ?? []
+		);
+	};
+	test(`an array of the wrong length is rejected (${target})`, () => {
+		assertErrorContains(errs("[3]int{}"), "different array lengths");
+	});
+	test(`a slice for an array parameter is rejected (${target})`, () => {
+		assertErrorContains(errs("[]int{1, 2}"), "Cannot infer type arguments");
+	});
+}
+
+section(
+	"Generics — type-parameter index and size operands need integer type sets",
+);
+
+{
+	const operandProgram = (
+		constraintDecl,
+		constraint,
+		use,
+		call,
+	) => `package main
+
+import "fmt"
+
+${constraintDecl}
+func f[T ${constraint}](i T) {
+	s := []int{1, 2, 3}
+	_ = s
+	${use}
+}
+
+func main() {
+	${call}
+	fmt.Println("ok")
+}
+`;
+	const NON_INT_USES = [
+		"_ = s[i]",
+		"_ = s[:i]",
+		"_ = make([]int, i)",
+		"_ = make(map[string]int, i)",
+	];
+	for (const [name, decl, constraint, arg] of [
+		["any", "", "any", "1"],
+		["comparable", "", "comparable", "1"],
+		["fmt.Stringer", "", "fmt.Stringer", "nil"],
+		["~int | ~string", "", "~int | ~string", "1"],
+		["~float64", "", "~float64", "1.5"],
+		[
+			"a named interface with ~float64",
+			"type F interface{ ~float64 }",
+			"F",
+			"1.5",
+		],
+	]) {
+		for (const use of NON_INT_USES) {
+			for (const target of ["js", "wasm"]) {
+				for (const called of [true, false]) {
+					test(`[T ${name}] ${use} is rejected, ${called ? "called" : "never called"} (${target})`, () => {
+						const src = operandProgram(
+							decl,
+							constraint,
+							use,
+							called ? `f(${arg})` : "",
+						);
+						const { errors } =
+							target === "wasm" ? compileWasm(src) : compile(src, { target });
+						assertErrorContains(errors ?? [], "must be integer");
+					});
+				}
+			}
+		}
+	}
+
+	test("a non-integer type-parameter index reports once when instantiated on wasm", () => {
+		const { errors } = compileWasm(
+			operandProgram("", "~float64", "_ = s[i]", "f(1.5)"),
+		);
+		const n =
+			(errors ?? [])
+				.map((e) => e.message)
+				.join("\n")
+				.split("must be integer").length - 1;
+		assertEqual(n, 1);
+	});
+
+	test("integer type sets index and size (js, both, wasm)", async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type Int interface{ ~int | ~int64 }
+type MyInt int
+
+func at[T ~int](s []string, i T) string { return s[i] }
+func small[T ~int | ~uint8](s []string, i T) []string { return s[:i] }
+func mk[T Int](n T) int { return len(make([]int, n)) + cap(make([]int, 0, n)) }
+func keyed[K comparable, V any](m map[K]V, k K) V { return m[k] }
+func elem[T any](xs []T, i int) T { return xs[i] }
+
+func main() {
+	s := []string{"a", "b", "c"}
+	fmt.Println(at(s, MyInt(1)), small(s, uint8(2)), mk(MyInt(3)), mk(2))
+	fmt.Println(keyed(map[string]int{"x": 7}, "x"), keyed(map[any]int{1.5: 8}, 1.5))
+	fmt.Println(elem([]string{"p", "q"}, 1))
+}
+`,
+			"b [a b] 6 4\n7 8\nq\n",
+		);
+	});
+}
+
+section("Generics — 64-bit type-parameter index and size operands");
+
+test("an int64 or uint64 type-parameter make size, index and bound run (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Int interface{ ~int | ~int64 | ~uint64 }
+
+func mk[T Int](n T) int { return len(make([]int, n)) }
+func mkCap[T Int](n T) int { return cap(make([]int, 0, n)) }
+func mkMap[T Int](n T) int { return len(make(map[string]int, n)) }
+func at[T Int](s []string, n T) string { return s[n] }
+func hi[T Int](s []string, n T) []string { return s[:n] }
+func lo[T Int](s []string, n T) []string { return s[n:] }
+func both[T Int](s []string, n T) []string { return s[n-1 : n+1 : n+1] }
+func str[T Int](s string, n T) byte { return s[n] }
+
+func main() {
+	s := []string{"a", "b", "c", "d"}
+	fmt.Println(mk(int64(3)), mk(uint64(2)), mk(4))
+	fmt.Println(mkCap(int64(3)), mkCap(uint64(2)), mkCap(4))
+	fmt.Println(mkMap(int64(3)), mkMap(uint64(2)), mkMap(4))
+	fmt.Println(at(s, int64(1)), at(s, uint64(2)), at(s, 3))
+	fmt.Println(hi(s, int64(1)), hi(s, uint64(2)), hi(s, 3))
+	fmt.Println(lo(s, int64(1)), lo(s, uint64(2)), lo(s, 3))
+	fmt.Println(both(s, int64(2)), both(s, uint64(3)), both(s, 1))
+	fmt.Println(str("xyz", int64(1)), str("xyz", uint64(2)), str("xyz", 0))
+}
+`,
+		"3 2 4\n3 2 4\n0 0 0\nb c d\n[a] [a b] [a b c]\n[b c d] [c d] [d]\n[b c] [c d] [a b]\n121 122 120\n",
+	);
+});
+
+section("Generics — union constraints with named-interface terms");
+
+const UNION_DECLS = `type S interface{ ~int }
+type U interface{ ~uint }
+type I interface{ S | U }
+type V interface{ I | ~string }
+type MyInt int
+
+func f[T I](x T) T { return x }
+func g[T V](x T) T { return x }
+func h[T ~int | ~uint](x T) T { return x }
+`;
+
+test("a union of named interfaces accepts a type from any term (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${UNION_DECLS}
+func main() {
+	fmt.Println(f(1), f(uint(2)), f(MyInt(3)))
+	fmt.Println(g(4), g(uint(5)), g("six"), h(7), h(uint(8)))
+}
+`,
+		"1 2 3\n4 5 six 7 8\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [name, call] of [
+		["a string for a union of named interfaces", 'f("a")'],
+		["a float for a union of named interfaces", "f(1.5)"],
+		["an int8 for a union of named interfaces", "f(int8(1))"],
+		["a float for a nested named union", "g(1.5)"],
+		["a string for a ~int | ~uint union", 'h("a")'],
+	]) {
+		test(`${name} does not satisfy the constraint (${target})`, () => {
+			const src = `package main
+
+${UNION_DECLS}
+func main() { ${call} }
+`;
+			const { errors } =
+				target === "wasm" ? compileWasm(src) : compile(src, { target });
+			assertErrorContains(errors ?? [], "does not satisfy constraint");
 		});
 	}
 }

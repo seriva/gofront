@@ -44,6 +44,7 @@ import {
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
+	UNTYPED_RUNE,
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
@@ -93,6 +94,11 @@ const BUILTIN_CHECK = {
 					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
 				if (!e.args[i]._spread && at[i]) {
 					if (is64) e.args[i]._is64Bit = true;
+					s._tagComplexConst(
+						s.resolveType(sb.elem),
+						s.resolveType(at[i]),
+						e.args[i],
+					);
 					s._markIfaceBox(
 						s.resolveType(sb.elem),
 						s.resolveType(at[i]),
@@ -120,6 +126,8 @@ const BUILTIN_CHECK = {
 		// `make(S, n)` with S a type parameter makes its core type.
 		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
 		if (core) ta._coreType = core;
+		for (const size of e.args.slice(1, 3))
+			s._checkIntegerConstOperand(size, "size", sc);
 		return made;
 	},
 	new: (s, _n, e, _at, sc) => {
@@ -144,6 +152,29 @@ const BUILTIN_CHECK = {
 	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
 	imag: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
 };
+
+// Type kinds that are never valid as an index, slice bound or `make` size.
+const NON_INTEGER_KINDS = new Set([
+	"struct",
+	"pointer",
+	"slice",
+	"map",
+	"func",
+	"array",
+	"interface",
+	"simd",
+]);
+
+// Basic types that are never valid as an index, slice bound or `make` size.
+const NON_INTEGER_BASICS = new Set([
+	"float32",
+	"float64",
+	"complex64",
+	"complex128",
+	"bool",
+	"string",
+	"any",
+]);
 
 // Method-name dispatch for _checkExpr — string values add no static call edges.
 const CHECK_EXPR_DELEGATE = {
@@ -174,7 +205,7 @@ export const expressionCheckMethods = {
 			case "BasicLit": {
 				switch (expr.litKind) {
 					case "INT":
-						return UNTYPED_INT;
+						return expr.rune ? UNTYPED_RUNE : UNTYPED_INT;
 					case "FLOAT":
 						return UNTYPED_FLOAT;
 					case "STRING":
@@ -265,6 +296,8 @@ export const expressionCheckMethods = {
 				}
 				this._tagFloat32Const(lt, rt, expr.right);
 				this._tagFloat32Const(rt, lt, expr.left);
+				this._tagComplex64Const(lt, rt, expr.right);
+				this._tagComplex64Const(rt, lt, expr.left);
 				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 					expr.right._is64Bit = true;
 				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
@@ -315,7 +348,8 @@ export const expressionCheckMethods = {
 
 	_checkBoolUnaryOp(ot, expr) {
 		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
-		return BOOL;
+		// `!` keeps an untyped or defined bool type.
+		return isBool(ot) ? ot : BOOL;
 	},
 
 	_checkNumericUnaryOp(ot, expr) {
@@ -880,6 +914,8 @@ export const expressionCheckMethods = {
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
+		if (btu.kind !== "map")
+			this._checkIntegerConstOperand(expr.index, "index", scope);
 		if (btu.kind === "slice" || btu.kind === "array") {
 			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
@@ -969,15 +1005,61 @@ export const expressionCheckMethods = {
 		return t.base;
 	},
 
+	// An index, slice bound or `make` size that is a constant must be an
+	// integer (`s[1 == 1]`, `make([]int, "a")`).
+	// A typed operand must have an integer type too (`s[f]` with `f float64`).
+	_checkIntegerConstOperand(operand, what, scope) {
+		const kind = this._nonIntegerConst(operand, scope);
+		if (kind) {
+			this.err(
+				`invalid argument: ${what} ${exprText(operand)} (${kind}) must be integer`,
+				operand,
+			);
+			return;
+		}
+		const t = operand?._type;
+		if (!this._isNonIntegerType(t, scope)) return;
+		this.err(
+			`invalid argument: ${what} ${exprText(operand)} (${operandKind(operand, typeStr(t), false)}) must be integer`,
+			operand,
+		);
+	},
+
+	// Whether `t` is a type (or a defined type over one) that is not an
+	// integer: a float, complex, bool, string, `any`, struct, pointer, slice,
+	// map, func, array, interface, simd vector or a type parameter whose type
+	// set is not all integers.  Untyped constants are judged by
+	// `_nonIntegerConst`, so only untyped non-integers that reach here
+	// (`s[a == b]`) count.
+	_isNonIntegerType(t, scope) {
+		if (!t || t._tainted) return false;
+		// A type parameter is an integer only when every type in its type set
+		// is (`~int | ~uint8`); `any`, `comparable` and method-only
+		// constraints have no integer type set.
+		if (t.kind === "typeParam") {
+			const terms = this._constraintTerms(t.constraint, new Set(), scope);
+			return !(terms?.length > 0 && terms.every(isInteger));
+		}
+		if (t.kind === "untyped")
+			return (
+				t.base === "bool" || t.base === "string" || t.base === "complex128"
+			);
+		const u = this._deepUnderlying(t);
+		if (u?.kind === "basic") return NON_INTEGER_BASICS.has(u.name);
+		return NON_INTEGER_KINDS.has(u?.kind);
+	},
+
 	_checkSliceExpr(expr, scope) {
 		const bt = this._derefArrayPtr(
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		if (expr.low) this.checkExpr(expr.low, scope);
-		if (expr.high) this.checkExpr(expr.high, scope);
-		if (expr.max) this.checkExpr(expr.max, scope);
+		for (const bound of [expr.low, expr.high, expr.max]) {
+			if (!bound) continue;
+			this.checkExpr(bound, scope);
+			this._checkIntegerConstOperand(bound, "index", scope);
+		}
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);

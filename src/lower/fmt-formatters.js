@@ -34,7 +34,7 @@ import {
 	under,
 	walkNodes,
 } from "./gen-types.js";
-import { holdsFunc, isCompositeType, isFuncComposite } from "./json-codecs.js";
+import { holdsFunc } from "./json-codecs.js";
 
 const FMT_PATH = "fmt";
 const RT_PATH = "internal/fmtrt";
@@ -136,6 +136,12 @@ const returnsString = (m) => {
 		under(r[0]).name === "string"
 	);
 };
+
+// A map, slice or array type: one that generic code boxes into an interface
+// is not spelled in the package, so the formatter lookup must describe it.
+function isMapSliceOrArray(t) {
+	return t?.kind === "map" || t?.kind === "slice" || t?.kind === "array";
+}
 
 class FmtGen extends TypeSpeller {
 	constructor(checker, pkgName, qualifiers, programs, formatted = false) {
@@ -559,14 +565,14 @@ class FmtGen extends TypeSpeller {
 			if (via === "declared" && !this.topLevel.has(type.name)) continue;
 			add(type);
 		}
-		// Only instances of generic types (and pointers to them), and maps a
-		// generic body boxes into an interface: they are the types a package
+		// Only instances of generic types (and pointers to them), and maps, slices and
+		// arrays a generic body boxes into an interface: they are the types a package
 		// never spells, and any other type here would take the place of the
 		// dispatch a type parameter value already has.
 		for (const { type, boxed } of this.genericBodyTypes()) {
 			const base = type.kind === "pointer" ? type.base : type;
 			if (
-				(boxed && type.kind === "map") ||
+				(boxed && isMapSliceOrArray(type)) ||
 				(base.kind === "named" && base.typeArgs?.length > 0)
 			)
 				add(type);
@@ -615,7 +621,7 @@ class FmtGen extends TypeSpeller {
 		if (node._type && mentionsTypeParam(node._type))
 			out.push({ type: sub(node._type) });
 		const src = node._ifaceSrc;
-		if (src?.kind === "map" && mentionsTypeParam(src))
+		if (isMapSliceOrArray(src) && mentionsTypeParam(src))
 			out.push({ type: sub(src), boxed: true });
 		return out;
 	}
@@ -643,11 +649,11 @@ class FmtGen extends TypeSpeller {
 		if (isInterface(t) || under(t)?.kind === "interface") return false;
 		if (t.kind === "basic") return false;
 		if (t.kind === "func") return true;
-		// An unnamed array or map of small integers would shadow its look-alikes
-		// in the type switch (see SHARED_REPR in json-codecs). One holding
-		// funcs is still described, so `%T` names it.
+		// An array, map or slice is boxed by its Go type, so one with small
+		// integer or boolean keys or elements no longer shadows its look-alikes in
+		// the type switch. One holding funcs is described too, so `%T` names it.
 		if (t.kind === "array" || t.kind === "map" || t.kind === "slice")
-			return isCompositeType(t) || isFuncComposite(t);
+			return true;
 		if (holdsFunc(t)) return false;
 		return true;
 	}

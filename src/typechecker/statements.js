@@ -228,10 +228,31 @@ export const statementCheckMethods = {
 		return !isAny(target) && (!isAny(source) || !!source._declared);
 	},
 
+	// A range assignment (`for _, s = range xs`) stores each key and element
+	// into an existing variable; one of interface type boxes the value as
+	// any other conversion does. The box is recorded on a holder, not on the
+	// target, which codegen also reads as an assignable expression.
+	_markRangeAssignBox(stmt, i, target, source) {
+		if (stmt.rhs[0]?.kind !== "RangeExpr") return;
+		this._markRangeTargetBox(stmt.lhs[i], target, source);
+	},
+
+	_markRangeTargetBox(node, target, source) {
+		if (!target || !source) return;
+		const holder = {};
+		this._markIfaceBox(
+			this.resolveType(target),
+			this.resolveType(source),
+			holder,
+		);
+		if (holder._ifaceBox) node._rangeBox = holder;
+	},
+
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
 			const r = rhsFlat[i] ?? ANY;
+			this._markRangeAssignBox(stmt, i, lhsTypes[i], r);
 			if (stmt.rhs.length === lhsTypes.length && lhsTypes[i] && r)
 				this._markIfaceBox(
 					this.resolveType(lhsTypes[i]),
@@ -667,9 +688,35 @@ export const statementCheckMethods = {
 		}
 	},
 
-	_checkRangeIterAssignVars(lhs, scope) {
-		for (const e of lhs) {
-			if (e.kind === "Ident" && e.name !== "_") this.checkExpr(e, scope);
+	// Each yielded value is stored into an existing variable; one of
+	// interface type boxes the value as any other conversion does.
+	_checkRangeIterAssignVars(lhs, scope, yieldParams = []) {
+		lhs.forEach((e, i) => {
+			if (e.kind === "Ident" && e.name === "_") return;
+			const target = this.checkExpr(e, scope);
+			this._markRangeTargetBox(e, target, yieldParams[i]);
+			this._checkRangeIterAssignable(e, target, yieldParams[i]);
+		});
+	},
+
+	// The yielded value is assigned to the target, so it must be assignable
+	// to it (`for s = range seq` with `s string` and `seq` yielding `int`).
+	// The lenient `float64 = int` pair of plain assignments is reported here:
+	// the iterator loop stores the yielded value without converting it.
+	_checkRangeIterAssignable(node, target, source) {
+		if (!target || !source) return;
+		const t = this.resolveType(target);
+		const v = this.resolveType(source);
+		if (this._isNumericCoercible(t, v)) {
+			this.err(`Cannot assign ${typeStr(v)} to ${typeStr(t)}`, node);
+			return;
+		}
+		if (!this._needsAssignCheck(target, source)) return;
+		this._skipIfaceMark = true;
+		try {
+			this.assertAssignable(target, source, node, "assignment");
+		} finally {
+			this._skipIfaceMark = false;
 		}
 	},
 
@@ -695,7 +742,7 @@ export const statementCheckMethods = {
 
 		if (initStmt.kind === "DefineStmt")
 			this._bindRangeIterDefineVars(lhs, info, scope);
-		else this._checkRangeIterAssignVars(lhs, scope);
+		else this._checkRangeIterAssignVars(lhs, scope, info.yieldParams);
 		return info;
 	},
 };

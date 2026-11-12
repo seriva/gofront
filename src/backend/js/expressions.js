@@ -16,6 +16,7 @@ import {
 	is64BitUnsigned,
 	isAny,
 	isComplex,
+	isComplex64,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
 	typeStr,
@@ -117,6 +118,16 @@ function receiverPrefix(stmts, name, safe) {
 }
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+// True for a map, slice or array type that mentions a type parameter: one
+// that generic code boxes into an interface is tagged by its instantiated
+// type.
+export function isGenericComposite(t) {
+	return (
+		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		mentionsTypeParam(t)
+	);
+}
 
 // True when type `t` mentions a type parameter anywhere.
 export function mentionsTypeParam(t, depth = 0) {
@@ -713,17 +724,15 @@ export const expressionGenMethods = {
 				expr._tfnTagging = false;
 			}
 		}
-		if (
-			expr._ifaceSrc?.kind === "map" &&
-			!expr._gmapTagging &&
-			mentionsTypeParam(expr._ifaceSrc)
-		) {
+		if (isGenericComposite(expr._ifaceSrc) && !expr._gmapTagging) {
 			const tag = this._genericMapTag(expr._ifaceSrc);
 			if (tag) {
 				this.useHelper("ifaceBox");
 				expr._gmapTagging = true;
 				try {
-					return `__ity(${this.genExpr(expr)}, ${tag})`;
+					// An array is copied before it is tagged: a copy made after
+					// `__ity` (`.map`) would drop the tag.
+					return `__ity(${this.genValueExpr(expr)}, ${tag})`;
 				} finally {
 					expr._gmapTagging = false;
 				}
@@ -1070,7 +1079,11 @@ export const expressionGenMethods = {
 
 	// Emits `expr` as a Go value: struct/array operands that alias existing storage are copied.
 	genValueExpr(expr) {
-		const tagged = Boolean(this._ityTag(expr));
+		const tagged =
+			Boolean(this._ityTag(expr)) ||
+			(isGenericComposite(expr._ifaceSrc) &&
+				!expr._gmapTagging &&
+				Boolean(this._genericMapTag(expr._ifaceSrc)));
 		const js = this.genExpr(expr);
 		if (expr._ifaceBox || tagged) return js;
 		if (
@@ -1642,7 +1655,7 @@ export const expressionGenMethods = {
 			if (!expr._lvalue) return this._genMapIndexExpr(expr, base, idx);
 			return `${this._genMapWriteBase(base)}[${idx}]`;
 		}
-		if (this._is64BitInt(expr.index?._type)) idx = `Number(${idx})`;
+		idx = this._asIndexNumber(idx, expr.index?._type);
 		const checked = this._genStrictIndex(expr, base, idx);
 		if (checked) return checked;
 		if (this._isStringExprType(exprType) && !expr._lvalue)
@@ -1699,14 +1712,10 @@ export const expressionGenMethods = {
 	_genSliceExpr(expr) {
 		const base = this.genExpr(expr.expr);
 		const lo = expr.low
-			? this._is64BitInt(expr.low._type)
-				? `Number(${this.genExpr(expr.low)})`
-				: this.genExpr(expr.low)
+			? this._asIndexNumber(this.genExpr(expr.low), expr.low._type)
 			: "0";
 		const hi = expr.high
-			? this._is64BitInt(expr.high._type)
-				? `Number(${this.genExpr(expr.high)})`
-				: this.genExpr(expr.high)
+			? this._asIndexNumber(this.genExpr(expr.high), expr.high._type)
 			: "undefined";
 		if (this._isStringExprType(expr.expr._type))
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
@@ -1721,7 +1730,7 @@ export const expressionGenMethods = {
 		if (expr._selfReslice && !isTypedArraySlice(expr.expr._type))
 			return `__reslice(${base}, ${lo}, ${hi})`;
 		const max = expr.max
-			? `, ${this._is64BitInt(expr.max._type) ? `Number(${this.genExpr(expr.max)})` : this.genExpr(expr.max)}`
+			? `, ${this._asIndexNumber(this.genExpr(expr.max), expr.max._type)}`
 			: "";
 		return `__slice(${base}, ${lo}, ${hi}${max})`;
 	},
@@ -1907,7 +1916,10 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
-		if (typeNode?._assertType?.kind === "slice") {
+		if (
+			typeNode?._assertType?.kind === "slice" ||
+			this._isNamedSliceTypeNode(typeNode)
+		) {
 			// A nil slice in an interface is a tagged empty array.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
@@ -1917,6 +1929,16 @@ export const expressionGenMethods = {
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
 		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+	},
+
+	// A type name that denotes a defined slice type (`type S []int`).
+	_isNamedSliceTypeNode(typeNode) {
+		if (typeNode?.kind !== "TypeName") return false;
+		const named = this.checker?.types.get(typeNode.name);
+		return (
+			this._isNamedComposite(named) &&
+			this._underlyingOf(named)?.kind === "slice"
+		);
 	},
 
 	_isStructPtrTypeNode(typeNode) {
@@ -2280,9 +2302,7 @@ export const expressionGenMethods = {
 			// TypeError with a different message.
 			this.useHelper("nilCall");
 			const recv = this.genExpr(expr.func.expr);
-			const args = expr.args
-				.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
-				.join(", ");
+			const args = this._genCallArgs(expr);
 			return `__nilcall(${recv}).${expr.func.field}(${args})`;
 		}
 		return undefined;
@@ -2437,8 +2457,7 @@ export const expressionGenMethods = {
 		const resolvedKind = madeType?.kind;
 		if (typeNode.kind === "SliceType" || resolvedKind === "slice") {
 			let n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
-			if (expr.args[1] && this._is64BitInt(expr.args[1]._type))
-				n = `Number(${n})`;
+			if (expr.args[1]) n = this._asIndexNumber(n, expr.args[1]._type);
 			// A negative length or capacity panics with Go's message.
 			n = this._guardMakeSize(n, "__mkn");
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
@@ -2454,8 +2473,8 @@ export const expressionGenMethods = {
 			// make([]T, n, cap) allocates cap elements and returns a view of
 			// the first n (`__mkslice`), so append within cap shares them.
 			let capArg = expr.args[2] ? this.genExpr(expr.args[2]) : null;
-			if (capArg && expr.args[2] && this._is64BitInt(expr.args[2]._type))
-				capArg = `Number(${capArg})`;
+			if (capArg && expr.args[2])
+				capArg = this._asIndexNumber(capArg, expr.args[2]._type);
 			if (capArg) {
 				this.useHelper("slice");
 				capArg = this._guardMakeSize(capArg, "__mkc");
@@ -3239,20 +3258,45 @@ export const expressionGenMethods = {
 		const r = this._genComplexOperand(expr.right);
 		switch (expr.op) {
 			case "+":
-				return `{ re: ${l}.re + ${r}.re, im: ${l}.im + ${r}.im }`;
 			case "-":
-				return `{ re: ${l}.re - ${r}.re, im: ${l}.im - ${r}.im }`;
 			case "*":
-				this.useHelper("cmul");
-				return `__cmul(${l}, ${r})`;
 			case "/":
-				this.useHelper("cdiv");
-				return `__cdiv(${l}, ${r})`;
+				return this._genComplexArith(expr.op, l, r, isComplex64(expr._type));
 			case "==":
-				return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
+				return this._genComplexEquality("===", "&&", l, r);
 			case "!=":
-				return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
+				return this._genComplexEquality("!==", "||", l, r);
 		}
+	},
+
+	// `l == r` / `l != r` on complex operands: each component reads both
+	// operands, so an operand that calls a function is bound once first.
+	_genComplexEquality(cmp, join, l, r) {
+		const pure = (js) => !js.includes("(");
+		if (pure(l) && pure(r))
+			return `(${l}.re ${cmp} ${r}.re ${join} ${l}.im ${cmp} ${r}.im)`;
+		return `((__a, __b) => __a.re ${cmp} __b.re ${join} __a.im ${cmp} __b.im)(${l}, ${r})`;
+	},
+
+	// `l op r` for complex operands.  A complex64 result has float32
+	// components, as in Go (where the arithmetic runs in float64 and the
+	// result is narrowed).
+	_genComplexArith(op, l, r, is64) {
+		let re;
+		let im;
+		let call = null;
+		if (op === "+" || op === "-") {
+			re = `${l}.re ${op} ${r}.re`;
+			im = `${l}.im ${op} ${r}.im`;
+		} else {
+			const helper = op === "*" ? "cmul" : "cdiv";
+			this.useHelper(helper);
+			call = `__${helper}(${l}, ${r})`;
+		}
+		if (!is64) return call ?? `{ re: ${re}, im: ${im} }`;
+		if (call)
+			return `((__z) => ({ re: Math.fround(__z.re), im: Math.fround(__z.im) }))(${call})`;
+		return `{ re: Math.fround(${re}), im: Math.fround(${im}) }`;
 	},
 
 	_genBinaryExpr(expr) {
@@ -3719,6 +3763,19 @@ export const expressionGenMethods = {
 
 	_is64BitInt(t) {
 		return is64BitInt(t);
+	},
+
+	// Whether a value of type `t` can be a BigInt at run time: a 64-bit
+	// integer, or a type parameter whose type set holds one (`~int | ~int64`).
+	_mayBeBigInt(t) {
+		if (t?.kind !== "typeParam") return is64BitInt(t);
+		const terms = this.checker?._constraintTerms(t.constraint, new Set());
+		return terms?.some(is64BitInt) === true;
+	},
+
+	// `code` as a JS number for an index, slice bound or `make` size.
+	_asIndexNumber(code, t) {
+		return this._mayBeBigInt(t) ? `Number(${code})` : code;
 	},
 
 	// float32 arithmetic rounds through Math.fround and arithmetic on a type

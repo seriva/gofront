@@ -576,6 +576,7 @@ export class ModuleEmitter {
 		const known = this.taggedSliceTypes.get(key);
 		if (known) return known;
 		const base = this.getSliceType(elemGoType);
+		const root = this.getTaggedSliceRoot(base);
 		const tagIndex = this.taggedSliceTypes.size + 1;
 		const tagTypeIndex = this._getTotalTypeCount();
 		this._pushType({
@@ -589,7 +590,7 @@ export class ModuleEmitter {
 		this._pushType({
 			form: "struct",
 			sub: true,
-			superTypeIndex: base.typeIndex,
+			superTypeIndex: root.typeIndex,
 			fields: [
 				...base.typeEntry.fields,
 				{
@@ -601,6 +602,23 @@ export class ModuleEmitter {
 		const info = { key, typeIndex, tagTypeIndex, base, goType: sliceGoType };
 		this.taggedSliceTypes.set(key, info);
 		return info;
+	}
+
+	// The common supertype of every tagged subtype of the slice type `base`.  An
+	// unnamed `[]int` in an interface is the bare slice type, which every
+	// tagged subtype (`type S []int`) also passes `ref.test` for; testing
+	// "base and not root" is what keeps `any(S{}).([]int)` from matching.
+	getTaggedSliceRoot(base) {
+		if (base.tagRoot) return base.tagRoot;
+		const typeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			sub: true,
+			superTypeIndex: base.typeIndex,
+			fields: [...base.typeEntry.fields],
+		});
+		base.tagRoot = { typeIndex };
+		return base.tagRoot;
 	}
 
 	getSliceTypeByIndex(typeIndex) {
@@ -1331,7 +1349,15 @@ export class ModuleEmitter {
 
 			// Promoted methods on sName
 			const promoted = this._findPromotedMethod(sInfo, methodName);
-			if (promoted) {
+			if (promoted?.iface) {
+				this._addIfaceEmbedCandidates(
+					candidates,
+					seenKeys,
+					sName,
+					sInfo,
+					promoted.embedPath,
+				);
+			} else if (promoted) {
 				const { embedType, embedPath, viaPointer } = promoted;
 				const embedMethodName = `${embedType}.${methodName}`;
 				const fIdx = this.resolveFuncIndex(embedMethodName);
@@ -1349,6 +1375,7 @@ export class ModuleEmitter {
 						isBoxedValue: false,
 						needsValueDeref: !isPtrRecv,
 						embedPath,
+						nilCheckLast: !isPtrRecv,
 						funcIndex: fIdx,
 						targetParamTypes: paramWTypes,
 						targetRecvWType: paramWTypes[0],
@@ -1369,6 +1396,7 @@ export class ModuleEmitter {
 							isBoxedValue: true,
 							needsValueDeref: false,
 							embedPath,
+							nilCheckLast: !isPtrRecv,
 							funcIndex: fIdx,
 							targetParamTypes: paramWTypes,
 							targetRecvWType: paramWTypes[0],
@@ -1484,6 +1512,60 @@ export class ModuleEmitter {
 		return candidates;
 	}
 
+	// Whether `goType`, the type of an embedded field, is an interface whose
+	// method set has `methodName`.
+	embeddedInterfaceHas(goType, methodName) {
+		let t = goType;
+		for (let i = 0; i < 8 && t; i++) {
+			if (t.kind === "TypeName" || t.kind === "Ident") {
+				const named = this.checker?.types?.get(t.name);
+				if (!named) return t.name === "error" && methodName === "Error";
+				t = named;
+			} else if (t.kind === "named") {
+				t = t.underlying ?? this.checker?.types?.get(t.name)?.underlying;
+			} else if (t.kind === "interface") {
+				return t.methods?.has?.(methodName) ?? false;
+			} else if (t.kind === "InterfaceType") {
+				return (t.methods ?? []).some((m) => (m.name ?? m) === methodName);
+			} else {
+				return false;
+			}
+		}
+		return false;
+	}
+
+	// Dispatch candidates for a method `sName` promotes from an embedded
+	// interface: the embedded value is loaded and dispatched again through the
+	// same dispatcher (`selfDispatch`).
+	_addIfaceEmbedCandidates(candidates, seenKeys, sName, sInfo, embedPath) {
+		const base = {
+			recvTypeName: sName,
+			needsValueDeref: false,
+			embedPath,
+			selfDispatch: true,
+			structInfo: sInfo,
+		};
+		const ptrKey = `ptr:${sName}`;
+		if (!seenKeys.has(ptrKey)) {
+			seenKeys.add(ptrKey);
+			candidates.push({
+				...base,
+				testTypeIndex: sInfo.typeIndex,
+				isBoxedValue: false,
+			});
+		}
+		const box = this.getIfaceBoxType({ kind: "named", name: sName });
+		const valKey = `val:${sName}`;
+		if (box && !seenKeys.has(valKey)) {
+			seenKeys.add(valKey);
+			candidates.push({
+				...base,
+				testTypeIndex: box.typeIndex,
+				isBoxedValue: true,
+			});
+		}
+	}
+
 	// The shallowest embedded type of `sInfo` (any depth) that declares
 	// `methodName`: its name, the field path to reach it from an `sInfo`
 	// struct, and whether that path goes through an embedded pointer. Null
@@ -1503,10 +1585,22 @@ export class ModuleEmitter {
 					const step = {
 						path: [
 							...path,
-							{ parentTypeIndex: info.typeIndex, fieldIndex: embed.fieldIndex },
+							{
+								parentTypeIndex: info.typeIndex,
+								fieldIndex: embed.fieldIndex,
+								// An embedded pointer may be nil: reading through it
+								// is a recoverable nil dereference.
+								...(isPtr && {
+									ptrWType: info.fields[embed.fieldIndex].wType,
+								}),
+							},
 						],
 						viaPointer: viaPointer || isPtr,
 					};
+					if (this.embeddedInterfaceHas(goType, methodName)) {
+						hits.push({ iface: true, embedPath: step.path, viaPointer: false });
+						continue;
+					}
 					if (this.funcMap.has(`${embedType}.${methodName}`)) {
 						hits.push({
 							embedType,

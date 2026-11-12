@@ -591,6 +591,252 @@ func main() {
 	);
 });
 
+section("Complex: complex64 keeps float32 components in JavaScript");
+
+test("a typed complex64 constant and complex64 arithmetic round to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const kt complex64 = 1 + 0.01i
+
+func main() {
+	var c complex64 = 2
+	x := c * (1 + 0.01i)
+	fmt.Println(imag(kt) == 0.01, imag(x) == 0.02)
+}
+`,
+		"true true\n",
+	);
+});
+
+test("complex64 addition, subtraction, multiplication and division follow float32 results", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex64 = 2
+	var d complex64 = 1 + 0.1i
+	s := c + (1 + 0.01i)
+	fmt.Println(real(s), imag(s))
+	t := c - (1 + 0.01i)
+	fmt.Println(real(t), imag(t))
+	m := d * d
+	fmt.Println(real(m), imag(m))
+	q := c / (1 + 0.01i)
+	fmt.Println(real(q), imag(q))
+	fmt.Println(d * (3 + 0.7i))
+}
+`,
+		"3 0.01\n1 -0.01\n0.99 0.2\n1.9998 -0.019998\n(2.93+1i)\n",
+	);
+});
+
+test("complex64 compound assignment and local typed constants keep float32 components", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	const kt complex64 = 1 + 0.01i
+	var c complex64 = 2
+	c *= 1 + 0.01i
+	fmt.Println(imag(c) == 0.02, imag(kt) == 0.01)
+	var d complex64 = 2
+	d /= 1 + 0.01i
+	fmt.Println(real(d), imag(d))
+	d += kt
+	d -= kt
+	fmt.Println(real(d), imag(d))
+}
+`,
+		"true true\n1.9998 -0.019998\n1.9998 -0.019998\n",
+	);
+});
+
+test("complex128 arithmetic keeps full precision", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const k complex128 = 1 + 0.01i
+
+func main() {
+	var c complex128 = 2
+	x := c * (1 + 0.01i)
+	fmt.Println(imag(k) == 0.01, imag(x) == 0.02, x)
+	fmt.Println(c * c, c + (1 + 0.01i))
+}
+`,
+		"true true (2+0.02i)\n(4+0i) (3+0.01i)\n",
+	);
+});
+
+section("Complex: append of untyped constants");
+
+test("append converts untyped constants to the complex element type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Zs []complex128
+
+func main() {
+	var c []complex128
+	c = append(c, 7)
+	fmt.Println(c)
+	c = append(c, 7.5, 2)
+	fmt.Println(c)
+	var z Zs
+	z = append(z, 3)
+	fmt.Println(z)
+	var d []complex128
+	d = append(d, 3i)
+	d = append(d, c...)
+	fmt.Println(d)
+}
+`,
+		"[(7+0i)]\n[(7+0i) (7.5+0i) (2+0i)]\n[(3+0i)]\n[(0+3i) (7+0i) (7.5+0i) (2+0i)]\n",
+	);
+});
+
+test("append rounds a complex64 constant to float32", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c []complex64
+	c = append(c, 1+0.01i)
+	var x complex64 = 1 + 0.01i
+	fmt.Println(imag(c[0]) == 0.01, imag(c[0]) == imag(x))
+	c = append(c, 2)
+	fmt.Println(c[1])
+}
+`,
+		"true true\n(2+0i)\n",
+	);
+});
+
+section("Complex: equality evaluates each operand once");
+
+const HEAD = `package main
+
+import "fmt"
+`;
+
+test("a switch on a complex value calls the case expression once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex128 = 1
+	switch c {
+	case next():
+		fmt.Println("hit", calls)
+	}
+}
+`,
+		"hit 1\n",
+	);
+});
+
+test("== and != call a complex operand once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex128 = 1
+	fmt.Println(c == next(), calls)
+	calls = 0
+	fmt.Println(c != next(), calls)
+	calls = 0
+	fmt.Println(next() == c, calls)
+	calls = 0
+	fmt.Println(next() != next(), calls)
+}
+`,
+		"true 1\nfalse 1\ntrue 1\nfalse 2\n",
+	);
+});
+
+test("complex64 equality calls an operand once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex64 = 1
+	next64 := func() complex64 {
+		calls++
+		return 1
+	}
+	fmt.Println(c == next64(), calls)
+}
+`,
+		"true 1\n",
+	);
+});
+
+test("a case list with a call evaluates it once", async () => {
+	await assertAllTargetsOutput(
+		`${HEAD}
+func main() {
+	calls := 0
+	next := func() complex128 {
+		calls++
+		return 1
+	}
+	_ = next
+	var c complex128 = 1
+	switch c {
+	case 2, next():
+		fmt.Println("hit", calls)
+	}
+}
+`,
+		"hit 1\n",
+	);
+});
+
+test("complex equality results are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := complex(1, 2)
+	b := complex(1, 2)
+	c := complex(1, 3)
+	fmt.Println(a == b, a != b, a == c, a != c, a == complex(1, 2))
+}
+`,
+		"true false false true true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

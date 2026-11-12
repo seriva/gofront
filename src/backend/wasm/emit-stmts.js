@@ -722,17 +722,26 @@ export class StmtsEmitter {
 
 	// Stores the value `emitValue` pushes into the variable `name` that a range
 	// assignment (`for k, v = range m`) targets: a plain local, a boxed local
-	// (its address is taken or a closure mutates it), or a global.
-	_emitRangeAssignStore(name, info, emitValue) {
+	// (its address is taken or a closure mutates it), or a global.  When the
+	// target is an interface, `valueGoType` is the Go type of the ranged
+	// element and the value is boxed into the interface representation;
+	// `emitValue` is then called with the wasm type of `valueGoType`.
+	_emitRangeAssignStore(name, info, emitValue, valueGoType = null) {
 		const local = this.resolveLocal(name);
+		const boxIface =
+			valueGoType && this._rangeStoreWType(name, info) === "anyref";
+		const pushValue = () => {
+			if (boxIface) this._emitRangeValueToAny(emitValue, valueGoType);
+			else emitValue();
+		};
 		if (!local) {
-			emitValue();
+			pushValue();
 			this.pushInstruction({ op: "global.set", index: info.index });
 			return;
 		}
 		if (local.isBoxed) {
 			this.pushInstruction({ op: "local.get", index: local.index });
-			emitValue();
+			pushValue();
 			this.pushInstruction({
 				op: "struct.set",
 				typeIndex: local.boxInfo.typeIndex,
@@ -740,8 +749,28 @@ export class StmtsEmitter {
 			});
 			return;
 		}
-		emitValue();
+		pushValue();
 		this.pushInstruction({ op: "local.set", index: info.index });
+	}
+
+	// Pushes a ranged element of Go type `goType` as an interface value.
+	// `emitValue(wType)` pushes the element in the wasm type of `goType`; an
+	// element that is already an interface needs no boxing.
+	_emitRangeValueToAny(emitValue, goType) {
+		const wType = this.toWasmType(goType);
+		if (wType === "anyref") {
+			emitValue(wType);
+			return;
+		}
+		const name = `__rangeval$${this.tempCounter++}`;
+		const idx = this.allocLocal(name, wType, goType, true);
+		emitValue(wType);
+		this.pushInstruction({ op: "local.set", index: idx });
+		this.emitExpr(
+			{ kind: "Ident", name, _type: goType, _parTmp: true },
+			"anyref",
+		);
+		this.locals.delete(name);
 	}
 
 	// The wasm type of the value a range assignment stores into `info`: the
@@ -751,7 +780,35 @@ export class StmtsEmitter {
 		return local?.isBoxed ? local.boxInfo.wType : info.type;
 	}
 
+	// `for _, out[0] = range xs`: an index, selector or dereference target is
+	// not a variable the loop can store into directly.  Each such target gets
+	// a hidden local that the loop writes (so conversions and interface
+	// boxing work as for a variable), and `_emitRangeBoxes` assigns it to the
+	// real target at the top of the body.  Returns `lhs` with those targets
+	// replaced by identifiers of the hidden locals.
+	_bindRangeAssignTargets(lhs) {
+		return lhs.map((node) => {
+			if (!node || node.kind === "Ident" || !node._type) return node;
+			const name = `__rangetarget$${this.tempCounter++}`;
+			const wType = this.toWasmType(node._type);
+			this.allocLocal(name, wType, node._type, true);
+			if (!this._pendingRangeTargets) this._pendingRangeTargets = [];
+			this._pendingRangeTargets.push({ node, name, goType: node._type });
+			return { kind: "Ident", name, _type: node._type };
+		});
+	}
+
 	_emitRangeBoxes() {
+		const targets = this._pendingRangeTargets ?? [];
+		this._pendingRangeTargets = [];
+		for (const { node, name, goType } of targets) {
+			this._emitAssignSingle(
+				node,
+				{ kind: "Ident", name, _type: goType, _parTmp: true },
+				"=",
+			);
+			this.locals.delete(name);
+		}
 		const pending = this._pendingRangeBoxes ?? [];
 		this._pendingRangeBoxes = [];
 		for (const { name, idx, wType, goType } of pending) {
@@ -1390,13 +1447,19 @@ export class StmtsEmitter {
 		return this.mod.checker?.types?.get(t.name) ?? t;
 	}
 
-	// A defined func or map type lives in `any` as a box (so `iter.Seq[int]` is
-	// not a plain `func(func(int) bool)` and `type M map[string]int` keeps its
-	// name in `%T` and unhashable-key panics).
+	// A defined func, map or array type lives in `any` as a box (so
+	// `iter.Seq[int]` is not a plain `func(func(int) bool)`, `type M
+	// map[string]int` keeps its name in `%T` and unhashable-key panics, and
+	// `type A [2]int` is not a `[2]int` in a type switch).
 	_isMethodNamedRef(goType) {
 		const t = this._resolveTestTarget(goType);
+		if (
+			t &&
+			(isArrayType(t, this.mod.checker) || isMapType(t, this.mod.checker))
+		)
+			return true;
 		if (t?.kind !== "named") return false;
-		return isFuncType(t, this.mod.checker) || isMapType(t, this.mod.checker);
+		return isFuncType(t, this.mod.checker);
 	}
 
 	_emitTypeTest(targetGoType) {
@@ -1455,33 +1518,25 @@ export class StmtsEmitter {
 
 		if (isSliceType(targetGoType, this.mod.checker)) {
 			const elem = this._getSliceElemType(targetGoType);
-			const sInfo = isTaggedSliceType(targetGoType, this.mod.checker)
-				? this.mod.getTaggedSliceType(targetGoType, elem)
-				: this.mod.getSliceType(elem);
+			if (isTaggedSliceType(targetGoType, this.mod.checker)) {
+				const tagged = this.mod.getTaggedSliceType(targetGoType, elem);
+				this.pushInstruction({ op: "ref.test", typeIndex: tagged.typeIndex });
+				return;
+			}
+			const sInfo = this.mod.getSliceType(elem);
 			if (sInfo) {
+				// The unnamed slice type is the bare one, not a tagged subtype.
+				const root = this.mod.getTaggedSliceRoot(sInfo);
+				const tmp = this.acquireTemp("anyref");
+				this.pushInstruction({ op: "local.tee", index: tmp });
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
+				this.pushInstruction({ op: "local.get", index: tmp });
+				this.pushInstruction({ op: "ref.test", typeIndex: root.typeIndex });
+				this.pushInstruction("i32.eqz");
+				this.pushInstruction("i32.and");
+				this.releaseTemp(tmp, "anyref");
 				return;
 			}
-		}
-
-		if (isArrayType(targetGoType, this.mod.checker)) {
-			const elem = this._getArrayElemType(targetGoType);
-			const aInfo = this.mod.getArrayType(elem);
-			if (aInfo) {
-				this._emitArrayTypeTest(targetGoType, aInfo);
-				return;
-			}
-		}
-
-		// A map lives in `any` as its bare map struct.
-		if (isMapType(targetGoType, this.mod.checker)) {
-			const { keyType, valType } = getMapKeyValTypes(
-				targetGoType,
-				this.mod.checker,
-			);
-			const mInfo = this.mod.getMapType(keyType, valType);
-			this._emitRefTestOrNil(targetGoType, mInfo.typeIndex);
-			return;
 		}
 
 		// Scalar types
@@ -1493,32 +1548,6 @@ export class StmtsEmitter {
 
 		this.pushInstruction("drop");
 		this.pushInstruction({ op: "i32.const", value: 1 });
-	}
-
-	// `[3]int` and `[2]int` share one wasm array type, so the test also compares
-	// the length.
-	_emitArrayTypeTest(goType, aInfo) {
-		let t = goType?._assertType ?? goType;
-		for (let i = 0; i < 16 && t && t.kind !== "array"; i++)
-			t = t.underlying ?? this.mod.checker?.types?.get(t.name);
-		const size = typeof t?.size === "number" ? t.size : null;
-		if (size === null) {
-			this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
-			return;
-		}
-		const tmp = this.acquireTemp("anyref");
-		this.pushInstruction({ op: "local.tee", index: tmp });
-		this.pushInstruction({ op: "ref.test", typeIndex: aInfo.typeIndex });
-		this.pushInstruction({ op: "if", blockType: "i32" });
-		this.pushInstruction({ op: "local.get", index: tmp });
-		this.pushInstruction({ op: "ref.cast", typeIndex: aInfo.typeIndex });
-		this.pushInstruction("array.len");
-		this.pushInstruction({ op: "i32.const", value: size });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction("end");
-		this.releaseTemp(tmp, "anyref");
 	}
 
 	// Whether the interface value on the stack holds a type implementing the
@@ -1646,28 +1675,6 @@ export class StmtsEmitter {
 				});
 				return;
 			}
-		}
-
-		if (isArrayType(targetGoType, this.mod.checker)) {
-			const elem = this._getArrayElemType(targetGoType);
-			const aInfo = this.mod.getArrayType(elem);
-			if (aInfo) {
-				this.pushInstruction({
-					op: "ref.cast_null",
-					typeIndex: aInfo.typeIndex,
-				});
-				return;
-			}
-		}
-
-		if (isMapType(targetGoType, this.mod.checker)) {
-			const { keyType, valType } = getMapKeyValTypes(
-				targetGoType,
-				this.mod.checker,
-			);
-			const mInfo = this.mod.getMapType(keyType, valType);
-			this._emitRefCastOrNil(targetGoType, mInfo.typeIndex);
-			return;
 		}
 
 		// Scalar types
@@ -2288,7 +2295,9 @@ export class StmtsEmitter {
 		const rangeExpr =
 			stmt.cond?.kind === "RangeExpr" ? stmt.cond : stmt.init.rhs[0];
 		const isAssign = stmt.init?.kind === "AssignStmt";
-		const lhs = stmt.init?.lhs ?? [];
+		const lhs = isAssign
+			? this._bindRangeAssignTargets(stmt.init.lhs)
+			: (stmt.init?.lhs ?? []);
 		const iterExpr = rangeExpr.expr;
 		const iterType = iterExpr._type;
 
@@ -2357,10 +2366,19 @@ export class StmtsEmitter {
 			if (idxLocalInfo) {
 				const name = lhs[0].name;
 				const wType = this._rangeStoreWType(name, idxLocalInfo);
-				this._emitRangeAssignStore(name, idxLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: idxTmp });
-					if (wType === "i64") this.pushInstruction("i64.extend_i32_s");
-				});
+				const idxGoType =
+					iterType?.kind === "untyped"
+						? { kind: "basic", name: "int" }
+						: iterType;
+				this._emitRangeAssignStore(
+					name,
+					idxLocalInfo,
+					(want = wType) => {
+						this.pushInstruction({ op: "local.get", index: idxTmp });
+						if (want === "i64") this.pushInstruction("i64.extend_i32_s");
+					},
+					idxGoType,
+				);
 			}
 
 			// Emit body
@@ -2471,20 +2489,30 @@ export class StmtsEmitter {
 
 			// Assign index variable
 			if (idxLocalInfo) {
-				this._emitRangeAssignStore(lhs[0].name, idxLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: idxTmp });
-					this.pushInstruction("i64.extend_i32_s");
-				});
+				this._emitRangeAssignStore(
+					lhs[0].name,
+					idxLocalInfo,
+					() => {
+						this.pushInstruction({ op: "local.get", index: idxTmp });
+						this.pushInstruction("i64.extend_i32_s");
+					},
+					{ kind: "basic", name: "int" },
+				);
 			}
 
 			// Assign rune variable
 			if (valLocalInfo) {
 				const name = lhs[1].name;
 				const wType = this._rangeStoreWType(name, valLocalInfo);
-				this._emitRangeAssignStore(name, valLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: runeTmp });
-					if (wType === "i64") this.pushInstruction("i64.extend_i32_u");
-				});
+				this._emitRangeAssignStore(
+					name,
+					valLocalInfo,
+					(want = wType) => {
+						this.pushInstruction({ op: "local.get", index: runeTmp });
+						if (want === "i64") this.pushInstruction("i64.extend_i32_u");
+					},
+					{ kind: "basic", name: "int32" },
+				);
 			}
 
 			// Body
@@ -2652,28 +2680,38 @@ export class StmtsEmitter {
 
 			// Assign key variable
 			if (keyLocalInfo) {
-				this._emitRangeAssignStore(lhs[0].name, keyLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: entryTmp });
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: mapInfo.entryTypeIndex,
-						fieldIndex: 0,
-					});
-					this._emitCopyMapEntry(keyType, mapInfo.keyWType);
-				});
+				this._emitRangeAssignStore(
+					lhs[0].name,
+					keyLocalInfo,
+					() => {
+						this.pushInstruction({ op: "local.get", index: entryTmp });
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: mapInfo.entryTypeIndex,
+							fieldIndex: 0,
+						});
+						this._emitCopyMapEntry(keyType, mapInfo.keyWType);
+					},
+					keyType,
+				);
 			}
 
 			// Assign val variable
 			if (valLocalInfo) {
-				this._emitRangeAssignStore(lhs[1].name, valLocalInfo, () => {
-					this.pushInstruction({ op: "local.get", index: entryTmp });
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: mapInfo.entryTypeIndex,
-						fieldIndex: 1,
-					});
-					this._emitCopyMapEntry(valType, mapInfo.valWType);
-				});
+				this._emitRangeAssignStore(
+					lhs[1].name,
+					valLocalInfo,
+					() => {
+						this.pushInstruction({ op: "local.get", index: entryTmp });
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: mapInfo.entryTypeIndex,
+							fieldIndex: 1,
+						});
+						this._emitCopyMapEntry(valType, mapInfo.valWType);
+					},
+					valType,
+				);
 			}
 
 			// Body
@@ -2849,38 +2887,48 @@ export class StmtsEmitter {
 		if (idxLocalInfo) {
 			const name = lhs[0].name;
 			const wType = this._rangeStoreWType(name, idxLocalInfo);
-			this._emitRangeAssignStore(name, idxLocalInfo, () => {
-				this.pushInstruction({ op: "local.get", index: idxTmp });
-				if (wType === "i64") this.pushInstruction("i64.extend_i32_s");
-			});
+			this._emitRangeAssignStore(
+				name,
+				idxLocalInfo,
+				(want = wType) => {
+					this.pushInstruction({ op: "local.get", index: idxTmp });
+					if (want === "i64") this.pushInstruction("i64.extend_i32_s");
+				},
+				{ kind: "basic", name: "int" },
+			);
 		}
 
 		// Assign val
 		if (valLocalInfo) {
-			this._emitRangeAssignStore(lhs[1].name, valLocalInfo, () => {
-				this.pushInstruction({ op: "local.get", index: arrTmp });
-				this.pushInstruction({ op: "local.get", index: offTmp });
-				this.pushInstruction({ op: "local.get", index: idxTmp });
-				this.pushInstruction("i32.add");
-				this.pushInstruction({
-					op: "array.get",
-					typeIndex: arrInfo.typeIndex,
-				});
-				if (
-					isStructType(elemGoType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(elemGoType, this.mod.checker, this.mod)
-				) {
-					const sInfo = this._resolveStructInfo({ _type: elemGoType });
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, arrInfo.elemWType);
+			this._emitRangeAssignStore(
+				lhs[1].name,
+				valLocalInfo,
+				() => {
+					this.pushInstruction({ op: "local.get", index: arrTmp });
+					this.pushInstruction({ op: "local.get", index: offTmp });
+					this.pushInstruction({ op: "local.get", index: idxTmp });
+					this.pushInstruction("i32.add");
+					this.pushInstruction({
+						op: "array.get",
+						typeIndex: arrInfo.typeIndex,
+					});
+					if (
+						isStructType(elemGoType, this.mod.checker, this.mod) &&
+						!isPointerToStruct(elemGoType, this.mod.checker, this.mod)
+					) {
+						const sInfo = this._resolveStructInfo({ _type: elemGoType });
+						if (sInfo) {
+							this.emitCloneStruct(sInfo, arrInfo.elemWType);
+						}
+					} else if (
+						elemGoType?.kind !== "pointer" &&
+						isArrayType(elemGoType, this.mod.checker)
+					) {
+						this.emitCopyArray(elemGoType);
 					}
-				} else if (
-					elemGoType?.kind !== "pointer" &&
-					isArrayType(elemGoType, this.mod.checker)
-				) {
-					this.emitCopyArray(elemGoType);
-				}
-			});
+				},
+				elemGoType,
+			);
 		}
 
 		// Body
