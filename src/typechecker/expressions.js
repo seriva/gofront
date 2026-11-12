@@ -322,7 +322,8 @@ export const expressionCheckMethods = {
 
 	_checkBoolUnaryOp(ot, expr) {
 		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
-		return BOOL;
+		// `!` keeps an untyped or defined bool type.
+		return isBool(ot) ? ot : BOOL;
 	},
 
 	_checkNumericUnaryOp(ot, expr) {

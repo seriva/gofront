@@ -12,6 +12,7 @@ import {
 	FLOAT64,
 	is64BitInt,
 	isAny,
+	isBool,
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
@@ -27,6 +28,7 @@ import {
 	SIZED_INT_NAMES,
 	STRING,
 	typeStr,
+	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
@@ -63,6 +65,15 @@ const UNTYPED_COMPAT = {
 	complex128: new Set(["complex128", "complex64"]),
 };
 
+// `&&` and `||` of two untyped bools stay untyped; a typed operand (including
+// a defined bool type) gives its type, as in Go.
+function logicalResultType(lt, rt) {
+	if (lt?.kind === "untyped" && rt?.kind === "untyped") return UNTYPED_BOOL;
+	if (rt?.kind === "untyped" && isBool(lt)) return lt;
+	if (lt?.kind === "untyped" && isBool(rt)) return rt;
+	return BOOL;
+}
+
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
@@ -71,12 +82,13 @@ export const assignabilityMethods = {
 		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
 			return this._binaryResultTypeTypeParam(op, lt, rt);
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
-		if (LOG_OPS.has(op)) return BOOL;
+		if (LOG_OPS.has(op)) return logicalResultType(lt, rt);
 		return this._binaryResultTypeNonComplex(op, lt, rt, node);
 	},
 
 	_binaryResultTypeTypeParam(op, lt, rt) {
-		if (CMP_OPS.has(op) || LOG_OPS.has(op)) return BOOL;
+		if (CMP_OPS.has(op)) return UNTYPED_BOOL;
+		if (LOG_OPS.has(op)) return BOOL;
 		return lt?.kind === "typeParam" ? lt : rt;
 	},
 
@@ -137,7 +149,8 @@ export const assignabilityMethods = {
 		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
 		this._checkIntegerCmpKinds(op, lt, rt, node);
 		this._checkEqualityComparable(op, lt, rt, node);
-		return BOOL;
+		// A comparison is an untyped bool: it also fits a defined bool type.
+		return UNTYPED_BOOL;
 	},
 
 	_binaryResultTypeComplex(op, lt, rt, node) {

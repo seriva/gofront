@@ -409,7 +409,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
 
 ### Phase 10: Untyped Constants and Comparisons
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth sweep, `M01`–`M05`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, fourth sweep)).
-- [ ] Task 10.1: Treat comparison results as untyped bools (`M01`)
+- [x] Task 10.1: Treat comparison results as untyped bools (`M01`)
   - Files: `src/typechecker/expressions.js` (binary comparison and logical result types), `src/typechecker/assignability.js` (untyped bool into a defined bool type, if needed)
   - Test: `test/unit/language/defined-bool.test.js` (new): `type B bool; func f(b B)`: `f(x == 1)`, `var b B = x == 1`, `b = x < 2`, `return x == 1`, `S{x == 1}`, `map[string]B{"a": x == 1}`, `f(x == 1 && y == 2)` print `true`; `var u = x == 1` and `x == 1` into `any` print `bool`; negative (`assertErrorContains(…, "Cannot assign")` on every target): a typed `bool` variable and `!b`/`a && b` of typed bools into `B`, `x == 1` into `type MyI int`
   - Done when: `assertAllTargetsOutput` passes for the positives, the negatives report on every target, and `npm run check` type-checks the examples and the Go-source stdlib
