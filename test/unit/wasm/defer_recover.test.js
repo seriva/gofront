@@ -982,3 +982,23 @@ func main() {
 `;
 	await assertDeferOutput(src, "true\n");
 });
+
+section("WASM Defer — inferred generic callees");
+
+test("constants for an inferred generic callee take the declared parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+func id[T any](x T, y complex128) { fmt.Println(x, y) }
+func idf[T any](x T, y float64)   { fmt.Println(x, y) }
+
+func main() {
+	defer id(1, 2)
+	defer idf("a", 2)
+	defer id[int](1, 2)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n1 (2+0i)\na 2\n1 (2+0i)\n");
+});

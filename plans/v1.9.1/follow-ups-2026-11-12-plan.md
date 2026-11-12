@@ -337,7 +337,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third s
   - Files: `src/lower/functions.js` (`deferTempType`, temp declaration)
   - Test: `test/unit/wasm/defer_recover.test.js`: `type MyFloat float64; func f(x MyFloat) {…}; defer f(2.5)` → `2.5` and compiling the same file twice (`compileFiles` on one path) succeeds; `MyInt`, `MyS`; `defer f(nil)` for `*int`, `fmt.Stringer`, `error`, `any`, `[]int`, `map[string]int`, `func()` parameters → `true`; typed nil variable unchanged
   - Done when: `assertAllTargetsOutput` passes, `assertValidWasm` holds, and the second compile no longer reports `Cannot assign float64 to MyFloat`
-- [ ] Task 8.2: Type deferred constants for inferred generic callees (`L08`)
+- [x] Task 8.2: Type deferred constants for inferred generic callees (`L08`)
   - Files: `src/lower/functions.js`, `src/backend/wasm/monomorph.js` (only if the probe at task start shows the instantiated signature is lost there)
   - Test: `test/unit/wasm/defer_recover.test.js`: `func id[T any](x T, y complex128) {…}; defer id(1, 2)` → `1 (2+0i)`; `defer id("a", 2)` with a `float64` parameter → `a 2`; `defer id[int](1, 2)` unchanged
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
