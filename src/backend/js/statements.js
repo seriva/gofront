@@ -1948,7 +1948,8 @@ export const statementGenMethods = {
 	genIteratorFor(stmt) {
 		const range = stmt.init.rhs[0];
 		const isAssign = stmt.init.kind === "AssignStmt";
-		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
+		// A non-identifier target is stored through _emitRangeVar, not by name.
+		const lhs = stmt.init.lhs.map((e) => e.name ?? "_$target");
 		const yieldTypes = range._yieldParams ?? [];
 		if (isAssign) {
 			const cbParams = lhs.map((_, i) => `__p${i}`);
@@ -1962,9 +1963,7 @@ export const statementGenMethods = {
 							this._isStructType(stmt.init.lhs[i]?._type);
 						if (isStruct) this.useHelper("sclone");
 						const value = isStruct ? `__sclone(${cbParams[i]})` : cbParams[i];
-						this.line(
-							`${lhs[i]} = ${this._boxRangeAssigned(stmt.init.lhs[i], value)};`,
-						);
+						this._emitRangeVar(stmt.init.lhs[i], value, true);
 					}
 				}
 			};

@@ -670,6 +670,79 @@ func main() {
 	);
 });
 
+section("Range assignment: range-over-func into non-identifier targets");
+
+for (const [name, decls, body, want] of [
+	[
+		"a slice element of an interface",
+		"out := make([]fmt.Stringer, 1)",
+		"for out[0] = range seq {\n\t}\n\tfmt.Println(out[0].String())",
+		"N10\n",
+	],
+	[
+		"a struct field of an interface",
+		"var s struct{ v fmt.Stringer }",
+		"for s.v = range seq {\n\t}\n\tfmt.Println(s.v)",
+		"N10\n",
+	],
+	[
+		"a map entry of an interface",
+		"m := map[string]fmt.Stringer{}",
+		'for m["a"] = range seq {\n\t}\n\tfmt.Println(m["a"])',
+		"N10\n",
+	],
+	[
+		"a pointer deref of an interface",
+		"var v fmt.Stringer\n\tp := &v",
+		"for *p = range seq {\n\t}\n\tfmt.Println(v, *p == v)",
+		"N10 true\n",
+	],
+	[
+		"an any slice element keeping the defined type",
+		"a := make([]any, 1)",
+		"for a[0] = range seq {\n\t}\n\t_, ok := a[0].(N)\n\tfmt.Println(ok)",
+		"true\n",
+	],
+	[
+		"an index and an interface element (two values)",
+		"ks := make([]int, 1)\n\tout := make([]fmt.Stringer, 1)",
+		"for ks[0], out[0] = range seq2 {\n\t}\n\tfmt.Println(ks[0], out[0])",
+		"1 N10\n",
+	],
+	[
+		"an interface element from a struct yield value",
+		"out := make([]fmt.Stringer, 1)",
+		"for out[0] = range seqP {\n\t}\n\tfmt.Println(out[0])",
+		"P7\n",
+	],
+	[
+		"a non-interface slice element",
+		"ks := make([]int, 1)",
+		"for ks[0] = range seqInt {\n\t}\n\tfmt.Println(ks[0])",
+		"5\n",
+	],
+]) {
+	test(`range-over-func assignment into ${name}`, async () => {
+		await assertAllTargetsOutput(
+			`${ITER_PRELUDE}
+func seqP(yield func(P) bool) {
+	yield(P{7})
+}
+
+func seqInt(yield func(int) bool) {
+	yield(5)
+}
+
+func main() {
+	${decls}
+	${body}
+}
+`,
+			want,
+		);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

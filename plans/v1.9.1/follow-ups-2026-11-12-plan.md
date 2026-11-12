@@ -427,7 +427,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 fourth 
   - Files: per probe at task start: `src/typechecker/assignability.js` (`_ifaceBoxMeta` / `_classifyIfaceBox`) and/or `src/backend/js/index.js` (fmt tag), `src/backend/wasm/module-emitter.js` (box/name registration), `docs/go-compatibility.md` (`fmt` of a value in an `any` row, only if it no longer matches)
   - Test: `test/unit/types/dynamic-types.test.js`: `var a any = map[string]bool{"a": true}; fmt.Printf("%T|%v\n", a, a)` → `map[string]bool|map[a:true]`; `[2]bool`, `map[rune]string`, `map[int32]bool`, `map[int8]int`, `map[bool]int`, `[2]int32`, `[2]uint8`, by literal, by variable and by `make`; `map[string]bool` asserted as `map[string]int` → `false`; `int`/`string`/`float32` element composites and slices unchanged
   - Done when: `assertAllTargetsOutput` passes and the commit body names the root cause
-- [ ] Task 11.2: Box range-over-func assignments into index, field, map-entry and deref targets in JS (`M03`)
+- [x] Task 11.2: Box range-over-func assignments into index, field, map-entry and deref targets in JS (`M03`)
   - Files: `src/typechecker/statements.js` (`_checkRangeIterAssignVars`), `src/backend/js/statements.js` (iterator loop store)
   - Test: `test/unit/language/range-assign.test.js`: `for out[0] = range seq {}` into `[]fmt.Stringer` → `N10`; struct field `s.v` → `N10`; map entry `m["a"]` → `N10`; deref `*p` (with `p` used afterwards) → `N10`; `[]any` element with `.(N)` → `true`; two-value `for ks[0], out[0] = range seq2` → `1 N10`; struct yield value and `[]int` element unchanged
   - Done when: `assertAllTargetsOutput` passes
