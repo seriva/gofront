@@ -430,7 +430,7 @@ func main() { adopt(Fish{}) }`);
 	assertErrorContains(errors, "does not satisfy constraint");
 });
 
-test("approx constraint (~int) accepts any type — no error", () => {
+test("approx constraint (~int) accepts a matching type — no error", () => {
 	const { errors } = compile(`package main
 type Num interface { ~int }
 func double[T Num](v T) T { return v + v }
@@ -2333,6 +2333,56 @@ func main() {
 		"3 2 4\n3 2 4\n0 0 0\nb c d\n[a] [a b] [a b c]\n[b c d] [c d] [d]\n[b c] [c d] [a b]\n121 122 120\n",
 	);
 });
+
+section("Generics — union constraints with named-interface terms");
+
+const UNION_DECLS = `type S interface{ ~int }
+type U interface{ ~uint }
+type I interface{ S | U }
+type V interface{ I | ~string }
+type MyInt int
+
+func f[T I](x T) T { return x }
+func g[T V](x T) T { return x }
+func h[T ~int | ~uint](x T) T { return x }
+`;
+
+test("a union of named interfaces accepts a type from any term (js, both, wasm)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${UNION_DECLS}
+func main() {
+	fmt.Println(f(1), f(uint(2)), f(MyInt(3)))
+	fmt.Println(g(4), g(uint(5)), g("six"), h(7), h(uint(8)))
+}
+`,
+		"1 2 3\n4 5 six 7 8\n",
+	);
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [name, call] of [
+		["a string for a union of named interfaces", 'f("a")'],
+		["a float for a union of named interfaces", "f(1.5)"],
+		["an int8 for a union of named interfaces", "f(int8(1))"],
+		["a float for a nested named union", "g(1.5)"],
+		["a string for a ~int | ~uint union", 'h("a")'],
+	]) {
+		test(`${name} does not satisfy the constraint (${target})`, () => {
+			const src = `package main
+
+${UNION_DECLS}
+func main() { ${call} }
+`;
+			const { errors } =
+				target === "wasm" ? compileWasm(src) : compile(src, { target });
+			assertErrorContains(errors ?? [], "does not satisfy constraint");
+		});
+	}
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
