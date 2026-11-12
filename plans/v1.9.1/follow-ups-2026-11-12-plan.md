@@ -165,10 +165,10 @@ All 9 entries re-probed on `feat/follow-ups-2026-11-12` @ `14cde54`. Columns js 
 - **`K06` (Tasks 7.1–7.3):** each site converts an untyped constant to the complex struct with the existing untyped-literal-to-complex conversion in `src/backend/wasm/emit-exprs.js` (it needs the target wasm type, which these three sites do not pass): store through a pointer deref (assign and compound assign), the `switch` tag comparison (complex equality for the tag and each case, including complex-typed cases), and deferred call arguments (evaluated into the defer record with the parameter type as target).
 
 - **`L05`, `L07`, `L08`, `L09` (Tasks 8.1–8.4):** deferred-call argument hoisting (`normalizeDeferStmt`, `src/lower/functions.js`) types each temp by the callee's declared parameter.
-  - 8.1: `deferTempType` returns the parameter's type for an untyped constant or `nil` whatever the parameter (defined basic types, pointer, interface, `error`, slice, map, func, `any`); the temp is declared with that type node (resolved through the callee's `_type`, not only `{ kind: "TypeName", name }` for basic names), so the lowered code type-checks again on a second compile (`L07`, `L09`).
-  - 8.2: an inferred generic callee uses the instantiated signature (typechecker's resolved call type) or, for constants, the generic parameter's declared type after substitution (`L08`).
+  - 8.1: an untyped constant or `nil` argument (a literal, a constant expression or a named constant) is not hoisted: it stays in the deferred call, where it takes the callee's parameter type as in a direct call, so no temp is declared with a defaulted type and the lowered code type-checks again on a second compile (`L07`, `L09`). Declaring the temp with a type node would need a type node for every parameter type (`spec.type` is read by the backends); leaving a constant in place needs none. Non-constant untyped values (`x == 1`) are still hoisted with their default type.
+  - 8.2: with constants left in place, an inferred generic callee types them from its own signature (`L08`); no `monomorph.js` change.
   - 8.3: variadic arguments are typed by the variadic element type, and a spread argument (`f(s...)`) keeps `_spread` on its temp (declared with the slice type), so the call passes the slice through (`L05` JS/lowering).
-  - 8.4: with 8.3 in place, `emitDeferStmt` (`src/backend/wasm/emit.js`) packs variadic arguments of a deferred call into the element-typed array (and `...any` as one array of boxed values), so no invalid module and `defer fmt.Println("x", 1)` prints (`L05` WASM); pin the remaining WASM cause with a probe at task start.
+  - 8.4: root cause pinned by probe: the lowered deferred wrapper lists its call under both `stmts` and `list`, so `desugarVariadics` (`src/backend/wasm/variadic.js`) packed the same call node twice (`[]int{[]int{…}}`, a `[[1 a]]` for `...any`, a spread wrapped again). `packCallArgs` marks a packed call (`_variadicPacked`) and skips it the second time; `emitDeferStmt` needs no change, and `defer fmt.Println("x", 1)` now prints (`L05` WASM).
 - **`L01` (Task 9.1):** `_emitRangeAssignStore` takes the assignment target node, not a name: identifiers keep the current local/boxed/global paths; index (slice, array, map), selector and deref targets evaluate the target address once before the loop body iteration and store through the existing assignment-statement lvalue emitter, with the Task 4.1 interface boxing when the target type is an interface.
 - **`L02` (Task 9.2):** the range-over-func assignment path records the same `_rangeBox` holder as Task 5.4 on each assigned `lhs` using the iterator's yield parameter types (`_checkRangeIterAssignVars`), and the JS iterator loop wraps the yielded value with `_ifaceBoxWrap` / the named-box helpers before assigning.
 - **`L03` (Task 9.3):** the JS assertion / type-switch unboxing of a defined slice type returns `null` for a boxed nil slice (the same value the nil `any` held), like maps; pin the exact unwrap site at task start.
@@ -333,20 +333,20 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
 
 ### Phase 8: Deferred Calls
 Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12 third sweep, `L01`–`L09`). Each task's `Test:` asserts the repro from `Verified Gaps` (Review follow-ups (2026-11-12, third sweep)).
-- [ ] Task 8.1: Type deferred constants and `nil` by the callee's parameter (`L07`, `L09`)
+- [x] Task 8.1: Type deferred constants and `nil` by the callee's parameter (`L07`, `L09`)
   - Files: `src/lower/functions.js` (`deferTempType`, temp declaration)
   - Test: `test/unit/wasm/defer_recover.test.js`: `type MyFloat float64; func f(x MyFloat) {…}; defer f(2.5)` → `2.5` and compiling the same file twice (`compileFiles` on one path) succeeds; `MyInt`, `MyS`; `defer f(nil)` for `*int`, `fmt.Stringer`, `error`, `any`, `[]int`, `map[string]int`, `func()` parameters → `true`; typed nil variable unchanged
   - Done when: `assertAllTargetsOutput` passes, `assertValidWasm` holds, and the second compile no longer reports `Cannot assign float64 to MyFloat`
-- [ ] Task 8.2: Type deferred constants for inferred generic callees (`L08`)
+- [x] Task 8.2: Type deferred constants for inferred generic callees (`L08`)
   - Files: `src/lower/functions.js`, `src/backend/wasm/monomorph.js` (only if the probe at task start shows the instantiated signature is lost there)
   - Test: `test/unit/wasm/defer_recover.test.js`: `func id[T any](x T, y complex128) {…}; defer id(1, 2)` → `1 (2+0i)`; `defer id("a", 2)` with a `float64` parameter → `a 2`; `defer id[int](1, 2)` unchanged
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds
-- [ ] Task 8.3: Hoist variadic and spread deferred arguments correctly (`L05` lowering, JS)
+- [x] Task 8.3: Hoist variadic and spread deferred arguments correctly (`L05` lowering, JS)
   - Files: `src/lower/functions.js` (`normalizeDeferStmt`)
   - Test: `test/unit/wasm/defer_recover.test.js` (JS targets via `assertJsTargetsOutput`): `s := []int{1, 2}; defer f(s...)` → `[1 2]`; `defer f(0, s...)` → `0 [1 2 3]`; `[]string` spread → `[a b]`; arguments evaluated at the `defer` statement (`x` changed afterwards); no-argument variadic defer
   - Done when: `assertJsTargetsOutput` passes and the output no longer contains `-9223372036854775808`
-- [ ] Task 8.4: Emit deferred variadic calls in WASM (`L05` WASM)
-  - Files: `src/backend/wasm/emit.js` (`emitDeferStmt`), `src/backend/wasm/emit-stmts.js` (only if the probe at task start shows it)
+- [x] Task 8.4: Emit deferred variadic calls in WASM (`L05` WASM)
+  - Files: `src/backend/wasm/variadic.js` (`packCallArgs`; the probe at task start pinned the cause there, not in `emitDeferStmt`)
   - Test: `test/unit/wasm/defer_recover.test.js`: `defer f(x)` (`...float64`) → `[4]`; `...int` with none, one, many and spread arguments; `...string`; `...any` `defer f(1, "a")` → `[1 a]`; `defer fmt.Println("x", 1)` → `x 1`; variadic method `defer tv.m(1, 2)`; `defer func(ys ...int){…}(1, 2)`
   - Done when: `assertAllTargetsOutput` passes and `assertValidWasm` holds for every program
 

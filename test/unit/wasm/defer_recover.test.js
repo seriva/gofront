@@ -1,16 +1,60 @@
 // test/unit/wasm/defer_recover.test.js
 // Tests for Task H4.4: Defer & Recover in WASM backend and JS-strict parity.
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { compileFiles, evictParseCache } from "../../../src/compiler.js";
 import {
 	assertAllTargetsOutput,
 	assertEqual,
+	assertJsTargetsOutput,
 	assertProgramOutput,
+	assertValidWasm,
 	compileHybrid,
 	compileWasm,
 	runWasm,
 	section,
 	test,
 } from "../helpers.js";
+
+// Compiles `source` twice on one path for each target, as `gofront dev` does
+// when the file is unchanged: the second type-check sees the lowered syntax
+// tree the first compile left in the parse cache, so a deferred call's
+// hoisted temporaries must type-check again.
+function assertRecompiles(source, targets = ["js", "both", "wasm"]) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-defer-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		for (const target of targets) {
+			try {
+				compileFiles([goPath], { forceTarget: target });
+				const second = compileFiles([goPath], { forceTarget: target });
+				if (target === "wasm") assertValidWasm(second.wasm);
+			} catch (e) {
+				throw new Error(`${target}: second compile failed: ${e.message}`);
+			} finally {
+				evictParseCache(goPath);
+			}
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+// `assertAllTargetsOutput` plus a second compile of the same file.
+async function assertDeferOutput(source, expected) {
+	await assertAllTargetsOutput(source, expected);
+	assertRecompiles(source);
+}
+
+// The same for programs only the JS targets (`js` and the JS side of `both`)
+// run correctly.
+async function assertDeferJsOutput(source, expected) {
+	await assertJsTargetsOutput(source, expected);
+	assertRecompiles(source, ["js", "both"]);
+}
 
 section("WASM Defer — LIFO Execution Order");
 
@@ -841,4 +885,275 @@ func main() {
 }
 `;
 	await assertAllTargetsOutput(src, "body\n2 3 1\n");
+});
+
+section("WASM Defer — constants and nil for the callee's parameter");
+
+test("untyped constants take a defined parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyFloat float64
+type MyInt int
+type MyS string
+
+func f(x MyFloat, n MyInt, s MyS) { fmt.Println(x, n, s) }
+
+func main() {
+	defer f(2.5, 3, "a")
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n2.5 3 a\n");
+});
+
+test("a named constant and a constant expression take the parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyFloat float64
+
+const k = 1.5
+
+func f(x MyFloat, y MyFloat) { fmt.Println(x, y) }
+
+func main() {
+	defer f(k, k*2+1)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n1.5 4\n");
+});
+
+test("an untyped bool value is computed at the defer statement", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(b bool) { fmt.Println(b) }
+
+func main() {
+	x := 1
+	defer f(x == 1)
+	x = 2
+}
+`;
+	await assertDeferOutput(src, "true\n");
+});
+
+test("defer f(nil) for every nilable parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+func fp(p *int)               { fmt.Println("ptr", p == nil) }
+func fs(p fmt.Stringer)       { fmt.Println("stringer", p == nil) }
+func fe(p error)              { fmt.Println("error", p == nil) }
+func fa(p any)                { fmt.Println("any", p == nil) }
+func fl(p []int)              { fmt.Println("slice", p == nil) }
+func fm(p map[string]int)     { fmt.Println("map", p == nil) }
+func ff(p func())             { fmt.Println("func", p == nil) }
+
+func main() {
+	defer fp(nil)
+	defer fs(nil)
+	defer fe(nil)
+	defer fa(nil)
+	defer fl(nil)
+	defer fm(nil)
+	defer ff(nil)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(
+		src,
+		"body\nfunc true\nmap true\nslice true\nany true\nerror true\nstringer true\nptr true\n",
+	);
+});
+
+test("a typed nil variable is still evaluated at the defer statement", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(p *int) { fmt.Println(p == nil) }
+
+func main() {
+	var p *int
+	defer f(p)
+	v := 1
+	p = &v
+}
+`;
+	await assertDeferOutput(src, "true\n");
+});
+
+section("WASM Defer — inferred generic callees");
+
+test("constants for an inferred generic callee take the declared parameter type", async () => {
+	const src = `package main
+
+import "fmt"
+
+func id[T any](x T, y complex128) { fmt.Println(x, y) }
+func idf[T any](x T, y float64)   { fmt.Println(x, y) }
+
+func main() {
+	defer id(1, 2)
+	defer idf("a", 2)
+	defer id[int](1, 2)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n1 (2+0i)\na 2\n1 (2+0i)\n");
+});
+
+section("Defer — variadic and spread arguments (JS targets)");
+
+test("a spread argument of a deferred call stays a slice", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...int)               { fmt.Println(ys) }
+func g(a int, ys ...int)        { fmt.Println(a, ys) }
+func h(ys ...string)            { fmt.Println(ys) }
+
+func main() {
+	s := []int{1, 2}
+	defer f(s...)
+	t := []int{1, 2, 3}
+	defer g(0, t...)
+	u := []string{"a", "b"}
+	defer h(u...)
+	fmt.Println("body")
+}
+`;
+	await assertDeferJsOutput(src, "body\n[a b]\n0 [1 2 3]\n[1 2]\n");
+});
+
+test("deferred variadic arguments are evaluated at the defer statement", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...int) { fmt.Println(ys) }
+
+func main() {
+	x := 1
+	defer f(x, x+1)
+	x = 5
+	s := []int{1, 2}
+	defer f(s...)
+	s[0] = 9
+	s = nil
+	defer f()
+	fmt.Println("body", x, s)
+}
+`;
+	await assertDeferJsOutput(src, "body 5 []\n[]\n[9 2]\n[1 2]\n");
+});
+
+section("WASM Defer — variadic callees on every target");
+
+test("a deferred call of a variadic float64 function", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...float64) { fmt.Println(ys) }
+
+func main() {
+	x := 4.0
+	defer f(x)
+	x = 5
+	fmt.Println("body", x)
+}
+`;
+	await assertDeferOutput(src, "body 5\n[4]\n");
+});
+
+test("a deferred call of a variadic int function with none, one, many and spread arguments", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...int)        { fmt.Println("f", ys) }
+func g(a int, ys ...int) { fmt.Println("g", a, ys) }
+
+func main() {
+	s := []int{7, 8, 9}
+	defer f()
+	defer f(1)
+	defer f(1, 2, 3)
+	defer f(s...)
+	defer g(0)
+	defer g(0, 5)
+	defer g(0, s...)
+	s[0] = 70
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(
+		src,
+		"body\ng 0 [70 8 9]\ng 0 [5]\ng 0 []\nf [70 8 9]\nf [1 2 3]\nf [1]\nf []\n",
+	);
+});
+
+test("a deferred call of a variadic string function", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...string) { fmt.Println(len(ys), ys) }
+
+func main() {
+	u := []string{"x", "y"}
+	defer f("a", "b", "c")
+	defer f(u...)
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n2 [x y]\n3 [a b c]\n");
+});
+
+test("a deferred call of a variadic any function and fmt.Println", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f(ys ...any) { fmt.Println(len(ys), ys) }
+
+func main() {
+	defer f(1, "a")
+	defer fmt.Println("x", 1)
+	defer fmt.Printf("%d-%s\\n", 2, "b")
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\n2-b\nx 1\n2 [1 a]\n");
+});
+
+test("deferred variadic method and func literal calls", async () => {
+	const src = `package main
+
+import "fmt"
+
+type T struct{ n int }
+
+func (t T) m(ys ...int)   { fmt.Println("m", t.n, ys) }
+func (t *T) p(ys ...int)  { fmt.Println("p", t.n, ys) }
+
+func main() {
+	tv := T{n: 1}
+	defer tv.m(1, 2)
+	defer tv.p(3)
+	defer func(ys ...int) { fmt.Println("lit", ys) }(1, 2)
+	defer func(ys ...int) { fmt.Println("lit", ys) }()
+	fmt.Println("body")
+}
+`;
+	await assertDeferOutput(src, "body\nlit []\nlit [1 2]\np 1 [3]\nm 1 [1 2]\n");
 });
