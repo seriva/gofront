@@ -73,6 +73,53 @@ for (const [name, body, want] of [
 	});
 }
 
+section("Index and make size: only integer constants are accepted");
+
+const SLICE = "s := []int{1, 2, 3}\n\t_ = s\n\t";
+
+for (const [name, body] of [
+	["s[1 == 1]", "_ = s[1 == 1]"],
+	['s["a"]', '_ = s["a"]'],
+	["s[nil]", "_ = s[nil]"],
+	["s[1.5]", "_ = s[1.5]"],
+	["a typed float constant index", "const c float64 = 1\n\t_ = s[c]"],
+	["an array index a[1 == 1]", "var a [3]int\n\t_ = a[1 == 1]"],
+	["a string index", '_ = "abc"[1 == 1]'],
+	["a slice bound s[1 == 1 : 2]", "_ = s[1 == 1 : 2]"],
+	["make([]int, 1 == 1)", "_ = make([]int, 1 == 1)"],
+	['make([]int, "a")', '_ = make([]int, "a")'],
+	["make([]int, 2, 1.5)", "_ = make([]int, 2, 1.5)"],
+	["make([]int, 2i)", "_ = make([]int, 2i)"],
+	['make(map[string]int, "a")', '_ = make(map[string]int, "a")'],
+]) {
+	for (const target of TARGETS) {
+		test(`${name} is rejected (${target})`, () => {
+			assertErrorContains(
+				errorsOn(target, program(`${SLICE}${body}`)),
+				"must be integer",
+			);
+		});
+	}
+}
+
+for (const [name, body, want] of [
+	["s[1.0]", "fmt.Println(s[1.0])", "2\nok\n"],
+	["s['\\x01']", "fmt.Println(s['\\x01'])", "2\nok\n"],
+	["s[N - 1]", "fmt.Println(s[N-1])", "3\nok\n"],
+	["s[1.0:2.0]", "fmt.Println(s[1.0:2.0])", "[2]\nok\n"],
+	["make([]int, 2.0)", "fmt.Println(len(make([]int, 2.0)))", "2\nok\n"],
+	["make([]int, 1, 2.0)", "fmt.Println(cap(make([]int, 1, 2.0)))", "2\nok\n"],
+	[
+		"a map keyed by a bool constant",
+		"m := map[bool]int{true: 4}\n\tfmt.Println(m[1 == 1])",
+		"4\nok\n",
+	],
+]) {
+	test(`${name} runs (js, both, wasm)`, async () => {
+		await assertAllTargetsOutput(program(`${SLICE}${body}`), want);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

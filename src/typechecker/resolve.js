@@ -2,7 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { parseJsonTag } from "../parser/struct-tag.js";
-import { constIntValue, foldConstExpr } from "./const-fold.js";
+import { foldConstExpr } from "./const-fold.js";
 import { exprText } from "./operand-text.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
@@ -26,17 +26,6 @@ import {
 } from "./types.js";
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
-
-// Describes a constant that is not integer-valued (`untyped bool constant`), or
-// null for an integer, an untyped float with an integer value, or a rune.
-function nonIntegerConstKind(v) {
-	if (v.k === "INT") return null;
-	if (v.k === "FLOAT") {
-		if (v.t) return `${v.t} constant`;
-		return constIntValue(v) === null ? "untyped float constant" : null;
-	}
-	return `${v.k.toLowerCase()} constant`;
-}
 
 // Dispatch table for substituteType — keyed by type.kind.
 // Nesting depth of in-progress instances of one generic type before the
@@ -478,21 +467,7 @@ export const resolveMethods = {
 	// An array length must be an integer constant: `[1 == 1]T`, `["a"]T`,
 	// `[nil]T`, `[2.5]T`, `[2i]T` and a typed float constant are rejected.
 	_reportNonIntegerArrayLen(size, scope) {
-		let e = size;
-		while (e?.kind === "ParenExpr") e = e.expr;
-		let what = null;
-		if (e?.kind === "ImagLit") what = "untyped complex constant";
-		else if (e?.kind === "BasicLit" && e.litKind === "NIL")
-			what = "untyped nil";
-		else {
-			let v = null;
-			try {
-				v = this._constValue(size, scope);
-			} catch {
-				// not a constant the evaluator understands
-			}
-			what = v ? nonIntegerConstKind(v) : null;
-		}
+		const what = this._nonIntegerConst(size, scope);
 		if (!what) return false;
 		this.err(
 			`invalid array length ${exprText(size)} (${what}): must be integer`,
