@@ -541,8 +541,14 @@ export function isSliceType(goType, checker = null) {
 }
 
 // Element kinds whose slices share one WebAssembly representation (a slice of
-// i32), so `[]bool`, `[]byte` and `[]rune` cannot be told apart by `ref.test`.
+// i32, or of i64 for the 64-bit integers), so `[]bool`, `[]byte`, `[]rune` and
+// `[]int` vs `[]int64` cannot be told apart by `ref.test`.
 const TAGGED_SLICE_ELEMS = new Set([
+	"int",
+	"int64",
+	"uint",
+	"uint64",
+	"uintptr",
 	"bool",
 	"int8",
 	"int16",
@@ -554,8 +560,8 @@ const TAGGED_SLICE_ELEMS = new Set([
 	"rune",
 ]);
 
-// True for a defined slice type, a slice of booleans or integers of at most
-// 32 bits, or a slice of a method interface.  In an
+// True for a defined slice type, a slice of booleans or integers, or a slice
+// of a method interface.  In an
 // interface such a value carries a per-Go-type tag (see getTaggedSliceType).
 export function isTaggedSliceType(goType, checker = null) {
 	if (!isSliceType(goType, checker)) return false;

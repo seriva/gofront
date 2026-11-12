@@ -821,3 +821,74 @@ func main() {
 		"[3 4] [2]int64 [0 4]\n[3 4] [3 9] true false\ninterface conversion: interface {} is [2]int32, not int\ninterface conversion: interface {} is [3]uint8, not int\n",
 	);
 });
+
+section("Slices of 64-bit integers in an interface");
+
+test("slices of 64-bit integers are tagged per Go type in an any", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = []int64{1}
+	_, ok1 := a.([]int)
+	_, ok2 := a.([]uint64)
+	_, ok3 := a.([]int64)
+	var b any = []uint{1}
+	_, ok4 := b.([]uint64)
+	_, ok5 := b.([]uint)
+	var c any = []int{1}
+	_, ok6 := c.([]int)
+	_, ok7 := c.([]int64)
+	var d any = []float32{1}
+	_, ok8 := d.([]float64)
+	fmt.Println(ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8)
+	fmt.Println(c.([]int)[0], a.([]int64)[0])
+}
+`,
+		"false false true false true true false false\n1 1\n",
+	);
+});
+
+test("a type switch picks the slice of 64-bit integers by Go type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func name(v any) string {
+	switch v.(type) {
+	case []int:
+		return "int"
+	case []int64:
+		return "int64"
+	case []uint64:
+		return "uint64"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(name([]int64{1}), name([]int{1}), name([]uint64{1}), name([]uint{1}))
+}
+`,
+		"int64 int uint64 other\n",
+	);
+});
+
+test("a failed assertion names a slice of 64-bit integers", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var a any = []int64{1}
+	_ = a.([]int)
+}
+`,
+		"interface conversion: interface {} is []int64, not []int\n",
+	);
+});

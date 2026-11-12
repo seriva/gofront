@@ -1964,6 +1964,22 @@ export class BuiltinsEmitter {
 				return;
 			}
 			case "any_ref": {
+				// A tagged slice is a fresh header on each conversion to an `any`:
+				// its backing array is the identity every copy shares.
+				for (const info of this.mod.taggedSliceTypes.values()) {
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.test", typeIndex: info.typeIndex });
+					this.pushInstruction({ op: "if", blockType: "void" });
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.cast", typeIndex: info.typeIndex });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: info.typeIndex,
+						fieldIndex: 0,
+					});
+					this.pushInstruction("return");
+					this.pushInstruction("end");
+				}
 				// A boxed defined map or func value: the reference inside the box.
 				for (const box of this.mod.ifaceBoxTypes.values()) {
 					if (

@@ -254,7 +254,7 @@ Scheduled from review follow-ups (`plans/follow-ups.md` sweep 2026-11-12, `K01`�
   - Files: `src/backend/wasm/emit-exprs.js` (interface boxing), `src/backend/wasm/module-emitter.js` (box selection), `src/backend/wasm/emit-builtins.js` (`any_eq`/`any_hash`/`_dynamicTypeNames`, if needed)
   - Test: `test/unit/types/dynamic-types.test.js`: `[2]int64` asserted as `[2]int` → `false`; `[2]int32` vs `[2]uint8`; `[2]A` (`type A [2]int`) vs `[2][2]int`; type switch `case [2]int … case [2]int64` on a `[2]int64` → `int64`; `map[any]int{[2]int{1,2}: 1}` lookup with a separately built `[2]int{1,2}` → `1` and with `[2]int64{1,2}` → `0` (WASM only)
   - Done when: `assertAllTargetsOutput` passes (the `map[any]` lookup with `[2]int64` is a WASM-only assertion because JS stringifies keys)
-- [ ] Task 6.2: Tag slices of 64-bit integers per Go type in an `any` (`K03` slices)
+- [x] Task 6.2: Tag slices of 64-bit integers per Go type in an `any` (`K03` slices)
   - Files: `src/backend/wasm/types.js` (`TAGGED_SLICE_ELEMS`), `src/backend/wasm/module-emitter.js` (tag registration, if needed)
   - Test: `test/unit/types/dynamic-types.test.js`: `[]int64{1}` in an `any` asserted as `[]int` → `false`, as `[]uint64` → `false`; `[]uint` vs `[]uint64`; `[]int{1}` asserted as `[]int` → `true`; `[]float32` vs `[]float64` stays `false`; assertion-panic names `[]int64`
   - Done when: `assertAllTargetsOutput` passes and `node test/perf/zero-alloc.js` results are unchanged
