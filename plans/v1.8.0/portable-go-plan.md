@@ -3,7 +3,7 @@
 **Version:** v1.8.0
 **Status:** Completed (2026-10-28); simplification phases 8–11 added and completed 2026-10-27  
 **Base branch:** main
-**Related:** Depends on v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`; built in Phase 4, removed again by D2), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan.
+**Related:** Depends on v1.7.0 (`json-preact-simd-plan.md`, retired; see git history), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`; built in Phase 4, removed again by D2), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan.
 
 ---
 
@@ -117,7 +117,7 @@ These were confirmed while writing this plan. The Phase 1 audit produced the com
 | `simd.F32x4` in exported API | An exported struct with an `F32x4` field, or an exported function with an `F32x4` parameter, fails the whole build in a `wasm`/`both` package (`cannot cross the JS↔WASM boundary in 1.7.0`), even if JS never uses it | Probe; [`boundary.js`](../../src/backend/wasm/boundary.js) `classifyType` `case "simd"` |
 | `simd.F32x4` formatting | `fmt.Sprintf("%v", v)` is rejected in WASM (`only primitive, string, error and any arguments are supported`) | Probe |
 | `gofront/simd` API | No comparisons, masks, `bitselect`, `any_true`/`all_true`, lane-wise `Sqrt`/`Abs`/`Neg`/rounding or shuffles. The encoder already has `f32x4.abs`/`neg`/`sqrt` and `i8x16.shuffle` opcodes, but the checker does not expose them. | [`typechecker/stdlib/simd.js`](../../src/typechecker/stdlib/simd.js), [`encode.js`](../../src/backend/wasm/encode.js) |
-| `encoding/json` | Rejected in WASM with a diagnostic. JS packages lack `Encoder`/`Decoder`, `Number`, `Compact`/`Indent`/`HTMLEscape` and typed errors. (Case-insensitive matching, Go `null` semantics, integer range errors, exact `RawMessage` bytes and float32 formatting landed in JS on the v1.7.0 branch.) | [`v1.7.0` plan](../v1.7.0/json-preact-simd-plan.md) Phase 1; [`json.test.js`](../../test/unit/builtins/json.test.js) |
+| `encoding/json` | Rejected in WASM with a diagnostic. JS packages lack `Encoder`/`Decoder`, `Number`, `Compact`/`Indent`/`HTMLEscape` and typed errors. (Case-insensitive matching, Go `null` semantics, integer range errors, exact `RawMessage` bytes and float32 formatting landed in JS on the v1.7.0 branch.) | `v1.7.0` plan Phase 1 (retired); [`json.test.js`](../../test/unit/builtins/json.test.js) |
 
 ### Review follow-ups (2026-10-24)
 
@@ -151,7 +151,7 @@ Probed on `feat/portable-go` at `a697b9b`. The reviews of PRs #28–#40 listed b
 ## Out of Scope
 
 - Everything in the **Excluded** rows of the [Scope rule](#scope-rule).
-- **`regexp` in WASM.** It still needs either an RE2 engine or a host call per match (see [v1.6.1](../v1.6.1/wasm-gaps-plan.md#out-of-scope)). It stays JS-only.
+- **`regexp` in WASM.** It still needs either an RE2 engine or a host call per match (see the retired v1.6.1 WASM gaps plan in git history). It stays JS-only.
 - **`math/big`** and the other **deferred (pure, large)** packages in the [Scope rule](#scope-rule). Each is deferred to a separate plan if a user asks for it.
 - **`log/slog`.** It is a candidate for v1.8.x once `log` and the Go-source stdlib exist. (`log` and `math/rand/v2` are **in** scope: see [§7](#7-new-pure-packages-go-source).)
 - **`goto`.** It is inside the no-runtime boundary, but neither backend has unstructured control flow and both would need a loop-plus-state-machine lowering for a construct that is rare in idiomatic Go. It stays a targeted diagnostic (`goto is not supported; restructure with labeled break/continue`) in every target, and the parity matrix checks that diagnostic. Revisit only with a user request.
