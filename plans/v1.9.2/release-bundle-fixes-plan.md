@@ -1,7 +1,7 @@
 # v1.9.2 Release Bundle Fixes — Design Plan
 
 **Version:** v1.9.2  
-**Status:** In Progress  
+**Status:** Completed (2026-11-13)  
 **Base branch:** main  
 **Related:** [`../v1.9.1/follow-ups-2026-11-09-plan.md`](../v1.9.1/follow-ups-2026-11-09-plan.md) (scheduled the first `U4` JSON-codec fix as `G29`; this plan finishes it), [`../v2.0.0/web-platform-evolution-plan.md`](../v2.0.0/web-platform-evolution-plan.md) (Phase 4 whole-program DCE, the home of the deferred size work). Consumer: SimpleFPS (`seriva/simplefps`, `plans/gofront-v1.9-adoption-plan.md`) is blocked on this release; it measured every number below on `gofront@1.9.1` (tag `1.9.1`, `9d0899c`).  
 **Release note:** Builds that import `fmt`, `strings`, `strconv` or other standard library packages no longer produce a minified bundle with a syntax error, and `gofront build` output is checked for valid syntax in the test suite.  
@@ -17,7 +17,7 @@ Three other 1.9 size effects are measured here and **not** fixed (see *Excluded:
 **Done means:**
 - `node --check` accepts the `gofront build` output of every `example/*` and of programs importing `fmt`, `strings`, `strconv`, `unicode/utf8`, `encoding/json`, `sort`, `time`, `bytes`: proven by `test/unit/compiler/minifier.test.js` (all numeric literal forms), `test/unit/compiler/minifier-stdlib.test.js` (new) and `npm run build` (`scripts/build-examples.js` gets a minified pass that parse-checks every example bundle and fails on a syntax error). The new tests and the new build pass fail on `9d0899c` with `Unexpected identifier 'b00000000'`.
 - `test/perf/bundle-size.js` (new, part of `npm test`) builds the fixture set with `--release` and fails when a bundle exceeds its ceiling in `test/perf/bundle-size.baseline.json` (post-fix measurement × 1.05).
-- `docs/usage.md` has a *Bundle size* section (what a first `fmt`/`strconv`/`encoding/json` import costs, how to read the budget file) and `CHANGELOG.md` has one `### Fixed` entry; `npm run check` and `npm test` pass.
+- `docs/usage.md` has a *Bundle size* section (what a first `fmt`/`strconv`/`encoding/json` import costs; the budget workflow is documented in `test/perf/bundle-size.js`) and `CHANGELOG.md` has one `### Fixed` entry; `npm run check` and `npm test` pass.
 
 ---
 
@@ -90,4 +90,4 @@ Probe setup (scratch, deleted afterwards): published `gofront@1.8.0` and `gofron
 - [x] Task 2.1: Add size budgets and user docs
   - Files: `test/perf/bundle-size.js` (new), `test/perf/bundle-size.baseline.json` (new), `docs/usage.md` (plus the `CHANGELOG.md` entry and the `npm test` wiring in `package.json`)
   - Test: the script measures the nine fixtures with `--release`, fails with old/new bytes when one exceeds its ceiling, and `--self-test` proves it fails for a ceiling set 1 byte below the measured size
-  - Done when: `npm test` runs it and passes; `docs/usage.md` has a *Bundle size* section listing the budget table and how to update it
+  - Done when: `npm test` runs it and passes; `docs/usage.md` has a *Bundle size* section listing what common imports cost

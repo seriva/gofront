@@ -20,7 +20,7 @@ features (e.g. `plans/v1.8.0/`).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Release bundle fixes | Medium | Draft | [`v1.9.2/release-bundle-fixes-plan.md`](v1.9.2/release-bundle-fixes-plan.md): minifier numeric literals (`0b`/`0o`/`_`), a parse gate in `npm run build`, `test/perf/bundle-size.js` budgets. JSON register-only scoping was dropped (no reflective JS fallback) and is deferred. The Go-source stdlib and generated-code size growth is measured and deferred to v2.0.0 DCE. |
+| Release bundle fixes | Medium | Completed (2026-11-13) | [`v1.9.2/release-bundle-fixes-plan.md`](v1.9.2/release-bundle-fixes-plan.md): minifier numeric literals (`0b`/`0o`/`_`), a parse gate in `npm run build`, `test/perf/bundle-size.js` budgets. JSON register-only scoping was dropped (no reflective JS fallback) and is deferred. The Go-source stdlib and generated-code size growth is measured and deferred to v2.0.0 DCE. |
 
 ---
 
