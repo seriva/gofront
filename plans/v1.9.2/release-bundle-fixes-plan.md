@@ -87,7 +87,7 @@ Probe setup (scratch, deleted afterwards): published `gofront@1.8.0` and `gofron
   - Done when: `npm run build` builds all examples twice (plain, minified), exits non-zero for an invalid minified bundle, and fails on `9d0899c` for `simple`, `gom`, `templ`, `preact` and `hybrid`
 
 ### Phase 2: Size budgets and docs
-- [ ] Task 2.1: Add size budgets and user docs
+- [x] Task 2.1: Add size budgets and user docs
   - Files: `test/perf/bundle-size.js` (new), `test/perf/bundle-size.baseline.json` (new), `docs/usage.md` (plus the `CHANGELOG.md` entry and the `npm test` wiring in `package.json`)
   - Test: the script measures the nine fixtures with `--release`, fails with old/new bytes when one exceeds its ceiling, and `--self-test` proves it fails for a ceiling set 1 byte below the measured size
   - Done when: `npm test` runs it and passes; `docs/usage.md` has a *Bundle size* section listing the budget table and how to update it
