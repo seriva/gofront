@@ -16,11 +16,11 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v1.9.2
 
-**Theme: Valid release bundles.** Patch release for the 1.9.1 regression found while adopting 1.9 in SimpleFPS: the built-in minifier turns binary literals from the Go-source stdlib (`0b00000000`) into `0 b00000000`, so `gofront build` output for any program importing `fmt`, `strings` or `strconv` does not parse. Also removes JSON codecs generated for packages that never call `encoding/json` and adds bundle-size budgets.
+**Theme: Valid release bundles.** Patch release for the 1.9.1 regression found while adopting 1.9 in SimpleFPS: the built-in minifier turns binary literals from the Go-source stdlib (`0b00000000`) into `0 b00000000`, so `gofront build` output for any program importing `fmt`, `strings` or `strconv` does not parse. Also adds bundle-size budgets.
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Release bundle fixes | Medium | Draft | [`v1.9.2/release-bundle-fixes-plan.md`](v1.9.2/release-bundle-fixes-plan.md): minifier numeric literals (`0b`/`0o`/`_`), a parse gate in `npm run build`, register-only JSON codecs skipped for JS-only packages, `test/perf/bundle-size.js` budgets. The Go-source stdlib and generated-code size growth is measured and deferred to v2.0.0 DCE. |
+| Release bundle fixes | Medium | Draft | [`v1.9.2/release-bundle-fixes-plan.md`](v1.9.2/release-bundle-fixes-plan.md): minifier numeric literals (`0b`/`0o`/`_`), a parse gate in `npm run build`, `test/perf/bundle-size.js` budgets. JSON register-only scoping was dropped (no reflective JS fallback) and is deferred. The Go-source stdlib and generated-code size growth is measured and deferred to v2.0.0 DCE. |
 
 ---
 
