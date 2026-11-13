@@ -116,7 +116,7 @@ loader is in the [Hybrid JS + WebAssembly Guide](hybrid-wasm.md).
 
 The standard library is compiled from Go source, so the first import of a package adds that
 package and everything it depends on to your bundle. A program that only uses `println`
-produces a bundle of a few dozen bytes; importing `fmt` makes it roughly 165 kB, because
+produces a bundle of a few dozen bytes; importing `fmt` makes it roughly 170 kB, because
 `fmt` pulls in `strconv`, `unicode/utf8` and the runtime helpers they need. These are
 the sizes of `app.js` from `gofront build --release` for small programs:
 
