@@ -1,7 +1,8 @@
 # v1.9.2 Release Bundle Fixes — Design Plan
 
 **Version:** v1.9.2  
-**Status:** Draft (2026-11-13)  
+**Status:** In Progress  
+**Base branch:** main  
 **Related:** [`../v1.9.1/follow-ups-2026-11-09-plan.md`](../v1.9.1/follow-ups-2026-11-09-plan.md) (scheduled the first `U4` JSON-codec fix as `G29`; this plan finishes it), [`../v2.0.0/web-platform-evolution-plan.md`](../v2.0.0/web-platform-evolution-plan.md) (Phase 4 whole-program DCE, the home of the deferred size work). Consumer: SimpleFPS (`seriva/simplefps`, `plans/gofront-v1.9-adoption-plan.md`) is blocked on this release; it measured every number below on `gofront@1.9.1` (tag `1.9.1`, `9d0899c`).  
 **Release note:** Builds that import `fmt`, `strings`, `strconv` or other standard library packages no longer produce a minified bundle with a syntax error, and programs that use `encoding/json` no longer carry JSON code for packages that never encode anything.  
 
