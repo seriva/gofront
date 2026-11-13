@@ -461,7 +461,7 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 ## Tests
 
 ```sh
-npm test                  # unit, zero-alloc perf, and example tests (~4,700 tests, no browser required)
+npm test                  # unit, zero-alloc perf, and example tests (~4,800 tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Raycast, JSON, and SIMD particle benchmarks (pure JS vs hybrid WASM)
 ```

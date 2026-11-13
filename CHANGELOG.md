@@ -7,6 +7,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-11-13
+
 ### Fixed
 - **Minified builds that import the standard library work again**: `gofront build` and `--minify` no longer emit a bundle with a syntax error when a program imports `fmt`, `strings`, `strconv` or other standard library packages. The [usage guide](docs/usage.md#bundle-size) now lists what common imports add to a release bundle.
 
