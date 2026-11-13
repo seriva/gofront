@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
+import { checkSyntax } from "../../scripts/build-examples.js";
 import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import {
@@ -30,6 +31,7 @@ import {
 import { TypeChecker } from "../../src/typechecker/index.js";
 
 export {
+	checkSyntax,
 	compileDir,
 	DtsParser,
 	instantiateWasm,

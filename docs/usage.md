@@ -112,6 +112,30 @@ when `--source-map` is enabled. In development (`gofront dev`), unoptimized WASM
 directly for sub-10ms instant hot-reload. Everything about targets, boundary rules and the
 loader is in the [Hybrid JS + WebAssembly Guide](hybrid-wasm.md).
 
+### Bundle size
+
+The standard library is compiled from Go source, so the first import of a package adds that
+package and everything it depends on to your bundle. A program that only uses `println`
+produces a bundle of a few dozen bytes; importing `fmt` makes it roughly 170 kB, because
+`fmt` pulls in `strconv`, `unicode/utf8` and the runtime helpers they need. These are
+the sizes of `app.js` from `gofront build --release` for small programs:
+
+| Program imports | `app.js` |
+|---|---|
+| nothing (`println` only) | 46 B |
+| `strings` (`ToUpper`, `Split`) | 21 kB |
+| `encoding/json` (`Marshal` of a struct) | 40 kB |
+| `strconv` (`Itoa`, `FormatFloat`) | 88 kB |
+| `fmt` (`Println`) | 169 kB |
+| `fmt` (`Sprintf`) | 176 kB |
+| `encoding/json` (`Unmarshal` into a struct) | 266 kB |
+| `encoding/json` (`Unmarshal` with an `any` field) | 279 kB |
+
+Pages are usually served compressed, which shrinks these files to roughly a fifth of the
+numbers above. Use `gofront build --release` for the smallest output, and check it with
+your own program: the size depends on which functions you call, not only on which packages
+you import.
+
 ---
 
 ## Testing

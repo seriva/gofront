@@ -1,0 +1,11 @@
+{
+	"println": 49,
+	"fmt-println": 176939,
+	"fmt-sprintf": 184585,
+	"strconv": 92220,
+	"strings": 22384,
+	"json-unmarshal": 279638,
+	"json-unmarshal-any": 293368,
+	"json-marshal": 42045,
+	"multipackage": 184545
+}
