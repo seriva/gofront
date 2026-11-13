@@ -14,6 +14,16 @@ features (e.g. `plans/v1.8.0/`).
 
 ---
 
+## v1.9.2
+
+**Theme: Valid release bundles.** Patch release for the 1.9.1 regression found while adopting 1.9 in SimpleFPS: the built-in minifier turns binary literals from the Go-source stdlib (`0b00000000`) into `0 b00000000`, so `gofront build` output for any program importing `fmt`, `strings` or `strconv` does not parse. Also removes JSON codecs generated for packages that never call `encoding/json` and adds bundle-size budgets.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Release bundle fixes | Medium | Draft | [`v1.9.2/release-bundle-fixes-plan.md`](v1.9.2/release-bundle-fixes-plan.md): minifier numeric literals (`0b`/`0o`/`_`), a parse gate in `npm run build`, register-only JSON codecs skipped for JS-only packages, `test/perf/bundle-size.js` budgets. The Go-source stdlib and generated-code size growth is measured and deferred to v2.0.0 DCE. |
+
+---
+
 ## v1.9.1
 
 **Theme: Review follow-ups.** Patch release fixing the 24 reproducing review follow-ups left after v1.9.0, 5 regressions found while adopting 1.9.0 in SimpleFPS, 21 defects found while reviewing those fixes, 14 more found while reviewing the second round, and 11 more found while reviewing the third round.
