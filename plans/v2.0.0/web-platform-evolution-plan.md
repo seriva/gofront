@@ -3,7 +3,7 @@
 **Version:** v2.0.0  
 **Status:** Draft  
 **Related:** Builds on [`../v1.9.1/follow-ups-2026-11-10-plan.md`](../v1.9.1/follow-ups-2026-11-10-plan.md) and [`../v1.9.1/follow-ups-2026-11-11b-plan.md`](../v1.9.1/follow-ups-2026-11-11b-plan.md).  
-**Release note:** GoFront v2.0.0 introduces compile-time asset embedding via `//go:embed`, sub-25ms incremental watch rebuilds, whole-program dead-code elimination on JS, first-class typed web APIs (`gofront/dom`, `gofront/canvas`, `gofront/fetch`), and fine-grained reactive DOM binding in `.templ` via `gom.Signal`.
+**Release note:** GoFront v2.0.0 introduces compile-time asset embedding via `//go:embed`, sub-25ms incremental watch rebuilds, whole-program dead-code elimination on JS, a fully typed web platform (`document`, `window`, `navigator`, `fetch` and the other browser globals are typed instead of `any`, plus `gofront/dom`, `gofront/canvas`, `gofront/fetch`, `gofront/websocket` and `gofront/webgpu`), a `gofront check` that reports every package and test file, and fine-grained reactive DOM binding in `.templ` via `gom.Signal`. **Breaking:** code that relied on browser globals being `any` needs explicit types or assertions; `GPUDevice`, `GPUQueue` and `GPUAdapter` become plain typed interop (no structural runtime check).
 
 ---
 
@@ -11,19 +11,24 @@
 
 Transform GoFront from a Go-to-JS/WASM transpile pipeline into a complete, modern web application and reactive UI framework without compromising the pure Node.js ESM compiler architecture or violating the foundational **"No Runtime"** principle (no concurrency scheduler, no runtime reflection, no garbage-collected runtime threads).
 
-v2.0.0 delivers five high-impact capabilities executed in strict dependency order:
+v2.0.0 is a major release and **backward compatibility is explicitly not a goal** (user decision 2026-11-13): it may break source that compiled on 1.x when that removes a class of problem. Motivating consumer: SimpleFPS' 1.9.2 adoption (`seriva/simplefps`, archived `gofront-v1.9-adoption-plan.md`), where the stricter `any` rule forced hand-written `.d.ts` interfaces for every DOM and WebGPU value, and the built-in structural `GPUDevice` check (`x.(GPUDevice)` wants `createBuffer` *and* `CreateBuffer` + 7 more pairs, so it rejects a standard device) forced a repo-local `WebGPUDevice`.
+
+v2.0.0 delivers six high-impact capabilities executed in strict dependency order:
 1. **`//go:embed` asset and shader inlining:** Embed files directly into compiled bundles as `string`, `[]byte`, or `embed.FS` with zero runtime network fetch requests.
 2. **Instant incremental compilation in `gofront dev`:** Sub-25ms file-save rebuilds for JS packages via package-level dependency caching and granular AST invalidation.
 3. **Whole-program dead-code elimination (DCE):** Call-graph reachability analysis on user code to prune uncalled functions, unused struct methods, and uninstantiated types from JS bundles before codegen.
-4. **Standard typed Web APIs:** Eliminate unchecked `any` across DOM, Canvas, and Fetch with canonical, type-checked Go packages under `stdlib/gofront/`.
-5. **Fine-grained reactivity (`gom.Signal` + `.templ`):** Surgical, SolidJS-tier DOM text and attribute updates directly driven by signals in `.templ` templates—zero virtual DOM, zero diffing overhead.
+4. **Fully typed web platform:** Remove `any` from the browser globals (`document`, `window`, `navigator`, `location`, `performance`, `crypto`, `fetch`, timers, …) and ship canonical, type-checked Go packages under `stdlib/gofront/` for DOM, Canvas, Fetch, WebSocket and WebGPU, generated from the WebIDL / `@webgpu/types` rather than hand-written. The hand-built `GPUDevice`/`GPUQueue`/`GPUAdapter` in `src/typechecker/stdlib/web.js` are replaced by the typed package.
+5. **Reporting every error in one `gofront check`:** `gofront check <pattern>` and `gofront test` report errors from all packages and test files in one run.
+6. **Fine-grained reactivity (`gom.Signal` + `.templ`):** Surgical, SolidJS-tier DOM text and attribute updates directly driven by signals in `.templ` templates—zero virtual DOM, zero diffing overhead.
 
 **Done means:**
 - `//go:embed` compiles assets into JS strings, `Uint8Array`s, and WASM WasmGC data segments across `js`, `wasm`, and `both` targets, verified by `test/unit/compiler/embed.test.js`.
 - `embed.FS` provides `ReadFile` and `ReadDir` with glob matching across single and multi-file patterns (`test/unit/stdlib/embed.test.js`).
 - `gofront dev` rebuilds a modified leaf file in a cached package in < 25ms on JS targets (`test/unit/cli/dev-server.test.js`).
 - Unused user functions and unselected struct methods are completely omitted from emitted JS bundles, reducing example bundle sizes without regressions (`test/unit/compiler/dce.test.js`).
-- DOM interactions compile with static type checking using `gofront/dom`, `gofront/canvas`, and `gofront/fetch` without manual type assertions from `any` (`test/unit/stdlib/web-apis.test.js`).
+- DOM, Canvas, Fetch, WebSocket and WebGPU interactions compile with static type checking and without assertions from `any`; `document`, `window` and the other `BROWSER_GLOBALS` are no longer `any` (`test/unit/stdlib/web-apis.test.js`, `test/unit/typechecker/browser-globals.test.js`). `device.(GPUDevice)`-style assertions against a standard WebGPU device never fail at runtime (`test/unit/stdlib/webgpu-typed.test.js`).
+- `gofront check app/src/...` reports every failing package and test file in one run (`test/unit/cli/check-all-packages.test.js`).
+- Whole-program DCE also prunes unreachable methods of Go-source stdlib types; a `fmt.Println` hello world is measurably smaller than on 1.9.2 (`test/perf/bundle-size.js` budgets tightened).
 - Dynamic expressions in `.templ` bound to `gom.Signal` surgically update target DOM text and attribute nodes on `.Set()` calls without component remounting (`test/e2e/templ.spec.js` and `test/unit/builtins/gom.test.js`).
 - All existing unit, E2E (`npm run test:e2e`), and zero-allocation performance benchmarks pass with zero regressions.
 
@@ -33,7 +38,7 @@ v2.0.0 delivers five high-impact capabilities executed in strict dependency orde
 
 | Category | Rule | Examples / Members | Reason (Excluded rows) |
 |---|---|---|---|
-| **In scope: core** | Asset embedding, incremental watch compilation, DCE, typed web APIs, and UI signals | `//go:embed`, `embed.FS`, `PackageCache`, reachability DCE, `gofront/dom`, `gom.Signal` | Core capabilities of the v2.0.0 web platform milestone |
+| **In scope: core** | Asset embedding, incremental watch compilation, DCE (user code and stdlib methods), typed web platform (globals + packages), all-package `check`, and UI signals | `//go:embed`, `embed.FS`, `PackageCache`, reachability DCE, typed `document`/`window`, `gofront/dom`, `gofront/webgpu`, `gom.Signal` | Core capabilities of the v2.0.0 web platform milestone |
 | **In scope: target-specific** | Target-specific asset representation and reactivity | JS: UTF-8 string literals / `Uint8Array` / reactive subscriber closures. WASM: WasmGC passive data segments via `array.new_data` | Idiomatic platform and backend mapping |
 | **Excluded: runtime / platform** | Concurrency scheduler, raw memory access, runtime reflection | Goroutines, channels, `select`, `unsafe.Pointer` to host memory, full `reflect` package | Strict adherence to the GoFront "No Runtime" architectural invariant |
 | **Excluded: deferred** | Server-side rendering (SSR) hydration, multi-tab broadcast state, Web Worker RPC | `.templ` HTML stream hydration, `SharedWorker`, Web Worker message passing | Deferred to v2.1+; client-side signals, DOM reactivity, and compiler DX take precedence |
@@ -51,6 +56,10 @@ v2.0.0 delivers five high-impact capabilities executed in strict dependency orde
 | AST cache invalidation | ASTs in `_parseCache` are mutated during typechecking and lowering, preventing cross-build reuse | `src/compiler.js:656`: `mangleLocalTypes` deletes ASTs from `_parseCache`; `plans/v1.9.1/follow-ups-2026-11-10-plan.md:109` confirms AST cloning was rejected |
 | User-code DCE in JS | `src/lower/reachability.js` only prunes stdlib declarations; unused user functions and methods are fully emitted | `src/link/stdlib.js:422`: `reachableStdlibDecls` only filters `stdlibPrograms`; probe in `.probes/probe_dce`: `UnusedUserFunction` and `UnusedMethod` both emitted in `app.js` (168.4 kB) |
 | Web APIs typing | Browser globals (`document`, `window`, `HTMLElement`, `fetch`) are typed as untyped dynamic `ANY` | `src/typechecker/stdlib/index.js:13`: `for (const g of BROWSER_GLOBALS) globals.define(g, ANY);` disables type safety on DOM operations |
+| Browser globals typing | Same finding, wider: `BROWSER_GLOBALS` (`src/typechecker/types.js:43`) lists `console`, `document`, `window`, `navigator`, `location`, `history`, `screen`, `performance`, `crypto`, `fetch`, timers, `Math`, `JSON`, … all defined as `ANY`; the 1.9 checker rejects `any` → concrete without an assertion, so consumers hand-write `.d.ts` interfaces (SimpleFPS: `UIElement`, `UIEvent`, `WebGPUDevice`, …) | `src/typechecker/stdlib/index.js:13`; SimpleFPS Phase 1 (PRs #64–#66) |
+| Built-in WebGPU types | `GPUQueue`, `GPUDevice`, `GPUAdapter` are hand-built structural types; `x.(GPUDevice)` compiles to a runtime check needing both lower- and upper-case method names, so every standard device fails it. Redeclaring `GPUDevice` in a `.d.ts` does not help (the built-in wins). Other WebGPU types (`GPUBuffer`, `GPUCanvasContext`, …) only exist as consumer `.d.ts` interfaces | `src/typechecker/stdlib/web.js:408-445`; SimpleFPS `rendering/backend.go`, `interop.d.ts` |
+| `check` stops early | `handleCheck` loops over package dirs and `runCompile` throws on the first failing package, so later packages' errors only appear after fixing earlier ones; test files are not compiled by `check` | `src/cli/cli-core.js:572-590` |
+| Stdlib footprint | 1.9 Go-source stdlib is whole-declaration reachable only: `fmt.Println` hello world 24 kB (1.8.0) → 176 kB (1.9.1); SimpleFPS release `app.js` 835,581 → 1,117,919 B, ≈ +142 kB from stdlib (`strconv` +44 kB, `fmt` +38 kB) | `src/lower/reachability.js` (`reachableStdlibDecls`, called at `src/link/stdlib.js:472`); GoFront `plans/v1.9.2/release-bundle-fixes-plan.md` *Excluded: deferred* |
 | Templ reactivity | Templ codegen emits static one-time mounts with no update mechanism | `src/backend/js/templ.js:88-93, 160-180`: text expressions emit `document.createTextNode(String(expr))` and conditional attributes emit static `if (expr) setAttribute(...)` |
 
 ---
@@ -63,8 +72,8 @@ v2.0.0 delivers five high-impact capabilities executed in strict dependency orde
 flowchart TD
     P1["Phase 1: //go:embed Scalars (string & []byte)"] --> P2["Phase 2: embed.FS Virtual Filesystem"]
     P2 --> P3["Phase 3: Incremental Watch Cache (<25ms)"]
-    P3 --> P4["Phase 4: Whole-Program JS DCE (Size Protection)"]
-    P4 --> P5["Phase 5: Standard Typed Web APIs (gofront/dom)"]
+    P3 --> P4["Phase 4: Whole-Program JS DCE (user code + stdlib methods)"]
+    P4 --> P5["Phase 5: Fully Typed Web Platform (globals, dom, webgpu)"]
     P5 --> P6["Phase 6: Fine-Grained Reactivity (gom.Signal + .templ)"]
 ```
 
@@ -97,13 +106,16 @@ flowchart TD
   2. Functions exported across the WASM boundary (`//gofront:export` or boundary facade).
   3. `init()` functions and package-level variable initializers with side effects.
   4. Implicit runtime/formatter methods (`String()`, `Error()`, `MarshalJSON()`).
+- **Stdlib methods:** Apply the same reachability to Go-source stdlib types, not just whole declarations, so an unused method of a used stdlib type (e.g. most of `strconv`/`fmt` internals) is dropped. Target: the `fmt.Println` hello world and the SimpleFPS release `app.js` shrink measurably against 1.9.2 (baselines in `plans/v1.9.2/release-bundle-fixes-plan.md`).
 - **Pruning:** Prune unreached `FuncDecl`s, unreferenced struct types, and uncalled methods from the AST before JS codegen.
 - **JS Class Methods:** For struct types that are retained, omit uncalled methods from the generated ES6 `class` definition and the `__vm` method array.
 
-#### Subsystem 4: Standard Typed Web APIs (Phase 5)
-- **Package location:** Add `stdlib/gofront/dom`, `stdlib/gofront/canvas`, `stdlib/gofront/fetch`, and `stdlib/gofront/websocket`.
-- **Declaration mechanism:** Define typed Go interfaces and structs with `//gofront:target js`. Methods compile directly to native JS property accesses and method invocations without runtime wrapper overhead.
-- **Backward compatibility:** Existing code using untyped `document` / `window` globals continues to type-check as `ANY`. Importing `gofront/dom` provides typed entry points (e.g., `dom.GetDocument()`, `dom.Window()`, typed element castings).
+#### Subsystem 4: Fully Typed Web Platform (Phase 5)
+- **Generated, not hand-written:** A generator script (`scripts/gen-web-types.js`, run by maintainers, output committed) turns WebIDL / `lib.dom.d.ts` and `@webgpu/types` into `//gofront:target js` Go declarations under `stdlib/gofront/dom`, `canvas`, `fetch`, `websocket` and `webgpu`. Methods compile to native JS property accesses and calls with no wrapper. Hand-tuned overrides live in a small side file so regeneration is reproducible.
+- **Typed globals (breaking):** Remove `ANY` for the `BROWSER_GLOBALS` set. `document`, `window`, `navigator`, `location`, `performance`, `crypto`, `fetch`, timers and `requestAnimationFrame` get their typed definitions without an import. Migration: values read from untyped JS still need an assertion; list the common cases in the changelog and `docs/`.
+- **Headless-safe:** Typed globals stay comparable to `nil` (`if window == nil`), because packages guard on it to stay testable under `gofront test` without a DOM.
+- **WebGPU:** `gofront/webgpu` replaces the hand-built `GPUDevice`/`GPUQueue`/`GPUAdapter` in `web.js`. An assertion to a WebGPU interface is a typed pass-through, never a structural runtime check, so `device.(webgpu.Device)` accepts a standard browser device and a test fake with the same members. The old `GPUDevice`, `GPUQueue` and `GPUAdapter` names are removed outright (no compatibility aliases).
+- **Consumer `.d.ts`:** A package's own `interop.d.ts` declarations keep working (they are the escape hatch for libraries such as PeerJS).
 - **Callbacks:** Event listener functions take typed parameters (`func(e dom.MouseEvent)`).
 
 #### Subsystem 5: Fine-Grained UI Reactivity (Phase 6)
@@ -140,6 +152,9 @@ flowchart TD
 - **Type Mismatch on Embed:** If `//go:embed` precedes a type other than `string`, `[]byte`, or `embed.FS`, report `cannot embed into variable of type <type>`.
 - **Cycle in Watch Graph:** Circular package dependencies are rejected by the existing package resolver; the incremental DAG respects existing import validation.
 - **DCE Interface Dispatch:** If an interface method is called dynamically (`var r io.Reader; r.Read(...)`), any concrete struct method matching that signature on an instantiated type must be marked reachable.
+- **Breaking migration:** Typed globals reject code that assigned an `any` result to a concrete type without an assertion (the same class the 1.9 checker already rejects for values from JS). `docs/` gets a migration section with before/after examples; the changelog entry is `**Breaking:**` and says what to do.
+- **WebGPU fakes in tests:** A test double that implements only some `webgpu.Device` members must still be assertable to the interface; the typed package must not add a runtime member check.
+- **`check` over many packages:** One package's error must not hide another's, and a package whose dependency failed to compile is reported as skipped, not as a second error.
 - **Signal Disconnect / Leaks:** When a component's parent element is removed, signal subscriptions attached during `Mount` must provide a cleanup callback mechanism if an unmount hook is called.
 
 ---
@@ -204,6 +219,11 @@ flowchart TD
   - Test: `test/unit/compiler/incremental-sourcemap.test.js` asserting valid source-map mappings after incremental updates
   - Done when: Browser DevTools correctly map source lines to original `.go` files after multiple incremental saves
 
+- [ ] Task 3.5: Make `gofront check` and `gofront test` report every package and test file
+  - Files: `src/cli/cli-core.js` (`handleCheck`), `src/cli/test-runner.js`
+  - Test: `test/unit/cli/check-all-packages.test.js` with two failing packages and one failing `_test.go`: asserts all three errors appear in one run and the exit code is non-zero
+  - Done when: `gofront check ./pkg/...` collects errors per package (dependents of a failed package are listed as skipped), includes `_test.go` files, and prints a per-package summary
+
 ### Phase 4: Whole-Program Dead-Code Elimination (DCE) on JS
 - [ ] Task 4.1: Extend reachability analysis to user packages and call graphs
   - Files: `src/lower/reachability.js`, `src/lower/index.js`
@@ -222,9 +242,18 @@ flowchart TD
   - Test: `test/unit/compiler/dce-bundle-size.test.js` asserting bundle size reduction on `example/simple` and `example/gom`
   - Done when: DCE achieves measurable size reduction across all standard examples with zero semantic regressions
 
-### Phase 5: Standard Typed Web APIs (`gofront/dom`, `gofront/canvas`, `gofront/fetch`)
+- [ ] Task 4.5: Method-level reachability for Go-source stdlib types
+  - Files: `src/lower/reachability.js`, `src/link/stdlib.js` (`reachableStdlibDecls`)
+  - Test: `test/unit/compiler/dce-stdlib-methods.test.js` asserting an unused method of a used stdlib type is absent from `app.js`, plus `test/perf/bundle-size.js` budgets for the `fmt.Println`, `strconv.Itoa` and `strings.Split` hello worlds tightened below the 1.9.2 numbers
+  - Done when: the three hello worlds and the `example/*` bundles shrink against the 1.9.2 baselines with no output differences in the stdlib test suite; record the numbers in the plan
+
+### Phase 5: Fully Typed Web Platform (`gofront/dom`, `canvas`, `fetch`, `websocket`, `webgpu`, typed globals)
+- [ ] Task 5.0: Add the web-types generator
+  - Files: `scripts/gen-web-types.js`, `scripts/web-types-overrides/`
+  - Test: `test/unit/scripts/gen-web-types.test.js` asserting deterministic output for a small IDL fixture (interfaces, optional members, unions, callbacks, async methods)
+  - Done when: running the generator twice produces byte-identical Go files and the DOM/WebGPU declarations used by later tasks come from it
 - [ ] Task 5.1: Implement typed DOM package under `stdlib/gofront/dom`
-  - Files: `stdlib/gofront/dom/dom.go`, `src/resolver.js`
+  - Files: `stdlib/gofront/dom/dom.go` (generated), `src/resolver.js`
   - Test: `test/unit/stdlib/dom-typed.test.js` asserting type checking of `Document`, `Element`, `HTMLElement`, `Event`
   - Done when: `dom.GetDocument().GetElementById("app")` compiles with typed return values
 - [ ] Task 5.2: Implement typed Canvas and 2D Context package under `stdlib/gofront/canvas`
@@ -239,6 +268,15 @@ flowchart TD
   - Files: `stdlib/gofront/websocket/websocket.go`
   - Test: `test/unit/stdlib/websocket-typed.test.js` asserting event callback registration and sending typed payloads
   - Done when: `ws.OnMessage(func(e MessageEvent))` compiles and correctly receives typed event objects
+
+- [ ] Task 5.5: Implement typed WebGPU package under `stdlib/gofront/webgpu`
+  - Files: `stdlib/gofront/webgpu/webgpu.go` (generated), `src/typechecker/stdlib/web.js` (remove the hand-built `GPUQueue`/`GPUDevice`/`GPUAdapter`, `:408-445`)
+  - Test: `test/unit/stdlib/webgpu-typed.test.js`: `GPUCanvasContext`, `Buffer`, `Texture`, `Device.CreateRenderPipeline(descriptor)` type-check against typed descriptors; a test double with only the standard lowercase members passes `x.(webgpu.Device)` at runtime (the case that panics on 1.9.x); a misspelled member fails `gofront check`
+  - Done when: SimpleFPS-style code can drop its repo-local `WebGPUDevice`/`GPUCanvasContext` interfaces; the generated package emits no runtime code
+- [ ] Task 5.6: Type the browser globals and migrate the examples
+  - Files: `src/typechecker/types.js` (`BROWSER_GLOBALS`), `src/typechecker/stdlib/index.js`, `src/typechecker/stdlib/web.js`, `example/*`
+  - Test: `test/unit/typechecker/browser-globals.test.js` asserting `document.GetElementById("x")` is typed, a misspelled member is rejected, and `window == nil` still compiles; all `example/*` build
+  - Done when: no entry of `BROWSER_GLOBALS` that has a typed definition is defined as `ANY`; remaining untyped names (if any) are listed in the plan with a reason; `docs/` has a migration section; the changelog has a `**Breaking:**` entry
 
 ### Phase 6: Fine-Grained Reactivity (`gom.Signal` + `.templ` Surgical Updates)
 - [ ] Task 6.1: Implement `gom.Signal[T]` and `gom.Computed[T]` reactive primitives
