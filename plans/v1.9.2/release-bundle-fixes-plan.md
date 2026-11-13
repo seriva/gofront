@@ -83,11 +83,11 @@ Probe setup (scratch, deleted afterwards): published `gofront@1.8.0` and `gofron
   - Files: `src/cli/minifier.js`
   - Test: `test/unit/compiler/minifier.test.js`: a table of ≥ 20 literals (*Edge Cases* list plus `0b00000000`, `0B101`, `0o17`, `0O7`, `0xFFn`, `1_000`, `1_0.0_1e1_0`) asserting `new Function("return " + minify(expr))()` equals the unminified value and that `minify(src)` never contains a number token followed by a space and a letter/`_`; plus folding cases (`0b11*2` folds to `6`, `1_000+1` is left unfolded)
   - Done when: the table passes and fails on `9d0899c` with `0 b…`; `0xFFn` and decimal output are byte-identical to 1.9.1
-- [ ] Task 1.2: Minified stdlib-importing programs parse and behave like the unminified ones
+- [x] Task 1.2: Minified stdlib-importing programs parse and behave like the unminified ones
   - Files: `test/unit/compiler/minifier-stdlib.test.js` (new), `test/unit/helpers.js` (a `checkSyntax(js)` helper that copies to a temp `.mjs` and runs `node --check`)
   - Test: compile programs importing `fmt`, `strings`, `strconv`, `unicode/utf8`, `encoding/json`, `sort`, `time`, `bytes` (js target), minify with and without `mangle`, assert `checkSyntax` passes and, for programs that print, stdout equals the unminified run
   - Done when: passes after Task 1.1 and fails on `9d0899c` with `Unexpected identifier 'b00000000'` (shown in the commit body)
-- [ ] Task 1.3: Add a minified, parse-checked build pass to `npm run build`
+- [x] Task 1.3: Add a minified, parse-checked build pass to `npm run build`
   - Files: `scripts/build-examples.js`, `test/unit/cli/build-examples.test.js`
   - Test: a helper `checkBundle(dir)` exported from the script: a fixture directory with a deliberately invalid `app.js` makes it throw with the file path and the `SyntaxError` text; the six repository examples pass through the minified pass
   - Done when: `npm run build` builds all examples twice (plain, minified), exits non-zero for an invalid minified bundle, and fails on `9d0899c` for `simple`, `gom`, `templ`, `preact` and `hybrid`

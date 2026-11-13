@@ -7,6 +7,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+- **Minified builds that import the standard library load again**: `gofront build` no longer produces a bundle with a syntax error when a program imports `fmt`, `strings`, `strconv` or other standard library packages, and `npm run build` now checks that every example bundle parses.
+
 ## [1.9.1] - 2026-11-12
 
 ### Fixed
