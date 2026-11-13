@@ -196,26 +196,40 @@ function _scanTemplateLiteral(code, i, len) {
 	return j;
 }
 
+// Consume digits matching `digit` plus `_` numeric separators.
+function _scanDigits(code, j, len, digit) {
+	while (j < len && (digit.test(code[j]) || code[j] === "_")) j++;
+	return j;
+}
+
 function _scanDecimalNumber(code, j, len) {
-	while (j < len && /[0-9]/.test(code[j])) j++;
+	const digit = /[0-9]/;
+	j = _scanDigits(code, j, len, digit);
 	if (j < len && code[j] === ".") {
 		j++;
-		while (j < len && /[0-9]/.test(code[j])) j++;
+		j = _scanDigits(code, j, len, digit);
 	}
 	if (j < len && (code[j] === "e" || code[j] === "E")) {
 		j++;
 		if (j < len && (code[j] === "+" || code[j] === "-")) j++;
-		while (j < len && /[0-9]/.test(code[j])) j++;
+		j = _scanDigits(code, j, len, digit);
 	}
 	return j;
 }
 
+const RADIX_DIGITS = {
+	x: /[0-9a-fA-F]/,
+	b: /[01]/,
+	o: /[0-7]/,
+};
+
 function _scanNumber(code, i, len) {
 	const ch = code[i];
 	let j = i + 1;
-	if (ch === "0" && j < len && (code[j] === "x" || code[j] === "X")) {
-		j++;
-		while (j < len && /[0-9a-fA-F]/.test(code[j])) j++;
+	const radix =
+		ch === "0" && j < len ? RADIX_DIGITS[code[j].toLowerCase()] : null;
+	if (radix) {
+		j = _scanDigits(code, j + 1, len, radix);
 	} else {
 		j = _scanDecimalNumber(code, j, len);
 	}

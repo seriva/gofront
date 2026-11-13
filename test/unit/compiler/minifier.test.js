@@ -416,3 +416,77 @@ func main() {
 		`minified (${minified.length}) should be shorter than original (${js.length})`,
 	);
 });
+
+// ── Numeric literal forms ────────────────────────────────────
+
+section("Minifier — Numeric literals");
+
+const evalExpr = (src) => new Function(`return ${src}`)();
+
+const NUMERIC_LITERALS = [
+	"0b00000000",
+	"0B101",
+	"0b11|0b01",
+	"0o17",
+	"0O7",
+	"0xFF",
+	"0xFFn",
+	"0b1n",
+	"0o7n",
+	"1_000n",
+	"1_000",
+	"1_0.0_1e1_0",
+	"1e3",
+	"1E-3",
+	"1e+3",
+	".5",
+	"5.",
+	"1..toString()",
+	"1.5.toFixed(1)",
+	"(0b11).toString()",
+	"true?.5:1",
+	"false?0b1:0o7",
+	"[0b1,0b10,0o3]",
+	"017",
+	"08",
+	"0b11+0b01",
+];
+
+for (const src of NUMERIC_LITERALS) {
+	test(`numeric literal survives minify: ${src}`, () => {
+		const out = minify(src);
+		assert(
+			!/[0-9a-fA-F_.] [a-zA-Z_]/.test(out),
+			`number token split from identifier: ${out}`,
+		);
+		assertEqual(String(evalExpr(out)), String(evalExpr(src)));
+	});
+
+	test(`numeric literal survives minify with mangle: ${src}`, () => {
+		const out = minify(src, { mangle: true });
+		assertEqual(String(evalExpr(out)), String(evalExpr(src)));
+	});
+}
+
+test("binary literal declaration stays a single token", () => {
+	assertEqual(minify("const a = 0b00000000;"), "const a=0b00000000;");
+	assertEqual(minify("const a = 0o17;"), "const a=0o17;");
+	assertEqual(minify("const a = 1_000;"), "const a=1_000;");
+});
+
+test("hex and decimal literals are unchanged", () => {
+	assertEqual(minify("x = 0xFFn;"), "x=0xFFn;");
+	assertEqual(minify("x = 0xDEADBEEF;"), "x=0xDEADBEEF;");
+	assertEqual(minify("x = 3.14;"), "x=3.14;");
+	assertEqual(minify("x = 1e3;"), "x=1e3;");
+	assertEqual(minify("x = 1..toString();"), "x=1..toString();");
+});
+
+test("folds binary and octal literal arithmetic", () => {
+	assertEqual(minify("x = 0b11 * 2;"), "x=6;");
+	assertEqual(minify("x = 0o10 + 1;"), "x=9;");
+});
+
+test("leaves numeric separator arithmetic unfolded", () => {
+	assertEqual(minify("x = 1_000 + 1;"), "x=1_000+1;");
+});

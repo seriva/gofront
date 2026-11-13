@@ -79,7 +79,7 @@ Probe setup (scratch, deleted afterwards): published `gofront@1.8.0` and `gofron
 ## Implementation Tasks
 
 ### Phase 1: Valid minified output
-- [ ] Task 1.1: Scan every numeric literal form in the minifier
+- [x] Task 1.1: Scan every numeric literal form in the minifier
   - Files: `src/cli/minifier.js`
   - Test: `test/unit/compiler/minifier.test.js`: a table of ≥ 20 literals (*Edge Cases* list plus `0b00000000`, `0B101`, `0o17`, `0O7`, `0xFFn`, `1_000`, `1_0.0_1e1_0`) asserting `new Function("return " + minify(expr))()` equals the unminified value and that `minify(src)` never contains a number token followed by a space and a letter/`_`; plus folding cases (`0b11*2` folds to `6`, `1_000+1` is left unfolded)
   - Done when: the table passes and fails on `9d0899c` with `0 b…`; `0xFFn` and decimal output are byte-identical to 1.9.1
