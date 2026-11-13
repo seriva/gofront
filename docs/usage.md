@@ -136,20 +136,6 @@ numbers above. Use `gofront build --release` for the smallest output, and check 
 your own program: the size depends on which functions you call, not only on which packages
 you import.
 
-The repository guards these numbers with a size budget. `npm test` runs
-`test/perf/bundle-size.js`, which builds nine small programs (one per row above plus a
-three-package program that calls `json.Marshal` in one package) with `--release` and
-compares each `app.js` with its ceiling in `test/perf/bundle-size.baseline.json`. A ceiling
-is the measured size plus 5%. When a bundle is over its ceiling the script prints the
-fixture name with the new size and the ceiling, and exits non-zero. If the growth is
-intended, regenerate the ceilings and review the diff:
-
-```sh
-node test/perf/bundle-size.js            # check every program against its ceiling
-node test/perf/bundle-size.js --update   # rewrite the ceilings from the current sizes
-node test/perf/bundle-size.js --self-test  # prove that a ceiling one byte too low fails
-```
-
 ---
 
 ## Testing
