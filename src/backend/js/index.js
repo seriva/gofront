@@ -19,6 +19,7 @@
 
 import {
 	computeEmbeddedStubs,
+	forEachChild,
 	hasDirectRecover,
 	markInBoundsIndexes,
 	markRedundantNilChecks,
@@ -125,8 +126,27 @@ const JS_RESERVED = new Set([
 	"yield",
 ]);
 
+// Every type declared in `node`, package-level or local.
+function collectTypeDeclNames(node, out) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) collectTypeDeclNames(n, out);
+		return;
+	}
+	if (node.kind === "TypeDecl" && typeof node.name === "string")
+		out.add(node.name);
+	forEachChild(node, (child) => collectTypeDeclNames(child, out));
+}
+
+// Names a Go program may not reuse in the flat bundle: JS keywords, and
+// anything starting with `__`, the prefix of every runtime helper (`__len`,
+// `__append`, ...).  Go identifiers never contain `$`, so a name that does was
+// synthesised by lowering (`__fwd$1`) and is left alone.
 const jsSafeName = (n) =>
-	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
+	typeof n === "string" &&
+	(JS_RESERVED.has(n) || (n.startsWith("__") && !n.includes("$")))
+		? `${n}$`
+		: n;
 
 // Go declarations may shadow browser globals (Task 0.9).  The JS bundle is one
 // flat module scope, so such a binding gets a `$` suffix: generated code and
@@ -393,6 +413,8 @@ export class CodeGen {
 				if (!d._pkgName) d._pkgName = pkgName;
 			}
 		}
+		this._typeDeclNames = new Set();
+		collectTypeDeclNames(program.decls, this._typeDeclNames);
 		this._renameReservedIdents(program.decls);
 		this._elemAddrTaken =
 			takesElementAddress(program.decls) ||
@@ -475,6 +497,10 @@ export class CodeGen {
 
 	_renameIdentNode(node) {
 		if (node._isStructKey || node._type?.kind === "builtin") return;
+		// A type declaration is emitted under its Go name (`class __T`), so a
+		// reference to it keeps that name.
+		if (this._typeDeclNames?.has(node.name) && !JS_RESERVED.has(node.name))
+			return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)
 			: jsSafeName(node.name);

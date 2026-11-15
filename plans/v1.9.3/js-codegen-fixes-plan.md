@@ -113,7 +113,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/expressions.js` (bundled-package selector `:1330`), `src/backend/wasm/boundary.js` (`facadeName`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h01`, `h02`, `h03`, `h04`, `h06`, `h10`; single-package `g04`/`n05` switched to `assertAllTargetsOutput` (adds `wasm`)
   - Done when: all print Go's output; the facade of a `wasm` package exporting `func Map` defines `Map$`, and the existing `Array$` tests pass
-- [ ] Task 1.4: Suffix user identifiers that start with `__` (C3)
+- [x] Task 1.4: Suffix user identifiers that start with `__` (C3)
   - Files: `src/backend/js/index.js` (`jsSafeName`), `src/lower/range.js` (mark `__yield_p<i>` as synthesised)
   - Test: `test/unit/types/shadowing.test.js`: `g09`, `n17`, `n18`, `h07` (written first), plus a range-over-func loop with an assigned yield value (`for k = range seq`) as a regression guard for synthesised names
   - Done when: all print Go's output on `js`/`both`; `n19` and `h08` unchanged

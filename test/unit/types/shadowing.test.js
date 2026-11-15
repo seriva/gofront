@@ -1041,3 +1041,180 @@ func Main() string {
 		assertEqual(mod.Main(), "14 [1 2] 1");
 	});
 }
+
+section("User names that start with __");
+
+test("var __append does not clash with the append helper (g09)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+var __append = 7
+
+func main() {
+	xs := []int{1}
+	xs = append(xs, __append)
+	fmt.Println(xs, __append)
+}
+`,
+		"[1 7] 7\n",
+	);
+});
+
+test("func __len does not clash with the len helper (n17)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func __len(x []int) int { return len(x) * 10 }
+
+func main() {
+	fmt.Println(__len([]int{1, 2}), len("ab"))
+}
+`,
+		"20 2\n",
+	);
+});
+
+test("local __append does not replace the append helper (n18)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	__append := 7
+	xs := append([]int{1}, __append)
+	fmt.Println(xs, __append)
+}
+`,
+		"[1 7] 7\n",
+	);
+});
+
+test("range-over-func with an assigned loop variable still works (synthesised yield names)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func seq(yield func(int) bool) {
+	for i := 0; i < 3; i++ {
+		if !yield(i) {
+			return
+		}
+	}
+}
+
+var _ iter.Seq[int] = seq
+
+func main() {
+	var k int
+	for k = range seq {
+		fmt.Println(k)
+	}
+	fmt.Println("last", k)
+}
+`,
+		"0\n1\n2\nlast 2\n",
+	);
+});
+
+test("locals named __r, recv and args keep working (n19)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	__r := 1
+	recv := 2
+	args := []int{3}
+	args = append(args, __r+recv)
+	fmt.Println(__r, recv, args)
+}
+`,
+		"1 2 [3 3]\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`a ${target} package with func __len, __gfw_i64in and __w works from a js main (h07, h08)`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+func __len(x []int) int { return len(x) * 10 }
+
+func __gfw_i64in(n int) int { return n + 1 }
+
+func __w(n int) int { return n * 2 }
+
+func Size(xs []int) int { return __len(xs) + __gfw_i64in(1) + __w(3) }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	return fmt.Sprint(util.Size([]int{1, 2}), len([]int{1}), len("abc"))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "28 1 3");
+	});
+}
+
+test("types named with a __ prefix keep their class name in every use", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __q struct{ A int }
+
+func (q __q) Get() int { return q.A }
+func (q *__q) Set(n int) { q.A = n }
+
+type __n int
+
+type __i interface{ Get() int }
+
+type __g[T any] struct{ V T }
+
+func conv(x int) __n { return __n(x) }
+
+func main() {
+	x := __q{1}
+	y := x
+	y.Set(5)
+	var i __i = y
+	var p *__q = &x
+	n := conv(3)
+	g := __g[int]{V: 4}
+	var a any = x
+	_, ok := a.(__q)
+	switch v := a.(type) {
+	case __q:
+		fmt.Println("q", v.A)
+	}
+	m := map[__q]int{x: 1}
+	s := []__q{{2}, {3}}
+	fmt.Println(x, y == x, i.Get(), p.A, n, g, ok, m[x], s, new(__q).A, make([]__n, 2))
+	fmt.Printf("%T %T\\n", x, n)
+}
+`,
+		"q 1\n{1} false 5 1 3 {4} true 1 [{2} {3}] 0 [0 0]\nmain.__q main.__n\n",
+	);
+});
