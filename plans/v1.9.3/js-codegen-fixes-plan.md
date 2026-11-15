@@ -117,7 +117,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/index.js` (`jsSafeName`), `src/lower/range.js` (mark `__yield_p<i>` as synthesised)
   - Test: `test/unit/types/shadowing.test.js`: `g09`, `n17`, `n18`, `h07` (written first), plus a range-over-func loop with an assigned yield value (`for k = range seq`) as a regression guard for synthesised names
   - Done when: all print Go's output on `js`/`both`; `n19` and `h08` unchanged
-- [ ] Task 1.5: Document the rename set
+- [x] Task 1.5: Document the rename set
   - Files: `docs/go-compatibility.md` (*Names that shadow JS globals*: the new built-ins (`Map`, `Set`, `BigInt`, `NaN`, `Infinity`, `undefined`, `globalThis`, typed arrays, …), templ and css components, `__`-prefixed names, and facade exports such as `Map$`)
   - Test: none (docs only; `test/unit/language/parity-matrix.test.js` reads `docs/language-support.md`, not this file)
   - Done when: the section lists every category renamed in Tasks 1.2–1.4, with an example each
