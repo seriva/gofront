@@ -101,7 +101,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
 ## Implementation Tasks
 
 ### Phase 1: Names that shadow JS globals (C1–C3)
-- [ ] Task 1.1: Add `JS_RESERVED_GLOBALS` / `shadowsJsGlobal` and the registry test
+- [x] Task 1.1: Add `JS_RESERVED_GLOBALS` / `shadowsJsGlobal` and the registry test
   - Files: `src/typechecker/types.js`, `src/typechecker/index.js` (move `JS_BUILTIN_CLASSES` to `types.js`, no behaviour change)
   - Test: new `test/unit/compiler/js-globals.test.js`. (a) Every identifier in the source text of `src/backend/js/**`, `src/backend/shared/**` and `src/backend/wasm/boundary.js` that names a host global (`Object.getOwnPropertyNames(globalThis)` ∪ `BROWSER_GLOBALS`, not after `.`) satisfies `shadowsJsGlobal`, or sits in a `NOT_EMITTED` allowlist where each entry has a reason. (b) The same check holds over the emitted JS of the `test/perf/bundle-size.js` `FIXTURES` plus one program per helper family (struct-key map, `int64`, typed slices, slice views, `math`, `time`, `os`, `encoding/json`, a `wasm` export), compiled for `js`/`both`/`wasm`. (c) `JS_BUILTIN_CLASSES ⊆ shadowsJsGlobal`. It fails first on `Map`, `BigInt`, `Uint8Array`, `NaN`, `Infinity`, `globalThis`, `Proxy`
   - Done when: the test passes and no emitted output changes (the set is not consumed yet)

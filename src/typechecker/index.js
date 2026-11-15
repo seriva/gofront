@@ -28,6 +28,7 @@ import {
 	isAny,
 	isBool,
 	isVoid,
+	JS_BUILTIN_CLASSES,
 	NATIVES,
 	promotedMethods,
 	Scope,
@@ -59,46 +60,6 @@ function rootIdentName(e) {
 
 // Re-export for consumers that import from typechecker.js
 export { EXCLUDED_STDLIB_PACKAGES, TypeCheckError, typeStr };
-
-// JavaScript built-ins that generated JS relies on; a JS class of the same
-// name in the bundle would shadow them (see _checkGlobalTypeNamesPass).
-const JS_BUILTIN_CLASSES = new Set([
-	"Array",
-	"ArrayBuffer",
-	"BigInt",
-	"BigInt64Array",
-	"BigUint64Array",
-	"Boolean",
-	"DataView",
-	"Date",
-	"Error",
-	"Float32Array",
-	"Float64Array",
-	"Int16Array",
-	"Int32Array",
-	"Int8Array",
-	"JSON",
-	"Map",
-	"Math",
-	"Number",
-	"Object",
-	"Promise",
-	"RangeError",
-	"Reflect",
-	"RegExp",
-	"Set",
-	"String",
-	"Symbol",
-	"TextDecoder",
-	"TextEncoder",
-	"TypeError",
-	"Uint16Array",
-	"Uint32Array",
-	"Uint8Array",
-	"Uint8ClampedArray",
-	"WeakMap",
-	"WebAssembly",
-]);
 
 // The promoted-method entry for candidate `cand`, reusing `prev` when
 // nothing changed so the method keeps its identity across passes. A pointer

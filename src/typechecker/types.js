@@ -102,6 +102,96 @@ export const BROWSER_GLOBALS = new Set([
 	"TextDecoder",
 ]);
 
+// ES and host globals that generated code, runtime helpers and the wasm
+// loader read but that Go programs may legally declare (`func Map`, `NaN :=
+// 2.0`).  Rename-only: the names are never predeclared, so adding one cannot
+// change what compiles.  See `shadowsJsGlobal`.
+export const JS_RESERVED_GLOBALS = new Set([
+	"ArrayBuffer",
+	"BigInt",
+	"BigInt64Array",
+	"BigUint64Array",
+	"DataView",
+	"Float32Array",
+	"Float64Array",
+	"Function",
+	"Infinity",
+	"Int16Array",
+	"Int32Array",
+	"Int8Array",
+	"Iterator",
+	"Map",
+	"NaN",
+	"Proxy",
+	"RangeError",
+	"Reflect",
+	"ReferenceError",
+	"Set",
+	"SyntaxError",
+	"TypeError",
+	"Uint16Array",
+	"Uint32Array",
+	"Uint8Array",
+	"Uint8ClampedArray",
+	"WeakMap",
+	"WeakRef",
+	"WeakSet",
+	"WebAssembly",
+	"escape",
+	"global",
+	"globalThis",
+	"process",
+	"queueMicrotask",
+	"structuredClone",
+	"undefined",
+]);
+
+// True when a Go declaration of `name` must be emitted under a `$`-suffixed
+// binding so it does not shadow a global the generated code relies on.
+export const shadowsJsGlobal = (name) =>
+	BROWSER_GLOBALS.has(name) || JS_RESERVED_GLOBALS.has(name);
+
+// JavaScript built-ins that generated JS relies on; a JS class of the same
+// name in the bundle would shadow them (see _checkGlobalTypeNamesPass).
+// Rejecting a type name is breaking, so this set does not grow.
+export const JS_BUILTIN_CLASSES = new Set([
+	"Array",
+	"ArrayBuffer",
+	"BigInt",
+	"BigInt64Array",
+	"BigUint64Array",
+	"Boolean",
+	"DataView",
+	"Date",
+	"Error",
+	"Float32Array",
+	"Float64Array",
+	"Int16Array",
+	"Int32Array",
+	"Int8Array",
+	"JSON",
+	"Map",
+	"Math",
+	"Number",
+	"Object",
+	"Promise",
+	"RangeError",
+	"Reflect",
+	"RegExp",
+	"Set",
+	"String",
+	"Symbol",
+	"TextDecoder",
+	"TextEncoder",
+	"TypeError",
+	"Uint16Array",
+	"Uint32Array",
+	"Uint8Array",
+	"Uint8ClampedArray",
+	"WeakMap",
+	"WebAssembly",
+]);
+
 // Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/stdlib/
 // gains support; anything not listed is rejected at import with "not yet available in
 // wasm packages".
