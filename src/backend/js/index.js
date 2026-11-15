@@ -497,9 +497,17 @@ export class CodeGen {
 
 	_renameIdentNode(node) {
 		if (node._isStructKey || node._type?.kind === "builtin") return;
+		// Package namespaces are selected by their import name, never renamed.
+		if (node._type?.kind === "namespace") return;
 		// A type declaration is emitted under its Go name (`class __T`), so a
-		// reference to it keeps that name.
-		if (this._typeDeclNames?.has(node.name) && !JS_RESERVED.has(node.name))
+		// reference to it keeps that name.  Only an Ident that names a type is
+		// skipped: a variable that shares the name is renamed like its
+		// declaration.
+		if (
+			node._isTypeRef &&
+			this._typeDeclNames?.has(node.name) &&
+			!JS_RESERVED.has(node.name)
+		)
 			return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)

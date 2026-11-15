@@ -1218,3 +1218,98 @@ func main() {
 		"q 1\n{1} false 5 1 3 {4} true 1 [{2} {3}] 0 [0 0]\nmain.__q main.__n\n",
 	);
 });
+
+test("a local variable named after a declared type is not treated as the type", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Proxy struct{ X int }
+
+func main() {
+	Proxy := 5
+	fmt.Println(Proxy)
+}
+`,
+		"5\n",
+	);
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __q struct{ A int }
+
+func main() {
+	__q := 7
+	fmt.Println(__q)
+}
+`,
+		"7\n",
+	);
+});
+
+test("a local type does not stop another function's variable of that name being renamed", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func other() int {
+	type __q struct{ A int }
+	return __q{2}.A
+}
+
+func main() {
+	__q := 7
+	fmt.Println(__q, other())
+}
+`,
+		"7 2\n",
+	);
+});
+
+test("a package named with a __ prefix keeps its namespace name", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `package util
+
+func Answer() int { return 42 }
+`,
+			"main.go": `package main
+
+import __u "./util"
+
+func Main() int { return __u.Answer() }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 42);
+});
+
+for (const [comp, param] of [
+	["Page", "__x"],
+	["Page", "BigInt"],
+]) {
+	test(`templ case expressions after the first are renamed too (${param})`, () => {
+		const document = templDom({
+			"main.go": `package main
+func main() {
+	gom.Mount("#app", ${comp}("b"))
+}`,
+			"page.templ": `package main
+
+templ ${comp}(${param} string) {
+	switch "b" {
+	case "a", ${param}:
+		<p>hit</p>
+	default:
+		<p>miss</p>
+	}
+}`,
+		});
+		assertEqual(document.querySelector("#app p").textContent, "hit");
+	});
+}

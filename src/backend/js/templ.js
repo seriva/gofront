@@ -263,6 +263,8 @@ export const templGenMethods = {
 	// generic walk does not visit, so `class` in `{ class }` would stay unsafe.
 	_renameTemplExprNode(node) {
 		this._renameReservedIdents(node.expr);
+		// `case a, b:` keeps every expression in `exprs`, not only the first.
+		this._renameReservedIdents(node.exprs);
 	},
 
 	_renameTemplForNode(node) {

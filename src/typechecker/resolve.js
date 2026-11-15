@@ -287,6 +287,9 @@ export const resolveMethods = {
 					base: this.resolveTypeNode(node.operand, scope),
 				};
 			case "Ident":
+				// An Ident in a type position (`__q{1}`, `new(__q)`) never goes
+				// through checkExpr, so tag it as the type reference it is.
+				node._isTypeRef = true;
 				return this.resolveTypeNode(
 					{ kind: "TypeName", name: node.name },
 					scope,
