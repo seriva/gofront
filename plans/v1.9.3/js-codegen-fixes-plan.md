@@ -1,7 +1,7 @@
 # v1.9.3 JS Codegen Fixes — Design Plan
 
 **Version:** v1.9.3  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** [`../v2.0.0/checker-strictness-plan.md`](../v2.0.0/checker-strictness-plan.md) (the breaking half of the same 2026-11-13 review), [`../v2.0.0/web-platform-evolution-plan.md`](../v2.0.0/web-platform-evolution-plan.md) (Phase 7 retypes `BROWSER_GLOBALS` without changing its membership; Task 3.1 owns import cycles; Task 4.5 owns duplicate runtime helpers).  
 **Release note:** Functions, variables, local types, struct fields and templ components named after JavaScript built-ins or runtime properties (`Map`, `BigInt`, `NaN`, `__clone`) no longer break the bundle, and side effects in divisors, shift counts and multiple assignments run once and in Go's order. Anonymous structs copy their array and struct fields and work in literals that omit the type and as generic type arguments, and in WebAssembly `recover()` returns the panic value with its type and slice-bounds panics name the bounds as Go does.  
