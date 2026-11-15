@@ -29,10 +29,10 @@ import {
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
-	BROWSER_GLOBALS,
 	isComplex,
 	isMethodPromotedOverField,
 	isNumeric,
+	shadowsJsGlobal,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import {
@@ -132,7 +132,7 @@ const jsSafeName = (n) =>
 // flat module scope, so such a binding gets a `$` suffix: generated code and
 // other packages keep reaching the real global (`Array.from`, `Object.keys`).
 const jsBindingName = (n) =>
-	typeof n === "string" && BROWSER_GLOBALS.has(n) ? `${n}$` : jsSafeName(n);
+	typeof n === "string" && shadowsJsGlobal(n) ? `${n}$` : jsSafeName(n);
 
 // Runtime helpers by registry name, in output order.  Mark one as needed with
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
@@ -485,6 +485,16 @@ export class CodeGen {
 		this._renameSignature(node);
 	}
 
+	// A templ or css component is a top-level function of the bundle, so its
+	// name follows the same rule as `func`.  `_goName` keeps the declared name
+	// for the generated CSS class, which cannot contain `$`.
+	_renameCompDeclNode(node) {
+		const renamed = jsBindingName(node.name);
+		if (renamed !== node.name) node._goName = node.name;
+		node.name = renamed;
+		this._renameSignature(node);
+	}
+
 	_renameMethodDeclNode(node) {
 		node.recvName = jsBindingName(node.recvName);
 		this._renameSignature(node);
@@ -522,7 +532,7 @@ export class CodeGen {
 		FuncDecl: "_renameFuncDeclNode",
 		MethodDecl: "_renameMethodDeclNode",
 		FuncLit: "_renameSignature",
-		TemplDecl: "_renameSignature",
+		TemplDecl: "_renameCompDeclNode",
 		TemplExpr: "_renameTemplExprNode",
 		TemplChildren: "_renameTemplExprNode",
 		TemplComponent: "_renameTemplExprNode",
@@ -531,7 +541,7 @@ export class CodeGen {
 		TemplCase: "_renameTemplExprNode",
 		TemplFor: "_renameTemplForNode",
 		TemplElement: "_renameTemplElementNode",
-		CssDecl: "_renameSignature",
+		CssDecl: "_renameCompDeclNode",
 		DefineStmt: "_renameDefineNode",
 		VarDecl: "_renameDeclSpecs",
 		ConstDecl: "_renameDeclSpecs",

@@ -37,6 +37,7 @@ import {
 	Scope,
 	SIZED_INT_NAMES,
 	STRING,
+	shadowsJsGlobal,
 	TAINTED_ANY,
 	typeStr,
 	UINT8,
@@ -255,7 +256,7 @@ export const expressionCheckMethods = {
 				// it so generated code keeps reaching the real global.  Package
 				// namespaces (`import console "./util"`) are never renamed: JS
 				// selects their members directly (bundledPackages).
-				if (BROWSER_GLOBALS.has(expr.name) && t.kind !== "namespace") {
+				if (shadowsJsGlobal(expr.name) && t.kind !== "namespace") {
 					const owner = scope.lookupScope(expr.name);
 					if (
 						owner !== this.universe &&

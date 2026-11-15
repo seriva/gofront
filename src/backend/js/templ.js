@@ -52,12 +52,13 @@ export const templGenMethods = {
 	getCssClassName(decl) {
 		if (decl._className) return decl._className;
 		let h = 2166136261 >>> 0;
-		const str = `${decl._pkgName || ""}_${decl.name}_${decl.cssText}`;
+		const goName = decl._goName ?? decl.name;
+		const str = `${decl._pkgName || ""}_${goName}_${decl.cssText}`;
 		for (let i = 0; i < str.length; i++) {
 			h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;
 		}
 		const hash = (h >>> 0).toString(36);
-		decl._className = `gfc_${decl.name}_${hash}`;
+		decl._className = `gfc_${goName}_${hash}`;
 		return decl._className;
 	},
 
