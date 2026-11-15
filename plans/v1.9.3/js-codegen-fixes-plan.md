@@ -109,7 +109,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/typechecker/expressions.js` (`_shadowsGlobal` via `shadowsJsGlobal`), `src/backend/js/index.js` (`jsBindingName`; `TemplDecl`/`CssDecl` names in `_RENAME_HANDLERS`)
   - Test: `test/unit/types/shadowing.test.js`, with `assertJsTargetsOutput` (js + both), each written first and checked against Go's output: `g01`, `g03`, `g04`, `n01`, `n02`, `n05`, `n06`, `n07`, `n15`, `n21` (top level); `g10`, `g11`, `n09`, `n10`, `n13` plus range/type-switch/closure-param bindings named `NaN`/`BigInt` (locals); `t01`, `t02` (templ/css via `compileHybridProject`); variadic `func Map(xs ...int)` called as `Map(ys...)`
   - Done when: all print Go's output on `js` and `both`; the controls `n04`, `n20`, `n22`, `n23` still pass
-- [ ] Task 1.3: Cross-package references and the `wasm` facade (C1)
+- [x] Task 1.3: Cross-package references and the `wasm` facade (C1)
   - Files: `src/backend/js/expressions.js` (bundled-package selector `:1330`), `src/backend/wasm/boundary.js` (`facadeName`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h01`, `h02`, `h03`, `h04`, `h06`, `h10`; single-package `g04`/`n05` switched to `assertAllTargetsOutput` (adds `wasm`)
   - Done when: all print Go's output; the facade of a `wasm` package exporting `func Map` defines `Map$`, and the existing `Array$` tests pass

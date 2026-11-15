@@ -5,6 +5,7 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertJsTargetsOutput,
@@ -474,7 +475,7 @@ func main() {
 });
 
 test("func Uint8Array keeps the typed array constructor (g04)", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -535,7 +536,7 @@ func main() {
 });
 
 test("func WeakMap keeps typed slice capacity (n05)", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -942,3 +943,101 @@ func main() {
 		"1 2 [3] s 4 5 6 7 8 [0 0]\n",
 	);
 });
+
+section("Packages that export names shadowing JS globals");
+
+const GLOBALS_UTIL = (target) => `//gofront:target ${target}
+package util
+
+func Map(n int) int { return n * 2 }
+
+func Set(n int) int { return n + 1 }
+
+func BigInt(n int) int64 { return int64(n) << 40 }
+
+const NaN = 2.5
+
+const Infinity = 7
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`qualified use of a ${target} package exporting Map, Set, BigInt, NaN and Infinity`, async () => {
+		const { mod, js } = await compileHybridProject(
+			{
+				"util/u.go": GLOBALS_UTIL(target),
+				"main.go": `package main
+
+import (
+	"fmt"
+	"math"
+	"./util"
+)
+
+func Main() string {
+	return fmt.Sprint(util.Map(3), util.Set(3), util.BigInt(3), util.NaN, util.Infinity,
+		math.IsNaN(math.NaN()), math.Inf(1))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "6 4 3298534883328 2.5 7 true +Inf");
+		assert(js.includes("Map$"), "the exported Map is bound as Map$");
+	});
+
+	test(`dot-importing a ${target} package exporting Map, Set, BigInt, NaN and Infinity`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": GLOBALS_UTIL(target),
+				"main.go": `package main
+
+import (
+	"fmt"
+	"math"
+	. "./util"
+)
+
+func Main() string {
+	return fmt.Sprint(Map(3), Set(3), BigInt(3), NaN, Infinity,
+		math.IsNaN(math.NaN()), math.Inf(1))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "6 4 3298534883328 2.5 7 true +Inf");
+	});
+}
+
+for (const target of ["js"]) {
+	test(`a ${target} package var named after a global is readable and writable from main`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+var Set = 3
+
+var Proxy = []int{1, 2}
+
+func Bump() { Set++ }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	util.Bump()
+	util.Set += 10
+	return fmt.Sprint(util.Set, util.Proxy, len(util.Proxy[:1]))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "14 [1 2] 1");
+	});
+}

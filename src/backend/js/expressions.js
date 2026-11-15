@@ -18,6 +18,7 @@ import {
 	isComplex,
 	isComplex64,
 	isTypedArraySlice,
+	shadowsJsGlobal,
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
@@ -1327,7 +1328,7 @@ export const expressionGenMethods = {
 		// Bundled GoFront package member; browser-global names carry the `$`
 		// suffix of their declaration (see jsBindingName).
 		if (this.bundledPackages.has(base))
-			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
+			return shadowsJsGlobal(expr.field) ? `${expr.field}$` : expr.field;
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}${this._promotedPath(expr)}.${this._jsMemberName(expr)}`;
