@@ -177,7 +177,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/compiler.js` (`mangleLocalTypes` passes `JS_BUILTIN_CLASSES` to `renameLocalTypes` as reserved names)
   - Test: `test/unit/compiler/local-type-shadow.test.js` with `assertAllTargetsOutput`: `h09`; `fmt.Printf("%T", Map{})` prints `main.Map`; a local `type Set struct{}` next to a local value `Set`; a local `type Map` inside a generic function
   - Done when: all print Go's output on every target; programs without such local types emit the same JS
-- [ ] Task 5.2: Package-level types of `wasm` packages named after JS built-ins get `Name$$pkg`
+- [x] Task 5.2: Package-level types of `wasm` packages named after JS built-ins get `Name$$pkg`
   - Files: `src/link/type-names.js` (`mangleCollidingTypes` takes the built-in names for `wasm` packages), `src/compiler.js` (passes the package target), `docs/go-compatibility.md` (*Names that shadow JS globals*: in a `wasm` package such a type is renamed `WeakMap$$util` in the facade, so hand-written JS uses that name; `js`/`both` packages keep the error)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h05`, plus `var z util.WeakMap` in the js main and `%T` printing `util.WeakMap`; a second package that also declares `WeakMap`; the existing `type Array struct{}` rejection tests for `js`/`both` stay green
   - Done when: `h05` prints `3 2`, the facade defines `class WeakMap$$util`, and no `js`/`both` behaviour changes

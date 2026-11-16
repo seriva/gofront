@@ -6,6 +6,7 @@
 import {
 	assert,
 	assertAllTargetsOutput,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	assertJsTargetsOutput,
@@ -1679,3 +1680,100 @@ func Main() int { return g[int](4) }
 		assertEqual(mod.Main(), 8);
 	});
 }
+
+section("wasm package types named after JS built-ins");
+
+const WEAKMAP_UTIL = `//gofront:target wasm
+package util
+
+type WeakMap struct{ N int }
+
+func Make(n int) WeakMap { return WeakMap{N: n} }
+`;
+
+test("an exported wasm struct named WeakMap crosses to a js main", async () => {
+	const { mod, js } = await compileHybridProject(
+		{
+			"util/u.go": WEAKMAP_UTIL,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	w := util.Make(3)
+	var z util.WeakMap
+	z.N = 2
+	return fmt.Sprint(w.N, " ", z.N)
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "3 2");
+	assertContains(js, "class WeakMap$$util");
+});
+
+test("%T of a renamed wasm package type prints util.WeakMap", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": WEAKMAP_UTIL,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	var z util.WeakMap
+	return fmt.Sprintf("%T", z)
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "util.WeakMap");
+});
+
+test("two wasm packages that both declare WeakMap stay apart", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": WEAKMAP_UTIL,
+			"other/o.go": `//gofront:target wasm
+package other
+
+type WeakMap struct{ M int }
+
+func Make2(n int) WeakMap { return WeakMap{M: n * 10} }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./other"
+	"./util"
+)
+
+func Main() string {
+	return fmt.Sprintf("%d %d %T %T", util.Make(3).N, other.Make2(2).M, util.Make(1), other.Make2(1))
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "3 20 util.WeakMap other.WeakMap");
+});
+
+test("a js package type named WeakMap is still rejected next to a wasm one", () => {
+	const { errors } = compile(
+		"package main\n\ntype WeakMap struct{ N int }\n\nfunc main() { _ = WeakMap{} }\n",
+		{ target: "js" },
+	);
+	assertErrorContains(
+		errors,
+		"type WeakMap shadows the JavaScript global WeakMap; rename the type",
+	);
+});
