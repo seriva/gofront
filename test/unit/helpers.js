@@ -8,13 +8,14 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
+import { isMainThread } from "node:worker_threads";
 import { checkSyntax } from "../../scripts/build-examples.js";
-import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import {
+	CompileError,
 	compileDir,
 	compileFiles,
 	compileWasm as compileWasmSource,
@@ -23,13 +24,7 @@ import {
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
-import {
-	bindUntypedImports,
-	isBuiltinPackage,
-	resolveAll,
-	resolveStdlibSource,
-} from "../../src/resolver.js";
-import { TypeChecker } from "../../src/typechecker/index.js";
+import { isBuiltinPackage, resolveStdlibSource } from "../../src/resolver.js";
 
 export {
 	checkSyntax,
@@ -97,21 +92,33 @@ function importsGoSourceStdlib(ast, source = "") {
 	);
 }
 
-// `compileFiles` for one in-memory source; compile errors come back as an
-// `errors` array like the in-memory helpers return them.
-function compileSourceFile(source, target, options = {}) {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-source-"));
+// Runs `fn`; a `CompileError` comes back as `{ res: null, errors }` and any
+// other exception (a compiler crash) propagates so the test fails with it.
+export function toCompileResult(fn) {
 	try {
-		const goPath = join(dir, "main.go");
-		writeFileSync(goPath, source);
-		return {
-			res: compileFiles([goPath], { forceTarget: target, ...options }),
-			errors: [],
-		};
+		return { res: fn(), errors: [] };
 	} catch (e) {
-		return { res: null, errors: [{ message: e.message }] };
+		if (e instanceof CompileError) return { res: null, errors: e.errors };
+		throw e;
+	}
+}
+
+// `compileFiles` for one in-memory source, written as `fileName` in a fresh
+// temp dir. Imports resolve from `options.fromDir` when given.
+function compileSourceFile(source, target, options = {}) {
+	const { fileName = "main.go", ...rest } = options;
+	const dir = mkdtempSync(join(tmpdir(), "gofront-source-"));
+	const goPath = join(dir, fileName);
+	try {
+		writeFileSync(goPath, source);
+		return toCompileResult(() =>
+			compileFiles([goPath], {
+				...(target ? { forceTarget: target } : {}),
+				...rest,
+			}),
+		);
 	} finally {
-		evictParseCache(join(dir, "main.go"));
+		evictParseCache(goPath);
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -141,53 +148,14 @@ export function compile(
 		target = null,
 	} = {},
 ) {
-	const filename = fromFile.split("/").pop();
-	const tokens = new Lexer(source, filename).tokenize();
-	const ast = new Parser(tokens, filename, source).parse();
-
-	const checker = new TypeChecker();
-	const fromDir = dirname(resolve(fromFile));
-	const jsImports = new Map();
-
-	const pkgTarget = target ?? ast.target ?? "js";
-	ast.target = pkgTarget;
-	checker.target = pkgTarget;
-	checker.pkgName = ast.pkg?.name ?? "main";
-
-	for (const imp of ast.imports) {
-		for (const { path } of imp.imports) {
-			if (!path.startsWith("js:")) continue;
-			const dtsPath = join(fromDir, path.slice(3));
-			const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
-			checker.addDefinitions(types, values);
-		}
-	}
-
-	const resolved = resolveAll(ast.imports, fromFile, parseDts);
-	for (const [path, info] of resolved) {
-		if (!info) continue;
-		checker.addDefinitions(info.types, info.values);
-		jsImports.set(path, [...info.values.keys()]);
-	}
-	bindUntypedImports(ast.imports, resolved, checker);
-
-	if (importsGoSourceStdlib(ast, source)) {
-		const { res, errors } = compileSourceFile(source, pkgTarget, { strict });
-		return errors.length > 0
-			? { js: null, errors }
-			: { js: res.js, errors: [], warnings: [] };
-	}
-
-	const errors = checker.check(ast);
-	if (errors.length > 0) return { js: null, errors };
-
-	const isStrict = Boolean(strict || pkgTarget === "both");
-	const cg = new CodeGen(checker, jsImports, new Set(), {
-		target: pkgTarget,
-		strict: isStrict,
+	const { res, errors } = compileSourceFile(source, target, {
+		strict,
+		fileName: basename(fromFile),
+		fromDir: dirname(resolve(fromFile)),
 	});
-	const js = cg.generate(ast);
-	return { js, errors: [], warnings: [...checker.warnings, ...cg.warnings] };
+	return errors.length > 0
+		? { js: null, errors }
+		: { js: res.js, errors: [], warnings: res.warnings };
 }
 
 export function compileFile(path) {
@@ -537,169 +505,108 @@ async function runProgramModule(js, wasm) {
 	}
 }
 
-// `natives: false` compiles with the native registries off (the Go bodies of
-// `//gofront:native` functions run); `stdlibRoot` swaps the stdlib directory.
-export async function compileHybridProgram(
+// First line where `got` differs from `want`, as a ready-to-print message part:
+// `line N: want "<x>", got "<y>"` (`<EOF>` when one side ends early).
+export function firstDiff(want, got) {
+	const w = want.split("\n");
+	const g = got.split("\n");
+	let i = 0;
+	while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
+	return `line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`;
+}
+
+// Compiles `source` as one package `target` (`js`, `both` or `wasm`), runs
+// `main` and returns its stdout.  `natives: false` compiles with the native
+// registries off (the Go bodies of `//gofront:native` functions run);
+// `stdlibRoot` swaps the stdlib directory.
+export async function runProgram(
 	source,
-	{ natives = true, stdlibRoot } = {},
+	{ target = "both", natives = true, stdlibRoot } = {},
 ) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
 	try {
 		const goPath = join(dir, "main.go");
 		writeFileSync(goPath, source);
-		const run = async (target, label) => {
-			let res;
-			try {
-				res = compileFiles([goPath], {
-					forceTarget: target,
-					natives,
-					...(stdlibRoot && { stdlibRoot }),
-				});
-			} catch (e) {
-				throw new Error(`${label} compile failed:\n${e.message}`);
-			}
-			if (target === "wasm") assertValidWasm(res.wasm);
-			return runProgramModule(res.js, target === "wasm" ? res.wasm : null);
-		};
-		return {
-			js: await run("both", "JS"),
-			wasm: await run("wasm", "WASM"),
-		};
+		let res;
+		try {
+			res = compileFiles([goPath], {
+				forceTarget: target,
+				natives,
+				...(stdlibRoot && { stdlibRoot }),
+			});
+		} catch (e) {
+			throw new Error(`${target} compile failed:\n${e.message}`);
+		}
+		if (target === "wasm") assertValidWasm(res.wasm);
+		return await runProgramModule(res.js, res.wasm ?? null);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
 
-export async function assertProgramOutput(source, expected) {
-	const { js, wasm } = await compileHybridProgram(source);
-	for (const [backend, out] of [
-		["JS", js],
-		["WASM", wasm],
-	]) {
-		if (out === expected) continue;
-		const w = expected.split("\n");
-		const g = out.split("\n");
-		let i = 0;
-		while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
-		throw new Error(
-			`${backend} output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
-		);
-	}
-}
+// `both` as the JS side, `wasm`, or a plain `js` package.
+const TARGET_LABELS = { both: "js", wasm: "wasm", js: "js package" };
 
-// Runs `source` four ways -- JS (`both`) and WASM, each with natives on and
-// off -- and fails naming the first configuration whose output differs from
-// `expected` (`js (natives on)`, `wasm (natives off)`, ...).
-export async function assertFourWay(source, expected, options = {}) {
-	for (const natives of [true, false]) {
-		const state = natives ? "on" : "off";
-		const out = await compileHybridProgram(source, { ...options, natives });
-		for (const [backend, got] of [
-			["js", out.js],
-			["wasm", out.wasm],
-		]) {
+// Runs `source` on each of `targets` (default `both`, `wasm`) and for each
+// `natives` setting (default on), and fails naming the first configuration
+// (`js (natives on)`, `wasm (natives off)`, `js package (natives on)`) whose
+// output differs from `expected`.
+export async function assertOutput(
+	source,
+	expected,
+	{ targets = ["both", "wasm"], natives = [true], stdlibRoot } = {},
+) {
+	for (const n of natives) {
+		for (const target of targets) {
+			const got = await runProgram(source, { target, natives: n, stdlibRoot });
 			if (got === expected) continue;
-			const w = expected.split("\n");
-			const g = got.split("\n");
-			let i = 0;
-			while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
 			throw new Error(
-				`${backend} (natives ${state}) output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
+				`${TARGET_LABELS[target]} (natives ${n ? "on" : "off"}) output differs from real Go at ${firstDiff(expected, got)}`,
 			);
 		}
 	}
 }
 
-// `assertProgramOutput` (`both` + `wasm`) plus the same program as a plain
-// `js` package.
-export async function assertAllTargetsOutput(source, expected) {
-	await assertProgramOutput(source, expected);
-	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
-	try {
-		const goPath = join(dir, "main.go");
-		writeFileSync(goPath, source);
-		const res = compileFiles([goPath], { forceTarget: "js" });
-		const out = await runProgramModule(res.js, null);
-		if (out !== expected)
-			throw new Error(
-				`js package output differs: want ${JSON.stringify(expected)}, got ${JSON.stringify(out)}`,
-			);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+export async function compileHybridProgram(source, options = {}) {
+	return {
+		js: await runProgram(source, { ...options, target: "both" }),
+		wasm: await runProgram(source, { ...options, target: "wasm" }),
+	};
 }
 
-// Same as assertProgramOutput for a program only the JS side of a `both`
-// package is expected to run (the WASM backend cannot compile it yet).
-export async function assertJsProgramOutput(source, expected) {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
-	try {
-		const goPath = join(dir, "main.go");
-		writeFileSync(goPath, source);
-		const res = compileFiles([goPath], { forceTarget: "both" });
-		const out = await runProgramModule(res.js, res.wasm);
-		if (out !== expected)
-			throw new Error(
-				`JS output differs: want ${JSON.stringify(expected)}, got ${JSON.stringify(out)}`,
-			);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-}
+// `both` (JS side) and `wasm` against the text real Go printed.
+export const assertProgramOutput = (source, expected) =>
+	assertOutput(source, expected);
 
-// Runs `source` as a `js` package and as the JS side of a `both` package;
-// both must print `expected` (the text real Go printed).
-export async function assertJsTargetsOutput(source, expected) {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
-	try {
-		const goPath = join(dir, "main.go");
-		writeFileSync(goPath, source);
-		for (const target of ["js", "both"]) {
-			const res = compileFiles([goPath], { forceTarget: target });
-			const out = await runProgramModule(res.js, res.wasm ?? null);
-			if (out === expected) continue;
-			const w = expected.split("\n");
-			const g = out.split("\n");
-			let i = 0;
-			while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
-			throw new Error(
-				`${target} output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
-			);
-		}
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-}
+// JS and WASM, each with natives on and off.
+export const assertFourWay = (source, expected, options = {}) =>
+	assertOutput(source, expected, { ...options, natives: [true, false] });
 
-// Same as assertProgramOutput for a program only the WASM backend can run
-// the way Go does (the JS representation cannot tell the cases apart).
-export async function assertWasmProgramOutput(source, expected) {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
-	try {
-		const goPath = join(dir, "main.go");
-		writeFileSync(goPath, source);
-		const res = compileFiles([goPath], { forceTarget: "wasm" });
-		assertValidWasm(res.wasm);
-		const out = await runProgramModule(res.js, res.wasm);
-		if (out === expected) return;
-		const w = expected.split("\n");
-		const g = out.split("\n");
-		let i = 0;
-		while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
-		throw new Error(
-			`WASM output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
-		);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-}
+// `assertProgramOutput` plus the same program as a plain `js` package.
+export const assertAllTargetsOutput = (source, expected) =>
+	assertOutput(source, expected, { targets: ["both", "wasm", "js"] });
+
+// A program only the JS side of a `both` package is expected to run.
+export const assertJsProgramOutput = (source, expected) =>
+	assertOutput(source, expected, { targets: ["both"] });
+
+// A `js` package and the JS side of a `both` package.
+export const assertJsTargetsOutput = (source, expected) =>
+	assertOutput(source, expected, { targets: ["js", "both"] });
+
+// A program only the WASM backend can run the way Go does.
+export const assertWasmProgramOutput = (source, expected) =>
+	assertOutput(source, expected, { targets: ["wasm"] });
 
 // ── Test harness ─────────────────────────────────────────────
 
 let passed = 0,
-	failed = 0;
+	failed = 0,
+	skipped = 0;
 const failures = [];
 const pending = [];
+let summarized = false;
+let exitHookInstalled = false;
 
 // Output is written in registration order: sync results print immediately,
 // but once an async test is queued, later results wait for it to settle.
@@ -736,7 +643,44 @@ function reportFail(slot, name, e) {
 	);
 }
 
+// The default is generous: a file's async tests all start together and share
+// one thread, so under full-suite load one test can wait minutes for its turn.
+// Both knobs are read per call: run.js sets TEST_GREP after this module has
+// already been imported.
+function testTimeoutMs() {
+	const n = Number(process.env.TEST_TIMEOUT_MS);
+	return n > 0 ? n : 600_000;
+}
+
+function matchesGrep(name) {
+	const grep = process.env.TEST_GREP;
+	return !grep || new RegExp(grep).test(name);
+}
+
+// A file run directly (no run.js, no footer) still reports and sets the exit
+// code once the event loop drains. A file that already printed its summary
+// only gets the exit code; one loaded by run.js is left alone.
+function installExitHook() {
+	if (exitHookInstalled || !isMainThread) return;
+	exitHookInstalled = true;
+	process.on("beforeExit", () => {
+		if (globalThis.__GOFRONT_TEST_RUNNER) return;
+		if (summarized) {
+			if (failed > 0) process.exitCode = 1;
+			return;
+		}
+		return summarize().then((n) => {
+			process.exitCode = n > 0 ? 1 : 0;
+		});
+	});
+}
+
 export function test(name, fn) {
+	installExitHook();
+	if (!matchesGrep(name)) {
+		skipped++;
+		return;
+	}
 	const slot = reserveSlot();
 	let result;
 	try {
@@ -746,11 +690,31 @@ export function test(name, fn) {
 		return;
 	}
 	if (result && typeof result.then === "function") {
+		const ms = testTimeoutMs();
 		pending.push(
-			result.then(
-				() => reportPass(slot, name),
-				(e) => reportFail(slot, name, e),
-			),
+			new Promise((done) => {
+				// The slot is filled once: a timed-out test that settles later
+				// must not be counted again.
+				let settled = false;
+				const settle = (report) => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					report();
+					done();
+				};
+				const timer = setTimeout(
+					() =>
+						settle(() =>
+							reportFail(slot, name, new Error(`timed out after ${ms}ms`)),
+						),
+					ms,
+				);
+				result.then(
+					() => settle(() => reportPass(slot, name)),
+					(e) => settle(() => reportFail(slot, name, e)),
+				);
+			}),
 		);
 		return;
 	}
@@ -846,6 +810,7 @@ export async function waitForPending() {
 export function resetTestStats() {
 	passed = 0;
 	failed = 0;
+	skipped = 0;
 	failures.length = 0;
 	pending.length = 0;
 	slots.length = 0;
@@ -853,17 +818,22 @@ export function resetTestStats() {
 }
 
 export function getTestStats() {
-	return { passed, failed, failures: [...failures] };
+	return { passed, failed, skipped, failures: [...failures] };
 }
 
 export async function summarize() {
+	summarized = true;
 	await waitForPending();
 	const total = passed + failed;
 	process.stdout.write(`\n${total} tests: \x1b[32m${passed} passed\x1b[0m`);
 	if (failed > 0) {
 		process.stdout.write(`, \x1b[31m${failed} failed\x1b[0m`);
+		if (skipped > 0) process.stdout.write(`, ${skipped} skipped`);
 		process.stdout.write("\n\nFailed tests:\n");
 		for (const f of failures) process.stdout.write(`  • ${f.name}\n`);
+	}
+	if (failed === 0 && skipped > 0) {
+		process.stdout.write(`, ${skipped} skipped`);
 	}
 	process.stdout.write("\n");
 	return failed;

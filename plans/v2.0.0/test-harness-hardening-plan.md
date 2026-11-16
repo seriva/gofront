@@ -1,7 +1,7 @@
 # Unit Test Harness Hardening — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-16)  
 **Base branch:** main  
 **Related:** [`web-platform-evolution-plan.md`](web-platform-evolution-plan.md) Phase 3 (`PackageCache`; owns the suite-speed lever deferred below). [`checker-strictness-plan.md`](checker-strictness-plan.md) starts after Phase 1 of this plan (`CompileError` with one entry per error, `compile()` on the production path, crashes propagate); keep Phase 1's scope and number stable.  
 **Release note:** None. This is internal test tooling with no user-facing change, so `/dev-loop` skips `CHANGELOG.md` for every phase.  
@@ -41,6 +41,7 @@ The plan may change `test/unit/{helpers,run,worker,discover}.js`, add test files
 | **Excluded: deferred** | Routing the `compileWasm` helper through `compileFiles` | `compileWasm` in-memory path (`compileWasmSource`) | G8: it costs +73 s wall (≈ +49%) and breaks a WAT-shape test. The in-memory WASM path is test-only but cheap, so this plan only applies the crash-propagation fix (Task 1.2) to its `compileFiles` branch. |
 | **Excluded: deferred** | Raising coverage of `backend/wasm/glue.js`, `method-expr.js` and `wat.js` | `glue.js` 72% lines, `method-expr.js` 69% lines, `wat.js` 62% branches | `glue.js` is a loader only tests import (no `src/` importer). `method-expr.js` `stdlibFuncLit`/`variadicDispatch` may be unreachable since stdlib moved to Go source (`strings.ToUpper` as a value no longer reaches it), which needs a reachability audit in a compiler-shrinking plan, not tests. |
 | **Excluded: deferred** | Removing the 54 `if (process.argv[1] === …) process.exit(await summarize() …)` footers and the 2 bare `summarize()` calls, or renaming the 10 test names that repeat across files | `language/core.test.js` footer; `wasm/fmt-any.test.js:611`, `stdlib/testing.test.js:460`; duplicate "complex division" etc. | Mechanical churn across ~60 files. The Task 3.4 `beforeExit` hook is compatible with both forms (`process.exit` skips `beforeExit`, and the hook does nothing once `summarize()` has run). File-qualified failure output (Task 3.2) settles the cross-file name clashes. The 3 within-file duplicates (G5) are renamed in Task 3.2. |
+| **Excluded: deferred** | Runner edge cases and one duplicate test name found in Phase 3 review | `node test/unit/run.js fixtures/harness` (directory arg) exits 1 with `ERR_UNSUPPORTED_DIR_IMPORT`, want 2; `TEST_PARALLEL=0 node test/unit/run.js --grep "[" fixtures/harness/pass.test.js` throws an uncaught `SyntaxError`, want exit 2; `TEST_FILE_TIMEOUT_MS=-1 node test/unit/run.js fixtures/harness/pass.test.js` reports `› timed out`, want pass; `language/value-semantics.test.js` lines 767 and 1125 share the name `a scalar-only anonymous struct copy still uses __sclone` | Small edge cases in internal test tooling, deferred at the Phase 3 review. |
 
 ---
 
@@ -78,7 +79,7 @@ Probes ran on 2026-11-12 against `main` @ `8b6cad64` on a 12-core/24-thread Ryze
 - **Runner**:
   - `run.js` accepts file paths (relative to cwd or `test/unit/`; unknown path is an error, exit 2) and `--grep <re>`, which also comes from `TEST_GREP` and is passed to workers.
   - `helpers.test()` skips non-matching names and counts them as `skipped`, which the summary prints.
-  - Async tests race a `TEST_TIMEOUT_MS` timer (default 120,000; the slowest single test today is under 10 s). The timer is cleared when the test settles. An uncleared timer would keep a directly run file alive for the full timeout before `beforeExit` fires.
+  - Async tests race a `TEST_TIMEOUT_MS` timer (default 600,000: a file's async tests start together and share one thread, so under full-suite load `builtins/json.test.js` tests ran past 120 s). The timer is cleared when the test settles. An uncleared timer would keep a directly run file alive for the full timeout before `beforeExit` fires.
   - `run.js` terminates a worker whose file runs past `TEST_FILE_TIMEOUT_MS` (default 900,000, about 6× the slowest file under full load), records `<file> › timed out`, and starts a fresh worker, reusing the existing `workerDied` path.
   - Failures carry `file`, and the summary prints `<file> › <name>`.
 - **Standalone exit code**: on the first `test()` call on the main thread (`isMainThread`), `helpers.js` registers a one-shot `process.on("beforeExit")` hook. The hook awaits pending tests, prints the summary and sets `process.exitCode`. When it fires, it does nothing if `globalThis.__GOFRONT_TEST_RUNNER` is set (`run.js` sets it for `TEST_PARALLEL=0`; it has to be checked at fire time, because `run.js` sets it only after its static `helpers.js` import has evaluated, G11) or if `summarize()` has already run. Registering lazily keeps the perf scripts that import `compile()` but never call `test()` silent. Files with the existing footer call `process.exit()`, which skips `beforeExit`. The 2 bare `summarize()` callers are covered by the already-summarized check, so nothing prints twice.
@@ -104,47 +105,47 @@ Probes ran on 2026-11-12 against `main` @ `8b6cad64` on a 12-core/24-thread Ryze
 ## Implementation Tasks
 
 ### Phase 1: Production-path compile helper
-- [ ] Task 1.1: Structured compile errors and returned warnings from `compileFiles`
+- [x] Task 1.1: Structured compile errors and returned warnings from `compileFiles`
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/compile-result.test.js` (new). Two undefined vars throw a `CompileError` with `errors.length === 2` and a `message` equal to the joined messages. A parse error and a mixed-package dir throw `CompileError`. An integer literal beyond 2^53 in a `js` package yields `res.warnings` containing the precision warning.
   - Done when: the new tests pass and the existing CLI error-output tests in `test/unit/cli/` pass unchanged.
-- [ ] Task 1.2: `compile()` always goes through `compileFiles`, and crashes propagate
+- [x] Task 1.2: `compile()` always goes through `compileFiles`, and crashes propagate
   - Files: `test/unit/helpers.js`. Same-commit test updates for G2b: `language/expressions.test.js:21,32,44,56`, `language/core.test.js:706`, `language/control-flow.test.js:533`, `types/generics.test.js:1600` (`assertThrows(() => compile(…), s)` → `assertErrorContains(compile(…).errors, s)` with the same `s`; `goto` asserts `"expected"` or the observed parser message); `compiler/packages.test.js:174` (`"Undefined"` → `"No member 'Nonexistent'"`); `compiler/stdlib-go.test.js:694` (`import _ "nope/zzz"` → unused `import z "nope/zzz"`, keeping both the no-errors and the warning assertions)
   - Test: `test/unit/compiler/test-helpers.test.js` (new). `compile()` of a type error returns `errors` with the fixture basename in the message (`fromFile: join(FIXTURES, "type_alias_test.go")`). `compile()` of a parse error returns it in `errors` instead of throwing. `compile()` returns `warnings` for the 2^53 literal. `compileSourceFile` rethrows a non-`CompileError` (driven through an exported `toCompileResult(fn)` with a thunk that throws `TypeError`).
   - Done when: `grep -nE "new (TypeChecker|CodeGen)" test/unit/helpers.js` prints nothing, and the six G2 tests and nine G2b tests pass along with the full `npm test` (including `test/perf/zero-alloc.js`).
-- [ ] Task 1.3: Negative tests check messages, enforced by a test
+- [x] Task 1.3: Negative tests check messages, enforced by a test
   - Files: `test/unit/types/typedarrays.test.js`, `test/unit/types/webgl.test.js`, `test/unit/compiler/targets.test.js` (plus `test/unit/cli/test-runner.test.js`: `:127` gets a message check; the redundant `:1129,:1142` asserts are deleted because an `assertErrorContains` follows each)
   - Test: `test/unit/compiler/test-conventions.test.js` (new) fails while any G4 site remains. Write it first, then replace each site with `assertErrorContains(errors, "<observed substring>")`, taking the substring from the actual message.
   - Done when: the G4 grep prints nothing and the convention test passes.
 
 ### Phase 2: Consolidated output assertions
-- [ ] Task 2.1: Single `firstDiff` and `runProgram`
+- [x] Task 2.1: Single `firstDiff` and `runProgram`
   - Files: `test/unit/helpers.js`
   - Test: `test/unit/compiler/test-helpers.test.js`. `firstDiff("a\nb", "a\nc")` names line 2 with want `"b"`, got `"c"`, and reports `<EOF>` on length mismatch. `runProgram` of a hello-world returns `"hello\n"` for `js`, `both` and `wasm`.
   - Done when: the 4 inline diff loops in helpers.js are gone (`grep -c "while (i < Math.max" test/unit/helpers.js` → 1).
-- [ ] Task 2.2: `assertOutput` over `runProgram` and `firstDiff`
+- [x] Task 2.2: `assertOutput` over `runProgram` and `firstDiff`
   - Files: `test/unit/helpers.js`
   - Test: `test/unit/compiler/stdlib-go.test.js`, next to the `assertFourWay` self-tests (reusing `FOUR_PKG` and its registered natives). `assertOutput(fourProgram("WasmDisagree"), "2\n", { targets: ["both", "wasm"], stdlibRoot })` fails with a message starting `wasm (natives on)`. The same call with `targets: ["both"]` passes, and `fourProgram("Disagree")` with `natives: [true, false]` fails starting `js (natives on)`.
   - Done when: these tests pass.
-- [ ] Task 2.3: The six output helpers become wrappers
+- [x] Task 2.3: The six output helpers become wrappers
   - Files: `test/unit/helpers.js`
   - Test: the existing `assertFourWay` self-tests in `compiler/stdlib-go.test.js` (`js (natives on)` / `wasm (natives on)`) and the 85 calling files, unchanged.
   - Done when: each of the six names is a ≤ 3-line wrapper over `assertOutput` and `npm test` passes with an unchanged test count.
 
 ### Phase 3: Runner filtering, timeouts and reporting
-- [ ] Task 3.1: File arguments and a name filter
+- [x] Task 3.1: File arguments and a name filter
   - Files: `test/unit/run.js`, `test/unit/helpers.js`, `test/unit/worker.js`
   - Test: `test/unit/compiler/runner.test.js`, spawning `node test/unit/run.js` against new fixtures `test/unit/fixtures/harness/{pass,fail}.test.js`. Assert that a file arg runs only that file, that `--grep` / `TEST_GREP` run only matching tests and print the skipped count, that an unknown path exits 2, and that "no tests matched" exits 1.
   - Done when: those assertions pass and `npm test` with no args runs the same file count as before.
-- [ ] Task 3.2: File-qualified failures
+- [x] Task 3.2: File-qualified failures
   - Files: `test/unit/run.js`, `test/unit/worker.js`, `test/unit/helpers.js` (plus `test/unit/language/array-length.test.js:138`: rename the second `"a string index"` row to `"a string-typed index"` so no name repeats within a file, G5)
   - Test: `runner.test.js`. Running `fixtures/harness/fail.test.js` prints `fixtures/harness/fail.test.js › <name>` under "Failed tests", in both parallel and `TEST_PARALLEL=0` modes.
   - Done when: the assertion passes in both modes, and the ANSI-stripped `✓`/`✗` lines of one full run, prefixed by file, have no duplicates.
-- [ ] Task 3.3: Per-test and per-file timeouts
+- [x] Task 3.3: Per-test and per-file timeouts
   - Files: `test/unit/helpers.js`, `test/unit/run.js`
   - Test: `runner.test.js` with fixtures `fixtures/harness/hang-async.test.js` (a never-settling promise) and `hang-sync.test.js` (a `while(true)` behind an env guard). Assert that with `TEST_TIMEOUT_MS=200` the async test fails as "timed out after 200ms" and the other tests in the file still report, and that with `TEST_FILE_TIMEOUT_MS=1000` the sync file is reported as `› timed out` and the run exits 1 without hanging.
   - Done when: both fixtures finish within the `runner.test.js` budget (child process `timeout` 30 s) with the expected output.
-- [ ] Task 3.4: Correct exit code when a test file runs directly, plus contributor docs
+- [x] Task 3.4: Correct exit code when a test file runs directly, plus contributor docs
   - Files: `test/unit/helpers.js`, `AGENTS.md`
   - Test: `runner.test.js`. `node test/unit/fixtures/harness/fail.test.js` (no footer) exits 1 and prints the summary once. The same file with a footer copied from `language/core.test.js`, and with a bare `await summarize()` as in `stdlib/testing.test.js`, still prints it once. A fixture script that imports `compile` from `helpers.js` without calling `test()` (like `test/perf/zero-alloc.js`) prints no summary and exits 0. `TEST_PARALLEL=0 node test/unit/run.js fixtures/harness/fail.test.js` prints one summary.
   - Done when: these assertions pass, and `AGENTS.md` **Commands** documents `node test/unit/run.js <file…>`, `--grep`/`TEST_GREP`, `TEST_TIMEOUT_MS` and `TEST_FILE_TIMEOUT_MS`.

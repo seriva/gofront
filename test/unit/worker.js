@@ -49,7 +49,9 @@ parentPort.on("message", async (msg) => {
 			stderr: `${capturedStderr + (error?.stack || String(error))}\n`,
 			passed: 0,
 			failed: 1,
-			failures: [{ name: file, error: error?.stack || String(error) }],
+			failures: [
+				{ name: "failed to load", error: error?.stack || String(error) },
+			],
 		});
 	}
 });

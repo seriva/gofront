@@ -74,6 +74,17 @@ const _parseCache = new Map();
 // first.
 const PARSE_CACHE_LIMIT = 16;
 
+// A user-code diagnostic (parse, package or type errors) as opposed to a
+// compiler crash. `message` is the joined text the CLI prints; `errors`
+// holds the individual error objects.
+export class CompileError extends Error {
+	constructor(errors) {
+		super(errors.map((e) => e.message).join("\n"));
+		this.name = "CompileError";
+		this.errors = errors;
+	}
+}
+
 export function clearParseCache() {
 	_parseCache.clear();
 }
@@ -471,19 +482,19 @@ export function compileFiles(files, options = {}) {
 		try {
 			programs.push(parseGoFrontFile(f));
 		} catch (e) {
-			parseErrors.push(e.message);
+			parseErrors.push(e);
 		}
 	}
 	if (parseErrors.length > 0) {
-		throw new Error(parseErrors.join("\n"));
+		throw new CompileError(parseErrors);
 	}
 
 	// Validate consistent package name
 	const pkgNames = [...new Set(programs.map((p) => p.pkg.name))];
 	if (pkgNames.length > 1)
-		throw new Error(
-			`Mixed package names in ${fromDir}: ${pkgNames.join(", ")}`,
-		);
+		throw new CompileError([
+			new Error(`Mixed package names in ${fromDir}: ${pkgNames.join(", ")}`),
+		]);
 	const pkgName = pkgNames[0];
 
 	// Local packages share one flat JS module: a type name another package
@@ -508,9 +519,11 @@ export function compileFiles(files, options = {}) {
 		const list = [...declaredTargets.entries()]
 			.map(([t, fList]) => `${t} (${fList.join(", ")})`)
 			.join(" vs ");
-		throw new Error(
-			`Conflicting //gofront:target directives in package '${pkgName}': ${list}`,
-		);
+		throw new CompileError([
+			new Error(
+				`Conflicting //gofront:target directives in package '${pkgName}': ${list}`,
+			),
+		]);
 	}
 	const pkgTarget = resolvePackageTarget(
 		declaredTargets.size === 1
@@ -557,8 +570,7 @@ export function compileFiles(files, options = {}) {
 	);
 	checker.reportUnusedImports();
 	if (errors.length > 0) {
-		const msgs = errors.map((e) => e.message).join("\n");
-		throw new Error(msgs);
+		throw new CompileError(errors);
 	}
 	for (const w of checker.warnings) log.warn(w);
 
@@ -585,6 +597,7 @@ export function compileFiles(files, options = {}) {
 					isTest: options.isTest ?? false,
 				});
 	logWarnings(codegen.warnings);
+	const warnings = [...checker.warnings, ...codegen.warnings];
 
 	const mainChunk = {
 		js: mainJs,
@@ -614,6 +627,7 @@ export function compileFiles(files, options = {}) {
 	return {
 		pkgName,
 		target: pkgTarget,
+		warnings,
 		elemAddrTaken:
 			checker.depElemAddrTaken === true ||
 			programs.some((p) => takesElementAddress(p.decls)),

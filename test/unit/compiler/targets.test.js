@@ -60,7 +60,6 @@ func Step() {
 }
 `;
 	const { errors } = compile(src);
-	assert(errors.length > 0, "expected target error for browser global");
 	const msg = errors.map((e) => e.message).join("\n");
 	assertContains(msg, "'console' is not available in wasm packages");
 	assertContains(
@@ -90,7 +89,6 @@ func Render() {
 }
 `;
 	const { errors } = compile(src);
-	assert(errors.length > 0);
 	const msg = errors.map((e) => e.message).join("\n");
 	assertContains(msg, "package 'gom' is not available in wasm packages");
 });
@@ -114,7 +112,6 @@ package physics
 async func FetchData() {}
 `;
 	const { errors } = compile(src);
-	assert(errors.length > 0);
 	const msg = errors.map((e) => e.message).join("\n");
 	assertContains(
 		msg,
@@ -133,7 +130,6 @@ func Touch() {
 }
 `;
 	const { errors } = compile(src);
-	assert(errors.length > 0);
 	const msg = errors.map((e) => e.message).join("\n");
 	assertContains(
 		msg,

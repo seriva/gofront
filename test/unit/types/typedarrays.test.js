@@ -87,7 +87,6 @@ func main() {
 	var b []float64 = a
 	_ = b
 }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "Cannot assign []float32 to []float64");
 });
 
@@ -98,7 +97,6 @@ func main() {
 	var b []float32 = a
 	_ = b
 }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "Cannot assign []float64 to []float32");
 });
 
@@ -109,7 +107,6 @@ func main() {
 	var b []int32 = a
 	_ = b
 }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "Cannot assign []uint8 to []int32");
 });
 
@@ -120,7 +117,6 @@ func main() {
 	var b []int32 = a
 	_ = b
 }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "Cannot assign []int to []int32");
 });
 

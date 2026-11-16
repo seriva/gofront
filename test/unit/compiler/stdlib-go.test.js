@@ -10,6 +10,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertFourWay,
+	assertOutput,
 	assertThrows,
 	compile,
 	compileDir,
@@ -698,7 +699,7 @@ test("an unknown third-party path still compiles with the missing-types warning"
 	let errors;
 	try {
 		({ errors } = compile(
-			`package main\nimport _ "nope/zzz"\nfunc main() {}\n`,
+			`package main\nimport z "nope/zzz"\nfunc main() {}\n`,
 		));
 	} finally {
 		console.error = realError;
@@ -1153,6 +1154,37 @@ test("assertFourWay names a WASM native that disagrees with its Go body", async 
 		assert(msg !== null, "a disagreeing native must fail");
 		assertContains(msg, "wasm (natives on)");
 	});
+});
+
+const outputFailure = (fn, options) =>
+	withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		try {
+			await assertOutput(fourProgram(fn), "2\n", {
+				...options,
+				stdlibRoot: stdlib,
+			});
+		} catch (e) {
+			return e.message;
+		}
+		return null;
+	});
+
+test("assertOutput names the wasm leg that disagrees", async () => {
+	const msg = await outputFailure("WasmDisagree", {
+		targets: ["both", "wasm"],
+	});
+	assert(msg !== null, "a disagreeing wasm native must fail");
+	assert(msg.startsWith("wasm (natives on)"), msg);
+});
+
+test("assertOutput passes when only the agreeing targets run", async () => {
+	assertEqual(await outputFailure("WasmDisagree", { targets: ["both"] }), null);
+});
+
+test("assertOutput names the JS leg that disagrees with natives on", async () => {
+	const msg = await outputFailure("Disagree", { natives: [true, false] });
+	assert(msg !== null, "a disagreeing js native must fail");
+	assert(msg.startsWith("js (natives on)"), msg);
 });
 
 const FX_PKG = `//go:build gofront
