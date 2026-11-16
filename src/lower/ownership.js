@@ -147,26 +147,20 @@ export function fnMutates(body, name, addrOnly = false, cache = null) {
 	return nodeMutatesVar(body, name, addrOnly);
 }
 
-// True when `body` (not its nested function literals) declares a variable
-// `name` with `:=`, `var` or a range clause, so it shadows any outer `name`.
+// True when `body` declares a variable `name` with `:=` or `var` at its top
+// level, so it shadows any outer `name` for the whole body. Declarations in
+// nested blocks only shadow within that block and do not count.
 export function declaresVar(body, name) {
-	const walk = (node) => {
-		if (!node || typeof node !== "object") return false;
-		if (Array.isArray(node)) return node.some(walk);
-		if (node.kind === "FuncLit") return false;
+	for (const s of body?.stmts ?? []) {
 		if (
-			node.kind === "DefineStmt" &&
-			node.lhs.some((e) => e.kind === "Ident" && !e._redecl && e.name === name)
+			s.kind === "DefineStmt" &&
+			s.lhs.some((e) => e.kind === "Ident" && !e._redecl && e.name === name)
 		)
 			return true;
-		if (
-			node.kind === "VarDecl" &&
-			node.decls.some((d) => d.names?.includes(name))
-		)
+		if (s.kind === "VarDecl" && s.decls.some((d) => d.names?.includes(name)))
 			return true;
-		return someChild(node, walk);
-	};
-	return walk(body);
+	}
+	return false;
 }
 
 function collectClosureMutatedVars(node, mutated = new Set()) {

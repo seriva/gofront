@@ -1219,6 +1219,38 @@ closureCase(
 );
 
 closureCase(
+	"a nested-block shadow in a closure does not detach the outer pointer",
+	`	s := S{1}
+	ps := &s
+	f := func() {
+		if true {
+			s := S{9}
+			_ = s
+		}
+		s = S{2}
+	}
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n",
+);
+
+closureCase(
+	"a nested-block array shadow in a closure keeps the outer slice view",
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	f := func() {
+		if true {
+			arr := [2]int{9, 9}
+			_ = arr
+		}
+		arr = [2]int{3, 4}
+	}
+	f()
+	fmt.Println(sl)`,
+	"[3 4]\n",
+);
+
+closureCase(
 	"an array reassigned in a closure keeps its identity",
 	`	arr := [2]int{1, 2}
 	pa := &arr
