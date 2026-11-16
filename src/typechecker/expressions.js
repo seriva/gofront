@@ -252,20 +252,12 @@ export const expressionCheckMethods = {
 				}
 				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
 					expr._isTypeRef = true;
-				// The binding is the declared type itself, not a function or
-				// variable that shares its name with a type of the build.
-				if (t.kind !== "typeParam" && this.types.get(expr.name) === t)
-					expr._namesDeclType = true;
-				// A binding of a function scope (local, parameter, result,
-				// receiver) is a value even when its type shares its name.
-				const bindingScope = scope.lookupScope(expr.name);
-				if (
-					bindingScope !== this.globals &&
-					bindingScope !== this.universe &&
-					t.kind !== "typeParam" &&
-					t.kind !== "aliasArg"
-				)
-					expr._isValueRef = true;
+				// JS output keeps the Go name of what names a type: a type is a
+				// class under that name, and a type parameter is looked up by it.
+				// Decided from the binding the name resolves to, so a variable,
+				// function or parameter is never one, whatever its type is.
+				if (t.kind === "typeParam") expr._namesTypeParam = true;
+				else if (scope.bindsType(expr.name)) expr._namesDeclType = true;
 				// A Go declaration that shadows a browser global: JS output renames
 				// it so generated code keeps reaching the real global.  Package
 				// namespaces (`import console "./util"`) are never renamed: JS
@@ -747,9 +739,13 @@ export const expressionCheckMethods = {
 	// build (the type table spans packages) is a value.
 	_namesType(name, t, scope) {
 		if (!this.types.has(name)) return false;
-		return (
-			scope.lookupScope(name) === this.globals || this.types.get(name) === t
-		);
+		const owner = scope.lookupScope(name);
+		if (owner?._typeNames.has(name)) return true;
+		// A binding the source declared as a variable, constant, function,
+		// parameter or package is a value, whatever its type is.
+		if (owner && owner !== this.universe && !this._externalNames.has(name))
+			return false;
+		return owner === this.globals || this.types.get(name) === t;
 	},
 
 	_checkSelectorExpr(expr, scope) {

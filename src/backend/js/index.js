@@ -431,12 +431,14 @@ export class CodeGen {
 		if (node._isStructKey || node._type?.kind === "builtin") return;
 		// Package namespaces are selected by their import name, never renamed.
 		if (node._isNamespace || node._type?.kind === "namespace") return;
+		// A type parameter is looked up by its Go name (`$z___T`), so a
+		// reference to it keeps that name.
+		if (node._namesTypeParam) return;
 		// A type declaration is emitted under its Go name (`class __T`), so a
-		// reference to it keeps that name.  Only an Ident that names a type is
-		// skipped: a variable that shares the name is renamed like its
+		// reference to it keeps that name.  Only an Ident whose name binds the
+		// type is skipped: a variable that shares the name is renamed like its
 		// declaration.
-		if (node._namesDeclType && !node._isValueRef && !JS_RESERVED.has(node.name))
-			return;
+		if (node._namesDeclType && !JS_RESERVED.has(node.name)) return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)
 			: jsSafeName(node.name);

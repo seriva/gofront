@@ -824,16 +824,31 @@ export class Scope {
 		this._constExprs = new Map(); // name -> AST initializer expr
 		this._locals = new Set(); // names declared as local variables (var / :=)
 		this._used = new Set(); // names referenced in this scope
+		this._typeNames = new Set(); // names whose binding here is a type declaration
 	}
 	define(name, type) {
 		this.symbols.set(name, type);
+		this._typeNames.delete(name);
+	}
+	// Binds `name` to a type declaration (`type T ...`, `type T = ...`): a
+	// reference to it names a type, whatever other bindings share its name.
+	defineType(name, type) {
+		this.symbols.set(name, type);
+		this._typeNames.add(name);
+	}
+	// True when the binding `name` resolves to is a type declaration, not a
+	// variable, constant, function, parameter or package that shares the name.
+	bindsType(name) {
+		return this.lookupScope(name)?._typeNames.has(name) ?? false;
 	}
 	defineLocal(name, type) {
 		this.symbols.set(name, type);
+		this._typeNames.delete(name);
 		if (name !== "_") this._locals.add(name);
 	}
 	defineConst(name, type, expr = null) {
 		this.symbols.set(name, type);
+		this._typeNames.delete(name);
 		this._consts.add(name);
 		if (expr) this._constExprs.set(name, expr);
 	}

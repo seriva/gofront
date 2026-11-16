@@ -547,15 +547,21 @@ export const resolveMethods = {
 	},
 
 	// `G[X]`: instantiate a generic named type, or expand a generic alias.
-	// Marks an Ident in a type position that resolves to a declared type: JS
-	// output emits such a type under its Go name, so the reference keeps it.
-	// Basic types, type parameters and alias arguments name no declaration.
+	// Marks an Ident in a type position by the binding it resolves to: JS output
+	// emits a declared type under its Go name, and looks a type parameter up by
+	// its name, so references to either keep it.  Basic types and alias
+	// arguments name no declaration.
 	_tagDeclTypeIdent(node, scope) {
 		if (BASIC_TYPES[node.name] || node.name === "comparable") return;
-		const fromScope = scope?.lookup(node.name);
-		if (fromScope?.kind === "typeParam" || fromScope?.kind === "aliasArg")
-			return;
-		if (this.types.has(node.name)) node._namesDeclType = true;
+		const owner = scope?.lookupScope(node.name);
+		const bound = owner?.symbols.get(node.name);
+		if (bound?.kind === "typeParam") node._namesTypeParam = true;
+		else if (bound?.kind === "aliasArg") return;
+		// Dot-imported and predeclared types are known by the type table only.
+		else if (
+			owner ? owner._typeNames.has(node.name) : this.types.has(node.name)
+		)
+			node._namesDeclType = true;
 	},
 
 	_resolveGenericTypeName(node, scope) {

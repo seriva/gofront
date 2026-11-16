@@ -1549,3 +1549,133 @@ ${body}
 		assertEqual(mod.Main(), want);
 	});
 }
+
+section("Renames follow the binding a name resolves to");
+
+for (const [name, decl, read] of [
+	["Array", "type Array int", "int(Array)"],
+	["Map", "type Map int", "int(Map)"],
+	["Proxy", "type Proxy int", "int(Proxy)"],
+	["__n", "type __n int", "int(__n)"],
+]) {
+	test(`package var ${name} of an imported type of the same name`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `package util\n\n${decl}\n`,
+				"main.go": `package main
+
+import "./util"
+
+var ${name} util.${name} = 5
+
+func Main() int { return ${read} }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 5);
+	});
+}
+
+for (const name of ["__A", "Proxy"]) {
+	test(`package var ${name} of an imported struct type of the same name`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `package util\n\ntype ${name} struct{ X int }\n`,
+				"main.go": `package main
+
+import "./util"
+
+var ${name} = util.${name}{X: 5}
+
+func Main() int { return ${name}.X }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 5);
+	});
+}
+
+for (const [name, local, pkg, want] of [
+	["__A", 3, 7, 10],
+	["Map", 1, 7, 8],
+	["Proxy", 1, 7, 8],
+]) {
+	test(`package var ${name} next to a local type of the same name in another function`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"main.go": `package main
+
+func other() int {
+	type ${name} = int
+	var x ${name} = ${local}
+	return x
+}
+
+var ${name} = ${pkg}
+
+func Main() int { return ${name} + other() }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), want);
+	});
+}
+
+section("Type parameters named like runtime helpers or JS globals");
+
+for (const tp of ["__T", "Proxy", "Map", "BigInt", "delete"]) {
+	test(`new(${tp}) of a type parameter`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"main.go": `package main
+
+func f[${tp} any]() *${tp} { return new(${tp}) }
+
+type Box[${tp} any] struct{ V ${tp} }
+
+func (b Box[${tp}]) ZeroPtr() *${tp} { return new(${tp}) }
+
+func Main() int {
+	a := *f[string]() + "!"
+	b := *(&Box[string]{V: "x"}).ZeroPtr() + "!"
+	return len(a) + len(b) + *f[int]() - 2
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 0);
+	});
+
+	test(`composite and assertion forms of type parameter ${tp}`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"main.go": `package main
+
+func g[${tp} comparable](x ${tp}) int {
+	m := map[${tp}]int{x: 3}
+	s := []${tp}{x, x}
+	a := new([2]${tp})
+	var i any = &x
+	_, ok := i.(*${tp})
+	var j any = s
+	_, ok2 := j.([]${tp})
+	p := (*${tp})(nil)
+	n := 0
+	if ok && ok2 && p == nil {
+		n = 1
+	}
+	return m[x] + len(s) + len(a) + n
+}
+
+func Main() int { return g[int](4) }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 8);
+	});
+}
