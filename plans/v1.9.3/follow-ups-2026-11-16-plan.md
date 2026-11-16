@@ -1,7 +1,7 @@
 # v1.9.3 Review Follow-ups (2026-11-16) — Design Plan
 
 **Version:** v1.9.3  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** [`js-codegen-fixes-plan.md`](js-codegen-fixes-plan.md) is where most ledger entries came from (PRs #203–#207). Its deferred Tasks 5.2 and 5.4 are scheduled here as Phases 9 and 7. [`../v2.0.0/checker-strictness-plan.md`](../v2.0.0/checker-strictness-plan.md) owns rejecting invalid Go that compiles today and runs (see the deferred rows below). Its own Excluded row hands "generic instances over anonymous structs" to this ledger (F23).  
 **Release note:** More valid Go now runs correctly. Types named `yield`, `arguments` or after JavaScript built-ins such as `Map` work. Multiple and compound assignments run their side effects in Go's order, and copies of anonymous structs no longer share arrays. Generic code over anonymous structs and `(*T)(nil)` now compiles for WebAssembly. WebAssembly panics also match Go more closely: `panic(nil)`, large slice bounds, and the messages of uncaught `bool`, unsigned and `error` panics.  
