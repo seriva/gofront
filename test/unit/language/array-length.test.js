@@ -135,7 +135,7 @@ for (const [name, body] of [
 	["make(map[string]int, f)", "f := 1.5\n\t_ = make(map[string]int, f)"],
 	["a float32 index", "var f float32 = 1\n\t_ = s[f]"],
 	["a complex128 index", "var f complex128 = 1\n\t_ = s[f]"],
-	["a string index", 'f := "a"\n\t_ = s[f]'],
+	["a string-typed index", 'f := "a"\n\t_ = s[f]'],
 	["a bool index", "f := true\n\t_ = s[f]"],
 	["an any index", "var f any = 1\n\t_ = s[f]"],
 	["a bool comparison index", "x := 1\n\t_ = s[x == 1]"],
