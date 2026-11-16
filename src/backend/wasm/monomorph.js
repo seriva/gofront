@@ -100,17 +100,20 @@ function structFieldList(t) {
 	return t._structFields ?? t.fields ?? [];
 }
 
-// Anonymous struct `struct{ A [2]int }` -> `st_A_arr_2_int`: the field names
+// Anonymous struct `struct{ A [2]int }` -> `st_n1_At9_arr_2_int`: the field names
 // and the keys of their types, so each distinct struct type argument gets its
 // own instance and the same struct written twice shares one.
 function structKey(t) {
+	// Go identifiers may contain `_`, so each name and type key is length
+	// prefixed (`n1_A`): distinct structs never join to the same key.
+	const seg = (tag, text) => `${tag}${text.length}_${text}`;
 	const parts = [];
 	for (const f of structFieldList(t)) {
-		const type = typeKey(f.type);
-		if (f.embedded) parts.push(`emb_${type}`);
-		else for (const n of f.names ?? []) parts.push(`${n}_${type}`);
+		const type = seg("t", typeKey(f.type));
+		if (f.embedded) parts.push(`e${type}`);
+		else for (const n of f.names ?? []) parts.push(`${seg("n", n)}${type}`);
 	}
-	return `st_${parts.join("_")}`;
+	return `st_${parts.join("")}`;
 }
 
 // A checker struct type as a `StructType` node.

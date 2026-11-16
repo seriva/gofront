@@ -911,7 +911,12 @@ export const expressionGenMethods = {
 				map: "__ifm",
 				slice: "__ifs",
 			}[box] ?? "__ifv";
-		const fields = ptrFields?.length ? JSON.stringify(ptrFields) : "";
+		// Field paths name JS properties, which `jsMemberName` may suffix.
+		const fields = ptrFields?.length
+			? JSON.stringify(
+					ptrFields.map((f) => f.split(".").map(jsMemberName).join(".")),
+				)
+			: "";
 		if (fn === "__ifv" && fresh)
 			return `${fn}(${js}, ${fields || "null"}, true)`;
 		return `${fn}(${js}${fields ? `, ${fields}` : ""})`;

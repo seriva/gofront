@@ -288,7 +288,8 @@ export class ModuleEmitter {
 
 	getAnonStructType(fields) {
 		const key = fields.map((f) => `${f.name}:${goTypeKey(f.goType)}`).join(";");
-		const name = `__anon_${key.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+		// `_` is escaped too, so `A_int` and `A:int` never share a name.
+		const name = `__anon_${key.replace(/[^a-zA-Z0-9]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`)}`;
 		if (this.structTypes.has(name)) {
 			return this.structTypes.get(name);
 		}

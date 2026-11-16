@@ -801,7 +801,7 @@ export class CodeGen {
 			for (const m of methodDecls) {
 				const recv = m.recvPointer ? "this._p" : "this._p.value";
 				this.line(
-					`${m.name}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
+					`${jsMemberName(m.name)}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
 				);
 			}
 			this._tagMultiUnwrap(methodDecls);

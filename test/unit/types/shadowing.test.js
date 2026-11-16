@@ -1767,6 +1767,42 @@ func Main() string {
 	assertEqual(mod.Main(), "3 20 util.WeakMap other.WeakMap");
 });
 
+test("a function-local Map next to a wasm package-level Map keeps both (fmt imported)", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+import "fmt"
+
+type Map struct{ N int }
+
+func Make(n int) Map { return Map{N: n} }
+
+func Local() string {
+	type Map struct{ V string }
+	m := Map{V: "x"}
+	return fmt.Sprintf("%T %v", m, m)
+}
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	var z util.Map
+	return fmt.Sprintf("%T %v", z, util.Make(3)) + " | " + util.Local()
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "util.Map {3} | util.Map {x}");
+});
+
 test("a js package type named WeakMap is still rejected next to a wasm one", () => {
 	const { errors } = compile(
 		"package main\n\ntype WeakMap struct{ N int }\n\nfunc main() { _ = WeakMap{} }\n",

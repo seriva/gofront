@@ -43,7 +43,7 @@ export function mangleCollidingTypes(
 	if (renamed.size > 0)
 		for (const p of programs)
 			for (const d of p.decls ?? [])
-				renameTypeRefs(d, renamed, new Set(), new Set());
+				renameTypeRefs(d, renamed, new Set(), new Set(), true);
 	return renamed;
 }
 
@@ -150,10 +150,19 @@ export function registerLocalTypeOwners(programs, pkgKey, owners) {
 
 // `tparams` are type parameters in scope; `values` are names a function
 // declares as parameters or locals, which shadow a same-spelled bare `Ident`.
-function renameTypeRefs(node, renamed, tparams, values) {
+// `scoped` keeps a function-local type declaration, and the references it
+// shadows, out of the rename: only package-level types are renamed.
+function renameTypeRefs(node, renamed, tparams, values, scoped = false) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
-		for (const n of node) renameTypeRefs(n, renamed, tparams, values);
+		let visible = renamed;
+		for (const n of node) {
+			if (scoped && n?.kind === "TypeDecl" && visible.has(n.name)) {
+				visible = new Map(visible);
+				visible.delete(n.name);
+			}
+			renameTypeRefs(n, visible, tparams, values, scoped);
+		}
 		return;
 	}
 	const tp = withTypeParams(node, tparams);
@@ -162,7 +171,7 @@ function renameTypeRefs(node, renamed, tparams, values) {
 		node.name = renamed.get(node.name);
 	forEachChild(node, (child) => {
 		if (node.kind === "KeyValueExpr" && child === node.key) return;
-		renameTypeRefs(child, renamed, tp, vals);
+		renameTypeRefs(child, renamed, tp, vals, scoped);
 	});
 }
 

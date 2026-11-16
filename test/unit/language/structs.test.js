@@ -955,6 +955,78 @@ func main() {
 	);
 });
 
+test("a pointer to a named non-struct type with __ methods boxes into an interface", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ __ref() int }
+
+type N int
+
+func (n N) __ref() int { return int(n) }
+
+type PN int
+
+func (n *PN) __ref() int {
+	*n += 1
+	return int(*n)
+}
+
+func main() {
+	n := N(4)
+	var i I = &n
+	fmt.Println(i.__ref())
+	p := PN(7)
+	var j I = &p
+	fmt.Println(j.__ref(), p)
+}
+`,
+		"4\n8 8\n",
+	);
+});
+
+test("a __ pointer field of a boxed struct keeps its pointer methods", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func (s *S) M() int {
+	s.N++
+	return s.N
+}
+
+type M interface{ M() int }
+
+type T struct{ __t *S }
+type Inner struct{ __in *S }
+type Outer struct{ Mid Inner }
+
+func main() {
+	s := &S{1}
+	var v any = T{s}
+	t := v.(T)
+	var m M = t.__t
+	fmt.Println(m.M(), s.N)
+	_, ok := any(t.__t).(M)
+	fmt.Println(ok)
+	o := Outer{Inner{&S{10}}}
+	var w any = o
+	oo := w.(Outer)
+	var m2 M = oo.Mid.__in
+	fmt.Println(m2.M())
+	_, ok2 := any(oo.Mid.__in).(M)
+	fmt.Println(ok2)
+}
+`,
+		"2 2\ntrue\n11\ntrue\n",
+	);
+});
+
 test("a both-package struct with a __t field crosses to a wasm package", async () => {
 	const { mod } = await compileHybridProject(
 		{

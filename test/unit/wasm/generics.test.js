@@ -1190,6 +1190,39 @@ b a
 	);
 });
 
+section("WASM Generics — anonymous struct instance keys");
+
+test("anonymous structs whose field names and types join to the same text stay apart", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Alias = struct {
+	A int
+	B string
+}
+
+func id[T any](x T) T { return x }
+
+func main() {
+	a := id(struct {
+		A int
+		B string
+	}{1, "x"})
+	b := id(struct{ A_int_B string }{"y"})
+	c := id(struct {
+		A int
+		B string
+	}{2, "z"})
+	d := id(Alias{3, "w"})
+	fmt.Println(a.A, a.B, b.A_int_B, c.A, c.B, d.A, d.B)
+}
+`,
+		"1 x y 2 z 3 w\n",
+	);
+});
+
 section("WASM Generics — named slice and map type arguments");
 
 test("append of S, a method on a returned S and make(S) match Go", async () => {
