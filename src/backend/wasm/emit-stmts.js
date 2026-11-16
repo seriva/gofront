@@ -255,7 +255,9 @@ export class StmtsEmitter {
 		) {
 			// Target operands run before the asserted expression.
 			const undo =
-				op === "=" ? this._hoistLhsOperands(lhsNodes, rhsNodes) : null;
+				op === "="
+					? this._hoistLhsOperands(lhsNodes, rhsNodes, false, true)
+					: null;
 			this._emitCommaOkTypeAssert(
 				lhsNodes[0],
 				lhsNodes[1],
@@ -277,7 +279,9 @@ export class StmtsEmitter {
 		) {
 			// Target operands run before the map and key.
 			const undo =
-				op === "=" ? this._hoistLhsOperands(lhsNodes, rhsNodes) : null;
+				op === "="
+					? this._hoistLhsOperands(lhsNodes, rhsNodes, false, true)
+					: null;
 			this._emitCommaOkMapIndex(
 				lhsNodes[0],
 				lhsNodes[1],
@@ -298,7 +302,9 @@ export class StmtsEmitter {
 		}
 
 		const hoisted =
-			op === "=" ? this._hoistLhsOperands(lhsNodes, rhsNodes) : null;
+			op === "="
+				? this._hoistLhsOperands(lhsNodes, rhsNodes, false, !!this._inForPost)
+				: null;
 		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes);
 		for (let i = 0; i < lhsNodes.length; i++) {
 			this._emitAssignSingle(lhsNodes[i], rhsVals[i], op);
@@ -314,7 +320,9 @@ export class StmtsEmitter {
 	// operands before the right-hand sides: then every non-constant operand
 	// is bound, in source order.
 	// Returns a function that restores the AST and releases the temporaries.
-	_hoistLhsOperands(lhsNodes, rhsNodes, single = false) {
+	// With `callOnly`, plain-variable operands are read after the right-hand
+	// side; only operands with a call or receive are bound first.
+	_hoistLhsOperands(lhsNodes, rhsNodes, single = false, callOnly = false) {
 		if (lhsNodes.length < 2 && !single) return null;
 		const ordered = hasCallOrReceive(rhsNodes) || hasCallOrReceive(lhsNodes);
 		const assigned = new Set(
@@ -325,8 +333,11 @@ export class StmtsEmitter {
 		if (assigned.size === 0 && !ordered) return null;
 		const undo = [];
 		const names = [];
-		const needsTemp = (n) =>
-			ordered ? !this._isConstOperand(n) : this._mentions(n, assigned);
+		const needsTemp = (n) => {
+			if (!ordered) return this._mentions(n, assigned);
+			if (callOnly) return hasCallOrReceive([n]) || this._mentions(n, assigned);
+			return !this._isConstOperand(n);
+		};
 		const visit = (l) => {
 			let keys;
 			if (l.kind === "IndexExpr") keys = ["expr", "index"];
@@ -3182,7 +3193,12 @@ export class StmtsEmitter {
 			this.pushInstruction("i32.add");
 			this.pushInstruction({ op: "local.set", index: ivLocalInfo.index });
 		} else if (stmt.post) {
+			// A post assignment reads plain-variable target operands after
+			// its right-hand calls.
+			const outer = this._inForPost;
+			this._inForPost = true;
 			this.emitStmt(stmt.post);
+			this._inForPost = outer;
 		}
 
 		// Repeat loop: branch back to loop block

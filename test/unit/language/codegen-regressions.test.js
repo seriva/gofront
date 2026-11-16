@@ -436,3 +436,39 @@ g1 pixy
 `,
 	);
 });
+
+test("plain-variable target operands are read after the right-hand call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	i := 0
+	arr := [2]int{}
+	fv := func() any { i = 1; return 4 }
+	var ok bool
+	arr[i], ok = fv().(int)
+	fmt.Println(arr, ok)
+
+	i = 0
+	arr = [2]int{}
+	m := map[string]int{"k": 4}
+	ks := func(k string) string { i = 1; return k }
+	arr[i], ok = m[ks("k")]
+	fmt.Println(arr, ok)
+
+	i = 0
+	arr = [2]int{}
+	fi := func() int { i = 1; return 1 }
+	for k := 0; k < 1; arr[i], k = 9, fi() {
+	}
+	fmt.Println(arr)
+}
+`,
+		`[0 4] true
+[0 4] true
+[0 9]
+`,
+	);
+});
