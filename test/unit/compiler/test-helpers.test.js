@@ -10,6 +10,8 @@ import {
 	assertThrows,
 	compile,
 	FIXTURES,
+	firstDiff,
+	runProgram,
 	section,
 	test,
 	toCompileResult,
@@ -61,3 +63,22 @@ test("a non-CompileError exception propagates", () => {
 		"crash",
 	);
 });
+
+section("firstDiff and runProgram");
+
+test("firstDiff names the first differing line", () => {
+	assertEqual(firstDiff("a\nb", "a\nc"), 'line 2: want "b", got "c"');
+});
+
+test("firstDiff reports <EOF> on a length mismatch", () => {
+	assertEqual(firstDiff("a\nb", "a"), 'line 2: want "b", got "<EOF>"');
+	assertEqual(firstDiff("a", "a\nb"), 'line 2: want "<EOF>", got "b"');
+});
+
+const HELLO = 'package main\n\nfunc main() { println("hello") }\n';
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`runProgram returns stdout for target ${target}`, async () => {
+		assertEqual(await runProgram(HELLO, { target }), "hello\n");
+	});
+}
