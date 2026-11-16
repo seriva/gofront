@@ -155,19 +155,19 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Done when: all print Go's output on every target
 
 ### Phase 4: `wasm` parity and panic messages (C7, C8)
-- [ ] Task 4.1: `recover()` on `wasm` returns the panic value with its dynamic type
+- [x] Task 4.1: `recover()` on `wasm` returns the panic value with its dynamic type
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitBuiltinPanic`), `docs/go-compatibility.md` (`defer`/`recover()` row: the recovered value keeps its type on every target; only an uncaught panic reaches JS as an `Error` whose message is the value's text)
   - Test: `test/unit/wasm/defer_recover.test.js` with `assertProgramOutput`: `p01`, `p02`, `p04`, `p05`, and `p03` line 1 (`int64`); an uncaught `panic(42)` from a `wasm` export still throws an `Error` whose message contains `42`
   - Done when: all print Go's output; existing `defer_recover`/`traps` tests pass
-- [ ] Task 4.2: JS slice-bounds panics carry Go's bounds text
+- [x] Task 4.2: JS slice-bounds panics carry Go's bounds text
   - Files: `src/backend/js/runtime.js` (`__slice`, failing path only), `src/backend/js/expressions.js` (`_genSliceExpr`: length-wording flag for array operands)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsTargetsOutput`: `p06`, `p07`, `p09`, and the array lines of `p08`
   - Done when: all print Go's text on `js`/`both`; 3- and 4-argument `__slice` calls on slices are byte-identical
-- [ ] Task 4.3: String slicing in `both` packages checks its bounds
+- [x] Task 4.3: String slicing in `both` packages checks its bounds
   - Files: `src/backend/js/expressions.js` (`_genSliceExpr`, strict mode only), `src/backend/js/runtime.js` (checked string-slice helper)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsProgramOutput` (the JS side of `both`): the string lines of `p08`; an in-range string slice in a `js` package emits the same `s.slice(…)` as before
   - Done when: `both` panics with `[2:1]` / `[:7] with length 3`; `js` package output unchanged
-- [ ] Task 4.4: `wasm` slice-bounds panics carry Go's bounds text
+- [x] Task 4.4: `wasm` slice-bounds panics carry Go's bounds text
   - Files: `src/backend/wasm/index.js` (`__slice_bounds_panic(lo, hi, max, cap, form)` body, modelled on `emitIndexPanicBody`), `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-shared.js` (call sites pass their temps), `docs/go-compatibility.md` (runtime-panics row: slice bounds and `both` string slices)
   - Test: switch the Task 4.2/4.3 cases to `assertProgramOutput` (both + wasm)
   - Done when: `p06`–`p09` print Go's text on every target except the documented `js`-package string slices

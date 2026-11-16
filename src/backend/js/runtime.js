@@ -166,7 +166,7 @@ var __rcflush = __rcflush || function(a) {
   if (e !== undefined) __rcput(e, a, 0, a.length);
   return e;
 };
-var __slice = __slice || function(a, lo, hi, max) {
+var __slice = __slice || function(a, lo, hi, max, arr) {
   if (typeof a === "string") return a.slice(lo, hi);
   const s = a == null ? undefined : a[__sv];
   const n = s !== undefined ? s.n : a == null ? 0 : a.length;
@@ -174,7 +174,7 @@ var __slice = __slice || function(a, lo, hi, max) {
   const mx = max;
   if (hi === undefined) hi = n;
   if (max === undefined) max = c;
-  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
+  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) __slicefail(lo, hi, mx, c, arr);
   if (a == null) return a;
   if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
   if (c > n && Array.isArray(a)) {
@@ -624,6 +624,25 @@ var __ix = __ix || function(a, i) {
   return __ixerr(i, a == null ? 0 : a.length);
 };
 var __lv;`;
+
+// Go's "slice bounds out of range" panic text for `__slice` and `__sslice`
+// (`arr`: the operand has a length, not a capacity).  The first failing
+// bound picks the message: max, then hi, then lo.
+export const HELPER_SLICEFAIL = `var __slicefail = __slicefail || function(lo, hi, mx, c, arr) {
+  const t = mx !== undefined, m = t ? mx : hi;
+  let s;
+  if (!(m >= 0 && m <= c)) s = (t ? "[::" : "[:") + m + (m < 0 ? "]" : "] with " + (arr ? "length " : "capacity ") + c);
+  else if (t && !(hi >= 0 && hi <= mx)) s = "[:" + hi + ":" + (hi < 0 ? "" : mx) + "]";
+  else s = "[" + lo + ":" + (lo < 0 ? "" : hi) + (t ? ":" : "") + "]";
+  throw new Error("runtime error: slice bounds out of range " + s);
+};`;
+
+// Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
+// `s[lo:]`): Go's bounds text instead of JavaScript's silent clamping.
+export const HELPER_SSLICE = `var __sslice = __sslice || function(s, lo, hi = s.length) {
+  if (!(lo >= 0 && lo <= hi && hi <= s.length)) __slicefail(lo, hi, undefined, s.length, true);
+  return s.slice(lo, hi);
+};`;
 
 // Generic zero values (generics are erased in JS): a generic function takes
 // one zero-value factory per type parameter as leading arguments, and an

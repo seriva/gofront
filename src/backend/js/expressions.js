@@ -1777,8 +1777,14 @@ export const expressionGenMethods = {
 		const hi = expr.high
 			? this._asIndexNumber(this.genExpr(expr.high), expr.high._type)
 			: "undefined";
-		if (this._isStringExprType(expr.expr._type))
+		if (this._isStringExprType(expr.expr._type)) {
+			// `both` packages panic on bad bounds; `js` packages keep `slice`.
+			if (this.strict) {
+				this.useHelper("sslice");
+				return `__sslice(${base}, ${lo}${expr.high ? `, ${hi}` : ""})`;
+			}
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
+		}
 		// `b[:]`, `b[0:]` and `a[:]` have the operand's length and capacity:
 		// the result is the operand itself.  Other bounds make a view sharing
 		// the backing store (`__slice`, which checks the bounds against cap).
@@ -1792,7 +1798,17 @@ export const expressionGenMethods = {
 		const max = expr.max
 			? `, ${this._asIndexNumber(this.genExpr(expr.max), expr.max._type)}`
 			: "";
+		// An array (or array pointer) is a JS array like a slice: the flag
+		// makes a failed bounds check word its limit as a length.
+		if (this._isArrayOperand(expr.expr._type))
+			return `__slice(${base}, ${lo}, ${hi}${max || ", undefined"}, 1)`;
 		return `__slice(${base}, ${lo}, ${hi}${max})`;
+	},
+
+	_isArrayOperand(t) {
+		let u = this._underlyingOf(t);
+		if (u?.kind === "pointer") u = this._underlyingOf(u.base);
+		return u?.kind === "array";
 	},
 
 	_genFuncLit(expr) {
