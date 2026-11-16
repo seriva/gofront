@@ -276,6 +276,12 @@ export const expressionCheckMethods = {
 					this._pkgRefs.add(`${this._currentFile}:${expr._line}:${expr._col}`);
 				if (
 					(this.target === "wasm" || this.target === "both") &&
+					this._untypedImports.has(expr.name) &&
+					scope.lookupScope(expr.name) === this.globals
+				)
+					return this._errJsOnly(expr.name, expr);
+				if (
+					(this.target === "wasm" || this.target === "both") &&
 					BROWSER_GLOBALS.has(expr.name) &&
 					scope.lookupScope(expr.name) === this.universe
 				) {

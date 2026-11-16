@@ -105,7 +105,7 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Done when: all pass on `js`/`both`
 
 ### Phase 2: Untyped npm imports (F1)
-- [ ] Task 2.1: An untyped npm import is a dynamic `any` value (F1)
+- [x] Task 2.1: An untyped npm import is a dynamic `any` value (F1)
   - Files: `src/compiler.js` (`resolveImports`: bind the local name for `null` entries and defer untyped npm import rejection on `wasm`/`both` to `Ident` lookup), `src/typechecker/index.js` (helper defining a JS-dynamic global value), `src/typechecker/expressions.js` (`Ident` reports untyped npm imports via `_errJsOnly` on `wasm`/`both`), `test/unit/helpers.js` (`compile` binds `null` entries from `resolveAll`), `docs/usage.md` (*Vendoring npm packages*: an import without types is a dynamic global named after the package)
   - Test: `test/unit/compiler/stdlib-go.test.js`: `import "nope/zzz"; func main() { zzz.F() }` compiles with the warning, and the JS calls `zzz.F()`; `import z "nope/zzz"` binds `z`; on `forceTarget` `wasm` → `assertErrorContains(errors, "zzz")` with the JS-only message
   - Done when: all pass; the existing `nope/zzz` warning test is unchanged

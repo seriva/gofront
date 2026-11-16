@@ -81,6 +81,10 @@ GoFront code can call them through `.d.ts` declarations. Subpath entries such as
   object `{ "<global>": "<export>" }` binding individual exports.
 - `namedExports` binds individual exports as globals: an array of export names
   (`["h", "render"]` → `window.h = preact.h`, …) or an object `{ "<global>": "<export>" }`.
+- An import without a `.d.ts` file compiles with a warning and is a dynamic global named
+  after the package (`import "nope/zzz"` binds `zzz`; `import z "nope/zzz"` binds `z`). Its
+  members are untyped, so GoFront checks nothing about them. `wasm` and `both` packages
+  reject using it.
 
 ```json
 "gofront": {
