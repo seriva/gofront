@@ -140,15 +140,15 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
   - Done when: all three print Go's output on every target
 
 ### Phase 4: Calls run once (C1, C2, C4) and WASM deep copies through pointers (V1–V3)
-- [ ] Task 4.1: Non-strict comma-ok `:=` binds a map or key with a call once
+- [x] Task 4.1: Non-strict comma-ok `:=` binds a map or key with a call once
   - Files: `src/backend/js/statements.js` (`_genCommaOkMapIndex` non-strict define path)
   - Test: `codegen-regressions.test.js`: C1 and C2 with `assertJsTargetsOutput` and the call count printed (`1 true 1`, `1 1`); a call-free key keeps the fast path (assert the emitted JS has no `__m` temp)
   - Done when: both print Go's output on `js` and `both`, and `bundle-size.js` passes
-- [ ] Task 4.2: Complex compound assignment binds its right-hand call first
+- [x] Task 4.2: Complex compound assignment binds its right-hand call first
   - Files: `src/backend/js/statements.js` (`_genAssignStmt` dispatch order, `_genComplexCompoundAssign` map base/key)
   - Test: `codegen-regressions.test.js`: C4 (`(4+6i) 1`), `m[k()] += f()` on a `map[string]complex128` (each call once), `c *= f()` with `assertAllTargetsOutput`
   - Done when: each call runs once on every target
-- [ ] Task 4.3: WASM struct stores through a pointer deep-copy array and struct fields
+- [x] Task 4.3: WASM struct stores through a pointer deep-copy array and struct fields
   - Files: `src/backend/wasm/emit.js` (`_emitCopyFieldValue`, used by `emitCloneStruct`), `src/backend/wasm/emit-stmts.js` (`_emitStructDerefAssign`)
   - Test: `test/unit/language/value-semantics.test.js` *Struct value semantics*: V1, V2 (and the ledger `*p, x = s2, 9` → `[1 2]`), V3, and a composite-literal right-hand side (no extra copy: same output) with `assertAllTargetsOutput`
   - Done when: all pass on wasm, and `zero-alloc.js` passes

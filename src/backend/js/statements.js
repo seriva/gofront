@@ -291,12 +291,21 @@ export const statementGenMethods = {
 		const copyVal = (js) =>
 			this._aggregateBase(valType) ? this._cloneJs(valType, js) : js;
 		if (isDefine && !this.strict) {
+			// Both reads use the map and key: a call in either runs once.
+			let m = mapExpr;
+			let k = keyExpr;
+			if (hasCallOrReceive([rhsNode.expr, rhsNode.index])) {
+				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+				m = `__m${this._tmpCounter}`;
+				k = `__k${this._tmpCounter}`;
+				this.line(`const ${m} = ${mapExpr}, ${k} = ${keyExpr};`);
+			}
 			if (vName !== "_") {
-				const val = this._nonStrictMapRead(mapExpr, keyExpr, valType, copyVal);
+				const val = this._nonStrictMapRead(m, k, valType, copyVal);
 				this.line(bind(vL, vName, val, vDeref));
 			}
 			if (okName !== "_") {
-				this.line(bind(okL, okName, `(${keyExpr}) in ${mapExpr}`, okDeref));
+				this.line(bind(okL, okName, `(${k}) in ${m}`, okDeref));
 			}
 			return;
 		}
@@ -819,12 +828,13 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		if (stmt.op !== "=") for (const l of stmt.lhs) this._markDerefOpTarget(l);
 		this._markSelfReslice(stmt);
-		if (this._isComplexCompoundAssign(stmt)) {
-			this._genComplexCompoundAssign(stmt);
-			return;
-		}
+		// A right-hand call is bound first, so the complex path sees a temp.
 		if (this._isCompoundWithCall(stmt)) {
 			this._genCompoundWithCall(stmt);
+			return;
+		}
+		if (this._isComplexCompoundAssign(stmt)) {
+			this._genComplexCompoundAssign(stmt);
 			return;
 		}
 		if (stmt._commaOkMap) {
