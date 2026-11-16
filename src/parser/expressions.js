@@ -558,8 +558,15 @@ export const expressionParserMethods = {
 		}
 
 		// Anonymous struct composite literal: struct{Name string}{Name: "Alice"}
+		// or conversion: struct{Name string}(v)
 		if (t.type === T.STRUCT) {
 			const typeExpr = this.parseStructType();
+			if (this.check(T.LPAREN)) {
+				this.advance();
+				const expr = this.parseExpr();
+				this.expect(T.RPAREN);
+				return { kind: "TypeConversion", targetType: typeExpr, expr };
+			}
 			return this.parseCompositeLit(typeExpr);
 		}
 

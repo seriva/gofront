@@ -970,3 +970,25 @@ func main() {
 		"4 7 [7 2 3 4] [1 2 3 4] [1 2 3 4]\n[2 3] 2\n",
 	);
 });
+
+test("conversion to an anonymous struct type copies and parses", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A [2]int }
+
+func main() {
+	s := S{[2]int{1, 2}}
+	u := struct{ A [2]int }(s)
+	s.A[0] = 9
+	var a any = u
+	fmt.Printf("%T %v\\n", a, u)
+	v := struct{ A [2]int }{[2]int{3, 4}}
+	fmt.Println(v, s)
+}
+`,
+		"struct { A [2]int } {[1 2]}\n{[3 4]} {[9 2]}\n",
+	);
+});

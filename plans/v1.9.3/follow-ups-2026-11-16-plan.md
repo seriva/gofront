@@ -115,7 +115,7 @@ Fix the 31 review follow-ups that still reproduce in `plans/follow-ups.md` (re-p
 > Scheduled from review follow-ups (`plans/follow-ups.md`, re-probed 2026-11-16).
 
 ### Phase 1: Parser and checker (F4, F18, F23)
-- [ ] Task 1.1: Parse and clone conversions to an anonymous struct type (F18)
+- [x] Task 1.1: Parse and clone conversions to an anonymous struct type (F18)
   - Files: `src/parser/expressions.js` (the `T.STRUCT` branch of `_parsePrimary`: `(` after the struct type → `TypeConversion`), `src/backend/js/expressions.js` (`_genTypeConversion` and `_genTypeConversionCall` clone into an anonymous plain object via `_cloneAnonStruct`)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: `type S struct{ A [2]int }; s := S{[2]int{1, 2}}; u := struct{ A [2]int }(s); s.A[0] = 9; var a any = u; fmt.Printf("%T %v\n", a, u)` → `struct { A [2]int } {[1 2]}`; `test/unit/compiler/lexer-parser.test.js`: the AST is a `TypeConversion` with a `StructType` target
   - Done when: both pass on every target; `struct{…}{…}` literals still parse
