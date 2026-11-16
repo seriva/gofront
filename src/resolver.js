@@ -102,6 +102,32 @@ function resolveImport(importPath, fromFile) {
 	return null;
 }
 
+// The Go name an untyped npm import binds: its alias, else the last path
+// element with characters that cannot be in an identifier replaced by `_`.
+// Returns null for blank (`_`) and dot (`.`) imports, which bind no name.
+export function untypedImportName(path, alias = null) {
+	if (alias === "_" || alias === ".") return null;
+	const name =
+		alias ??
+		path
+			.split("/")
+			.at(-1)
+			.replace(/[^A-Za-z0-9_$]/g, "_");
+	return /^[0-9]/.test(name) ? `_${name}` : name;
+}
+
+// Binds every import that `resolveAll` found no types for (a `null` entry) as
+// a JS-dynamic `any` global on `checker`.
+export function bindUntypedImports(imports, resolved, checker) {
+	for (const imp of imports) {
+		for (const { path, alias } of imp.imports) {
+			if (resolved.get(path) !== null) continue;
+			const name = untypedImportName(path, alias);
+			if (name) checker.defineUntypedImport(name);
+		}
+	}
+}
+
 // Given an AST's import list, resolve all imports.
 // Returns Map<importPath, { dtsPath, importPath, types, values }>
 export function resolveAll(imports, fromFile, parseDts, stdlibRoot = null) {

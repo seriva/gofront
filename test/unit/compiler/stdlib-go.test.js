@@ -710,6 +710,73 @@ test("an unknown third-party path still compiles with the missing-types warning"
 	);
 });
 
+// Runs `fn` with console.error captured; returns the logged lines.
+function captureWarnings(fn) {
+	const realError = console.error;
+	const logged = [];
+	console.error = (m) => logged.push(String(m));
+	try {
+		return { result: fn(), logged };
+	} finally {
+		console.error = realError;
+	}
+}
+
+test("an untyped npm import is a dynamic global named after the package", () => {
+	const { result, logged } = captureWarnings(() =>
+		compile(`package main\nimport "nope/zzz"\nfunc main() { zzz.F() }\n`),
+	);
+	assertEqual(result.errors.length, 0);
+	assert(result.js.includes("zzz.F()"), `no call in: ${result.js}`);
+	assert(
+		logged.some((m) => m.includes("cannot find types for 'nope/zzz'")),
+		`expected the warning, got: ${logged.join("|")}`,
+	);
+});
+
+test("an aliased untyped npm import binds the alias", () => {
+	const { result } = captureWarnings(() =>
+		compile(`package main\nimport z "nope/zzz"\nfunc main() { z.F(1) }\n`),
+	);
+	assertEqual(result.errors.length, 0);
+	assert(result.js.includes("z.F(1)"), `no call in: ${result.js}`);
+});
+
+test("an untyped npm import binds a sanitised name for a non-identifier path", () => {
+	const { result } = captureWarnings(() =>
+		compile(`package main\nimport "nope/zz-z"\nfunc main() { zz_z.F() }\n`),
+	);
+	assertEqual(result.errors.length, 0);
+});
+
+test("an untyped npm import is rejected in a wasm package where it is used", () => {
+	const { result } = captureWarnings(() =>
+		compile(`package main\nimport "nope/zzz"\nfunc main() { zzz.F() }\n`, {
+			target: "wasm",
+		}),
+	);
+	assertErrorContains(result.errors, "'zzz' is only available in js packages");
+});
+
+test("an untyped npm import in a wasm package compiled from disk reports the use", () => {
+	withTempDir(
+		{
+			"main.go": `package main\nimport "nope/zzz"\nfunc main() { zzz.F() }\n`,
+		},
+		(dir) => {
+			let msg = "";
+			captureWarnings(() => {
+				try {
+					compileDir(dir, { forceTarget: "wasm" });
+				} catch (e) {
+					msg = e.message;
+				}
+			});
+			assertContains(msg, "'zzz' is only available in js packages");
+		},
+	);
+});
+
 test("kept packages still compile on both backends", async () => {
 	const out = await stdParity(`import (
 	"encoding/json"
