@@ -5,6 +5,7 @@ import {
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybridProject,
@@ -777,4 +778,67 @@ func main() {
 `);
 	assertContains(js, "__sclone(");
 	assertEqual(out, "0 5");
+});
+
+test("a generic copy of an anonymous struct clones its array field", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func dup[T any](v T) (T, T) { return v, v }
+
+func main() {
+	st := struct{ A [2]int }{}
+	x, y := dup(st)
+	x.A[0] = 1
+	fmt.Println(st.A[0], x.A[0], y.A[0])
+}
+`,
+		"0 1 0\n",
+	);
+});
+
+test("a generic identity of an anonymous struct returns an independent copy", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func id[T any](v T) T { return v }
+
+func main() {
+	st := struct{ A [2]int }{}
+	a := id(st)
+	a.A[0] = 1
+	fmt.Println(st.A[0], a.A[0])
+}
+`,
+		"0 1\n",
+	);
+});
+
+test("a generic copy of an anonymous struct keeps sharing the pointee", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func dup[T any](v T) (T, T) { return v, v }
+
+func main() {
+	st := struct {
+		Ptr *P
+		A   [2]int
+	}{&P{1}, [2]int{}}
+	x, y := dup(st)
+	x.Ptr.N = 5
+	x.A[0] = 2
+	fmt.Println(st.Ptr.N, y.Ptr.N, st.A[0], x.A[0], y.A[0])
+}
+`,
+		"5 5 0 2 0\n",
+	);
 });
