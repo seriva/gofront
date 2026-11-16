@@ -290,6 +290,7 @@ export const resolveMethods = {
 				// An Ident in a type position (`__q{1}`, `new(__q)`) never goes
 				// through checkExpr, so tag it as the type reference it is.
 				node._isTypeRef = true;
+				this._tagDeclTypeIdent(node, scope);
 				return this.resolveTypeNode(
 					{ kind: "TypeName", name: node.name },
 					scope,
@@ -546,6 +547,17 @@ export const resolveMethods = {
 	},
 
 	// `G[X]`: instantiate a generic named type, or expand a generic alias.
+	// Marks an Ident in a type position that resolves to a declared type: JS
+	// output emits such a type under its Go name, so the reference keeps it.
+	// Basic types, type parameters and alias arguments name no declaration.
+	_tagDeclTypeIdent(node, scope) {
+		if (BASIC_TYPES[node.name] || node.name === "comparable") return;
+		const fromScope = scope?.lookup(node.name);
+		if (fromScope?.kind === "typeParam" || fromScope?.kind === "aliasArg")
+			return;
+		if (this.types.has(node.name)) node._namesDeclType = true;
+	},
+
 	_resolveGenericTypeName(node, scope) {
 		const sel = node.expr?.kind === "SelectorExpr" ? node.expr : null;
 		const qualified =
@@ -561,6 +573,11 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
+		// `__G[int]{}`: the generic's name is an Ident that never reaches checkExpr.
+		if (!qualified && node.expr?.kind === "Ident") {
+			node.expr._isTypeRef = true;
+			this._tagDeclTypeIdent(node.expr, scope);
+		}
 		if (qualified) {
 			this.globals.lookup(sel.expr.name);
 			sel.expr._isNamespace = true;

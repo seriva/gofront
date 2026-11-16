@@ -1479,3 +1479,73 @@ func Main() int { return __u.__Answer() + __u.__V }
 	);
 	assertEqual(mod.Main(), 50);
 });
+
+section("Dot-imported types that need a rename-safe name");
+
+const DOT_TYPES_UTIL = `package __u
+
+type __S struct{ B int }
+
+type __G[X any] struct{ V X }
+
+func (g __G[X]) Pick() X { return g.V }
+
+func __Answer() int { return 42 }
+
+var __V = 8
+`;
+
+for (const [label, body, want] of [
+	[
+		"composite literal, assertion and new of a __ type",
+		`	s := __S{B: 5}
+	var a any = s
+	_, ok := a.(__S)
+	p := new(__S)
+	if !ok {
+		return -1
+	}
+	return s.B + p.B + __Answer() + __V`,
+		55,
+	],
+	[
+		"a variable that shares its name with the dot-imported type",
+		`	__S := __S{42}
+	return __S.B`,
+		42,
+	],
+	[
+		"a generic __ type",
+		`	g := __G[int]{V: 9}
+	return g.Pick()`,
+		9,
+	],
+	[
+		"type switch case and conversion of dot-imported types",
+		`	var a any = __S{B: 3}
+	switch v := a.(type) {
+	case __S:
+		return v.B
+	}
+	return -1`,
+		3,
+	],
+]) {
+	test(`dot-imported package: ${label}`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": DOT_TYPES_UTIL,
+				"main.go": `package main
+
+import . "./util"
+
+func Main() int {
+${body}
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), want);
+	});
+}

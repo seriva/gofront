@@ -19,7 +19,6 @@
 
 import {
 	computeEmbeddedStubs,
-	forEachChild,
 	hasDirectRecover,
 	markInBoundsIndexes,
 	markRedundantNilChecks,
@@ -88,18 +87,6 @@ import { templGenMethods } from "./templ.js";
 import { typeInfoGenMethods } from "./type-info.js";
 
 export { buildSourceMap, buildWasmSourceMap };
-
-// Every type declared in `node`, package-level or local.
-function collectTypeDeclNames(node, out) {
-	if (!node || typeof node !== "object") return;
-	if (Array.isArray(node)) {
-		for (const n of node) collectTypeDeclNames(n, out);
-		return;
-	}
-	if (node.kind === "TypeDecl" && typeof node.name === "string")
-		out.add(node.name);
-	forEachChild(node, (child) => collectTypeDeclNames(child, out));
-}
 
 // Runtime helpers by registry name, in output order.  Mark one as needed with
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
@@ -360,8 +347,6 @@ export class CodeGen {
 				if (!d._pkgName) d._pkgName = pkgName;
 			}
 		}
-		this._typeDeclNames = new Set();
-		collectTypeDeclNames(program.decls, this._typeDeclNames);
 		this._renameReservedIdents(program.decls);
 		this._elemAddrTaken =
 			takesElementAddress(program.decls) ||
@@ -450,12 +435,7 @@ export class CodeGen {
 		// reference to it keeps that name.  Only an Ident that names a type is
 		// skipped: a variable that shares the name is renamed like its
 		// declaration.
-		if (
-			node._isTypeRef &&
-			!node._isValueRef &&
-			this._typeDeclNames?.has(node.name) &&
-			!JS_RESERVED.has(node.name)
-		)
+		if (node._namesDeclType && !node._isValueRef && !JS_RESERVED.has(node.name))
 			return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)

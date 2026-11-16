@@ -252,6 +252,10 @@ export const expressionCheckMethods = {
 				}
 				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
 					expr._isTypeRef = true;
+				// The binding is the declared type itself, not a function or
+				// variable that shares its name with a type of the build.
+				if (t.kind !== "typeParam" && this.types.get(expr.name) === t)
+					expr._namesDeclType = true;
 				// A binding of a function scope (local, parameter, result,
 				// receiver) is a value even when its type shares its name.
 				const bindingScope = scope.lookupScope(expr.name);
