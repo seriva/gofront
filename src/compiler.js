@@ -57,7 +57,10 @@ import {
 	resolveStdlibSource,
 } from "./resolver.js";
 import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
-import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
+import {
+	JS_BUILTIN_CLASSES,
+	WASM_SUPPORTED_STDLIB,
+} from "./typechecker/types.js";
 
 // ── Parse cache ──────────────────────────────────────────────
 
@@ -650,7 +653,8 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
-	const foreign = new Set();
+	// A local type named after a JS built-in would shadow it in the bundle.
+	const foreign = new Set(JS_BUILTIN_CLASSES);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
 	const locals = renameLocalTypes(programs, foreign);

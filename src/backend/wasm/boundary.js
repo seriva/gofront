@@ -39,6 +39,7 @@ import {
 	unicodeToLowerJs,
 	unicodeToUpperJs,
 } from "../shared/host-unicode.js";
+import { jsMemberName } from "../shared/member-names.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -1741,7 +1742,7 @@ function zeroExpr(desc) {
 		case "anon_struct":
 			return desc.ptr
 				? "null"
-				: `{ ${desc.fields.map((f) => `"${f.name}": ${zeroExpr(f.desc)}`).join(", ")} }`;
+				: `{ ${desc.fields.map((f) => `"${jsMemberName(f.name)}": ${zeroExpr(f.desc)}`).join(", ")} }`;
 		case "struct":
 			return desc.ptr ? "null" : `new ${desc.name}()`;
 		case "array":
@@ -2306,17 +2307,17 @@ export function generateFacade(
 	for (const [name, desc] of needs.anonStructs) {
 		out.push(`function ${P}to_${name}(o) {
 	if (o == null) return __w.__zero_${name}();
-	return __w.__new_${name}(${desc.fields.map((f) => inExpr(f.desc, `(o.${f.name} ?? ${zeroExpr(f.desc)})`)).join(", ")});
+	return __w.__new_${name}(${desc.fields.map((f) => inExpr(f.desc, `(o.${jsMemberName(f.name)} ?? ${zeroExpr(f.desc)})`)).join(", ")});
 }
 function ${P}from_${name}(r) {
 	if (r == null) return null;
 	return {
-${desc.fields.map((f) => `\t\t"${f.name}": ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)}`).join(",\n")}
+${desc.fields.map((f) => `\t\t"${jsMemberName(f.name)}": ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)}`).join(",\n")}
 	};
 }
 function ${P}back_${name}(r, o) {
 	if (r == null || o == null) return;
-${desc.fields.map((f) => `\to.${f.name} = ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)};`).join("\n")}
+${desc.fields.map((f) => `\to.${jsMemberName(f.name)} = ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)};`).join("\n")}
 }`);
 	}
 
@@ -2620,7 +2621,7 @@ function bindExports(src) {
 
 function genBothStruct(out, name, fields) {
 	const toArgs = fields.map((f) => {
-		const v = `o.${f.name}`;
+		const v = `o.${jsMemberName(f.name)}`;
 		if (isBothStruct(f.desc))
 			return `${P}to_${f.desc.name}(${v}, ${f.desc.ptr ? "false" : "true"}, m)`;
 		return inExpr(f.desc, v);
@@ -2628,15 +2629,15 @@ function genBothStruct(out, name, fields) {
 	const backLines = fields.map((f) => {
 		const got = `__w.__get_${name}_${f.name}(r)`;
 		if (isBothStruct(f.desc))
-			return `\t${P}back_${f.desc.name}(${got}, o.${f.name});`;
-		return `\to.${f.name} = ${outExpr(f.desc, got)};`;
+			return `\t${P}back_${f.desc.name}(${got}, o.${jsMemberName(f.name)});`;
+		return `\to.${jsMemberName(f.name)} = ${outExpr(f.desc, got)};`;
 	});
 	const fromArgs = fields.map((f) =>
 		outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`),
 	);
 	const viewProps = fields.map((f) => {
 		const got = `__w.__get_${name}_${f.name}(this.__ref)`;
-		return `"${f.name}": { "enumerable": true, "get"() { return ${viewExpr(f.desc, got)}; }, "set"(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); } }`;
+		return `"${jsMemberName(f.name)}": { "enumerable": true, "get"() { return ${viewExpr(f.desc, got)}; }, "set"(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); } }`;
 	});
 	// The one conversion `time.Time` has beyond the ordinary struct rules: JS
 	// code may pass a Date (or an object holding one in `_d`), and a Time
@@ -2693,7 +2694,7 @@ function genIfaceFacade(out, key, desc) {
 		const { names, body } = genFuncBody(m.callName, m.params, m.returns, [
 			"this.__ref",
 		]);
-		return `\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
+		return `\t${jsMemberName(m.name)}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
 	});
 	const cases = desc.concrete.map((c, i) => {
 		const wrap = c.both ? `${P}view_${c.name}(r)` : `${c.name}.__wrap(r)`;
@@ -2741,7 +2742,7 @@ function promotedMethods(info, fields, methods, meta) {
 		for (const { info: owner, via } of level) {
 			for (const e of owner.embeds ?? []) {
 				const typeName = e.typeName ?? e.name;
-				const path = `${via}.${e.name}`;
+				const path = `${via}.${jsMemberName(e.name)}`;
 				const inner = meta._mod.getStructType(typeName);
 				const innerMethods =
 					meta.structByName.get(typeName.replaceAll(".", "$"))?.methods ?? [];
@@ -2805,7 +2806,7 @@ function genHandleStruct(out, name, fields, methods, promoted = []) {
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
-	const fromArgs = fields.map((f) => `o.${f.name}`);
+	const fromArgs = fields.map((f) => `o.${jsMemberName(f.name)}`);
 	const ptrMsg = `GoFront: expected a ${name} handle for a *${name} parameter (use ${name}.from(obj) to create one)`;
 	const lines = [
 		`const ${P}h_${name} = new WeakMap();
@@ -2835,9 +2836,11 @@ class ${name} {
 	];
 	for (const f of fields) {
 		const got = `__w.__get_${name}_${f.name}(this.__ref)`;
-		lines.push(`\tget ${f.name}() { return ${viewExpr(f.desc, got)}; }`);
 		lines.push(
-			`\tset ${f.name}(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); }`,
+			`\tget ${jsMemberName(f.name)}() { return ${viewExpr(f.desc, got)}; }`,
+		);
+		lines.push(
+			`\tset ${jsMemberName(f.name)}(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); }`,
 		);
 	}
 	for (const m of methods) {
@@ -2849,13 +2852,13 @@ class ${name} {
 			[recv],
 		);
 		lines.push(
-			`\t${m.name}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
+			`\t${jsMemberName(m.name)}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
 		);
 	}
 	for (const m of promoted) {
 		const names = m.params.map((_, i) => `a${i}`);
 		lines.push(
-			`\t${m.name}(${restParams(names, m.variadic)}) { return this${m.via}.${m.name}(${restParams(names, m.variadic)}); }`,
+			`\t${jsMemberName(m.name)}(${restParams(names, m.variadic)}) { return this${m.via}.${jsMemberName(m.name)}(${restParams(names, m.variadic)}); }`,
 		);
 	}
 	lines.push("}");

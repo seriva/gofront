@@ -56,3 +56,5 @@ export const jsSafeName = (n) =>
 // other packages keep reaching the real global (`Array.from`, `Object.keys`).
 export const jsBindingName = (n) =>
 	typeof n === "string" && shadowsJsGlobal(n) ? `${n}$` : jsSafeName(n);
+
+export { jsMemberName } from "../shared/member-names.js";

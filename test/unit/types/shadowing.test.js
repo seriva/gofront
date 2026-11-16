@@ -1679,3 +1679,44 @@ func Main() int { return g[int](4) }
 		assertEqual(mod.Main(), 8);
 	});
 }
+
+section("__ members of wasm package structs");
+
+test("a __ field and interface method of a wasm struct are reached from a js main", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+type Rec struct {
+	__t int
+	N   int
+}
+
+func (r Rec) __twice() int { return r.__t * 2 }
+
+type Sizer interface{ __twice() int }
+
+func New(t, n int) *Rec { return &Rec{__t: t, N: n} }
+
+func AsSizer(r *Rec) Sizer { return r }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	r := util.New(7, 8)
+	r.__t = 9
+	s := util.AsSizer(r)
+	return fmt.Sprintf("%d %d %d", r.__t, r.N, s.__twice())
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "9 8 18");
+});

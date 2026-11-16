@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Fixed
-- **Valid Go no longer breaks or misbehaves in the generated code**: functions, variables, locals and `templ` or `css` components named `Map`, `BigInt`, `NaN`, `globalThis` or starting with `__` now work, a call in a divisor, shift count or multiple assignment runs once and in Go's order, and anonymous structs copy their array and struct fields and work in literals that omit the type. In WebAssembly, `recover()` now returns the panic value with its type (`panic(42)` recovers an `int`), and slice-bounds panics in every target name the bounds as Go does (`slice bounds out of range [:5] with capacity 3`); hand-written JavaScript reaches renamed exports through a `$`-suffixed name such as `Map$`, as described in the [compatibility guide](docs/go-compatibility.md#names-that-shadow-js-globals).
+- **Valid Go no longer breaks or misbehaves in the generated code**: functions, variables, local types, struct fields and `templ` or `css` components named after JavaScript built-ins or runtime properties (`Map`, `BigInt`, `NaN`, `__clone`) now work, a call in a divisor, shift count or multiple assignment runs once and in Go's order, and anonymous structs copy their array and struct fields and work in literals that omit the type. In WebAssembly, `recover()` returns the panic value with its type and slice-bounds panics in every target name the bounds as Go does; hand-written JavaScript reaches renamed functions through a `$`-suffixed name (`Map$`), as described in the [compatibility guide](docs/go-compatibility.md#names-that-shadow-js-globals).
 
 ## [1.9.2] - 2026-11-13
 
