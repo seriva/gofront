@@ -253,12 +253,16 @@ export class StmtsEmitter {
 			lhsNodes.length === 2 &&
 			rhsNodes[0].kind === "TypeAssertExpr"
 		) {
+			// Target operands run before the asserted expression.
+			const undo =
+				op === "=" ? this._hoistLhsOperands(lhsNodes, rhsNodes) : null;
 			this._emitCommaOkTypeAssert(
 				lhsNodes[0],
 				lhsNodes[1],
 				rhsNodes[0],
 				op === ":=",
 			);
+			undo?.();
 			return;
 		}
 
@@ -271,12 +275,16 @@ export class StmtsEmitter {
 				this.mod.checker,
 			)
 		) {
+			// Target operands run before the map and key.
+			const undo =
+				op === "=" ? this._hoistLhsOperands(lhsNodes, rhsNodes) : null;
 			this._emitCommaOkMapIndex(
 				lhsNodes[0],
 				lhsNodes[1],
 				rhsNodes[0],
 				op === ":=",
 			);
+			undo?.();
 			return;
 		}
 
@@ -306,8 +314,8 @@ export class StmtsEmitter {
 	// operands before the right-hand sides: then every non-constant operand
 	// is bound, in source order.
 	// Returns a function that restores the AST and releases the temporaries.
-	_hoistLhsOperands(lhsNodes, rhsNodes) {
-		if (lhsNodes.length < 2) return null;
+	_hoistLhsOperands(lhsNodes, rhsNodes, single = false) {
+		if (lhsNodes.length < 2 && !single) return null;
 		const ordered = hasCallOrReceive(rhsNodes) || hasCallOrReceive(lhsNodes);
 		const assigned = new Set(
 			lhsNodes
@@ -1721,8 +1729,34 @@ export class StmtsEmitter {
 	_emitCompoundAssign(lhs, rhs, op) {
 		const baseOp = op.slice(0, -1);
 		const l = Array.isArray(lhs) ? lhs[0] : lhs;
-		const r = Array.isArray(rhs) ? rhs[0] : rhs;
+		let r = Array.isArray(rhs) ? rhs[0] : rhs;
 
+		// `x op= f()`: the target's operands, then the call, then the read of
+		// the target (a call that changes `x` is seen).  The call's value is
+		// bound before the target is read.
+		let release = null;
+		if (hasCallOrReceive([r]) && r._type) {
+			const undo = this._hoistLhsOperands([l], [r], true);
+			const goType = r._type;
+			const wType = this.toWasmType(goType);
+			const name = `__cmp_tmp_${this.tempCounter++}`;
+			const idx = this.allocLocal(name, wType, goType, true);
+			this.emitExpr(r, wType);
+			this.pushInstruction({ op: "local.set", index: idx });
+			r = { kind: "Ident", name, _type: goType, _parTmp: true };
+			release = () => {
+				undo?.();
+				this.locals.delete(name);
+			};
+		}
+		try {
+			this._emitCompoundAssignBound(l, r, baseOp);
+		} finally {
+			release?.();
+		}
+	}
+
+	_emitCompoundAssignBound(l, r, baseOp) {
 		if (isComplex(l._type)) {
 			const synthBinary = {
 				kind: "BinaryExpr",

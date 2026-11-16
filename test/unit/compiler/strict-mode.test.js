@@ -549,3 +549,66 @@ func main() {
 `,
 	);
 });
+
+test("compound assignment on every target reads the target after the right-hand call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+
+func main() {
+	var x int32 = 100
+	next := func() int32 { x = 200; return 2 }
+	x += next()
+	fmt.Println(x)
+	x = 100
+	x /= next()
+	fmt.Println(x)
+	x = 100
+	x %= next() + 1
+	fmt.Println(x)
+	x = 100
+	shift := func() uint { x = 200; return 2 }
+	x <<= shift()
+	fmt.Println(x)
+	x = 100
+	x >>= shift()
+	fmt.Println(x)
+	y := 100
+	ny := func() int { y = 200; return 2 }
+	y += ny()
+	fmt.Println(y)
+	m := map[string]int{"a": 1}
+	nm := func() int { m["a"] = 50; return 2 }
+	m["a"] += nm()
+	fmt.Println(m["a"])
+	p := &P{1}
+	np := func() int { p.n = 70; return 2 }
+	p.n += np()
+	fmt.Println(p.n)
+}
+`,
+		`202
+100
+2
+800
+50
+202
+52
+72
+`,
+	);
+});
+
+test("a compound assignment without a call emits a plain operator", () => {
+	const { js } = compile(`package main
+func main() {
+	x := 1
+	y := 2
+	x += y
+	println(x)
+}`);
+	assertContains(js, "x += y;");
+});
