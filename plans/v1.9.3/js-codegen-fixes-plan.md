@@ -185,7 +185,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/index.js` (`jsMemberName`; class constructor, `__clone()`, method definitions), `src/backend/js/expressions.js` (`_jsMemberName`, `_fillKeyedStructElems`, `_genAnonStructLit`), `src/backend/wasm/boundary.js` (`genBothStruct` field reads)
   - Test: `test/unit/language/structs.test.js` with `assertAllTargetsOutput`: `f01`, `f02`, `f03` (written first), plus a promoted `__clone` field through embedding, a method value `a.__clone`, an interface with a `__clone() int` method, an anonymous struct `struct{ __t int }`, and a `both`-package struct with a `__t` field passed from a js main (`compileHybridProject`)
   - Done when: all print Go's output on every target; `%+v` still prints `{__clone:1 …}`
-- [ ] Task 5.4: `wasm` specialises generics for anonymous struct type arguments
+- [x] Task 5.4: `wasm` specialises generics for anonymous struct type arguments
   - Files: `src/backend/wasm/monomorph.js` (`rawTypeKey` struct case, `typeToTypeNode`)
   - Test: `test/unit/wasm/generics.test.js` with `assertProgramOutput`: `id(struct{ A [2]int }{})` then `a.A[0] = 1` → `0 1`; `dup` → `0 1 0`; alias `type S = struct{ A [2]int }` together with `id(struct{ N int }{3})` → `0 1 3`; two different anonymous struct type arguments of one generic in one program. Switch the Task 3.2 cases to `assertAllTargetsOutput`
   - Done when: all compile and print Go's output on every target

@@ -150,8 +150,12 @@ The names renamed are:
 
 Go code never sees the suffix: references from the same package, from importing packages
 (`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
-renamed binding. Builtins that are not JS globals (`len`, `append`, …), type names, struct
-fields, methods and labels are not renamed.
+renamed binding. Builtins that are not JS globals (`len`, `append`, …), type names and labels
+are not renamed. A struct field or method is renamed only when its name starts with `__`
+(`__clone` is `__clone$` on the JS object), because the runtime uses such names itself;
+`fmt` and `%+v` still print the Go name. This applies to the JS output and to `both`
+structs that cross the WASM boundary; hand-written JavaScript reads the field as `r.__t$`.
+Fields of `wasm` package structs are reached through the facade and keep their name.
 
 The suffix is visible to hand-written JavaScript. Code that reaches into the bundle or the
 WASM facade by name (an `import { Array$ } from "./app.js"`, a `<script>` calling an

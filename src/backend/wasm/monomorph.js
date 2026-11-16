@@ -73,6 +73,7 @@ function rawTypeKey(t) {
 	if (t.kind === "map" || t.kind === "MapType") {
 		return `map_${typeKey(t.key)}_${typeKey(t.value)}`;
 	}
+	if (t.kind === "struct" || t.kind === "StructType") return structKey(t);
 	if (t.kind === "func") {
 		const params = (t.params ?? []).map(typeKey).join("_");
 		const rets = (t.returns ?? [])
@@ -93,6 +94,45 @@ function rawTypeKey(t) {
 	return "val";
 }
 
+// The fields of an anonymous struct type, as the checker (`_structFields`) or
+// the parser (`fields`) lists them: `{ names, type, embedded }` each.
+function structFieldList(t) {
+	return t._structFields ?? t.fields ?? [];
+}
+
+// Anonymous struct `struct{ A [2]int }` -> `st_A_arr_2_int`: the field names
+// and the keys of their types, so each distinct struct type argument gets its
+// own instance and the same struct written twice shares one.
+function structKey(t) {
+	const parts = [];
+	for (const f of structFieldList(t)) {
+		const type = typeKey(f.type);
+		if (f.embedded) parts.push(`emb_${type}`);
+		else for (const n of f.names ?? []) parts.push(`${n}_${type}`);
+	}
+	return `st_${parts.join("_")}`;
+}
+
+// A checker struct type as a `StructType` node.
+function structTypeNode(t) {
+	return {
+		kind: "StructType",
+		fields: structFieldList(t).map((f) => ({
+			names: f.embedded ? [] : [...(f.names ?? [])],
+			type: typeToTypeNode(f.type),
+			tag: f.tag ?? null,
+			...(f.embedded
+				? { embedded: true, embeddedName: embeddedNameOf(f) }
+				: {}),
+		})),
+	};
+}
+
+function embeddedNameOf(f) {
+	const ft = f.type?.kind === "pointer" ? f.type.base : f.type;
+	return f.embeddedName ?? ft?.name ?? "";
+}
+
 /**
  * Converts a Go type representation or AST type node into a concrete AST type node.
  */
@@ -106,6 +146,7 @@ export function typeToTypeNode(t) {
 		t.kind === "SliceType" ||
 		t.kind === "ArrayType" ||
 		t.kind === "MapType" ||
+		t.kind === "StructType" ||
 		t.kind === "FuncType"
 	) {
 		return cloneAst(t);
@@ -146,6 +187,7 @@ export function typeToTypeNode(t) {
 		};
 	}
 	if (t.kind === "typeParam") return { kind: "TypeName", name: t.name };
+	if (t.kind === "struct") return structTypeNode(t);
 	// Without this a func type argument fell through to `any`, so a
 	// `map[string]V` built in `mk[func()]` was a `map[string]any`.
 	if (t.kind === "func") return funcTypeNode(t);

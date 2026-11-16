@@ -5,7 +5,6 @@ import {
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
-	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybridProject,
@@ -781,7 +780,7 @@ func main() {
 });
 
 test("a generic copy of an anonymous struct clones its array field", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -800,7 +799,7 @@ func main() {
 });
 
 test("a generic identity of an anonymous struct returns an independent copy", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -819,7 +818,7 @@ func main() {
 });
 
 test("a generic copy of an anonymous struct keeps sharing the pointee", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -928,7 +927,7 @@ func main() {
 });
 
 test("generic copies of anonymous structs share map fields", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -951,7 +950,7 @@ func main() {
 });
 
 test("generic copies of anonymous structs copy byte array fields", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"

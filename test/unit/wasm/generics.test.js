@@ -1384,3 +1384,112 @@ func main() {
 		"main.Box[int]\nmain.Pair[string,int]\n*main.Box[string]\n[]main.Box[int]\nmain.Box[main.Foo]\nmain.Box[*main.Foo]\nmain.Box[main.Pair[string,[]int]]\nmain.Pair[main.Foo,map[string]main.Foo]\n{{0}}\n",
 	);
 });
+
+section("WASM Generics — anonymous struct type arguments");
+
+test("a generic identity of an anonymous struct returns a usable struct", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func id[T any](v T) T { return v }
+
+func main() {
+	st := struct{ A [2]int }{}
+	a := id(st)
+	a.A[0] = 1
+	fmt.Println(st.A[0], a.A[0])
+}
+`,
+		"0 1\n",
+	);
+});
+
+test("a generic copy of an anonymous struct is independent", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func dup[T any](v T) (T, T) { return v, v }
+
+func main() {
+	st := struct{ A [2]int }{}
+	x, y := dup(st)
+	x.A[0] = 1
+	fmt.Println(st.A[0], x.A[0], y.A[0])
+}
+`,
+		"0 1 0\n",
+	);
+});
+
+test("an alias of an anonymous struct and a different anonymous struct", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type S = struct{ A [2]int }
+
+func id[T any](v T) T { return v }
+
+func main() {
+	s := S{}
+	a := id(s)
+	a.A[0] = 1
+	b := id(struct{ N int }{3})
+	fmt.Println(s.A[0], a.A[0], b.N)
+}
+`,
+		"0 1 3\n",
+	);
+});
+
+test("an identical anonymous struct written twice shares one instance", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func id[T any](v T) T { return v }
+
+func main() {
+	a := id(struct {
+		A int
+		B string
+	}{1, "x"})
+	b := id(struct {
+		A int
+		B string
+	}{2, "y"})
+	c := id(struct {
+		A string
+		B int
+	}{"z", 3})
+	fmt.Println(a.A, a.B, b.A, b.B, c.A, c.B)
+}
+`,
+		"1 x 2 y z 3\n",
+	);
+});
+
+test("two anonymous struct arguments of one generic function in slices", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func first[T any](xs []T) T { return xs[0] }
+
+func main() {
+	a := first([]struct{ X, Y int }{{1, 2}})
+	b := first([]struct{ S string }{{"s"}})
+	a.X++
+	fmt.Println(a.X+a.Y, b.S)
+}
+`,
+		"4 s\n",
+	);
+});
