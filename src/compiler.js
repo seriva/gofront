@@ -657,6 +657,15 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const foreign = new Set(JS_BUILTIN_CLASSES);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
+	// A local type spelled like a package-level var, const or func would take
+	// over that value inside its function.
+	for (const p of programs)
+		for (const d of p.decls ?? []) {
+			if (d.kind === "FuncDecl") foreign.add(d.name);
+			else if (d.kind === "VarDecl" || d.kind === "ConstDecl")
+				for (const spec of d.decls ?? [])
+					for (const n of spec.names ?? []) foreign.add(n);
+		}
 	const locals = renameLocalTypes(programs, foreign);
 	registerLocalTypeOwners(programs, pkgKey, owners);
 	if (renamed.size > 0 || locals)

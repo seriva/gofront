@@ -1091,18 +1091,22 @@ export const expressionGenMethods = {
 	},
 
 	// Array and struct fields of an anonymous struct. Embedded structs add
-	// promoted keys to the object, so those structs are copied shallowly.
-	_anonCloneFields(base) {
-		if (!(base.fields instanceof Map) || base._embeds?.length) return [];
+	// promoted keys to the object, so those structs are copied shallowly unless
+	// `plain` asks for a fresh object (a conversion), which clones them too.
+	_anonCloneFields(base, plain = false) {
+		if (!(base.fields instanceof Map)) return [];
+		if (base._embeds?.length && !plain) return [];
 		return [...base.fields].filter(([, ft]) => this._aggregateBase(ft));
 	},
 
 	// Copy of an anonymous struct (no class). Array and struct fields are
 	// cloned one by one, so the copy shares no storage with the original;
 	// pointer, slice, map and other fields are copied as references.
-	_cloneAnonStruct(base, js) {
-		const fields = this._anonCloneFields(base);
-		if (fields.length === 0) {
+	// `plain` forces a fresh plain object even when no field needs a deep copy,
+	// for a source that may be an instance of a struct class.
+	_cloneAnonStruct(base, js, plain = false) {
+		const fields = this._anonCloneFields(base, plain);
+		if (fields.length === 0 && !plain) {
 			this.useHelper("sclone");
 			return `__sclone(${js})`;
 		}
@@ -2065,9 +2069,20 @@ export const expressionGenMethods = {
 		return `Object.assign(new ${cls}(), ${this._cloneJs(srcType, inner)})`;
 	},
 
+	// Conversion to an anonymous struct type: the result is a plain object
+	// holding a copy of the source's fields, never the source instance itself.
+	_genAnonStructConversion(targetType, inner) {
+		const base = targetType?.kind === "named" ? null : targetType;
+		if (base?.kind !== "struct" || this._structClassName(base)) return null;
+		if (!(base.fields instanceof Map)) return null;
+		return this._cloneAnonStruct(base, inner, true);
+	},
+
 	_genTypeConversionCall(expr) {
 		const targetType = expr._conversionTargetType;
 		const arg = this.genExpr(expr.args[0]);
+		const anonConv = this._genAnonStructConversion(targetType, arg);
+		if (anonConv) return anonConv;
 		const viaParam = this._genTypeParamConversion(targetType?.name, arg);
 		if (targetType?.kind === "typeParam" && viaParam) return viaParam;
 		const structConv = this._genStructClassConversion(
@@ -3685,6 +3700,11 @@ export const expressionGenMethods = {
 		if (t?.name === "complex128" || t?.name === "complex64") {
 			return isComplex(expr.expr._type) ? inner : `{ re: ${inner}, im: 0 }`;
 		}
+		if (t?.kind === "StructType")
+			return (
+				this._genAnonStructConversion(expr._type, inner) ??
+				this._cloneJs(expr._type, inner)
+			);
 		if (t?.kind === "ArrayType")
 			return this._genArrayTypeConversion(expr, inner, t);
 		if (t?.kind === "SliceType")

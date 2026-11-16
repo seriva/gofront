@@ -2384,6 +2384,82 @@ func main() { ${call} }
 	}
 }
 
+section("Generic instances over anonymous struct type arguments");
+
+test("distinct anonymous struct arguments give distinct instances", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+func main() {
+	a := Box[struct{ X int }]{}
+	b := Box[struct{ S string }]{}
+	fmt.Println(a.V.X, b.V.S)
+}
+`,
+		"0 \n",
+	);
+});
+
+test("nested generics keep anonymous struct arguments apart", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+type Outer[T any] struct{ B T }
+
+func main() {
+	a := Outer[Box[struct{ X int }]]{}
+	b := Outer[Box[struct{ S string }]]{}
+	fmt.Println(a.B.V.X, b.B.V.S)
+}
+`,
+		"0 \n",
+	);
+});
+
+test("the same anonymous struct written twice shares one instance", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+func main() {
+	a := Box[struct{ X int }]{}
+	a = Box[struct{ X int }]{V: struct{ X int }{3}}
+	var b Box[struct{ X int }] = a
+	fmt.Println(a.V.X, b.V.X)
+}
+`,
+		"3 3\n",
+	);
+});
+
+test("anonymous structs differing in field name stay distinct", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+func main() {
+	a := Box[struct{ X int }]{}
+	b := Box[struct{ Y int }]{}
+	fmt.Println(a.V.X, b.V.Y)
+}
+`,
+		"0 0\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
