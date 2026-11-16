@@ -155,7 +155,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Done when: all print Go's output on every target
 
 ### Phase 4: `wasm` parity and panic messages (C7, C8)
-- [ ] Task 4.1: `recover()` on `wasm` returns the panic value with its dynamic type
+- [x] Task 4.1: `recover()` on `wasm` returns the panic value with its dynamic type
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitBuiltinPanic`), `docs/go-compatibility.md` (`defer`/`recover()` row: the recovered value keeps its type on every target; only an uncaught panic reaches JS as an `Error` whose message is the value's text)
   - Test: `test/unit/wasm/defer_recover.test.js` with `assertProgramOutput`: `p01`, `p02`, `p04`, `p05`, and `p03` line 1 (`int64`); an uncaught `panic(42)` from a `wasm` export still throws an `Error` whose message contains `42`
   - Done when: all print Go's output; existing `defer_recover`/`traps` tests pass

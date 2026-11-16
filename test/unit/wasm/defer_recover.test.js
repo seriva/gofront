@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileFiles, evictParseCache } from "../../../src/compiler.js";
 import {
+	assert,
 	assertAllTargetsOutput,
 	assertEqual,
 	assertJsTargetsOutput,
@@ -868,6 +869,149 @@ func main() {
 `,
 		"boom\ntrue\n",
 	);
+});
+
+test("recover() returns an int panic value with its dynamic type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+		switch v := r.(type) {
+		case string:
+			fmt.Println("string", v)
+		case int:
+			fmt.Println("int", v)
+		}
+	}()
+	panic(42)
+}
+`,
+		"int 42\nint 42\n",
+	);
+});
+
+test("recover() returns float and bool panic values with their types", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func try(f func()) {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	f()
+}
+
+func main() {
+	try(func() { panic(1.5) })
+	try(func() { panic(true) })
+}
+`,
+		"float64 1.5\nbool true\n",
+	);
+});
+
+test("recover() returns sized and defined number panic values with their types", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Code int
+
+func try(f func()) {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	f()
+}
+
+func main() {
+	try(func() { panic(int64(7)) })
+	try(func() { panic(Code(3)) })
+}
+`,
+		"int64 7\nmain.Code 3\n",
+	);
+});
+
+test("recover() keeps struct and error panic values", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type P struct{ X, Y int }
+
+func try(f func()) {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	f()
+}
+
+func main() {
+	try(func() { panic(P{1, 2}) })
+	try(func() { panic(errors.New("bad")) })
+	try(func() { panic("text") })
+}
+`,
+		"main.P {1 2}\n*errors.errorString bad\nstring text\n",
+	);
+});
+
+test("a recovered integer panic value compares equal to the integer", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Println(r == 42, r == "42")
+		fmt.Printf("%T\\n", r)
+	}()
+	panic(42)
+}
+`,
+		"true false\nint\n",
+	);
+});
+
+test("an uncaught integer panic still reaches the host as an Error with its text", () => {
+	const src = `package main
+
+func Fail() {
+	panic(42)
+}
+
+func Main() {
+	Fail()
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	const { exports } = runWasm(wasm, { stringTable });
+	let err = null;
+	try {
+		exports.Main();
+	} catch (e) {
+		err = e;
+	}
+	assert(err instanceof Error, "expected an Error");
+	assert(err.message.includes("42"), `message was ${err?.message}`);
 });
 
 section("WASM Defer — untyped constant arguments");

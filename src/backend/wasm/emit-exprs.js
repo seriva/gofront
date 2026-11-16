@@ -134,10 +134,7 @@ export class ExprsEmitter {
 
 			// Scalar type -> box into struct
 			// An untyped rune constant boxes as `rune` (int32), like Go.
-			const scalarType = goType?.rune
-				? { kind: "basic", name: "int32" }
-				: (goType ?? { kind: "basic", name: "int" });
-			const box = this.mod.getIfaceBoxType(scalarType);
+			const box = this._scalarIfaceBox(goType);
 			this._emitRawExpr(expr, box.wType);
 			this._emitBoxValue(box);
 			return;
@@ -240,6 +237,14 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.get", index: tmp });
 		this.pushInstruction("end");
 		this.releaseTemp(tmp, this.toWasmType(goType));
+	}
+
+	// The interface box a scalar of `goType` lives in (see `emitExpr`).
+	_scalarIfaceBox(goType) {
+		const scalarType = goType?.rune
+			? { kind: "basic", name: "int32" }
+			: (goType ?? { kind: "basic", name: "int" });
+		return this.mod.getIfaceBoxType(scalarType);
 	}
 
 	_emitBoxValue(box) {
