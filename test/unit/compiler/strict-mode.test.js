@@ -4,6 +4,8 @@ import {
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
+	assertJsProgramOutput,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	assertThrows,
 	compile,
@@ -473,6 +475,77 @@ func main() {
 [64 32 16 8 4 2] 6
 50 1
 [0 25] 1
+`,
+	);
+});
+
+test("compound assignment reads the target after a call on the right side", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ n int32 }
+
+func main() {
+	{
+		var x int32 = 100
+		next := func() int32 { x = 200; return 2 }
+		x /= next()
+		var y int = 100
+		nexty := func() int { y = 200; return 2 }
+		y /= nexty()
+		fmt.Println(x, y)
+	}
+	{
+		xs := []int32{100}
+		next := func() int32 { xs[0] = 200; return 2 }
+		xs[0] /= next()
+		s := S{100}
+		nexts := func() int32 { s.n = 200; return 2 }
+		s.n /= nexts()
+		fmt.Println(xs, s.n)
+	}
+	{
+		var x int32 = 100
+		calls := 0
+		next := func() int32 { calls++; x = 8; return 2 }
+		var out []int32
+		for j := 0; j < 2; x /= next() {
+			out = append(out, x)
+			j++
+		}
+		fmt.Println(out, x, calls)
+	}
+}
+`,
+		`100 100
+[100] 100
+[100 4] 4 2
+`,
+	);
+});
+
+test("strict compound %=, <<= and >>= read the target after a call on the right side", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var m int32 = 100
+	nextm := func() int32 { m = 205; return 10 }
+	m %= nextm()
+	var x int32 = 10
+	next := func() uint { x = 20; return 1 }
+	x <<= next()
+	var z int32 = 1000
+	nz := func() uint { z = 2000; return 2 }
+	z >>= nz()
+	fmt.Println(m, x, z)
+}
+`,
+		`5 40 500
 `,
 	);
 });

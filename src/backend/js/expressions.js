@@ -3860,17 +3860,20 @@ export const expressionGenMethods = {
 	) {
 		const type = lhsNode._type;
 		if (!this._needsStrictOp(op, type)) return false;
-		// A call on the right runs once, after the target's operands and the
-		// read of the target (`_genStrictBinary` binds both).
-		const bind = this._hasCallExpr(rhsNode);
+		// A call on the right runs once, after the target's operands and before
+		// the read of the target: only the right operand is bound, and the
+		// template reads the target once the call has returned.
+		const bind =
+			this._hasCallExpr(rhsNode) && this._strictNeedsBinding(op, type);
+		const compute = (target) =>
+			bind
+				? `((__b) => ${this._genStrictBinary(op, target, "__b", type, countType)})(${rhsJs})`
+				: this._genStrictBinary(op, target, rhsJs, type, countType);
 		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
 			return false;
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
-			this.line(
-				`${l} = ${this._genStrictBinary(op, l, rhsJs, type, countType, bind)};`,
-				srcLine,
-			);
+			this.line(`${l} = ${compute(l)};`, srcLine);
 			return true;
 		}
 		const split = splitLastAccess(l);
@@ -3881,13 +3884,13 @@ export const expressionGenMethods = {
 			const k = `__k${this._tmpCounter}`;
 			const target = `${o}[${k}]`;
 			this.line(
-				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType, bind)}; }`,
+				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${compute(target)}; }`,
 				srcLine,
 			);
 		} else {
 			const target = `${o}.${split.prop}`;
 			this.line(
-				`{ const ${o} = ${split.obj}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType, bind)}; }`,
+				`{ const ${o} = ${split.obj}; ${target} = ${compute(target)}; }`,
 				srcLine,
 			);
 		}
