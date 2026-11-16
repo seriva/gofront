@@ -173,7 +173,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Done when: `p06`–`p09` print Go's text on every target except the documented `js`-package string slices
 
 ### Phase 5: Type and member names, `wasm` generics over anonymous structs (C10–C12)
-- [ ] Task 5.1: Function-local types named after JS built-ins are renamed
+- [x] Task 5.1: Function-local types named after JS built-ins are renamed
   - Files: `src/compiler.js` (`mangleLocalTypes` passes `JS_BUILTIN_CLASSES` to `renameLocalTypes` as reserved names)
   - Test: `test/unit/compiler/local-type-shadow.test.js` with `assertAllTargetsOutput`: `h09`; `fmt.Printf("%T", Map{})` prints `main.Map`; a local `type Set struct{}` next to a local value `Set`; a local `type Map` inside a generic function
   - Done when: all print Go's output on every target; programs without such local types emit the same JS

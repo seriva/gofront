@@ -3,6 +3,7 @@
 // rewrite the imported type.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	compileHybridProject,
 	section,
@@ -66,3 +67,78 @@ ${body}
 		});
 	}
 }
+
+section("Function-local types named after JS built-ins");
+
+test("local types named Map and BigInt compile and run", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type K struct{ A, B int }
+
+func main() {
+	type Map struct{ N int }
+	type BigInt struct{ N int }
+	seen := map[K]bool{{1, 2}: true}
+	var x int64 = 1 << 40
+	fmt.Println(Map{1}.N, BigInt{2}.N, len(seen), x*3)
+}
+`,
+		"1 2 1 3298534883328\n",
+	);
+});
+
+test("%T of a local type named after a JS built-in drops the rename", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Map struct{}
+	fmt.Printf("%T\\n", Map{})
+}
+`,
+		"main.Map\n",
+	);
+});
+
+test("a local type named Set next to a local value Set", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Set struct{ N int }
+	s := Set{4}
+	fmt.Println(s.N)
+	Set := 7
+	fmt.Println(Set)
+}
+`,
+		"4\n7\n",
+	);
+});
+
+test("a local type named Map inside a generic function", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func wrap[T any](v T) any {
+	type Map struct{ N int }
+	_ = v
+	return Map{3}
+}
+
+func main() {
+	fmt.Printf("%v %T\\n", wrap(1), wrap("x"))
+}
+`,
+		"{3} main.Map\n",
+	);
+});
