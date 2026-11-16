@@ -763,11 +763,18 @@ export const expressionGenMethods = {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
+				// `__ifv` copies an anonymous struct shallowly, so an addressable
+				// one with array or struct fields is cloned field by field first.
+				const own =
+					this._isAnonAggregateStruct(expr._type) &&
+					this._isAddressableExpr(expr);
 				const boxed = this._ifaceBoxWrap(
-					this.genExpr(expr),
+					own
+						? this._cloneJs(expr._type, this.genExpr(expr))
+						: this.genExpr(expr),
 					expr._ifaceBox,
 					expr._ifacePtrFields,
-					expr.kind === "CompositeLit",
+					own || expr.kind === "CompositeLit",
 				);
 				return this._typedNilWrap(boxed, expr);
 			} finally {
@@ -1026,6 +1033,17 @@ export const expressionGenMethods = {
 		}
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
+		if (node.kind === "StructType") {
+			const fields = new Map();
+			for (const f of node.fields)
+				for (const n of f.names ?? [])
+					fields.set(n, this._typeFromNode(f.type));
+			return {
+				kind: "struct",
+				fields,
+				_embeds: node.fields.filter((f) => f.embedded),
+			};
+		}
 		return null;
 	},
 
@@ -1048,13 +1066,50 @@ export const expressionGenMethods = {
 		if (base.kind === "struct") {
 			if (this._structClassName(t) || this._structClassName(base))
 				return `${js}.__clone()`;
-			this.useHelper("sclone");
-			return `__sclone(${js})`;
+			return this._cloneAnonStruct(base, js);
 		}
 		const elemClone = this._cloneJs(base.elem, "__e");
 		return elemClone === "__e"
 			? `${js}?.slice()`
 			: `${js}?.map((__e) => ${elemClone})`;
+	},
+
+	// An anonymous struct type (no class) whose copy is made field by field.
+	_isAnonAggregateStruct(t) {
+		const base = this._aggregateBase(t);
+		return (
+			base?.kind === "struct" &&
+			!this._structClassName(t) &&
+			!this._structClassName(base) &&
+			this._anonCloneFields(base).length > 0
+		);
+	},
+
+	// Array and struct fields of an anonymous struct. Embedded structs add
+	// promoted keys to the object, so those structs are copied shallowly.
+	_anonCloneFields(base) {
+		if (!(base.fields instanceof Map) || base._embeds?.length) return [];
+		return [...base.fields].filter(([, ft]) => this._aggregateBase(ft));
+	},
+
+	// Copy of an anonymous struct (no class). Array and struct fields are
+	// cloned one by one, so the copy shares no storage with the original;
+	// pointer, slice, map and other fields are copied as references.
+	_cloneAnonStruct(base, js) {
+		const fields = this._anonCloneFields(base);
+		if (fields.length === 0) {
+			this.useHelper("sclone");
+			return `__sclone(${js})`;
+		}
+		const cloned = new Map(
+			fields.map(([name, ft]) => [name, this._cloneJs(ft, `__v.${name}`)]),
+		);
+		const props = [...base.fields.keys()].map((name) =>
+			cloned.has(name)
+				? `${name}: ${cloned.get(name)}`
+				: `${name}: __v.${name}`,
+		);
+		return `((__v) => ({ ${props.join(", ")} }))(${js})`;
 	},
 
 	_isAddressableExpr(e) {
@@ -2828,8 +2883,8 @@ export const expressionGenMethods = {
 	// A literal of an anonymous struct type: a plain object with every field,
 	// the omitted ones set to their zero value.
 	_genAnonStructLit(expr) {
-		const st =
-			expr._type?.kind === "named" ? expr._type.underlying : expr._type;
+		const lt = expr._type?.kind === "pointer" ? expr._type.base : expr._type;
+		const st = lt?.kind === "named" ? lt.underlying : lt;
 		if (st?.kind !== "struct" || !(st.fields instanceof Map))
 			return this._genFallbackCompositeLit(expr);
 		const values = new Map();
@@ -2853,6 +2908,9 @@ export const expressionGenMethods = {
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}
+		// An elided anonymous struct (`[]struct{ A [2]int }{{}}`) has every field.
+		const litBase = lit?.kind === "named" ? lit.underlying : lit;
+		if (litBase?.kind === "struct") return this._genAnonStructLit(expr);
 		if (this._isMapLit(expr))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const hasPositional = expr.elems.some((e) => e._positionalField);
