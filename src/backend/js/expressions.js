@@ -1030,26 +1030,43 @@ export const expressionGenMethods = {
 	// Pseudo type object for an AST type node (used where no checker type is available).
 	_typeFromNode(node) {
 		if (!node) return null;
-		if (node.kind === "TypeName" || node.kind === "SelectorExpr") {
-			// `pkg.S` of a bundled package names the class `S`.
-			const name = this.getTypeName(node);
-			if (name && this.structNames.has(name))
-				return { kind: "named", name, underlying: { kind: "struct" } };
-		}
+		if (node.kind === "TypeName" || node.kind === "SelectorExpr")
+			return this._typeFromNameNode(node);
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
-		if (node.kind === "StructType") {
-			const fields = new Map();
-			for (const f of node.fields)
-				for (const n of f.names ?? [])
-					fields.set(n, this._typeFromNode(f.type));
-			return {
-				kind: "struct",
-				fields,
-				_embeds: node.fields.filter((f) => f.embedded),
-			};
-		}
+		if (node.kind === "StructType") return this._typeFromStructNode(node);
 		return null;
+	},
+
+	_typeFromNameNode(node) {
+		// `pkg.S` of a bundled package names the class `S`.
+		const name = this.getTypeName(node);
+		if (name && this.structNames.has(name))
+			return { kind: "named", name, underlying: { kind: "struct" } };
+		if (node.kind !== "TypeName") return null;
+		if (this._typeParamZeroFactory(node.name))
+			return { kind: "typeParam", name: node.name };
+		// A defined array or struct type (`type Vec [2]int`).
+		const named = this.checker?.types.get(node.name);
+		return named?.kind === "named" && this._aggregateBase(named) ? named : null;
+	},
+
+	_typeFromStructNode(node) {
+		const fields = new Map();
+		for (const f of node.fields) {
+			if (f.embedded) {
+				const ft = this._typeFromNode(f.type);
+				const en = f.type?.name ?? f.type?.base?.name;
+				if (ft && en) fields.set(en, ft);
+				continue;
+			}
+			for (const n of f.names ?? []) fields.set(n, this._typeFromNode(f.type));
+		}
+		return {
+			kind: "struct",
+			fields,
+			_embeds: node.fields.filter((f) => f.embedded),
+		};
 	},
 
 	// A value of type-parameter type is copied at run time when its type
@@ -1090,12 +1107,9 @@ export const expressionGenMethods = {
 		);
 	},
 
-	// Array and struct fields of an anonymous struct. Embedded structs add
-	// promoted keys to the object, so those structs are copied shallowly unless
-	// `plain` asks for a fresh object (a conversion), which clones them too.
-	_anonCloneFields(base, plain = false) {
+	// Array and struct fields of an anonymous struct, embedded ones included.
+	_anonCloneFields(base) {
 		if (!(base.fields instanceof Map)) return [];
-		if (base._embeds?.length && !plain) return [];
 		return [...base.fields].filter(([, ft]) => this._aggregateBase(ft));
 	},
 
@@ -1105,7 +1119,7 @@ export const expressionGenMethods = {
 	// `plain` forces a fresh plain object even when no field needs a deep copy,
 	// for a source that may be an instance of a struct class.
 	_cloneAnonStruct(base, js, plain = false) {
-		const fields = this._anonCloneFields(base, plain);
+		const fields = this._anonCloneFields(base);
 		if (fields.length === 0 && !plain) {
 			this.useHelper("sclone");
 			return `__sclone(${js})`;
@@ -3176,6 +3190,8 @@ export const expressionGenMethods = {
 			return entry[1];
 		}
 		const named = this.checker?.types.get(name);
+		// An alias of an anonymous struct resolves to the struct type itself.
+		if (named?.kind === "struct") return this.zeroValueForType(named);
 		const u = named?.kind === "named" ? named.underlying : null;
 		if (
 			u &&

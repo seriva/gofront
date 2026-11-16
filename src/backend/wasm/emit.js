@@ -1154,6 +1154,9 @@ export class FunctionEmitter {
 		if (t.kind === "TypeName" || t.kind === "Ident") {
 			if (this.mod.structTypes.has(t.name))
 				return this.mod.structTypes.get(t.name);
+			// An alias of an anonymous struct resolves to the struct type itself.
+			const aliased = this.mod.checker?.types?.get(t.name);
+			if (aliased?.kind === "struct") t = aliased;
 		}
 		if (t.kind === "struct" || t.kind === "StructType") {
 			const rawFields = [];

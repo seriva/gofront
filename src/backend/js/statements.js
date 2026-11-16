@@ -2055,6 +2055,11 @@ export const statementGenMethods = {
 		this._iterDepth--;
 	},
 
+	// Copy of a yielded struct value, typed by the yield parameter or the loop variable.
+	_yieldClone(yType, varType, js) {
+		return this._cloneJs(this._aggregateBase(yType) ? yType : varType, js);
+	},
+
 	genIteratorFor(stmt) {
 		const range = stmt.init.rhs[0];
 		const isAssign = stmt.init.kind === "AssignStmt";
@@ -2071,8 +2076,9 @@ export const statementGenMethods = {
 						const isStruct =
 							this._isStructType(yType) ||
 							this._isStructType(stmt.init.lhs[i]?._type);
-						if (isStruct) this.useHelper("sclone");
-						const value = isStruct ? `__sclone(${cbParams[i]})` : cbParams[i];
+						const value = isStruct
+							? this._yieldClone(yType, stmt.init.lhs[i]._type, cbParams[i])
+							: cbParams[i];
 						this._emitRangeVar(stmt.init.lhs[i], value, true);
 					}
 				}
@@ -2096,8 +2102,9 @@ export const statementGenMethods = {
 						this._isStructType(yType) ||
 						this._isStructType(stmt.init.lhs[i]?._type);
 					if (isStruct) {
-						this.useHelper("sclone");
-						this.line(`${cbParams[i]} = __sclone(${cbParams[i]});`);
+						this.line(
+							`${cbParams[i]} = ${this._yieldClone(yType, stmt.init.lhs[i]._type, cbParams[i])};`,
+						);
 					}
 				}
 			}
@@ -2379,6 +2386,16 @@ export const statementGenMethods = {
 		}
 	},
 
+	// The value a single-type clause binds: the unboxed value of a named
+	// non-struct case, a copy of an array or struct case, else the boxed value.
+	_typeSwitchBinding(only) {
+		if (!only) return "__tsw";
+		const unboxed = this._assertedValueJs(only, "__tsw");
+		if (unboxed !== "__tsw") return unboxed;
+		const t = this._typeFromNode(only);
+		return this._aggregateBase(t) ? this._cloneJs(t, "__tsw") : "__tsw";
+	},
+
 	genTypeSwitch(stmt) {
 		this.line("{");
 		this.indented(() => {
@@ -2407,13 +2424,7 @@ export const statementGenMethods = {
 				this.indented(() => {
 					if (stmt.assign) {
 						const only = c.types.length === 1 ? c.types[0] : null;
-						// A single named non-struct case binds the unboxed value.
-						if (only && this._assertedValueJs(only, "__tsw") !== "__tsw")
-							bind(this._assertedValueJs(only, "__tsw"));
-						// An array case binds a copy of the boxed value.
-						else if (only && this._typeFromNode(only)?.kind === "array")
-							bind(this._cloneJs(this._typeFromNode(only), "__tsw"));
-						else bind("__tsw");
+						bind(this._typeSwitchBinding(only));
 					}
 					for (const s of c.stmts) this.genStmt(s);
 				});

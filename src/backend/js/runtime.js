@@ -311,6 +311,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   if (x === null || typeof x !== "object") return x;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return x;
+  // A Go map's zero (__nm() or __nilmap) marks a map argument: it stays shared.
+  if (zero.__nilm === true || zero.__nm === true) return x;
   // A copy keeps the hidden tags (__t, __map, ...) that name the value's type
   // in an interface: the generic code boxes the value first and copies after.
   const keep = (v, c) => {

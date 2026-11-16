@@ -204,6 +204,12 @@ const JS_INTRINSICS = {
 	),
 };
 
+// A `type S struct{…}` declaration, which gets a class. An alias of an
+// anonymous struct (`type S = struct{…}`) has none: its values are plain objects.
+function isStructClassDecl(d) {
+	return d.kind === "TypeDecl" && !d.isAlias && d.type.kind === "StructType";
+}
+
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
 	// bundledPackages: Set<string>               — GoFront package names bundled inline;
@@ -591,8 +597,7 @@ export class CodeGen {
 				this.variadicFns.add(`${d.recvType.name}.${d.name}`);
 		}
 		for (const d of program.decls) {
-			if (d.kind === "TypeDecl" && d.type.kind === "StructType")
-				this.structNames.add(d.name);
+			if (isStructClassDecl(d)) this.structNames.add(d.name);
 		}
 		// Structs from bundled GoFront packages are inlined under their bare name.
 		// Skip aliases (key differs from the type's own name) — no class is emitted for them.
@@ -784,7 +789,7 @@ export class CodeGen {
 	_genTypeDeclBody(decl, methodDecls) {
 		const definedStruct =
 			decl.type.kind === "StructType" ? null : this._definedStructAst(decl);
-		if (decl.type.kind === "StructType") {
+		if (isStructClassDecl(decl)) {
 			this.genStruct(decl.name, decl.type, methodDecls);
 		} else if (definedStruct) {
 			this.genStruct(decl.name, definedStruct, methodDecls);
@@ -800,6 +805,8 @@ export class CodeGen {
 				this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
 			this.genNamedTypeClass(decl.name, methodDecls);
 		} else {
+			// Also an alias of an anonymous struct: it has no class, its values
+			// are plain objects.
 			this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
 		}
 	}
