@@ -479,6 +479,15 @@ export function compileFiles(files, options = {}) {
 		);
 	const pkgName = pkgNames[0];
 
+	// Local packages share one flat JS module: a type name another package
+	// already declared is renamed here (`Pt` -> `Pt$$b`).
+	const renamedTypes = mangleLocalTypes(
+		programs,
+		resolve(fromDir),
+		pkgName,
+		options.typeOwners,
+	);
+
 	// Validate target directives across files in this package
 	const declaredTargets = new Map();
 	for (const p of programs) {
@@ -504,16 +513,6 @@ export function compileFiles(files, options = {}) {
 		options,
 	);
 	for (const p of programs) p.target = pkgTarget;
-
-	// Local packages share one flat JS module: a type name another package
-	// already declared is renamed here (`Pt` -> `Pt$$b`).
-	const renamedTypes = mangleLocalTypes(
-		programs,
-		resolve(fromDir),
-		pkgName,
-		options.typeOwners,
-		pkgTarget,
-	);
 
 	// The test runner's driver is a source that exists only in memory: it is
 	// parsed and checked with the package but never written next to it.
@@ -652,14 +651,8 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 }
 
 // The renamed ASTs must not be reused from the parse cache by a later build.
-function mangleLocalTypes(programs, pkgKey, pkgName, owners, target) {
-	const renamed = mangleCollidingTypes(
-		programs,
-		pkgKey,
-		pkgName,
-		owners,
-		target === "wasm" ? JS_BUILTIN_CLASSES : undefined,
-	);
+function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
+	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
 	// A local type named after a JS built-in would shadow it in the bundle.
 	const foreign = new Set(JS_BUILTIN_CLASSES);
 	for (const [name, owner] of owners ?? [])

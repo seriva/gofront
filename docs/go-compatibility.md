@@ -150,8 +150,8 @@ The names renamed are:
 
 Go code never sees the suffix: references from the same package, from importing packages
 (`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
-renamed binding. Builtins that are not JS globals (`len`, `append`, …), labels and package-level type names
-in `js` and `both` packages are not renamed. A struct field or method is renamed only when its name starts with `__`
+renamed binding. Builtins that are not JS globals (`len`, `append`, …), labels and package-level
+type names are not renamed. A struct field or method is renamed only when its name starts with `__`
 (`__clone` is `__clone$` on the JS object), because the runtime uses such names itself;
 `fmt` and `%+v` still print the Go name. This applies to the JS output and to `both`
 structs that cross the WASM boundary; hand-written JavaScript reads the field as `r.__t$`.
@@ -166,24 +166,18 @@ unsuffixed name there is still the browser's global. Pick a different Go name fo
 functions you call from JS.
 
 > [!WARNING]
-> Package-level type declarations are **not** renamed in `js` and `both` packages. A struct
-> type, or a named type with methods, is emitted as a JS class of the same name, and a class
-> named after a JavaScript built-in that generated helpers call (`Array`, `Object`, `Error`,
-> `Map`, `Set`, `Number`, `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array
-> constructors, …) would shadow it. GoFront therefore rejects such a declaration with
+> Package-level type declarations are **not** renamed. A struct type, or a named type with
+> methods, is emitted as a JS class of the same name, and a class named after a JavaScript
+> built-in that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
+> `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array constructors, …) would
+> shadow it. GoFront therefore rejects such a declaration in `js` and `both` packages with
 > `type Array shadows the JavaScript global Array; rename the type`; pick another name
 > (`ArrayData`, `AppError`, …). Interfaces (`type Number interface{ ~int | ~float64 }`),
-> method-less named types (`type String string`), aliases and DOM names
-> (`type Element struct{…}`) emit no conflicting class and are accepted.
+> method-less named types (`type String string`), aliases, DOM names (`type Element struct{…}`)
+> and every type in a `wasm` package emit no conflicting class and are accepted.
 
-Types declared inside a function can use these names freely (`type Map struct{ N int }`
-in `main` works, and `%T` prints `main.Map`).
-
-A type in a `wasm` package can use them too, because the type itself is not a JS class.
-When such a struct is exported through the facade, the facade class and the name hand-written
-JavaScript sees carry a `$$<package>` suffix: `type WeakMap struct{…}` in package `util`
-becomes `class WeakMap$$util`. Go code, including importers written in Go
-(`var z util.WeakMap`), keeps using `util.WeakMap`, and `%T` prints `util.WeakMap`.
+Types declared inside a function are the exception: they can use these names freely
+(`type Map struct{ N int }` in `main` works in every target, and `%T` prints `main.Map`).
 
 ---
 

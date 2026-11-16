@@ -18,24 +18,10 @@ function topLevelTypeNames(programs) {
 
 // Registers the package's type names in `owners` (name -> package key) and
 // renames those another package registered first.  Returns Map<name, mangled>
-// for the renamed types, empty when nothing collides.  `builtins` names types
-// that are always renamed: a `wasm` package's exported struct becomes a facade
-// class of the same name, which would shadow the JS global of that name.
-export function mangleCollidingTypes(
-	programs,
-	pkgKey,
-	pkgName,
-	owners,
-	builtins = new Set(),
-) {
+// for the renamed types, empty when nothing collides.
+export function mangleCollidingTypes(programs, pkgKey, pkgName, owners) {
 	const renamed = new Map();
 	for (const name of topLevelTypeNames(programs)) {
-		if (builtins.has(name)) {
-			const mangled = `${name}$$${pkgName}`;
-			renamed.set(name, mangled);
-			if (!owners.has(mangled)) owners.set(mangled, pkgKey);
-			continue;
-		}
 		const owner = owners.get(name);
 		if (owner === undefined) owners.set(name, pkgKey);
 		else if (owner !== pkgKey) renamed.set(name, `${name}$$${pkgName}`);
@@ -43,7 +29,7 @@ export function mangleCollidingTypes(
 	if (renamed.size > 0)
 		for (const p of programs)
 			for (const d of p.decls ?? [])
-				renameTypeRefs(d, renamed, new Set(), new Set(), true);
+				renameTypeRefs(d, renamed, new Set(), new Set());
 	return renamed;
 }
 
@@ -150,19 +136,10 @@ export function registerLocalTypeOwners(programs, pkgKey, owners) {
 
 // `tparams` are type parameters in scope; `values` are names a function
 // declares as parameters or locals, which shadow a same-spelled bare `Ident`.
-// `scoped` keeps a function-local type declaration, and the references it
-// shadows, out of the rename: only package-level types are renamed.
-function renameTypeRefs(node, renamed, tparams, values, scoped = false) {
+function renameTypeRefs(node, renamed, tparams, values) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
-		let visible = renamed;
-		for (const n of node) {
-			if (scoped && n?.kind === "TypeDecl" && visible.has(n.name)) {
-				visible = new Map(visible);
-				visible.delete(n.name);
-			}
-			renameTypeRefs(n, visible, tparams, values, scoped);
-		}
+		for (const n of node) renameTypeRefs(n, renamed, tparams, values);
 		return;
 	}
 	const tp = withTypeParams(node, tparams);
@@ -171,7 +148,7 @@ function renameTypeRefs(node, renamed, tparams, values, scoped = false) {
 		node.name = renamed.get(node.name);
 	forEachChild(node, (child) => {
 		if (node.kind === "KeyValueExpr" && child === node.key) return;
-		renameTypeRefs(child, renamed, tp, vals, scoped);
+		renameTypeRefs(child, renamed, tp, vals);
 	});
 }
 

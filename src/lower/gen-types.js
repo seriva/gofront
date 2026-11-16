@@ -224,11 +224,7 @@ export class TypeSpeller {
 		let name = t.name;
 		const at = name.indexOf("$$");
 		const dot = name.indexOf(".");
-		// A renamed type of the generated unit's own package (`Map$$util`) is
-		// spelled `util.Map` without an import; only the others are imports.
-		if (at >= 0 && this.declared.has(name)) {
-			name = `${this.pkgName}.${name.slice(0, at)}`;
-		} else if (at >= 0) {
+		if (at >= 0) {
 			const orig = name.slice(0, at);
 			const modPath = name.slice(at + 2).replaceAll("$", "/");
 			name = `${this.qualifierFor(modPath)}.${orig}`;
