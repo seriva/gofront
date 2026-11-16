@@ -131,7 +131,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/expressions.js` (`_genStrictCompound` takes the rhs node), `src/backend/js/statements.js` (`_genAssignStmt`, `_inlineAssign`/`_inlineStrictCompound` pass it)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertAllTargetsOutput`: `e10`, `e11`, `e15`; the controls `e12`, `e16`, `d02` keep passing
   - Done when: all print Go's output on every target
-- [ ] Task 2.3: Multiple assignment evaluates target operands before right-hand sides (JS)
+- [x] Task 2.3: Multiple assignment evaluates target operands before right-hand sides (JS)
   - Files: `src/backend/js/statements.js` (`_hoistLhsOperands`)
   - Test: `test/unit/language/codegen-regressions.test.js` with `assertJsTargetsOutput`: `o01`–`o04`, `o06`–`o08` (with a local trace closure, since `both` rejects mutated package variables); controls `o05`, `o09`
   - Done when: all print Go's order on `js`/`both`; a multi-assignment without calls emits the same JS as before

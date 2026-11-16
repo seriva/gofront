@@ -935,28 +935,41 @@ export const statementGenMethods = {
 	// target before any assignment, but a JS destructuring target reads its
 	// operands after the earlier ones are stored.  Operands that mention a
 	// variable assigned by the same statement are bound to temporaries first.
+	// When a call appears anywhere in the statement, Go also runs the target
+	// operands before the right-hand sides, which JS runs first: then every
+	// non-constant operand is bound, in source order.
 	_hoistLhsOperands(stmt) {
 		if (stmt.op !== "=" || stmt.lhs.length < 2) return null;
+		const ordered =
+			stmt.rhs.some((e) => this._hasCallExpr(e)) ||
+			stmt.lhs.some((e) => this._hasCallExpr(e));
 		const assigned = new Set(
 			stmt.lhs
 				.filter((l) => l.kind === "Ident" && l.name !== "_")
 				.map((l) => l.name),
 		);
-		if (assigned.size === 0) return null;
+		if (assigned.size === 0 && !ordered) return null;
 		const mentions = (n) =>
 			!!n &&
 			typeof n === "object" &&
 			((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
+		const isConst = (n) =>
+			n.kind === "BasicLit" ||
+			n._type?.kind === "untyped" ||
+			n._type?.kind === "namespace";
+		const needsTemp = (n) => (ordered ? !isConst(n) : mentions(n));
 		const lines = [];
 		const undo = [];
 		const visit = (l) => {
 			let keys;
 			if (l.kind === "IndexExpr") keys = ["expr", "index"];
 			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
+			else if (ordered && l.kind === "UnaryExpr" && l.op === "*")
+				keys = ["operand"];
 			else return;
 			for (const key of keys) {
 				const operand = l[key];
-				if (!mentions(operand)) continue;
+				if (!needsTemp(operand)) continue;
 				// A struct or array value names the variable's storage in Go: hoist
 				// the operands inside it (`ps[n].A`) instead of the value.
 				if (key === "expr" && this._aggregateBase(operand._type)) {
