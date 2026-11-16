@@ -123,19 +123,19 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Done when: the section lists every category renamed in Tasks 1.2–1.4, with an example each
 
 ### Phase 2: Evaluation count and order (C4, C6)
-- [ ] Task 2.1: Strict `/`, `%`, `<<`, `>>` evaluate each operand once, left first
+- [x] Task 2.1: Strict `/`, `%`, `<<`, `>>` evaluate each operand once, left first
   - Files: `src/backend/js/expressions.js` (`_genStrictBinary`, `_genBinaryExpr` passes the operand nodes)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertProgramOutput` (both + wasm): `e01`–`e08`, `e13`, `e14`; plus a codegen assertion that `e17` (no calls) emits no `=>` for its strict operators
   - Done when: all print Go's output; perf gates pass with unchanged budgets
-- [ ] Task 2.2: Strict compound assignment evaluates a side-effecting right side once (`js` and `both`)
+- [x] Task 2.2: Strict compound assignment evaluates a side-effecting right side once (`js` and `both`)
   - Files: `src/backend/js/expressions.js` (`_genStrictCompound` takes the rhs node), `src/backend/js/statements.js` (`_genAssignStmt`, `_inlineAssign`/`_inlineStrictCompound` pass it)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertAllTargetsOutput`: `e10`, `e11`, `e15`; the controls `e12`, `e16`, `d02` keep passing
   - Done when: all print Go's output on every target
-- [ ] Task 2.3: Multiple assignment evaluates target operands before right-hand sides (JS)
+- [x] Task 2.3: Multiple assignment evaluates target operands before right-hand sides (JS)
   - Files: `src/backend/js/statements.js` (`_hoistLhsOperands`)
   - Test: `test/unit/language/codegen-regressions.test.js` with `assertJsTargetsOutput`: `o01`–`o04`, `o06`–`o08` (with a local trace closure, since `both` rejects mutated package variables); controls `o05`, `o09`
   - Done when: all print Go's order on `js`/`both`; a multi-assignment without calls emits the same JS as before
-- [ ] Task 2.4: Same order on `wasm`
+- [x] Task 2.4: Same order on `wasm`
   - Files: `src/backend/wasm/emit-stmts.js` (`_hoistLhsOperands`, `_emitTupleAssign`)
   - Test: switch the Task 2.3 cases to `assertAllTargetsOutput`
   - Done when: `o01`–`o08` print Go's order on all three targets

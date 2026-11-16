@@ -2,6 +2,7 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -231,4 +232,100 @@ func main() {
 	println(delete2(new.in))
 }`);
 	assertEqual(out, "10");
+});
+
+section("Multiple assignment evaluation order");
+
+test("targets evaluate their operands before the right-hand sides", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f int }
+
+func main() {
+	trace := ""
+	t := func(s string, v int) int { trace += s; return v }
+	s := func(name string, p *S) *S { trace += name; return p }
+	pn := func(name string, p *int) *int { trace += name; return p }
+	flush := func(label string) {
+		fmt.Println(label, trace)
+		trace = ""
+	}
+	two := func() (int, int) { trace += "f"; return 1, 2 }
+
+	var arr [3]int
+	arr[t("i", 0)], arr[t("j", 1)] = t("x", 5), t("y", 6)
+	flush("o01")
+
+	m := map[int]int{}
+	m[t("i", 0)], m[t("j", 1)] = t("x", 5), t("y", 6)
+	flush("o02")
+
+	a, b := &S{}, &S{}
+	s("a", a).f, s("b", b).f = t("x", 5), t("y", 6)
+	flush("o03a")
+	p := new(int)
+	*pn("p", p), arr[t("i", 0)] = t("x", 5), t("y", 6)
+	flush("o03b")
+
+	var k int
+	k, arr[t("i", 1)] = t("x", 5), t("y", 6)
+	flush("o04")
+	_ = k
+
+	xs := []int{1, 2}
+	xs[t("a", 0)], xs[t("b", 1)] = xs[t("c", 1)], xs[t("d", 0)]
+	flush("o06")
+	fmt.Println(xs)
+
+	grid := [][]int{{0, 0}, {0, 0}}
+	grid[t("a", 0)][t("b", 1)], grid[t("c", 1)][t("d", 0)], arr[t("e", 2)] = t("x", 1), t("y", 2), t("w", 3)
+	flush("o07")
+
+	arr[t("i", 0)], arr[t("j", 1)] = two()
+	flush("o08")
+
+	// controls
+	arr[t("i", 0)] = t("x", 5)
+	flush("o05a")
+	arr[t("i", 0)] += t("x", 5)
+	flush("o05b")
+	fmt.Println(t("a", 1), t("b", 2), []int{t("c", 3), t("d", 4)})
+	flush("o09")
+	q, r := t("a", 1), t("b", 2)
+	_, _ = q, r
+	flush("o09b")
+	fmt.Println(arr, xs, grid, m, a.f, b.f, *p)
+}
+`,
+		`o01 ijxy
+o02 ijxy
+o03a abxy
+o03b pixy
+o04 ixy
+o06 abcd
+[2 1]
+o07 abcdexyw
+o08 ijf
+o05a ix
+o05b ix
+1 2 [3 4]
+o09 abcd
+o09b ab
+[10 2 3] [2 1] [[0 1] [2 0]] map[0:5 1:6] 5 6 5
+`,
+	);
+});
+
+test("a multiple assignment without calls emits no operand temporaries", () => {
+	const { js } = run(`package main
+func main() {
+	xs := []int{1, 2}
+	i, j := 0, 1
+	xs[i], xs[j] = xs[j], xs[i]
+	println(xs[0], xs[1])
+}`);
+	assert(!js.includes("__h"), js);
 });

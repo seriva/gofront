@@ -183,6 +183,11 @@ const STRICT_NUMERIC_TYPES = new Set([
 	"uint32",
 ]);
 
+// The strict types whose shift template checks the count against the width.
+const NARROW_SHIFT_NAMES = new Set(
+	[...STRICT_NUMERIC_TYPES].filter((n) => n !== "float32"),
+);
+
 // Unsigned types narrower than 64 bits: `-x` and `^x` wrap back into range.
 const SMALL_UNSIGNED_WRAP = {
 	uint8: "& 0xFF",
@@ -3342,7 +3347,14 @@ export const expressionGenMethods = {
 		) {
 			const l = this.genExpr(expr.left);
 			const r = this.genExpr(expr.right);
-			return this._genStrictBinary(expr.op, l, r, expr._type, expr.right._type);
+			return this._genStrictBinary(
+				expr.op,
+				l,
+				r,
+				expr._type,
+				expr.right._type,
+				this._hasCallExpr(expr.left) || this._hasCallExpr(expr.right),
+			);
 		}
 
 		return this._genStandardBinaryExpr(expr);
@@ -3844,17 +3856,24 @@ export const expressionGenMethods = {
 		srcLine = null,
 		lhsJs = null,
 		countType = null,
+		rhsNode = null,
 	) {
 		const type = lhsNode._type;
 		if (!this._needsStrictOp(op, type)) return false;
+		// A call on the right runs once, after the target's operands and before
+		// the read of the target: only the right operand is bound, and the
+		// template reads the target once the call has returned.
+		const bind =
+			this._hasCallExpr(rhsNode) && this._strictNeedsBinding(op, type);
+		const compute = (target) =>
+			bind
+				? `((__b) => ${this._genStrictBinary(op, target, "__b", type, countType)})(${rhsJs})`
+				: this._genStrictBinary(op, target, rhsJs, type, countType);
 		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
 			return false;
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
-			this.line(
-				`${l} = ${this._genStrictBinary(op, l, rhsJs, type, countType)};`,
-				srcLine,
-			);
+			this.line(`${l} = ${compute(l)};`, srcLine);
 			return true;
 		}
 		const split = splitLastAccess(l);
@@ -3865,13 +3884,13 @@ export const expressionGenMethods = {
 			const k = `__k${this._tmpCounter}`;
 			const target = `${o}[${k}]`;
 			this.line(
-				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType)}; }`,
+				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${compute(target)}; }`,
 				srcLine,
 			);
 		} else {
 			const target = `${o}.${split.prop}`;
 			this.line(
-				`{ const ${o} = ${split.obj}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType)}; }`,
+				`{ const ${o} = ${split.obj}; ${target} = ${compute(target)}; }`,
 				srcLine,
 			);
 		}
@@ -3888,7 +3907,26 @@ export const expressionGenMethods = {
 		return `__shc(${this._is64BitInt(countType) ? `Number(${r})` : r})`;
 	},
 
-	_genStrictBinary(op, l, r, type, countType = null) {
+	// `/`, `%`, `<<` and `>>` on a narrow integer paste an operand into the
+	// zero check or width check as well as the operation, and a shift skips
+	// its left operand when the count is out of range.  The other forms
+	// (`__shl64`, `Math.fround`, `__tar`, the BigInt path) use each operand once.
+	_strictNeedsBinding(op, type) {
+		if (op !== "/" && op !== "%" && op !== "<<" && op !== ">>") return false;
+		if (type?.kind === "typeParam" || this._is64BitInt(type)) return false;
+		const name = this._typeName(type);
+		if (name === "float32") return false;
+		if (op === "<<" || op === ">>") return NARROW_SHIFT_NAMES.has(name);
+		return this.isIntType(type);
+	},
+
+	// `bind`: an operand contains a call, so both are evaluated once, left
+	// first, as arguments of an arrow function that holds the template.
+	_genStrictBinary(op, l, r, type, countType = null, bind = false) {
+		if (bind && this._strictNeedsBinding(op, type)) {
+			const body = this._genStrictBinary(op, "__a", "__b", type, countType);
+			return `((__a, __b) => ${body})(${l}, ${r})`;
+		}
 		if (type?.kind === "typeParam") {
 			this.useHelper("generics");
 			return `__tar(${this._typeParamZeroFactory(type.name)}, "${op}", ${l}, ${r})`;
