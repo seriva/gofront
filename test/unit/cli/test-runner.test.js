@@ -124,7 +124,6 @@ func TestBad(t *testing.T) {
   t.NonExistentMethod()
 }
 `);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "No field 'NonExistentMethod' on testing.T");
 });
 
@@ -1126,7 +1125,6 @@ func TestTemp(t *testing.T) {
 }
 `;
 	const resTemp = compile(srcTemp);
-	assert(resTemp.errors.length > 0);
 	assertErrorContains(
 		resTemp.errors,
 		"testing.T.TempDir is not available: file system",
@@ -1139,7 +1137,6 @@ func TestCd(t *testing.T) {
 }
 `;
 	const resChdir = compile(srcChdir);
-	assert(resChdir.errors.length > 0);
 	assertErrorContains(
 		resChdir.errors,
 		"testing.T.Chdir is not available: file system",

@@ -19,48 +19,44 @@ import {
 section("Unimplemented Go features");
 
 test("go statement produces a clear error", () => {
-	assertThrows(
-		() =>
-			compile(`package main
+	assertErrorContains(
+		compile(`package main
 func main() {
 	go doSomething()
-}`),
+}`).errors,
 		"goroutines are not supported",
 	);
 });
 
 test("select statement produces a clear error", () => {
-	assertThrows(
-		() =>
-			compile(`package main
+	assertErrorContains(
+		compile(`package main
 func main() {
 	select {
 	}
-}`),
+}`).errors,
 		"select statement is not supported",
 	);
 });
 
 test("chan type produces a clear error", () => {
-	assertThrows(
-		() =>
-			compile(`package main
+	assertErrorContains(
+		compile(`package main
 func main() {
 	var ch chan int
 	_ = ch
-}`),
+}`).errors,
 		"channels are not supported",
 	);
 });
 
 test("make(chan int) produces a clear error", () => {
-	assertThrows(
-		() =>
-			compile(`package main
+	assertErrorContains(
+		compile(`package main
 func main() {
 	ch := make(chan int)
 	_ = ch
-}`),
+}`).errors,
 		"channels are not supported",
 	);
 });

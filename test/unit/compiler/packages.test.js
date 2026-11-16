@@ -182,7 +182,7 @@ func main() {
 }`,
 		{ fromFile: join(FIXTURES, "multifile/withimportalias/main.go") },
 	);
-	assertErrorContains(errors, "Undefined");
+	assertErrorContains(errors, "No member 'Nonexistent'");
 });
 
 test("import alias in group syntax compiles and runs", () => {

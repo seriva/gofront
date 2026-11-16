@@ -104,15 +104,15 @@ Probes ran on 2026-11-12 against `main` @ `8b6cad64` on a 12-core/24-thread Ryze
 ## Implementation Tasks
 
 ### Phase 1: Production-path compile helper
-- [ ] Task 1.1: Structured compile errors and returned warnings from `compileFiles`
+- [x] Task 1.1: Structured compile errors and returned warnings from `compileFiles`
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/compile-result.test.js` (new). Two undefined vars throw a `CompileError` with `errors.length === 2` and a `message` equal to the joined messages. A parse error and a mixed-package dir throw `CompileError`. An integer literal beyond 2^53 in a `js` package yields `res.warnings` containing the precision warning.
   - Done when: the new tests pass and the existing CLI error-output tests in `test/unit/cli/` pass unchanged.
-- [ ] Task 1.2: `compile()` always goes through `compileFiles`, and crashes propagate
+- [x] Task 1.2: `compile()` always goes through `compileFiles`, and crashes propagate
   - Files: `test/unit/helpers.js`. Same-commit test updates for G2b: `language/expressions.test.js:21,32,44,56`, `language/core.test.js:706`, `language/control-flow.test.js:533`, `types/generics.test.js:1600` (`assertThrows(() => compile(…), s)` → `assertErrorContains(compile(…).errors, s)` with the same `s`; `goto` asserts `"expected"` or the observed parser message); `compiler/packages.test.js:174` (`"Undefined"` → `"No member 'Nonexistent'"`); `compiler/stdlib-go.test.js:694` (`import _ "nope/zzz"` → unused `import z "nope/zzz"`, keeping both the no-errors and the warning assertions)
   - Test: `test/unit/compiler/test-helpers.test.js` (new). `compile()` of a type error returns `errors` with the fixture basename in the message (`fromFile: join(FIXTURES, "type_alias_test.go")`). `compile()` of a parse error returns it in `errors` instead of throwing. `compile()` returns `warnings` for the 2^53 literal. `compileSourceFile` rethrows a non-`CompileError` (driven through an exported `toCompileResult(fn)` with a thunk that throws `TypeError`).
   - Done when: `grep -nE "new (TypeChecker|CodeGen)" test/unit/helpers.js` prints nothing, and the six G2 tests and nine G2b tests pass along with the full `npm test` (including `test/perf/zero-alloc.js`).
-- [ ] Task 1.3: Negative tests check messages, enforced by a test
+- [x] Task 1.3: Negative tests check messages, enforced by a test
   - Files: `test/unit/types/typedarrays.test.js`, `test/unit/types/webgl.test.js`, `test/unit/compiler/targets.test.js` (plus `test/unit/cli/test-runner.test.js`: `:127` gets a message check; the redundant `:1129,:1142` asserts are deleted because an `assertErrorContains` follows each)
   - Test: `test/unit/compiler/test-conventions.test.js` (new) fails while any G4 site remains. Write it first, then replace each site with `assertErrorContains(errors, "<observed substring>")`, taking the substring from the actual message.
   - Done when: the G4 grep prints nothing and the convention test passes.

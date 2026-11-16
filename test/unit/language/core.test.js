@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
-	assertThrows,
 	compile,
 	compileHybrid,
 	FIXTURES,
@@ -704,13 +703,12 @@ func Main() int {
 });
 
 test("error: unknown string escape", () => {
-	assertThrows(
-		() =>
-			compile(`package main
+	assertErrorContains(
+		compile(`package main
 func main() {
 	s := "\\q"
 	console.log(s)
-}`),
+}`).errors,
 		"unknown escape",
 	);
 });
