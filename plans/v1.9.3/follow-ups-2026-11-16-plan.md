@@ -3,7 +3,7 @@
 **Version:** v1.9.3  
 **Status:** In Progress  
 **Base branch:** main  
-**Related:** [`js-codegen-fixes-plan.md`](js-codegen-fixes-plan.md) is where most ledger entries came from (PRs #203–#207). The `wasm` parity gaps, the `wasm` package-boundary errors and the type names after JS built-ins (F2, F5, F8, F17, F19–F22, F24, F25, F28–F31, including that plan's deferred Tasks 5.2 and 5.4) moved to [`../v2.0.0/follow-ups-2026-11-16-wasm-plan.md`](../v2.0.0/follow-ups-2026-11-16-wasm-plan.md). [`../v2.0.0/checker-strictness-plan.md`](../v2.0.0/checker-strictness-plan.md) owns rejecting invalid Go that compiles today. Its own Excluded row hands "generic instances over anonymous structs" to this ledger (F23).  
+**Related:** [`js-codegen-fixes-plan.md`](js-codegen-fixes-plan.md) is where most ledger entries came from (PRs #203–#207). The `wasm` parity gaps, the `wasm` package-boundary errors and the type names after JS built-ins (F2, F5, F8, F17, F19–F22, F24, F25, F28–F31, including that plan's deferred Tasks 5.2 and 5.4) moved to [`../v2.0.0/followup-fixes-plan.md`](../v2.0.0/followup-fixes-plan.md). [`../v2.0.0/checker-strictness-plan.md`](../v2.0.0/checker-strictness-plan.md) owns rejecting invalid Go that compiles today. Its own Excluded row hands "generic instances over anonymous structs" to this ledger (F23).  
 **Release note:** More valid Go now runs correctly. Types named `yield` or `arguments` work, multiple and compound assignments run their side effects in Go's order, copies of anonymous structs no longer share arrays, and conversions to anonymous struct types and generic code over different anonymous structs compile. An import of an npm package without type declarations compiles and is treated as an untyped value.  
 
 ---
@@ -25,7 +25,7 @@ Fix the 16 review follow-ups (F1, F3, F4, F6, F7, F9–F16, F18, F23, F26) that 
 | Category | Rule | Examples / Members | Reason (Excluded rows) |
 |---|---|---|---|
 | **In scope: core** | Valid Go that compiles and misbehaves, or fails to compile/parse, on the JavaScript targets or every target | F1, F3, F4, F6, F7, F9–F16, F18, F23, F26 | |
-| **Excluded: deferred** | `wasm` parity gaps, `wasm`-only boundary errors (unexported and `__` members of `wasm` packages) and package-level type names after JS built-ins | F2, F5, F8, F17, F19–F22, F24, F25, F28–F31 | Moved to v2.0.0 on 2026-11-16: they land on the hardened test harness, F5/F29 and F2/F30 can follow v2.0.0's no-backward-compatibility rule instead of v1.9.3-only asymmetries, and the `src/compiler.js` edits of F1 and F2/F30 should not be made twice; `../v2.0.0/follow-ups-2026-11-16-wasm-plan.md` |
+| **Excluded: deferred** | `wasm` parity gaps, `wasm`-only boundary errors (unexported and `__` members of `wasm` packages) and package-level type names after JS built-ins | F2, F5, F8, F17, F19–F22, F24, F25, F28–F31 | Moved to v2.0.0 on 2026-11-16: they land on the hardened test harness, F5/F29 and F2/F30 can follow v2.0.0's no-backward-compatibility rule instead of v1.9.3-only asymmetries, and the `src/compiler.js` edits of F1 and F2/F30 should not be made twice; `../v2.0.0/followup-fixes-plan.md` |
 | **Excluded: deferred** | The "reslice-synced target" assignment-order form from the F11 ledger entry | The entry gave no repro for it. The `for`-post and generic `*p` forms are scheduled (Task 4.3) | No repro to write a test from. Re-record it in `plans/follow-ups.md` if Task 4.3's review finds one |
 
 ---
