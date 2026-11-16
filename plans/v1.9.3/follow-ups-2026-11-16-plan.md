@@ -123,7 +123,7 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Files: `src/backend/js/expressions.js` (`new` builtin: type-parameter check first)
   - Test: `test/unit/types/generics.test.js` with `assertAllTargetsOutput`: F7 with `S` and with `__S` → `0`; `f[struct{X int}]` and `f[S]` (the real struct) → `{0}`
   - Done when: all pass
-- [ ] Task 3.4: Typed nil pointers panic on `__` methods (F26)
+- [x] Task 3.4: Typed nil pointers panic on `__` methods (F26)
   - Files: `src/backend/js/runtime.js` (`__mknil` skips only runtime-owned `__` keys, not suffixed user members `__x$`, and matches `C.__vm` entries with or without the trailing `$`)
   - Test: `test/unit/language/structs.test.js` with `assertAllTargetsOutput`: F26 → `runtime error: invalid memory address or nil pointer dereference`; pointer-receiver `__` method on a typed nil still gets `nil` as receiver
   - Done when: all pass

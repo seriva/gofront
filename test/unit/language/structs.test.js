@@ -1069,6 +1069,53 @@ func Main() string {
 	assertEqual(mod.Main(), "lwe");
 });
 
+section("Typed nil pointers and __ methods");
+
+test("typed nil pointer panics calling a value __ method", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type V struct{ N int }
+
+func (v V) __ref() int { return v.N }
+
+type I interface{ __ref() int }
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var vp *V = nil
+	var i I = vp
+	fmt.Println(i.__ref())
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
+test("typed nil pointer passes nil to a pointer __ method", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type V struct{ N int }
+
+func (v *V) __isNil() bool { return v == nil }
+
+type I interface{ __isNil() bool }
+
+func main() {
+	var vp *V = nil
+	var i I = vp
+	fmt.Println(i.__isNil())
+}
+`,
+		"true\n",
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
