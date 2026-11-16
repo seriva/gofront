@@ -223,6 +223,7 @@ export class CodeGen {
 		this.structNames = new Set();
 		this.structFields = new Map();
 		this.namedWrapperNames = new Set();
+		this._classBindings = new Set(); // package-level type names whose class a local could hide
 		this.collectedCss = [];
 		this.warnings = []; // non-fatal diagnostics; the compiler prints them
 		this._precisionWarned = new Set(); // nodes already given a precision warning
@@ -356,6 +357,7 @@ export class CodeGen {
 				if (!d._pkgName) d._pkgName = pkgName;
 			}
 		}
+		this._classBindings = this._collectClassBindings(program);
 		this._renameReservedIdents(program.decls);
 		this._elemAddrTaken =
 			takesElementAddress(program.decls) ||
@@ -423,12 +425,41 @@ export class CodeGen {
 	}
 
 	_renameParams(params) {
-		for (const p of params ?? []) p.name = jsBindingName(p.name);
+		for (const p of params ?? []) p.name = this._bindingName(p.name);
 	}
 
 	_renameNamedReturns(node) {
 		for (const r of node.returnType?._namedReturns ?? [])
-			r.name = jsBindingName(r.name);
+			r.name = this._bindingName(r.name);
+	}
+
+	// Package-level types whose JS class is reached by its Go name (static
+	// method calls, `new`, `instanceof`): structs, and named types with
+	// methods or a box.  A local of the same name would hide the class, so
+	// locals get a `$` suffix (see _bindingName).
+	_collectClassBindings(program) {
+		const withMethods = new Set();
+		for (const d of program.decls)
+			if (d.kind === "MethodDecl") withMethods.add(d.recvType.name);
+		const names = new Set();
+		for (const d of program.decls) {
+			if (d.kind !== "TypeDecl" || d.isAlias) continue;
+			if (d.type.kind === "InterfaceType") continue;
+			if (
+				d.type.kind === "StructType" ||
+				withMethods.has(d.name) ||
+				this._isPlainNamedBox(this.checker?.types.get(d.name))
+			)
+				names.add(d.name);
+		}
+		return names;
+	}
+
+	// Binding name of a local, parameter or result.
+	_bindingName(n) {
+		const b = jsBindingName(n);
+		if (!this._classBindings.has(n)) return b;
+		return b === n || b === jsClassName(n) ? `${b}$` : b;
 	}
 
 	_renameSignature(node) {
@@ -448,9 +479,11 @@ export class CodeGen {
 		// type is skipped: a variable that shares the name is renamed like its
 		// declaration.
 		if (node._namesDeclType) return;
+		const orig = node.name;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)
 			: jsSafeName(node.name);
+		if (this._classBindings.has(orig)) node.name = this._bindingName(orig);
 	}
 
 	_renameFuncDeclNode(node) {
@@ -469,13 +502,13 @@ export class CodeGen {
 	}
 
 	_renameMethodDeclNode(node) {
-		node.recvName = jsBindingName(node.recvName);
+		node.recvName = this._bindingName(node.recvName);
 		this._renameSignature(node);
 	}
 
 	_renameDeclSpecs(node) {
 		for (const spec of node.decls ?? [])
-			spec.names = spec.names.map(jsBindingName);
+			spec.names = spec.names.map((n) => this._bindingName(n));
 	}
 
 	// `document := 1` declares a binding that shadows the browser global.  A
@@ -483,11 +516,11 @@ export class CodeGen {
 	// same scope, which carries the same suffix.
 	_renameDefineNode(node) {
 		for (const l of node.lhs ?? [])
-			if (l.kind === "Ident") l.name = jsBindingName(l.name);
+			if (l.kind === "Ident") l.name = this._bindingName(l.name);
 	}
 
 	_renameTypeSwitchNode(node) {
-		node.assign = jsBindingName(node.assign);
+		node.assign = this._bindingName(node.assign);
 	}
 
 	_markStructKeys(node) {

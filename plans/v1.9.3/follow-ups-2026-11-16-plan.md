@@ -115,7 +115,7 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Files: `src/backend/js/index.js` (`genStruct`, `genNamedTypeClass`, `$Ptr` class, `defineProperty` lines, `_hoistLocalClass`, `_renameIdentNode`), `src/backend/js/expressions.js` (`new`, `instanceof`, `_typeNameCheckExpr`, `_namedBoxInfo`, `_zeroForNamedType`, `_genStructClone`, and `getStructFields`/`structNames` lookups)
   - Test: `test/unit/types/shadowing.test.js` with `assertAllTargetsOutput`: `yield` → `7`, `arguments` → `3`, `undefined` assertion → `true`, plus `fmt.Printf("%T", yield{})` → `main.yield`
   - Done when: all pass on every target
-- [ ] Task 3.2: A local named after a class-emitting type keeps the class reachable (F3)
+- [x] Task 3.2: A local named after a class-emitting type keeps the class reachable (F3)
   - Files: `src/typechecker/expressions.js` (mark bindings that shadow a package-level class type), `src/backend/js/index.js` (`jsBindingName` honours the mark for those locals)
   - Test: `test/unit/types/shadowing.test.js` with `assertAllTargetsOutput`: F3 → `8`; a parameter `func g(T T) int { return int(T.Dbl()) }`; a struct type `type R struct{N int}` with `var R R; R.M()`
   - Done when: all pass; locals that shadow no type emit the same JS

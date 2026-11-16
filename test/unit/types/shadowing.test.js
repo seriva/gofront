@@ -1866,3 +1866,34 @@ func main() {
 		"5\nfalse\n",
 	);
 });
+
+test("type switch binding and named result named after a type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T int
+
+func (t T) Dbl() T { return t * 2 }
+
+func f(x any) T {
+	switch T := x.(type) {
+	case T:
+		return T.Dbl()
+	}
+	return 0
+}
+
+func h() (T T) {
+	T = 6
+	return T.Dbl()
+}
+
+func main() {
+	fmt.Println(f(T(4)), h())
+}
+`,
+		"8 12\n",
+	);
+});
