@@ -6,6 +6,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
@@ -1115,6 +1116,60 @@ func main() {
 		"true\n",
 	);
 });
+
+test("typed nil pointer panics for a __ value method that reads no field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ __ref() int }
+
+type V struct{ N int }
+
+func (v V) __ref() int { return 42 }
+
+func main() {
+	defer func() { fmt.Println(recover()) }()
+	var p *V
+	var i I = p
+	fmt.Println(i.__ref())
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
+for (const name of ["yield", "undefined"]) {
+	test(`pointer methods of struct ${name} work as expression, value and nil call`, async () => {
+		await assertJsTargetsOutput(
+			`package main
+
+import "fmt"
+
+type ${name} struct{ X int }
+
+func (y *${name}) M() int { return y.X + 1 }
+func (y *${name}) IsNil() bool { return y == nil }
+
+type Outer struct{ *${name} }
+
+func main() {
+	fn := (*${name}).M
+	fmt.Println(fn(&${name}{5}))
+	y := &${name}{5}
+	g := y.M
+	fmt.Println(g())
+	var n *${name}
+	fmt.Println(n.IsNil())
+	var o Outer
+	fmt.Println(o.IsNil())
+}
+`,
+			"6\n6\ntrue\ntrue\n",
+		);
+	});
+}
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

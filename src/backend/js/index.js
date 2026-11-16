@@ -441,12 +441,16 @@ export class CodeGen {
 		const withMethods = new Set();
 		for (const d of program.decls)
 			if (d.kind === "MethodDecl") withMethods.add(d.recvType.name);
+		this._typeDeclsByName = new Map();
+		for (const d of program.decls)
+			if (d.kind === "TypeDecl") this._typeDeclsByName.set(d.name, d);
 		const names = new Set();
 		for (const d of program.decls) {
 			if (d.kind !== "TypeDecl" || d.isAlias) continue;
 			if (d.type.kind === "InterfaceType") continue;
 			if (
 				d.type.kind === "StructType" ||
+				this._definedStructAst(d) ||
 				withMethods.has(d.name) ||
 				this._isPlainNamedBox(this.checker?.types.get(d.name))
 			)
@@ -1150,11 +1154,11 @@ export class CodeGen {
 	_embedStubCall(method, embedName, field, nilPtrRecv) {
 		const jm = jsMemberName(method);
 		if (!this.structNames.has(embedName))
-			return `${embedName}.prototype.${jm}.call(this, ...__a)`;
+			return `${jsClassName(embedName)}.prototype.${jm}.call(this, ...__a)`;
 		// A nil embedded pointer still reaches a pointer-receiver method, as in
 		// Go: call it through the prototype instead of reading it off null.
 		return nilPtrRecv
-			? `${embedName}.prototype.${jm}.call(this.${field}, ...__a)`
+			? `${jsClassName(embedName)}.prototype.${jm}.call(this.${field}, ...__a)`
 			: `this.${field}.${jm}(...__a)`;
 	}
 

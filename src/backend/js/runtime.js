@@ -409,7 +409,7 @@ var __mknil = __mknil || function(C) {
   for (const k of Object.getOwnPropertyNames(C.prototype)) {
     const f = C.prototype[k];
     if (k === "constructor" || k === "toString" || (k.startsWith("__") && !k.endsWith("$")) || typeof f !== "function") continue;
-    Object.defineProperty(s, k, { value: (vm.includes(k) || vm.includes(k.replace(/\$$/, "")))
+    Object.defineProperty(s, k, { value: (vm.includes(k) || vm.includes(k.endsWith("$") ? k.slice(0, -1) : k))
       ? function() { throw new Error("runtime error: invalid memory address or nil pointer dereference"); }
       : function(...a) { return f.apply(null, a); } });
   }

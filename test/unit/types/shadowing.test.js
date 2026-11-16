@@ -1897,3 +1897,22 @@ func main() {
 		"8 12\n",
 	);
 });
+
+test("a variable named after a defined struct type without methods", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ X int }
+type Sub Base
+
+func main() {
+	var Sub Sub
+	Sub.X = 7
+	fmt.Println(Sub.X)
+}
+`,
+		"7\n",
+	);
+});

@@ -2222,7 +2222,7 @@ export const expressionGenMethods = {
 			return null;
 		if (from?.kind !== "pointer" || from.base === target.base) return null;
 		if (target.base.underlying?.kind !== "struct") return null;
-		const cls = target.base.name;
+		const cls = jsClassName(target.base.name);
 		if (!target.base.methods?.has(sel.field)) return null;
 		const rest = this._genCallArgs(expr);
 		const obj = this.genExpr(recv.args[0]);
@@ -2237,7 +2237,7 @@ export const expressionGenMethods = {
 		if (ptr.base.underlying?.kind !== "struct") return null;
 		if (sel && this._promotedPath(sel)) return null;
 		if (!ptr.base.methods?.has(field)) return null;
-		return ptr.base.name;
+		return jsClassName(ptr.base.name);
 	},
 
 	// The class of a pointer-receiver struct method that accepts a nil receiver
@@ -2256,14 +2256,14 @@ export const expressionGenMethods = {
 			!this._promotedPath(func) &&
 			this.nilSafeMethods?.has(`${cls}.${func.field}`)
 		)
-			return cls;
+			return jsClassName(cls);
 		// A Go-source stdlib type (`Buffer$$bytes`) is declared outside this
 		// package: its method decl tells whether it tests the receiver for nil.
 		const decl = cls.includes("$$")
 			? t.base.methods?.get(func.field)?._methodDecl
 			: null;
 		return decl?.recvPointer && comparesToNil(decl.body, decl.recvName)
-			? cls
+			? jsClassName(cls)
 			: null;
 	},
 
