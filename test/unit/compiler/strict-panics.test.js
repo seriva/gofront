@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
+	assertJsTargetsOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -444,6 +445,119 @@ test("make with valid lengths is unchanged", () => {
 		),
 		"nopanic",
 	);
+});
+
+section("Slice-bounds panics carry Go's bounds text");
+
+// Runs each closure and prints the panic it recovers.
+const TRY = `func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover()) }()
+	f()
+}
+`;
+
+const SLICE_PRELUDE = `package main
+
+import "fmt"
+
+${TRY}`;
+
+test("a slice with low above high names both bounds", async () => {
+	await assertJsTargetsOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := []int{1, 2, 3}
+	lo, hi := 2, 1
+	try("p06", func() { _ = xs[lo:hi] })
+	try("ok", func() { _ = xs[1:2] })
+}
+`,
+		"p06 runtime error: slice bounds out of range [2:1]\nok <nil>\n",
+	);
+});
+
+test("a slice high above the capacity names the capacity", async () => {
+	await assertJsTargetsOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := []int{1, 2, 3}
+	n := 5
+	try("p07", func() { _ = xs[:n] })
+}
+`,
+		"p07 runtime error: slice bounds out of range [:5] with capacity 3\n",
+	);
+});
+
+test("two- and three-index slices of a slice with capacity", async () => {
+	await assertJsTargetsOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := make([]int, 3, 5)
+	a, b, c, neg, nine := 4, 2, 1, -1, 9
+	try("lo above len", func() { _ = xs[a:] })
+	try("max above cap", func() { _ = xs[:b:nine] })
+	try("high above max", func() { _ = xs[:b:c] })
+	try("low above high", func() { _ = xs[a:b:a] })
+	try("negative low", func() { _ = xs[neg:] })
+	try("negative high", func() { _ = xs[:neg] })
+	try("negative max", func() { _ = xs[:b:neg] })
+	try("negative 3-index high", func() { _ = xs[:neg:a] })
+	try("negative 3-index low", func() { _ = xs[neg:b:a] })
+	try("high above cap", func() { _ = xs[:6+c-c] })
+	try("ok", func() { _ = xs[:5] })
+}
+`,
+		`lo above len runtime error: slice bounds out of range [4:3]
+max above cap runtime error: slice bounds out of range [::9] with capacity 5
+high above max runtime error: slice bounds out of range [:2:1]
+low above high runtime error: slice bounds out of range [4:2:]
+negative low runtime error: slice bounds out of range [-1:]
+negative high runtime error: slice bounds out of range [:-1]
+negative max runtime error: slice bounds out of range [::-1]
+negative 3-index high runtime error: slice bounds out of range [:-1:]
+negative 3-index low runtime error: slice bounds out of range [-1::]
+high above cap runtime error: slice bounds out of range [:6] with capacity 5
+ok <nil>
+`,
+	);
+});
+
+test("slicing an array or an array pointer names the length", async () => {
+	await assertJsTargetsOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	var arr [3]int
+	p := &arr
+	lo, hi, n := 2, 1, 7
+	try("arr low above high", func() { _ = arr[lo:hi] })
+	try("arr high", func() { _ = arr[:n] })
+	try("arr max", func() { _ = arr[:lo:n] })
+	try("ptr high", func() { _ = p[:n] })
+	try("ok", func() { _ = arr[1:3] })
+}
+`,
+		`arr low above high runtime error: slice bounds out of range [2:1]
+arr high runtime error: slice bounds out of range [:7] with length 3
+arr max runtime error: slice bounds out of range [::7] with length 3
+ptr high runtime error: slice bounds out of range [:7] with length 3
+ok <nil>
+`,
+	);
+});
+
+test("slice calls on slices keep the same emitted call", () => {
+	const { js } = compile(`package main
+func main() {
+	xs := []int{1, 2, 3}
+	lo, hi := 1, 2
+	ys := xs[lo:hi]
+	zs := xs[:hi:3]
+	_, _ = ys, zs
+}
+`);
+	assert(js.includes("__slice(xs, lo, hi)"), "2-index slice call changed");
+	assert(js.includes("__slice(xs, 0, hi, 3)"), "3-index slice call changed");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

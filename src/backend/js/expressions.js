@@ -1792,7 +1792,17 @@ export const expressionGenMethods = {
 		const max = expr.max
 			? `, ${this._asIndexNumber(this.genExpr(expr.max), expr.max._type)}`
 			: "";
+		// An array (or array pointer) is a JS array like a slice: the flag
+		// makes a failed bounds check word its limit as a length.
+		if (this._isArrayOperand(expr.expr._type))
+			return `__slice(${base}, ${lo}, ${hi}${max || ", undefined"}, 1)`;
 		return `__slice(${base}, ${lo}, ${hi}${max})`;
+	},
+
+	_isArrayOperand(t) {
+		let u = this._underlyingOf(t);
+		if (u?.kind === "pointer") u = this._underlyingOf(u.base);
+		return u?.kind === "array";
 	},
 
 	_genFuncLit(expr) {

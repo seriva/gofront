@@ -159,7 +159,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitBuiltinPanic`), `docs/go-compatibility.md` (`defer`/`recover()` row: the recovered value keeps its type on every target; only an uncaught panic reaches JS as an `Error` whose message is the value's text)
   - Test: `test/unit/wasm/defer_recover.test.js` with `assertProgramOutput`: `p01`, `p02`, `p04`, `p05`, and `p03` line 1 (`int64`); an uncaught `panic(42)` from a `wasm` export still throws an `Error` whose message contains `42`
   - Done when: all print Go's output; existing `defer_recover`/`traps` tests pass
-- [ ] Task 4.2: JS slice-bounds panics carry Go's bounds text
+- [x] Task 4.2: JS slice-bounds panics carry Go's bounds text
   - Files: `src/backend/js/runtime.js` (`__slice`, failing path only), `src/backend/js/expressions.js` (`_genSliceExpr`: length-wording flag for array operands)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsTargetsOutput`: `p06`, `p07`, `p09`, and the array lines of `p08`
   - Done when: all print Go's text on `js`/`both`; 3- and 4-argument `__slice` calls on slices are byte-identical

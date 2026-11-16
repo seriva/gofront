@@ -166,7 +166,18 @@ var __rcflush = __rcflush || function(a) {
   if (e !== undefined) __rcput(e, a, 0, a.length);
   return e;
 };
-var __slice = __slice || function(a, lo, hi, max) {
+var __slicefail = __slicefail || function(lo, hi, mx, c, arr) {
+  const w = arr ? "length" : "capacity";
+  const p = "runtime error: slice bounds out of range ";
+  if (mx !== undefined) {
+    if (!(mx >= 0 && mx <= c)) throw new Error(p + (mx < 0 ? "[::" + mx + "]" : "[::" + mx + "] with " + w + " " + c));
+    if (!(hi >= 0 && hi <= mx)) throw new Error(p + (hi < 0 ? "[:" + hi + ":]" : "[:" + hi + ":" + mx + "]"));
+    throw new Error(p + (lo < 0 ? "[" + lo + "::]" : "[" + lo + ":" + hi + ":]"));
+  }
+  if (!(hi >= 0 && hi <= c)) throw new Error(p + (hi < 0 ? "[:" + hi + "]" : "[:" + hi + "] with " + w + " " + c));
+  throw new Error(p + (lo < 0 ? "[" + lo + ":]" : "[" + lo + ":" + hi + "]"));
+};
+var __slice = __slice || function(a, lo, hi, max, arr) {
   if (typeof a === "string") return a.slice(lo, hi);
   const s = a == null ? undefined : a[__sv];
   const n = s !== undefined ? s.n : a == null ? 0 : a.length;
@@ -174,7 +185,7 @@ var __slice = __slice || function(a, lo, hi, max) {
   const mx = max;
   if (hi === undefined) hi = n;
   if (max === undefined) max = c;
-  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
+  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) __slicefail(lo, hi, mx, c, arr);
   if (a == null) return a;
   if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
   if (c > n && Array.isArray(a)) {
