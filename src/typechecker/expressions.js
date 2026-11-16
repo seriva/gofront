@@ -252,6 +252,16 @@ export const expressionCheckMethods = {
 				}
 				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
 					expr._isTypeRef = true;
+				// A binding of a function scope (local, parameter, result,
+				// receiver) is a value even when its type shares its name.
+				const bindingScope = scope.lookupScope(expr.name);
+				if (
+					bindingScope !== this.globals &&
+					bindingScope !== this.universe &&
+					t.kind !== "typeParam" &&
+					t.kind !== "aliasArg"
+				)
+					expr._isValueRef = true;
 				// A Go declaration that shadows a browser global: JS output renames
 				// it so generated code keeps reaching the real global.  Package
 				// namespaces (`import console "./util"`) are never renamed: JS

@@ -1313,3 +1313,169 @@ templ ${comp}(${param} string) {
 		assertEqual(document.querySelector("#app p").textContent, "hit");
 	});
 }
+
+section("Value bindings named after a type");
+
+for (const [name, decl, init, use] of [
+	["Proxy", "struct{ X int }", "Proxy{99}", "Proxy.X"],
+	["__q", "struct{ A int }", "__q{42}", "__q.A"],
+]) {
+	const field = use.split(".")[1];
+	test(`${name} := ${name}{...} reads the value after its declaration`, async () => {
+		await assertJsTargetsOutput(
+			`package main
+
+import "fmt"
+
+type ${name} ${decl}
+
+func main() {
+	${name} := ${init}
+	fmt.Println(${use})
+	${name}.${field} = 3
+	fmt.Println(${name}.${field}, ${name})
+}
+`,
+			`${init.includes("99") ? 99 : 42}\n3 {3}\n`,
+		);
+	});
+
+	test(`func f(${name} ${name}) reads the parameter in its body`, async () => {
+		await assertJsTargetsOutput(
+			`package main
+
+import "fmt"
+
+type ${name} ${decl}
+
+func f(${name} ${name}) int { return ${use} }
+
+func main() {
+	fmt.Println(f(${init}))
+}
+`,
+			`${init.includes("99") ? 99 : 42}\n`,
+		);
+	});
+}
+
+test("var __n __n = 7 reads the variable after its declaration", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __n int
+
+func main() {
+	var __n __n = 7
+	fmt.Println(__n + 1)
+}
+`,
+		"8\n",
+	);
+});
+
+test("type switch binding, receiver and result named after a type are values", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __q struct{ A int }
+
+func (__q __q) Get() int { return __q.A }
+
+func g() (__q __q) {
+	__q.A = 5
+	return
+}
+
+func main() {
+	var a any = __q{3}
+	switch __q := a.(type) {
+	case __q:
+		fmt.Println(__q.A)
+	}
+	fmt.Println(__q{4}.Get(), g().A, __q{A: 1})
+}
+`,
+		"3\n4 5 {1}\n",
+	);
+});
+
+section("Packages named with a __ prefix");
+
+const UNDERSCORE_PKG = `package __u
+
+type T struct{ A int }
+
+func (t T) Get() int { return t.A }
+
+type __S struct{ B int }
+
+type G[X any] struct{ V X }
+
+func (g G[X]) Pick() X { return g.V }
+
+func N(n int) int { return n * 2 }
+
+func Answer() int { return 42 }
+`;
+
+for (const [label, pkgFile, importLine] of [
+	["package __u", UNDERSCORE_PKG, 'import "./util"'],
+	[
+		"import __u",
+		UNDERSCORE_PKG.replace("package __u", "package util"),
+		'import __u "./util"',
+	],
+]) {
+	test(`types of a __ prefixed package keep working (${label})`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": pkgFile,
+				"main.go": `package main
+
+${importLine}
+
+func Main() int {
+	v := __u.T{A: 10}
+	s := __u.__S{B: 5}
+	var a any = v
+	_, ok := a.(__u.T)
+	p := new(__u.T)
+	g := __u.G[int]{V: 4}
+	if !ok {
+		return -1
+	}
+	return v.Get() + s.B + __u.Answer() + __u.N(5) + p.A + g.Pick()
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 71);
+	});
+}
+
+test("members of a __ prefixed package keep working", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `package __u
+
+func __Answer() int { return 42 }
+
+var __V = 8
+`,
+			"main.go": `package main
+
+import "./util"
+
+func Main() int { return __u.__Answer() + __u.__V }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 50);
+});

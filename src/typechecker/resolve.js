@@ -300,6 +300,9 @@ export const resolveMethods = {
 				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
 					const qualified = `${node.expr.name}.${node.field}`;
 					if (this.types.has(qualified)) {
+						// Never reaches checkExpr: tag the qualifier as the package
+						// name it is so JS output does not rename it.
+						node.expr._isNamespace = true;
 						const inner = { kind: "TypeName", name: qualified };
 						this._inheritConstraintPos(node, inner);
 						const resolved = this.resolveTypeNode(inner, scope);
@@ -560,6 +563,7 @@ export const resolveMethods = {
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
 		if (qualified) {
 			this.globals.lookup(sel.expr.name);
+			sel.expr._isNamespace = true;
 			// `iter.Seq[int](f)`: the selector names the mangled stdlib type.
 			this._useQualifiedTypeName(sel, base);
 		} else if (name)

@@ -33,7 +33,6 @@ import {
 	isComplex,
 	isMethodPromotedOverField,
 	isNumeric,
-	shadowsJsGlobal,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import {
@@ -46,6 +45,7 @@ import {
 	derefsReceiverFirst,
 	expressionGenMethods,
 } from "./expressions.js";
+import { JS_RESERVED, jsBindingName, jsSafeName } from "./names.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
@@ -89,43 +89,6 @@ import { typeInfoGenMethods } from "./type-info.js";
 
 export { buildSourceMap, buildWasmSourceMap };
 
-// Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
-const JS_RESERVED = new Set([
-	"arguments",
-	"await",
-	"catch",
-	"class",
-	"debugger",
-	"delete",
-	"do",
-	"enum",
-	"eval",
-	"export",
-	"extends",
-	"finally",
-	"function",
-	"implements",
-	"in",
-	"instanceof",
-	"let",
-	"new",
-	"null",
-	"private",
-	"protected",
-	"public",
-	"static",
-	"super",
-	"this",
-	"throw",
-	"try",
-	"typeof",
-	"undefined",
-	"void",
-	"while",
-	"with",
-	"yield",
-]);
-
 // Every type declared in `node`, package-level or local.
 function collectTypeDeclNames(node, out) {
 	if (!node || typeof node !== "object") return;
@@ -137,22 +100,6 @@ function collectTypeDeclNames(node, out) {
 		out.add(node.name);
 	forEachChild(node, (child) => collectTypeDeclNames(child, out));
 }
-
-// Names a Go program may not reuse in the flat bundle: JS keywords, and
-// anything starting with `__`, the prefix of every runtime helper (`__len`,
-// `__append`, ...).  Go identifiers never contain `$`, so a name that does was
-// synthesised by lowering (`__fwd$1`) and is left alone.
-const jsSafeName = (n) =>
-	typeof n === "string" &&
-	(JS_RESERVED.has(n) || (n.startsWith("__") && !n.includes("$")))
-		? `${n}$`
-		: n;
-
-// Go declarations may shadow browser globals (Task 0.9).  The JS bundle is one
-// flat module scope, so such a binding gets a `$` suffix: generated code and
-// other packages keep reaching the real global (`Array.from`, `Object.keys`).
-const jsBindingName = (n) =>
-	typeof n === "string" && shadowsJsGlobal(n) ? `${n}$` : jsSafeName(n);
 
 // Runtime helpers by registry name, in output order.  Mark one as needed with
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
@@ -498,13 +445,14 @@ export class CodeGen {
 	_renameIdentNode(node) {
 		if (node._isStructKey || node._type?.kind === "builtin") return;
 		// Package namespaces are selected by their import name, never renamed.
-		if (node._type?.kind === "namespace") return;
+		if (node._isNamespace || node._type?.kind === "namespace") return;
 		// A type declaration is emitted under its Go name (`class __T`), so a
 		// reference to it keeps that name.  Only an Ident that names a type is
 		// skipped: a variable that shares the name is renamed like its
 		// declaration.
 		if (
 			node._isTypeRef &&
+			!node._isValueRef &&
 			this._typeDeclNames?.has(node.name) &&
 			!JS_RESERVED.has(node.name)
 		)
