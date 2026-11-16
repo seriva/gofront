@@ -97,7 +97,6 @@ func main() {
 	var fa Float32Array = s
 	_ = fa
 }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "Cannot assign []float64 to Float32Array");
 });
 

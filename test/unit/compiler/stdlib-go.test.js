@@ -698,7 +698,7 @@ test("an unknown third-party path still compiles with the missing-types warning"
 	let errors;
 	try {
 		({ errors } = compile(
-			`package main\nimport _ "nope/zzz"\nfunc main() {}\n`,
+			`package main\nimport z "nope/zzz"\nfunc main() {}\n`,
 		));
 	} finally {
 		console.error = realError;

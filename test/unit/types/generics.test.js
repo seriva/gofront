@@ -9,7 +9,6 @@ import {
 	assertJsProgramOutput,
 	assertJsTargetsOutput,
 	assertProgramOutput,
-	assertThrows,
 	compile,
 	compileDir,
 	compileHybrid,
@@ -1598,15 +1597,14 @@ func main() {
 });
 
 test("a[foo, bar] on a non-generic value is an error, not an instantiation", () => {
-	assertThrows(
-		() => compile("package main\nfunc main() { var a int; _ = a[foo, bar] }"),
+	assertErrorContains(
+		compile("package main\nfunc main() { var a int; _ = a[foo, bar] }").errors,
 		"expected ']'",
 	);
-	assertThrows(
-		() =>
-			compile(
-				"package main\nfunc Main() int { var a int = 42; return a[foo, bar] }",
-			),
+	assertErrorContains(
+		compile(
+			"package main\nfunc Main() int { var a int = 42; return a[foo, bar] }",
+		).errors,
 		"expected ']'",
 	);
 });

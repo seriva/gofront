@@ -8,13 +8,13 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import { checkSyntax } from "../../scripts/build-examples.js";
-import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import {
+	CompileError,
 	compileDir,
 	compileFiles,
 	compileWasm as compileWasmSource,
@@ -23,13 +23,7 @@ import {
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
-import {
-	bindUntypedImports,
-	isBuiltinPackage,
-	resolveAll,
-	resolveStdlibSource,
-} from "../../src/resolver.js";
-import { TypeChecker } from "../../src/typechecker/index.js";
+import { isBuiltinPackage, resolveStdlibSource } from "../../src/resolver.js";
 
 export {
 	checkSyntax,
@@ -97,21 +91,33 @@ function importsGoSourceStdlib(ast, source = "") {
 	);
 }
 
-// `compileFiles` for one in-memory source; compile errors come back as an
-// `errors` array like the in-memory helpers return them.
-function compileSourceFile(source, target, options = {}) {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-source-"));
+// Runs `fn`; a `CompileError` comes back as `{ res: null, errors }` and any
+// other exception (a compiler crash) propagates so the test fails with it.
+export function toCompileResult(fn) {
 	try {
-		const goPath = join(dir, "main.go");
-		writeFileSync(goPath, source);
-		return {
-			res: compileFiles([goPath], { forceTarget: target, ...options }),
-			errors: [],
-		};
+		return { res: fn(), errors: [] };
 	} catch (e) {
-		return { res: null, errors: [{ message: e.message }] };
+		if (e instanceof CompileError) return { res: null, errors: e.errors };
+		throw e;
+	}
+}
+
+// `compileFiles` for one in-memory source, written as `fileName` in a fresh
+// temp dir. Imports resolve from `options.fromDir` when given.
+function compileSourceFile(source, target, options = {}) {
+	const { fileName = "main.go", ...rest } = options;
+	const dir = mkdtempSync(join(tmpdir(), "gofront-source-"));
+	const goPath = join(dir, fileName);
+	try {
+		writeFileSync(goPath, source);
+		return toCompileResult(() =>
+			compileFiles([goPath], {
+				...(target ? { forceTarget: target } : {}),
+				...rest,
+			}),
+		);
 	} finally {
-		evictParseCache(join(dir, "main.go"));
+		evictParseCache(goPath);
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -141,53 +147,14 @@ export function compile(
 		target = null,
 	} = {},
 ) {
-	const filename = fromFile.split("/").pop();
-	const tokens = new Lexer(source, filename).tokenize();
-	const ast = new Parser(tokens, filename, source).parse();
-
-	const checker = new TypeChecker();
-	const fromDir = dirname(resolve(fromFile));
-	const jsImports = new Map();
-
-	const pkgTarget = target ?? ast.target ?? "js";
-	ast.target = pkgTarget;
-	checker.target = pkgTarget;
-	checker.pkgName = ast.pkg?.name ?? "main";
-
-	for (const imp of ast.imports) {
-		for (const { path } of imp.imports) {
-			if (!path.startsWith("js:")) continue;
-			const dtsPath = join(fromDir, path.slice(3));
-			const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
-			checker.addDefinitions(types, values);
-		}
-	}
-
-	const resolved = resolveAll(ast.imports, fromFile, parseDts);
-	for (const [path, info] of resolved) {
-		if (!info) continue;
-		checker.addDefinitions(info.types, info.values);
-		jsImports.set(path, [...info.values.keys()]);
-	}
-	bindUntypedImports(ast.imports, resolved, checker);
-
-	if (importsGoSourceStdlib(ast, source)) {
-		const { res, errors } = compileSourceFile(source, pkgTarget, { strict });
-		return errors.length > 0
-			? { js: null, errors }
-			: { js: res.js, errors: [], warnings: [] };
-	}
-
-	const errors = checker.check(ast);
-	if (errors.length > 0) return { js: null, errors };
-
-	const isStrict = Boolean(strict || pkgTarget === "both");
-	const cg = new CodeGen(checker, jsImports, new Set(), {
-		target: pkgTarget,
-		strict: isStrict,
+	const { res, errors } = compileSourceFile(source, target, {
+		strict,
+		fileName: basename(fromFile),
+		fromDir: dirname(resolve(fromFile)),
 	});
-	const js = cg.generate(ast);
-	return { js, errors: [], warnings: [...checker.warnings, ...cg.warnings] };
+	return errors.length > 0
+		? { js: null, errors }
+		: { js: res.js, errors: [], warnings: res.warnings };
 }
 
 export function compileFile(path) {

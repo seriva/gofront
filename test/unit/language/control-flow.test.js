@@ -531,13 +531,8 @@ test("goto is rejected by the WASM compile too", () => {
 });
 
 test("goto without a label is a parse error", () => {
-	let err = null;
-	try {
-		compile("package main\nfunc main() { goto }");
-	} catch (e) {
-		err = e;
-	}
-	assert(err !== null, "expected a parse error");
+	const { errors } = compile("package main\nfunc main() { goto }");
+	assertErrorContains(errors, "expected");
 });
 
 section("else-if init statements");
