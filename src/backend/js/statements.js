@@ -862,7 +862,7 @@ export const statementGenMethods = {
 				? this.genValueExpr(e)
 				: this.genExpr(e),
 		);
-		const hoisted = this._hoistLhsOperands(stmt);
+		const hoisted = this._hoistLhsOperands(stmt, this._inForPost);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
 		// A struct pointer target is the struct itself: it is written with
 		// `Object.assign`, which a destructuring target cannot express.
@@ -2246,7 +2246,13 @@ export const statementGenMethods = {
 		hoisted?.restore();
 		if (hoisted || stmt.lhs.some((l) => this._isStructDerefTarget(l))) {
 			const mark = this.out.length;
-			this._genAssignStmt(stmt);
+			const prev = this._inForPost;
+			this._inForPost = true;
+			try {
+				this._genAssignStmt(stmt);
+			} finally {
+				this._inForPost = prev;
+			}
 			const body = this.out.splice(mark).map((l) => l.trim());
 			return `(() => { ${body.join(" ")} })()`;
 		}

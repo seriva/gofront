@@ -472,3 +472,36 @@ func main() {
 `,
 	);
 });
+
+test("for-post multi-assignment reads plain-variable operands after the right-hand call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func main() {
+	i := 0
+	arr := [2]int{}
+	arr2 := [2]int{}
+	fv := func() int { i = 1; return 1 }
+	ti := func(n int) int { return n }
+	k := 0
+	for k = 0; k < 1; arr[i], arr2[ti(0)], k = 9, 8, fv() {
+	}
+	fmt.Println(arr, arr2, k)
+
+	i = 0
+	arr = [2]int{}
+	p := &S{}
+	for k = 0; k < 1; *p, arr[i], k = (S{5}), 9, fv() {
+	}
+	fmt.Println(p.A, arr, k)
+}
+`,
+		`[0 9] [8 0] 1
+5 [0 9] 1
+`,
+	);
+});
