@@ -1136,3 +1136,55 @@ func main() {
 `);
 	assertContains(js, "__sclone(");
 });
+
+test("assertions and type switches on an anonymous struct alias check the type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T = struct{ A [2]int }
+
+func main() {
+	var a any = 42
+	_, ok := a.(T)
+	fmt.Println(ok)
+	switch a.(type) {
+	case T:
+		fmt.Println("T")
+	default:
+		fmt.Println("other")
+	}
+	func() {
+		defer func() { fmt.Println(recover() != nil) }()
+		_ = a.(T)
+	}()
+	var b any = T{}
+	_, ok = b.(T)
+	fmt.Println(ok)
+}
+`,
+		"false\nother\ntrue\ntrue\n",
+	);
+});
+
+test("a type-switch binding of an anonymous struct alias is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T = struct{ A [2]int }
+
+func main() {
+	var a any = T{}
+	switch v := a.(type) {
+	case T:
+		v.A[0] = 5
+		fmt.Println(v.A[0], a.(T).A[0])
+	}
+}
+`,
+		"5 0\n",
+	);
+});

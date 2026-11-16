@@ -1048,6 +1048,7 @@ export const expressionGenMethods = {
 			return { kind: "typeParam", name: node.name };
 		// A defined array or struct type (`type Vec [2]int`).
 		const named = this.checker?.types.get(node.name);
+		if (named?.kind === "struct") return named; // alias of an anonymous struct
 		return named?.kind === "named" && this._aggregateBase(named) ? named : null;
 	},
 
@@ -1961,6 +1962,13 @@ export const expressionGenMethods = {
 		if (this._isNamedComposite(named)) {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
+		}
+		// An alias of an anonymous struct: a plain object with its fields.
+		if (named?.kind === "struct") {
+			const fields = [...(named.fields?.keys() ?? [])].map(
+				(f) => `${JSON.stringify(jsMemberName(f))} in ${val}`,
+			);
+			return `(typeof ${val} === "object" && ${val} !== null && !Array.isArray(${val})${fields.map((f) => ` && ${f}`).join("")})`;
 		}
 		return "true"; // unknown type — can't check at runtime
 	},
