@@ -147,6 +147,22 @@ export function fnMutates(body, name, addrOnly = false, cache = null) {
 	return nodeMutatesVar(body, name, addrOnly);
 }
 
+// True when `body` declares a variable `name` with `:=` or `var` at its top
+// level, so it shadows any outer `name` for the whole body. Declarations in
+// nested blocks only shadow within that block and do not count.
+export function declaresVar(body, name) {
+	for (const s of body?.stmts ?? []) {
+		if (
+			s.kind === "DefineStmt" &&
+			s.lhs.some((e) => e.kind === "Ident" && !e._redecl && e.name === name)
+		)
+			return true;
+		if (s.kind === "VarDecl" && s.decls.some((d) => d.names?.includes(name)))
+			return true;
+	}
+	return false;
+}
+
 function collectClosureMutatedVars(node, mutated = new Set()) {
 	if (!node || typeof node !== "object") return mutated;
 	if (Array.isArray(node)) {

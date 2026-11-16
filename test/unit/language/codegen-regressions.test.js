@@ -536,3 +536,47 @@ func main() {
 `,
 	);
 });
+
+test("a comma-ok map lookup stores a struct into *p", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f int }
+
+func main() {
+	p := &S{1}
+	m := map[string]S{"k": {5}}
+	var ok bool
+	*p, ok = m["k"]
+	fmt.Println(*p, ok)
+	*p, ok = m["z"]
+	fmt.Println(*p, ok)
+}
+`,
+		`{5} true
+{0} false
+`,
+	);
+});
+
+test("a comma-ok type assertion stores a struct into *p", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f int }
+
+func main() {
+	p := &S{1}
+	var i any = S{7}
+	var ok bool
+	*p, ok = i.(S)
+	fmt.Println(*p, ok)
+}
+`,
+		"{7} true\n",
+	);
+});
