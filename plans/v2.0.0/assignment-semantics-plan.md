@@ -102,11 +102,11 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
 > Scheduled from the 2026-11-16 differential fuzzer and the spec-mandated `plans/follow-ups.md` entries. The gc-order-only entries were closed into the *Excluded* row above.
 
 ### Phase 1: Spec-aware differential fuzzer
-- [ ] Task 1.1: Fuzzer only generates programs whose output the spec fixes
+- [x] Task 1.1: Fuzzer only generates programs whose output the spec fixes
   - Files: `test/fuzz/difffuzz.js` (alias groups, per-closure mutated groups, regenerate a statement whose calls mutate a group it names), `package.json` (`fuzz` script)
   - Test: `test/unit/cli/difffuzz.test.js` (no Go needed): import the generator through a new `--self-test` entry that generates 2,000 order-mode cases from seed 1 and asserts that no statement both calls a closure mutating group G and names a member of G elsewhere; and that `--replay` on a missing file exits non-zero with `ENOENT`
   - Done when: the self-test passes, and `npm run fuzz -- --mode order --seed 1 --batches 3 --cases 30 --stmts 6` no longer reports any finding whose minimal repro is in the gc-order *Excluded* row
-- [ ] Task 1.2: Deterministic replay of findings
+- [x] Task 1.2: Deterministic replay of findings
   - Files: `test/fuzz/difffuzz.js` (`--case <seed>:<n>` regenerates and replays one case; finding headers print it)
   - Test: `test/unit/cli/difffuzz.test.js`: `--self-test` also asserts that generating seed 7000 twice yields identical program text
   - Done when: a finding's header names a `--case` that reproduces it

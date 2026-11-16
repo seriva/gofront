@@ -8,6 +8,11 @@
 //     [--no-reduce] [--anon-embed]
 //   node test/fuzz/difffuzz.js --replay file.go [--targets js,both,wasm]
 //     runs one program with Go and each target and prints every output
+//   node test/fuzz/difffuzz.js --case SEED:N [--mode ..] [--stmts N] [--anon-embed]
+//     regenerates case N of batch seed SEED and replays it; every finding
+//     header prints the exact command
+//   node test/fuzz/difffuzz.js --self-test
+//     checks the generator without Go (run by the unit tests)
 //
 // Modes:
 //   order  evaluation order and value semantics: side-effecting calls in
@@ -17,6 +22,12 @@
 //   arith  sized integer arithmetic (int8..uint64): wrapping, conversions,
 //          shifts, truncated division. `js` packages do not wrap narrow
 //          integers by design, so this mode defaults to `both,wasm`.
+//
+// The generator only produces programs whose output the Go spec fixes. Go
+// leaves the order of a plain variable read relative to a call in the same
+// statement unspecified (`a + f()` where `f` changes `a`), and gc and GoFront
+// can differ there. So every statement that calls a closure must not name any
+// variable the closure changes (see ALIAS_GROUPS and stmtConflicts).
 //
 // Known, documented differences the generator avoids:
 //   - Go's `int`/`uint` are 64-bit; in JS output they are exact only to 2^53.
@@ -60,6 +71,8 @@ const OUT = resolve(opt("out", ".probes/fuzz"));
 const REDUCE = !args.includes("--no-reduce");
 const ANON_EMBED = args.includes("--anon-embed");
 const REPLAY = opt("replay", null);
+const CASE = opt("case", null);
+const SELF_TEST = args.includes("--self-test");
 if (!["order", "arith"].includes(MODE)) {
 	console.error(`unknown --mode ${MODE}`);
 	process.exit(2);
@@ -92,6 +105,47 @@ function weighted(r, kinds) {
 		x -= w;
 	}
 	throw new Error("unreachable");
+}
+
+// Variables that may alias each other (or share storage) map to one group.
+// `p` points at `a` or `b`; `ps` at `s`, `s2` or an element of `ss`; `ys`
+// shares `xs`'s array.
+const ALIAS_GROUPS = {
+	a: "ab",
+	b: "ab",
+	p: "ab",
+	i: "i",
+	j: "j",
+	xs: "xs",
+	ys: "xs",
+	arr: "arr",
+	m: "m",
+	s: "S",
+	s2: "S",
+	ps: "S",
+	ss: "S",
+	v: "v",
+	w: "w",
+};
+
+function groupsNamed(text) {
+	const groups = new Set();
+	for (const m of text.matchAll(/(?<![.\w"])[a-z]\w*/g))
+		if (Object.hasOwn(ALIAS_GROUPS, m[0])) groups.add(ALIAS_GROUPS[m[0]]);
+	return groups;
+}
+
+// True when `stmt` calls a closure that changes a group the statement also
+// names: Go leaves the result of such a statement unspecified.
+function stmtConflicts(stmt, funcs) {
+	const named = groupsNamed(stmt);
+	for (const m of stmt.matchAll(/(?<![.\w])(f\d+|ks)\(/g)) {
+		const fn = funcs.find((f) => f.name === m[1]);
+		if (!fn) continue;
+		for (const g of groupsNamed(fn.muts.join(";")))
+			if (named.has(g)) return true;
+	}
+	return false;
 }
 
 // A case is { decls, funcs, stmts, prints }. `decls` ends with a line that
@@ -308,7 +362,14 @@ function genOrderCase(r, nStmts) {
 	}
 
 	const stmts = [];
-	for (let k = 0; k < nStmts; k++) stmts.push(stmt(1));
+	for (let k = 0; k < nStmts; k++) {
+		let st = null;
+		for (let tries = 0; tries < 20 && st === null; tries++) {
+			const cand = stmt(1);
+			if (!stmtConflicts(cand, funcs)) st = cand;
+		}
+		stmts.push(st ?? "a++");
+	}
 	const prints = [
 		"tr",
 		"a",
@@ -652,21 +713,89 @@ async function reduce(c, sig) {
 	}
 }
 
-// ── Replay ───────────────────────────────────────────────────
+// ── Self-test, replay and case replay ────────────────────────
 
-if (REPLAY) {
-	const src = readFileSync(REPLAY, "utf8");
+function selfTest() {
+	const fail = (msg) => {
+		console.error(`self-test failed: ${msg}`);
+		process.exit(1);
+	};
+	const r = rng(1 * 2654435761);
+	let calls = 0;
+	for (let n = 0; n < 2000; n++) {
+		const c = genOrderCase(r, STMTS);
+		for (const st of c.stmts) {
+			if (/(?<![.\w])(f\d+|ks)\(/.test(st)) calls++;
+			if (stmtConflicts(st, c.funcs))
+				fail(
+					`case ${n}: statement calls a closure that changes a variable it names: ${st}`,
+				);
+		}
+	}
+	if (calls === 0) fail("no generated statement calls a closure");
+	const text = (seed) => {
+		const q = rng(seed * 2654435761);
+		return renderProgram(
+			Array.from({ length: 5 }, () => genOrderCase(q, STMTS)),
+		);
+	};
+	const first = text(7000);
+	if (first !== text(7000)) fail("seed 7000 is not deterministic");
+	if (first === text(7001)) fail("different seeds gave the same program");
+	console.log(`self-test ok (2000 cases, ${calls} statements with calls)`);
+	process.exit(0);
+}
+
+async function replaySource(src, targets) {
 	const go = runGo(src);
 	console.log(
 		`go    ${go.ok ? go.out.trimEnd() : `ERROR ${firstLine(go.err)}`}`,
 	);
-	for (const t of opt("targets", "js,both,wasm").split(",")) {
+	for (const t of targets.split(",")) {
 		const gf = await runGofront(src, t);
 		const tag = gf.kind === "ok" ? "" : ` [${gf.kind}: ${gf.err}]`;
 		const same =
 			go.ok && gf.kind === "ok" && gf.out === go.out ? "  (same)" : "";
 		console.log(`${t.padEnd(5)} ${gf.out.trimEnd()}${tag}${same}`);
 	}
+}
+
+// Case n of the batch with this seed, regenerated from the seed alone.
+function regenerateCase(seed, n) {
+	const r = rng(seed * 2654435761);
+	const gen = MODE === "order" ? genOrderCase : genArithCase;
+	let c;
+	for (let k = 0; k <= n; k++) c = gen(r, STMTS);
+	return c;
+}
+
+function reproduceCommand(seed, n) {
+	return `node test/fuzz/difffuzz.js --mode ${MODE} --stmts ${STMTS}${ANON_EMBED ? " --anon-embed" : ""} --case ${seed}:${n}`;
+}
+
+if (SELF_TEST) selfTest();
+
+if (REPLAY) {
+	let src;
+	try {
+		src = readFileSync(REPLAY, "utf8");
+	} catch (e) {
+		console.error(`error: ${e.message}`);
+		process.exit(1);
+	}
+	await replaySource(src, opt("targets", "js,both,wasm"));
+	process.exit(0);
+}
+
+if (CASE) {
+	const m = /^(\d+):(\d+)$/.exec(CASE);
+	if (!m) {
+		console.error("--case needs SEED:N");
+		process.exit(2);
+	}
+	const src = renderProgram([regenerateCase(Number(m[1]), Number(m[2]))]);
+	console.log(src);
+	await replaySource(src, opt("targets", TARGETS.join(",")));
 	process.exit(0);
 }
 
@@ -721,6 +850,7 @@ for (let b = 0; b < BATCHES; b++) {
 		);
 		const name = `${MODE}-${seed}-${n}-${fails.map((f) => f.target).join("+")}.go`;
 		const header = [
+			`// reproduce (unreduced): ${reproduceCommand(seed, n)}`,
 			`// difffuzz finding: fails on ${tlist.join(", ")}${e.err ? ` err=${e.err}` : ""}`,
 			`// want (go): ${e.want.split("\n").join(" | ")}`,
 			...fails.map(
@@ -736,6 +866,7 @@ for (let b = 0; b < BATCHES; b++) {
 		console.log(
 			`\n✗ ${name}  [${tlist.join(", ")}]${e.err ? ` ${e.err}` : ""}`,
 		);
+		console.log(`  reproduce: ${reproduceCommand(seed, n)}`);
 		console.log(`  want  ${e.want}`);
 		for (const f of fails) console.log(`  ${f.target.padEnd(5)} ${f.got}`);
 		console.log(`  ${body.join("\n  ")}`);
