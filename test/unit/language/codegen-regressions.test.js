@@ -329,3 +329,179 @@ func main() {
 }`);
 	assert(!js.includes("__h"), js);
 });
+
+section("Assignment order: blanks, pointer targets, comma-ok");
+
+const ORDER_PRELUDE = `package main
+
+import "fmt"
+
+type S struct{ f int }
+
+func main() {
+	trace := ""
+	t := func(s string, v int) int { trace += s; return v }
+	flush := func(label string) {
+		fmt.Println(label, trace)
+		trace = ""
+	}
+	var arr [3]int
+`;
+
+test("blank targets still evaluate every right-hand side once", async () => {
+	await assertAllTargetsOutput(
+		`${ORDER_PRELUDE}
+	_, arr[t("i", 0)] = t("x", 5), t("y", 6)
+	flush("b1")
+	fmt.Println(arr)
+	_, _ = t("x", 5), t("y", 6)
+	flush("b2")
+}
+`,
+		`b1 ixy
+[6 0 0]
+b2 xy
+`,
+	);
+});
+
+test("a *p target with a nil check evaluates right-hand sides first", async () => {
+	await assertAllTargetsOutput(
+		`${ORDER_PRELUDE}
+	ps := func(name string, p *S) *S { trace += name; return p }
+	p := &S{}
+	*ps("p", p), arr[t("i", 0)] = S{5}, t("y", 6)
+	flush("d1")
+	fmt.Println(p.f, arr[0])
+}
+`,
+		`d1 piy
+5 6
+`,
+	);
+});
+
+test("comma-ok assignment evaluates target operands first", async () => {
+	await assertAllTargetsOutput(
+		`${ORDER_PRELUDE}
+	var ok bool
+	fv := func() any { trace += "f"; return 3 }
+	arr[t("i", 0)], ok = fv().(int)
+	flush("c1")
+	fmt.Println(arr, ok)
+	ks := func(k string) string { trace += "k"; return k }
+	m := map[string]int{"k": 4}
+	k0 := "k"
+	arr[t("i", 1)], ok = m[ks("k")]
+	flush("c2")
+	fmt.Println(arr, ok)
+	v, ok2 := m[k0]
+	fmt.Println(v, ok2)
+}
+`,
+		`c1 if
+[3 0 0] true
+c2 ik
+[3 4 0] true
+4 true
+`,
+	);
+});
+
+test("for-post and generic *p targets evaluate operands first", async () => {
+	await assertAllTargetsOutput(
+		`${ORDER_PRELUDE}
+	for k := 0; k < 1; k, arr[t("i", 0)] = t("x", 1), t("y", 6) {
+	}
+	flush("f1")
+	fmt.Println(arr)
+	x := 0
+	nums := make([]int, 3)
+	run(&x, 5, 6, nums, &trace)
+	flush("g1")
+	fmt.Println(x, nums)
+}
+
+func run[T any](p *T, v1, v2 T, arr []T, tr *string) {
+	pn := func(s string, q *T) *T { *tr += s; return q }
+	ti := func(s string, i int) int { *tr += s; return i }
+	tv := func(s string, v T) T { *tr += s; return v }
+	*pn("p", p), arr[ti("i", 0)] = tv("x", v1), tv("y", v2)
+}
+`,
+		`f1 ixy
+[6 0 0]
+g1 pixy
+5 [6 0 0]
+`,
+	);
+});
+
+test("plain-variable target operands are read after the right-hand call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	i := 0
+	arr := [2]int{}
+	fv := func() any { i = 1; return 4 }
+	var ok bool
+	arr[i], ok = fv().(int)
+	fmt.Println(arr, ok)
+
+	i = 0
+	arr = [2]int{}
+	m := map[string]int{"k": 4}
+	ks := func(k string) string { i = 1; return k }
+	arr[i], ok = m[ks("k")]
+	fmt.Println(arr, ok)
+
+	i = 0
+	arr = [2]int{}
+	fi := func() int { i = 1; return 1 }
+	for k := 0; k < 1; arr[i], k = 9, fi() {
+	}
+	fmt.Println(arr)
+}
+`,
+		`[0 4] true
+[0 4] true
+[0 9]
+`,
+	);
+});
+
+test("for-post multi-assignment reads plain-variable operands after the right-hand call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func main() {
+	i := 0
+	arr := [2]int{}
+	arr2 := [2]int{}
+	fv := func() int { i = 1; return 1 }
+	ti := func(n int) int { return n }
+	k := 0
+	for k = 0; k < 1; arr[i], arr2[ti(0)], k = 9, 8, fv() {
+	}
+	fmt.Println(arr, arr2, k)
+
+	i = 0
+	arr = [2]int{}
+	p := &S{}
+	for k = 0; k < 1; *p, arr[i], k = (S{5}), 9, fv() {
+	}
+	fmt.Println(p.A, arr, k)
+}
+`,
+		`[0 9] [8 0] 1
+5 [0 9] 1
+`,
+	);
+});

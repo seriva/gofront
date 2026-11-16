@@ -267,9 +267,13 @@ export const statementGenMethods = {
 	// `pre` carries the map and key already evaluated (a shadowing declaration
 	// reads them before its names exist).
 	_genCommaOkMapIndex(stmt, rhsNode, isDefine, pre = null) {
+		// Go evaluates the target operands before the map and key.
+		const hoisted = isDefine ? null : this._hoistLhsOperands(stmt, true);
+		for (const l of hoisted?.lines ?? []) this.line(l);
 		const mapExpr = pre?.map ?? this.genExpr(rhsNode.expr);
 		const keyExpr = pre?.key ?? this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		hoisted?.restore();
 		// A name `:=` reuses is assigned, not declared again; an address-taken
 		// variable lives in a `{ value }` box.
 		const bind = (l, name, js) => {
@@ -599,7 +603,9 @@ export const statementGenMethods = {
 		const n = stmt.lhs.length;
 		const names = stmt.lhs.map((_, i) => `__t${i}`);
 		this.line("{");
+		const hoisted = this._hoistLhsOperands(stmt);
 		this.indented(() => {
+			for (const l of hoisted?.lines ?? []) this.line(l);
 			if (stmt.rhs.length === n) {
 				const vals = stmt.rhs.map((e, i) =>
 					stmt.lhs[i].name !== "_" ? this.genValueExpr(e) : this.genExpr(e),
@@ -623,6 +629,7 @@ export const statementGenMethods = {
 			});
 		});
 		this.line("}");
+		hoisted?.restore();
 	},
 
 	_isStructDerefAssign(stmt) {
@@ -653,12 +660,22 @@ export const statementGenMethods = {
 		if (this._isTypeParamDerefTarget(e)) e._derefOpTarget = true;
 	},
 
-	_genAssignMulti(stmt, lhs, rhs, active, pairs) {
+	_isStructDerefTarget(l) {
+		return (
+			l.kind === "UnaryExpr" &&
+			l.op === "*" &&
+			this._isStructPointerType(l.operand?._type)
+		);
+	},
+
+	_genAssignMulti(stmt, lhs, rhs, active, pairs, derefs = null) {
 		const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
-		if (active.length === pairs.length) {
+		if (derefs?.some(Boolean)) {
+			this._genMultiAssignViaTemps(stmt, lhs, rhsStr, derefs);
+		} else if (active.length === pairs.length) {
 			this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
 		} else {
-			this._genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr);
+			this._genMultiAssignWithBlanks(stmt, lhs, rhsStr);
 		}
 	},
 
@@ -800,6 +817,10 @@ export const statementGenMethods = {
 			this._genComplexCompoundAssign(stmt);
 			return;
 		}
+		if (this._isCompoundWithCall(stmt)) {
+			this._genCompoundWithCall(stmt);
+			return;
+		}
 		if (stmt._commaOkMap) {
 			this._genCommaOkMapIndex(stmt, stmt.rhs[0], false);
 			return;
@@ -841,13 +862,23 @@ export const statementGenMethods = {
 				? this.genValueExpr(e)
 				: this.genExpr(e),
 		);
-		const hoisted = this._hoistLhsOperands(stmt);
+		const hoisted = this._hoistLhsOperands(stmt, this._inForPost);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
+		// A struct pointer target is the struct itself: it is written with
+		// `Object.assign`, which a destructuring target cannot express.
+		const derefs =
+			lhs.length > 1
+				? stmt.lhs.map((l) =>
+						this._isStructDerefTarget(l) ? this.genExpr(l.operand) : null,
+					)
+				: null;
 		hoisted?.restore();
 		const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
 		const active = pairs.filter((p) => p.l !== "_");
 		if (active.length === 0) {
-			if (rhs.length > 0) this.line(`${rhs[0]};`);
+			// Every right-hand side still runs, in order.
+			if (rhs.length === lhs.length) for (const r of rhs) this.line(`${r};`);
+			else if (rhs.length > 0) this.line(`${rhs[0]};`);
 		} else if (lhs.length === 1) {
 			if (
 				stmt.op !== "=" &&
@@ -924,12 +955,61 @@ export const statementGenMethods = {
 			this.line("{");
 			this.indented(() => {
 				for (const l of hoisted.lines) this.line(l);
-				this._genAssignMulti(stmt, lhs, rhs, active, pairs);
+				this._genAssignMulti(stmt, lhs, rhs, active, pairs, derefs);
 			});
 			this.line("}");
 		} else {
-			this._genAssignMulti(stmt, lhs, rhs, active, pairs);
+			this._genAssignMulti(stmt, lhs, rhs, active, pairs, derefs);
 		}
+	},
+
+	// `x op= f()` where `f` may change `x`: Go runs the call before it reads
+	// the target (`x = x op f()`), so the call's value is bound first.
+	_isCompoundWithCall(stmt) {
+		return (
+			stmt.op !== "=" &&
+			stmt.op !== ":=" &&
+			stmt.lhs.length === 1 &&
+			stmt.rhs.length === 1 &&
+			hasCallOrReceive(stmt.rhs)
+		);
+	},
+
+	// Target operands that contain a call run first, in source order, then the
+	// right-hand call, then the read and the store.
+	_genCompoundWithCall(stmt) {
+		const undo = [];
+		this.line("{");
+		this.indented(() => {
+			const bind = (node, key) => {
+				const operand = node[key];
+				if (!hasCallOrReceive(operand)) return;
+				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+				const name = `__h${this._tmpCounter}`;
+				this.line(`const ${name} = ${this.genExpr(operand)};`);
+				undo.push([node, key, operand]);
+				node[key] = { kind: "Ident", name, _type: operand._type };
+			};
+			const l = stmt.lhs[0];
+			if (l.kind === "IndexExpr") {
+				bind(l, "expr");
+				bind(l, "index");
+			} else if (l.kind === "SelectorExpr" && !l._isMethodExpr) {
+				bind(l, "expr");
+			} else if (l.kind === "UnaryExpr" && l.op === "*") {
+				bind(l, "operand");
+			}
+			const r = stmt.rhs[0];
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const name = `__r${this._tmpCounter}`;
+			this.line(`const ${name} = ${this.genExpr(r)};`);
+			this._genAssignStmt({
+				...stmt,
+				rhs: [{ kind: "Ident", name, _type: r._type }],
+			});
+		});
+		this.line("}");
+		for (const [node, key, v] of undo) node[key] = v;
 	},
 
 	// `k, xs[k] = 1, 5`: Go evaluates the operands of every index and field
@@ -938,8 +1018,10 @@ export const statementGenMethods = {
 	// variable assigned by the same statement are bound to temporaries first.
 	// When a call appears anywhere in the statement, Go also runs the target
 	// operands before the right-hand sides, which JS runs first: then every
-	// non-constant operand is bound, in source order.
-	_hoistLhsOperands(stmt) {
+	// non-constant operand is bound, in source order.  With `callOnly`, only
+	// operands that contain a call or receive (or mention an assigned
+	// variable) are bound: plain variables are read after the right-hand side.
+	_hoistLhsOperands(stmt, callOnly = false) {
 		if (stmt.op !== "=" || stmt.lhs.length < 2) return null;
 		const ordered = hasCallOrReceive(stmt.rhs) || hasCallOrReceive(stmt.lhs);
 		const assigned = new Set(
@@ -956,7 +1038,11 @@ export const statementGenMethods = {
 			n.kind === "BasicLit" ||
 			n._type?.kind === "untyped" ||
 			n._type?.kind === "namespace";
-		const needsTemp = (n) => (ordered ? !isConst(n) : mentions(n));
+		const needsTemp = (n) => {
+			if (!ordered) return mentions(n);
+			if (callOnly) return hasCallOrReceive(n) || mentions(n);
+			return !isConst(n);
+		};
 		const lines = [];
 		const undo = [];
 		const visit = (l) => {
@@ -993,8 +1079,12 @@ export const statementGenMethods = {
 	},
 
 	_genCommaOkTypeAssert(stmt) {
+		// Go evaluates the target operands before the asserted expression.
+		const hoisted = this._hoistLhsOperands(stmt, true);
+		for (const l of hoisted?.lines ?? []) this.line(l);
 		const val = this.genExpr(stmt.rhs[0]);
 		const [vName, okName] = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
+		hoisted?.restore();
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__ta${this._tmpCounter}`;
 		this.line(`const ${tmp} = ${val};`);
@@ -1127,15 +1217,22 @@ export const statementGenMethods = {
 		this.line(`Object.assign(${target}, ${source});`);
 	},
 
-	_genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr) {
+	_genMultiAssignWithBlanks(stmt, lhs, rhsStr) {
+		this._genMultiAssignViaTemps(stmt, lhs, rhsStr, null);
+	},
+
+	// Evaluates every right-hand side once into a temporary, then stores each
+	// non-blank target in order.  `derefs[i]` is the struct a `*p` target
+	// writes into.
+	_genMultiAssignViaTemps(stmt, lhs, rhsStr, derefs) {
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__t${this._tmpCounter}`;
 		this.line(`const ${tmp} = ${rhsStr};`);
 		for (let i = 0; i < lhs.length; i++) {
-			if (lhs[i] !== "_") {
-				const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
-				this.line(`${lhs[i]} ${stmt.op} ${src};`);
-			}
+			if (lhs[i] === "_") continue;
+			const src = `${tmp}[${i}]`;
+			if (derefs?.[i]) this.line(`Object.assign(${derefs[i]}, ${src});`);
+			else this.line(`${lhs[i]} ${stmt.op} ${src};`);
 		}
 	},
 
@@ -2121,6 +2218,12 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
+			if (this._isCompoundWithCall(stmt)) {
+				const mark = this.out.length;
+				this._genAssignStmt(stmt);
+				const body = this.out.splice(mark).map((l) => l.trim());
+				return `(() => { ${body.join(" ")} })()`;
+			}
 			if (stmt.op !== "=" && is64BitInt(stmt.lhs[0]._type)) {
 				const binOp = stmt.op.slice(0, -1);
 				// Same operand coercion as the statement path (`_genAssignStmt`).
@@ -2135,6 +2238,23 @@ export const statementGenMethods = {
 			if (stmt.op === "&^=")
 				return `${this.genExpr(stmt.lhs[0])} &= ~(${rhs[0]})`;
 			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
+		}
+		// Target operands that must run first (calls, or a variable the
+		// statement assigns) and `*p` struct targets need statements: lift them
+		// into an immediately-invoked arrow, as `_inlineStrictCompound` does.
+		const hoisted = this._hoistLhsOperands(stmt, true);
+		hoisted?.restore();
+		if (hoisted || stmt.lhs.some((l) => this._isStructDerefTarget(l))) {
+			const mark = this.out.length;
+			const prev = this._inForPost;
+			this._inForPost = true;
+			try {
+				this._genAssignStmt(stmt);
+			} finally {
+				this._inForPost = prev;
+			}
+			const body = this.out.splice(mark).map((l) => l.trim());
+			return `(() => { ${body.join(" ")} })()`;
 		}
 		// `i, j = i+1, j-1`: every right-hand side is evaluated first.
 		const lhs = stmt.lhs.map((e) =>

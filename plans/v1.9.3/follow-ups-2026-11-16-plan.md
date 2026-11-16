@@ -129,19 +129,19 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Done when: all pass
 
 ### Phase 4: Assignment evaluation order (F9–F13)
-- [ ] Task 4.1: Blank and `*p` targets in JS multi-assignment (F9, F13)
+- [x] Task 4.1: Blank and `*p` targets in JS multi-assignment (F9, F13)
   - Files: `src/backend/js/statements.js` (`_genMultiAssignWithBlanks`; `*p` targets with a nil check or struct pointee evaluate RHS into temps and assign/copy via `Object.assign` instead of destructuring)
   - Test: `test/unit/language/codegen-regressions.test.js` with `assertAllTargetsOutput`: F9 → `ixy [6 0]` / `xy`; F13 → `piy 5 6`
   - Done when: all pass; multi-assignments without calls emit the same JS
-- [ ] Task 4.2: Comma-ok forms evaluate target operands first (F10)
+- [x] Task 4.2: Comma-ok forms evaluate target operands first (F10)
   - Files: `src/backend/js/statements.js` (`_genCommaOkTypeAssert`, `_genCommaOkMapIndex`), `src/backend/wasm/emit-stmts.js` (`_emitCommaOkTypeAssert`, `_emitCommaOkMapIndex`)
   - Test: `test/unit/language/codegen-regressions.test.js` with `assertAllTargetsOutput`: F10 → `if [3 0] true` / `ik [3 4] true`; comma-ok `:=` unchanged
   - Done when: all pass on every target
-- [ ] Task 4.3: `for`-post and generic `*p` targets (F11)
+- [x] Task 4.3: `for`-post and generic `*p` targets (F11)
   - Files: `src/backend/js/statements.js` (`for` post multi-assignment and generic `*p` targets through `_hoistLhsOperands`)
   - Test: `test/unit/language/codegen-regressions.test.js` with `assertAllTargetsOutput`: F11 → `ixy [6 0]` and `pixy`
   - Done when: all pass
-- [ ] Task 4.4: Compound assignment reads the target after a right-hand call (F12)
+- [x] Task 4.4: Compound assignment reads the target after a right-hand call (F12)
   - Files: `src/backend/js/statements.js` (`_genAssignStmt`, `_inlineStrictCompound`), `src/backend/js/expressions.js` (`_genStrictCompound`), `src/backend/wasm/emit-stmts.js` (`_emitCompoundAssign`)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertAllTargetsOutput`: F12 → `202\n100\n2\n800\n50\n202`; plus `m[k] += f()` and `p.n += f()` where `f` mutates the target; the `e10`/`e11`/`e15` cases from `js-codegen-fixes` keep passing; codegen check that `x += y` (no call) emits the same JS
   - Done when: all pass on every target
