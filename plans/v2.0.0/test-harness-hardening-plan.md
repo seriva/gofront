@@ -118,15 +118,15 @@ Probes ran on 2026-11-12 against `main` @ `8b6cad64` on a 12-core/24-thread Ryze
   - Done when: the G4 grep prints nothing and the convention test passes.
 
 ### Phase 2: Consolidated output assertions
-- [ ] Task 2.1: Single `firstDiff` and `runProgram`
+- [x] Task 2.1: Single `firstDiff` and `runProgram`
   - Files: `test/unit/helpers.js`
   - Test: `test/unit/compiler/test-helpers.test.js`. `firstDiff("a\nb", "a\nc")` names line 2 with want `"b"`, got `"c"`, and reports `<EOF>` on length mismatch. `runProgram` of a hello-world returns `"hello\n"` for `js`, `both` and `wasm`.
   - Done when: the 4 inline diff loops in helpers.js are gone (`grep -c "while (i < Math.max" test/unit/helpers.js` → 1).
-- [ ] Task 2.2: `assertOutput` over `runProgram` and `firstDiff`
+- [x] Task 2.2: `assertOutput` over `runProgram` and `firstDiff`
   - Files: `test/unit/helpers.js`
   - Test: `test/unit/compiler/stdlib-go.test.js`, next to the `assertFourWay` self-tests (reusing `FOUR_PKG` and its registered natives). `assertOutput(fourProgram("WasmDisagree"), "2\n", { targets: ["both", "wasm"], stdlibRoot })` fails with a message starting `wasm (natives on)`. The same call with `targets: ["both"]` passes, and `fourProgram("Disagree")` with `natives: [true, false]` fails starting `js (natives on)`.
   - Done when: these tests pass.
-- [ ] Task 2.3: The six output helpers become wrappers
+- [x] Task 2.3: The six output helpers become wrappers
   - Files: `test/unit/helpers.js`
   - Test: the existing `assertFourWay` self-tests in `compiler/stdlib-go.test.js` (`js (natives on)` / `wasm (natives on)`) and the 85 calling files, unchanged.
   - Done when: each of the six names is a ≤ 3-line wrapper over `assertOutput` and `npm test` passes with an unchanged test count.
