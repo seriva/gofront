@@ -1017,3 +1017,174 @@ func main() {
 		"struct { A [2]int } {[1 2]}\n{[3 4]} {[9 2]}\n",
 	);
 });
+
+test("alias of an anonymous struct has fields and zero value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T = struct{ A [2]int }
+type S = struct{ A [2]int }
+type U = T
+
+func main() {
+	var s T
+	s.A[0] = 1
+	fmt.Println(s.A[0])
+	var z S
+	fmt.Println(z.A[0])
+	var u U
+	u.A[1] = 5
+	cp := u
+	cp.A[0] = 2
+	fmt.Println(u.A, cp.A)
+}
+`,
+		"1\n0\n[0 5] [2 5]\n",
+	);
+});
+
+test("anonymous struct copies are field-wise for embedded, defined-array and type-parameter arrays", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ A [2]int }
+type Vec [2]int
+
+func f(s struct{ V Vec }) { s.V[0] = 9 }
+
+func g[T any](a T) {
+	st := struct{ X [2]T }{}
+	st.X[0] = a
+	cp := st
+	cp.X[0] = a
+	fmt.Println(len(cp.X))
+}
+
+func main() {
+	st := struct {
+		P
+		B [2]int
+	}{}
+	cp := st
+	cp.P.A[0] = 7
+	fmt.Println(st.P.A[0], cp.P.A[0])
+
+	x := struct{ V Vec }{}
+	f(x)
+	fmt.Println(x.V[0])
+
+	var a any = struct{ A [2]int }{}
+	switch v := a.(type) {
+	case struct{ A [2]int }:
+		v.A[0] = 5
+		fmt.Println(v.A[0], a.(struct{ A [2]int }).A[0])
+	}
+
+	s := struct{ A [2]int }{}
+	seq := func(yield func(struct{ A [2]int }) bool) { yield(s) }
+	for v := range seq {
+		v.A[0] = 4
+	}
+	fmt.Println(s.A[0])
+	g(1)
+}
+`,
+		"0 7\n0\n5 0\n0\n2\n",
+	);
+});
+
+test("generic copies keep maps shared and copy arrays", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func dup[T any](v T) (T, T) { return v, v }
+
+func main() {
+	m := map[string]int{"a": 1}
+	x, y := dup(m)
+	x["a"] = 9
+	fmt.Println(x["a"], y["a"], m["a"])
+	b, _ := dup([4]byte{1, 2, 3, 4})
+	fmt.Println(len(b))
+	s := []int{1}
+	c, d := dup([2][]int{s, s})
+	c[0][0] = 7
+	fmt.Println(d[0][0], s[0])
+}
+`,
+		"9 9 9\n4\n7 7\n",
+	);
+});
+
+test("a scalar-only anonymous struct copy still uses __sclone", () => {
+	const { js } = run(`package main
+
+import "fmt"
+
+func main() {
+	s := struct{ N int }{1}
+	cp := s
+	cp.N = 2
+	fmt.Println(s.N, cp.N)
+}
+`);
+	assertContains(js, "__sclone(");
+});
+
+test("assertions and type switches on an anonymous struct alias check the type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T = struct{ A [2]int }
+
+func main() {
+	var a any = 42
+	_, ok := a.(T)
+	fmt.Println(ok)
+	switch a.(type) {
+	case T:
+		fmt.Println("T")
+	default:
+		fmt.Println("other")
+	}
+	func() {
+		defer func() { fmt.Println(recover() != nil) }()
+		_ = a.(T)
+	}()
+	var b any = T{}
+	_, ok = b.(T)
+	fmt.Println(ok)
+}
+`,
+		"false\nother\ntrue\ntrue\n",
+	);
+});
+
+test("a type-switch binding of an anonymous struct alias is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T = struct{ A [2]int }
+
+func main() {
+	var a any = T{}
+	switch v := a.(type) {
+	case T:
+		v.A[0] = 5
+		fmt.Println(v.A[0], a.(T).A[0])
+	}
+}
+`,
+		"5 0\n",
+	);
+});

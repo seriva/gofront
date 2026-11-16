@@ -147,15 +147,15 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Done when: all pass on every target
 
 ### Phase 5: JS anonymous struct values (F14–F16)
-- [ ] Task 5.1: Aliases of anonymous structs have fields (F14)
+- [x] Task 5.1: Aliases of anonymous structs have fields (F14)
   - Files: `src/backend/js/index.js` (`_collectStructNames` skips `d.isAlias`; `_genTypeDeclBody` emits no class for an anonymous-struct alias), `src/backend/js/expressions.js` (zero value / literal of the alias uses the anonymous path), `src/backend/wasm/emit.js` (zero value of the alias)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: both F14 repros → `1`, `0`; `type U = T`; copy `cp := s; cp.A[0] = 2` stays independent
   - Done when: all pass on every target
-- [ ] Task 5.2: Field-wise copies for embedded, defined-array and type-parameter array fields; copy bindings (F15)
+- [x] Task 5.2: Field-wise copies for embedded, defined-array and type-parameter array fields; copy bindings (F15)
   - Files: `src/backend/js/expressions.js` (`_cloneJs` resolves the underlying field type), `src/backend/js/statements.js` (type-switch binding and range-over-func yield value copies)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: the four F15 repros → `0 7`, `0`, `5 0`, `0`; a scalar-only anonymous struct still emits `__sclone`
   - Done when: all pass
-- [ ] Task 5.3: Generic copies keep maps shared and copy typed arrays (F16)
+- [x] Task 5.3: Generic copies keep maps shared and copy typed arrays (F16)
   - Files: `src/backend/js/runtime.js` (`HELPER_VCLONE`: top-level `!isShape(zero)` check so Go map zeros `__nm` / `__nilm` return `x` uncloned)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: F16 → `9 9 9` / `4`; `dup([2][]int{…})` still shares the slice
   - Done when: all pass
