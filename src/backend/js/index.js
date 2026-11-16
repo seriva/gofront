@@ -45,8 +45,8 @@ import {
 	expressionGenMethods,
 } from "./expressions.js";
 import {
-	JS_RESERVED,
 	jsBindingName,
+	jsClassName,
 	jsMemberName,
 	jsSafeName,
 } from "./names.js";
@@ -447,7 +447,7 @@ export class CodeGen {
 		// reference to it keeps that name.  Only an Ident whose name binds the
 		// type is skipped: a variable that shares the name is renamed like its
 		// declaration.
-		if (node._namesDeclType && !JS_RESERVED.has(node.name)) return;
+		if (node._namesDeclType) return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)
 			: jsSafeName(node.name);
@@ -736,7 +736,7 @@ export class CodeGen {
 		const goName = JSON.stringify(goTypeName(t));
 		if (this.structNames.has(name)) {
 			this.line(
-				`Object.defineProperty(${name}, "__uh", { value: ${goName} });`,
+				`Object.defineProperty(${jsClassName(name)}, "__uh", { value: ${goName} });`,
 			);
 		} else if (this._isNamedComposite(t)) {
 			this.useHelper("structKey");
@@ -770,10 +770,11 @@ export class CodeGen {
 	genNamedTypeClass(name, methodDecls) {
 		const namedType = this.checker?.types.get(name);
 		const field = this._namedBoxField(namedType?.underlying);
+		const cls = jsClassName(name);
 		// Values of the type stay raw (number, string, array, map, function); the
 		// class is only the box used when a value is stored in an interface.
 		// Methods are static (`T.$M(recv, ...)`) so raw values can call them.
-		this.line(`class ${name} {`);
+		this.line(`class ${cls} {`);
 		this.indented(() => {
 			this.line(`constructor(${field}) { this.${field} = ${field}; }`);
 			this.line(`__gfUnbox() { return this.${field}; }`);
@@ -782,7 +783,7 @@ export class CodeGen {
 				this.genMethod(m, { staticNamed: true });
 				if (!m.recvPointer) {
 					this.line(
-						`${jsMemberName(m.name)}(...__a) { return ${name}.$${m.name}(this.${field}, ...__a); }`,
+						`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(this.${field}, ...__a); }`,
 					);
 				}
 			}
@@ -792,7 +793,7 @@ export class CodeGen {
 		// Box for *T in an interface. It also proxies `.value` to the pointer, so
 		// helpers that write through a pointer argument (errors.As, json.Unmarshal)
 		// keep working. Pointer methods get the { value } box, value methods its value.
-		this.line(`class ${name}$Ptr {`);
+		this.line(`class ${cls}$Ptr {`);
 		this.indented(() => {
 			this.line("constructor(_p) { this._p = _p; }");
 			this.line("__gfUnbox() { return this._p; }");
@@ -801,7 +802,7 @@ export class CodeGen {
 			for (const m of methodDecls) {
 				const recv = m.recvPointer ? "this._p" : "this._p.value";
 				this.line(
-					`${jsMemberName(m.name)}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
+					`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(${recv}, ...__a); }`,
 				);
 			}
 			this._tagMultiUnwrap(methodDecls);
@@ -842,14 +843,14 @@ export class CodeGen {
 		const methods = type.methods ?? type._generic?.methods;
 		if (this._isPlainNamedBox(type))
 			return {
-				cls: this._dequalify(type.name),
+				cls: jsClassName(this._dequalify(type.name)),
 				field: this._namedBoxField(u),
 				methods: new Map(),
 			};
 		if (!methods || methods.size === 0) return null;
 		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
 			return null;
-		const cls = this._dequalify(type.name).replace(/\[.*$/, "");
+		const cls = jsClassName(this._dequalify(type.name).replace(/\[.*$/, ""));
 		return { cls, field: this._namedBoxField(u), methods };
 	}
 
@@ -984,7 +985,9 @@ export class CodeGen {
 		}
 		if (tpNames) args.push("this[__tz]");
 		this.blank();
-		this.line(`__clone() { return new ${name}(${args.join(", ")}); }`);
+		this.line(
+			`__clone() { return new ${jsClassName(name)}(${args.join(", ")}); }`,
+		);
 	}
 
 	_structDefinesValue(name, fields, methodDecls) {
@@ -1017,7 +1020,8 @@ export class CodeGen {
 					)
 				: fields,
 		);
-		this.line(`class ${name} {`);
+		const cls = jsClassName(name);
+		this.line(`class ${cls} {`);
 		this.indented(() => {
 			if (tpNames) this._genGenericStructConstructor(fields, tpNames);
 			else this._genStructConstructor(fields);
@@ -1033,7 +1037,7 @@ export class CodeGen {
 		// Lets generic `p.value` dereferences resolve to the struct itself.
 		if (!this._structDefinesValue(name, fields, methodDecls)) {
 			this.line(
-				`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
+				`Object.defineProperty(${cls}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
 			);
 		}
 		this._genValueMethodMeta(name, methodDecls);
@@ -1045,7 +1049,7 @@ export class CodeGen {
 		const vm = methodDecls.filter((m) => !m.recvPointer).map((m) => m.name);
 		if (vm.length > 0)
 			this.line(
-				`Object.defineProperty(${name}, "__vm", { value: ${JSON.stringify(vm)} });`,
+				`Object.defineProperty(${jsClassName(name)}, "__vm", { value: ${JSON.stringify(vm)} });`,
 			);
 		// Pointer-receiver methods are outside the method set of a struct value
 		// held in an interface (see _ifaceMethodCheck).
@@ -1055,7 +1059,7 @@ export class CodeGen {
 			if (stub.ptrOnly) pm.push(stub.methodName);
 		if (pm.length > 0)
 			this.line(
-				`Object.defineProperty(${name}, "__pm", { value: ${JSON.stringify(pm)} });`,
+				`Object.defineProperty(${jsClassName(name)}, "__pm", { value: ${JSON.stringify(pm)} });`,
 			);
 	}
 
@@ -1064,17 +1068,18 @@ export class CodeGen {
 	// where the Go source declares them.
 	_hoistLocalClass(stmt, start) {
 		if (!this._hasJsonCodecs || stmt.type.kind !== "StructType") return;
+		const cls = jsClassName(stmt.name);
 		const open = this.out.findIndex(
-			(l, i) => i >= start && l.trimStart().startsWith(`class ${stmt.name} `),
+			(l, i) => i >= start && l.trimStart().startsWith(`class ${cls} `),
 		);
 		if (open < 0) return;
 		const indent = this.out[open].match(/^\s*/)[0];
 		const close = this.out.findIndex((l, i) => i > open && l === `${indent}}`);
 		if (close < 0) return;
 		this.out[open] =
-			`${indent}${stmt.name} = ${stmt.name}.__ph ? ${this.out[open].trimStart()}`;
-		this.out[close] = `${indent}} : ${stmt.name};`;
-		this._hoistedLocals.add(stmt.name);
+			`${indent}${cls} = ${cls}.__ph ? ${this.out[open].trimStart()}`;
+		this.out[close] = `${indent}} : ${cls};`;
+		this._hoistedLocals.add(cls);
 	}
 
 	_emitHoistedLocals(at) {
@@ -1104,7 +1109,7 @@ export class CodeGen {
 		// A named non-struct type is boxed: its methods are static, taking
 		// the value as the receiver.
 		if (valueEmbed)
-			return `${jm}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
+			return `${jm}(...__a) { return ${jsClassName(embedName)}.$${method}(this.${field}, ...__a); }`;
 		const call = this._embedStubCall(method, embedName, field, nilPtrRecv);
 		return `${jm}(...__a) { return ${call}; }`;
 	}

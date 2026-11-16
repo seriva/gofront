@@ -111,7 +111,7 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Done when: all pass; the existing `nope/zzz` warning test is unchanged
 
 ### Phase 3: JS names of types, locals and nil methods (F3, F6, F7, F26)
-- [ ] Task 3.1: Class names that are strict-mode words (F6)
+- [x] Task 3.1: Class names that are strict-mode words (F6)
   - Files: `src/backend/js/index.js` (`genStruct`, `genNamedTypeClass`, `$Ptr` class, `defineProperty` lines, `_hoistLocalClass`, `_renameIdentNode`), `src/backend/js/expressions.js` (`new`, `instanceof`, `_typeNameCheckExpr`, `_namedBoxInfo`, `_zeroForNamedType`, `_genStructClone`, and `getStructFields`/`structNames` lookups)
   - Test: `test/unit/types/shadowing.test.js` with `assertAllTargetsOutput`: `yield` → `7`, `arguments` → `3`, `undefined` assertion → `true`, plus `fmt.Printf("%T", yield{})` → `main.yield`
   - Done when: all pass on every target

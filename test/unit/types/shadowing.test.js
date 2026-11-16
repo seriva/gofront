@@ -1720,3 +1720,149 @@ func Main() string {
 	);
 	assertEqual(mod.Main(), "9 8 18");
 });
+
+section("Class names that are JS strict-mode words");
+
+test("type named yield keeps its class declaration valid", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type yield struct{ X int }
+
+func main() {
+	y := yield{7}
+	var a any = y
+	_, ok := a.(yield)
+	fmt.Println(y.X, ok)
+	fmt.Printf("%T\\n", yield{})
+}
+`,
+		"7 true\nmain.yield\n",
+	);
+});
+
+test("type named arguments keeps its class declaration valid", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type arguments struct{ X int }
+
+func main() {
+	a := arguments{3}
+	b := a
+	b.X++
+	fmt.Println(a.X, b.X)
+}
+`,
+		"3 4\n",
+	);
+});
+
+test("type named undefined works with type assertions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type undefined struct{ X int }
+
+func main() {
+	var a any = undefined{1}
+	_, ok := a.(undefined)
+	fmt.Println(ok)
+}
+`,
+		"true\n",
+	);
+});
+
+test("named non-struct type named yield with methods", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type yield int
+
+func (y yield) Dbl() yield { return y * 2 }
+
+func main() {
+	var a any = yield(4).Dbl()
+	v, ok := a.(yield)
+	fmt.Println(v, ok)
+	p := new(yield)
+	*p = 3
+	fmt.Println(*p)
+}
+`,
+		"8 true\n3\n",
+	);
+});
+
+section("Locals named after their own type");
+
+test("local named after its type calls static methods (F3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T int
+
+func (t T) Dbl() T { return t * 2 }
+
+func main() {
+	var T T = 4
+	fmt.Println(T.Dbl())
+}
+`,
+		"8\n",
+	);
+});
+
+test("parameter named after its type calls static methods", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T int
+
+func (t T) Dbl() T { return t * 2 }
+
+func g(T T) int { return int(T.Dbl()) }
+
+func main() {
+	fmt.Println(g(5))
+}
+`,
+		"10\n",
+	);
+});
+
+test("local struct named after its struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type R struct{ N int }
+
+func (r R) M() int { return r.N + 1 }
+
+func main() {
+	var R R
+	R.N = 4
+	fmt.Println(R.M())
+	var a any = R
+	_, ok := a.(struct{ N int })
+	fmt.Println(ok)
+}
+`,
+		"5\nfalse\n",
+	);
+});

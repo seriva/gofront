@@ -22,7 +22,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
-import { jsBindingName, jsMemberName } from "./names.js";
+import { jsBindingName, jsClassName, jsMemberName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
@@ -471,12 +471,12 @@ const BUILTIN_GEN = {
 		}
 		const typeName = arg.name ?? s.getTypeName(arg);
 		if (typeName && s.structNames.has(typeName)) {
-			return `new ${typeName}()`;
+			return `new ${jsClassName(typeName)}()`;
 		}
 		const t = arg._type;
 		if (s._isStructType(t)) {
 			const name = t.name ?? (t.kind === "named" ? t.name : null);
-			if (name) return `new ${name}()`;
+			if (name) return `new ${jsClassName(name)}()`;
 		}
 		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
 		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
@@ -931,7 +931,7 @@ export const expressionGenMethods = {
 		if (base?.kind !== "named" || base.underlying?.kind !== "struct") return js;
 		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
 		if (!this.structNames.has(cls)) return js;
-		return `__ifn(${js}, ${cls})`;
+		return `__ifn(${js}, ${jsClassName(cls)})`;
 	},
 
 	_isNamedBoxKind(expr) {
@@ -1929,7 +1929,7 @@ export const expressionGenMethods = {
 		if (name === "error")
 			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
 		if (this.structNames.has(name))
-			return `(${val} instanceof ${name} && ${val}.__p !== true)`;
+			return `(${val} instanceof ${jsClassName(name)} && ${val}.__p !== true)`;
 		const named = this.checker?.types.get(name);
 		const namedInfo = this._namedBoxInfo(named);
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
@@ -2066,7 +2066,7 @@ export const expressionGenMethods = {
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
 		const cls = this._dequalify(targetName);
-		return `Object.assign(new ${cls}(), ${this._cloneJs(srcType, inner)})`;
+		return `Object.assign(new ${jsClassName(cls)}(), ${this._cloneJs(srcType, inner)})`;
 	},
 
 	// Conversion to an anonymous struct type: the result is a plain object
@@ -2482,7 +2482,7 @@ export const expressionGenMethods = {
 				);
 			if (elems.length === 0) return this.genExpr(expr.args[0]);
 			this.useHelper("append");
-			return `new ${retType.name}(__append(${sliceJS}, ${elems.join(", ")}))`;
+			return `new ${jsClassName(retType.name)}(__append(${sliceJS}, ${elems.join(", ")}))`;
 		}
 		const slice = this.genExpr(expr.args[0]);
 		// Spread elements of array type are values: append copies them.
@@ -2739,7 +2739,7 @@ export const expressionGenMethods = {
 		const generic = this._genGenericStructLit(fields, expr);
 		if (generic) return generic;
 		if (!fields || fields.length === 0 || expr.elems.length === 0) {
-			return `new ${typeName}()`;
+			return `new ${jsClassName(typeName)}()`;
 		}
 		const values = fields.map((f) => f.zero);
 		const hasPositional = expr.elems.some(
@@ -2750,8 +2750,8 @@ export const expressionGenMethods = {
 			: this._fillKeyedStructElems(fields, expr, values);
 		const inst =
 			maxExplicitIdx < 0
-				? `new ${typeName}()`
-				: `new ${typeName}(${values.slice(0, maxExplicitIdx + 1).join(", ")})`;
+				? `new ${jsClassName(typeName)}()`
+				: `new ${jsClassName(typeName)}(${values.slice(0, maxExplicitIdx + 1).join(", ")})`;
 		return inst;
 	},
 
@@ -3152,7 +3152,7 @@ export const expressionGenMethods = {
 			if (runtimeId) tz.push(runtimeId);
 		}
 		vals.push(`[${tz.join(", ")}]`);
-		return `new ${cls}(${vals.join(", ")})`;
+		return `new ${jsClassName(cls)}(${vals.join(", ")})`;
 	},
 
 	// Returns the JS zero-value literal for a basic type name, or null if not a basic type.
@@ -3177,10 +3177,10 @@ export const expressionGenMethods = {
 			return this.zeroValueForType(u);
 		if (named?.kind === "named" && u?.kind === "struct") {
 			const clsName = named.name ?? this._dequalify(name);
-			if (this.structNames.has(clsName)) return `new ${clsName}()`;
+			if (this.structNames.has(clsName)) return `new ${jsClassName(clsName)}()`;
 		}
 		name = this._dequalify(name);
-		if (this.structNames.has(name)) return `new ${name}()`;
+		if (this.structNames.has(name)) return `new ${jsClassName(name)}()`;
 		return "null";
 	},
 
@@ -3309,7 +3309,7 @@ export const expressionGenMethods = {
 			this.structNames.has(this._qualifiedStructName(typeNode.base.name))
 		) {
 			const name = this._qualifiedStructName(typeNode.base.name);
-			return `(${val} instanceof ${name} && ${val}.__v !== true)`;
+			return `(${val} instanceof ${jsClassName(name)} && ${val}.__v !== true)`;
 		}
 		return "true";
 	},
@@ -3325,8 +3325,8 @@ export const expressionGenMethods = {
 		const generic = this.checker?.types.get(base.name)?._generic;
 		const id = instanceId(base._typeArgs);
 		let check = isPtr
-			? `${val} instanceof ${cls} && ${val}.__v !== true`
-			: `${val} instanceof ${cls} && ${val}.__p !== true`;
+			? `${val} instanceof ${jsClassName(cls)} && ${val}.__v !== true`
+			: `${val} instanceof ${jsClassName(cls)} && ${val}.__p !== true`;
 		if (id !== null && generic) {
 			this.useHelper("generics");
 			const at = generic.typeParams.length;

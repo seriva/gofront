@@ -51,6 +51,11 @@ export const jsSafeName = (n) =>
 		? `${n}$`
 		: n;
 
+// JS name of the class emitted for a Go type.  Only strict-mode words need an
+// escape (`class yield` is a syntax error); `__T` and the like stay as written.
+export const jsClassName = (n) =>
+	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
+
 // Go declarations may shadow browser globals (Task 0.9).  The JS bundle is one
 // flat module scope, so such a binding gets a `$` suffix: generated code and
 // other packages keep reaching the real global (`Array.from`, `Object.keys`).
