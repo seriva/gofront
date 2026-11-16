@@ -87,7 +87,7 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 |---|---|---|---|
 | Map iteration order | Insertion-order (`Object.entries`) | Randomised | JS objects preserve insertion order. |
 | Map keys | Keys are stringified: keys of a named struct type are told apart field by field, struct keys of an unnamed struct type collapse to `"[object Object]"`, array keys join their elements with commas, `NaN` equals itself and `-0` equals `0` | Field-wise struct equality, `NaN != NaN` | JS objects only have string keys. `wasm` packages hash struct keys field-wise and follow Go's float key rules. |
-| `defer` / `recover()` | `try`/`finally` defer stack plus a panic stack; `recover()` only works when called directly by a deferred function; a panic inside a deferred function replaces the in-flight one | Same | Matches Go for the common cases; panic *values* are surfaced as `Error.message` strings. |
+| `defer` / `recover()` | `try`/`finally` defer stack plus a panic stack; `recover()` only works when called directly by a deferred function; a panic inside a deferred function replaces the in-flight one | Same | Matches Go for the common cases. `recover()` returns the panic value with its type on every target (`panic(42)` recovers an `int`); an uncaught string or signed numeric panic reaches JavaScript as an `Error` whose message is the value's text (on WebAssembly, structs, errors and interface-typed values report "[panic object]"). |
 | Integer arithmetic | `int64`/`uint64` wrap at 64 bits as BigInt on all targets; other integer types use IEEE 754 float64 semantics in `js` packages (`a + b` never wraps) and wrap at type width in `wasm`/`both` | Wraps at type width | `int64`/`uint64` are exact BigInt across all targets. For other integer types in `js` packages, all JS numbers are float64. Conversions do truncate: `uint8(300) == 44`, `int8(200) == -56`. |
 | Integer precision | `int64`/`uint64` are exact 64-bit BigInt on all targets; `int`/`uint` are safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | `int64` and `uint64` are exact BigInt across all targets (`js`, `wasm`, `both`) and across the WASM facade. `int`, `uint`, and narrower types map to JS `number` (exact up to 2⁵³); hot loops should use `int` for performance. Constant literals outside ±2⁵³ typed as `int` emit a warning. |
 | `cap()` | Tracks capacity for slice views (`b[i:j]`, `b[i:j:k]`), `make([]T, n, cap)` and `x = x[lo:hi]` copies; equals `len()` for slices built by literals, `append` beyond capacity and other operations | May exceed `len()` | A plain JS array has no separate capacity, so only views and resliced copies carry one. |
@@ -95,7 +95,7 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | `nil` | Maps to `null`; `== nil` also matches `undefined`. A nil slice or func stored in an `any` or `interface{}` still compares equal to `nil` (a nil slice keeps its type for assertions and type switches), while a nil map or pointer stored in an `any` or interface is not equal to `nil`, as in Go | Typed nil (distinct per type); a nil map, pointer or func in an interface is not a nil interface | JS has no typed nil concept; JS interop values are often `undefined`. In `wasm` packages a nil map, pointer or func in an `any` is not equal to `nil`, a type switch sees its type, and it can be asserted to an interface its type implements and have its methods called, as in Go. A method with a pointer receiver can be called on a nil pointer (`var p *T; p.M()`, `(*T).M(p)`) and receives `nil`, as in Go, on every target. |
 | `rune` / `byte` | Aliases of `int32` / `uint8`, all mapped to `number` | Aliases of `int32` / `uint8` | Type-level behaviour matches Go; at runtime every number is a float64. |
 | Strings and UTF-16 | JavaScript UTF-16 code units for string length, indexing, and range. Byte conversions (`[]byte(s)`) and standard library parsers operate on exact UTF-8 bytes | Byte count, byte index, rune range | See [String semantics](#string-semantics-both-backends) above. |
-| Runtime panics in `both` packages | In `both` and `wasm` packages, out-of-range indexing panics with `index out of range [i] with length n`, writes to a nil map panic with `assignment to entry in nil map`, and nil struct pointer reads panic with `invalid memory address or nil pointer dereference`. In `wasm` packages, reading through a nil pointer (`*p`, value-receiver calls), calling a nil func value, and calling a method on a nil interface or on a nil pointer stored in one also panic with the same message. Bounds checks are elided for provably in-bounds loops and for constant slice indexes after a length proof (`_ = xs[15]`, or `if len(xs) > 15 { ... }`) when the slice is never reassigned in the function. In `js` packages, standard JavaScript behavior applies | Same runtime panics | Matches Go runtime panic behavior in `both` and `wasm` packages without slowing hot paths. |
+| Runtime panics in `both` packages | In `both` and `wasm` packages, out-of-range indexing panics with `index out of range [i] with length n`, writes to a nil map panic with `assignment to entry in nil map`, and nil struct pointer reads panic with `invalid memory address or nil pointer dereference`. In `wasm` packages, reading through a nil pointer (`*p`, value-receiver calls), calling a nil func value, and calling a method on a nil interface or on a nil pointer stored in one also panic with the same message. Slice expressions panic with Go's bounds text on every target (`slice bounds out of range [:5] with capacity 3`, `[2:1]`), and so do string slices in `both` and `wasm` packages; in `js` packages a string slice out of range returns the clamped substring. Bounds checks are elided for provably in-bounds loops and for constant slice indexes after a length proof (`_ = xs[15]`, or `if len(xs) > 15 { ... }`) when the slice is never reassigned in the function. In `js` packages, standard JavaScript behavior applies | Same runtime panics | Matches Go runtime panic behavior in `both` and `wasm` packages without slowing hot paths. |
 | `maps.Keys` / `maps.Values` | Return `iter.Seq` iterators, matching Go 1.23. Range over them directly or collect into a slice with `slices.Collect(maps.Keys(m))` | Return `iter.Seq` | Matches Go 1.23 iterator semantics. |
 | `fmt` of a value in an `any` | `Print`, `Println`, `Sprint`, `Fprint` and `Append` describe each type at compile time from the code of the package that calls them. A struct, map, slice or pointer that reaches an `any` prints as Go does when that package mentions its type; one it never mentions, for example a value another package returns as `any`, prints as `<nil>`. An integer-valued `float64` stored in an `any` variable (such as `var a any = 3.0`) prints as `3` like Go, but `%T` reports `int`. `%T` of a map, slice or array that generic code builds and boxes into an `any` (`map[K]V` inside `func pair[K comparable, V any]`, `[]V` inside `func one[V any](v V) any`, `[2]V` inside `func two[V any](v V) any`) prints the instantiated type (`map[string]int`, `[]int`, `[2]int`) on every target | Reads the type at run time | GoFront has no run-time type information. Print the value where its type is known (`fmt.Println(lib.New())` instead of passing it through `any` first) or give the type a `String` method. |
 | `fmt` `%p` verb | Prints `0x` and a small hex id instead of an address: the same pointer or func gets the same id in every call and different ones get different ids, numbered from 1 in order of first appearance; a nil pointer, func, map or slice prints `0x0`. A map or slice has one id per value, so two slices of the same backing array made by reslicing can print different ids, unlike in Go. `%d` of a pointer to a scalar prints the id in decimal, and `%v` of a func prints the id | Prints the memory address | GoFront has no raw memory, so the ids are not real addresses and differ from run to run in Go. Do not rely on the digits; compare pointers with `==` instead. |
@@ -120,37 +120,64 @@ accepted in `js`, `wasm` and `both` packages, and Go code referring to the name 
 declaration.
 
 The JS bundle is one flat module scope, and generated code relies on the real globals
-(`Array.from`, `Object.keys`, `Math.trunc`, …). So when a function, variable, constant,
-parameter or named result has the same name as a browser global GoFront predeclares
-(`console`, `document`, `window`, `Array`, `Object`, `Math`, `JSON`, `Date`, `Error`,
-`String`, `Number`, `Promise`, `fetch`, `setTimeout`, …), it is emitted with a `$` suffix:
+(`Array.from`, `Object.keys`, `Math.trunc`, `new Map()`, `BigInt.asIntN`, …). So when a
+function, variable, constant, parameter, named result, local, `templ` component or `css`
+component has the same name as a global the output reads, it is emitted with a `$` suffix.
+The names renamed are:
+
+- the browser globals GoFront predeclares (`console`, `document`, `window`, `Array`,
+  `Object`, `Math`, `JSON`, `Date`, `Error`, `String`, `Number`, `Promise`, `fetch`,
+  `setTimeout`, …);
+- the JavaScript built-ins that generated code and the WebAssembly loader use: `Map`,
+  `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `BigInt`, `Proxy`, `Reflect`, `ArrayBuffer`,
+  `DataView`, every typed-array constructor (`Uint8Array`, `Int32Array`, `Float64Array`,
+  `BigUint64Array`, …), `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError`,
+  `WebAssembly`, `NaN`, `Infinity`, `undefined`, `globalThis`, `process`, `Function`,
+  `Iterator` and a few more host functions (`queueMicrotask`, `structuredClone`);
+- any name that starts with `__`, the prefix of the runtime's own helpers (`__len`,
+  `__append`, …).
 
 | Go source | JS output / WASM boundary facade |
 |---|---|
 | `func Array() int` | `function Array$()`; the facade of a `wasm`/`both` package exports `Array$` |
+| `func Map(xs []int) []int` | `function Map$(xs)`; the facade exports `Map$` |
 | `var document int` | `let document$` |
+| `const NaN = 2.0` | `const NaN$`, so `math.NaN()` still returns the real `NaN` |
 | `func f(console int)` | `function f(console$)` |
+| `BigInt := 2` | `let BigInt$`, so `int64` arithmetic in the same function still works |
+| `templ Map(msg string)` / `css Object()` | `function Map$(msg)` / `function Object$()` |
+| `var __append = 7` | `let __append$` |
 
 Go code never sees the suffix: references from the same package, from importing packages
 (`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
-renamed binding. Builtins that are not JS globals (`len`, `append`, …) and type names are
-not renamed.
+renamed binding. Builtins that are not JS globals (`len`, `append`, …), labels and package-level
+type names are not renamed. A struct field or method is renamed only when its name starts with `__`
+(`__clone` is `__clone$` on the JS object), because the runtime uses such names itself;
+`fmt` and `%+v` still print the Go name. This applies to the JS output and to `both`
+structs that cross the WASM boundary; hand-written JavaScript reads the field as `r.__t$`.
+Fields of `wasm` package structs are reached through the facade, which applies the same
+rule: a field or interface method that begins with `__` gets the `$` suffix on the JS side,
+and every other name is unchanged.
 
 The suffix is visible to hand-written JavaScript. Code that reaches into the bundle or the
 WASM facade by name (an `import { Array$ } from "./app.js"`, a `<script>` calling an
-exported function, a test harness) must use `Array$`, not `Array`; `Array` there is still
-the browser's global. Pick a different Go name for exported functions you call from JS.
+exported function, a test harness) must use `Array$` or `Map$`, not `Array` or `Map`; the
+unsuffixed name there is still the browser's global. Pick a different Go name for exported
+functions you call from JS.
 
 > [!WARNING]
-> Type declarations are **not** renamed. A struct type, or a named type with methods, is
-> emitted as a JS class of the same name, and a class named after a JavaScript built-in
-> that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
+> Package-level type declarations are **not** renamed. A struct type, or a named type with
+> methods, is emitted as a JS class of the same name, and a class named after a JavaScript
+> built-in that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
 > `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array constructors, …) would
 > shadow it. GoFront therefore rejects such a declaration in `js` and `both` packages with
 > `type Array shadows the JavaScript global Array; rename the type`; pick another name
 > (`ArrayData`, `AppError`, …). Interfaces (`type Number interface{ ~int | ~float64 }`),
 > method-less named types (`type String string`), aliases, DOM names (`type Element struct{…}`)
 > and every type in a `wasm` package emit no conflicting class and are accepted.
+
+Types declared inside a function are the exception: they can use these names freely
+(`type Map struct{ N int }` in `main` works in every target, and `%T` prints `main.Map`).
 
 ---
 

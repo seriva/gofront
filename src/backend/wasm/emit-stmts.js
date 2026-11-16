@@ -176,6 +176,8 @@ export class StmtsEmitter {
 	// local: an index, field or dereference, or a name redeclared by `:=`.
 	_emitTupleViaTemps(lhsNodes, rhsNode, assignOne, hoist) {
 		const tupleTypes = rhsNode._type.types;
+		// The call is a right-hand side: target operands run before it.
+		const undo = hoist ? this._hoistLhsOperands(lhsNodes, [rhsNode]) : null;
 		this.emitExpr(rhsNode);
 		const temps = [];
 		for (let i = lhsNodes.length - 1; i >= 0; i--) {
@@ -186,7 +188,6 @@ export class StmtsEmitter {
 			this.pushInstruction({ op: "local.set", index: idx });
 			temps[i] = { kind: "Ident", name, _type: goType, _parTmp: true };
 		}
-		const undo = hoist ? this._hoistLhsOperands(lhsNodes) : null;
 		for (let i = 0; i < lhsNodes.length; i++) assignOne(lhsNodes[i], temps[i]);
 		undo?.();
 		for (const t of temps) this.locals.delete(t.name);
@@ -288,7 +289,8 @@ export class StmtsEmitter {
 			return;
 		}
 
-		const hoisted = op === "=" ? this._hoistLhsOperands(lhsNodes) : null;
+		const hoisted =
+			op === "=" ? this._hoistLhsOperands(lhsNodes, rhsNodes) : null;
 		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes);
 		for (let i = 0; i < lhsNodes.length; i++) {
 			this._emitAssignSingle(lhsNodes[i], rhsVals[i], op);
@@ -300,25 +302,33 @@ export class StmtsEmitter {
 	// `k, xs[k] = 1, 5`: Go evaluates the operands of every index and field
 	// target before any assignment.  An operand that mentions a variable
 	// assigned by the same statement is evaluated into a temporary first.
+	// When a call appears anywhere in the statement, Go also runs the target
+	// operands before the right-hand sides: then every non-constant operand
+	// is bound, in source order.
 	// Returns a function that restores the AST and releases the temporaries.
-	_hoistLhsOperands(lhsNodes) {
+	_hoistLhsOperands(lhsNodes, rhsNodes) {
 		if (lhsNodes.length < 2) return null;
+		const ordered = hasCallOrReceive(rhsNodes) || hasCallOrReceive(lhsNodes);
 		const assigned = new Set(
 			lhsNodes
 				.filter((l) => l.kind === "Ident" && l.name !== "_")
 				.map((l) => l.name),
 		);
-		if (assigned.size === 0) return null;
+		if (assigned.size === 0 && !ordered) return null;
 		const undo = [];
 		const names = [];
+		const needsTemp = (n) =>
+			ordered ? !this._isConstOperand(n) : this._mentions(n, assigned);
 		const visit = (l) => {
 			let keys;
 			if (l.kind === "IndexExpr") keys = ["expr", "index"];
 			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
+			else if (ordered && l.kind === "UnaryExpr" && l.op === "*")
+				keys = ["operand"];
 			else return;
 			for (const key of keys) {
 				const operand = l[key];
-				if (!this._mentions(operand, assigned)) continue;
+				if (!needsTemp(operand)) continue;
 				const goType = operand._type ?? this._resolveExprGoType(operand);
 				// A struct or array value names the variable's storage in Go: hoist
 				// the operands inside it (`ps[n].A`) instead of the value.
@@ -420,6 +430,17 @@ export class StmtsEmitter {
 	_isStableTarget(l) {
 		const t = l._type ?? this._resolveExprGoType(l);
 		return this._needsStableStore(l, t);
+	}
+
+	// A literal, an untyped constant, or a name that is neither a local nor a
+	// global (a named constant or an imported package).
+	_isConstOperand(n) {
+		if (n.kind === "BasicLit" || n._type?.kind === "untyped") return true;
+		return (
+			n.kind === "Ident" &&
+			!this.resolveLocal(n.name) &&
+			!this.mod.resolveGlobal(n.name)
+		);
 	}
 
 	_mentions(node, names) {

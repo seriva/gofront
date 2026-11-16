@@ -7,6 +7,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+- **Valid Go no longer breaks or misbehaves in the generated JavaScript**: functions, variables, local types and `templ` or `css` components named after JavaScript built-ins (`Map`, `BigInt`, `NaN`), and names starting with `__`, now work; a call in a divisor, shift count or multiple assignment runs once and in Go's order; and anonymous structs copy their array and struct fields and work in literals that omit the type. `recover()` on WebAssembly now returns the panic value with its type and slice-bounds panics report the bounds as Go does; hand-written JavaScript reaches a renamed function through a `$`-suffixed name such as `Map$` ([details](docs/go-compatibility.md#names-that-shadow-js-globals)).
+
 ## [1.9.2] - 2026-11-13
 
 ### Fixed

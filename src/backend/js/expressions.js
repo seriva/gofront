@@ -22,6 +22,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { jsBindingName, jsMemberName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
@@ -181,6 +182,11 @@ const STRICT_NUMERIC_TYPES = new Set([
 	"uint16",
 	"uint32",
 ]);
+
+// The strict types whose shift template checks the count against the width.
+const NARROW_SHIFT_NAMES = new Set(
+	[...STRICT_NUMERIC_TYPES].filter((n) => n !== "float32"),
+);
 
 // Unsigned types narrower than 64 bits: `-x` and `^x` wrap back into range.
 const SMALL_UNSIGNED_WRAP = {
@@ -757,11 +763,18 @@ export const expressionGenMethods = {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
+				// `__ifv` copies an anonymous struct shallowly, so an addressable
+				// one with array or struct fields is cloned field by field first.
+				const own =
+					this._isAnonAggregateStruct(expr._type) &&
+					this._isAddressableExpr(expr);
 				const boxed = this._ifaceBoxWrap(
-					this.genExpr(expr),
+					own
+						? this._cloneJs(expr._type, this.genExpr(expr))
+						: this.genExpr(expr),
 					expr._ifaceBox,
 					expr._ifacePtrFields,
-					expr.kind === "CompositeLit",
+					own || expr.kind === "CompositeLit",
 				);
 				return this._typedNilWrap(boxed, expr);
 			} finally {
@@ -898,7 +911,12 @@ export const expressionGenMethods = {
 				map: "__ifm",
 				slice: "__ifs",
 			}[box] ?? "__ifv";
-		const fields = ptrFields?.length ? JSON.stringify(ptrFields) : "";
+		// Field paths name JS properties, which `jsMemberName` may suffix.
+		const fields = ptrFields?.length
+			? JSON.stringify(
+					ptrFields.map((f) => f.split(".").map(jsMemberName).join(".")),
+				)
+			: "";
 		if (fn === "__ifv" && fresh)
 			return `${fn}(${js}, ${fields || "null"}, true)`;
 		return `${fn}(${js}${fields ? `, ${fields}` : ""})`;
@@ -1020,6 +1038,17 @@ export const expressionGenMethods = {
 		}
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
+		if (node.kind === "StructType") {
+			const fields = new Map();
+			for (const f of node.fields)
+				for (const n of f.names ?? [])
+					fields.set(n, this._typeFromNode(f.type));
+			return {
+				kind: "struct",
+				fields,
+				_embeds: node.fields.filter((f) => f.embedded),
+			};
+		}
 		return null;
 	},
 
@@ -1042,13 +1071,53 @@ export const expressionGenMethods = {
 		if (base.kind === "struct") {
 			if (this._structClassName(t) || this._structClassName(base))
 				return `${js}.__clone()`;
-			this.useHelper("sclone");
-			return `__sclone(${js})`;
+			return this._cloneAnonStruct(base, js);
 		}
 		const elemClone = this._cloneJs(base.elem, "__e");
 		return elemClone === "__e"
 			? `${js}?.slice()`
 			: `${js}?.map((__e) => ${elemClone})`;
+	},
+
+	// An anonymous struct type (no class) whose copy is made field by field.
+	_isAnonAggregateStruct(t) {
+		const base = this._aggregateBase(t);
+		return (
+			base?.kind === "struct" &&
+			!this._structClassName(t) &&
+			!this._structClassName(base) &&
+			this._anonCloneFields(base).length > 0
+		);
+	},
+
+	// Array and struct fields of an anonymous struct. Embedded structs add
+	// promoted keys to the object, so those structs are copied shallowly.
+	_anonCloneFields(base) {
+		if (!(base.fields instanceof Map) || base._embeds?.length) return [];
+		return [...base.fields].filter(([, ft]) => this._aggregateBase(ft));
+	},
+
+	// Copy of an anonymous struct (no class). Array and struct fields are
+	// cloned one by one, so the copy shares no storage with the original;
+	// pointer, slice, map and other fields are copied as references.
+	_cloneAnonStruct(base, js) {
+		const fields = this._anonCloneFields(base);
+		if (fields.length === 0) {
+			this.useHelper("sclone");
+			return `__sclone(${js})`;
+		}
+		const cloned = new Map(
+			fields.map(([name, ft]) => [
+				name,
+				this._cloneJs(ft, `__v.${jsMemberName(name)}`),
+			]),
+		);
+		const props = [...base.fields.keys()].map((name) =>
+			cloned.has(name)
+				? `${jsMemberName(name)}: ${cloned.get(name)}`
+				: `${jsMemberName(name)}: __v.${jsMemberName(name)}`,
+		);
+		return `((__v) => ({ ${props.join(", ")} }))(${js})`;
 	},
 
 	_isAddressableExpr(e) {
@@ -1226,7 +1295,7 @@ export const expressionGenMethods = {
 			}
 			if (expr.operand.kind === "SelectorExpr") {
 				const obj = this.genExpr(expr.operand.expr);
-				const field = expr.operand.field;
+				const field = jsMemberName(expr.operand.field);
 				return `((__o) => Object.defineProperties({ get value() { return __o.${field}; }, set value(v) { __o.${field} = v; } }, { __target: { value: __o }, __index: { value: "${field}" } }))(${obj})`;
 			}
 			// For non-boxed vars (primitives, etc.), wrap in { value: x }
@@ -1311,9 +1380,9 @@ export const expressionGenMethods = {
 					this.useHelper("nilCall");
 					recv = "__nilcall(recv)";
 				}
-				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(${recv}, ...args))`;
+				return `((recv, ...args) => ${protoCls}.prototype.${jsMemberName(expr.field)}.call(${recv}, ...args))`;
 			}
-			return `((recv, ...args) => recv.${expr.field}(...args))`;
+			return `((recv, ...args) => recv.${jsMemberName(expr.field)}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
 		if (namedValue !== undefined) return namedValue;
@@ -1326,8 +1395,7 @@ export const expressionGenMethods = {
 		const base = this.genExpr(expr.expr);
 		// Bundled GoFront package member; browser-global names carry the `$`
 		// suffix of their declaration (see jsBindingName).
-		if (this.bundledPackages.has(base))
-			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
+		if (this.bundledPackages.has(base)) return jsBindingName(expr.field);
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}${this._promotedPath(expr)}.${this._jsMemberName(expr)}`;
@@ -1386,7 +1454,7 @@ export const expressionGenMethods = {
 		let t = expr.expr._type;
 		if (t?.kind === "pointer") t = t.base;
 		const path = this._embedPath(t, expr.field, 0);
-		return path ? path.map((n) => `.${n}`).join("") : "";
+		return path ? path.map((n) => `.${jsMemberName(n)}`).join("") : "";
 	},
 
 	_embedPath(t, field, depth) {
@@ -1428,7 +1496,7 @@ export const expressionGenMethods = {
 			const camel = f[0].toLowerCase() + f.slice(1);
 			if (t.underlying?.methods?.has(camel)) return camel;
 		}
-		return f;
+		return jsMemberName(f);
 	},
 
 	// ── Named non-struct types with methods: raw values, static dispatch ──
@@ -1615,7 +1683,7 @@ export const expressionGenMethods = {
 				this.strict && !expr._isMethodValue && !expr._nonNil
 					? this._genNilChecked(base)
 					: base;
-			const sel = `${recv}${this._promotedPath(expr)}.${expr.field}`;
+			const sel = `${recv}${this._promotedPath(expr)}.${jsMemberName(expr.field)}`;
 			if (expr._isMethodValue && !expr._callee) {
 				// `p.M` with a value receiver binds a copy of `*p` now.
 				if (expr._derefRecv) {
@@ -1623,7 +1691,7 @@ export const expressionGenMethods = {
 						expr.expr._type.base,
 						this.strict ? this._genNilChecked(base) : base,
 					);
-					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
+					return `((__r) => __r.${jsMemberName(expr.field)}.bind(__r))(${copy})`;
 				}
 				// A pointer receiver may be nil: bind through the prototype so
 				// `s.M` on a nil pointer does not read `.M` off null.
@@ -1633,12 +1701,12 @@ export const expressionGenMethods = {
 					expr,
 				);
 				if (protoCls)
-					return `${protoCls}.prototype.${expr.field}.bind(${base})`;
+					return `${protoCls}.prototype.${jsMemberName(expr.field)}.bind(${base})`;
 				return `${sel}.bind(${base})`;
 			}
 			return sel;
 		}
-		const sel = `${base}.value.${expr.field}`;
+		const sel = `${base}.value.${jsMemberName(expr.field)}`;
 		if (expr._isMethodValue && !expr._callee)
 			return `${sel}.bind(${base}.value)`;
 		return sel;
@@ -1717,8 +1785,14 @@ export const expressionGenMethods = {
 		const hi = expr.high
 			? this._asIndexNumber(this.genExpr(expr.high), expr.high._type)
 			: "undefined";
-		if (this._isStringExprType(expr.expr._type))
+		if (this._isStringExprType(expr.expr._type)) {
+			// `both` packages panic on bad bounds; `js` packages keep `slice`.
+			if (this.strict) {
+				this.useHelper("sslice");
+				return `__sslice(${base}, ${lo}${expr.high ? `, ${hi}` : ""})`;
+			}
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
+		}
 		// `b[:]`, `b[0:]` and `a[:]` have the operand's length and capacity:
 		// the result is the operand itself.  Other bounds make a view sharing
 		// the backing store (`__slice`, which checks the bounds against cap).
@@ -1732,7 +1806,17 @@ export const expressionGenMethods = {
 		const max = expr.max
 			? `, ${this._asIndexNumber(this.genExpr(expr.max), expr.max._type)}`
 			: "";
+		// An array (or array pointer) is a JS array like a slice: the flag
+		// makes a failed bounds check word its limit as a length.
+		if (this._isArrayOperand(expr.expr._type))
+			return `__slice(${base}, ${lo}, ${hi}${max || ", undefined"}, 1)`;
 		return `__slice(${base}, ${lo}, ${hi}${max})`;
+	},
+
+	_isArrayOperand(t) {
+		let u = this._underlyingOf(t);
+		if (u?.kind === "pointer") u = this._underlyingOf(u.base);
+		return u?.kind === "array";
 	},
 
 	_genFuncLit(expr) {
@@ -1894,10 +1978,11 @@ export const expressionGenMethods = {
 
 	_ifaceMethodCheck(val, methodNames, multiUnwrap = null) {
 		const checks = methodNames.map((m) => {
+			const jm = jsMemberName(m);
 			const base =
 				m === "Unwrap" && multiUnwrap !== null
-					? `typeof ${val}.${m} === "function" && (${val}.${m}.__multi === true) === ${multiUnwrap}`
-					: `typeof ${val}.${m} === "function"`;
+					? `typeof ${val}.${jm} === "function" && (${val}.${jm}.__multi === true) === ${multiUnwrap}`
+					: `typeof ${val}.${jm} === "function"`;
 			// A struct value's method set lacks the pointer-receiver methods.
 			return `${base} && !(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
 		});
@@ -2062,7 +2147,7 @@ export const expressionGenMethods = {
 			// prototype so a nil `this` reaches it instead of a TypeError.
 			const recv = this.genExpr(expr.func.expr);
 			const rest = this._genCallArgs(expr);
-			const m = expr.func.field;
+			const m = jsMemberName(expr.func.field);
 			const viaProto = (r) =>
 				`${nilSafe}.prototype.${m}.call(${rest ? `${r}, ${rest}` : r})`;
 			// A non-nil variable keeps the direct (faster) call.
@@ -2091,9 +2176,9 @@ export const expressionGenMethods = {
 		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
 		// type-parameter variable is the box, so reach the value it holds.
 		if (this._hasPointerTypeSet(expr.func.expr._type))
-			recv = `((__r) => typeof __r?.${expr.func.field} === "function" ? __r : __r?.value)(${recv})`;
+			recv = `((__r) => typeof __r?.${jsMemberName(expr.func.field)} === "function" ? __r : __r?.value)(${recv})`;
 		const args = this._genCallArgs(expr);
-		return `${recv}.${expr.func.field}(${args})`;
+		return `${recv}.${jsMemberName(expr.func.field)}(${args})`;
 	},
 
 	// Whether type parameter `tp` is constrained to a single `*T` type-set term.
@@ -2126,7 +2211,7 @@ export const expressionGenMethods = {
 		if (!target.base.methods?.has(sel.field)) return null;
 		const rest = this._genCallArgs(expr);
 		const obj = this.genExpr(recv.args[0]);
-		return `${cls}.prototype.${sel.field}.call(${rest ? `${obj}, ${rest}` : obj})`;
+		return `${cls}.prototype.${jsMemberName(sel.field)}.call(${rest ? `${obj}, ${rest}` : obj})`;
 	},
 
 	// The class whose prototype holds pointer-receiver method `field`, for a
@@ -2303,7 +2388,7 @@ export const expressionGenMethods = {
 			this.useHelper("nilCall");
 			const recv = this.genExpr(expr.func.expr);
 			const args = this._genCallArgs(expr);
-			return `__nilcall(${recv}).${expr.func.field}(${args})`;
+			return `__nilcall(${recv}).${jsMemberName(expr.func.field)}(${args})`;
 		}
 		return undefined;
 	},
@@ -2600,7 +2685,7 @@ export const expressionGenMethods = {
 		} else {
 			const valExpr = this.genExpr(e.value);
 			values[idx] =
-				`(${valExpr} != null ? ${valExpr}.${ef} : ${fields[idx].zero})`;
+				`(${valExpr} != null ? ${valExpr}.${jsMemberName(ef)} : ${fields[idx].zero})`;
 		}
 		return idx;
 	},
@@ -2823,8 +2908,8 @@ export const expressionGenMethods = {
 	// A literal of an anonymous struct type: a plain object with every field,
 	// the omitted ones set to their zero value.
 	_genAnonStructLit(expr) {
-		const st =
-			expr._type?.kind === "named" ? expr._type.underlying : expr._type;
+		const lt = expr._type?.kind === "pointer" ? expr._type.base : expr._type;
+		const st = lt?.kind === "named" ? lt.underlying : lt;
 		if (st?.kind !== "struct" || !(st.fields instanceof Map))
 			return this._genFallbackCompositeLit(expr);
 		const values = new Map();
@@ -2836,7 +2921,7 @@ export const expressionGenMethods = {
 		}
 		const fields = [...st.fields].map(
 			([name, ft]) =>
-				`${name}: ${values.get(name) ?? this.zeroValueForType(ft)}`,
+				`${jsMemberName(name)}: ${values.get(name) ?? this.zeroValueForType(ft)}`,
 		);
 		return `{ ${fields.join(", ")} }`;
 	},
@@ -2848,6 +2933,9 @@ export const expressionGenMethods = {
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}
+		// An elided anonymous struct (`[]struct{ A [2]int }{{}}`) has every field.
+		const litBase = lit?.kind === "named" ? lit.underlying : lit;
+		if (litBase?.kind === "struct") return this._genAnonStructLit(expr);
 		if (this._isMapLit(expr))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const hasPositional = expr.elems.some((e) => e._positionalField);
@@ -3117,7 +3205,7 @@ export const expressionGenMethods = {
 					.filter((f) => !f.embedded && f.names.length > 0)
 					.map(
 						(f) =>
-							`${f.names.map((n) => `${n}: ${this.zeroValueForTypeNode(f.type)}`).join(", ")}`,
+							`${f.names.map((n) => `${jsMemberName(n)}: ${this.zeroValueForTypeNode(f.type)}`).join(", ")}`,
 					)
 					.join(", ");
 				return `{ ${fields} }`;
@@ -3168,7 +3256,10 @@ export const expressionGenMethods = {
 				return this._nilMapZero();
 			case "struct": {
 				const fields = [...t.fields.entries()]
-					.map(([name, ft]) => `${name}: ${this.zeroValueForType(ft)}`)
+					.map(
+						([name, ft]) =>
+							`${jsMemberName(name)}: ${this.zeroValueForType(ft)}`,
+					)
 					.join(", ");
 				return `{ ${fields} }`;
 			}
@@ -3342,7 +3433,14 @@ export const expressionGenMethods = {
 		) {
 			const l = this.genExpr(expr.left);
 			const r = this.genExpr(expr.right);
-			return this._genStrictBinary(expr.op, l, r, expr._type, expr.right._type);
+			return this._genStrictBinary(
+				expr.op,
+				l,
+				r,
+				expr._type,
+				expr.right._type,
+				this._hasCallExpr(expr.left) || this._hasCallExpr(expr.right),
+			);
 		}
 
 		return this._genStandardBinaryExpr(expr);
@@ -3844,17 +3942,24 @@ export const expressionGenMethods = {
 		srcLine = null,
 		lhsJs = null,
 		countType = null,
+		rhsNode = null,
 	) {
 		const type = lhsNode._type;
 		if (!this._needsStrictOp(op, type)) return false;
+		// A call on the right runs once, after the target's operands and before
+		// the read of the target: only the right operand is bound, and the
+		// template reads the target once the call has returned.
+		const bind =
+			this._hasCallExpr(rhsNode) && this._strictNeedsBinding(op, type);
+		const compute = (target) =>
+			bind
+				? `((__b) => ${this._genStrictBinary(op, target, "__b", type, countType)})(${rhsJs})`
+				: this._genStrictBinary(op, target, rhsJs, type, countType);
 		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
 			return false;
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
-			this.line(
-				`${l} = ${this._genStrictBinary(op, l, rhsJs, type, countType)};`,
-				srcLine,
-			);
+			this.line(`${l} = ${compute(l)};`, srcLine);
 			return true;
 		}
 		const split = splitLastAccess(l);
@@ -3865,13 +3970,13 @@ export const expressionGenMethods = {
 			const k = `__k${this._tmpCounter}`;
 			const target = `${o}[${k}]`;
 			this.line(
-				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType)}; }`,
+				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${compute(target)}; }`,
 				srcLine,
 			);
 		} else {
 			const target = `${o}.${split.prop}`;
 			this.line(
-				`{ const ${o} = ${split.obj}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type, countType)}; }`,
+				`{ const ${o} = ${split.obj}; ${target} = ${compute(target)}; }`,
 				srcLine,
 			);
 		}
@@ -3888,7 +3993,26 @@ export const expressionGenMethods = {
 		return `__shc(${this._is64BitInt(countType) ? `Number(${r})` : r})`;
 	},
 
-	_genStrictBinary(op, l, r, type, countType = null) {
+	// `/`, `%`, `<<` and `>>` on a narrow integer paste an operand into the
+	// zero check or width check as well as the operation, and a shift skips
+	// its left operand when the count is out of range.  The other forms
+	// (`__shl64`, `Math.fround`, `__tar`, the BigInt path) use each operand once.
+	_strictNeedsBinding(op, type) {
+		if (op !== "/" && op !== "%" && op !== "<<" && op !== ">>") return false;
+		if (type?.kind === "typeParam" || this._is64BitInt(type)) return false;
+		const name = this._typeName(type);
+		if (name === "float32") return false;
+		if (op === "<<" || op === ">>") return NARROW_SHIFT_NAMES.has(name);
+		return this.isIntType(type);
+	},
+
+	// `bind`: an operand contains a call, so both are evaluated once, left
+	// first, as arguments of an arrow function that holds the template.
+	_genStrictBinary(op, l, r, type, countType = null, bind = false) {
+		if (bind && this._strictNeedsBinding(op, type)) {
+			const body = this._genStrictBinary(op, "__a", "__b", type, countType);
+			return `((__a, __b) => ${body})(${l}, ${r})`;
+		}
 		if (type?.kind === "typeParam") {
 			this.useHelper("generics");
 			return `__tar(${this._typeParamZeroFactory(type.name)}, "${op}", ${l}, ${r})`;

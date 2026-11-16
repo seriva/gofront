@@ -29,7 +29,6 @@ import {
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
-	BROWSER_GLOBALS,
 	isComplex,
 	isMethodPromotedOverField,
 	isNumeric,
@@ -45,6 +44,12 @@ import {
 	derefsReceiverFirst,
 	expressionGenMethods,
 } from "./expressions.js";
+import {
+	JS_RESERVED,
+	jsBindingName,
+	jsMemberName,
+	jsSafeName,
+} from "./names.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
@@ -72,6 +77,8 @@ import {
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
+	HELPER_SLICEFAIL,
+	HELPER_SSLICE,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_TO64,
@@ -88,52 +95,6 @@ import { typeInfoGenMethods } from "./type-info.js";
 
 export { buildSourceMap, buildWasmSourceMap };
 
-// Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
-const JS_RESERVED = new Set([
-	"arguments",
-	"await",
-	"catch",
-	"class",
-	"debugger",
-	"delete",
-	"do",
-	"enum",
-	"eval",
-	"export",
-	"extends",
-	"finally",
-	"function",
-	"implements",
-	"in",
-	"instanceof",
-	"let",
-	"new",
-	"null",
-	"private",
-	"protected",
-	"public",
-	"static",
-	"super",
-	"this",
-	"throw",
-	"try",
-	"typeof",
-	"undefined",
-	"void",
-	"while",
-	"with",
-	"yield",
-]);
-
-const jsSafeName = (n) =>
-	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
-
-// Go declarations may shadow browser globals (Task 0.9).  The JS bundle is one
-// flat module scope, so such a binding gets a `$` suffix: generated code and
-// other packages keep reaching the real global (`Array.from`, `Object.keys`).
-const jsBindingName = (n) =>
-	typeof n === "string" && BROWSER_GLOBALS.has(n) ? `${n}$` : jsSafeName(n);
-
 // Runtime helpers by registry name, in output order.  Mark one as needed with
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
 const HELPER_MAP = [
@@ -142,6 +103,8 @@ const HELPER_MAP = [
 	["u8dec", HELPER_U8DEC],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
+	["slicefail", HELPER_SLICEFAIL],
+	["sslice", HELPER_SSLICE],
 	["mklen", HELPER_MKLEN],
 	["runestr", HELPER_RUNESTR],
 	["append", HELPER_APPEND],
@@ -475,6 +438,16 @@ export class CodeGen {
 
 	_renameIdentNode(node) {
 		if (node._isStructKey || node._type?.kind === "builtin") return;
+		// Package namespaces are selected by their import name, never renamed.
+		if (node._isNamespace || node._type?.kind === "namespace") return;
+		// A type parameter is looked up by its Go name (`$z___T`), so a
+		// reference to it keeps that name.
+		if (node._namesTypeParam) return;
+		// A type declaration is emitted under its Go name (`class __T`), so a
+		// reference to it keeps that name.  Only an Ident whose name binds the
+		// type is skipped: a variable that shares the name is renamed like its
+		// declaration.
+		if (node._namesDeclType && !JS_RESERVED.has(node.name)) return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)
 			: jsSafeName(node.name);
@@ -482,6 +455,16 @@ export class CodeGen {
 
 	_renameFuncDeclNode(node) {
 		node.name = jsBindingName(node.name);
+		this._renameSignature(node);
+	}
+
+	// A templ or css component is a top-level function of the bundle, so its
+	// name follows the same rule as `func`.  `_goName` keeps the declared name
+	// for the generated CSS class, which cannot contain `$`.
+	_renameCompDeclNode(node) {
+		const renamed = jsBindingName(node.name);
+		if (renamed !== node.name) node._goName = node.name;
+		node.name = renamed;
 		this._renameSignature(node);
 	}
 
@@ -522,7 +505,7 @@ export class CodeGen {
 		FuncDecl: "_renameFuncDeclNode",
 		MethodDecl: "_renameMethodDeclNode",
 		FuncLit: "_renameSignature",
-		TemplDecl: "_renameSignature",
+		TemplDecl: "_renameCompDeclNode",
 		TemplExpr: "_renameTemplExprNode",
 		TemplChildren: "_renameTemplExprNode",
 		TemplComponent: "_renameTemplExprNode",
@@ -531,7 +514,7 @@ export class CodeGen {
 		TemplCase: "_renameTemplExprNode",
 		TemplFor: "_renameTemplForNode",
 		TemplElement: "_renameTemplElementNode",
-		CssDecl: "_renameSignature",
+		CssDecl: "_renameCompDeclNode",
 		DefineStmt: "_renameDefineNode",
 		VarDecl: "_renameDeclSpecs",
 		ConstDecl: "_renameDeclSpecs",
@@ -652,7 +635,11 @@ export class CodeGen {
 		}
 		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
-		if (name === "slice") this._helpers.add("sv");
+		if (name === "slice") {
+			this._helpers.add("sv");
+			this._helpers.add("slicefail");
+		}
+		if (name === "sslice") this._helpers.add("slicefail");
 	}
 
 	_prependHelpers(_isTest = false) {
@@ -795,7 +782,7 @@ export class CodeGen {
 				this.genMethod(m, { staticNamed: true });
 				if (!m.recvPointer) {
 					this.line(
-						`${m.name}(...__a) { return ${name}.$${m.name}(this.${field}, ...__a); }`,
+						`${jsMemberName(m.name)}(...__a) { return ${name}.$${m.name}(this.${field}, ...__a); }`,
 					);
 				}
 			}
@@ -814,7 +801,7 @@ export class CodeGen {
 			for (const m of methodDecls) {
 				const recv = m.recvPointer ? "this._p" : "this._p.value";
 				this.line(
-					`${m.name}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
+					`${jsMemberName(m.name)}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
 				);
 			}
 			this._tagMultiUnwrap(methodDecls);
@@ -912,6 +899,7 @@ export class CodeGen {
 			return;
 		}
 		const binding = (f) => `${f.name}$`;
+		const prop = (f) => jsMemberName(f.name);
 		const params = fields.map((f) => `${binding(f)} = ${f.zero}`).join(", ");
 		this.line(`constructor(${params}) {`);
 		this.indented(() => {
@@ -919,14 +907,14 @@ export class CodeGen {
 			// Legacy `new T({...})` support; only unambiguous when field 0 is a primitive.
 			if (/^(0|""|false)$/.test(fields[0].zero)) {
 				const pattern = fields
-					.map((f) => `${f.name}: ${binding(f)} = ${f.zero}`)
+					.map((f) => `${prop(f)}: ${binding(f)} = ${f.zero}`)
 					.join(", ");
 				this.line(
 					`if (arguments.length === 1 && typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object) ({ ${pattern} } = ${first});`,
 				);
 			}
 			for (const f of fields) {
-				this.line(`this.${f.name} = ${binding(f)};`);
+				this.line(`this.${prop(f)} = ${binding(f)};`);
 			}
 		});
 		this.line("}");
@@ -954,7 +942,7 @@ export class CodeGen {
 				const v = usesTz(f)
 					? `${f.name}$ === undefined ? ${f.zero} : ${f.name}$`
 					: `${f.name}$`;
-				this.line(`this.${f.name} = ${v};`);
+				this.line(`this.${jsMemberName(f.name)} = ${v};`);
 			}
 		});
 		this.line("}");
@@ -989,7 +977,7 @@ export class CodeGen {
 				const t =
 					resolved?.fields?.get(f.name) ??
 					this._typeFromNode(astTypes.get(f.name));
-				return this._cloneJs(t, `this.${f.name}`);
+				return this._cloneJs(t, `this.${jsMemberName(f.name)}`);
 			});
 		} finally {
 			this._typeParamZeros = prevZeros;
@@ -1107,27 +1095,29 @@ export class CodeGen {
 		ifaceEmbed = false,
 	) {
 		// An embedded interface forwards to the interface value in its field.
+		const jm = jsMemberName(method);
 		if (ifaceEmbed)
-			return `${method}(...__a) { return this.${fieldName}.${method}(...__a); }`;
+			return `${jm}(...__a) { return this.${jsMemberName(fieldName)}.${jm}(...__a); }`;
 		// The field is named after the type without its package suffix
 		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
-		const field = fieldName || embedName.replace(/\$\$.*$/, "");
+		const field = jsMemberName(fieldName || embedName.replace(/\$\$.*$/, ""));
 		// A named non-struct type is boxed: its methods are static, taking
 		// the value as the receiver.
 		if (valueEmbed)
-			return `${method}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
+			return `${jm}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
 		const call = this._embedStubCall(method, embedName, field, nilPtrRecv);
-		return `${method}(...__a) { return ${call}; }`;
+		return `${jm}(...__a) { return ${call}; }`;
 	}
 
 	_embedStubCall(method, embedName, field, nilPtrRecv) {
+		const jm = jsMemberName(method);
 		if (!this.structNames.has(embedName))
-			return `${embedName}.prototype.${method}.call(this, ...__a)`;
+			return `${embedName}.prototype.${jm}.call(this, ...__a)`;
 		// A nil embedded pointer still reaches a pointer-receiver method, as in
 		// Go: call it through the prototype instead of reading it off null.
 		return nilPtrRecv
-			? `${embedName}.prototype.${method}.call(this.${field}, ...__a)`
-			: `this.${field}.${method}(...__a)`;
+			? `${embedName}.prototype.${jm}.call(this.${field}, ...__a)`
+			: `this.${field}.${jm}(...__a)`;
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {
@@ -1209,7 +1199,7 @@ export class CodeGen {
 		const params = this._paramNames(decl.params);
 		const asyncPrefix = decl.async ? "async " : "";
 		if (!staticNamed)
-			return `${asyncPrefix}${decl.name}(${params.join(", ")}) {`;
+			return `${asyncPrefix}${jsMemberName(decl.name)}(${params.join(", ")}) {`;
 		return `static ${asyncPrefix}$${decl.name}(${[recvParam, ...params].join(", ")}) {`;
 	}
 

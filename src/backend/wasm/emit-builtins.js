@@ -825,37 +825,59 @@ export class BuiltinsEmitter {
 			) {
 				this.emitExpr(arg, "externref");
 				this.pushInstruction("any.convert_extern");
-			} else if (wType === "i64") {
-				this.emitExpr(arg, "i64");
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.getStrFromI64ImportIndex(),
-				});
-				this.pushInstruction("any.convert_extern");
-			} else if (wType === "i32") {
-				this.emitExpr(arg, "i32");
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.getStrFromI32ImportIndex(),
-				});
-				this.pushInstruction("any.convert_extern");
-			} else if (wType === "f64" || wType === "f32") {
-				if (wType === "f32") {
-					this.emitExpr(arg, "f32");
-					this.pushInstruction("f64.promote_f32");
-				} else {
-					this.emitExpr(arg, "f64");
-				}
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.getStrFromF64ImportIndex(),
-				});
-				this.pushInstruction("any.convert_extern");
+			} else if (
+				wType === "i64" ||
+				wType === "i32" ||
+				wType === "f64" ||
+				wType === "f32"
+			) {
+				this._emitScalarPanic(arg, goType);
+				return;
 			} else {
 				this.emitExpr(arg, "anyref");
 			}
 		}
 		this.emitPanicThrow();
+	}
+
+	// `panic(v)` of a number or bool: the panic value is `v` boxed as in
+	// `var a any = v`, so `recover()` returns it with its dynamic type, and
+	// an uncaught panic reaches the host with the value's text as message.
+	_emitScalarPanic(arg, goType) {
+		this.emitExpr(arg, "anyref");
+		const anyTmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.tee", index: anyTmp });
+		const box = this._isMethodNamedRef(goType)
+			? this.mod.getIfaceBoxType(this._resolveTestTarget(goType))
+			: this._scalarIfaceBox(goType);
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+			fieldIndex: 0,
+		});
+		// The box's own field type decides the conversion: an untyped rune
+		// is boxed as an int32 although `toWasmType` maps it to i64.
+		const boxType = box.wType;
+		if (boxType === "f32") this.pushInstruction("f64.promote_f32");
+		const strFrom =
+			boxType === "i64"
+				? this.mod.getStrFromI64ImportIndex()
+				: boxType === "i32"
+					? this.mod.getStrFromI32ImportIndex()
+					: this.mod.getStrFromF64ImportIndex();
+		this.pushInstruction({ op: "call", funcIndex: strFrom });
+		const msgTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.set", index: msgTmp });
+		this.pushInstruction({ op: "local.get", index: anyTmp });
+		this.emitPanicThrow(msgTmp);
+		this.releaseTemp(msgTmp, "externref");
+		this.releaseTemp(anyTmp, "anyref");
 	}
 
 	_emitBuiltinRecover(_call, targetWasmType) {

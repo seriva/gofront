@@ -1,10 +1,10 @@
 # v1.9.3 JS Codegen Fixes — Design Plan
 
 **Version:** v1.9.3  
-**Status:** Draft  
+**Status:** Completed (2026-11-16)  
 **Base branch:** main  
 **Related:** [`../v2.0.0/checker-strictness-plan.md`](../v2.0.0/checker-strictness-plan.md) (the breaking half of the same 2026-11-13 review), [`../v2.0.0/web-platform-evolution-plan.md`](../v2.0.0/web-platform-evolution-plan.md) (Phase 7 retypes `BROWSER_GLOBALS` without changing its membership; Task 3.1 owns import cycles; Task 4.5 owns duplicate runtime helpers).  
-**Release note:** Functions, variables, local types, struct fields and templ components named after JavaScript built-ins or runtime properties (`Map`, `BigInt`, `NaN`, `__clone`) no longer break the bundle, and side effects in divisors, shift counts and multiple assignments run once and in Go's order. Anonymous structs copy their array and struct fields and work in literals that omit the type and as generic type arguments, and in WebAssembly `recover()` returns the panic value with its type and slice-bounds panics name the bounds as Go does.  
+**Release note:** Functions, variables, local types and templ or css components named after JavaScript built-ins (`Map`, `BigInt`, `NaN`), and names starting with `__`, no longer break the generated JavaScript, a call in a divisor, shift count or multiple assignment runs once and in Go's order, and anonymous structs copy their array and struct fields and work in literals that omit the type. `recover()` on WebAssembly returns the panic value with its type, and slice-bounds panics report the bounds as Go does.  
 
 ---
 
@@ -12,7 +12,7 @@
 
 Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up probes. Every item compiles today and then crashes or prints a wrong result at run time. No fix rejects a program that compiles today, so this is a patch release that does not wait for v2.0.0.
 
-**Done means:**
+**Done means:** (Shipped except C10 `wasm` package types (Task 5.2) and C12 (Task 5.4: `wasm` generics over anonymous structs, `v09`/`w08`/`w09` on `wasm`); both deferred to `plans/follow-ups.md` after review found regressions in their implementation.)
 - Every repro in *Verified Gaps* (C1–C12) prints Go 1.26's output on `js`, `both` and `wasm` (except the cases listed as `Excluded: runtime / platform`). Each repro is a test in `test/unit/types/shadowing.test.js`, `test/unit/compiler/strict-mode.test.js`, `test/unit/language/codegen-regressions.test.js`, `test/unit/language/value-semantics.test.js`, `test/unit/wasm/defer_recover.test.js`, `test/unit/compiler/strict-panics.test.js`, `test/unit/compiler/local-type-shadow.test.js`, `test/unit/language/structs.test.js` or `test/unit/wasm/generics.test.js`.
 - `test/unit/compiler/js-globals.test.js` fails when a runtime helper, inline template or facade template references a host global missing from the rename set (C1). It is modelled on `test/unit/compiler/natives.test.js`.
 - `npm test` passes with `test/perf/zero-alloc.js`, `bce-mathx.js` and `bundle-size.js` unchanged (`bundle-size.baseline.json` not edited).
@@ -101,79 +101,79 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
 ## Implementation Tasks
 
 ### Phase 1: Names that shadow JS globals (C1–C3)
-- [ ] Task 1.1: Add `JS_RESERVED_GLOBALS` / `shadowsJsGlobal` and the registry test
+- [x] Task 1.1: Add `JS_RESERVED_GLOBALS` / `shadowsJsGlobal` and the registry test
   - Files: `src/typechecker/types.js`, `src/typechecker/index.js` (move `JS_BUILTIN_CLASSES` to `types.js`, no behaviour change)
   - Test: new `test/unit/compiler/js-globals.test.js`. (a) Every identifier in the source text of `src/backend/js/**`, `src/backend/shared/**` and `src/backend/wasm/boundary.js` that names a host global (`Object.getOwnPropertyNames(globalThis)` ∪ `BROWSER_GLOBALS`, not after `.`) satisfies `shadowsJsGlobal`, or sits in a `NOT_EMITTED` allowlist where each entry has a reason. (b) The same check holds over the emitted JS of the `test/perf/bundle-size.js` `FIXTURES` plus one program per helper family (struct-key map, `int64`, typed slices, slice views, `math`, `time`, `os`, `encoding/json`, a `wasm` export), compiled for `js`/`both`/`wasm`. (c) `JS_BUILTIN_CLASSES ⊆ shadowsJsGlobal`. It fails first on `Map`, `BigInt`, `Uint8Array`, `NaN`, `Infinity`, `globalThis`, `Proxy`
   - Done when: the test passes and no emitted output changes (the set is not consumed yet)
-- [ ] Task 1.2: Rename declarations and references inside a package (C1 top level, C2 locals)
+- [x] Task 1.2: Rename declarations and references inside a package (C1 top level, C2 locals)
   - Files: `src/typechecker/expressions.js` (`_shadowsGlobal` via `shadowsJsGlobal`), `src/backend/js/index.js` (`jsBindingName`; `TemplDecl`/`CssDecl` names in `_RENAME_HANDLERS`)
   - Test: `test/unit/types/shadowing.test.js`, with `assertJsTargetsOutput` (js + both), each written first and checked against Go's output: `g01`, `g03`, `g04`, `n01`, `n02`, `n05`, `n06`, `n07`, `n15`, `n21` (top level); `g10`, `g11`, `n09`, `n10`, `n13` plus range/type-switch/closure-param bindings named `NaN`/`BigInt` (locals); `t01`, `t02` (templ/css via `compileHybridProject`); variadic `func Map(xs ...int)` called as `Map(ys...)`
   - Done when: all print Go's output on `js` and `both`; the controls `n04`, `n20`, `n22`, `n23` still pass
-- [ ] Task 1.3: Cross-package references and the `wasm` facade (C1)
+- [x] Task 1.3: Cross-package references and the `wasm` facade (C1)
   - Files: `src/backend/js/expressions.js` (bundled-package selector `:1330`), `src/backend/wasm/boundary.js` (`facadeName`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h01`, `h02`, `h03`, `h04`, `h06`, `h10`; single-package `g04`/`n05` switched to `assertAllTargetsOutput` (adds `wasm`)
   - Done when: all print Go's output; the facade of a `wasm` package exporting `func Map` defines `Map$`, and the existing `Array$` tests pass
-- [ ] Task 1.4: Suffix user identifiers that start with `__` (C3)
+- [x] Task 1.4: Suffix user identifiers that start with `__` (C3)
   - Files: `src/backend/js/index.js` (`jsSafeName`), `src/lower/range.js` (mark `__yield_p<i>` as synthesised)
   - Test: `test/unit/types/shadowing.test.js`: `g09`, `n17`, `n18`, `h07` (written first), plus a range-over-func loop with an assigned yield value (`for k = range seq`) as a regression guard for synthesised names
   - Done when: all print Go's output on `js`/`both`; `n19` and `h08` unchanged
-- [ ] Task 1.5: Document the rename set
+- [x] Task 1.5: Document the rename set
   - Files: `docs/go-compatibility.md` (*Names that shadow JS globals*: the new built-ins (`Map`, `Set`, `BigInt`, `NaN`, `Infinity`, `undefined`, `globalThis`, typed arrays, …), templ and css components, `__`-prefixed names, and facade exports such as `Map$`)
   - Test: none (docs only; `test/unit/language/parity-matrix.test.js` reads `docs/language-support.md`, not this file)
   - Done when: the section lists every category renamed in Tasks 1.2–1.4, with an example each
 
 ### Phase 2: Evaluation count and order (C4, C6)
-- [ ] Task 2.1: Strict `/`, `%`, `<<`, `>>` evaluate each operand once, left first
+- [x] Task 2.1: Strict `/`, `%`, `<<`, `>>` evaluate each operand once, left first
   - Files: `src/backend/js/expressions.js` (`_genStrictBinary`, `_genBinaryExpr` passes the operand nodes)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertProgramOutput` (both + wasm): `e01`–`e08`, `e13`, `e14`; plus a codegen assertion that `e17` (no calls) emits no `=>` for its strict operators
   - Done when: all print Go's output; perf gates pass with unchanged budgets
-- [ ] Task 2.2: Strict compound assignment evaluates a side-effecting right side once (`js` and `both`)
+- [x] Task 2.2: Strict compound assignment evaluates a side-effecting right side once (`js` and `both`)
   - Files: `src/backend/js/expressions.js` (`_genStrictCompound` takes the rhs node), `src/backend/js/statements.js` (`_genAssignStmt`, `_inlineAssign`/`_inlineStrictCompound` pass it)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertAllTargetsOutput`: `e10`, `e11`, `e15`; the controls `e12`, `e16`, `d02` keep passing
   - Done when: all print Go's output on every target
-- [ ] Task 2.3: Multiple assignment evaluates target operands before right-hand sides (JS)
+- [x] Task 2.3: Multiple assignment evaluates target operands before right-hand sides (JS)
   - Files: `src/backend/js/statements.js` (`_hoistLhsOperands`)
   - Test: `test/unit/language/codegen-regressions.test.js` with `assertJsTargetsOutput`: `o01`–`o04`, `o06`–`o08` (with a local trace closure, since `both` rejects mutated package variables); controls `o05`, `o09`
   - Done when: all print Go's order on `js`/`both`; a multi-assignment without calls emits the same JS as before
-- [ ] Task 2.4: Same order on `wasm`
+- [x] Task 2.4: Same order on `wasm`
   - Files: `src/backend/wasm/emit-stmts.js` (`_hoistLhsOperands`, `_emitTupleAssign`)
   - Test: switch the Task 2.3 cases to `assertAllTargetsOutput`
   - Done when: `o01`–`o08` print Go's order on all three targets
 
 ### Phase 3: Anonymous struct values in the JS output (C5, C9)
-- [ ] Task 3.1: Copying an anonymous struct clones its array and struct fields
+- [x] Task 3.1: Copying an anonymous struct clones its array and struct fields
   - Files: `src/backend/js/expressions.js` (`_cloneJs`; `genValueExpr` if boxing into `any` skips the copy)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: `v01`, `v02`, `v04`, `v05`, `v06`, `v08`, `w04`, `w06`, `w10`; codegen check that scalar-only `v03` still emits `__sclone`
   - Done when: all print Go's output on every target
-- [ ] Task 3.2: Generic copies (`__vclone`) of anonymous structs follow the zero-value shape
+- [x] Task 3.2: Generic copies (`__vclone`) of anonymous structs follow the zero-value shape
   - Files: `src/backend/js/runtime.js` (`HELPER_VCLONE`)
   - Test: `test/unit/language/value-semantics.test.js` with `assertJsTargetsOutput` (Task 5.4 adds `wasm`): `w08`, `w09`, plus an anonymous struct with a `*P` field passed through `dup` that still shares the pointee
   - Done when: all print Go's output on `js`/`both`
-- [ ] Task 3.3: Elided anonymous struct literals build structs (C9)
+- [x] Task 3.3: Elided anonymous struct literals build structs (C9)
   - Files: `src/backend/js/expressions.js` (`_genImplicitCompositeLit`)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: `w01`, `w02`, `v07`, plus `[]*struct{ N int }{{}}`; control `w03`
   - Done when: all print Go's output on every target
 
 ### Phase 4: `wasm` parity and panic messages (C7, C8)
-- [ ] Task 4.1: `recover()` on `wasm` returns the panic value with its dynamic type
+- [x] Task 4.1: `recover()` on `wasm` returns the panic value with its dynamic type
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitBuiltinPanic`), `docs/go-compatibility.md` (`defer`/`recover()` row: the recovered value keeps its type on every target; only an uncaught panic reaches JS as an `Error` whose message is the value's text)
   - Test: `test/unit/wasm/defer_recover.test.js` with `assertProgramOutput`: `p01`, `p02`, `p04`, `p05`, and `p03` line 1 (`int64`); an uncaught `panic(42)` from a `wasm` export still throws an `Error` whose message contains `42`
   - Done when: all print Go's output; existing `defer_recover`/`traps` tests pass
-- [ ] Task 4.2: JS slice-bounds panics carry Go's bounds text
+- [x] Task 4.2: JS slice-bounds panics carry Go's bounds text
   - Files: `src/backend/js/runtime.js` (`__slice`, failing path only), `src/backend/js/expressions.js` (`_genSliceExpr`: length-wording flag for array operands)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsTargetsOutput`: `p06`, `p07`, `p09`, and the array lines of `p08`
   - Done when: all print Go's text on `js`/`both`; 3- and 4-argument `__slice` calls on slices are byte-identical
-- [ ] Task 4.3: String slicing in `both` packages checks its bounds
+- [x] Task 4.3: String slicing in `both` packages checks its bounds
   - Files: `src/backend/js/expressions.js` (`_genSliceExpr`, strict mode only), `src/backend/js/runtime.js` (checked string-slice helper)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsProgramOutput` (the JS side of `both`): the string lines of `p08`; an in-range string slice in a `js` package emits the same `s.slice(…)` as before
   - Done when: `both` panics with `[2:1]` / `[:7] with length 3`; `js` package output unchanged
-- [ ] Task 4.4: `wasm` slice-bounds panics carry Go's bounds text
+- [x] Task 4.4: `wasm` slice-bounds panics carry Go's bounds text
   - Files: `src/backend/wasm/index.js` (`__slice_bounds_panic(lo, hi, max, cap, form)` body, modelled on `emitIndexPanicBody`), `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-shared.js` (call sites pass their temps), `docs/go-compatibility.md` (runtime-panics row: slice bounds and `both` string slices)
   - Test: switch the Task 4.2/4.3 cases to `assertProgramOutput` (both + wasm)
   - Done when: `p06`–`p09` print Go's text on every target except the documented `js`-package string slices
 
 ### Phase 5: Type and member names, `wasm` generics over anonymous structs (C10–C12)
-- [ ] Task 5.1: Function-local types named after JS built-ins are renamed
+- [x] Task 5.1: Function-local types named after JS built-ins are renamed
   - Files: `src/compiler.js` (`mangleLocalTypes` passes `JS_BUILTIN_CLASSES` to `renameLocalTypes` as reserved names)
   - Test: `test/unit/compiler/local-type-shadow.test.js` with `assertAllTargetsOutput`: `h09`; `fmt.Printf("%T", Map{})` prints `main.Map`; a local `type Set struct{}` next to a local value `Set`; a local `type Map` inside a generic function
   - Done when: all print Go's output on every target; programs without such local types emit the same JS
@@ -181,7 +181,8 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/link/type-names.js` (`mangleCollidingTypes` takes the built-in names for `wasm` packages), `src/compiler.js` (passes the package target), `docs/go-compatibility.md` (*Names that shadow JS globals*: in a `wasm` package such a type is renamed `WeakMap$$util` in the facade, so hand-written JS uses that name; `js`/`both` packages keep the error)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h05`, plus `var z util.WeakMap` in the js main and `%T` printing `util.WeakMap`; a second package that also declares `WeakMap`; the existing `type Array struct{}` rejection tests for `js`/`both` stay green
   - Done when: `h05` prints `3 2`, the facade defines `class WeakMap$$util`, and no `js`/`both` behaviour changes
-- [ ] Task 5.3: Struct fields and methods starting with `__` get a `$` suffix in JS output
+  - Deferred: see plans/follow-ups.md
+- [x] Task 5.3: Struct fields and methods starting with `__` get a `$` suffix in JS output
   - Files: `src/backend/js/index.js` (`jsMemberName`; class constructor, `__clone()`, method definitions), `src/backend/js/expressions.js` (`_jsMemberName`, `_fillKeyedStructElems`, `_genAnonStructLit`), `src/backend/wasm/boundary.js` (`genBothStruct` field reads)
   - Test: `test/unit/language/structs.test.js` with `assertAllTargetsOutput`: `f01`, `f02`, `f03` (written first), plus a promoted `__clone` field through embedding, a method value `a.__clone`, an interface with a `__clone() int` method, an anonymous struct `struct{ __t int }`, and a `both`-package struct with a `__t` field passed from a js main (`compileHybridProject`)
   - Done when: all print Go's output on every target; `%+v` still prints `{__clone:1 …}`
@@ -189,3 +190,4 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/wasm/monomorph.js` (`rawTypeKey` struct case, `typeToTypeNode`)
   - Test: `test/unit/wasm/generics.test.js` with `assertProgramOutput`: `id(struct{ A [2]int }{})` then `a.A[0] = 1` → `0 1`; `dup` → `0 1 0`; alias `type S = struct{ A [2]int }` together with `id(struct{ N int }{3})` → `0 1 3`; two different anonymous struct type arguments of one generic in one program. Switch the Task 3.2 cases to `assertAllTargetsOutput`
   - Done when: all compile and print Go's output on every target
+  - Deferred: see plans/follow-ups.md

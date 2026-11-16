@@ -11,6 +11,7 @@
 //     js:              string,          // generated JS bundle (may include dep preamble)
 //     exportedSymbols: Map<name, type>, // for importers to build a namespace
 //     exportedTypes:   Map<name, type>,
+//     exportedTypeNames: Set<name>,     // names declared as types, for dot imports
 //   }
 //
 // Local imports (`import "./subpkg"`) are compiled recursively and bundled inline.
@@ -56,7 +57,10 @@ import {
 	resolveStdlibSource,
 } from "./resolver.js";
 import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
-import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
+import {
+	JS_BUILTIN_CLASSES,
+	WASM_SUPPORTED_STDLIB,
+} from "./typechecker/types.js";
 
 // ── Parse cache ──────────────────────────────────────────────
 
@@ -348,6 +352,7 @@ function resolveImports(
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
 						external: false,
 						consts: dep.exportedConsts,
+						typeNames: dep.exportedTypeNames,
 					});
 					continue;
 				}
@@ -619,6 +624,7 @@ export function compileFiles(files, options = {}) {
 			renamedTypes,
 		),
 		exportedConsts: checker.getExportedConsts(),
+		exportedTypeNames: checker.getExportedTypeNames(),
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
@@ -647,7 +653,8 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
-	const foreign = new Set();
+	// A local type named after a JS built-in would shadow it in the bundle.
+	const foreign = new Set(JS_BUILTIN_CLASSES);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
 	const locals = renameLocalTypes(programs, foreign);

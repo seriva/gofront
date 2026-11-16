@@ -166,7 +166,7 @@ var __rcflush = __rcflush || function(a) {
   if (e !== undefined) __rcput(e, a, 0, a.length);
   return e;
 };
-var __slice = __slice || function(a, lo, hi, max) {
+var __slice = __slice || function(a, lo, hi, max, arr) {
   if (typeof a === "string") return a.slice(lo, hi);
   const s = a == null ? undefined : a[__sv];
   const n = s !== undefined ? s.n : a == null ? 0 : a.length;
@@ -174,7 +174,7 @@ var __slice = __slice || function(a, lo, hi, max) {
   const mx = max;
   if (hi === undefined) hi = n;
   if (max === undefined) max = c;
-  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
+  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) __slicefail(lo, hi, mx, c, arr);
   if (a == null) return a;
   if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
   if (c > n && Array.isArray(a)) {
@@ -320,14 +320,23 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
     }
     return c;
   };
-  const cp = (v) => {
-    if (v === null || typeof v !== "object") return v;
+  // The zero value z is the shape of v: a field or element is copied only
+  // where z holds an array or an object (a struct or array value); a null
+  // zero is a pointer, slice, map, func or interface, which stays shared.
+  // A nil map zero (__nm() or __nilmap) marks a map field: it stays shared.
+  const isObj = (o) => o !== null && typeof o === "object";
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
+  const cp = (v, z) => {
+    if (!isObj(v)) return v;
     if (v.__nilm === true) return v;
-    if (Array.isArray(v)) return keep(v, v.map(cp));
+    if (ArrayBuffer.isView(v)) return keep(v, v.slice());
+    if (Array.isArray(v)) return keep(v, v.map((e, i) => (isShape(z?.[i]) ? cp(e, z[i]) : e)));
     if (typeof v.__clone === "function") return keep(v, v.__clone());
-    return keep(v, Object.assign(Object.create(Object.getPrototypeOf(v)), v));
+    const c = Object.assign(Object.create(Object.getPrototypeOf(v)), v);
+    for (const k of Object.keys(v)) if (isObj(v[k]) && isShape(z?.[k])) c[k] = cp(v[k], z[k]);
+    return keep(v, c);
   };
-  return cp(x);
+  return cp(x, zero);
 };`;
 
 // == on type-parameter operands: structs and arrays compare by value, other
@@ -615,6 +624,25 @@ var __ix = __ix || function(a, i) {
   return __ixerr(i, a == null ? 0 : a.length);
 };
 var __lv;`;
+
+// Go's "slice bounds out of range" panic text for `__slice` and `__sslice`
+// (`arr`: the operand has a length, not a capacity).  The first failing
+// bound picks the message: max, then hi, then lo.
+export const HELPER_SLICEFAIL = `var __slicefail = __slicefail || function(lo, hi, mx, c, arr) {
+  const t = mx !== undefined, m = t ? mx : hi;
+  let s;
+  if (!(m >= 0 && m <= c)) s = (t ? "[::" : "[:") + m + (m < 0 ? "]" : "] with " + (arr ? "length " : "capacity ") + c);
+  else if (t && !(hi >= 0 && hi <= mx)) s = "[:" + hi + ":" + (hi < 0 ? "" : mx) + "]";
+  else s = "[" + lo + ":" + (lo < 0 ? "" : hi) + (t ? ":" : "") + "]";
+  throw new Error("runtime error: slice bounds out of range " + s);
+};`;
+
+// Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
+// `s[lo:]`): Go's bounds text instead of JavaScript's silent clamping.
+export const HELPER_SSLICE = `var __sslice = __sslice || function(s, lo, hi = s.length) {
+  if (!(lo >= 0 && lo <= hi && hi <= s.length)) __slicefail(lo, hi, undefined, s.length, true);
+  return s.slice(lo, hi);
+};`;
 
 // Generic zero values (generics are erased in JS): a generic function takes
 // one zero-value factory per type parameter as leading arguments, and an
