@@ -127,7 +127,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/expressions.js` (`_genStrictBinary`, `_genBinaryExpr` passes the operand nodes)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertProgramOutput` (both + wasm): `e01`–`e08`, `e13`, `e14`; plus a codegen assertion that `e17` (no calls) emits no `=>` for its strict operators
   - Done when: all print Go's output; perf gates pass with unchanged budgets
-- [ ] Task 2.2: Strict compound assignment evaluates a side-effecting right side once (`js` and `both`)
+- [x] Task 2.2: Strict compound assignment evaluates a side-effecting right side once (`js` and `both`)
   - Files: `src/backend/js/expressions.js` (`_genStrictCompound` takes the rhs node), `src/backend/js/statements.js` (`_genAssignStmt`, `_inlineAssign`/`_inlineStrictCompound` pass it)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertAllTargetsOutput`: `e10`, `e11`, `e15`; the controls `e12`, `e16`, `d02` keep passing
   - Done when: all print Go's output on every target

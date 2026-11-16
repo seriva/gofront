@@ -908,6 +908,7 @@ export const statementGenMethods = {
 					null,
 					active[0].l,
 					stmt.rhs[0]?._type,
+					stmt.rhs[0],
 				)
 			) {
 				return;
@@ -2096,6 +2097,7 @@ export const statementGenMethods = {
 			null,
 			null,
 			stmt.rhs[0]?._type,
+			stmt.rhs[0],
 		);
 		const emitted = this.out.splice(mark).map((l) => l.trim());
 		if (!handled) return null;

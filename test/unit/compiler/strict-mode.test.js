@@ -1,6 +1,7 @@
 // GoFront test suite — JS strict numeric mode for 'both' packages
 
 import {
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertProgramOutput,
@@ -390,4 +391,88 @@ func Ops(a, b int32, c uint8, d uint) (int32, int32, uint8, uint8) {
 	const { js, errors } = compile(src);
 	assertEqual(errors.length, 0);
 	assertEqual(js.includes("(__a, __b) =>"), false);
+});
+
+test("compound assignment with a call on the right side runs it once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ n int32 }
+
+func main() {
+	{
+		calls := 0
+		next := func() int32 { calls++; return int32(calls + 1) }
+		var x int32 = 1000
+		x /= next()
+		var m int32 = 1000
+		m %= next()
+		var sl int32 = 1
+		sl <<= next()
+		var sr int32 = 1000
+		sr >>= next()
+		var y uint8 = 200
+		ny := func() uint8 { calls++; return uint8(calls + 1) }
+		y /= ny()
+		n := 1000
+		nn := func() int { calls++; return calls + 1 }
+		n /= nn()
+		k := 1000
+		k %= nn()
+		fmt.Println(x, m, sl, sr, y, n, k, calls)
+	}
+	{
+		calls := 0
+		next := func() int32 { calls++; return int32(calls + 1) }
+		xs := []int32{100, 100}
+		s := S{100}
+		arr := [2]int32{64, 0}
+		xs[1] /= next()
+		s.n /= next()
+		arr[0] >>= next()
+		fmt.Println(xs, s.n, arr, calls)
+	}
+	{
+		calls := 0
+		next := func() int32 { calls++; return int32(calls + 1) }
+		m := map[string]int32{"a": 100}
+		m["a"] /= next()
+		fmt.Println(m["a"], calls)
+	}
+	{
+		calls := 0
+		next := func() int32 { calls++; return 2 }
+		var out []int32
+		for i := int32(64); i > 1; i /= next() {
+			out = append(out, i)
+		}
+		fmt.Println(out, calls)
+	}
+	{
+		calls := 0
+		next := func() int64 { calls++; return int64(calls + 1) }
+		var z int64 = 100
+		z /= next()
+		fmt.Println(z, calls)
+	}
+	{
+		// compound assignment with a side-effecting target
+		calls := 0
+		idx := func() int { calls++; return 1 }
+		xs := []int32{0, 100}
+		xs[idx()] /= 4
+		fmt.Println(xs, calls)
+	}
+}
+`,
+		`500 1 16 31 33 142 0 7
+[100 50] 33 [4 0] 3
+50 1
+[64 32 16 8 4 2] 6
+50 1
+[0 25] 1
+`,
+	);
 });
