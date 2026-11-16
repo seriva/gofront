@@ -311,6 +311,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   if (x === null || typeof x !== "object") return x;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return x;
+  // A Go map's zero (__nm() or __nilmap) marks a map argument: it stays shared.
+  if (zero.__nilm === true || zero.__nm === true) return x;
   // A copy keeps the hidden tags (__t, __map, ...) that name the value's type
   // in an interface: the generic code boxes the value first and copies after.
   const keep = (v, c) => {
@@ -408,8 +410,8 @@ var __mknil = __mknil || function(C) {
   const vm = C.__vm || [];
   for (const k of Object.getOwnPropertyNames(C.prototype)) {
     const f = C.prototype[k];
-    if (k === "constructor" || k === "toString" || k.startsWith("__") || typeof f !== "function") continue;
-    Object.defineProperty(s, k, { value: vm.includes(k)
+    if (k === "constructor" || k === "toString" || (k.startsWith("__") && !k.endsWith("$")) || typeof f !== "function") continue;
+    Object.defineProperty(s, k, { value: (vm.includes(k) || vm.includes(k.endsWith("$") ? k.slice(0, -1) : k))
       ? function() { throw new Error("runtime error: invalid memory address or nil pointer dereference"); }
       : function(...a) { return f.apply(null, a); } });
   }

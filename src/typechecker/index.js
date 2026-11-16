@@ -136,6 +136,7 @@ export class TypeChecker {
 		this._constExprs = new Map(); // name -> AST initializer expr
 		this._importedConsts = new Map(); // dot-imported const name -> value
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
+		this._untypedImports = new Set(); // names bound by npm imports without types
 		this._importedTypes = new WeakSet(); // named types reached through an imported package
 		this._pendingConstraintUses = []; // constraint-interface checks waiting on a type declaration
 		this._setupGlobals();
@@ -173,6 +174,14 @@ export class TypeChecker {
 			this.globals._consts.add(name);
 			this._importedConsts.set(name, v);
 		}
+	}
+
+	// Bind the name of an npm import that has no type declarations. It is a
+	// JS-dynamic `any` global; a wasm or both package reports it on use.
+	defineUntypedImport(name) {
+		this.globals.define(name, ANY);
+		this._externalNames.add(name);
+		this._untypedImports.add(name);
 	}
 
 	// Add an imported GoFront package as a qualified namespace.

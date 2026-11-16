@@ -50,6 +50,7 @@ import { lower, takesElementAddress } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
 import { TemplParser } from "./parser/templ.js";
 import {
+	bindUntypedImports,
 	isBuiltinPackage,
 	isLocalPath,
 	resolveAll,
@@ -189,6 +190,18 @@ function resolveImports(
 	const pkgTarget = checker.target ?? "js";
 	const pkgName = checker.pkgName ?? programs[0]?.pkg?.name ?? "main";
 
+	// npm packages — exclude side-effect imports from type resolution
+	const allImportsNoSideEffect = allImports.map((imp) => ({
+		...imp,
+		imports: imp.imports.filter(({ alias }) => alias !== "_"),
+	}));
+	const resolved = resolveAll(
+		allImportsNoSideEffect,
+		fromFile,
+		parseDts,
+		options.stdlibRoot,
+	);
+
 	// Validate target rules on non-local imports
 	if (pkgTarget === "wasm" || pkgTarget === "both") {
 		for (const p of programs) {
@@ -220,7 +233,11 @@ function resolveImports(
 						(isBuiltinPackage(path) ||
 							!resolveStdlibSource(path, options.stdlibRoot))
 					) {
-						if (!isBuiltinPackage(path)) {
+						// An npm package without types is a dynamic global: the
+						// checker reports it where the name is used.
+						if (!isBuiltinPackage(path) && resolved.get(path) === null) {
+							// deferred to Ident lookup
+						} else if (!isBuiltinPackage(path)) {
 							checker.recordBlocker("js: import", path);
 							checker.err(
 								"js: imports are not allowed in wasm packages",
@@ -255,22 +272,12 @@ function resolveImports(
 		}
 	}
 
-	// npm packages — exclude side-effect imports from type resolution
-	const allImportsNoSideEffect = allImports.map((imp) => ({
-		...imp,
-		imports: imp.imports.filter(({ alias }) => alias !== "_"),
-	}));
-	const resolved = resolveAll(
-		allImportsNoSideEffect,
-		fromFile,
-		parseDts,
-		options.stdlibRoot,
-	);
 	for (const [path, info] of resolved) {
 		if (!info) continue;
 		checker.addDefinitions(info.types, info.values);
 		jsImports.set(path, [...info.values.keys()]);
 	}
+	bindUntypedImports(allImportsNoSideEffect, resolved, checker);
 
 	importStdlibPackages(
 		programs,
@@ -657,6 +664,15 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const foreign = new Set(JS_BUILTIN_CLASSES);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
+	// A local type spelled like a package-level var, const or func would take
+	// over that value inside its function.
+	for (const p of programs)
+		for (const d of p.decls ?? []) {
+			if (d.kind === "FuncDecl") foreign.add(d.name);
+			else if (d.kind === "VarDecl" || d.kind === "ConstDecl")
+				for (const spec of d.decls ?? [])
+					for (const n of spec.names ?? []) foreign.add(n);
+		}
 	const locals = renameLocalTypes(programs, foreign);
 	registerLocalTypeOwners(programs, pkgKey, owners);
 	if (renamed.size > 0 || locals)

@@ -24,6 +24,7 @@ import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
 import {
+	bindUntypedImports,
 	isBuiltinPackage,
 	resolveAll,
 	resolveStdlibSource,
@@ -168,6 +169,7 @@ export function compile(
 		checker.addDefinitions(info.types, info.values);
 		jsImports.set(path, [...info.values.keys()]);
 	}
+	bindUntypedImports(ast.imports, resolved, checker);
 
 	if (importsGoSourceStdlib(ast, source)) {
 		const { res, errors } = compileSourceFile(source, pkgTarget, { strict });

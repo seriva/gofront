@@ -105,12 +105,30 @@ function nestsTypeParam(t, params) {
 	return t?.kind !== "typeParam" && mentions(t);
 }
 
+// An anonymous struct is identified by its fields: names, embedded flags,
+// tags and field types.
+function structInstanceKey(t) {
+	const fields =
+		t._structFields ??
+		[...t.fields].map(([n, ft]) => ({
+			names: [n],
+			type: ft,
+		}));
+	const parts = fields.map(
+		(f) =>
+			`${f.embedded ? "~" : ""}${(f.names ?? []).join("|")} ${instanceKey(f.type)}${f.tag ? ` ${JSON.stringify(f.tag)}` : ""}`,
+	);
+	return `struct{${parts.join("; ")}}`;
+}
+
 function instanceKey(t) {
 	switch (t?.kind) {
 		case "named":
 			return t.typeArgs?.length
-				? `${typeStr(t)}`
+				? `${displayTypeName(t.name)}[${t.typeArgs.map(instanceKey).join(", ")}]`
 				: `${typeStr(t)}#${declId(t)}`;
+		case "struct":
+			return t.name ? typeStr(t) : structInstanceKey(t);
 		case "pointer":
 			return `*${instanceKey(t.base)}`;
 		case "slice":
