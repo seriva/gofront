@@ -498,6 +498,13 @@ export class SharedEmitter {
 		this.pushInstruction("i32.gt_u");
 		this.pushInstruction("i32.or");
 		this.pushInstruction({ op: "if", blockType: "void" });
+		for (const index of [1, 2, 2]) {
+			this.pushInstruction({ op: "local.get", index });
+			this.pushInstruction("i64.extend_i32_s");
+		}
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "struct.get", typeIndex, fieldIndex: 1 });
+		this.pushInstruction({ op: "i32.const", value: 2 });
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),

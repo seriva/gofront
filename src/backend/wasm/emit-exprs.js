@@ -770,6 +770,23 @@ export class ExprsEmitter {
 		});
 	}
 
+	// Raises Go's slice-bounds panic.  `lo`, `hi`, `max` and `cap` are i32
+	// locals; `form` is described at `__slice_bounds_panic`.  The i32 bounds
+	// are sign-extended so a negative index prints as written.
+	_emitSliceBoundsPanic(lo, hi, max, cap, form) {
+		for (const index of [lo, hi, max]) {
+			this.pushInstruction({ op: "local.get", index });
+			this.pushInstruction("i64.extend_i32_s");
+		}
+		this.pushInstruction({ op: "local.get", index: cap });
+		this.pushInstruction({ op: "i32.const", value: form });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+	}
+
 	emitSliceExpr(expr) {
 		const baseNode = expr.expr;
 		const baseType = baseNode._type;
@@ -825,11 +842,7 @@ export class ExprsEmitter {
 			this.pushInstruction("i32.or");
 
 			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
+			this._emitSliceBoundsPanic(lowTmp, highTmp, srcLenTmp, srcLenTmp, 2);
 			this.pushInstruction("end");
 
 			this.pushInstruction({ op: "local.get", index: strTmp });
@@ -961,11 +974,13 @@ export class ExprsEmitter {
 		this.pushInstruction("i32.or");
 
 		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),
-		});
-		this.pushInstruction("unreachable");
+		this._emitSliceBoundsPanic(
+			lowTmp,
+			highTmp,
+			maxTmp,
+			srcCapTmp,
+			(expr.max ? 1 : 0) | (isSlice ? 0 : 2),
+		);
 		this.pushInstruction("end");
 
 		this.pushInstruction({ op: "local.get", index: arrTmp });

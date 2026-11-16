@@ -7,9 +7,9 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
-	assertJsProgramOutput,
-	assertJsTargetsOutput,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -464,7 +464,7 @@ import "fmt"
 ${TRY}`;
 
 test("a slice with low above high names both bounds", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`${SLICE_PRELUDE}
 func main() {
 	xs := []int{1, 2, 3}
@@ -478,7 +478,7 @@ func main() {
 });
 
 test("a slice high above the capacity names the capacity", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`${SLICE_PRELUDE}
 func main() {
 	xs := []int{1, 2, 3}
@@ -491,7 +491,7 @@ func main() {
 });
 
 test("two- and three-index slices of a slice with capacity", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`${SLICE_PRELUDE}
 func main() {
 	xs := make([]int, 3, 5)
@@ -525,7 +525,7 @@ ok <nil>
 });
 
 test("slicing an array or an array pointer names the length", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`${SLICE_PRELUDE}
 func main() {
 	var arr [3]int
@@ -564,7 +564,7 @@ func main() {
 section("String slicing in both packages checks its bounds");
 
 test("a string slice out of range panics with Go's text in a both package", async () => {
-	await assertJsProgramOutput(
+	await assertProgramOutput(
 		`${SLICE_PRELUDE}
 func main() {
 	s := "abc"

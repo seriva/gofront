@@ -167,7 +167,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/expressions.js` (`_genSliceExpr`, strict mode only), `src/backend/js/runtime.js` (checked string-slice helper)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsProgramOutput` (the JS side of `both`): the string lines of `p08`; an in-range string slice in a `js` package emits the same `s.slice(…)` as before
   - Done when: `both` panics with `[2:1]` / `[:7] with length 3`; `js` package output unchanged
-- [ ] Task 4.4: `wasm` slice-bounds panics carry Go's bounds text
+- [x] Task 4.4: `wasm` slice-bounds panics carry Go's bounds text
   - Files: `src/backend/wasm/index.js` (`__slice_bounds_panic(lo, hi, max, cap, form)` body, modelled on `emitIndexPanicBody`), `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-shared.js` (call sites pass their temps), `docs/go-compatibility.md` (runtime-panics row: slice bounds and `both` string slices)
   - Test: switch the Task 4.2/4.3 cases to `assertProgramOutput` (both + wasm)
   - Done when: `p06`–`p09` print Go's text on every target except the documented `js`-package string slices

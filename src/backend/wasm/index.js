@@ -86,6 +86,116 @@ function emitIndexPanicBody(mod, emitter) {
 	emitter.emitRuntimePanicThrow();
 }
 
+// Body of `__slice_bounds_panic(lo, hi, max i64, cap, form i32)`: Go's
+// `slice bounds out of range` text for the first failing bound, checked in
+// Go's order (max, then hi, then lo; hi, then lo for a two-index slice).
+function emitSliceBoundsPanicBody(mod, emitter) {
+	const LO = 0;
+	const HI = 1;
+	const MAX = 2;
+	const CAP = 3;
+	const FORM = 4;
+	const emit = (ins) => emitter.pushInstruction(ins);
+	const str = (text) => {
+		emit({ op: "i32.const", value: mod.internString(text) });
+		emit({ op: "call", funcIndex: mod.getStringImportIndex() });
+	};
+	const concat = () =>
+		emit({ op: "call", funcIndex: mod.getStringConcatImportIndex() });
+	const num = (index) => {
+		emit({ op: "local.get", index });
+		emit({ op: "call", funcIndex: mod.getStrFromI64ImportIndex() });
+	};
+	// `with length n` or `with capacity n`, by the form's wording bit.
+	const limit = () => {
+		emit({ op: "local.get", index: FORM });
+		emit({ op: "i32.const", value: 2 });
+		emit("i32.and");
+		emit({ op: "if", blockType: "externref" });
+		str(" with length ");
+		emit("else");
+		str(" with capacity ");
+		emit("end");
+		emit({ op: "local.get", index: CAP });
+		emit({ op: "call", funcIndex: mod.getStrFromI32ImportIndex() });
+		concat();
+	};
+	// Pushes the message built from `parts` (strings, local indexes of the
+	// i64 parameters, or `limit`) and raises it.
+	const fail = (...parts) => {
+		str("runtime error: slice bounds out of range ");
+		for (const part of parts) {
+			if (typeof part === "string") str(part);
+			else if (typeof part === "number") num(part);
+			else part();
+			concat();
+		}
+		emitter.emitRuntimePanicThrow();
+	};
+	const negative = (index) => {
+		emit({ op: "local.get", index });
+		emit({ op: "i64.const", value: 0n });
+		emit("i64.lt_s");
+	};
+	// `index` is outside 0..bound, `bound` being a local or the capacity.
+	const outside = (index, bound) => {
+		emit({ op: "local.get", index });
+		if (bound === CAP) {
+			emit({ op: "local.get", index: CAP });
+			emit("i64.extend_i32_u");
+		} else {
+			emit({ op: "local.get", index: bound });
+		}
+		emit("i64.gt_u");
+	};
+	const when = (cond, then, otherwise) => {
+		cond();
+		emit({ op: "if", blockType: "void" });
+		then();
+		if (otherwise) {
+			emit("else");
+			otherwise();
+		}
+		emit("end");
+	};
+	const bad = (index, bound, negParts, parts) =>
+		when(
+			() => outside(index, bound),
+			() =>
+				when(
+					() => negative(index),
+					() => fail(...negParts),
+					() => fail(...parts),
+				),
+		);
+
+	when(
+		() => {
+			emit({ op: "local.get", index: FORM });
+			emit({ op: "i32.const", value: 1 });
+			emit("i32.and");
+		},
+		() => {
+			bad(MAX, CAP, ["[::", MAX, "]"], ["[::", MAX, "]", limit]);
+			bad(HI, MAX, ["[:", HI, ":]"], ["[:", HI, ":", MAX, "]"]);
+			when(
+				() => negative(LO),
+				() => fail("[", LO, "::]"),
+				() => fail("[", LO, ":", HI, ":]"),
+			);
+		},
+		() => {
+			bad(HI, CAP, ["[:", HI, "]"], ["[:", HI, "]", limit]);
+			when(
+				() => negative(LO),
+				() => fail("[", LO, ":]"),
+				() => fail("[", LO, ":", HI, "]"),
+			);
+		},
+	);
+	emit("unreachable");
+}
+
 function peepholeOptimize(instructions) {
 	let changed = true;
 	let current = instructions;
@@ -407,15 +517,22 @@ export function compileWasmModule(
 			"runtime error: invalid memory address or nil pointer dereference",
 	});
 
-	const sliceBoundsPanicFn = {
+	// Go's slice-bounds panic from the failing bounds (`lo`, `hi`, `max` as
+	// signed values), the capacity (the length of an array or string) and
+	// `form`: bit 0 = three-index slice, bit 1 = limit worded as a length.
+	funcDecls.push({
 		kind: "FuncDecl",
 		name: "__slice_bounds_panic",
-		params: [],
+		params: [
+			{ name: "lo", type: { kind: "basic", name: "int64" } },
+			{ name: "hi", type: { kind: "basic", name: "int64" } },
+			{ name: "max", type: { kind: "basic", name: "int64" } },
+			{ name: "cap", type: { kind: "basic", name: "int32" } },
+			{ name: "form", type: { kind: "basic", name: "int32" } },
+		],
 		returnType: null,
-		_isRuntimePanic: true,
-		_panicMsg: "runtime error: slice bounds out of range",
-	};
-	funcDecls.push(sliceBoundsPanicFn);
+		_isSliceBoundsPanic: true,
+	});
 
 	const pushPanicFn = {
 		kind: "FuncDecl",
@@ -797,6 +914,7 @@ export function compileWasmModule(
 				!fn._isSharedHelper &&
 				!fn._isRuntimePanic &&
 				!fn._isIndexPanic &&
+				!fn._isSliceBoundsPanic &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -830,6 +948,8 @@ export function compileWasmModule(
 		const emitter = new FunctionEmitter(mod, fn, fn._globalFuncIndex);
 		if (fn._isIndexPanic) {
 			emitIndexPanicBody(mod, emitter);
+		} else if (fn._isSliceBoundsPanic) {
+			emitSliceBoundsPanicBody(mod, emitter);
 		} else if (fn._isRuntimePanic) {
 			const strIdx = mod.internString(fn._panicMsg);
 			const funcIdx = mod.getStringImportIndex();
