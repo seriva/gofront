@@ -831,7 +831,7 @@ export class BuiltinsEmitter {
 				wType === "f64" ||
 				wType === "f32"
 			) {
-				this._emitScalarPanic(arg, goType, wType);
+				this._emitScalarPanic(arg, goType);
 				return;
 			} else {
 				this.emitExpr(arg, "anyref");
@@ -843,7 +843,7 @@ export class BuiltinsEmitter {
 	// `panic(v)` of a number or bool: the panic value is `v` boxed as in
 	// `var a any = v`, so `recover()` returns it with its dynamic type, and
 	// an uncaught panic reaches the host with the value's text as message.
-	_emitScalarPanic(arg, goType, wType) {
+	_emitScalarPanic(arg, goType) {
 		this.emitExpr(arg, "anyref");
 		const anyTmp = this.acquireTemp("anyref");
 		this.pushInstruction({ op: "local.tee", index: anyTmp });
@@ -861,11 +861,14 @@ export class BuiltinsEmitter {
 			typeName: box.name,
 			fieldIndex: 0,
 		});
-		if (wType === "f32") this.pushInstruction("f64.promote_f32");
+		// The box's own field type decides the conversion: an untyped rune
+		// is boxed as an int32 although `toWasmType` maps it to i64.
+		const boxType = box.wType;
+		if (boxType === "f32") this.pushInstruction("f64.promote_f32");
 		const strFrom =
-			wType === "i64"
+			boxType === "i64"
 				? this.mod.getStrFromI64ImportIndex()
-				: wType === "i32"
+				: boxType === "i32"
 					? this.mod.getStrFromI32ImportIndex()
 					: this.mod.getStrFromF64ImportIndex();
 		this.pushInstruction({ op: "call", funcIndex: strFrom });

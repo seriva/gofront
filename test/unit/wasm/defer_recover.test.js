@@ -12,6 +12,7 @@ import {
 	assertJsTargetsOutput,
 	assertProgramOutput,
 	assertValidWasm,
+	assertWasmProgramOutput,
 	compileHybrid,
 	compileWasm,
 	runWasm,
@@ -970,6 +971,49 @@ func main() {
 `,
 		"main.P {1 2}\n*errors.errorString bad\nstring text\n",
 	);
+});
+
+test("recover() returns an untyped rune panic value as an int32", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+		fmt.Println(r == int32(97))
+	}()
+	panic('a')
+}
+`,
+		"int32 97\ntrue\n",
+	);
+});
+
+test("an uncaught rune panic still reaches the host as an Error with its text", () => {
+	const src = `package main
+
+func Fail() {
+	panic('a')
+}
+
+func Main() {
+	Fail()
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	assertValidWasm(wasm);
+	const { exports } = runWasm(wasm, { stringTable });
+	let err = null;
+	try {
+		exports.Main();
+	} catch (e) {
+		err = e;
+	}
+	assert(err instanceof Error, "expected an Error");
+	assert(err.message.includes("97"), `message was ${err?.message}`);
 });
 
 test("a recovered integer panic value compares equal to the integer", async () => {

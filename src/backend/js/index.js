@@ -72,6 +72,7 @@ import {
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
+	HELPER_SLICEFAIL,
 	HELPER_SSLICE,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
@@ -97,6 +98,7 @@ const HELPER_MAP = [
 	["u8dec", HELPER_U8DEC],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
+	["slicefail", HELPER_SLICEFAIL],
 	["sslice", HELPER_SSLICE],
 	["mklen", HELPER_MKLEN],
 	["runestr", HELPER_RUNESTR],
@@ -628,7 +630,11 @@ export class CodeGen {
 		}
 		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
-		if (name === "slice") this._helpers.add("sv");
+		if (name === "slice") {
+			this._helpers.add("sv");
+			this._helpers.add("slicefail");
+		}
+		if (name === "sslice") this._helpers.add("slicefail");
 	}
 
 	_prependHelpers(_isTest = false) {

@@ -1781,7 +1781,7 @@ export const expressionGenMethods = {
 			// `both` packages panic on bad bounds; `js` packages keep `slice`.
 			if (this.strict) {
 				this.useHelper("sslice");
-				return `__sslice(${base}, ${lo}, ${hi})`;
+				return `__sslice(${base}, ${lo}${expr.high ? `, ${hi}` : ""})`;
 			}
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
 		}

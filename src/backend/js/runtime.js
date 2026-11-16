@@ -166,17 +166,6 @@ var __rcflush = __rcflush || function(a) {
   if (e !== undefined) __rcput(e, a, 0, a.length);
   return e;
 };
-var __slicefail = __slicefail || function(lo, hi, mx, c, arr) {
-  const w = arr ? "length" : "capacity";
-  const p = "runtime error: slice bounds out of range ";
-  if (mx !== undefined) {
-    if (!(mx >= 0 && mx <= c)) throw new Error(p + (mx < 0 ? "[::" + mx + "]" : "[::" + mx + "] with " + w + " " + c));
-    if (!(hi >= 0 && hi <= mx)) throw new Error(p + (hi < 0 ? "[:" + hi + ":]" : "[:" + hi + ":" + mx + "]"));
-    throw new Error(p + (lo < 0 ? "[" + lo + "::]" : "[" + lo + ":" + hi + ":]"));
-  }
-  if (!(hi >= 0 && hi <= c)) throw new Error(p + (hi < 0 ? "[:" + hi + "]" : "[:" + hi + "] with " + w + " " + c));
-  throw new Error(p + (lo < 0 ? "[" + lo + ":]" : "[" + lo + ":" + hi + "]"));
-};
 var __slice = __slice || function(a, lo, hi, max, arr) {
   if (typeof a === "string") return a.slice(lo, hi);
   const s = a == null ? undefined : a[__sv];
@@ -636,12 +625,23 @@ var __ix = __ix || function(a, i) {
 };
 var __lv;`;
 
+// Go's "slice bounds out of range" panic text for `__slice` and `__sslice`
+// (`arr`: the operand has a length, not a capacity).  The first failing
+// bound picks the message: max, then hi, then lo.
+export const HELPER_SLICEFAIL = `var __slicefail = __slicefail || function(lo, hi, mx, c, arr) {
+  const t = mx !== undefined, m = t ? mx : hi;
+  let s;
+  if (!(m >= 0 && m <= c)) s = (t ? "[::" : "[:") + m + (m < 0 ? "]" : "] with " + (arr ? "length " : "capacity ") + c);
+  else if (t && !(hi >= 0 && hi <= mx)) s = "[:" + hi + ":" + (hi < 0 ? "" : mx) + "]";
+  else s = "[" + lo + ":" + (lo < 0 ? "" : hi) + (t ? ":" : "") + "]";
+  throw new Error("runtime error: slice bounds out of range " + s);
+};`;
+
 // Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
 // `s[lo:]`): Go's bounds text instead of JavaScript's silent clamping.
 export const HELPER_SSLICE = `var __sslice = __sslice || function(s, lo, hi = s.length) {
-  const n = s.length;
-  if (lo >= 0 && lo <= hi && hi <= n) return s.slice(lo, hi);
-  throw new Error("runtime error: slice bounds out of range " + (hi < 0 || hi > n ? "[:" + hi + (hi < 0 ? "]" : "] with length " + n) : "[" + lo + ":" + (lo < 0 ? "]" : hi + "]")));
+  if (!(lo >= 0 && lo <= hi && hi <= s.length)) __slicefail(lo, hi, undefined, s.length, true);
+  return s.slice(lo, hi);
 };`;
 
 // Generic zero values (generics are erased in JS): a generic function takes
