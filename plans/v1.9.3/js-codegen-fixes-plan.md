@@ -123,7 +123,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Done when: the section lists every category renamed in Tasks 1.2–1.4, with an example each
 
 ### Phase 2: Evaluation count and order (C4, C6)
-- [ ] Task 2.1: Strict `/`, `%`, `<<`, `>>` evaluate each operand once, left first
+- [x] Task 2.1: Strict `/`, `%`, `<<`, `>>` evaluate each operand once, left first
   - Files: `src/backend/js/expressions.js` (`_genStrictBinary`, `_genBinaryExpr` passes the operand nodes)
   - Test: `test/unit/compiler/strict-mode.test.js` with `assertProgramOutput` (both + wasm): `e01`–`e08`, `e13`, `e14`; plus a codegen assertion that `e17` (no calls) emits no `=>` for its strict operators
   - Done when: all print Go's output; perf gates pass with unchanged budgets

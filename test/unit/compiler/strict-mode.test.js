@@ -3,6 +3,7 @@
 import {
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	assertThrows,
 	compile,
 	compileHybrid,
@@ -281,4 +282,112 @@ func Main() (res string) {
 	const msg =
 		"runtime error: invalid memory address or nil pointer dereference";
 	assertEqual(res.jsRes, msg);
+});
+
+section("compiler — strict operands are evaluated once, left first");
+
+test("strict / % << >> run a call operand once and left to right", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	{
+		calls := 0
+		next := func() int32 { calls++; return int32(calls + 1) }
+		var a int32 = 100
+		fmt.Println(a/next(), calls)
+	}
+	{
+		calls := 0
+		next := func() int32 { calls++; return int32(calls + 1) }
+		var a int32 = 9
+		fmt.Println(a%next(), calls)
+	}
+	{
+		calls := 0
+		next := func() uint8 { calls++; return uint8(calls + 1) }
+		var s uint8 = 1
+		fmt.Println(s<<next(), calls)
+	}
+	{
+		calls := 0
+		next := func() int8 { calls++; return int8(calls + 1) }
+		var a int8 = 100
+		fmt.Println(a/next(), calls)
+	}
+	{
+		calls := 0
+		next := func() int { calls++; return calls + 1 }
+		n := 100
+		fmt.Println(n/next(), n%next(), calls)
+	}
+	{
+		calls := 0
+		next := func() uint32 { calls++; return uint32(calls + 1) }
+		var x uint32 = 1000
+		fmt.Println(x>>next(), calls)
+	}
+	{
+		calls := 0
+		next := func() int16 { calls++; return int16(calls + 1) }
+		var a int16 = 9
+		var b uint16 = 750
+		fmt.Println(a%next(), b/uint16(next()), calls)
+	}
+	{
+		calls := 0
+		next := func() uint { calls++; return uint(calls + 1) }
+		var a int32 = -128
+		var b int16 = 100
+		var c int8 = -64
+		var d int32 = 3
+		fmt.Println(a>>next(), b>>next(), c>>next(), d<<next(), calls)
+	}
+	{
+		calls := 0
+		next := func() uint8 { calls++; return uint8(calls) }
+		v := next() << uint(9)
+		fmt.Println(v, calls)
+	}
+	{
+		trace := ""
+		l := func() int32 { trace += "l"; return 40 }
+		r := func() int32 { trace += "r"; return 3 }
+		l8 := func() uint8 { trace += "L"; return 64 }
+		ru := func() uint { trace += "r"; return 2 }
+		_ = l() << uint(r())
+		_ = l() / r()
+		_ = l() % r()
+		_ = l8() >> ru()
+		fmt.Println(trace)
+	}
+}
+`,
+		`50 1
+1 1
+4 1
+50 1
+50 1 2
+250 1
+1 250 2
+-32 12 -4 96 4
+0 1
+lrlrlrLr
+`,
+	);
+});
+
+test("strict operators without calls keep the unbound form", () => {
+	const src = `//gofront:target both
+package mathx
+
+func Ops(a, b int32, c uint8, d uint) (int32, int32, uint8, uint8) {
+	return a / b, a % b, c << d, c >> d
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(js.includes("(__a, __b) =>"), false);
 });
