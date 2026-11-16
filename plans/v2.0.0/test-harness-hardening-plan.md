@@ -1,7 +1,7 @@
 # Unit Test Harness Hardening — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-16)  
 **Base branch:** main  
 **Related:** [`web-platform-evolution-plan.md`](web-platform-evolution-plan.md) Phase 3 (`PackageCache`; owns the suite-speed lever deferred below). [`checker-strictness-plan.md`](checker-strictness-plan.md) starts after Phase 1 of this plan (`CompileError` with one entry per error, `compile()` on the production path, crashes propagate); keep Phase 1's scope and number stable.  
 **Release note:** None. This is internal test tooling with no user-facing change, so `/dev-loop` skips `CHANGELOG.md` for every phase.  
