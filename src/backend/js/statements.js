@@ -675,7 +675,7 @@ export const statementGenMethods = {
 		} else if (active.length === pairs.length) {
 			this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
 		} else {
-			this._genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr);
+			this._genMultiAssignWithBlanks(stmt, lhs, rhsStr);
 		}
 	},
 
@@ -1217,7 +1217,7 @@ export const statementGenMethods = {
 		this.line(`Object.assign(${target}, ${source});`);
 	},
 
-	_genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr) {
+	_genMultiAssignWithBlanks(stmt, lhs, rhsStr) {
 		this._genMultiAssignViaTemps(stmt, lhs, rhsStr, null);
 	},
 
