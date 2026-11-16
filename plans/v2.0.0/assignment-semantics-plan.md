@@ -112,15 +112,15 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
   - Done when: a finding's header names a `--case` that reproduces it
 
 ### Phase 2: Shared left-hand operand rule (T1)
-- [ ] Task 2.1: `lhsOperandBinds` in `src/lower/assign-order.js`
+- [x] Task 2.1: `lhsOperandBinds` in `src/lower/assign-order.js`
   - Files: `src/lower/assign-order.js` (new), `src/lower/index.js` (export)
   - Test: `test/unit/compiler/assign-order.test.js`: on parsed and checked snippets, `i, xs[i] = 1, 5` binds `xs[i].index`; `p, *p = &b, 0` binds `(*p).operand`; `arr[i], x = f(), 5` binds `arr[i].expr`/`.index` (ordered); with `callOnly` the same statement binds nothing; `ps[n].A[k], x = …` descends into `ps[n]` instead of binding the struct value
   - Done when: the unit tests pass; nothing calls the function yet
-- [ ] Task 2.2: JS `_hoistLhsOperands` delegates to `lhsOperandBinds`
+- [x] Task 2.2: JS `_hoistLhsOperands` delegates to `lhsOperandBinds`
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/codegen-regressions.test.js` section *Assignment order: blanks, pointer targets, comma-ok*: T1 `p, *p = &b, 0` and the ledger `p, *p = &b, 99` (`99 20 20`) with `assertAllTargetsOutput` (fails on js/both first)
   - Done when: T1 passes on js/both and the existing gc-order sections pass unmodified
-- [ ] Task 2.3: WASM `_hoistLhsOperands` delegates to `lhsOperandBinds`
+- [x] Task 2.3: WASM `_hoistLhsOperands` delegates to `lhsOperandBinds`
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: the Task 2.2 tests now pass on wasm; add T1 inside a `for` post (`for k := 0; k < 1; p, *p, k = &b, 7, k+1 {}`) on all targets
   - Done when: `grep -n "ordered && l.kind" src/backend` finds nothing and all assignment-order sections pass

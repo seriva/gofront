@@ -7,6 +7,7 @@ import {
 	isRangeFor,
 	isSimpleIntRange,
 	isStringRangeType,
+	lhsOperandBinds,
 	loopVarsCapturedInLoop,
 	someChild,
 } from "../../lower/index.js";
@@ -1023,53 +1024,25 @@ export const statementGenMethods = {
 	// variable) are bound: plain variables are read after the right-hand side.
 	_hoistLhsOperands(stmt, callOnly = false) {
 		if (stmt.op !== "=" || stmt.lhs.length < 2) return null;
-		const ordered = hasCallOrReceive(stmt.rhs) || hasCallOrReceive(stmt.lhs);
-		const assigned = new Set(
-			stmt.lhs
-				.filter((l) => l.kind === "Ident" && l.name !== "_")
-				.map((l) => l.name),
-		);
-		if (assigned.size === 0 && !ordered) return null;
-		const mentions = (n) =>
-			!!n &&
-			typeof n === "object" &&
-			((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
-		const isConst = (n) =>
-			n.kind === "BasicLit" ||
-			n._type?.kind === "untyped" ||
-			n._type?.kind === "namespace";
-		const needsTemp = (n) => {
-			if (!ordered) return mentions(n);
-			if (callOnly) return hasCallOrReceive(n) || mentions(n);
-			return !isConst(n);
-		};
+		const binds = lhsOperandBinds(stmt.lhs, stmt.rhs, {
+			callOnly,
+			isConst: (n) =>
+				n.kind === "BasicLit" ||
+				n._type?.kind === "untyped" ||
+				n._type?.kind === "namespace",
+			isAggregate: (n) => !!this._aggregateBase(n._type),
+		});
+		if (binds.length === 0) return null;
 		const lines = [];
 		const undo = [];
-		const visit = (l) => {
-			let keys;
-			if (l.kind === "IndexExpr") keys = ["expr", "index"];
-			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
-			else if (ordered && l.kind === "UnaryExpr" && l.op === "*")
-				keys = ["operand"];
-			else return;
-			for (const key of keys) {
-				const operand = l[key];
-				if (!needsTemp(operand)) continue;
-				// A struct or array value names the variable's storage in Go: hoist
-				// the operands inside it (`ps[n].A`) instead of the value.
-				if (key === "expr" && this._aggregateBase(operand._type)) {
-					visit(operand);
-					continue;
-				}
-				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-				const name = `__h${this._tmpCounter}`;
-				lines.push(`const ${name} = ${this.genExpr(operand)};`);
-				undo.push([l, key, operand]);
-				l[key] = { kind: "Ident", name, _type: operand._type };
-			}
-		};
-		for (const l of stmt.lhs) visit(l);
-		if (lines.length === 0) return null;
+		for (const { node, key } of binds) {
+			const operand = node[key];
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const name = `__h${this._tmpCounter}`;
+			lines.push(`const ${name} = ${this.genExpr(operand)};`);
+			undo.push([node, key, operand]);
+			node[key] = { kind: "Ident", name, _type: operand._type };
+		}
 		return {
 			lines,
 			restore: () => {

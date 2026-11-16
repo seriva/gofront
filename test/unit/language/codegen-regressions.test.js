@@ -437,6 +437,37 @@ g1 pixy
 	);
 });
 
+test("a *p target mentioning an assigned pointer binds its operand first", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a, b := 1, 2
+	p := &a
+	p, *p = &b, 0
+	fmt.Println(a, b)
+
+	x, y := 10, 20
+	q := &x
+	q, *q = &y, 99
+	fmt.Println(x, y, *q)
+
+	c, d := 1, 2
+	r := &c
+	for k := 0; k < 1; r, *r, k = &d, 7, k+1 {
+	}
+	fmt.Println(c, d)
+}
+`,
+		`0 2
+99 20 20
+7 2
+`,
+	);
+});
+
 test("plain-variable target operands are read after the right-hand call", async () => {
 	await assertAllTargetsOutput(
 		`package main
