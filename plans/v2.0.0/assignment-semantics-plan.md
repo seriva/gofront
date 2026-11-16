@@ -154,7 +154,7 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
   - Done when: all pass on wasm, and `zero-alloc.js` passes
 
 ### Phase 5: Documentation and fuzzer sign-off
-- [ ] Task 5.1: Document evaluation order and the fuzzer
+- [x] Task 5.1: Document evaluation order and the fuzzer
   - Files: `docs/go-compatibility.md` (new *Evaluation order* row: calls run once in source order and multi-assignments evaluate their targets first, as Go requires; a variable read in the same statement as a call that changes it may see either value, which Go leaves unspecified, so GoFront and gc can differ, e.g. `a + f()`), `docs/architecture.md` (a short *Differential fuzzer* paragraph: what it generates, `npm run fuzz`, `--replay`, that findings become unit tests)
   - Test: `node test/fuzz/difffuzz.js --mode order --seed 1 --batches 20 --cases 30 --stmts 6` and `--mode arith --seed 1 --batches 20`, run by hand and recorded in the PR body
   - Done when: both runs report `0 distinct findings`, except findings outside this plan's scope (each logged in `plans/follow-ups.md` with its `--case`), and the docs rows exist
