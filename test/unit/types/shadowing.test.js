@@ -1813,3 +1813,70 @@ test("a js package type named WeakMap is still rejected next to a wasm one", () 
 		"type WeakMap shadows the JavaScript global WeakMap; rename the type",
 	);
 });
+
+section("wasm package types formatted inside the package");
+
+test("fmt prints a renamed wasm package type inside that package", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+import "fmt"
+
+type Map struct{ N int }
+
+func Show(n int) string {
+	return fmt.Sprintf("%T %v %+v", Map{N: n}, Map{N: n}, &Map{N: n})
+}
+`,
+			"main.go": `package main
+
+import "./util"
+
+func Main() string { return util.Show(1) }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "util.Map {1} &{N:1}");
+});
+
+test("a __ field and interface method of a wasm struct are reached from a js main", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+type Rec struct {
+	__t int
+	N   int
+}
+
+func (r Rec) __twice() int { return r.__t * 2 }
+
+type Sizer interface{ __twice() int }
+
+func New(t, n int) *Rec { return &Rec{__t: t, N: n} }
+
+func AsSizer(r *Rec) Sizer { return r }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	r := util.New(7, 8)
+	r.__t = 9
+	s := util.AsSizer(r)
+	return fmt.Sprintf("%d %d %d", r.__t, r.N, s.__twice())
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "9 8 18");
+});

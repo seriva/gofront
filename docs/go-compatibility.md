@@ -155,7 +155,9 @@ in `js` and `both` packages are not renamed. A struct field or method is renamed
 (`__clone` is `__clone$` on the JS object), because the runtime uses such names itself;
 `fmt` and `%+v` still print the Go name. This applies to the JS output and to `both`
 structs that cross the WASM boundary; hand-written JavaScript reads the field as `r.__t$`.
-Fields of `wasm` package structs are reached through the facade and keep their name.
+Fields of `wasm` package structs are reached through the facade, which applies the same
+rule: a field or interface method that begins with `__` gets the `$` suffix on the JS side,
+and every other name is unchanged.
 
 The suffix is visible to hand-written JavaScript. Code that reaches into the bundle or the
 WASM facade by name (an `import { Array$ } from "./app.js"`, a `<script>` calling an

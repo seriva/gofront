@@ -623,6 +623,12 @@ export function checkGeneratedGo(
 		options,
 		deps,
 	);
+	// A type this package declared under a renamed name (`Map$$util`) is
+	// written `util.Map` in the generated Go, which has no `$` to spell it.
+	const own = `$$${checker.pkgName}`;
+	for (const [k, t] of [...(checker.types ?? [])])
+		if (t.name === k && k.endsWith(own))
+			checker.types.set(`${checker.pkgName}.${k.slice(0, -own.length)}`, t);
 	const before = checker.errors.length;
 	checker.checkAll([ast]);
 	if (checker.errors.length > before) {

@@ -2694,7 +2694,7 @@ function genIfaceFacade(out, key, desc) {
 		const { names, body } = genFuncBody(m.callName, m.params, m.returns, [
 			"this.__ref",
 		]);
-		return `\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
+		return `\t${jsMemberName(m.name)}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
 	});
 	const cases = desc.concrete.map((c, i) => {
 		const wrap = c.both ? `${P}view_${c.name}(r)` : `${c.name}.__wrap(r)`;
@@ -2742,7 +2742,7 @@ function promotedMethods(info, fields, methods, meta) {
 		for (const { info: owner, via } of level) {
 			for (const e of owner.embeds ?? []) {
 				const typeName = e.typeName ?? e.name;
-				const path = `${via}.${e.name}`;
+				const path = `${via}.${jsMemberName(e.name)}`;
 				const inner = meta._mod.getStructType(typeName);
 				const innerMethods =
 					meta.structByName.get(typeName.replaceAll(".", "$"))?.methods ?? [];
@@ -2806,7 +2806,7 @@ function genHandleStruct(out, name, fields, methods, promoted = []) {
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
-	const fromArgs = fields.map((f) => `o.${f.name}`);
+	const fromArgs = fields.map((f) => `o.${jsMemberName(f.name)}`);
 	const ptrMsg = `GoFront: expected a ${name} handle for a *${name} parameter (use ${name}.from(obj) to create one)`;
 	const lines = [
 		`const ${P}h_${name} = new WeakMap();
@@ -2836,9 +2836,11 @@ class ${name} {
 	];
 	for (const f of fields) {
 		const got = `__w.__get_${name}_${f.name}(this.__ref)`;
-		lines.push(`\tget ${f.name}() { return ${viewExpr(f.desc, got)}; }`);
 		lines.push(
-			`\tset ${f.name}(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); }`,
+			`\tget ${jsMemberName(f.name)}() { return ${viewExpr(f.desc, got)}; }`,
+		);
+		lines.push(
+			`\tset ${jsMemberName(f.name)}(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); }`,
 		);
 	}
 	for (const m of methods) {
@@ -2850,13 +2852,13 @@ class ${name} {
 			[recv],
 		);
 		lines.push(
-			`\t${m.name}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
+			`\t${jsMemberName(m.name)}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
 		);
 	}
 	for (const m of promoted) {
 		const names = m.params.map((_, i) => `a${i}`);
 		lines.push(
-			`\t${m.name}(${restParams(names, m.variadic)}) { return this${m.via}.${m.name}(${restParams(names, m.variadic)}); }`,
+			`\t${jsMemberName(m.name)}(${restParams(names, m.variadic)}) { return this${m.via}.${jsMemberName(m.name)}(${restParams(names, m.variadic)}); }`,
 		);
 	}
 	lines.push("}");
