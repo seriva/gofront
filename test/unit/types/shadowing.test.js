@@ -5,16 +5,21 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	assertProgramOutput,
 	compile,
+	compileDir,
 	compileHybrid,
 	compileHybridProject,
 	compileWasm,
+	runInDom,
 	runWasm,
 	section,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("Predeclared-name shadowing");
@@ -421,3 +426,1256 @@ func main() {
 		"{x}\n",
 	);
 });
+
+section("Top-level names that shadow JS globals the output reads");
+
+test("func Map keeps the runtime's Map (g01)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Map(xs []int, f func(int) int) []int {
+	out := make([]int, 0, len(xs))
+	for _, x := range xs {
+		out = append(out, f(x))
+	}
+	return out
+}
+
+func main() {
+	fmt.Println(Map([]int{1, 2, 3}, func(x int) int { return x * 2 }))
+}
+`,
+		"[2 4 6]\n",
+	);
+});
+
+test("func BigInt keeps the runtime's BigInt (g03)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func BigInt(s string) int64 {
+	var n int64
+	for _, c := range s {
+		n = n*10 + int64(c-'0')
+	}
+	return n
+}
+
+func main() {
+	var x int64 = 1 << 40
+	fmt.Println(BigInt("123"), x*3)
+}
+`,
+		"123 3298534883328\n",
+	);
+});
+
+test("func Uint8Array keeps the typed array constructor (g04)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Uint8Array(n int) []byte {
+	return make([]byte, n)
+}
+
+func main() {
+	b := Uint8Array(3)
+	b[1] = 7
+	fmt.Println(b, len(b))
+}
+`,
+		"[0 7 0] 3\n",
+	);
+});
+
+test("var Reflect keeps slice views writable (n01)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+var Reflect = 3
+
+func main() {
+	xs := []int{1, 2, 3, 4, 5}
+	v := xs[1:3]
+	v[0] = 9
+	fmt.Println(Reflect, xs, v, cap(v))
+}
+`,
+		"3 [1 9 3 4 5] [9 3] 4\n",
+	);
+});
+
+test("func Proxy keeps slice views iterable (n02)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Proxy() int { return 5 }
+
+func main() {
+	xs := []int{1, 2, 3, 4, 5}
+	v := xs[1:3]
+	for i, y := range v {
+		fmt.Println(i, y)
+	}
+	w := append([]int(nil), v...)
+	fmt.Println(Proxy(), w, len(v))
+}
+`,
+		"0 2\n1 3\n5 [2 3] 2\n",
+	);
+});
+
+test("func WeakMap keeps typed slice capacity (n05)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func WeakMap() int { return 4 }
+
+func main() {
+	b := make([]byte, 6)
+	c := b[1:3]
+	fmt.Println(WeakMap(), len(c), cap(c))
+}
+`,
+		"4 2 5\n",
+	);
+});
+
+test("const NaN and var Infinity do not replace math.NaN and math.Inf (n06)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+const NaN = 2.0
+
+var Infinity = 3.0
+
+func main() {
+	fmt.Println(math.IsNaN(math.NaN()), math.Inf(1), NaN, Infinity)
+}
+`,
+		"true +Inf 2 3\n",
+	);
+});
+
+test("var globalThis is a plain variable (n07)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+var globalThis = 5
+
+func main() {
+	fmt.Println(globalThis)
+}
+`,
+		"5\n",
+	);
+});
+
+test("func Int32Array and Float64Array keep typed slices (n15)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Int32Array() int { return 1 }
+func Float64Array() int { return 2 }
+
+func main() {
+	xs := make([]int32, 2)
+	ys := make([]float64, 2)
+	fmt.Println(Int32Array(), Float64Array(), xs, ys)
+}
+`,
+		"1 2 [0 0] [0 0]\n",
+	);
+});
+
+test("func ArrayBuffer and DataView keep byte slices (n21)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func ArrayBuffer() int { return 8 }
+func DataView() int    { return 9 }
+
+func main() {
+	xs := []byte{1, 2}
+	fmt.Println(ArrayBuffer(), DataView(), xs)
+}
+`,
+		"8 9 [1 2]\n",
+	);
+});
+
+section("Locals that shadow JS globals the output reads");
+
+test("local NaN does not replace math.NaN (g10)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	NaN := 2.0
+	fmt.Println(math.IsNaN(math.NaN()), NaN)
+}
+`,
+		"true 2\n",
+	);
+});
+
+test("local Infinity does not replace math.Inf (g11)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	Infinity := 3.0
+	fmt.Println(math.Inf(1), math.IsInf(Infinity, 0))
+}
+`,
+		"+Inf false\n",
+	);
+});
+
+test("local BigInt keeps int64 multiplication (n09)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var x int64 = 1 << 40
+	BigInt := 2
+	y := x * int64(BigInt)
+	fmt.Println(y)
+}
+`,
+		"2199023255552\n",
+	);
+});
+
+test("parameter Uint8Array keeps make([]byte, n) (n10)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f(Uint8Array int) []byte {
+	return make([]byte, Uint8Array)
+}
+
+func main() {
+	fmt.Println(f(3))
+}
+`,
+		"[0 0 0]\n",
+	);
+});
+
+test("named results and parameters NaN and Infinity (n13)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func f() (NaN, Infinity float64) {
+	NaN = 1.5
+	Infinity = 2.5
+	fmt.Println(math.IsNaN(math.NaN()), math.Inf(1))
+	return
+}
+
+func g(NaN float64) float64 {
+	fmt.Println(math.IsNaN(math.NaN()))
+	return NaN * 2
+}
+
+func main() {
+	a, b := f()
+	fmt.Println(a, b, g(4))
+}
+`,
+		"true +Inf\ntrue\n1.5 2.5 8\n",
+	);
+});
+
+test("range, type-switch, closure-parameter and for bindings named after globals", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	for NaN, BigInt := range []float64{1, 2} {
+		fmt.Println(NaN, BigInt)
+	}
+	var v any = 3
+	switch Infinity := v.(type) {
+	case int:
+		fmt.Println(Infinity + 1)
+	}
+	f := func(Uint8Array int) []byte { return make([]byte, Uint8Array) }
+	fmt.Println(f(2), math.IsNaN(math.NaN()), math.Inf(1))
+	for Map := 0; Map < 2; Map++ {
+		fmt.Println(Map)
+	}
+	var x int64 = 1 << 40
+	for BigInt := int64(2); BigInt < 3; BigInt++ {
+		fmt.Println(x * BigInt)
+	}
+}
+`,
+		"0 1\n1 2\n4\n[0 0] true +Inf\n0\n1\n2199023255552\n",
+	);
+});
+
+section("Variadic user functions named after JS globals");
+
+test("func Map(xs ...int) called with ys... passes the slice", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Map(xs ...int) int { return len(xs) }
+
+func main() {
+	ys := []int{1, 2, 3}
+	fmt.Println(Map(ys...), Map(1, 2), Map())
+}
+`,
+		"3 2 0\n",
+	);
+});
+
+section("templ and css components named after JS globals");
+
+function templDom(files) {
+	const { js } = withTempDir(files, (dir) => compileDir(dir));
+	return runInDom(js, '<div id="app"></div>').document;
+}
+
+test("templ Map keeps the runtime's Map (t02)", () => {
+	const document = templDom({
+		"main.go": `package main
+type K struct{ A, B int }
+func main() {
+	seen := map[K]bool{{1, 2}: true}
+	if seen[K{1, 2}] {
+		gom.Mount("#app", Page())
+	}
+}`,
+		"page.templ": `package main
+templ Map(msg string) {
+	<p>{ msg }</p>
+}
+templ Page() {
+	<div>
+		@Map("a")
+		@Map("b")
+	</div>
+}`,
+	});
+	const ps = document.querySelectorAll("#app p");
+	assertEqual(ps.length, 2);
+	assertEqual(ps[0].textContent, "a");
+	assertEqual(ps[1].textContent, "b");
+});
+
+test("templ Array and css Object() keep Object.defineProperty (t01)", () => {
+	const document = templDom({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Array("hi"))
+}`,
+		"page.templ": `package main
+
+css Object() {
+	color: red;
+}
+
+templ Array(msg string) {
+	<span class={ Object() }>{ msg }</span>
+}`,
+	});
+	const el = document.querySelector("#app span");
+	assertEqual(el.textContent, "hi");
+	assert(el.className.startsWith("gfc_Object_"), el.className);
+});
+
+section("Names that need no rename keep working");
+
+test("func Set, String, Object, Array and TypeError coexist with struct-key maps (n04, n16, n20)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Set(xs []int) int { return len(xs) }
+
+func String() string  { return "s" }
+func Number() int     { return 1 }
+func Boolean() bool   { return true }
+func Object() int     { return 2 }
+func Array() int      { return 3 }
+func TypeError() int  { return 4 }
+func RangeError() int { return 5 }
+
+type K struct{ A, B int }
+
+func main() {
+	seen := map[K]bool{{1, 2}: true}
+	fmt.Println(Set([]int{1, 2}), String(), Number(), Boolean(), Object(), Array(), TypeError(), RangeError(), len(seen))
+}
+`,
+		"2 s 1 true 2 3 4 5 1\n",
+	);
+});
+
+test("methods and fields named Map, Set and Reflect stay properties (n22)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box struct {
+	Map []int
+	Set map[string]int
+}
+
+func (b Box) Size() int { return len(b.Map) + len(b.Set) }
+func (b Box) Reflect() int { return 7 }
+
+func main() {
+	b := Box{Map: []int{1, 2}, Set: map[string]int{"a": 1}}
+	fmt.Println(b.Size(), b.Reflect(), b.Map, b.Set)
+}
+`,
+		"3 7 [1 2] map[a:1]\n",
+	);
+});
+
+test("a type parameter Map and a label Set are not renamed (n23)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Keys[Map comparable](xs ...Map) int {
+	m := map[Map]bool{}
+	for _, x := range xs {
+		m[x] = true
+	}
+	return len(m)
+}
+
+func main() {
+Set:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				continue Set
+			}
+			fmt.Println(i, j)
+		}
+	}
+	fmt.Println(Keys(1, 2, 2))
+}
+`,
+		"0 0\n1 0\n2 0\n2\n",
+	);
+});
+
+test("locals named Map, Object, Array, String, Number, Math, Error, Promise, undefined (n08, n11, n12, n14, g12)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	Map := 1
+	Object := 2
+	Array := []int{3}
+	String := "s"
+	Number := 4
+	Math := 5
+	Error := 6
+	Promise := 7
+	undefined := 8
+	x := make([]byte, 2)
+	fmt.Println(Map, Object, Array, String, Number, Math, Error, Promise, undefined, x)
+}
+`,
+		"1 2 [3] s 4 5 6 7 8 [0 0]\n",
+	);
+});
+
+section("Packages that export names shadowing JS globals");
+
+const GLOBALS_UTIL = (target) => `//gofront:target ${target}
+package util
+
+func Map(n int) int { return n * 2 }
+
+func Set(n int) int { return n + 1 }
+
+func BigInt(n int) int64 { return int64(n) << 40 }
+
+const NaN = 2.5
+
+const Infinity = 7
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`qualified use of a ${target} package exporting Map, Set, BigInt, NaN and Infinity`, async () => {
+		const { mod, js } = await compileHybridProject(
+			{
+				"util/u.go": GLOBALS_UTIL(target),
+				"main.go": `package main
+
+import (
+	"fmt"
+	"math"
+	"./util"
+)
+
+func Main() string {
+	return fmt.Sprint(util.Map(3), util.Set(3), util.BigInt(3), util.NaN, util.Infinity,
+		math.IsNaN(math.NaN()), math.Inf(1))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "6 4 3298534883328 2.5 7 true +Inf");
+		assert(js.includes("Map$"), "the exported Map is bound as Map$");
+	});
+
+	test(`dot-importing a ${target} package exporting Map, Set, BigInt, NaN and Infinity`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": GLOBALS_UTIL(target),
+				"main.go": `package main
+
+import (
+	"fmt"
+	"math"
+	. "./util"
+)
+
+func Main() string {
+	return fmt.Sprint(Map(3), Set(3), BigInt(3), NaN, Infinity,
+		math.IsNaN(math.NaN()), math.Inf(1))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "6 4 3298534883328 2.5 7 true +Inf");
+	});
+}
+
+for (const target of ["js"]) {
+	test(`a ${target} package var named after a global is readable and writable from main`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+var Set = 3
+
+var Proxy = []int{1, 2}
+
+func Bump() { Set++ }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	util.Bump()
+	util.Set += 10
+	return fmt.Sprint(util.Set, util.Proxy, len(util.Proxy[:1]))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "14 [1 2] 1");
+	});
+}
+
+section("User names that start with __");
+
+test("var __append does not clash with the append helper (g09)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+var __append = 7
+
+func main() {
+	xs := []int{1}
+	xs = append(xs, __append)
+	fmt.Println(xs, __append)
+}
+`,
+		"[1 7] 7\n",
+	);
+});
+
+test("func __len does not clash with the len helper (n17)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func __len(x []int) int { return len(x) * 10 }
+
+func main() {
+	fmt.Println(__len([]int{1, 2}), len("ab"))
+}
+`,
+		"20 2\n",
+	);
+});
+
+test("local __append does not replace the append helper (n18)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	__append := 7
+	xs := append([]int{1}, __append)
+	fmt.Println(xs, __append)
+}
+`,
+		"[1 7] 7\n",
+	);
+});
+
+test("range-over-func with an assigned loop variable still works (synthesised yield names)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func seq(yield func(int) bool) {
+	for i := 0; i < 3; i++ {
+		if !yield(i) {
+			return
+		}
+	}
+}
+
+var _ iter.Seq[int] = seq
+
+func main() {
+	var k int
+	for k = range seq {
+		fmt.Println(k)
+	}
+	fmt.Println("last", k)
+}
+`,
+		"0\n1\n2\nlast 2\n",
+	);
+});
+
+test("locals named __r, recv and args keep working (n19)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	__r := 1
+	recv := 2
+	args := []int{3}
+	args = append(args, __r+recv)
+	fmt.Println(__r, recv, args)
+}
+`,
+		"1 2 [3 3]\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`a ${target} package with func __len, __gfw_i64in and __w works from a js main (h07, h08)`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+func __len(x []int) int { return len(x) * 10 }
+
+func __gfw_i64in(n int) int { return n + 1 }
+
+func __w(n int) int { return n * 2 }
+
+func Size(xs []int) int { return __len(xs) + __gfw_i64in(1) + __w(3) }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func Main() string {
+	return fmt.Sprint(util.Size([]int{1, 2}), len([]int{1}), len("abc"))
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), "28 1 3");
+	});
+}
+
+test("types named with a __ prefix keep their class name in every use", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __q struct{ A int }
+
+func (q __q) Get() int { return q.A }
+func (q *__q) Set(n int) { q.A = n }
+
+type __n int
+
+type __i interface{ Get() int }
+
+type __g[T any] struct{ V T }
+
+func conv(x int) __n { return __n(x) }
+
+func main() {
+	x := __q{1}
+	y := x
+	y.Set(5)
+	var i __i = y
+	var p *__q = &x
+	n := conv(3)
+	g := __g[int]{V: 4}
+	var a any = x
+	_, ok := a.(__q)
+	switch v := a.(type) {
+	case __q:
+		fmt.Println("q", v.A)
+	}
+	m := map[__q]int{x: 1}
+	s := []__q{{2}, {3}}
+	fmt.Println(x, y == x, i.Get(), p.A, n, g, ok, m[x], s, new(__q).A, make([]__n, 2))
+	fmt.Printf("%T %T\\n", x, n)
+}
+`,
+		"q 1\n{1} false 5 1 3 {4} true 1 [{2} {3}] 0 [0 0]\nmain.__q main.__n\n",
+	);
+});
+
+test("a local variable named after a declared type is not treated as the type", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Proxy struct{ X int }
+
+func main() {
+	Proxy := 5
+	fmt.Println(Proxy)
+}
+`,
+		"5\n",
+	);
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __q struct{ A int }
+
+func main() {
+	__q := 7
+	fmt.Println(__q)
+}
+`,
+		"7\n",
+	);
+});
+
+test("a local type does not stop another function's variable of that name being renamed", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func other() int {
+	type __q struct{ A int }
+	return __q{2}.A
+}
+
+func main() {
+	__q := 7
+	fmt.Println(__q, other())
+}
+`,
+		"7 2\n",
+	);
+});
+
+test("a package named with a __ prefix keeps its namespace name", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `package util
+
+func Answer() int { return 42 }
+`,
+			"main.go": `package main
+
+import __u "./util"
+
+func Main() int { return __u.Answer() }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 42);
+});
+
+for (const [comp, param] of [
+	["Page", "__x"],
+	["Page", "BigInt"],
+]) {
+	test(`templ case expressions after the first are renamed too (${param})`, () => {
+		const document = templDom({
+			"main.go": `package main
+func main() {
+	gom.Mount("#app", ${comp}("b"))
+}`,
+			"page.templ": `package main
+
+templ ${comp}(${param} string) {
+	switch "b" {
+	case "a", ${param}:
+		<p>hit</p>
+	default:
+		<p>miss</p>
+	}
+}`,
+		});
+		assertEqual(document.querySelector("#app p").textContent, "hit");
+	});
+}
+
+section("Value bindings named after a type");
+
+for (const [name, decl, init, use] of [
+	["Proxy", "struct{ X int }", "Proxy{99}", "Proxy.X"],
+	["__q", "struct{ A int }", "__q{42}", "__q.A"],
+]) {
+	const field = use.split(".")[1];
+	test(`${name} := ${name}{...} reads the value after its declaration`, async () => {
+		await assertJsTargetsOutput(
+			`package main
+
+import "fmt"
+
+type ${name} ${decl}
+
+func main() {
+	${name} := ${init}
+	fmt.Println(${use})
+	${name}.${field} = 3
+	fmt.Println(${name}.${field}, ${name})
+}
+`,
+			`${init.includes("99") ? 99 : 42}\n3 {3}\n`,
+		);
+	});
+
+	test(`func f(${name} ${name}) reads the parameter in its body`, async () => {
+		await assertJsTargetsOutput(
+			`package main
+
+import "fmt"
+
+type ${name} ${decl}
+
+func f(${name} ${name}) int { return ${use} }
+
+func main() {
+	fmt.Println(f(${init}))
+}
+`,
+			`${init.includes("99") ? 99 : 42}\n`,
+		);
+	});
+}
+
+test("var __n __n = 7 reads the variable after its declaration", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __n int
+
+func main() {
+	var __n __n = 7
+	fmt.Println(__n + 1)
+}
+`,
+		"8\n",
+	);
+});
+
+test("type switch binding, receiver and result named after a type are values", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type __q struct{ A int }
+
+func (__q __q) Get() int { return __q.A }
+
+func g() (__q __q) {
+	__q.A = 5
+	return
+}
+
+func main() {
+	var a any = __q{3}
+	switch __q := a.(type) {
+	case __q:
+		fmt.Println(__q.A)
+	}
+	fmt.Println(__q{4}.Get(), g().A, __q{A: 1})
+}
+`,
+		"3\n4 5 {1}\n",
+	);
+});
+
+section("Packages named with a __ prefix");
+
+const UNDERSCORE_PKG = `package __u
+
+type T struct{ A int }
+
+func (t T) Get() int { return t.A }
+
+type __S struct{ B int }
+
+type G[X any] struct{ V X }
+
+func (g G[X]) Pick() X { return g.V }
+
+func N(n int) int { return n * 2 }
+
+func Answer() int { return 42 }
+`;
+
+for (const [label, pkgFile, importLine] of [
+	["package __u", UNDERSCORE_PKG, 'import "./util"'],
+	[
+		"import __u",
+		UNDERSCORE_PKG.replace("package __u", "package util"),
+		'import __u "./util"',
+	],
+]) {
+	test(`types of a __ prefixed package keep working (${label})`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": pkgFile,
+				"main.go": `package main
+
+${importLine}
+
+func Main() int {
+	v := __u.T{A: 10}
+	s := __u.__S{B: 5}
+	var a any = v
+	_, ok := a.(__u.T)
+	p := new(__u.T)
+	g := __u.G[int]{V: 4}
+	if !ok {
+		return -1
+	}
+	return v.Get() + s.B + __u.Answer() + __u.N(5) + p.A + g.Pick()
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 71);
+	});
+}
+
+test("members of a __ prefixed package keep working", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `package __u
+
+func __Answer() int { return 42 }
+
+var __V = 8
+`,
+			"main.go": `package main
+
+import "./util"
+
+func Main() int { return __u.__Answer() + __u.__V }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 50);
+});
+
+section("Dot-imported types that need a rename-safe name");
+
+const DOT_TYPES_UTIL = `package __u
+
+type __S struct{ B int }
+
+type __G[X any] struct{ V X }
+
+func (g __G[X]) Pick() X { return g.V }
+
+func __Answer() int { return 42 }
+
+var __V = 8
+`;
+
+for (const [label, body, want] of [
+	[
+		"composite literal, assertion and new of a __ type",
+		`	s := __S{B: 5}
+	var a any = s
+	_, ok := a.(__S)
+	p := new(__S)
+	if !ok {
+		return -1
+	}
+	return s.B + p.B + __Answer() + __V`,
+		55,
+	],
+	[
+		"a variable that shares its name with the dot-imported type",
+		`	__S := __S{42}
+	return __S.B`,
+		42,
+	],
+	[
+		"a generic __ type",
+		`	g := __G[int]{V: 9}
+	return g.Pick()`,
+		9,
+	],
+	[
+		"type switch case and conversion of dot-imported types",
+		`	var a any = __S{B: 3}
+	switch v := a.(type) {
+	case __S:
+		return v.B
+	}
+	return -1`,
+		3,
+	],
+]) {
+	test(`dot-imported package: ${label}`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": DOT_TYPES_UTIL,
+				"main.go": `package main
+
+import . "./util"
+
+func Main() int {
+${body}
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), want);
+	});
+}
+
+section("Renames follow the binding a name resolves to");
+
+for (const [name, decl, read] of [
+	["Array", "type Array int", "int(Array)"],
+	["Map", "type Map int", "int(Map)"],
+	["Proxy", "type Proxy int", "int(Proxy)"],
+	["__n", "type __n int", "int(__n)"],
+]) {
+	test(`package var ${name} of an imported type of the same name`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `package util\n\n${decl}\n`,
+				"main.go": `package main
+
+import "./util"
+
+var ${name} util.${name} = 5
+
+func Main() int { return ${read} }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 5);
+	});
+}
+
+for (const name of ["__A", "Proxy"]) {
+	test(`package var ${name} of an imported struct type of the same name`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `package util\n\ntype ${name} struct{ X int }\n`,
+				"main.go": `package main
+
+import "./util"
+
+var ${name} = util.${name}{X: 5}
+
+func Main() int { return ${name}.X }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 5);
+	});
+}
+
+for (const [name, local, pkg, want] of [
+	["__A", 3, 7, 10],
+	["Map", 1, 7, 8],
+	["Proxy", 1, 7, 8],
+]) {
+	test(`package var ${name} next to a local type of the same name in another function`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"main.go": `package main
+
+func other() int {
+	type ${name} = int
+	var x ${name} = ${local}
+	return x
+}
+
+var ${name} = ${pkg}
+
+func Main() int { return ${name} + other() }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), want);
+	});
+}
+
+section("Type parameters named like runtime helpers or JS globals");
+
+for (const tp of ["__T", "Proxy", "Map", "BigInt", "delete"]) {
+	test(`new(${tp}) of a type parameter`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"main.go": `package main
+
+func f[${tp} any]() *${tp} { return new(${tp}) }
+
+type Box[${tp} any] struct{ V ${tp} }
+
+func (b Box[${tp}]) ZeroPtr() *${tp} { return new(${tp}) }
+
+func Main() int {
+	a := *f[string]() + "!"
+	b := *(&Box[string]{V: "x"}).ZeroPtr() + "!"
+	return len(a) + len(b) + *f[int]() - 2
+}
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 0);
+	});
+
+	test(`composite and assertion forms of type parameter ${tp}`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"main.go": `package main
+
+func g[${tp} comparable](x ${tp}) int {
+	m := map[${tp}]int{x: 3}
+	s := []${tp}{x, x}
+	a := new([2]${tp})
+	var i any = &x
+	_, ok := i.(*${tp})
+	var j any = s
+	_, ok2 := j.([]${tp})
+	p := (*${tp})(nil)
+	n := 0
+	if ok && ok2 && p == nil {
+		n = 1
+	}
+	return m[x] + len(s) + len(a) + n
+}
+
+func Main() int { return g[int](4) }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 8);
+	});
+}

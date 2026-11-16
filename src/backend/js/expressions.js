@@ -22,6 +22,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { jsBindingName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
@@ -1326,8 +1327,7 @@ export const expressionGenMethods = {
 		const base = this.genExpr(expr.expr);
 		// Bundled GoFront package member; browser-global names carry the `$`
 		// suffix of their declaration (see jsBindingName).
-		if (this.bundledPackages.has(base))
-			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
+		if (this.bundledPackages.has(base)) return jsBindingName(expr.field);
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}${this._promotedPath(expr)}.${this._jsMemberName(expr)}`;

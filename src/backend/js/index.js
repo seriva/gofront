@@ -29,7 +29,6 @@ import {
 } from "../../lower/index.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
-	BROWSER_GLOBALS,
 	isComplex,
 	isMethodPromotedOverField,
 	isNumeric,
@@ -45,6 +44,7 @@ import {
 	derefsReceiverFirst,
 	expressionGenMethods,
 } from "./expressions.js";
+import { JS_RESERVED, jsBindingName, jsSafeName } from "./names.js";
 import {
 	HELPER_APPEND,
 	HELPER_BOUNDS,
@@ -87,52 +87,6 @@ import { templGenMethods } from "./templ.js";
 import { typeInfoGenMethods } from "./type-info.js";
 
 export { buildSourceMap, buildWasmSourceMap };
-
-// Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
-const JS_RESERVED = new Set([
-	"arguments",
-	"await",
-	"catch",
-	"class",
-	"debugger",
-	"delete",
-	"do",
-	"enum",
-	"eval",
-	"export",
-	"extends",
-	"finally",
-	"function",
-	"implements",
-	"in",
-	"instanceof",
-	"let",
-	"new",
-	"null",
-	"private",
-	"protected",
-	"public",
-	"static",
-	"super",
-	"this",
-	"throw",
-	"try",
-	"typeof",
-	"undefined",
-	"void",
-	"while",
-	"with",
-	"yield",
-]);
-
-const jsSafeName = (n) =>
-	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
-
-// Go declarations may shadow browser globals (Task 0.9).  The JS bundle is one
-// flat module scope, so such a binding gets a `$` suffix: generated code and
-// other packages keep reaching the real global (`Array.from`, `Object.keys`).
-const jsBindingName = (n) =>
-	typeof n === "string" && BROWSER_GLOBALS.has(n) ? `${n}$` : jsSafeName(n);
 
 // Runtime helpers by registry name, in output order.  Mark one as needed with
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
@@ -475,6 +429,16 @@ export class CodeGen {
 
 	_renameIdentNode(node) {
 		if (node._isStructKey || node._type?.kind === "builtin") return;
+		// Package namespaces are selected by their import name, never renamed.
+		if (node._isNamespace || node._type?.kind === "namespace") return;
+		// A type parameter is looked up by its Go name (`$z___T`), so a
+		// reference to it keeps that name.
+		if (node._namesTypeParam) return;
+		// A type declaration is emitted under its Go name (`class __T`), so a
+		// reference to it keeps that name.  Only an Ident whose name binds the
+		// type is skipped: a variable that shares the name is renamed like its
+		// declaration.
+		if (node._namesDeclType && !JS_RESERVED.has(node.name)) return;
 		node.name = node._shadowsGlobal
 			? jsBindingName(node.name)
 			: jsSafeName(node.name);
@@ -482,6 +446,16 @@ export class CodeGen {
 
 	_renameFuncDeclNode(node) {
 		node.name = jsBindingName(node.name);
+		this._renameSignature(node);
+	}
+
+	// A templ or css component is a top-level function of the bundle, so its
+	// name follows the same rule as `func`.  `_goName` keeps the declared name
+	// for the generated CSS class, which cannot contain `$`.
+	_renameCompDeclNode(node) {
+		const renamed = jsBindingName(node.name);
+		if (renamed !== node.name) node._goName = node.name;
+		node.name = renamed;
 		this._renameSignature(node);
 	}
 
@@ -522,7 +496,7 @@ export class CodeGen {
 		FuncDecl: "_renameFuncDeclNode",
 		MethodDecl: "_renameMethodDeclNode",
 		FuncLit: "_renameSignature",
-		TemplDecl: "_renameSignature",
+		TemplDecl: "_renameCompDeclNode",
 		TemplExpr: "_renameTemplExprNode",
 		TemplChildren: "_renameTemplExprNode",
 		TemplComponent: "_renameTemplExprNode",
@@ -531,7 +505,7 @@ export class CodeGen {
 		TemplCase: "_renameTemplExprNode",
 		TemplFor: "_renameTemplForNode",
 		TemplElement: "_renameTemplElementNode",
-		CssDecl: "_renameSignature",
+		CssDecl: "_renameCompDeclNode",
 		DefineStmt: "_renameDefineNode",
 		VarDecl: "_renameDeclSpecs",
 		ConstDecl: "_renameDeclSpecs",

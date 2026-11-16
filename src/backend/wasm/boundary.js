@@ -32,7 +32,7 @@
 //     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
 //     handed out by this facade) may be passed back in.
 
-import { BROWSER_GLOBALS } from "../../typechecker/types.js";
+import { shadowsJsGlobal } from "../../typechecker/types.js";
 import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
@@ -2234,7 +2234,7 @@ function ${P}idxview(n, getAt, setAt) {
 // same `$` suffix as JS output uses (see jsBindingName in backend/js), so the
 // flat bundle keeps reaching the real global.
 function facadeName(name) {
-	return BROWSER_GLOBALS.has(name) ? `${name}$` : name;
+	return shadowsJsGlobal(name) ? `${name}$` : name;
 }
 
 export function generateFacade(

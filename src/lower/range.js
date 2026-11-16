@@ -25,7 +25,7 @@ function buildYieldParamsAndAssignments(lhs, yieldTypes, isAssign) {
 		if (!isAssign && lhsElem?.name && lhsElem.name !== "_") {
 			params.push({ name: lhsElem.name, type: yType });
 		} else {
-			const paramName = `__yield_p${i}`;
+			const paramName = `__yield_p$${i}`;
 			params.push({ name: paramName, type: yType });
 			if (isAssign && lhsElem && lhsElem.name !== "_") {
 				assignStmts.push({

@@ -101,23 +101,23 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
 ## Implementation Tasks
 
 ### Phase 1: Names that shadow JS globals (C1–C3)
-- [ ] Task 1.1: Add `JS_RESERVED_GLOBALS` / `shadowsJsGlobal` and the registry test
+- [x] Task 1.1: Add `JS_RESERVED_GLOBALS` / `shadowsJsGlobal` and the registry test
   - Files: `src/typechecker/types.js`, `src/typechecker/index.js` (move `JS_BUILTIN_CLASSES` to `types.js`, no behaviour change)
   - Test: new `test/unit/compiler/js-globals.test.js`. (a) Every identifier in the source text of `src/backend/js/**`, `src/backend/shared/**` and `src/backend/wasm/boundary.js` that names a host global (`Object.getOwnPropertyNames(globalThis)` ∪ `BROWSER_GLOBALS`, not after `.`) satisfies `shadowsJsGlobal`, or sits in a `NOT_EMITTED` allowlist where each entry has a reason. (b) The same check holds over the emitted JS of the `test/perf/bundle-size.js` `FIXTURES` plus one program per helper family (struct-key map, `int64`, typed slices, slice views, `math`, `time`, `os`, `encoding/json`, a `wasm` export), compiled for `js`/`both`/`wasm`. (c) `JS_BUILTIN_CLASSES ⊆ shadowsJsGlobal`. It fails first on `Map`, `BigInt`, `Uint8Array`, `NaN`, `Infinity`, `globalThis`, `Proxy`
   - Done when: the test passes and no emitted output changes (the set is not consumed yet)
-- [ ] Task 1.2: Rename declarations and references inside a package (C1 top level, C2 locals)
+- [x] Task 1.2: Rename declarations and references inside a package (C1 top level, C2 locals)
   - Files: `src/typechecker/expressions.js` (`_shadowsGlobal` via `shadowsJsGlobal`), `src/backend/js/index.js` (`jsBindingName`; `TemplDecl`/`CssDecl` names in `_RENAME_HANDLERS`)
   - Test: `test/unit/types/shadowing.test.js`, with `assertJsTargetsOutput` (js + both), each written first and checked against Go's output: `g01`, `g03`, `g04`, `n01`, `n02`, `n05`, `n06`, `n07`, `n15`, `n21` (top level); `g10`, `g11`, `n09`, `n10`, `n13` plus range/type-switch/closure-param bindings named `NaN`/`BigInt` (locals); `t01`, `t02` (templ/css via `compileHybridProject`); variadic `func Map(xs ...int)` called as `Map(ys...)`
   - Done when: all print Go's output on `js` and `both`; the controls `n04`, `n20`, `n22`, `n23` still pass
-- [ ] Task 1.3: Cross-package references and the `wasm` facade (C1)
+- [x] Task 1.3: Cross-package references and the `wasm` facade (C1)
   - Files: `src/backend/js/expressions.js` (bundled-package selector `:1330`), `src/backend/wasm/boundary.js` (`facadeName`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h01`, `h02`, `h03`, `h04`, `h06`, `h10`; single-package `g04`/`n05` switched to `assertAllTargetsOutput` (adds `wasm`)
   - Done when: all print Go's output; the facade of a `wasm` package exporting `func Map` defines `Map$`, and the existing `Array$` tests pass
-- [ ] Task 1.4: Suffix user identifiers that start with `__` (C3)
+- [x] Task 1.4: Suffix user identifiers that start with `__` (C3)
   - Files: `src/backend/js/index.js` (`jsSafeName`), `src/lower/range.js` (mark `__yield_p<i>` as synthesised)
   - Test: `test/unit/types/shadowing.test.js`: `g09`, `n17`, `n18`, `h07` (written first), plus a range-over-func loop with an assigned yield value (`for k = range seq`) as a regression guard for synthesised names
   - Done when: all print Go's output on `js`/`both`; `n19` and `h08` unchanged
-- [ ] Task 1.5: Document the rename set
+- [x] Task 1.5: Document the rename set
   - Files: `docs/go-compatibility.md` (*Names that shadow JS globals*: the new built-ins (`Map`, `Set`, `BigInt`, `NaN`, `Infinity`, `undefined`, `globalThis`, typed arrays, …), templ and css components, `__`-prefixed names, and facade exports such as `Map$`)
   - Test: none (docs only; `test/unit/language/parity-matrix.test.js` reads `docs/language-support.md`, not this file)
   - Done when: the section lists every category renamed in Tasks 1.2–1.4, with an example each

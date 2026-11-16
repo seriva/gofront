@@ -28,6 +28,7 @@ import {
 	isAny,
 	isBool,
 	isVoid,
+	JS_BUILTIN_CLASSES,
 	NATIVES,
 	promotedMethods,
 	Scope,
@@ -59,46 +60,6 @@ function rootIdentName(e) {
 
 // Re-export for consumers that import from typechecker.js
 export { EXCLUDED_STDLIB_PACKAGES, TypeCheckError, typeStr };
-
-// JavaScript built-ins that generated JS relies on; a JS class of the same
-// name in the bundle would shadow them (see _checkGlobalTypeNamesPass).
-const JS_BUILTIN_CLASSES = new Set([
-	"Array",
-	"ArrayBuffer",
-	"BigInt",
-	"BigInt64Array",
-	"BigUint64Array",
-	"Boolean",
-	"DataView",
-	"Date",
-	"Error",
-	"Float32Array",
-	"Float64Array",
-	"Int16Array",
-	"Int32Array",
-	"Int8Array",
-	"JSON",
-	"Map",
-	"Math",
-	"Number",
-	"Object",
-	"Promise",
-	"RangeError",
-	"Reflect",
-	"RegExp",
-	"Set",
-	"String",
-	"Symbol",
-	"TextDecoder",
-	"TextEncoder",
-	"TypeError",
-	"Uint16Array",
-	"Uint32Array",
-	"Uint8Array",
-	"Uint8ClampedArray",
-	"WeakMap",
-	"WebAssembly",
-]);
 
 // The promoted-method entry for candidate `cand`, reusing `prev` when
 // nothing changed so the method keeps its identity across passes. A pointer
@@ -191,12 +152,20 @@ export class TypeChecker {
 	// browser-global-named members get the same `$` renaming as local ones.
 	// `consts` (dot-imported GoFront packages) maps constant names to their
 	// folded values.
-	addDefinitions(types, values, { external = true, consts = null } = {}) {
+	// `typeNames` (dot-imported GoFront packages) lists the names the package
+	// declares as types; without it a value that is its type-table entry counts.
+	addDefinitions(
+		types,
+		values,
+		{ external = true, consts = null, typeNames = null } = {},
+	) {
 		for (const [name, type] of types) {
 			this.types.set(name, type);
 		}
 		for (const [name, type] of values) {
-			this.globals.define(name, type);
+			if (typeNames ? typeNames.has(name) : types.get(name) === type)
+				this.globals.defineType(name, type);
+			else this.globals.define(name, type);
 			if (external) this._externalNames.add(name);
 		}
 		for (const [name, v] of consts ?? []) {
@@ -280,6 +249,11 @@ export class TypeChecker {
 			out.set(name, this._constValue({ kind: "Ident", name }, this.globals));
 		}
 		return out;
+	}
+
+	// Names the package declares as types (see addDefinitions).
+	getExportedTypeNames() {
+		return new Set(this.globals._typeNames);
 	}
 
 	getExportedTypes() {
@@ -626,7 +600,7 @@ export class TypeChecker {
 						};
 					}
 					this.types.set(d.name, placeholder);
-					this.globals.define(d.name, placeholder);
+					this.globals.defineType(d.name, placeholder);
 				}
 			}
 		}
@@ -954,7 +928,7 @@ export class TypeChecker {
 
 	// ── Type collection ──────────────────────────────────────────
 
-	collectType(decl) {
+	collectType(decl, scope = null) {
 		// `type N interface{ ~int }` and `type D N` declare constraints.
 		this._markConstraintPos(decl.type);
 		if (decl.typeParams && decl.isAlias) {
@@ -995,12 +969,12 @@ export class TypeChecker {
 				underlying.methods = new Map();
 			}
 			this.types.set(decl.name, named);
-			this.globals.define(decl.name, named);
+			this._defineTypeBinding(decl.name, named, scope);
 			return;
 		}
 		// A type declared inside a function is registered before its fields
 		// resolve so `next *L` finds it; package-level types already are.
-		this._registerLocalTypePlaceholder(decl);
+		this._registerLocalTypePlaceholder(decl, scope);
 		let underlying = this.resolveTypeNode(decl.type, this.globals);
 		// `type W V` with V a named array: W's underlying type is V's array.
 		if (!decl.isAlias && underlying.kind === "named") {
@@ -1013,7 +987,7 @@ export class TypeChecker {
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
 			this.types.set(decl.name, underlying);
-			this.globals.define(decl.name, underlying);
+			this._defineTypeBinding(decl.name, underlying, scope);
 			return;
 		}
 		const existing = this.types.get(decl.name);
@@ -1035,15 +1009,28 @@ export class TypeChecker {
 			underlying.name = decl.name;
 		}
 		this.types.set(decl.name, named);
-		this.globals.define(decl.name, named);
+		this._defineTypeBinding(decl.name, named, scope);
 	}
 
-	_registerLocalTypePlaceholder(decl) {
+	// Binds a declared type's name.  A type declared in a function binds the
+	// name in that function's scope; the package scope still receives the type
+	// (types resolve through it) but keeps what its binding of that name is, so
+	// a package-level variable of the same name stays a value.
+	_defineTypeBinding(name, type, scope) {
+		if (!scope || scope === this.globals) {
+			this.globals.defineType(name, type);
+			return;
+		}
+		scope.defineType(name, type);
+		this.globals.symbols.set(name, type);
+	}
+
+	_registerLocalTypePlaceholder(decl, scope) {
 		const prior = this.types.get(decl.name);
 		if (decl.isAlias || (prior && !this._importedTypes.has(prior))) return;
 		const placeholder = { kind: "named", name: decl.name, underlying: null };
 		this.types.set(decl.name, placeholder);
-		this.globals.define(decl.name, placeholder);
+		this._defineTypeBinding(decl.name, placeholder, scope);
 	}
 
 	// type A[P any] = T[P] — Go 1.24 generic alias. The declaration is a
@@ -1066,7 +1053,7 @@ export class TypeChecker {
 			_generic: { typeParams: typeParamTypes, declNode: decl, isAlias: true },
 		};
 		this.types.set(decl.name, alias);
-		this.globals.define(decl.name, alias);
+		this.globals.defineType(decl.name, alias);
 	}
 
 	_buildCollectFuncScope(decl) {

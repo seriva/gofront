@@ -120,26 +120,44 @@ accepted in `js`, `wasm` and `both` packages, and Go code referring to the name 
 declaration.
 
 The JS bundle is one flat module scope, and generated code relies on the real globals
-(`Array.from`, `Object.keys`, `Math.trunc`, …). So when a function, variable, constant,
-parameter or named result has the same name as a browser global GoFront predeclares
-(`console`, `document`, `window`, `Array`, `Object`, `Math`, `JSON`, `Date`, `Error`,
-`String`, `Number`, `Promise`, `fetch`, `setTimeout`, …), it is emitted with a `$` suffix:
+(`Array.from`, `Object.keys`, `Math.trunc`, `new Map()`, `BigInt.asIntN`, …). So when a
+function, variable, constant, parameter, named result, local, `templ` component or `css`
+component has the same name as a global the output reads, it is emitted with a `$` suffix.
+The names renamed are:
+
+- the browser globals GoFront predeclares (`console`, `document`, `window`, `Array`,
+  `Object`, `Math`, `JSON`, `Date`, `Error`, `String`, `Number`, `Promise`, `fetch`,
+  `setTimeout`, …);
+- the JavaScript built-ins that generated code and the WebAssembly loader use: `Map`,
+  `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `BigInt`, `Proxy`, `Reflect`, `ArrayBuffer`,
+  `DataView`, every typed-array constructor (`Uint8Array`, `Int32Array`, `Float64Array`,
+  `BigUint64Array`, …), `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError`,
+  `WebAssembly`, `NaN`, `Infinity`, `undefined`, `globalThis`, `process`, `Function`,
+  `Iterator` and a few more host functions (`queueMicrotask`, `structuredClone`);
+- any name that starts with `__`, the prefix of the runtime's own helpers (`__len`,
+  `__append`, …).
 
 | Go source | JS output / WASM boundary facade |
 |---|---|
 | `func Array() int` | `function Array$()`; the facade of a `wasm`/`both` package exports `Array$` |
+| `func Map(xs []int) []int` | `function Map$(xs)`; the facade exports `Map$` |
 | `var document int` | `let document$` |
+| `const NaN = 2.0` | `const NaN$`, so `math.NaN()` still returns the real `NaN` |
 | `func f(console int)` | `function f(console$)` |
+| `BigInt := 2` | `let BigInt$`, so `int64` arithmetic in the same function still works |
+| `templ Map(msg string)` / `css Object()` | `function Map$(msg)` / `function Object$()` |
+| `var __append = 7` | `let __append$` |
 
 Go code never sees the suffix: references from the same package, from importing packages
 (`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
-renamed binding. Builtins that are not JS globals (`len`, `append`, …) and type names are
-not renamed.
+renamed binding. Builtins that are not JS globals (`len`, `append`, …), type names, struct
+fields, methods and labels are not renamed.
 
 The suffix is visible to hand-written JavaScript. Code that reaches into the bundle or the
 WASM facade by name (an `import { Array$ } from "./app.js"`, a `<script>` calling an
-exported function, a test harness) must use `Array$`, not `Array`; `Array` there is still
-the browser's global. Pick a different Go name for exported functions you call from JS.
+exported function, a test harness) must use `Array$` or `Map$`, not `Array` or `Map`; the
+unsuffixed name there is still the browser's global. Pick a different Go name for exported
+functions you call from JS.
 
 > [!WARNING]
 > Type declarations are **not** renamed. A struct type, or a named type with methods, is
