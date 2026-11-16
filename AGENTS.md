@@ -48,6 +48,8 @@ GoFront is a Go-inspired language that compiles to JavaScript and WebAssembly (W
 ## Commands
 
 - **Test**: `npm test && npm run test:e2e` (or unit only: `npm test`)
+- **Single unit file / test**: `node test/unit/run.js <file…>` (paths relative to the cwd or `test/unit/`); `--grep <re>` or `TEST_GREP=<re>` runs only matching test names. A file also runs directly with `node <file>` and exits 1 on failure.
+- **Timeouts**: `TEST_TIMEOUT_MS` fails one async test that does not settle (default 600000); `TEST_FILE_TIMEOUT_MS` stops a worker stuck on one file (default 900000).
 - **Lint**: `npm run check`
 - **Format**: `npm run format`
 - **Build**: `npm run build`

@@ -78,7 +78,7 @@ Probes ran on 2026-11-12 against `main` @ `8b6cad64` on a 12-core/24-thread Ryze
 - **Runner**:
   - `run.js` accepts file paths (relative to cwd or `test/unit/`; unknown path is an error, exit 2) and `--grep <re>`, which also comes from `TEST_GREP` and is passed to workers.
   - `helpers.test()` skips non-matching names and counts them as `skipped`, which the summary prints.
-  - Async tests race a `TEST_TIMEOUT_MS` timer (default 120,000; the slowest single test today is under 10 s). The timer is cleared when the test settles. An uncleared timer would keep a directly run file alive for the full timeout before `beforeExit` fires.
+  - Async tests race a `TEST_TIMEOUT_MS` timer (default 600,000: a file's async tests start together and share one thread, so under full-suite load `builtins/json.test.js` tests ran past 120 s). The timer is cleared when the test settles. An uncleared timer would keep a directly run file alive for the full timeout before `beforeExit` fires.
   - `run.js` terminates a worker whose file runs past `TEST_FILE_TIMEOUT_MS` (default 900,000, about 6× the slowest file under full load), records `<file> › timed out`, and starts a fresh worker, reusing the existing `workerDied` path.
   - Failures carry `file`, and the summary prints `<file> › <name>`.
 - **Standalone exit code**: on the first `test()` call on the main thread (`isMainThread`), `helpers.js` registers a one-shot `process.on("beforeExit")` hook. The hook awaits pending tests, prints the summary and sets `process.exitCode`. When it fires, it does nothing if `globalThis.__GOFRONT_TEST_RUNNER` is set (`run.js` sets it for `TEST_PARALLEL=0`; it has to be checked at fire time, because `run.js` sets it only after its static `helpers.js` import has evaluated, G11) or if `summarize()` has already run. Registering lazily keeps the perf scripts that import `compile()` but never call `test()` silent. Files with the existing footer call `process.exit()`, which skips `beforeExit`. The 2 bare `summarize()` callers are covered by the already-summarized check, so nothing prints twice.
@@ -132,19 +132,19 @@ Probes ran on 2026-11-12 against `main` @ `8b6cad64` on a 12-core/24-thread Ryze
   - Done when: each of the six names is a ≤ 3-line wrapper over `assertOutput` and `npm test` passes with an unchanged test count.
 
 ### Phase 3: Runner filtering, timeouts and reporting
-- [ ] Task 3.1: File arguments and a name filter
+- [x] Task 3.1: File arguments and a name filter
   - Files: `test/unit/run.js`, `test/unit/helpers.js`, `test/unit/worker.js`
   - Test: `test/unit/compiler/runner.test.js`, spawning `node test/unit/run.js` against new fixtures `test/unit/fixtures/harness/{pass,fail}.test.js`. Assert that a file arg runs only that file, that `--grep` / `TEST_GREP` run only matching tests and print the skipped count, that an unknown path exits 2, and that "no tests matched" exits 1.
   - Done when: those assertions pass and `npm test` with no args runs the same file count as before.
-- [ ] Task 3.2: File-qualified failures
+- [x] Task 3.2: File-qualified failures
   - Files: `test/unit/run.js`, `test/unit/worker.js`, `test/unit/helpers.js` (plus `test/unit/language/array-length.test.js:138`: rename the second `"a string index"` row to `"a string-typed index"` so no name repeats within a file, G5)
   - Test: `runner.test.js`. Running `fixtures/harness/fail.test.js` prints `fixtures/harness/fail.test.js › <name>` under "Failed tests", in both parallel and `TEST_PARALLEL=0` modes.
   - Done when: the assertion passes in both modes, and the ANSI-stripped `✓`/`✗` lines of one full run, prefixed by file, have no duplicates.
-- [ ] Task 3.3: Per-test and per-file timeouts
+- [x] Task 3.3: Per-test and per-file timeouts
   - Files: `test/unit/helpers.js`, `test/unit/run.js`
   - Test: `runner.test.js` with fixtures `fixtures/harness/hang-async.test.js` (a never-settling promise) and `hang-sync.test.js` (a `while(true)` behind an env guard). Assert that with `TEST_TIMEOUT_MS=200` the async test fails as "timed out after 200ms" and the other tests in the file still report, and that with `TEST_FILE_TIMEOUT_MS=1000` the sync file is reported as `› timed out` and the run exits 1 without hanging.
   - Done when: both fixtures finish within the `runner.test.js` budget (child process `timeout` 30 s) with the expected output.
-- [ ] Task 3.4: Correct exit code when a test file runs directly, plus contributor docs
+- [x] Task 3.4: Correct exit code when a test file runs directly, plus contributor docs
   - Files: `test/unit/helpers.js`, `AGENTS.md`
   - Test: `runner.test.js`. `node test/unit/fixtures/harness/fail.test.js` (no footer) exits 1 and prints the summary once. The same file with a footer copied from `language/core.test.js`, and with a bare `await summarize()` as in `stdlib/testing.test.js`, still prints it once. A fixture script that imports `compile` from `helpers.js` without calling `test()` (like `test/perf/zero-alloc.js`) prints no summary and exits 0. `TEST_PARALLEL=0 node test/unit/run.js fixtures/harness/fail.test.js` prints one summary.
   - Done when: these assertions pass, and `AGENTS.md` **Commands** documents `node test/unit/run.js <file…>`, `--grep`/`TEST_GREP`, `TEST_TIMEOUT_MS` and `TEST_FILE_TIMEOUT_MS`.

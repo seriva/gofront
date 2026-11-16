@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
+import { isMainThread } from "node:worker_threads";
 import { checkSyntax } from "../../scripts/build-examples.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import {
@@ -600,9 +601,12 @@ export const assertWasmProgramOutput = (source, expected) =>
 // ── Test harness ─────────────────────────────────────────────
 
 let passed = 0,
-	failed = 0;
+	failed = 0,
+	skipped = 0;
 const failures = [];
 const pending = [];
+let summarized = false;
+let exitHookInstalled = false;
 
 // Output is written in registration order: sync results print immediately,
 // but once an async test is queued, later results wait for it to settle.
@@ -639,7 +643,44 @@ function reportFail(slot, name, e) {
 	);
 }
 
+// The default is generous: a file's async tests all start together and share
+// one thread, so under full-suite load one test can wait minutes for its turn.
+// Both knobs are read per call: run.js sets TEST_GREP after this module has
+// already been imported.
+function testTimeoutMs() {
+	const n = Number(process.env.TEST_TIMEOUT_MS);
+	return n > 0 ? n : 600_000;
+}
+
+function matchesGrep(name) {
+	const grep = process.env.TEST_GREP;
+	return !grep || new RegExp(grep).test(name);
+}
+
+// A file run directly (no run.js, no footer) still reports and sets the exit
+// code once the event loop drains. A file that already printed its summary
+// only gets the exit code; one loaded by run.js is left alone.
+function installExitHook() {
+	if (exitHookInstalled || !isMainThread) return;
+	exitHookInstalled = true;
+	process.on("beforeExit", () => {
+		if (globalThis.__GOFRONT_TEST_RUNNER) return;
+		if (summarized) {
+			if (failed > 0) process.exitCode = 1;
+			return;
+		}
+		return summarize().then((n) => {
+			process.exitCode = n > 0 ? 1 : 0;
+		});
+	});
+}
+
 export function test(name, fn) {
+	installExitHook();
+	if (!matchesGrep(name)) {
+		skipped++;
+		return;
+	}
 	const slot = reserveSlot();
 	let result;
 	try {
@@ -649,11 +690,31 @@ export function test(name, fn) {
 		return;
 	}
 	if (result && typeof result.then === "function") {
+		const ms = testTimeoutMs();
 		pending.push(
-			result.then(
-				() => reportPass(slot, name),
-				(e) => reportFail(slot, name, e),
-			),
+			new Promise((done) => {
+				// The slot is filled once: a timed-out test that settles later
+				// must not be counted again.
+				let settled = false;
+				const settle = (report) => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					report();
+					done();
+				};
+				const timer = setTimeout(
+					() =>
+						settle(() =>
+							reportFail(slot, name, new Error(`timed out after ${ms}ms`)),
+						),
+					ms,
+				);
+				result.then(
+					() => settle(() => reportPass(slot, name)),
+					(e) => settle(() => reportFail(slot, name, e)),
+				);
+			}),
 		);
 		return;
 	}
@@ -749,6 +810,7 @@ export async function waitForPending() {
 export function resetTestStats() {
 	passed = 0;
 	failed = 0;
+	skipped = 0;
 	failures.length = 0;
 	pending.length = 0;
 	slots.length = 0;
@@ -756,17 +818,22 @@ export function resetTestStats() {
 }
 
 export function getTestStats() {
-	return { passed, failed, failures: [...failures] };
+	return { passed, failed, skipped, failures: [...failures] };
 }
 
 export async function summarize() {
+	summarized = true;
 	await waitForPending();
 	const total = passed + failed;
 	process.stdout.write(`\n${total} tests: \x1b[32m${passed} passed\x1b[0m`);
 	if (failed > 0) {
 		process.stdout.write(`, \x1b[31m${failed} failed\x1b[0m`);
+		if (skipped > 0) process.stdout.write(`, ${skipped} skipped`);
 		process.stdout.write("\n\nFailed tests:\n");
 		for (const f of failures) process.stdout.write(`  • ${f.name}\n`);
+	}
+	if (failed === 0 && skipped > 0) {
+		process.stdout.write(`, ${skipped} skipped`);
 	}
 	process.stdout.write("\n");
 	return failed;
