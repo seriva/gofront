@@ -142,3 +142,73 @@ func main() {
 		"{3} main.Map\n",
 	);
 });
+
+section("Local types vs package-level values");
+
+for (const name of ["__A", "A"]) {
+	test(`a local type ${name} does not take over a package-level var`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+var ${name} = "hi"
+
+func other() int {
+	type ${name} = int
+	var x ${name} = 3
+	return x + 2
+}
+
+func main() {
+	var s string = ${name}
+	fmt.Println(other(), s)
+}
+`,
+			"5 hi\n",
+		);
+	});
+}
+
+test("a local type does not take over a package-level const", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const K = "k"
+
+func other() int {
+	type K struct{ N int }
+	return K{5}.N
+}
+
+func main() {
+	var s string = K
+	fmt.Println(other(), s)
+}
+`,
+		"5 k\n",
+	);
+});
+
+test("a local type named after a package-level func", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Fn() string { return "fn" }
+
+func other() int {
+	type Fn struct{ N int }
+	return Fn{5}.N
+}
+
+func main() {
+	fmt.Println(other(), Fn())
+}
+`,
+		"5 fn\n",
+	);
+});

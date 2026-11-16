@@ -115,15 +115,15 @@ Fix the 31 review follow-ups that still reproduce in `plans/follow-ups.md` (re-p
 > Scheduled from review follow-ups (`plans/follow-ups.md`, re-probed 2026-11-16).
 
 ### Phase 1: Parser and checker (F4, F18, F23)
-- [ ] Task 1.1: Parse and clone conversions to an anonymous struct type (F18)
+- [x] Task 1.1: Parse and clone conversions to an anonymous struct type (F18)
   - Files: `src/parser/expressions.js` (the `T.STRUCT` branch of `_parsePrimary`: `(` after the struct type → `TypeConversion`), `src/backend/js/expressions.js` (`_genTypeConversion` and `_genTypeConversionCall` clone into an anonymous plain object via `_cloneAnonStruct`)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: `type S struct{ A [2]int }; s := S{[2]int{1, 2}}; u := struct{ A [2]int }(s); s.A[0] = 9; var a any = u; fmt.Printf("%T %v\n", a, u)` → `struct { A [2]int } {[1 2]}`; `test/unit/compiler/lexer-parser.test.js`: the AST is a `TypeConversion` with a `StructType` target
   - Done when: both pass on every target; `struct{…}{…}` literals still parse
-- [ ] Task 1.2: Local types do not take over package-level values (F4)
+- [x] Task 1.2: Local types do not take over package-level values (F4)
   - Files: `src/compiler.js` (`mangleLocalTypes` adds package-level var/const/func names to the `reserved` set), `src/link/type-names.js` (`renameLocalTypes` doc comment)
   - Test: `test/unit/compiler/local-type-shadow.test.js` with `assertAllTargetsOutput`: the F4 repro (`__A`) and the plain `A` variant → `5`; a local type named after a package-level func
   - Done when: all print `5` on every target; programs without such a clash emit the same JS
-- [ ] Task 1.3: Distinct generic instances for distinct anonymous struct type arguments (F23)
+- [x] Task 1.3: Distinct generic instances for distinct anonymous struct type arguments (F23)
   - Files: `src/typechecker/resolve.js` (`instanceKey`: recurse with `instanceKey` on `named.typeArgs`, and add `struct` case with field names, embedded flags, tags and `instanceKey` of each field type)
   - Test: `test/unit/types/generics.test.js` with `assertJsTargetsOutput` (Phase 7 adds `wasm`): the F23 repro → `0 `, nested `Outer[Box[struct{ X int }]]` vs `Outer[Box[struct{ S string }]]`, and the same `struct{ X int }` written twice shares one instance (`a = Box[struct{ X int }]{}` assignable)
   - Done when: all pass on `js`/`both`

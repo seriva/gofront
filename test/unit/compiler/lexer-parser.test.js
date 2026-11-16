@@ -1469,6 +1469,30 @@ func main() {
 	);
 });
 
+section("Parser — conversion to an anonymous struct type");
+
+function firstInitExpr(src) {
+	const tokens = new Lexer(src, "t.go").tokenize();
+	const ast = new Parser(tokens, "t.go", src).parse();
+	const fn = ast.decls.find((d) => d.kind === "FuncDecl");
+	return fn.body.stmts[0].rhs[0];
+}
+
+test("struct{...}(x) parses as a TypeConversion to a StructType", () => {
+	const e = firstInitExpr(
+		"package main\nfunc f() { u := struct{ A int }(s) }\n",
+	);
+	assertEqual(e.kind, "TypeConversion");
+	assertEqual(e.targetType.kind, "StructType");
+});
+
+test("struct{...}{...} still parses as a CompositeLit", () => {
+	const e = firstInitExpr(
+		"package main\nfunc f() { u := struct{ A int }{1} }\n",
+	);
+	assertEqual(e.kind, "CompositeLit");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

@@ -39,7 +39,9 @@ export function mangleCollidingTypes(programs, pkgKey, pkgName, owners) {
 // is renamed to `Name__L<n>` for its scope; `%T` and diagnostics drop the
 // suffix (see `displayTypeName`).  `reserved` holds type names other packages
 // own: a local type spelled like one is renamed too, so it cannot clash with
-// the imported type in the flat module.  Returns whether anything was renamed.
+// the imported type in the flat module.  It also holds the package-level
+// var, const and func names: a local type spelled like one is renamed so it
+// cannot take that value over inside its function.  Returns whether anything was renamed.
 let localTypeCounter = 0;
 
 export function renameLocalTypes(programs, reserved = new Set()) {
