@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-stmts.js
 // FunctionEmitter mixin: statement emission (decls, assignment, control flow, return).
 
+import { lhsOperandBinds } from "../../lower/assign-order.js";
 import { loopVarsCapturedInLoop } from "../../lower/captures.js";
 import { rootIdentName } from "../../lower/ownership.js";
 import {
@@ -323,53 +324,30 @@ export class StmtsEmitter {
 	// With `callOnly`, plain-variable operands are read after the right-hand
 	// side; only operands with a call or receive are bound first.
 	_hoistLhsOperands(lhsNodes, rhsNodes, single = false, callOnly = false) {
-		if (lhsNodes.length < 2 && !single) return null;
-		const ordered = hasCallOrReceive(rhsNodes) || hasCallOrReceive(lhsNodes);
-		const assigned = new Set(
-			lhsNodes
-				.filter((l) => l.kind === "Ident" && l.name !== "_")
-				.map((l) => l.name),
-		);
-		if (assigned.size === 0 && !ordered) return null;
+		const binds = lhsOperandBinds(lhsNodes, rhsNodes, {
+			single,
+			callOnly,
+			isConst: (n) => this._isConstOperand(n),
+			isAggregate: (n) => {
+				const t = n._type ?? this._resolveExprGoType(n);
+				return this._isValueStruct(t) || this._isValueArray(t);
+			},
+		});
+		if (binds.length === 0) return null;
 		const undo = [];
 		const names = [];
-		const needsTemp = (n) => {
-			if (!ordered) return this._mentions(n, assigned);
-			if (callOnly) return hasCallOrReceive([n]) || this._mentions(n, assigned);
-			return !this._isConstOperand(n);
-		};
-		const visit = (l) => {
-			let keys;
-			if (l.kind === "IndexExpr") keys = ["expr", "index"];
-			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
-			else if (ordered && l.kind === "UnaryExpr" && l.op === "*")
-				keys = ["operand"];
-			else return;
-			for (const key of keys) {
-				const operand = l[key];
-				if (!needsTemp(operand)) continue;
-				const goType = operand._type ?? this._resolveExprGoType(operand);
-				// A struct or array value names the variable's storage in Go: hoist
-				// the operands inside it (`ps[n].A`) instead of the value.
-				if (
-					key === "expr" &&
-					(this._isValueStruct(goType) || this._isValueArray(goType))
-				) {
-					visit(operand);
-					continue;
-				}
-				const wType = this.toWasmType(goType);
-				const name = `__lhs_tmp_${this.tempCounter++}`;
-				const idx = this.allocLocal(name, wType, goType, true);
-				this.emitExpr(operand, wType);
-				this.pushInstruction({ op: "local.set", index: idx });
-				undo.push([l, key, operand]);
-				names.push(name);
-				l[key] = { kind: "Ident", name, _type: goType, _parTmp: true };
-			}
-		};
-		for (const l of lhsNodes) visit(l);
-		if (undo.length === 0) return null;
+		for (const { node, key } of binds) {
+			const operand = node[key];
+			const goType = operand._type ?? this._resolveExprGoType(operand);
+			const wType = this.toWasmType(goType);
+			const name = `__lhs_tmp_${this.tempCounter++}`;
+			const idx = this.allocLocal(name, wType, goType, true);
+			this.emitExpr(operand, wType);
+			this.pushInstruction({ op: "local.set", index: idx });
+			undo.push([node, key, operand]);
+			names.push(name);
+			node[key] = { kind: "Ident", name, _type: goType, _parTmp: true };
+		}
 		return () => {
 			for (const [node, key, v] of undo) node[key] = v;
 			for (const n of names) this.locals.delete(n);
