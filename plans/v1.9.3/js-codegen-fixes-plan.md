@@ -141,7 +141,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Done when: `o01`–`o08` print Go's order on all three targets
 
 ### Phase 3: Anonymous struct values in the JS output (C5, C9)
-- [ ] Task 3.1: Copying an anonymous struct clones its array and struct fields
+- [x] Task 3.1: Copying an anonymous struct clones its array and struct fields
   - Files: `src/backend/js/expressions.js` (`_cloneJs`; `genValueExpr` if boxing into `any` skips the copy)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: `v01`, `v02`, `v04`, `v05`, `v06`, `v08`, `w04`, `w06`, `w10`; codegen check that scalar-only `v03` still emits `__sclone`
   - Done when: all print Go's output on every target

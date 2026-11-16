@@ -3,6 +3,7 @@
 import {
 	assert,
 	assertAllTargetsOutput,
+	assertContains,
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -558,3 +559,222 @@ func main() {
 		assertEqual(lines.join("\n"), "9");
 	});
 }
+
+section("Anonymous struct values");
+
+test("an anonymous struct copy clones its array field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	st := struct{ A [2]int }{}
+	cp := st
+	cp.A[1] = 6
+	fmt.Println(st.A[1], cp.A[1])
+}
+`,
+		"0 6\n",
+	);
+});
+
+test("an anonymous struct copy clones its struct field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	st := struct{ In P }{}
+	cp := st
+	cp.In.N = 5
+	fmt.Println(st.In.N, cp.In.N)
+}
+`,
+		"0 5\n",
+	);
+});
+
+test("an anonymous struct copy clones nested aggregates and shares pointers and slices", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	a := struct {
+		In  struct{ A [2]int }
+		Ps  [2]P
+		Ptr *P
+		S   []int
+	}{Ptr: &P{1}, S: []int{1, 2}}
+	b := a
+	b.In.A[0] = 7
+	b.Ps[0].N = 9
+	b.Ps[1].N = 10
+	b.Ptr.N = 8
+	b.S[0] = 7
+	fmt.Println(a.In.A[0], b.In.A[0], a.Ps[0].N, b.Ps[0].N, a.Ps[1].N, b.Ps[1].N)
+	fmt.Println(a.Ptr.N, a.S[0])
+}
+`,
+		"0 7 0 9 0 10\n8 7\n",
+	);
+});
+
+test("anonymous struct params, returns, array elements and array copies are independent", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func param(t struct{ A [2]int }) struct{ A [2]int } {
+	t.A[0] = 1
+	return t
+}
+
+func main() {
+	var s struct{ A [2]int }
+	r := param(s)
+	fmt.Println(s.A[0], r.A[0])
+	arr := [2]struct{ A [2]int }{}
+	e := arr[0]
+	e.A[0] = 3
+	c := arr
+	c[1].A[0] = 4
+	fmt.Println(arr[0].A[0], e.A[0], arr[1].A[0], c[1].A[0])
+	g := func() struct{ A [2]int } { return s }
+	h := g()
+	h.A[1] = 5
+	fmt.Println(s.A[1], h.A[1])
+}
+`,
+		"0 1\n0 3 0 4\n0 5\n",
+	);
+});
+
+test("a named struct with an anonymous struct field copies it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type H struct{ In struct{ A [2]int } }
+
+func main() {
+	h := H{}
+	g := h
+	g.In.A[1] = 5
+	fmt.Println(h.In.A[1], g.In.A[1])
+}
+`,
+		"0 5\n",
+	);
+});
+
+test("an anonymous struct compares by value after a copy is modified", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	st := struct{ A [2]int }{}
+	cp := st
+	cp.A[0] = 9
+	fmt.Println(cp == st)
+	cp.A[0] = 0
+	fmt.Println(cp == st)
+}
+`,
+		"false\ntrue\n",
+	);
+});
+
+test("an anonymous struct boxed into any is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	st := struct{ A [2]int }{[2]int{1, 2}}
+	var a any = st
+	st.A[0] = 7
+	st.A[1] = 8
+	fmt.Println(a.(struct{ A [2]int }).A)
+	b := a.(struct{ A [2]int })
+	b.A[0] = 5
+	fmt.Println(a.(struct{ A [2]int }).A, b.A)
+}
+`,
+		"[1 2]\n[1 2] [5 2]\n",
+	);
+});
+
+test("anonymous struct slice literal elements, append and range values are copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	e := struct{ A [2]int }{}
+	sl := []struct{ A [2]int }{e}
+	e.A[0] = 9
+	sl = append(sl, e)
+	e.A[1] = 5
+	for _, v := range sl {
+		v.A[0] = 1
+	}
+	fmt.Println(sl[0].A, sl[1].A, e.A)
+	for _, v := range sl {
+		fmt.Println(v.A)
+	}
+}
+`,
+		"[0 0] [9 0] [9 5]\n[0 0]\n[9 0]\n",
+	);
+});
+
+test("dereferencing and returning an anonymous struct copies it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := struct{ A [2]int }{}
+	p := &s
+	cp := *p
+	cp.A[0] = 4
+	f := func() struct{ A [2]int } { return s }
+	r := f()
+	r.A[1] = 5
+	fmt.Println(s.A, cp.A, r.A)
+}
+`,
+		"[0 0] [4 0] [0 5]\n",
+	);
+});
+
+test("a scalar-only anonymous struct copy still uses __sclone", () => {
+	const { js, out } = run(`package main
+
+import "fmt"
+
+func main() {
+	st := struct{ N int }{}
+	cp := st
+	cp.N = 5
+	fmt.Println(st.N, cp.N)
+}
+`);
+	assertContains(js, "__sclone(");
+	assertEqual(out, "0 5");
+});
