@@ -971,6 +971,31 @@ func main() {
 	);
 });
 
+test("conversion to an embedding anonymous struct drops the source type", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+type S struct{ P }
+
+func (S) M() {}
+
+func main() {
+	s := S{P{7}}
+	u := struct{ P }(s)
+	var a any = u
+	_, isS := a.(S)
+	_, isM := a.(interface{ M() })
+	u.P.N = 9
+	fmt.Println(isS, isM, u.N, s.N)
+}
+`,
+		"false false 9 7\n",
+	);
+});
+
 test("conversion to an anonymous struct type copies and parses", async () => {
 	await assertAllTargetsOutput(
 		`package main

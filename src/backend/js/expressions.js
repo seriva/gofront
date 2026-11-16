@@ -1091,9 +1091,11 @@ export const expressionGenMethods = {
 	},
 
 	// Array and struct fields of an anonymous struct. Embedded structs add
-	// promoted keys to the object, so those structs are copied shallowly.
-	_anonCloneFields(base) {
-		if (!(base.fields instanceof Map) || base._embeds?.length) return [];
+	// promoted keys to the object, so those structs are copied shallowly unless
+	// `plain` asks for a fresh object (a conversion), which clones them too.
+	_anonCloneFields(base, plain = false) {
+		if (!(base.fields instanceof Map)) return [];
+		if (base._embeds?.length && !plain) return [];
 		return [...base.fields].filter(([, ft]) => this._aggregateBase(ft));
 	},
 
@@ -1103,7 +1105,7 @@ export const expressionGenMethods = {
 	// `plain` forces a fresh plain object even when no field needs a deep copy,
 	// for a source that may be an instance of a struct class.
 	_cloneAnonStruct(base, js, plain = false) {
-		const fields = this._anonCloneFields(base);
+		const fields = this._anonCloneFields(base, plain);
 		if (fields.length === 0 && !plain) {
 			this.useHelper("sclone");
 			return `__sclone(${js})`;
@@ -2072,7 +2074,7 @@ export const expressionGenMethods = {
 	_genAnonStructConversion(targetType, inner) {
 		const base = targetType?.kind === "named" ? null : targetType;
 		if (base?.kind !== "struct" || this._structClassName(base)) return null;
-		if (!(base.fields instanceof Map) || base._embeds?.length) return null;
+		if (!(base.fields instanceof Map)) return null;
 		return this._cloneAnonStruct(base, inner, true);
 	},
 
