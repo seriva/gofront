@@ -16,6 +16,7 @@ import {
 	isComplex64,
 	isTypedArraySlice,
 } from "../../typechecker/types.js";
+import { jsMemberName } from "./names.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -1097,7 +1098,7 @@ export const statementGenMethods = {
 		if (base.kind === "struct") {
 			for (const [name, ft] of base.fields) {
 				if (name === "_") continue;
-				const f = `.${name}`;
+				const f = `.${jsMemberName(name)}`;
 				if (this._aggregateBase(ft))
 					this._emitCopyInto(`${dst}${f}`, `${src}${f}`, ft);
 				else this.line(`${dst}${f} = ${src}${f};`);

@@ -22,7 +22,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
-import { jsBindingName } from "./names.js";
+import { jsBindingName, jsMemberName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
@@ -1102,12 +1102,15 @@ export const expressionGenMethods = {
 			return `__sclone(${js})`;
 		}
 		const cloned = new Map(
-			fields.map(([name, ft]) => [name, this._cloneJs(ft, `__v.${name}`)]),
+			fields.map(([name, ft]) => [
+				name,
+				this._cloneJs(ft, `__v.${jsMemberName(name)}`),
+			]),
 		);
 		const props = [...base.fields.keys()].map((name) =>
 			cloned.has(name)
-				? `${name}: ${cloned.get(name)}`
-				: `${name}: __v.${name}`,
+				? `${jsMemberName(name)}: ${cloned.get(name)}`
+				: `${jsMemberName(name)}: __v.${jsMemberName(name)}`,
 		);
 		return `((__v) => ({ ${props.join(", ")} }))(${js})`;
 	},
@@ -1287,7 +1290,7 @@ export const expressionGenMethods = {
 			}
 			if (expr.operand.kind === "SelectorExpr") {
 				const obj = this.genExpr(expr.operand.expr);
-				const field = expr.operand.field;
+				const field = jsMemberName(expr.operand.field);
 				return `((__o) => Object.defineProperties({ get value() { return __o.${field}; }, set value(v) { __o.${field} = v; } }, { __target: { value: __o }, __index: { value: "${field}" } }))(${obj})`;
 			}
 			// For non-boxed vars (primitives, etc.), wrap in { value: x }
@@ -1372,9 +1375,9 @@ export const expressionGenMethods = {
 					this.useHelper("nilCall");
 					recv = "__nilcall(recv)";
 				}
-				return `((recv, ...args) => ${protoCls}.prototype.${expr.field}.call(${recv}, ...args))`;
+				return `((recv, ...args) => ${protoCls}.prototype.${jsMemberName(expr.field)}.call(${recv}, ...args))`;
 			}
-			return `((recv, ...args) => recv.${expr.field}(...args))`;
+			return `((recv, ...args) => recv.${jsMemberName(expr.field)}(...args))`;
 		}
 		const namedValue = this._genNamedMethodValue(expr);
 		if (namedValue !== undefined) return namedValue;
@@ -1446,7 +1449,7 @@ export const expressionGenMethods = {
 		let t = expr.expr._type;
 		if (t?.kind === "pointer") t = t.base;
 		const path = this._embedPath(t, expr.field, 0);
-		return path ? path.map((n) => `.${n}`).join("") : "";
+		return path ? path.map((n) => `.${jsMemberName(n)}`).join("") : "";
 	},
 
 	_embedPath(t, field, depth) {
@@ -1488,7 +1491,7 @@ export const expressionGenMethods = {
 			const camel = f[0].toLowerCase() + f.slice(1);
 			if (t.underlying?.methods?.has(camel)) return camel;
 		}
-		return f;
+		return jsMemberName(f);
 	},
 
 	// ── Named non-struct types with methods: raw values, static dispatch ──
@@ -1675,7 +1678,7 @@ export const expressionGenMethods = {
 				this.strict && !expr._isMethodValue && !expr._nonNil
 					? this._genNilChecked(base)
 					: base;
-			const sel = `${recv}${this._promotedPath(expr)}.${expr.field}`;
+			const sel = `${recv}${this._promotedPath(expr)}.${jsMemberName(expr.field)}`;
 			if (expr._isMethodValue && !expr._callee) {
 				// `p.M` with a value receiver binds a copy of `*p` now.
 				if (expr._derefRecv) {
@@ -1683,7 +1686,7 @@ export const expressionGenMethods = {
 						expr.expr._type.base,
 						this.strict ? this._genNilChecked(base) : base,
 					);
-					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
+					return `((__r) => __r.${jsMemberName(expr.field)}.bind(__r))(${copy})`;
 				}
 				// A pointer receiver may be nil: bind through the prototype so
 				// `s.M` on a nil pointer does not read `.M` off null.
@@ -1693,12 +1696,12 @@ export const expressionGenMethods = {
 					expr,
 				);
 				if (protoCls)
-					return `${protoCls}.prototype.${expr.field}.bind(${base})`;
+					return `${protoCls}.prototype.${jsMemberName(expr.field)}.bind(${base})`;
 				return `${sel}.bind(${base})`;
 			}
 			return sel;
 		}
-		const sel = `${base}.value.${expr.field}`;
+		const sel = `${base}.value.${jsMemberName(expr.field)}`;
 		if (expr._isMethodValue && !expr._callee)
 			return `${sel}.bind(${base}.value)`;
 		return sel;
@@ -1970,10 +1973,11 @@ export const expressionGenMethods = {
 
 	_ifaceMethodCheck(val, methodNames, multiUnwrap = null) {
 		const checks = methodNames.map((m) => {
+			const jm = jsMemberName(m);
 			const base =
 				m === "Unwrap" && multiUnwrap !== null
-					? `typeof ${val}.${m} === "function" && (${val}.${m}.__multi === true) === ${multiUnwrap}`
-					: `typeof ${val}.${m} === "function"`;
+					? `typeof ${val}.${jm} === "function" && (${val}.${jm}.__multi === true) === ${multiUnwrap}`
+					: `typeof ${val}.${jm} === "function"`;
 			// A struct value's method set lacks the pointer-receiver methods.
 			return `${base} && !(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
 		});
@@ -2138,7 +2142,7 @@ export const expressionGenMethods = {
 			// prototype so a nil `this` reaches it instead of a TypeError.
 			const recv = this.genExpr(expr.func.expr);
 			const rest = this._genCallArgs(expr);
-			const m = expr.func.field;
+			const m = jsMemberName(expr.func.field);
 			const viaProto = (r) =>
 				`${nilSafe}.prototype.${m}.call(${rest ? `${r}, ${rest}` : r})`;
 			// A non-nil variable keeps the direct (faster) call.
@@ -2167,9 +2171,9 @@ export const expressionGenMethods = {
 		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
 		// type-parameter variable is the box, so reach the value it holds.
 		if (this._hasPointerTypeSet(expr.func.expr._type))
-			recv = `((__r) => typeof __r?.${expr.func.field} === "function" ? __r : __r?.value)(${recv})`;
+			recv = `((__r) => typeof __r?.${jsMemberName(expr.func.field)} === "function" ? __r : __r?.value)(${recv})`;
 		const args = this._genCallArgs(expr);
-		return `${recv}.${expr.func.field}(${args})`;
+		return `${recv}.${jsMemberName(expr.func.field)}(${args})`;
 	},
 
 	// Whether type parameter `tp` is constrained to a single `*T` type-set term.
@@ -2202,7 +2206,7 @@ export const expressionGenMethods = {
 		if (!target.base.methods?.has(sel.field)) return null;
 		const rest = this._genCallArgs(expr);
 		const obj = this.genExpr(recv.args[0]);
-		return `${cls}.prototype.${sel.field}.call(${rest ? `${obj}, ${rest}` : obj})`;
+		return `${cls}.prototype.${jsMemberName(sel.field)}.call(${rest ? `${obj}, ${rest}` : obj})`;
 	},
 
 	// The class whose prototype holds pointer-receiver method `field`, for a
@@ -2379,7 +2383,7 @@ export const expressionGenMethods = {
 			this.useHelper("nilCall");
 			const recv = this.genExpr(expr.func.expr);
 			const args = this._genCallArgs(expr);
-			return `__nilcall(${recv}).${expr.func.field}(${args})`;
+			return `__nilcall(${recv}).${jsMemberName(expr.func.field)}(${args})`;
 		}
 		return undefined;
 	},
@@ -2676,7 +2680,7 @@ export const expressionGenMethods = {
 		} else {
 			const valExpr = this.genExpr(e.value);
 			values[idx] =
-				`(${valExpr} != null ? ${valExpr}.${ef} : ${fields[idx].zero})`;
+				`(${valExpr} != null ? ${valExpr}.${jsMemberName(ef)} : ${fields[idx].zero})`;
 		}
 		return idx;
 	},
@@ -2912,7 +2916,7 @@ export const expressionGenMethods = {
 		}
 		const fields = [...st.fields].map(
 			([name, ft]) =>
-				`${name}: ${values.get(name) ?? this.zeroValueForType(ft)}`,
+				`${jsMemberName(name)}: ${values.get(name) ?? this.zeroValueForType(ft)}`,
 		);
 		return `{ ${fields.join(", ")} }`;
 	},
@@ -3196,7 +3200,7 @@ export const expressionGenMethods = {
 					.filter((f) => !f.embedded && f.names.length > 0)
 					.map(
 						(f) =>
-							`${f.names.map((n) => `${n}: ${this.zeroValueForTypeNode(f.type)}`).join(", ")}`,
+							`${f.names.map((n) => `${jsMemberName(n)}: ${this.zeroValueForTypeNode(f.type)}`).join(", ")}`,
 					)
 					.join(", ");
 				return `{ ${fields} }`;
@@ -3247,7 +3251,10 @@ export const expressionGenMethods = {
 				return this._nilMapZero();
 			case "struct": {
 				const fields = [...t.fields.entries()]
-					.map(([name, ft]) => `${name}: ${this.zeroValueForType(ft)}`)
+					.map(
+						([name, ft]) =>
+							`${jsMemberName(name)}: ${this.zeroValueForType(ft)}`,
+					)
 					.join(", ");
 				return `{ ${fields} }`;
 			}

@@ -181,7 +181,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/link/type-names.js` (`mangleCollidingTypes` takes the built-in names for `wasm` packages), `src/compiler.js` (passes the package target), `docs/go-compatibility.md` (*Names that shadow JS globals*: in a `wasm` package such a type is renamed `WeakMap$$util` in the facade, so hand-written JS uses that name; `js`/`both` packages keep the error)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `h05`, plus `var z util.WeakMap` in the js main and `%T` printing `util.WeakMap`; a second package that also declares `WeakMap`; the existing `type Array struct{}` rejection tests for `js`/`both` stay green
   - Done when: `h05` prints `3 2`, the facade defines `class WeakMap$$util`, and no `js`/`both` behaviour changes
-- [ ] Task 5.3: Struct fields and methods starting with `__` get a `$` suffix in JS output
+- [x] Task 5.3: Struct fields and methods starting with `__` get a `$` suffix in JS output
   - Files: `src/backend/js/index.js` (`jsMemberName`; class constructor, `__clone()`, method definitions), `src/backend/js/expressions.js` (`_jsMemberName`, `_fillKeyedStructElems`, `_genAnonStructLit`), `src/backend/wasm/boundary.js` (`genBothStruct` field reads)
   - Test: `test/unit/language/structs.test.js` with `assertAllTargetsOutput`: `f01`, `f02`, `f03` (written first), plus a promoted `__clone` field through embedding, a method value `a.__clone`, an interface with a `__clone() int` method, an anonymous struct `struct{ __t int }`, and a `both`-package struct with a `__t` field passed from a js main (`compileHybridProject`)
   - Done when: all print Go's output on every target; `%+v` still prints `{__clone:1 …}`

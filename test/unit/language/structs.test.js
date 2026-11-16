@@ -3,11 +3,13 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
 	compile,
 	compileHybrid,
+	compileHybridProject,
 	runJs,
 	section,
 	summarize,
@@ -774,6 +776,225 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "3\n7 x");
 	await assertProgramOutput(src, "3\n7 x\n");
+});
+
+section("Fields and methods named like runtime properties");
+
+test("fields named __clone, __t and __ref keep their own values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ __clone, __t, __ref int }
+
+func main() {
+	a := T{1, 2, 3}
+	b := a
+	b.__clone = 9
+	fmt.Println(a.__clone, b.__clone, any(a).(T).__t, a.__ref)
+}
+`,
+		"1 9 2 3\n",
+	);
+});
+
+test("a method named __clone is called, not the generated copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ N int }
+
+func (t T) __clone() int { return t.N * 10 }
+
+func main() {
+	a := T{1}
+	b := a
+	b.N = 2
+	fmt.Println(a.__clone(), b.__clone())
+}
+`,
+		"10 20\n",
+	);
+});
+
+test("a field named __x copies, prints, compares and keys a map", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct {
+	__x int
+	Y   [2]int
+}
+
+func main() {
+	a := T{__x: 1}
+	b := a
+	b.Y[0] = 5
+	fmt.Printf("%+v %+v\\n", a, b)
+	fmt.Println(a == b, a == T{__x: 1})
+	m := map[T]int{a: 1, b: 2}
+	fmt.Println(len(m), m[a], m[b])
+}
+`,
+		"{__x:1 Y:[0 0]} {__x:1 Y:[5 0]}\nfalse true\n2 1 2\n",
+	);
+});
+
+test("a promoted __clone field goes through the embedded struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type In struct{ __clone, V int }
+type Out struct {
+	In
+	W int
+}
+
+func main() {
+	o := Out{In{1, 2}, 3}
+	p := o
+	p.__clone = 8
+	p.V = 9
+	fmt.Println(o.__clone, p.__clone, o.V, p.V, o.W)
+}
+`,
+		"1 8 2 9 3\n",
+	);
+});
+
+test("a __clone method value and an interface method dispatch", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ __clone() int }
+
+type T struct{ N int }
+
+func (t T) __clone() int { return t.N + 1 }
+
+type P struct{ N int }
+
+func (p *P) __clone() int { return p.N + 100 }
+
+func main() {
+	a := T{4}
+	f := a.__clone
+	a.N = 10
+	var i I = a
+	var j I = &P{1}
+	fmt.Println(f(), i.__clone(), j.__clone())
+}
+`,
+		"5 11 101\n",
+	);
+});
+
+test("an anonymous struct with a __t field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := struct{ __t int }{3}
+	b := a
+	b.__t = 4
+	c := struct{ __t, N int }{__t: 1, N: 2}
+	var z struct {
+		__t int
+		A   [2]int
+	}
+	z2 := z
+	z2.__t = 5
+	z2.A[1] = 1
+	var arr [2]struct{ __t int }
+	arr[1] = struct{ __t int }{7}
+	p := &arr[0]
+	*p = arr[1]
+	fmt.Printf("%v %v %+v %v\\n", a.__t, b.__t, c, a == b)
+	fmt.Println(z.__t, z2.__t, z2.A, arr)
+}
+`,
+		"3 4 {__t:1 N:2} false\n0 5 [0 1] [{7} {7}]\n",
+	);
+});
+
+test("a __clone method satisfies an inline interface assertion", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ N int }
+
+func (t T) __clone() int { return t.N }
+
+type N int
+
+func (n N) __ref() int { return int(n) }
+
+func main() {
+	var v any = T{1}
+	_, ok1 := v.(interface{ __clone() int })
+	_, ok2 := v.(interface{ __nope() int })
+	var w any = N(2)
+	x, ok3 := w.(interface{ __ref() int })
+	fmt.Println(ok1, ok2, ok3, x.__ref())
+}
+`,
+		"true false true 2\n",
+	);
+});
+
+test("a both-package struct with a __t field crosses to a wasm package", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"lib/lib.go": `//gofront:target both
+package lib
+
+type Rec struct {
+	__t   int
+	__ref int
+	N     int
+}
+`,
+			"calc/calc.go": `//gofront:target wasm
+package calc
+
+import "../lib"
+
+func Bump(r lib.Rec) lib.Rec {
+	r.__t += 10
+	r.__ref += 20
+	r.N += 1
+	return r
+}
+`,
+			"main.go": `package main
+
+import (
+	"./calc"
+	"./lib"
+)
+
+func Main() string {
+	r := calc.Bump(lib.Rec{1, 2, 3})
+	return string(rune('a'+r.__t)) + string(rune('a'+r.__ref)) + string(rune('a'+r.N))
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), "lwe");
 });
 
 // ── Entry point ───────────────────────────────────────────────
