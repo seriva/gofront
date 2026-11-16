@@ -1356,6 +1356,16 @@ closureCase(
 );
 
 closureCase(
+	"assigning a dereferenced pointer in a closure keeps the pointer identity",
+	`	s := S{1}
+	ps := &s
+	f := func() { s = *ps; s.N = 5 }
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{5} true\n",
+);
+
+closureCase(
 	"a pointer returned from another closure sees the store",
 	`	s := S{1}
 	get := func() *S { return &s }
