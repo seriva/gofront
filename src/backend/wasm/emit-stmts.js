@@ -1097,6 +1097,9 @@ export class StmtsEmitter {
 				typeIndex: structInfo.typeIndex,
 				fieldIndex: i,
 			});
+			// A composite literal is already a fresh value.
+			if (r.kind !== "CompositeLit")
+				this._emitCopyFieldValue(structInfo.fields[i]);
 			this.pushInstruction({
 				op: "struct.set",
 				typeIndex: structInfo.typeIndex,

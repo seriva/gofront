@@ -179,6 +179,79 @@ func main() { println(sum([]Vec{{1, 2}})) }`);
 	assert(!/__arr0\[__i0\]\.__clone\(\)/.test(js), `unexpected copy:\n${js}`);
 });
 
+test("a store through a pointer copies array fields (V1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A [2]int }
+
+func main() {
+	var s, s2 T
+	ps := &s
+	*ps = s2
+	ps.A[0] = 9
+	fmt.Println(s2, s)
+}
+`,
+		"{[0 0]} {[9 0]}\n",
+	);
+});
+
+test("a multi-assignment through a pointer copies array fields (V2)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A [2]int }
+
+func main() {
+	var s, s2 T
+	ps := &s
+	x := 0
+	*ps, x = s2, 1
+	ps.A[0] = 9
+	fmt.Println(s2, s, x)
+	p := &T{[2]int{5, 6}}
+	t2 := T{[2]int{1, 2}}
+	*p, x = t2, 9
+	t2.A[0] = 99
+	fmt.Println(*p, t2)
+}
+`,
+		"{[0 0]} {[9 0]} 1\n{[1 2]} {[99 2]}\n",
+	);
+});
+
+test("a store through a pointer copies nested struct fields (V3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ M int }
+type W struct {
+	Q P
+	A [2]int
+}
+
+func main() {
+	var a, b W
+	pa := &a
+	*pa = b
+	pa.Q.M = 3
+	pa.A[1] = 4
+	fmt.Println(b, a)
+	*pa = W{P{1}, [2]int{7, 8}}
+	fmt.Println(a)
+}
+`,
+		"{{0} [0 0]} {{3} [0 4]}\n{{1} [7 8]}\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {

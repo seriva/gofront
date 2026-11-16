@@ -1207,6 +1207,21 @@ export class FunctionEmitter {
 		return null;
 	}
 
+	// Array and value-struct fields are values: copies the field value on top
+	// of the stack so the copy does not share storage with the source.
+	_emitCopyFieldValue(f) {
+		if (!f.goType || f.goType.kind === "pointer") return;
+		if (isArrayType(f.goType, this.mod.checker)) {
+			this.emitCopyArray(f.goType);
+		} else if (
+			isStructType(f.goType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(f.goType, this.mod.checker, this.mod)
+		) {
+			const inner = this._resolveStructInfo({ _type: f.goType });
+			if (inner) this.emitCloneStruct(inner, f.wType);
+		}
+	}
+
 	emitCloneStruct(structInfo, baseWType, dstInfo = structInfo) {
 		const tmp = this.acquireTemp(baseWType);
 		this.pushInstruction({ op: "local.set", index: tmp });
@@ -1217,18 +1232,7 @@ export class FunctionEmitter {
 				typeIndex: structInfo.typeIndex,
 				fieldIndex: i,
 			});
-			// Array and value-struct fields are values: copy them with the struct.
-			const f = structInfo.fields[i];
-			if (!f.goType || f.goType.kind === "pointer") continue;
-			if (isArrayType(f.goType, this.mod.checker)) {
-				this.emitCopyArray(f.goType);
-			} else if (
-				isStructType(f.goType, this.mod.checker, this.mod) &&
-				!isPointerToStruct(f.goType, this.mod.checker, this.mod)
-			) {
-				const inner = this._resolveStructInfo({ _type: f.goType });
-				if (inner) this.emitCloneStruct(inner, f.wType);
-			}
+			this._emitCopyFieldValue(structInfo.fields[i]);
 		}
 		this.pushInstruction({
 			op: "struct.new",

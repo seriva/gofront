@@ -5,6 +5,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	compile,
 	runJs,
 	section,
@@ -578,5 +579,94 @@ func main() {
 }
 `,
 		"{7} true\n",
+	);
+});
+
+section("Calls run once (comma-ok define, complex compound)");
+
+test("a non-strict comma-ok define runs the key call once (C1)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	k := func() string { n++; return "x" }
+	m := map[string]int{"x": 1}
+	v, ok := m[k()]
+	fmt.Println(v, ok, n)
+}
+`,
+		"1 true 1\n",
+	);
+});
+
+test("an if initializer comma-ok runs the key call once (C2)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	k := func() string { n++; return "x" }
+	m := map[string]int{"x": 1}
+	if v, ok := m[k()]; ok {
+		fmt.Println(v, n)
+	}
+}
+`,
+		"1 1\n",
+	);
+});
+
+test("a call-free comma-ok define keeps the unbound fast path", () => {
+	const { js } = compile(`package main
+func main() {
+	m := map[string]int{"x": 1}
+	key := "x"
+	v, ok := m[key]
+	println(v, ok)
+}`);
+	assert(!js.includes("__m"), `unexpected temp:\n${js}`);
+});
+
+test("complex += runs the right-hand call once (C4)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	f := func() complex128 { n++; return complex(3, 4) }
+	c := complex(1, 2)
+	c += f()
+	fmt.Println(c, n)
+}
+`,
+		"(4+6i) 1\n",
+	);
+});
+
+test("complex map and *= compound assignments run each call once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n, kn := 0, 0
+	f := func() complex128 { n++; return complex(1, 1) }
+	k := func() string { kn++; return "a" }
+	m := map[string]complex128{"a": complex(1, 2)}
+	m[k()] += f()
+	c := complex(2, 0)
+	c *= f()
+	fmt.Println(m["a"], c, n, kn)
+}
+`,
+		"(2+3i) (2+2i) 2 1\n",
 	);
 });
