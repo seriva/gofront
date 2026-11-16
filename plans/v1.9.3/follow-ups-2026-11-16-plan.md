@@ -123,7 +123,7 @@ Fix the 31 review follow-ups that still reproduce in `plans/follow-ups.md` (re-p
   - Files: `src/compiler.js` (`mangleLocalTypes` adds package-level var/const/func names to the `reserved` set), `src/link/type-names.js` (`renameLocalTypes` doc comment)
   - Test: `test/unit/compiler/local-type-shadow.test.js` with `assertAllTargetsOutput`: the F4 repro (`__A`) and the plain `A` variant → `5`; a local type named after a package-level func
   - Done when: all print `5` on every target; programs without such a clash emit the same JS
-- [ ] Task 1.3: Distinct generic instances for distinct anonymous struct type arguments (F23)
+- [x] Task 1.3: Distinct generic instances for distinct anonymous struct type arguments (F23)
   - Files: `src/typechecker/resolve.js` (`instanceKey`: recurse with `instanceKey` on `named.typeArgs`, and add `struct` case with field names, embedded flags, tags and `instanceKey` of each field type)
   - Test: `test/unit/types/generics.test.js` with `assertJsTargetsOutput` (Phase 7 adds `wasm`): the F23 repro → `0 `, nested `Outer[Box[struct{ X int }]]` vs `Outer[Box[struct{ S string }]]`, and the same `struct{ X int }` written twice shares one instance (`a = Box[struct{ X int }]{}` assignable)
   - Done when: all pass on `js`/`both`

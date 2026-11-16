@@ -6,3 +6,4 @@ Bugs noticed outside the task at hand, each with a repro so it can be re-checked
 - **<Area>:** <defect in one sentence>. Repro: `<snippet or command>` → got `<actual>`, want `<expected>`. (<PR #N or branch>, <plan-slug Phase N | standalone>, <Low | Out of Scope>)
 -->
 - **Typechecker conversions:** Calling an alias of an anonymous struct type as a conversion is rejected. Repro: `type A = struct{ X int }; type S struct{ X int }; u := A(S{1})` → got `Cannot call non-function type struct{...}`, want a converted value. (feat/follow-ups-2026-11-16-phase-1, follow-ups-2026-11-16 Phase 1, Out of Scope)
+- **Parser:** A struct type with a field tag inside generic type arguments does not parse. Repro: `type Box[T any] struct{ V T }; var c Box[struct{ X int `json:"x"` }]` → got `Parse error at 3:10: Expected top-level declaration (got [ "[")`, want it to compile. (feat/follow-ups-2026-11-16-phase-1, follow-ups-2026-11-16 Phase 1, Out of Scope)
