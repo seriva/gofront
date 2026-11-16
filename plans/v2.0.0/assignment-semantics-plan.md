@@ -126,15 +126,15 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
   - Done when: `grep -n "ordered && l.kind" src/backend` finds nothing and all assignment-order sections pass
 
 ### Phase 3: JS stores keep identity and copies (I1–I7, X1, X3, V7)
-- [ ] Task 3.1: `_fnMutates` sees an enclosing function's `&x` for captured variables
+- [x] Task 3.1: `_fnMutates` sees an enclosing function's `&x` for captured variables
   - Files: `src/backend/js/expressions.js` (`_withFnCtx` parent link, `_fnMutates`), `src/lower/ownership.js` (a `declaresVar` helper if `fnMutates` needs it)
   - Test: `test/unit/language/value-semantics.test.js` new section *Whole-value stores in closures*: I1, I3, I4, I5, I6, I7 with `assertAllTargetsOutput`; I2 (arrays) as a control; a shadowing control (closure declares its own `s := S{9}`; outer `*ps` stays `{1}`)
   - Done when: all pass on every target
-- [ ] Task 3.2: Comma-ok results stored into a struct `*p`
+- [x] Task 3.2: Comma-ok results stored into a struct `*p`
   - Files: `src/backend/js/statements.js` (`_storeTarget`, used by `_genCommaOkMapIndex` and `_genCommaOkTypeAssert`)
   - Test: `codegen-regressions.test.js` *Assignment order: blanks, pointer targets, comma-ok*: X1 (`{5} true`), X3 (`{7} true`), plus a missing key (`*p, ok = m["z"]` → `{0} false`) with `assertAllTargetsOutput`
   - Done when: no `Invalid left-hand side` on js/both and all three print Go's output
-- [ ] Task 3.3: Range-over-func copies yielded arrays
+- [x] Task 3.3: Range-over-func copies yielded arrays
   - Files: `src/backend/js/statements.js` (`genIteratorFor` preambles)
   - Test: `test/unit/language/range-func.test.js`: V7 (`[1 2]`), the assign form (`var v [2]int; for v = range seq { v[0] = 9 }`), and a `[2][2]int` yield, with `assertAllTargetsOutput`
   - Done when: all three print Go's output on every target

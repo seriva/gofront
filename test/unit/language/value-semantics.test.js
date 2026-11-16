@@ -1188,3 +1188,110 @@ func main() {
 		"5 0\n",
 	);
 });
+
+section("Whole-value stores in closures");
+
+const closureCase = (name, body, want) =>
+	test(name, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+closureCase(
+	"a struct reassigned in a closure stays visible through its pointer",
+	`	s := S{1}
+	ps := &s
+	f := func() { s = S{2} }
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n",
+);
+
+closureCase(
+	"an array reassigned in a closure keeps its identity",
+	`	arr := [2]int{1, 2}
+	pa := &arr
+	f := func() { arr = [2]int{3, 4} }
+	f()
+	fmt.Println(*pa, pa == &arr)`,
+	"[3 4] true\n",
+);
+
+closureCase(
+	"a multi-assignment in a closure stores through the pointer",
+	`	s := S{1}
+	ps := &s
+	j := 0
+	f := func() { s, j = S{2}, 1 }
+	f()
+	fmt.Println(*ps, j)`,
+	"{2} 1\n",
+);
+
+closureCase(
+	"copying another struct in a closure keeps the pointer identity",
+	`	s := S{1}
+	ps := &s
+	t := S{5}
+	f := func() { s = t; s.N = 5 }
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{5} true\n",
+);
+
+closureCase(
+	"a pointer returned from another closure sees the store",
+	`	s := S{1}
+	get := func() *S { return &s }
+	set := func() { s = S{2} }
+	p := get()
+	set()
+	fmt.Println(p == &s, *p == s)`,
+	"true true\n",
+);
+
+closureCase(
+	"the address is taken after the closure is created",
+	`	s := S{1}
+	f := func() { s = S{2} }
+	ps := &s
+	f()
+	fmt.Println(*ps)`,
+	"{2}\n",
+);
+
+closureCase(
+	"a closure in a range body stores through the pointer",
+	`	s := S{1}
+	ps := &s
+	for i := 3; i < 4; i++ {
+		func() { s = S{i} }()
+	}
+	fmt.Println(*ps)`,
+	"{3}\n",
+);
+
+closureCase(
+	"a closure that declares its own struct does not touch the outer one",
+	`	s := S{1}
+	ps := &s
+	f := func() {
+		s := S{9}
+		s = S{8}
+		fmt.Println(s)
+	}
+	f()
+	fmt.Println(*ps)`,
+	"{8}\n{1}\n",
+);

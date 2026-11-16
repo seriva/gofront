@@ -147,6 +147,28 @@ export function fnMutates(body, name, addrOnly = false, cache = null) {
 	return nodeMutatesVar(body, name, addrOnly);
 }
 
+// True when `body` (not its nested function literals) declares a variable
+// `name` with `:=`, `var` or a range clause, so it shadows any outer `name`.
+export function declaresVar(body, name) {
+	const walk = (node) => {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) return node.some(walk);
+		if (node.kind === "FuncLit") return false;
+		if (
+			node.kind === "DefineStmt" &&
+			node.lhs.some((e) => e.kind === "Ident" && !e._redecl && e.name === name)
+		)
+			return true;
+		if (
+			node.kind === "VarDecl" &&
+			node.decls.some((d) => d.names?.includes(name))
+		)
+			return true;
+		return someChild(node, walk);
+	};
+	return walk(body);
+}
+
 function collectClosureMutatedVars(node, mutated = new Set()) {
 	if (!node || typeof node !== "object") return mutated;
 	if (Array.isArray(node)) {
