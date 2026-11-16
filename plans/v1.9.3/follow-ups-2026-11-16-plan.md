@@ -119,7 +119,7 @@ The rows for F2, F5, F8, F17, F19–F22, F24, F25 and F28–F31 moved with their
   - Files: `src/typechecker/expressions.js` (mark bindings that shadow a package-level class type), `src/backend/js/index.js` (`jsBindingName` honours the mark for those locals)
   - Test: `test/unit/types/shadowing.test.js` with `assertAllTargetsOutput`: F3 → `8`; a parameter `func g(T T) int { return int(T.Dbl()) }`; a struct type `type R struct{N int}` with `var R R; R.M()`
   - Done when: all pass; locals that shadow no type emit the same JS
-- [ ] Task 3.3: `new(T)` of a type parameter uses the instance's zero (F7)
+- [x] Task 3.3: `new(T)` of a type parameter uses the instance's zero (F7)
   - Files: `src/backend/js/expressions.js` (`new` builtin: type-parameter check first)
   - Test: `test/unit/types/generics.test.js` with `assertAllTargetsOutput`: F7 with `S` and with `__S` → `0`; `f[struct{X int}]` and `f[S]` (the real struct) → `{0}`
   - Done when: all pass

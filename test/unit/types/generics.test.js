@@ -2460,6 +2460,47 @@ func main() {
 	);
 });
 
+section("Generics — new of a type parameter");
+
+for (const S of ["S", "__S"]) {
+	test(`new(T) of a type parameter named ${S} like a package struct`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type ${S} struct{ X int }
+
+func f[${S} any](v ${S}) *${S} { return new(${S}) }
+
+func main() {
+	fmt.Println(*f[int](3))
+	fmt.Println(*f[${S}](${S}{}))
+}
+`,
+			"0\n{0}\n",
+		);
+	});
+}
+
+test("new(T) of a type parameter instantiated with an anonymous struct", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X int }
+
+func f[S any](v S) *S { return new(S) }
+
+func main() {
+	fmt.Println(f[struct{ X int }](struct{ X int }{}).X)
+}
+`,
+		"0\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

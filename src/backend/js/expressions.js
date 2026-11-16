@@ -469,6 +469,9 @@ const BUILTIN_GEN = {
 			const inst = s._genericStructNew(base.name, base.typeArgs);
 			if (inst) return inst;
 		}
+		// A type parameter is not the package type of the same name: its zero
+		// comes from the instance.
+		if (base?.kind === "typeParam") return s._newOfTypeParam(base, arg);
 		const typeName = arg.name ?? s.getTypeName(arg);
 		if (typeName && s.structNames.has(typeName)) {
 			return `new ${jsClassName(typeName)}()`;
@@ -480,9 +483,6 @@ const BUILTIN_GEN = {
 		}
 		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
 		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
-		// Erased type parameter: a struct instantiation is its own pointer.
-		if (base?.kind === "typeParam")
-			return `((__v) => (${s._typeParamIsStructJs(base.name)} ? __v : { value: __v }))(${zero})`;
 		return `{ value: ${zero} }`;
 	},
 	// `print` writes without a trailing newline (Go semantics); the wasm glue
@@ -3127,6 +3127,15 @@ export const expressionGenMethods = {
 	// `new Box(args…, [factories])` for an instance of generic struct `name`
 	// with `typeArgs`; fields without an argument start at their zero value.
 	// Null when `name` is not a generic struct.
+	// `new(T)` for a type parameter: erased, a struct instantiation is its own
+	// pointer.
+	_newOfTypeParam(base, arg) {
+		const zero = this.zeroValueForExpr(
+			arg.kind === "TypeExpr" ? arg.type : arg,
+		);
+		return `((__v) => (${this._typeParamIsStructJs(base.name)} ? __v : { value: __v }))(${zero})`;
+	},
+
 	_genericStructNew(name, typeArgs, args = []) {
 		const generic = this.checker?.types.get(name);
 		const st = generic?.underlying;
