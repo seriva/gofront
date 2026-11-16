@@ -1,7 +1,8 @@
 # Assignment Semantics — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
+**Base branch:** main  
 **Related:** Fixes the spec-mandated assignment and value-semantics defects found by the differential fuzzer (`test/fuzz/difffuzz.js`, added in Phase 1) and the matching `plans/follow-ups.md` entries from [`../v1.9.3/follow-ups-2026-11-16-plan.md`](../v1.9.3/follow-ups-2026-11-16-plan.md) Phases 4–5 (PRs #212, #213). Independent of [`followup-fixes-plan.md`](followup-fixes-plan.md), which owns the `wasm` anonymous-struct layout (F17) that the fuzzer skips by default. Start after the v1.9.3 follow-ups plan merges (it edits the same assignment paths in `src/backend/js/statements.js` and `src/backend/wasm/emit-stmts.js`).  
 **Release note:** Assignments now keep Go's value semantics in more places: a struct reassigned inside a closure stays visible through earlier pointers, `p, *p = &b, x` stores through the old pointer, and comma-ok lookups into `*p` no longer crash in JavaScript. Calls in a comma-ok map key or a complex `+=` run once, and struct copies through a pointer on WebAssembly no longer share their arrays.  
 
