@@ -940,9 +940,7 @@ export const statementGenMethods = {
 	// non-constant operand is bound, in source order.
 	_hoistLhsOperands(stmt) {
 		if (stmt.op !== "=" || stmt.lhs.length < 2) return null;
-		const ordered =
-			stmt.rhs.some((e) => this._hasCallExpr(e)) ||
-			stmt.lhs.some((e) => this._hasCallExpr(e));
+		const ordered = hasCallOrReceive(stmt.rhs) || hasCallOrReceive(stmt.lhs);
 		const assigned = new Set(
 			stmt.lhs
 				.filter((l) => l.kind === "Ident" && l.name !== "_")

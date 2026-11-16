@@ -2,9 +2,9 @@
 
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
-	assertJsTargetsOutput,
 	compile,
 	runJs,
 	section,
@@ -237,7 +237,7 @@ func main() {
 section("Multiple assignment evaluation order");
 
 test("targets evaluate their operands before the right-hand sides", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
