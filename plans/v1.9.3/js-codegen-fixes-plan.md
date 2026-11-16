@@ -1,10 +1,10 @@
 # v1.9.3 JS Codegen Fixes — Design Plan
 
 **Version:** v1.9.3  
-**Status:** In Progress  
+**Status:** Completed (2026-11-16)  
 **Base branch:** main  
 **Related:** [`../v2.0.0/checker-strictness-plan.md`](../v2.0.0/checker-strictness-plan.md) (the breaking half of the same 2026-11-13 review), [`../v2.0.0/web-platform-evolution-plan.md`](../v2.0.0/web-platform-evolution-plan.md) (Phase 7 retypes `BROWSER_GLOBALS` without changing its membership; Task 3.1 owns import cycles; Task 4.5 owns duplicate runtime helpers).  
-**Release note:** Functions, variables, local types, struct fields and templ components named after JavaScript built-ins or runtime properties (`Map`, `BigInt`, `NaN`, `__clone`) no longer break the bundle, and side effects in divisors, shift counts and multiple assignments run once and in Go's order. Anonymous structs copy their array and struct fields and work in literals that omit the type and as generic type arguments, and in WebAssembly `recover()` returns the panic value with its type and slice-bounds panics name the bounds as Go does.  
+**Release note:** Functions, variables, local types and templ or css components named after JavaScript built-ins (`Map`, `BigInt`, `NaN`), and names starting with `__`, no longer break the generated JavaScript, a call in a divisor, shift count or multiple assignment runs once and in Go's order, and anonymous structs copy their array and struct fields and work in literals that omit the type. `recover()` on WebAssembly returns the panic value with its type, and slice-bounds panics report the bounds as Go does.  
 
 ---
 
@@ -12,7 +12,7 @@
 
 Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up probes. Every item compiles today and then crashes or prints a wrong result at run time. No fix rejects a program that compiles today, so this is a patch release that does not wait for v2.0.0.
 
-**Done means:**
+**Done means:** (Shipped except C10 `wasm` package types (Task 5.2) and C12 (Task 5.4: `wasm` generics over anonymous structs, `v09`/`w08`/`w09` on `wasm`); both deferred to `plans/follow-ups.md` after review found regressions in their implementation.)
 - Every repro in *Verified Gaps* (C1–C12) prints Go 1.26's output on `js`, `both` and `wasm` (except the cases listed as `Excluded: runtime / platform`). Each repro is a test in `test/unit/types/shadowing.test.js`, `test/unit/compiler/strict-mode.test.js`, `test/unit/language/codegen-regressions.test.js`, `test/unit/language/value-semantics.test.js`, `test/unit/wasm/defer_recover.test.js`, `test/unit/compiler/strict-panics.test.js`, `test/unit/compiler/local-type-shadow.test.js`, `test/unit/language/structs.test.js` or `test/unit/wasm/generics.test.js`.
 - `test/unit/compiler/js-globals.test.js` fails when a runtime helper, inline template or facade template references a host global missing from the rename set (C1). It is modelled on `test/unit/compiler/natives.test.js`.
 - `npm test` passes with `test/perf/zero-alloc.js`, `bce-mathx.js` and `bundle-size.js` unchanged (`bundle-size.baseline.json` not edited).
