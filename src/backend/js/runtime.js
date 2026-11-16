@@ -636,6 +636,16 @@ var __ix = __ix || function(a, i) {
 };
 var __lv;`;
 
+// Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
+// `s[lo:]`): Go's bounds text instead of JavaScript's silent clamping.
+export const HELPER_SSLICE = `var __sslice = __sslice || function(s, lo, hi) {
+  const n = s.length;
+  if (hi === undefined) hi = n;
+  if (lo >= 0 && lo <= hi && hi <= n) return s.slice(lo, hi);
+  const p = "runtime error: slice bounds out of range ";
+  throw new Error(p + (!(hi >= 0 && hi <= n) ? (hi < 0 ? "[:" + hi + "]" : "[:" + hi + "] with length " + n) : lo < 0 ? "[" + lo + ":]" : "[" + lo + ":" + hi + "]"));
+};`;
+
 // Generic zero values (generics are erased in JS): a generic function takes
 // one zero-value factory per type parameter as leading arguments, and an
 // instance of a generic struct keeps its factories under the `__tz` symbol

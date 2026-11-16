@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
+	assertJsProgramOutput,
 	assertJsTargetsOutput,
 	compile,
 	compileHybrid,
@@ -558,6 +559,50 @@ func main() {
 `);
 	assert(js.includes("__slice(xs, lo, hi)"), "2-index slice call changed");
 	assert(js.includes("__slice(xs, 0, hi, 3)"), "3-index slice call changed");
+});
+
+section("String slicing in both packages checks its bounds");
+
+test("a string slice out of range panics with Go's text in a both package", async () => {
+	await assertJsProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	s := "abc"
+	lo, hi, n, neg := 2, 1, 7, -1
+	try("low above high", func() { _ = s[lo:hi] })
+	try("high above length", func() { _ = s[:n] })
+	try("low above length", func() { _ = s[n:] })
+	try("negative low", func() { _ = s[neg:] })
+	try("negative high", func() { _ = s[:neg] })
+	try("ok", func() { fmt.Println(s[1:], s[:2], s[1:2], s[:], s[3:]) })
+}
+`,
+		`low above high runtime error: slice bounds out of range [2:1]
+high above length runtime error: slice bounds out of range [:7] with length 3
+low above length runtime error: slice bounds out of range [7:3]
+negative low runtime error: slice bounds out of range [-1:]
+negative high runtime error: slice bounds out of range [:-1]
+bc ab b abc 
+ok <nil>
+`,
+	);
+});
+
+test("an in-range string slice in a js package emits the same s.slice call", () => {
+	const src = `package main
+func main() {
+	s := "abc"
+	lo, hi := 1, 2
+	a, b := s[lo:hi], s[lo:]
+	_, _ = a, b
+}
+`;
+	const { js } = compile(src);
+	assert(js.includes("s.slice(lo, hi)"), "2-index string slice changed");
+	assert(js.includes("s.slice(lo)"), "1-index string slice changed");
+	assert(!js.includes("__sslice"), "js package must not use the checked form");
+	const strict = compile(src, { strict: true }).js;
+	assert(strict.includes("__sslice(s, lo, hi)"), "both package is unchecked");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

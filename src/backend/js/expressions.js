@@ -1777,8 +1777,14 @@ export const expressionGenMethods = {
 		const hi = expr.high
 			? this._asIndexNumber(this.genExpr(expr.high), expr.high._type)
 			: "undefined";
-		if (this._isStringExprType(expr.expr._type))
+		if (this._isStringExprType(expr.expr._type)) {
+			// `both` packages panic on bad bounds; `js` packages keep `slice`.
+			if (this.strict) {
+				this.useHelper("sslice");
+				return `__sslice(${base}, ${lo}, ${hi})`;
+			}
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
+		}
 		// `b[:]`, `b[0:]` and `a[:]` have the operand's length and capacity:
 		// the result is the operand itself.  Other bounds make a view sharing
 		// the backing store (`__slice`, which checks the bounds against cap).

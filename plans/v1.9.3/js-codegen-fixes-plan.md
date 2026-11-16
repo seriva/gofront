@@ -163,7 +163,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/runtime.js` (`__slice`, failing path only), `src/backend/js/expressions.js` (`_genSliceExpr`: length-wording flag for array operands)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsTargetsOutput`: `p06`, `p07`, `p09`, and the array lines of `p08`
   - Done when: all print Go's text on `js`/`both`; 3- and 4-argument `__slice` calls on slices are byte-identical
-- [ ] Task 4.3: String slicing in `both` packages checks its bounds
+- [x] Task 4.3: String slicing in `both` packages checks its bounds
   - Files: `src/backend/js/expressions.js` (`_genSliceExpr`, strict mode only), `src/backend/js/runtime.js` (checked string-slice helper)
   - Test: `test/unit/compiler/strict-panics.test.js` with `assertJsProgramOutput` (the JS side of `both`): the string lines of `p08`; an in-range string slice in a `js` package emits the same `s.slice(…)` as before
   - Done when: `both` panics with `[2:1]` / `[:7] with length 3`; `js` package output unchanged
