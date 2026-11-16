@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Fixed
-- **Valid Go no longer breaks or misbehaves in the JavaScript output**: functions, variables, locals and `templ` or `css` components named `Map`, `BigInt`, `Uint8Array`, `NaN`, `globalThis` and similar, and any name starting with `__`, now work instead of crashing or changing numeric results, and a call in a divisor, shift count or multiple assignment runs once and in Go's order. Hand-written JavaScript reaches renamed exports through a `$`-suffixed name such as `Map$`, as described in the [compatibility guide](docs/go-compatibility.md#names-that-shadow-js-globals).
+- **Valid Go no longer breaks or misbehaves in the JavaScript output**: functions, variables, locals and `templ` or `css` components named `Map`, `BigInt`, `Uint8Array`, `NaN`, `globalThis` and similar, and any name starting with `__`, now work instead of crashing or changing numeric results,, a call in a divisor, shift count or multiple assignment runs once and in Go's order, and anonymous structs now copy their array and struct fields and work in literals that omit the type. Hand-written JavaScript reaches renamed exports through a `$`-suffixed name such as `Map$`, as described in the [compatibility guide](docs/go-compatibility.md#names-that-shadow-js-globals).
 
 ## [1.9.2] - 2026-11-13
 

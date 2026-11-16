@@ -149,7 +149,7 @@ Fix the miscompiles of valid Go found in the 2026-11-13 review and the follow-up
   - Files: `src/backend/js/runtime.js` (`HELPER_VCLONE`)
   - Test: `test/unit/language/value-semantics.test.js` with `assertJsTargetsOutput` (Task 5.4 adds `wasm`): `w08`, `w09`, plus an anonymous struct with a `*P` field passed through `dup` that still shares the pointee
   - Done when: all print Go's output on `js`/`both`
-- [ ] Task 3.3: Elided anonymous struct literals build structs (C9)
+- [x] Task 3.3: Elided anonymous struct literals build structs (C9)
   - Files: `src/backend/js/expressions.js` (`_genImplicitCompositeLit`)
   - Test: `test/unit/language/value-semantics.test.js` with `assertAllTargetsOutput`: `w01`, `w02`, `v07`, plus `[]*struct{ N int }{{}}`; control `w03`
   - Done when: all print Go's output on every target

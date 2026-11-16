@@ -2883,8 +2883,8 @@ export const expressionGenMethods = {
 	// A literal of an anonymous struct type: a plain object with every field,
 	// the omitted ones set to their zero value.
 	_genAnonStructLit(expr) {
-		const st =
-			expr._type?.kind === "named" ? expr._type.underlying : expr._type;
+		const lt = expr._type?.kind === "pointer" ? expr._type.base : expr._type;
+		const st = lt?.kind === "named" ? lt.underlying : lt;
 		if (st?.kind !== "struct" || !(st.fields instanceof Map))
 			return this._genFallbackCompositeLit(expr);
 		const values = new Map();
@@ -2908,6 +2908,9 @@ export const expressionGenMethods = {
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}
+		// An elided anonymous struct (`[]struct{ A [2]int }{{}}`) has every field.
+		const litBase = lit?.kind === "named" ? lit.underlying : lit;
+		if (litBase?.kind === "struct") return this._genAnonStructLit(expr);
 		if (this._isMapLit(expr))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const hasPositional = expr.elems.some((e) => e._positionalField);

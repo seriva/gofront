@@ -842,3 +842,87 @@ func main() {
 		"5 5 0 2 0\n",
 	);
 });
+
+test("an elided anonymous struct literal in a slice fills zero values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	sl := []struct{ A [2]int }{{}, {A: [2]int{1, 2}}}
+	fmt.Println(sl[0].A, sl[1].A, len(sl))
+}
+`,
+		"[0 0] [1 2] 2\n",
+	);
+});
+
+test("elided anonymous struct literals in maps and arrays fill zero values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]struct{ N int }{"k": {}}
+	arr := [2]struct{ S string }{{}, {"x"}}
+	fmt.Println(m["k"].N, len(arr), arr[0].S == "", arr[1].S)
+}
+`,
+		"0 2 true x\n",
+	);
+});
+
+test("a value read from a map of anonymous structs is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[string]struct{ A [2]int }{"k": {}}
+	v := m["k"]
+	v.A[0] = 1
+	fmt.Println(m["k"].A[0], v.A[0])
+}
+`,
+		"0 1\n",
+	);
+});
+
+test("an elided anonymous struct pointer literal builds a struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := []*struct{ N int }{{}}
+	b := []*struct{ N int }{{N: 3}}
+	fmt.Println(a[0].N, b[0].N)
+	a[0].N = 2
+	fmt.Println(a[0].N, b[0].N)
+}
+`,
+		"0 3\n2 3\n",
+	);
+});
+
+test("elided named struct literals keep working", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	a := []P{{}}
+	m := map[string]*P{"k": {}}
+	fmt.Println(a[0].N, m["k"].N)
+}
+`,
+		"0 0\n",
+	);
+});
