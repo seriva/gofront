@@ -323,14 +323,17 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   // The zero value z is the shape of v: a field or element is copied only
   // where z holds an array or an object (a struct or array value); a null
   // zero is a pointer, slice, map, func or interface, which stays shared.
+  // A nil map zero (__nm() or __nilmap) marks a map field: it stays shared.
   const isObj = (o) => o !== null && typeof o === "object";
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
   const cp = (v, z) => {
     if (!isObj(v)) return v;
     if (v.__nilm === true) return v;
-    if (Array.isArray(v)) return keep(v, v.map((e, i) => (isObj(z?.[i]) ? cp(e, z[i]) : e)));
+    if (ArrayBuffer.isView(v)) return keep(v, v.slice());
+    if (Array.isArray(v)) return keep(v, v.map((e, i) => (isShape(z?.[i]) ? cp(e, z[i]) : e)));
     if (typeof v.__clone === "function") return keep(v, v.__clone());
     const c = Object.assign(Object.create(Object.getPrototypeOf(v)), v);
-    for (const k of Object.keys(v)) if (isObj(v[k]) && isObj(z?.[k])) c[k] = cp(v[k], z[k]);
+    for (const k of Object.keys(v)) if (isObj(v[k]) && isShape(z?.[k])) c[k] = cp(v[k], z[k]);
     return keep(v, c);
   };
   return cp(x, zero);

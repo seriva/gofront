@@ -926,3 +926,47 @@ func main() {
 		"0 0\n",
 	);
 });
+
+test("generic copies of anonymous structs share map fields", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func dup[T any](v T) (T, T) { return v, v }
+
+func main() {
+	st := struct{ M map[string]int }{M: map[string]int{"a": 1}}
+	x, y := dup(st)
+	x.M["a"] = 9
+	fmt.Println(st.M["a"], x.M["a"], y.M["a"])
+	arr := [2]struct{ M map[string]int }{{M: map[string]int{"a": 1}}}
+	p, _ := dup(arr)
+	p[0].M["a"] = 5
+	fmt.Println(arr[0].M["a"], p[0].M["a"])
+}
+`,
+		"9 9 9\n5 5\n",
+	);
+});
+
+test("generic copies of anonymous structs copy byte array fields", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func dup[T any](v T) (T, T) { return v, v }
+
+func main() {
+	st := struct{ B [4]byte }{[4]byte{1, 2, 3, 4}}
+	x, y := dup(st)
+	x.B[0] = 7
+	fmt.Println(len(x.B), x.B[0], x.B, st.B, y.B)
+	s := x.B[1:3]
+	fmt.Println(s, len(s))
+}
+`,
+		"4 7 [7 2 3 4] [1 2 3 4] [1 2 3 4]\n[2 3] 2\n",
+	);
+});
