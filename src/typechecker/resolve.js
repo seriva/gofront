@@ -12,6 +12,7 @@ import {
 	DECLARED_ANY,
 	defaultType,
 	displayTypeName,
+	identical,
 	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
@@ -1059,10 +1060,10 @@ export const resolveMethods = {
 				: t;
 		if (base?.kind === "interface")
 			return this._interfaceAccepts(typeArg, base, active);
-		if (!approx) return typeStr(typeArg) === typeStr(t);
+		if (!approx) return identical(typeArg, t);
 		const want = this._deepUnderlying(t);
 		if (typeArg?.kind === "typeParam" || want?.kind !== "basic") return true;
-		return typeStr(this._deepUnderlying(typeArg)) === typeStr(want);
+		return identical(this._deepUnderlying(typeArg), want);
 	},
 
 	// An interface's type set is the intersection of its own union and the

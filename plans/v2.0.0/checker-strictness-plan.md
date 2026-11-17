@@ -199,7 +199,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/assignability.js` (7 `typeStr` equality sites, `_identicalUnderlyingLiteral`, `_sigTypeStr`/`_sigParamsMatch` → `identical`)
   - Test: delete `// pending:` from the S1, S2, S3 reject cases and from the S4 accept case. `npm test` stays green, so same-declaration assignments still pass
   - Done when: those corpus cases pass on all targets and `grep -nE "typeStr\([^)]*\) [!=]== typeStr\(|_sigTypeStr" src/typechecker/assignability.js` prints nothing
-- [ ] Task 2.3: Conversions, `copy`, element checks and type-set terms use `identical`
+- [x] Task 2.3: Conversions, `copy`, element checks and type-set terms use `identical`
   - Files: `src/typechecker/expressions.js` (`_interfaceTerms`, `_checkBuiltinCopy`, `_checkElemTypeCompatible`, `_sameStructFields`, `_pointerConversionOk`, `_checkConversionValidity`), `src/typechecker/resolve.js` (`_termAccepts`)
   - Test: new reject cases:
     - `copy(dst, src)` with `[]struct{ X int }`/`[]struct{ Y string }` → `arguments to copy dst and src have different element types`.

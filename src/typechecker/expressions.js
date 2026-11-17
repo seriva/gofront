@@ -22,6 +22,7 @@ import {
 	FLOAT64,
 	FMT_PRINT_FUNCS,
 	INT,
+	identical,
 	is64BitInt,
 	isAny,
 	isArray,
@@ -435,7 +436,7 @@ export const expressionCheckMethods = {
 		if (sets.length === 0 || sets.includes(null)) return null;
 		const [first, ...rest] = sets;
 		return first.filter((t) =>
-			rest.every((set) => set.some((u) => typeStr(u) === typeStr(t))),
+			rest.every((set) => set.some((u) => identical(u, t))),
 		);
 	},
 
@@ -835,8 +836,7 @@ export const expressionCheckMethods = {
 		const terms = this._constraintTerms(tp.constraint, new Set(), scope);
 		if (!terms || terms.length === 0) return null;
 		const unders = terms.map((t) => this._deepUnderlying(this.resolveType(t)));
-		const key = typeStr(unders[0]);
-		if (unders.some((u) => !u || typeStr(u) !== key)) return null;
+		if (unders.some((u) => !u || !identical(u, unders[0]))) return null;
 		return unders[0];
 	},
 
@@ -993,15 +993,22 @@ export const expressionCheckMethods = {
 			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
 		};
 		const [dt, st] = at;
-		if (!sharedInfo(dt) && !sharedInfo(st)) return INT;
 		const de = elemOf(dt);
 		const se = elemOf(st);
+		if (!sharedInfo(dt) && !sharedInfo(st)) {
+			if (de && se && !isAny(de) && !isAny(se) && !identical(de, se))
+				this.err(
+					`arguments to copy ${exprText(e.args[0])} and ${exprText(e.args[1])} have different element types (${typeStr(dt)} vs ${typeStr(st)})`,
+					e,
+				);
+			return INT;
+		}
 		if (!de || !se) {
 			this.err(
 				`copy: cannot copy between ${typeStr(dt)} and ${typeStr(st)}`,
 				e,
 			);
-		} else if (typeStr(de) !== typeStr(se)) {
+		} else if (!identical(de, se)) {
 			this.err(
 				`copy: element types differ (${typeStr(dt)} vs ${typeStr(st)})`,
 				e,
@@ -1146,7 +1153,7 @@ export const expressionCheckMethods = {
 			srcElem &&
 			!isAny(tgtElem) &&
 			!isAny(srcElem) &&
-			typeStr(tgtElem) !== typeStr(srcElem)
+			!identical(tgtElem, srcElem)
 		)
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
@@ -1169,7 +1176,7 @@ export const expressionCheckMethods = {
 		let i = 0;
 		for (const [name, type] of a.fields) {
 			const [bn, bt] = bf[i++];
-			if (name !== bn || typeStr(type) !== typeStr(bt)) return false;
+			if (name !== bn || !identical(type, bt)) return false;
 		}
 		return true;
 	},
@@ -1250,7 +1257,8 @@ export const expressionCheckMethods = {
 	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr) {
 		const sBase = this._deepUnderlying(srcPtr.base);
 		const tBase = this._deepUnderlying(tgtPtr.base);
-		if (typeStr(sBase) === typeStr(tBase)) return true;
+		// Two struct types are one wasm type only when they are one declaration.
+		if (identical(sBase, tBase) && sBase?.name === tBase?.name) return true;
 		if (!this._sameStructFields(sBase, tBase)) return false;
 		// WebAssembly struct types are nominal: the two pointers could not
 		// share one object.
@@ -1323,7 +1331,7 @@ export const expressionCheckMethods = {
 			);
 			return;
 		}
-		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
+		if (identical(srcResolved, tgtResolved)) return;
 		if (this._sameStructFields(srcResolved, tgtResolved)) return;
 		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
 		if (isString(srcResolved) && isString(tgtResolved)) return;
