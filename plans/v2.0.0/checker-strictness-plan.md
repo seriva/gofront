@@ -278,7 +278,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/expressions.js` (`_checkTypeAssertExpr`, value use of a generic func ident/selector), `src/typechecker/statements.js` (type-switch cases)
   - Test: delete `// pending:` from `s20` and its type-switch twin (`impossible type assertion: i.(S)` / `impossible type switch case`) and from `s21`/`s21b` (`cannot use generic function slices.Reverse without instantiation`). `f := Id[int]` and calls with inference stay valid
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 6.4: Local declarations shadow predeclared type names (S23)
+- [x] Task 6.4: Local declarations shadow predeclared type names (S23)
   - Files: `src/typechecker/resolve.js` (`resolveTypeNode` `TypeName`), `src/typechecker/expressions.js` (identifier lookup at `:227`)
   - Test: delete `// pending:` from the `s23`/`s23b` accept cases (`aliased`, `3`). The predeclared `int32`/`any` still resolve when not shadowed
   - Done when: those cases pass, `grep -rl "// pending:" test/unit/fixtures/conformance` prints nothing, and `npm test` passes
