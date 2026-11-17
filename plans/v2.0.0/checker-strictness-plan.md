@@ -252,7 +252,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/statements.js` (`_checkReturnStmt`), `src/typechecker/assignability.js` (`_assertAssignableEarlyReturn`: `nil` only into pointer, slice, map, func, interface and type-parameter targets; JS-dynamic `ANY` keeps accepting it)
   - Test: delete `// pending:` from `s10` (`too many return values`) and `s11`/`s11b` (`cannot use nil as int value in variable declaration`). Existing `nil` tests for maps, slices, funcs, pointers, interfaces and generics stay green
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 5.2: `range` operand kinds (S12)
+- [x] Task 5.2: `range` operand kinds (S12)
   - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`)
   - Test: delete `// pending:` from `s12`/`s12b` (`cannot range over 1.5 (untyped float constant)`, `cannot range over b (variable of type bool)`); range over int, string, slice, array, `*array`, map and iterator funcs stays green
   - Done when: those cases pass and `npm test` passes

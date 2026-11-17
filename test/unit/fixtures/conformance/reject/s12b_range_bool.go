@@ -1,4 +1,3 @@
-// pending: S12
 package main
 
 func main() {

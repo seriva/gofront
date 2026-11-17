@@ -1,5 +1,6 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
@@ -1438,17 +1439,41 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	_rangeOperandError(node, type) {
+		const untyped = type?.kind === "untyped";
+		return this.err(
+			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)})`,
+			node,
+		);
+	},
+
+	// A range operand of a kind Go rejects: bool, float or complex values,
+	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
+	// parameters and kinds the checker models loosely are left alone.
+	_notRangeable(node, type) {
+		if (!type || type._tainted || isAny(type)) return false;
+		if (type.kind === "untyped")
+			return !(
+				type.base === "string" ||
+				type.base === "int" ||
+				(type.base === "float64" &&
+					constIntValue(this._constValue(node)) !== null)
+			);
+		const u = this._deepUnderlying(type);
+		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
+		return (
+			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
+		);
+	},
+
 	_checkRangeExpr(expr, scope) {
 		const collType = this._derefArrayPtr(
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		if (collType?._declared) {
-			const bad = this.err(
-				`cannot range over ${exprText(expr.expr)} (${operandKind(expr.expr, typeStr(collType))})`,
-				expr.expr,
-			);
+		if (collType?._declared || this._notRangeable(expr.expr, collType)) {
+			const bad = this._rangeOperandError(expr.expr, collType);
 			return { kind: "tuple", types: [bad, bad] };
 		}
 		const resolved = this._underlyingOrCore(collType, scope);

@@ -488,11 +488,8 @@ export const statementCheckMethods = {
 				this.err("For condition must be bool", stmt);
 		} else {
 			const ct = this.checkExpr(stmt.cond.expr, inner);
-			if (ct?._declared)
-				this.err(
-					`cannot range over ${exprText(stmt.cond.expr)} (${operandKind(stmt.cond.expr, typeStr(ct))})`,
-					stmt.cond.expr,
-				);
+			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
+				this._rangeOperandError(stmt.cond.expr, ct);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
 			if (core) stmt.cond.expr._coreType = core;
 			const info = iteratorYieldParams(ct);
