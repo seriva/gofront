@@ -371,22 +371,29 @@ function resolveImports(
 					continue;
 				}
 				// Diamond imports: a package reached through several paths is
-				// compiled for its symbols each time but emitted only once.
+				// compiled once per build so its exported types keep their
+				// identity across every importer, and emitted only once.
 				const depKey = resolve(depDir);
 				const alreadyBundled = bundledDirs.has(depKey);
 				bundledDirs.add(depKey);
-				let dep;
-				try {
-					dep = compileDir(depDir, {
-						...options,
-						bundledDirs,
-						isDependency: true,
-					});
-				} catch (e) {
-					// Tag the failing package (innermost wins) so callers can tell
-					// a dependency's error from the importer's own.
-					if (e instanceof CompileError && !e.packageDir) e.packageDir = depKey;
-					throw e;
+				const depCache = options.depCache ?? new Map();
+				let dep = depCache.get(depKey);
+				if (!dep) {
+					try {
+						dep = compileDir(depDir, {
+							...options,
+							bundledDirs,
+							depCache,
+							isDependency: true,
+						});
+					} catch (e) {
+						// Tag the failing package (innermost wins) so callers can tell
+						// a dependency's error from the importer's own.
+						if (e instanceof CompileError && !e.packageDir)
+							e.packageDir = depKey;
+						throw e;
+					}
+					depCache.set(depKey, dep);
 				}
 				if (!alreadyBundled) preambles.push(dep);
 				// A dependency that hands out `&xs[i]` makes whole-element
@@ -623,7 +630,7 @@ export function compileFiles(files, options = {}) {
 		bundledPackages,
 		preambles,
 		options.bundledDirs ?? new Set(),
-		{ ...options, outputDir },
+		{ ...options, depCache: options.depCache ?? new Map(), outputDir },
 	);
 
 	// ── 3. Type-check ─────────────────────────────────────────────
