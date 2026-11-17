@@ -653,6 +653,7 @@ export const expressionCheckMethods = {
 	// a call, conversion, literal or assertion has no address. A receiver that
 	// reaches the method through an embedded pointer needs none.
 	_reportUnaddressableRecv(expr) {
+		if (this.receiversChecked) return false;
 		const recv = expr.expr;
 		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
 		if (this._isMapElementOperand(recv)) {
