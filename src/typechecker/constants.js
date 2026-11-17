@@ -448,10 +448,13 @@ export const constantCheckMethods = {
 	// operand's type.
 	_checkConstOperands(op, lt, rt, expr) {
 		if (op === "<<" || op === ">>" || op === "&&" || op === "||") return;
-		if (rt?.kind === "untyped" && lt?.kind !== "untyped")
-			this._checkConstOverflow(lt, rt, expr.right, null);
-		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
-			this._checkConstOverflow(rt, lt, expr.left, null);
+		// An interface operand has no constant range: the operator error covers it.
+		const isIface = (t) => this.resolveType(t)?.kind === "interface";
+		if (rt?.kind === "untyped" && lt?.kind !== "untyped") {
+			if (!isIface(lt)) this._checkConstOverflow(lt, rt, expr.right, null);
+		} else if (lt?.kind === "untyped" && rt?.kind !== "untyped") {
+			if (!isIface(rt)) this._checkConstOverflow(rt, lt, expr.left, null);
+		}
 	},
 
 	_intRange(t) {

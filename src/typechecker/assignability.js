@@ -8,7 +8,6 @@ import {
 	ANY,
 	BOOL,
 	CMP_OPS,
-	COMPLEX128,
 	FLOAT64,
 	identical,
 	is64BitInt,
@@ -28,7 +27,6 @@ import {
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
-	STRING,
 	typeStr,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
@@ -156,8 +154,15 @@ export const assignabilityMethods = {
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
-			return this._binaryResultTypeString(lt, rt);
-		if (node)
+			return this._binaryResultTypeString(lt, rt, node);
+		if (node && lt.kind !== "untyped" && identical(lt, rt)) {
+			// `b + b` on bool: the operator is not defined for the type.
+			const left = node.left;
+			this.err(
+				`invalid operation: operator ${op} not defined on ${exprText(left)} (${operandKind(left, typeStr(lt), false)})`,
+				left,
+			);
+		} else if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
 	},
@@ -167,7 +172,10 @@ export const assignabilityMethods = {
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
 		if (node && lt.kind !== "untyped" && !isInteger(lt))
-			this.err(`shifted operand ${typeStr(lt)} must be integer`, node.left);
+			this.err(
+				`invalid operation: shifted operand ${exprText(node.left)} (${operandKind(node.left, typeStr(lt), false)}) must be integer`,
+				node.left,
+			);
 		return lt;
 	},
 
@@ -206,11 +214,14 @@ export const assignabilityMethods = {
 			);
 	},
 
-	_binaryResultTypeString(lt, rt) {
+	// The result keeps the defined type of the typed operand (`S + S` is `S`);
+	// two typed operands must have identical types.
+	_binaryResultTypeString(lt, rt, node) {
 		if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
-		return STRING;
+		this._checkIdenticalOperands(lt, rt, node);
+		return lt;
 	},
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
@@ -235,8 +246,7 @@ export const assignabilityMethods = {
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
 		this._checkIdenticalOperands(lt, rt, node);
-		if (isComplex64(lt) && isComplex64(rt)) return lt;
-		return COMPLEX128;
+		return lt;
 	},
 
 	_binaryResultTypeNumeric(op, lt, rt, node) {
@@ -301,15 +311,6 @@ export const assignabilityMethods = {
 			this._checkDeclaredAnyOperator(op, lt, node.left) ??
 			this._checkDeclaredAnyOperator(op, rt, node.right)
 		);
-	},
-
-	// `f %= 2.0` with a non-integer `f`: the same rule as the binary form.
-	_checkCompoundIntegerOnly(stmtOp, lhsType, lhsExpr) {
-		const op = stmtOp.slice(0, -1);
-		if (!INTEGER_ONLY_OPS.has(op)) return;
-		const t = lhsType && this.resolveType(lhsType);
-		if (!this._isTypedBasicOperand(t) || isInteger(t)) return;
-		this._reportIntegerOnly(op, t, lhsExpr);
 	},
 
 	_reportIntegerOnly(op, type, operand) {

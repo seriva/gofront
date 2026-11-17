@@ -317,28 +317,7 @@ export const expressionCheckMethods = {
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
 				const rt = this.checkExpr(expr.right, scope);
-				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
-				if (isAny(lt) || isAny(rt))
-					return (
-						this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
-						this.binaryResultType(expr.op, ANY, ANY, expr)
-					);
-				this._checkConstOperands(expr.op, lt, rt, expr);
-				this._markTypeParamMapNil(expr, lt, rt, scope);
-				const res = this.binaryResultType(expr.op, lt, rt, expr);
-				if (expr.op !== "<<" && expr.op !== ">>") {
-					this._retypeUntypedShift(lt, rt, expr.right);
-					this._retypeUntypedShift(rt, lt, expr.left);
-				}
-				this._tagFloat32Const(lt, rt, expr.right);
-				this._tagFloat32Const(rt, lt, expr.left);
-				this._tagComplex64Const(lt, rt, expr.right);
-				this._tagComplex64Const(rt, lt, expr.left);
-				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
-					expr.right._is64Bit = true;
-				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
-					expr.left._is64Bit = true;
-				return res;
+				return this._typeBinaryOperands(expr, lt, rt, scope);
 			}
 			case "AwaitExpr": {
 				if (this.target === "wasm" || this.target === "both") {
@@ -509,6 +488,34 @@ export const expressionCheckMethods = {
 			`cannot take the address of a field, element or package-level variable of type ${typeStr(type)} in a ${this.target} package; only struct and array values have a stable address in WebAssembly. Pass the parent struct pointer or the index instead, or copy the value to a local variable`,
 			this._positioned(node),
 		);
+	},
+
+	// One operator typing path for `x op y`, `x op= y` and `x++` (the latter two
+	// pass a synthetic BinaryExpr): operand checks, result type and the
+	// constant retyping codegen reads.
+	_typeBinaryOperands(expr, lt, rt, scope) {
+		if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
+		if (isAny(lt) || isAny(rt))
+			return (
+				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
+				this.binaryResultType(expr.op, ANY, ANY, expr)
+			);
+		this._checkConstOperands(expr.op, lt, rt, expr);
+		this._markTypeParamMapNil(expr, lt, rt, scope);
+		const res = this.binaryResultType(expr.op, lt, rt, expr);
+		if (expr.op !== "<<" && expr.op !== ">>") {
+			this._retypeUntypedShift(lt, rt, expr.right);
+			this._retypeUntypedShift(rt, lt, expr.left);
+		}
+		this._tagFloat32Const(lt, rt, expr.right);
+		this._tagFloat32Const(rt, lt, expr.left);
+		this._tagComplex64Const(lt, rt, expr.right);
+		this._tagComplex64Const(rt, lt, expr.left);
+		if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
+			expr.right._is64Bit = true;
+		if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
+			expr.left._is64Bit = true;
+		return res;
 	},
 
 	// Go: map elements are not addressable, nor are fields and array elements

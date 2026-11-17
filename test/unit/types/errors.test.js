@@ -944,6 +944,20 @@ test("a bare checker reports an undefined identifier", () => {
 	assertErrorContains(tc.errors, "Undefined: 'foo'");
 });
 
+test("i += f reports one mismatched-types error", () => {
+	const { errors } = compile(`package main
+func main() {
+	i := 1
+	f := 2.0
+	i += f
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"invalid operation: i += f (mismatched types int and float64)",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

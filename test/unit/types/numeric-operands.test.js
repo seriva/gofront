@@ -308,7 +308,7 @@ test("int reaches float64 only through a conversion", () => {
 		[
 			"compound assignment",
 			"i := 3\n\tf := 1.5\n\tf += i\n\t_ = f",
-			"as float64 value in assignment",
+			"invalid operation: f += i (mismatched types float64 and int)",
 		],
 		[
 			"argument",
@@ -372,6 +372,49 @@ func main() {
 `,
 		"2 4 4\n",
 	);
+});
+
+test("string and complex results keep the defined operand type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type S string
+type MyC complex128
+func main() {
+	var a, b S = "x", "y"
+	var c S = a + b
+	var x, y MyC = 1i, 2i
+	var z MyC = x + y
+	fmt.Println(c, z)
+}
+`,
+		"xy (0+3i)\n",
+	);
+});
+
+function assertOneError(body, message) {
+	const { errors } = compile(`package main\nfunc main() {\n${body}\n}\n`);
+	assertErrorContains(errors, message);
+	assertEqual(errors.length, 1, errors.join(" | "));
+}
+
+test("compound assignment reports one constant error", () => {
+	const over = "300 (untyped int constant) overflows int8";
+	const trunc = "1.5 (untyped float constant) truncated to int";
+	assertOneError("var x int8\nx += 300\n_ = x", over);
+	assertOneError('m := map[string]int8{}\nm["a"] += 300', over);
+	assertOneError("var x int\nx += 1.5\n_ = x", trunc);
+	assertOneError("var x int\nfor i := 0; i < 1; i += 1.5 {\n_ = x\n}", trunc);
+	assertOneError('m := map[string]int{}\nm["a"] += 1.5', trunc);
+	assertOneError(
+		"const f = 1.5\nvar x int\nx += f\n_ = x",
+		"1.5 (untyped float constant 1.5) truncated to int",
+	);
+});
+
+test("compound assignment on any reports only the operator", () => {
+	assertOneError("var v any = 2\nv += 1 << 64", "operator + not defined on v");
+	assertOneError("var v interface{} = 2\nv += 1 << 64", "Invalid operation");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
