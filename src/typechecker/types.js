@@ -40,6 +40,16 @@ export class TypeCheckError extends Error {
 	}
 }
 
+// Valid Go that the compile target does not support yet (as opposed to a bug
+// in the compiler). A backend throws it where it would otherwise throw a bare
+// `Error`; the compiler reports it as a user error, not an internal one.
+export class UnsupportedError extends Error {
+	constructor(msg) {
+		super(msg);
+		this.name = "UnsupportedError";
+	}
+}
+
 export const BROWSER_GLOBALS = new Set([
 	"console",
 	"document",

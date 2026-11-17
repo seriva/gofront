@@ -6,6 +6,7 @@ import { lower } from "../lower/index.js";
 import { reachableStdlibDecls } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
 import { TypeCheckError, TypeChecker } from "../typechecker/index.js";
+import { UnsupportedError } from "../typechecker/types.js";
 
 // ── WASM linking ──────────────────────────────────────────────
 //
@@ -218,7 +219,8 @@ export function checkLinkCollisions(units) {
 			}
 		}
 	}
-	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
+	if (errors.length > 0)
+		throw new UnsupportedError([...new Set(errors)].join("\n"));
 }
 
 // Replaces the first wasm marker with the facade (dropping the others) and

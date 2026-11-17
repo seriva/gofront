@@ -176,7 +176,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
 
     The repro text for each ID is in *Verified Gaps* (and in `.probes/review-2026-11-13/` while it exists).
   - Done when: `node test/unit/run.js types/conformance.test.js` passes with every case either pending or passing; deleting a `// pending:` line makes that case fail; the file runs in under 30 s (`DEBUG_TIMINGS=1`)
-- [ ] Task 1.3: Validate linked WebAssembly and report internal compiler errors
+- [x] Task 1.3: Validate linked WebAssembly and report internal compiler errors
   - Files: `src/compiler.js` (`InternalCompilerError`, exported `validateWasm(bytes)` called from `finishWasm`, wrapping of the lowering/codegen/link stages), `src/typechecker/types.js` (`UnsupportedError`)
   - Test: `test/unit/compiler/internal-errors.test.js` (new):
     - `validateWasm` throws `InternalCompilerError` for a hand-encoded module whose function body is `i32.add` on an empty stack, and returns for a valid one.
