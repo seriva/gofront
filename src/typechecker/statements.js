@@ -176,15 +176,18 @@ export const statementCheckMethods = {
 	_declareDefineVars(stmt, rhsFlat, scope) {
 		for (let i = 0; i < stmt.lhs.length; i++) {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
-			if (
-				stmt.rhs.length === stmt.lhs.length &&
-				this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment")
-			)
-				rhsFlat[i] = ANY;
+			if (name === "_" || !scope.symbols.has(name)) {
+				if (
+					stmt.rhs.length === stmt.lhs.length &&
+					this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment")
+				)
+					rhsFlat[i] = ANY;
+			}
 			if (name === "_") continue;
 			if (scope.symbols.has(name)) {
 				stmt.lhs[i]._redecl = true;
-				// Redeclared variables keep their type; the value must be assignable.
+				// Redeclared variables keep their type; the value must be assignable
+				// (so nil is fine for nilable types, as in plain assignment).
 				this._checkRedeclAssign(scope.symbols.get(name), rhsFlat[i], stmt, i);
 				continue;
 			}
