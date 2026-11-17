@@ -116,6 +116,7 @@ const BUILTIN_CHECK = {
 	delete: (s, _n, e, at) => {
 		const mt = s._deepUnderlying(at[0]);
 		if (mt?.kind === "map" && e.args[1]) {
+			s.assertAssignable(mt.key, at[1], e.args[1]);
 			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
 			s._markIfaceKey(mt, e.args[1], at[1]);
 		}
@@ -1964,7 +1965,14 @@ export const expressionCheckMethods = {
 			const node = expr._multiForward ? null : expr.args[i];
 			// A forwarded call carries no per-argument node: report at the call.
 			this._forwardedCall = expr._multiForward ? expr : null;
-			this.assertAssignable(targetParam, argTypes[i], node, "argument");
+			this.assertAssignable(
+				targetParam,
+				argTypes[i],
+				node,
+				"argument",
+				undefined,
+				!expr._isDeferCall,
+			);
 			this._forwardedCall = null;
 		}
 		// `g(f())`: per-element box marks for lowering to split the forward.
@@ -2214,7 +2222,15 @@ export const expressionCheckMethods = {
 			}
 			const fieldType = base.fields.get(fieldName);
 			const vt = this.checkExpr(elem, scope);
-			if (fieldType) this.assertAssignable(fieldType, vt, elem);
+			if (fieldType)
+				this.assertAssignable(
+					fieldType,
+					vt,
+					elem,
+					"assignment",
+					undefined,
+					true,
+				);
 			elem._positionalField = fieldName;
 		}
 		return t;
@@ -2231,7 +2247,14 @@ export const expressionCheckMethods = {
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
 					const vt = this.checkExpr(elem.value, scope);
-					this.assertAssignable(fieldType, vt, elem.value);
+					this.assertAssignable(
+						fieldType,
+						vt,
+						elem.value,
+						"assignment",
+						undefined,
+						true,
+					);
 				} else {
 					this.err(`Unknown field '${keyName}'`, elem.key);
 				}
@@ -2269,11 +2292,25 @@ export const expressionCheckMethods = {
 					);
 				} else {
 					const vt = this.checkExpr(elem.value, scope);
-					this.assertAssignable(base.elem, vt, elem.value);
+					this.assertAssignable(
+						base.elem,
+						vt,
+						elem.value,
+						"assignment",
+						undefined,
+						true,
+					);
 				}
 			} else {
 				const et = this.checkExpr(elem, scope);
-				this.assertAssignable(base.elem, et, elem);
+				this.assertAssignable(
+					base.elem,
+					et,
+					elem,
+					"assignment",
+					undefined,
+					true,
+				);
 			}
 		}
 
@@ -2314,7 +2351,14 @@ export const expressionCheckMethods = {
 				}
 				this.assertAssignable(base.key, kt, elem.key);
 				this._markIfaceKey(base, elem.key, kt);
-				this.assertAssignable(base.value, vt, elem.value);
+				this.assertAssignable(
+					base.value,
+					vt,
+					elem.value,
+					"assignment",
+					undefined,
+					true,
+				);
 			}
 		}
 		return t;

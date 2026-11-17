@@ -54,6 +54,9 @@ export const statementCheckMethods = {
 			case "DeferStmt":
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
+				// The arguments are evaluated at the defer, into temps of their
+				// own type: they take no implicit struct conversion.
+				else stmt.call._isDeferCall = true;
 				this.checkExpr(stmt.call, scope);
 				this._deferCount++;
 				break;
@@ -97,6 +100,7 @@ export const statementCheckMethods = {
 			stmt.lhs[i],
 			"assignment",
 			this._assignOperand(stmt, i),
+			true,
 		);
 		this._skipIfaceMark = false;
 	},
@@ -277,6 +281,7 @@ export const statementCheckMethods = {
 					stmt.lhs[i],
 					"assignment",
 					this._assignOperand(stmt, i),
+					true,
 				);
 				this._skipIfaceMark = false;
 			}
@@ -381,6 +386,8 @@ export const statementCheckMethods = {
 						types[i],
 						stmt.values[i] ?? stmt,
 						"return statement",
+						undefined,
+						true,
 					);
 			}
 		}

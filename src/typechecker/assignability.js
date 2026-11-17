@@ -328,8 +328,18 @@ export const assignabilityMethods = {
 	},
 
 	// `operand` is the expression whose value flows in, when `node` (the
-	// position and codegen tag) is not that expression.
-	assertAssignable(target, source, node, ctx = "assignment", operand = node) {
+	// position and codegen tag) is not that expression. `structCopy` is set
+	// only by the contexts that accept the implicit conversion between a
+	// defined struct type and an identical struct literal type (see
+	// `_markStructCopy`); every other context rejects it.
+	assertAssignable(
+		target,
+		source,
+		node,
+		ctx = "assignment",
+		operand = node,
+		structCopy = false,
+	) {
 		if (!target || !source) return;
 		if (this._checkConstOverflow(target, source, node, ctx)) return;
 		target = this.resolveType(target);
@@ -356,7 +366,13 @@ export const assignabilityMethods = {
 		if (this._checkTypedArrayAssignable(target, source, node)) return;
 		if (this._checkFuncAssignable(target, source, node)) return;
 		if (!identical(target, source))
-			this._assertAssignableTypeMismatch(target, source, node, operand ?? node);
+			this._assertAssignableTypeMismatch(
+				target,
+				source,
+				node,
+				operand ?? node,
+				structCopy,
+			);
 	},
 
 	// The element of an array or the base of a pointer: a struct type and a
@@ -581,7 +597,13 @@ export const assignabilityMethods = {
 		);
 	},
 
-	_assertAssignableTypeMismatch(target, source, node, operand = node) {
+	_assertAssignableTypeMismatch(
+		target,
+		source,
+		node,
+		operand = node,
+		structCopy = false,
+	) {
 		let tBase = target.kind === "named" ? target.underlying : target;
 		tBase = this.resolveType(tBase);
 		if (tBase?.kind === "interface") {
@@ -611,7 +633,10 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) {
-			if (this._markStructCopy(target, source, tBase, sBase, operand)) return;
+			if (
+				this._markStructCopy(target, source, tBase, sBase, operand, structCopy)
+			)
+				return;
 			this.err(
 				`Cannot assign ${typeStr(source)} to ${typeStr(target)} here: convert it explicitly with ${typeStr(target)}(v)`,
 				node ?? this._forwardedCall,
@@ -633,10 +658,15 @@ export const assignabilityMethods = {
 	// call, a range clause or a missing operand has no such expression and
 	// returns false (the caller rejects the assignment). Structs with an
 	// embedded field are not converted either: wasm lays out an anonymous
-	// struct without its embeds.
-	_markStructCopy(target, source, tBase, sBase, operand) {
+	// struct without its embeds. The conversion is an allow-list: only the
+	// contexts that pass `allowed` (variable initializers, assignments, struct
+	// fields, composite literal elements, plain call arguments and returns)
+	// get it; a map key, a range clause, a switch case or a deferred call's
+	// argument needs the explicit conversion.
+	_markStructCopy(target, source, tBase, sBase, operand, allowed = false) {
 		if (tBase?.kind !== "struct") return true;
 		if (target.kind === "pointer" || source.kind === "pointer") return true;
+		if (!allowed) return false;
 		if ([tBase, sBase].some((b) => b?._structFields?.some((f) => f.embedded)))
 			return false;
 		if (!operand || typeof operand !== "object" || !operand._type) return false;
