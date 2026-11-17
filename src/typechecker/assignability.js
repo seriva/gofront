@@ -611,7 +611,11 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) {
-			this._markStructCopy(target, source, tBase, operand);
+			if (this._markStructCopy(target, source, tBase, sBase, operand)) return;
+			this.err(
+				`Cannot assign ${typeStr(source)} to ${typeStr(target)} here: convert it explicitly with ${typeStr(target)}(v)`,
+				node ?? this._forwardedCall,
+			);
 			return;
 		}
 		this.err(
@@ -623,12 +627,22 @@ export const assignabilityMethods = {
 
 	// A struct value assigned between a defined struct type and an identical
 	// struct literal type is converted: the backends that give each struct type
-	// its own representation copy it into the target's.
-	_markStructCopy(target, source, tBase, operand) {
-		if (tBase?.kind !== "struct" || !operand || typeof operand !== "object")
-			return;
-		if (target.kind === "pointer" || source.kind === "pointer") return;
+	// its own representation copy it into the target's. The conversion is
+	// attached to the expression producing the value, so it applies only when
+	// that expression yields exactly this one value; a forwarded multi-value
+	// call, a range clause or a missing operand has no such expression and
+	// returns false (the caller rejects the assignment). Structs with an
+	// embedded field are not converted either: wasm lays out an anonymous
+	// struct without its embeds.
+	_markStructCopy(target, source, tBase, sBase, operand) {
+		if (tBase?.kind !== "struct") return true;
+		if (target.kind === "pointer" || source.kind === "pointer") return true;
+		if ([tBase, sBase].some((b) => b?._structFields?.some((f) => f.embedded)))
+			return false;
+		if (!operand || typeof operand !== "object" || !operand._type) return false;
+		if (!identical(this.resolveType(operand._type), source)) return false;
 		operand._convertTo = target;
+		return true;
 	},
 
 	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the

@@ -636,6 +636,26 @@ function complexConstNeg(e, depth) {
 
 export const expressionGenMethods = {
 	genExpr(expr) {
+		if (expr._convertTo && !expr._converting) {
+			// An implicit struct conversion the checker accepted: a struct
+			// literal type's value assigned to a defined struct type becomes an
+			// instance of its class, so its methods exist. The reverse needs
+			// nothing: a class instance already holds the literal type's fields.
+			expr._converting = true;
+			try {
+				const to = expr._convertTo;
+				const inner = this.genExpr(expr);
+				return (
+					this._genStructClassConversion(
+						to.kind === "named" ? to.name : undefined,
+						expr._type,
+						inner,
+					) ?? inner
+				);
+			} finally {
+				expr._converting = false;
+			}
+		}
 		if (expr._asComplex && !expr._complexWrapping) {
 			expr._complexWrapping = true;
 			try {

@@ -1962,7 +1962,10 @@ export const expressionCheckMethods = {
 			}
 			const targetParam = fnType.params[paramIdx];
 			const node = expr._multiForward ? null : expr.args[i];
+			// A forwarded call carries no per-argument node: report at the call.
+			this._forwardedCall = expr._multiForward ? expr : null;
 			this.assertAssignable(targetParam, argTypes[i], node, "argument");
+			this._forwardedCall = null;
 		}
 		// `g(f())`: per-element box marks for lowering to split the forward.
 		if (
