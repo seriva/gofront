@@ -1,7 +1,7 @@
 # v2.0.0 Checker Strictness — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Starts after [`test-harness-hardening-plan.md`](test-harness-hardening-plan.md) Phase 1 (`CompileError` with one entry per error, `compile()` on the production path, crashes propagate). Must merge before [`web-platform-evolution-plan.md`](web-platform-evolution-plan.md) Phase 6, which extends assignability, and Phase 7, which turns `any` DOM values into `int`/`float64`; independent of its Phases 1–5. Non-breaking half of the same review: [`../v1.9.3/js-codegen-fixes-plan.md`](../v1.9.3/js-codegen-fixes-plan.md).  
 **Release note:** **Breaking:** the compiler now rejects programs that Go rejects, such as mixing numeric types (`int + float64`, or passing an `int` where a `float64` is expected), assigning between different anonymous struct or interface types, and doing arithmetic on an `any` value (values from browser globals and `.d.ts` declarations are unaffected). Add the conversion (`float64(n)`) or type assertion the error points at; these programs used to compile and then print wrong values or produce a WebAssembly module the browser refused to load.  
