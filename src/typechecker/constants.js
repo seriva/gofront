@@ -426,12 +426,21 @@ export const constantCheckMethods = {
 
 	// print/println arguments take their default type.
 	_checkPrintArgs(name, expr, argTypes) {
-		for (let i = 0; i < expr.args.length; i++)
+		for (let i = 0; i < expr.args.length; i++) {
+			if (
+				this._rejectUntypedNil(
+					argTypes[i],
+					expr.args[i],
+					`argument to built-in ${name}`,
+				)
+			)
+				continue;
 			this._checkConstDefault(
 				argTypes[i],
 				expr.args[i],
 				`argument to built-in ${name}`,
 			);
+		}
 		return VOID;
 	},
 

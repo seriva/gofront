@@ -102,13 +102,23 @@ function untypedIntegerKind(isFloat, lt, rt) {
 	return lt.rune || rt.rune ? UNTYPED_RUNE : UNTYPED_INT;
 }
 
+// The kind class of an untyped constant: only constants of one class
+// (bool, string or number) meet in an operator.
+function untypedClass(t) {
+	return t.base === "bool" || t.base === "string" ? t.base : "number";
+}
+
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
 
 	binaryResultType(op, lt, rt, node) {
-		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
+		if (lt?.kind === "typeParam" || rt?.kind === "typeParam") {
+			// `x == nil` with a type parameter takes the same nil rule.
+			if (node && CMP_OPS.has(op) && !this.convertUntyped(lt, rt, node))
+				return UNTYPED_BOOL;
 			return this._binaryResultTypeTypeParam(op, lt, rt);
+		}
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) {
 			this._checkLogicalOperands(lt, rt, node);
@@ -119,7 +129,11 @@ export const assignabilityMethods = {
 
 	// `B && bool` mixes two distinct bool types, which Go rejects.
 	_checkLogicalOperands(lt, rt, node) {
-		if (!node || lt?.kind === "untyped" || rt?.kind === "untyped") return;
+		if (!node) return;
+		if (lt?.kind === "untyped" || rt?.kind === "untyped") {
+			this.convertUntyped(lt, rt, node);
+			return;
+		}
 		if (!isBool(lt) || !isBool(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
@@ -162,13 +176,23 @@ export const assignabilityMethods = {
 		const v = this._constValue(countExpr);
 		if (v) {
 			const n = constIntValue(v);
-			if (n === null) {
+			if (rt && rt.kind !== "untyped" && !isInteger(rt)) {
+				this.err(
+					`invalid shift count: ${typeStr(rt)} is not an integer type`,
+					countExpr,
+				);
+			} else if (n === null) {
 				this.err(
 					`invalid shift count ${typeStr(rt)} constant: not an integer`,
 					countExpr,
 				);
 			} else if (n < 0n) {
 				this.err(`invalid shift count: ${n} is negative`, countExpr);
+			} else if (n > 0xffffffffffffffffn) {
+				this.err(
+					`${exprText(countExpr)} (${this._operandTypeStr(rt)} constant) overflows uint`,
+					countExpr,
+				);
 			} else if (rt?.kind === "untyped" && rt.base === "float64") {
 				// `x << 1.0`: the count is converted to an integer constant.
 				countExpr._type = UNTYPED_INT;
@@ -333,7 +357,9 @@ export const assignabilityMethods = {
 			return false;
 		}
 		let fits = true;
-		if (ln || rn) fits = !this._nilMismatch(ln ? rt : lt);
+		if (lt?.kind === "untyped" && rt?.kind === "untyped" && !ln && !rn)
+			fits = untypedClass(lt) === untypedClass(rt);
+		else if (ln || rn) fits = !this._nilMismatch(ln ? rt : lt);
 		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
 			return this._convertUntypedConst(rt, lt, node.left, lt, rt, node);
 		else if (rt?.kind === "untyped" && lt?.kind !== "untyped")
@@ -356,6 +382,8 @@ export const assignabilityMethods = {
 	_operandTypeStr(t) {
 		if (isNil(t)) return "untyped nil";
 		if (t?.kind === "untyped" && t.base === "float64") return "untyped float";
+		if (t?.kind === "untyped" && t.base === "complex128")
+			return "untyped complex";
 		return typeStr(t);
 	},
 
@@ -398,7 +426,10 @@ export const assignabilityMethods = {
 	_isNilless(t) {
 		if (!t) return false;
 		if (t.kind === "typeParam")
-			return !this._typeParamAllows(t, (term) => !this._isNilless(term));
+			return !this._typeParamAllows(
+				t,
+				(term) => term.name !== "comparable" && !this._isNilless(term),
+			);
 		const u = this._deepUnderlying(t);
 		return (
 			u?.kind === "struct" ||
