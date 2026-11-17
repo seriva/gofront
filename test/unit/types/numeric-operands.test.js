@@ -166,6 +166,58 @@ func main() {
 	);
 });
 
+section("Comparison operands");
+
+test("comparing different typed basic operands is a mismatch", () => {
+	rejectsEverywhere(
+		`package main
+type Celsius float64
+type Fahrenheit float64
+func main() {
+	var c Celsius = 1
+	var f Fahrenheit = 1
+	_ = c < f
+}`,
+		"invalid operation: c < f (mismatched types Celsius and Fahrenheit)",
+	);
+	rejectsEverywhere(
+		`package main
+type B bool
+func main() {
+	var b B
+	t := true
+	_ = b != t
+}`,
+		"mismatched types B and bool",
+	);
+});
+
+test("comparisons against constants, nil, any and type parameters stay valid", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type Celsius float64
+type Ordered interface{ ~int | ~float64 | ~string }
+func Max[T Ordered](a, b T) T {
+	if a > b {
+		return a
+	}
+	return b
+}
+func main() {
+	var c Celsius = 2
+	var v any = 2
+	var p *int
+	var e error
+	var b byte = 'a'
+	fmt.Println(c == 2, c < 2.5, v == 2, p == nil, e == nil, b == 'a')
+	fmt.Println(Max(1, 2), Max(Celsius(1.5), c), Max("a", "b"))
+}
+`,
+		"true true true true true true\n2 2 b\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

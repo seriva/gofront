@@ -24,6 +24,7 @@ import {
 	isString,
 	isTypedArraySlice,
 	isUntyped,
+	isVoid,
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
@@ -170,7 +171,7 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
 		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
-		this._checkIntegerCmpKinds(op, lt, rt, node);
+		this._checkCmpOperandTypes(lt, rt, node);
 		this._checkEqualityComparable(op, lt, rt, node);
 		// A comparison is an untyped bool: it also fits a defined bool type.
 		return UNTYPED_BOOL;
@@ -222,15 +223,24 @@ export const assignabilityMethods = {
 		return false;
 	},
 
-	// Comparing two typed integers of different types (`byte != int`) is a
-	// mismatch in Go; untyped constants adapt to either side.
-	_checkIntegerCmpKinds(op, lt, rt, node) {
-		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return;
-		if (!isInteger(lt) || !isInteger(rt) || identical(lt, rt)) return;
+	// Comparing two typed operands of basic types needs identical types
+	// (`float64 == int`, `Celsius == Fahrenheit`, `S == string`): neither is
+	// assignable to the other. Untyped constants, nil and interface or
+	// JS-dynamic operands adapt to either side.
+	_checkCmpOperandTypes(lt, rt, node) {
+		if (!node || !this._isTypedBasicOperand(lt)) return;
+		if (!this._isTypedBasicOperand(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
 			node,
 		);
+	},
+
+	// A typed value whose underlying type is a number, string or bool.
+	_isTypedBasicOperand(t) {
+		if (!t || t.kind === "untyped" || isAny(t) || isNil(t)) return false;
+		const u = this._deepUnderlying(t);
+		return u?.kind === "basic" && !isAny(u) && !isNil(u) && !isVoid(u);
 	},
 
 	_checkComplexCmpOp(op, lt, rt, node) {

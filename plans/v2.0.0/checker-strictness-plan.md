@@ -214,7 +214,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/assignability.js` (`_binaryResultTypeNumeric`, `_binaryResultTypeComplex`)
   - Test: delete `// pending:` from the S5 cases (`invalid operation: a + f (mismatched types int and float64)`). Rewrite `int8, int16, int64 all accepted` (`test/unit/types/checks.test.js:157`) to convert explicitly, and add its mixed form as a reject case
   - Done when: the S5 cases and the `Celsius + Celsius` / untyped-constant accept cases pass, and `npm test` passes
-- [ ] Task 3.2: Comparison requires assignable operands (S6)
+- [x] Task 3.2: Comparison requires assignable operands (S6)
   - Files: `src/typechecker/assignability.js` (`_checkIntegerCmpKinds` → `_checkCmpOperandTypes`)
   - Test: delete `// pending:` from the S6 cases (`mismatched types float64 and int`, `Celsius and Fahrenheit`, `S and string`); `s09h` (`any == 2`) and `window == nil` stay accepted
   - Done when: those cases pass and `npm test` passes
