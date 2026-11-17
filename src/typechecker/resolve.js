@@ -828,7 +828,10 @@ export const resolveMethods = {
 		let instantiated;
 		try {
 			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
-			instantiated = this.substituteType(underlying, map);
+			instantiated = this._definedEmptyInterface(
+				this.substituteType(underlying, map),
+				generic.declNode,
+			);
 		} finally {
 			building.pop();
 			generic._buildSizes.pop();

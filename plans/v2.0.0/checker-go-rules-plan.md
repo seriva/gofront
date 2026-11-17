@@ -280,11 +280,11 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
   - Done when: `_checkIncDecStmt` and the compound path call `binaryResultType` and no longer call `assertAssignable` for the rhs of `op=`; all conformance cases pass
 
 ### Phase 3: Empty-interface kinds (root `empty-interface-kinds`)
-- [ ] Task 3.1: `anyKind(t)` and identity of defined empty interfaces (R3.1, R3.2)
+- [x] Task 3.1: `anyKind(t)` and identity of defined empty interfaces (R3.1, R3.2)
   - Files: `src/typechecker/types.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/dynamic-types.test.js` R3.1 prints `2`; reject fixture `ptr_defined_empty_iface.go`; controls `var a any = b`, `var q *B = p` pass
   - Done when: all targets give Go's result
-- [ ] Task 3.2: Route ad-hoc `any` tests through `anyKind` (R3.3–R3.5)
+- [x] Task 3.2: Route ad-hoc `any` tests through `anyKind` (R3.3–R3.5)
   - Files: `src/typechecker/expressions.js`, `src/typechecker/index.js` (templ conditions)
   - Test: `test/unit/types/errors.test.js` R3.3 reports exactly one error; `dynamic-types.test.js` R3.4 compiles on `js`; `test/unit/compiler/templ.test.js` R3.5 reports `non-boolean condition`
   - Done when: `grep -rn "ot === ANY" src/typechecker` is empty and `NON_INTEGER_BASICS` has no `"any"`

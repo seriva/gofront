@@ -10,6 +10,7 @@ import {
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	anyKind,
 	BASIC_TYPES,
 	BOOL,
 	BROWSER_GLOBALS,
@@ -182,8 +183,12 @@ const NON_INTEGER_BASICS = new Set([
 	"complex128",
 	"bool",
 	"string",
-	"any",
 ]);
+
+// JS-dynamic `any` indexes anything; a Go `any` needs a type assertion.
+function nonIntegerBasic(u) {
+	return isAny(u) ? anyKind(u) === "go" : NON_INTEGER_BASICS.has(u.name);
+}
 
 // Method-name dispatch for _checkExpr — string values add no static call edges.
 const CHECK_EXPR_DELEGATE = {
@@ -353,7 +358,10 @@ export const expressionCheckMethods = {
 	},
 
 	_checkDeref(ot, expr) {
-		if (ot === ANY) return ANY;
+		// JS-dynamic values dereference freely; an error-recovery type has
+		// already been reported.
+		if (anyKind(ot) === "dynamic") return ANY;
+		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
 		if (ot.kind === "named" && ot.underlying?.kind === "pointer")
 			return ot.underlying.base;
@@ -500,6 +508,10 @@ export const expressionCheckMethods = {
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
 				this.binaryResultType(expr.op, ANY, ANY, expr)
 			);
+		// A defined empty interface (`type MyAny any`, `interface{}`) is a Go
+		// `any` too.
+		const goAnyError = this._checkDeclaredAnyBinary(expr.op, lt, rt, expr);
+		if (goAnyError) return goAnyError;
 		this._checkConstOperands(expr.op, lt, rt, expr);
 		this._markTypeParamMapNil(expr, lt, rt, scope);
 		const res = this.binaryResultType(expr.op, lt, rt, expr);
@@ -623,12 +635,12 @@ export const expressionCheckMethods = {
 		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
-		if (expr.op === "*" && ot?._declared && !expr.operand._isTypeRef)
+		if (expr.op === "*" && anyKind(ot) === "go" && !expr.operand._isTypeRef)
 			return this.err(
 				`invalid operation: cannot indirect ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot))})`,
 				expr.operand,
 			);
-		if (expr.op !== "&" && expr.op !== "*" && ot?._declared)
+		if (expr.op !== "&" && expr.op !== "*" && anyKind(ot) === "go")
 			return this._checkDeclaredAnyOperator(expr.op, ot, expr.operand);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
@@ -1139,7 +1151,7 @@ export const expressionCheckMethods = {
 				t.base === "bool" || t.base === "string" || t.base === "complex128"
 			);
 		const u = this._deepUnderlying(t);
-		if (u?.kind === "basic") return NON_INTEGER_BASICS.has(u.name);
+		if (u?.kind === "basic") return nonIntegerBasic(u);
 		return NON_INTEGER_KINDS.has(u?.kind);
 	},
 
@@ -1907,7 +1919,7 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
 		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
 			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
-		if (fnType?._declared && !expr.func._isTypeRef)
+		if (anyKind(fnType) === "go" && !expr.func._isTypeRef)
 			return this.err(
 				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
 				expr,

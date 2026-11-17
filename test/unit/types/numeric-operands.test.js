@@ -414,7 +414,10 @@ test("compound assignment reports one constant error", () => {
 
 test("compound assignment on any reports only the operator", () => {
 	assertOneError("var v any = 2\nv += 1 << 64", "operator + not defined on v");
-	assertOneError("var v interface{} = 2\nv += 1 << 64", "Invalid operation");
+	assertOneError(
+		"var v interface{} = 2\nv += 1 << 64",
+		"operator + not defined on v",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

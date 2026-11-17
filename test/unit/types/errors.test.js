@@ -958,6 +958,16 @@ func main() {
 	);
 });
 
+test("dereferencing an undefined name reports only the undefined name", () => {
+	const { errors } = compile(`package main
+func main() {
+	v := missingVar
+	_ = *v
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "missingVar");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

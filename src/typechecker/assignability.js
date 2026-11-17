@@ -6,6 +6,7 @@ import { exprText, operandKind } from "./operand-text.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	anyKind,
 	BOOL,
 	CMP_OPS,
 	FLOAT64,
@@ -295,9 +296,9 @@ export const assignabilityMethods = {
 
 	// A Go `any` (written in source) has no operators besides `==` and `!=`:
 	// the value needs a type assertion first. JS-dynamic and recovered `any`
-	// types are not `_declared` and stay permissive.
+	// types are not Go `any` and stay permissive.
 	_checkDeclaredAnyOperator(op, type, operand) {
-		if (!type?._declared || !operand) return null;
+		if (anyKind(type) !== "go" || !operand) return null;
 		return this.err(
 			`invalid operation: operator ${op} not defined on ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
 			operand,
@@ -616,7 +617,21 @@ export const assignabilityMethods = {
 			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
 			return;
 		}
+		if (this._distinctEmptyInterfaces(t, s)) {
+			this.err(`cannot use ${typeStr(s)} as ${typeStr(t)} value`, node);
+			return;
+		}
 		this.assertAssignable(target, source, node);
+	},
+
+	// `*B` and `*any` differ when `B` is a defined empty interface.
+	_distinctEmptyInterfaces(t, s) {
+		return (
+			anyKind(t) === "go" &&
+			anyKind(s) === "go" &&
+			(t.kind === "named" || s.kind === "named") &&
+			!identical(t, s)
+		);
 	},
 
 	// Tags struct values / struct pointers flowing into an interface so codegen can
@@ -766,7 +781,7 @@ export const assignabilityMethods = {
 	// flow into a concrete (non-interface) type, or into an interface with
 	// methods (`var e error = b` with `b any`).
 	_checkIfaceToConcrete(target, source, node, ctx, operand) {
-		if (!source?._declared || !operand || typeof operand !== "object")
+		if (anyKind(source) !== "go" || !operand || typeof operand !== "object")
 			return false;
 		if (!this._isConcreteTarget(target) && !this._isMethodIfaceTarget(target))
 			return false;
@@ -780,7 +795,7 @@ export const assignabilityMethods = {
 	// `int(x)`, `(*T)(x)` and `I(x)` (I with methods) with a source-written
 	// `any` operand need an assertion.
 	_checkIfaceConversion(srcType, targetType, expr, operand) {
-		if (!srcType?._declared || !operand) return false;
+		if (anyKind(srcType) !== "go" || !operand) return false;
 		if (
 			!this._isConcreteTarget(targetType) &&
 			!this._isMethodIfaceTarget(targetType)

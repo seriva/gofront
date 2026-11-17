@@ -606,6 +606,31 @@ export function isComplexOrNumeric(t) {
 export function isAny(t) {
 	return t?.kind === "basic" && t.name === "any";
 }
+// How an empty interface behaves.  "dynamic": a JS-dynamic value (browser
+// global, ECMAScript built-in, `.d.ts` value) that every operation accepts;
+// "go": a Go `any` (written as `any`, `interface{}`, or a defined type over
+// either) that needs a type assertion first; "tainted": the error-recovery
+// type that hides follow-up diagnostics; null: anything else.
+export function anyKind(t) {
+	let named = false;
+	for (let depth = 0; t && depth < 32; depth++) {
+		if (t.kind === "interface") return emptyInterfaceKind(t, named);
+		if (t.kind === "basic" && t.name === "any")
+			return t._tainted ? "tainted" : t._declared ? "go" : "dynamic";
+		if (t.kind !== "named") return null;
+		named = true;
+		t = t.underlying;
+	}
+	return null;
+}
+
+// A defined interface carries its own name; a literal has none.
+function emptyInterfaceKind(t, viaNamed) {
+	if (!viaNamed && t.name) return null;
+	const empty = t.methods.size === 0 && !t.unionConstraint;
+	return empty && !t._typeSetEmbeds && !t._comparable ? "go" : null;
+}
+
 export function isNil(t) {
 	return t?.kind === "basic" && t.name === "nil";
 }

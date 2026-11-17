@@ -1173,6 +1173,16 @@ test("an undefined name in a templ expression is a type error", () => {
 	}
 });
 
+test("a Go any is not a boolean templ condition", () => {
+	for (const body of ["if v {\n\t\t<p>x</p>\n\t}", "<p hidden?={ v }>x</p>"]) {
+		const { build, check } = checkTempl(body, "v any");
+		for (const r of [build, check]) {
+			assertEqual(r.code, 1);
+			assertContains(r.stderr, "non-boolean condition");
+		}
+	}
+});
+
 test("mismatched operand types in a templ expression are a type error", () => {
 	const { build, check } = checkTempl("<p>{ name + 5 }</p>");
 	for (const r of [build, check]) {
