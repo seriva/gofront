@@ -210,7 +210,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those cases pass and `grep -rnE "typeStr\([^)]*\) [!=]== typeStr\(" src/typechecker` prints nothing
 
 ### Phase 3: Numeric operands (S5–S8)
-- [ ] Task 3.1: Arithmetic requires identical operand types (S5)
+- [x] Task 3.1: Arithmetic requires identical operand types (S5)
   - Files: `src/typechecker/assignability.js` (`_binaryResultTypeNumeric`, `_binaryResultTypeComplex`)
   - Test: delete `// pending:` from the S5 cases (`invalid operation: a + f (mismatched types int and float64)`). Rewrite `int8, int16, int64 all accepted` (`test/unit/types/checks.test.js:157`) to convert explicitly, and add its mixed form as a reject case
   - Done when: the S5 cases and the `Celsius + Celsius` / untyped-constant accept cases pass, and `npm test` passes

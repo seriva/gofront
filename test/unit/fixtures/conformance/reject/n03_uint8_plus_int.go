@@ -1,4 +1,3 @@
-// pending: S5
 package main
 
 func main() {

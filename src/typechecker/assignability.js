@@ -122,7 +122,7 @@ export const assignabilityMethods = {
 		if ((op === "<<" || op === ">>") && isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
-			return this._binaryResultTypeNumeric(lt, rt);
+			return this._binaryResultTypeNumeric(lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
 			return this._binaryResultTypeString(lt, rt);
 		if (node)
@@ -188,11 +188,12 @@ export const assignabilityMethods = {
 		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
+		this._checkIdenticalOperands(lt, rt, node);
 		if (isComplex64(lt) && isComplex64(rt)) return lt;
 		return COMPLEX128;
 	},
 
-	_binaryResultTypeNumeric(lt, rt) {
+	_binaryResultTypeNumeric(lt, rt, node) {
 		const lName = lt.kind === "untyped" ? lt.base : lt.name;
 		const rName = rt.kind === "untyped" ? rt.base : rt.name;
 		const lFloat = lName === "float32" || lName === "float64";
@@ -200,16 +201,25 @@ export const assignabilityMethods = {
 		const isFloat = lFloat || rFloat;
 		if (lt.kind === "untyped" && rt.kind === "untyped")
 			return untypedIntegerKind(isFloat, lt, rt);
-		if (lt.kind === "untyped")
-			return isFloat && rt.name !== "float64" && rt.name !== "float32"
-				? FLOAT64
-				: rt;
-		if (rt.kind === "untyped")
-			return isFloat && lt.name !== "float64" && lt.name !== "float32"
-				? FLOAT64
-				: lt;
+		// An untyped constant takes the type of the typed operand.
+		if (lt.kind === "untyped") return rt;
+		if (rt.kind === "untyped") return lt;
+		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
 		if (lt.name === "float32" && rt.name === "float32") return lt;
 		return isFloat ? FLOAT64 : lt;
+	},
+
+	// Two typed operands of an arithmetic operator must have identical types
+	// (`int + float64`, `Meters + Feet`); untyped constants adapt to either
+	// side. Returns false after reporting a mismatch.
+	_checkIdenticalOperands(lt, rt, node) {
+		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return true;
+		if (identical(lt, rt)) return true;
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
+			node,
+		);
+		return false;
 	},
 
 	// Comparing two typed integers of different types (`byte != int`) is a
