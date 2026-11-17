@@ -1,4 +1,3 @@
-// pending: S9
 package main
 
 func first[T any](xs []T) T { return xs[0] }

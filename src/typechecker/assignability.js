@@ -241,6 +241,26 @@ export const assignabilityMethods = {
 		if (bad) this._reportIntegerOnly(op, bad[0], bad[1]);
 	},
 
+	// A Go `any` (written in source) has no operators besides `==` and `!=`:
+	// the value needs a type assertion first. JS-dynamic and recovered `any`
+	// types are not `_declared` and stay permissive.
+	_checkDeclaredAnyOperator(op, type, operand) {
+		if (!type?._declared || !operand) return null;
+		return this.err(
+			`invalid operation: operator ${op} not defined on ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
+			operand,
+		);
+	},
+
+	// `v + 1` with `v` a Go `any`: the left operand is reported first.
+	_checkDeclaredAnyBinary(op, lt, rt, node) {
+		if (op === "==" || op === "!=") return null;
+		return (
+			this._checkDeclaredAnyOperator(op, lt, node.left) ??
+			this._checkDeclaredAnyOperator(op, rt, node.right)
+		);
+	},
+
 	// `f %= 2.0` with a non-integer `f`: the same rule as the binary form.
 	_checkCompoundIntegerOnly(stmtOp, lhsType, lhsExpr) {
 		const op = stmtOp.slice(0, -1);

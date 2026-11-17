@@ -303,7 +303,10 @@ export const expressionCheckMethods = {
 				const rt = this.checkExpr(expr.right, scope);
 				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
 				if (isAny(lt) || isAny(rt))
-					return this.binaryResultType(expr.op, ANY, ANY, expr);
+					return (
+						this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
+						this.binaryResultType(expr.op, ANY, ANY, expr)
+					);
 				this._checkConstOperands(expr.op, lt, rt, expr);
 				this._markTypeParamMapNil(expr, lt, rt, scope);
 				const res = this.binaryResultType(expr.op, lt, rt, expr);
@@ -594,6 +597,13 @@ export const expressionCheckMethods = {
 		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
+		if (expr.op === "*" && ot?._declared && !expr.operand._isTypeRef)
+			return this.err(
+				`invalid operation: cannot indirect ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot))})`,
+				expr.operand,
+			);
+		if (expr.op !== "&" && expr.op !== "*" && ot?._declared)
+			return this._checkDeclaredAnyOperator(expr.op, ot, expr.operand);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
 			return this._checkNumericUnaryOp(ot, expr);
@@ -1088,6 +1098,7 @@ export const expressionCheckMethods = {
 			this._checkIntegerConstOperand(bound, "index", scope);
 		}
 		if (bt?._tainted) return TAINTED_ANY;
+		if (bt?._declared) return this._declaredAnyOperand("slice", expr.expr, bt);
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array")
@@ -1415,6 +1426,15 @@ export const expressionCheckMethods = {
 				types: [resolved.key ?? ANY, resolved.value ?? ANY],
 			};
 		return { kind: "tuple", types: [collType] };
+	},
+
+	// `cannot slice v (variable of type any)`: a Go `any` needs a type
+	// assertion before it can be sliced.
+	_declaredAnyOperand(verb, operand, type) {
+		return this.err(
+			`invalid operation: cannot ${verb} ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
+			operand,
+		);
 	},
 
 	_checkRangeExpr(expr, scope) {
@@ -1772,6 +1792,11 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
 		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
 			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
+		if (fnType?._declared && !expr.func._isTypeRef)
+			return this.err(
+				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
+				expr,
+			);
 		if (isAny(fnType)) return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)

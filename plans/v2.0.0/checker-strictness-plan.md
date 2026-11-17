@@ -238,11 +238,12 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
 
     A `.d.ts` `any` value assigned to `int` stays accepted.
   - Done when: those tests pass and `npm test` passes
-- [ ] Task 4.2: Operators on a Go `any` are errors
+- [x] Task 4.2: Operators on a Go `any` are errors
   - Files: `src/typechecker/assignability.js` (`_binaryResultTypeNonComplex`), `src/typechecker/expressions.js` (unary operators), `src/typechecker/statements.js` (`++`/`--`, compound assignment)
   - Test: delete `// pending:` from the S9 arithmetic and unary cases (`s09`, `s09c`–`s09e`, `s09i`, `s09j`, `r1`–`r4`): `invalid operation: operator * not defined on v (variable of type any)`. New reject case: `v++`. The `.d.ts` compile-only accept case stays green
   - Done when: those cases pass, `npm test` passes, and `npm run check` passes (examples untouched: their 14 sites are JS-dynamic)
 - [ ] Task 4.3: Calls, indexing, `range` and conditions on a Go `any` are errors
+  - Status: calls, slicing, conditions and tagless `switch` cases are done. Indexing and `range` are blocked: `stdlib/gom/gom.go:64` (`el[p.name] = p.value`, `el any`) and `example/simple/src/store.go:44` (`for _, raw := range parsed`, `parsed any` from `safeJsonParse`) use a Go `any` as a JS-dynamic value, which contradicts S27 and the no-change rule for `example/` and `stdlib/`. `s09g`, `s09k` and `s09q` keep `// pending: S9`. Needs a decision: migrate the two sites, or exempt index/range on a Go `any` in `js` packages
   - Files: `src/typechecker/expressions.js` (call, `IndexExpr`, `SliceExpr`, `_checkRangeExpr`), `src/typechecker/statements.js` (`if`/`for` conditions, `!`/`&&`/`||` operands)
   - Test: delete `// pending:` from `s09f`, `s09g` and the call/range halves of `a04` (`cannot call non-function v (variable of type any)`, `cannot range over v (variable of type any)`, `cannot index v (variable of type any)`, `non-boolean condition in if statement`)
   - Done when: those cases pass and `npm test` and `npm run check` pass

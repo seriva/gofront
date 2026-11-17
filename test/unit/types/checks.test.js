@@ -1054,15 +1054,19 @@ func main() {
 });
 
 test("user-declared any is permissive — no cascade suppression via taint", () => {
-	// GoFront treats 'any' like TS's any: permissive, not Go's strict interface{}.
-	// TAINTED_ANY (error-derived any) suppresses cascades; user 'any' does not taint.
+	// GoFront treats 'any' like TS's any for member access, but arithmetic on a
+	// Go `any` is rejected; TAINTED_ANY (error-derived any) suppresses cascades.
 	const { errors } = compile(`package main
 func main() {
   var x any
   x.SomeMethod()
   _ = x + 1
 }`);
-	assertEqual(errors.length, 0);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"operator + not defined on x (variable of type any)",
+	);
 });
 
 test("function literal assignable to named function type", () => {
