@@ -51,6 +51,16 @@ const TYPE_LITERAL_KINDS = new Set([
 // Basic types that are not number, string or bool types: JS-dynamic `any`,
 // the types of `nil` and `void`, and the `comparable` constraint.
 const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
+// Composite kinds that no untyped constant converts to.
+const CONST_REJECTING_KINDS = new Set([
+	"struct",
+	"array",
+	"slice",
+	"map",
+	"pointer",
+	"func",
+	"chan",
+]);
 
 const INTEGER_ONLY_OPS = new Set(["%", "&", "|", "^", "&^"]);
 
@@ -92,13 +102,23 @@ function untypedIntegerKind(isFloat, lt, rt) {
 	return lt.rune || rt.rune ? UNTYPED_RUNE : UNTYPED_INT;
 }
 
+// The kind class of an untyped constant: only constants of one class
+// (bool, string or number) meet in an operator.
+function untypedClass(t) {
+	return t.base === "bool" || t.base === "string" ? t.base : "number";
+}
+
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
 
 	binaryResultType(op, lt, rt, node) {
-		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
+		if (lt?.kind === "typeParam" || rt?.kind === "typeParam") {
+			// `x == nil` with a type parameter takes the same nil rule.
+			if (node && CMP_OPS.has(op) && !this.convertUntyped(lt, rt, node))
+				return UNTYPED_BOOL;
 			return this._binaryResultTypeTypeParam(op, lt, rt);
+		}
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) {
 			this._checkLogicalOperands(lt, rt, node);
@@ -109,7 +129,11 @@ export const assignabilityMethods = {
 
 	// `B && bool` mixes two distinct bool types, which Go rejects.
 	_checkLogicalOperands(lt, rt, node) {
-		if (!node || lt?.kind === "untyped" || rt?.kind === "untyped") return;
+		if (!node) return;
+		if (lt?.kind === "untyped" || rt?.kind === "untyped") {
+			this.convertUntyped(lt, rt, node);
+			return;
+		}
 		if (!isBool(lt) || !isBool(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
@@ -152,13 +176,26 @@ export const assignabilityMethods = {
 		const v = this._constValue(countExpr);
 		if (v) {
 			const n = constIntValue(v);
-			if (n === null) {
+			if (rt && rt.kind !== "untyped" && !isInteger(rt)) {
+				this.err(
+					`invalid shift count: ${typeStr(rt)} is not an integer type`,
+					countExpr,
+				);
+			} else if (n === null) {
 				this.err(
 					`invalid shift count ${typeStr(rt)} constant: not an integer`,
 					countExpr,
 				);
 			} else if (n < 0n) {
 				this.err(`invalid shift count: ${n} is negative`, countExpr);
+			} else if (n > 0xffffffffffffffffn) {
+				this.err(
+					`${exprText(countExpr)} (${this._operandTypeStr(rt)} constant) overflows uint`,
+					countExpr,
+				);
+			} else if (rt?.kind === "untyped" && rt.base === "float64") {
+				// `x << 1.0`: the count is converted to an integer constant.
+				countExpr._type = UNTYPED_INT;
 			}
 			return;
 		}
@@ -194,6 +231,7 @@ export const assignabilityMethods = {
 			return ANY;
 		}
 		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
+		if (node && !this.convertUntyped(lt, rt, node)) return ANY;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
 		this._checkIdenticalOperands(lt, rt, node);
@@ -289,14 +327,114 @@ export const assignabilityMethods = {
 
 	// Comparing two typed operands of basic types needs identical types
 	// (`float64 == int`, `Celsius == Fahrenheit`, `S == string`): neither is
-	// assignable to the other. Untyped constants, nil and interface or
+	// assignable to the other. An untyped constant or `nil` is converted to
+	// the other operand's type first (`convertUntyped`); interface and
 	// JS-dynamic operands adapt to either side.
 	_checkCmpOperandTypes(lt, rt, node) {
-		if (!node || !this._isTypedBasicOperand(lt)) return;
+		if (!node) return;
+		if (!this.convertUntyped(lt, rt, node)) return;
+		if (!this._isTypedBasicOperand(lt)) return;
 		if (!this._isTypedBasicOperand(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
 			node,
+		);
+	},
+
+	// The one conversion step for an untyped constant or `nil` operand of the
+	// binary expression `node`: it takes the other operand's type, and the
+	// kind must fit (`string == 'a'`, `int == nil`, `float64 + 1i`). Reports
+	// and returns false on a mismatch; true when nothing is wrong or there is
+	// nothing to convert.
+	convertUntyped(lt, rt, node) {
+		const ln = isNil(lt);
+		const rn = isNil(rt);
+		if (ln && rn) {
+			this.err(
+				`invalid operation: ${exprText(node)} (operator ${node.op} not defined on untyped nil)`,
+				node,
+			);
+			return false;
+		}
+		let fits = true;
+		if (lt?.kind === "untyped" && rt?.kind === "untyped" && !ln && !rn)
+			fits = untypedClass(lt) === untypedClass(rt);
+		else if (ln || rn) fits = !this._nilMismatch(ln ? rt : lt);
+		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
+			return this._convertUntypedConst(rt, lt, node.left, lt, rt, node);
+		else if (rt?.kind === "untyped" && lt?.kind !== "untyped")
+			return this._convertUntypedConst(lt, rt, node.right, lt, rt, node);
+		if (!fits) this._reportMismatch(lt, rt, node);
+		return fits;
+	},
+
+	_nilMismatch(other) {
+		return !!other && !other._tainted && this._isNilless(other);
+	},
+
+	_reportMismatch(lt, rt, node) {
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${this._operandTypeStr(lt)} and ${this._operandTypeStr(rt)})`,
+			node,
+		);
+	},
+
+	_operandTypeStr(t) {
+		if (isNil(t)) return "untyped nil";
+		if (t?.kind === "untyped" && t.base === "float64") return "untyped float";
+		if (t?.kind === "untyped" && t.base === "complex128")
+			return "untyped complex";
+		return typeStr(t);
+	},
+
+	// An untyped constant `untyped` (operand `untypedNode`) meets the typed
+	// operand `typed`: its kind must be one the type can hold.
+	_convertUntypedConst(typed, untyped, untypedNode, lt, rt, node) {
+		const u = this._deepUnderlying(typed);
+		if (!u || typed._tainted || typed.kind === "typeParam") return true;
+		let fits = !CONST_REJECTING_KINDS.has(u.kind);
+		if (u.kind === "basic") {
+			if (NIL_LOOSE_BASICS.has(u.name)) return true;
+			if (u.name === "string") fits = untyped.base === "string";
+			else if (u.name === "bool") fits = untyped.base === "bool";
+			else fits = untyped.base !== "string" && untyped.base !== "bool";
+			// Imaginary constants are not tracked by value: any non-complex
+			// target is reported as an overflow.
+			if (fits && untyped.base === "complex128" && !isComplex(u)) {
+				this.err(
+					`${exprText(untypedNode)} (untyped complex constant) overflows ${typeStr(typed)}`,
+					untypedNode,
+				);
+				return false;
+			}
+		}
+		if (!fits) this._reportMismatch(lt, rt, node);
+		return fits;
+	},
+
+	// `x := nil`, `var x = nil`: untyped `nil` has no default type, so it
+	// cannot give a variable its type. Reports and returns true for `nil`.
+	_rejectUntypedNil(t, node, ctx) {
+		if (!isNil(t)) return false;
+		this.err(`use of untyped nil in ${ctx}`, node);
+		return true;
+	},
+
+	// Whether `nil` has no value in `t`: a struct, array, number, string or
+	// bool, or a type parameter whose constraint admits such a type or has no
+	// type set. JS-dynamic `any` and the loosely modelled kinds keep `nil`.
+	_isNilless(t) {
+		if (!t) return false;
+		if (t.kind === "typeParam")
+			return !this._typeParamAllows(
+				t,
+				(term) => term.name !== "comparable" && !this._isNilless(term),
+			);
+		const u = this._deepUnderlying(t);
+		return (
+			u?.kind === "struct" ||
+			u?.kind === "array" ||
+			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name))
 		);
 	},
 
@@ -676,12 +814,7 @@ export const assignabilityMethods = {
 	// type-parameter type. JS-dynamic `any` and the other kinds the checker
 	// models loosely (`shared`, `simd`) keep accepting it.
 	_checkNilTarget(target, node, ctx) {
-		const u = this._deepUnderlying(target);
-		const nilless =
-			u?.kind === "struct" ||
-			u?.kind === "array" ||
-			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name));
-		if (nilless)
+		if (this._isNilless(target))
 			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, node);
 	},
 

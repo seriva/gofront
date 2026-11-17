@@ -360,6 +360,20 @@ func main() {
 	);
 });
 
+test("an integral float constant shift count is converted to an integer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+const c = 2.0
+func main() {
+	x := 1
+	fmt.Println(x<<1.0, x<<c, 8>>1.0)
+}
+`,
+		"2 4 4\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

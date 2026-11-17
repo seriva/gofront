@@ -176,10 +176,18 @@ export const statementCheckMethods = {
 	_declareDefineVars(stmt, rhsFlat, scope) {
 		for (let i = 0; i < stmt.lhs.length; i++) {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
+			if (name === "_" || !scope.symbols.has(name)) {
+				if (
+					stmt.rhs.length === stmt.lhs.length &&
+					this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment")
+				)
+					rhsFlat[i] = ANY;
+			}
 			if (name === "_") continue;
 			if (scope.symbols.has(name)) {
 				stmt.lhs[i]._redecl = true;
-				// Redeclared variables keep their type; the value must be assignable.
+				// Redeclared variables keep their type; the value must be assignable
+				// (so nil is fine for nilable types, as in plain assignment).
 				this._checkRedeclAssign(scope.symbols.get(name), rhsFlat[i], stmt, i);
 				continue;
 			}
@@ -358,7 +366,11 @@ export const statementCheckMethods = {
 
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
-			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
+			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") {
+				if (stmt.op === "=" && stmt.rhs.length === lhsTypes.length)
+					this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment");
+				continue;
+			}
 			const r = rhsFlat[i] ?? ANY;
 			this._markRangeAssignBox(stmt, i, lhsTypes[i], r);
 			if (stmt.rhs.length === lhsTypes.length && lhsTypes[i] && r)
@@ -630,7 +642,10 @@ export const statementCheckMethods = {
 	_checkSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
-		if (stmt.tag) this.checkExpr(stmt.tag, inner);
+		if (stmt.tag) {
+			this.checkExpr(stmt.tag, inner);
+			this._rejectUntypedNil(stmt.tag._type, stmt.tag, "switch expression");
+		}
 		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
 		const seenCases = [];
 		this._switchDepth++;

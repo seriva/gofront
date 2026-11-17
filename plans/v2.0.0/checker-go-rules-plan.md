@@ -256,15 +256,15 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
 ## Implementation Tasks
 
 ### Phase 1: Untyped operand conversion (root `untyped-conversion`)
-- [ ] Task 1.1: `convertUntyped` for comparison, arithmetic and type-parameter `nil` operands (R1.1–R1.3, R1.8–R1.11, R1.13, R1.14)
+- [x] Task 1.1: `convertUntyped` for comparison, arithmetic and type-parameter `nil` operands (R1.1–R1.3, R1.8–R1.11, R1.13, R1.14)
   - Files: `src/typechecker/assignability.js`
   - Test: reject fixtures `untyped_cmp_rune_string.go`, `untyped_cmp_string_int.go`, `untyped_complex_to_float.go`, `nil_type_param.go`, `nil_cmp_struct.go`, `nil_cmp_array.go`, `nil_cmp_int.go`, `nil_cmp_nil.go`, `untyped_cmp_ordered_string.go`; accept fixtures for nilable `== nil` on pointer/slice/map/func/interface/type param and `func f[T *int | []int]() T { return nil }`
   - Done when: each reject case reports Go's message on its line on all targets; no wasm ICE
-- [ ] Task 1.2: Untyped `nil` has no default type in `:=`, `var` and `const` (R1.5–R1.7)
+- [x] Task 1.2: Untyped `nil` has no default type in `:=`, `var` and `const` (R1.5–R1.7)
   - Files: `src/typechecker/types.js` (`defaultType`), `src/typechecker/statements.js`, `src/typechecker/index.js` (`checkVarDecl`, `checkConstDecl`)
   - Test: reject fixtures `nil_var_decl.go`, `nil_const.go`, `nil_define.go`
   - Done when: Go's messages on all targets (both package-level and function-local `var`/`const`)
-- [ ] Task 1.3: Constant shift counts and duplicate cases use the converted type (R1.4, R1.12)
+- [x] Task 1.3: Constant shift counts and duplicate cases use the converted type (R1.4, R1.12)
   - Files: `src/typechecker/assignability.js` (`checkShiftCount`), `src/typechecker/statements.js` (duplicate cases)
   - Test: `test/unit/types/numeric-operands.test.js` `x << 1.0` prints `2` on all targets; reject fixture `dup_case_float32.go`
   - Done when: both pass on all targets
