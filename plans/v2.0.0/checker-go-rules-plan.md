@@ -274,7 +274,7 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/numeric-operands.test.js` R2.1 (`xy`), R2.3 (`(0+3i)`) with `assertOutput`; reject fixture `defined_string_mismatch.go`
   - Done when: all targets give Go's result
-- [ ] Task 2.2: `x op= y` and `x++` type through `binaryResultType` (R2.4, R2.5, R2.7–R2.10)
+- [x] Task 2.2: `x op= y` and `x++` type through `binaryResultType` (R2.4, R2.5, R2.7–R2.10)
   - Files: `src/typechecker/statements.js`, `src/typechecker/assignability.js` (folding `_checkCompoundIntegerOnly`)
   - Test: reject fixtures `compound_shift_float.go`, `incdec_empty_interface.go`, `compound_add_bool.go`, `incdec_string.go`, `compound_defined_string_mismatch.go`, `compound_int_float.go`; `test/unit/types/errors.test.js` asserts `i += f` (R2.10) reports exactly one error; R2.6 and `c %= 2` controls and the existing `any_compound_assign.go`/`any_compound_shift_count.go` cases unchanged
   - Done when: `_checkIncDecStmt` and the compound path call `binaryResultType` and no longer call `assertAssignable` for the rhs of `op=`; all conformance cases pass

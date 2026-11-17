@@ -155,7 +155,14 @@ export const assignabilityMethods = {
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
 			return this._binaryResultTypeString(lt, rt, node);
-		if (node)
+		if (node && lt.kind !== "untyped" && identical(lt, rt)) {
+			// `b + b` on bool: the operator is not defined for the type.
+			const left = node.left;
+			this.err(
+				`invalid operation: operator ${op} not defined on ${exprText(left)} (${operandKind(left, typeStr(lt), false)})`,
+				left,
+			);
+		} else if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
 	},
@@ -165,7 +172,10 @@ export const assignabilityMethods = {
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
 		if (node && lt.kind !== "untyped" && !isInteger(lt))
-			this.err(`shifted operand ${typeStr(lt)} must be integer`, node.left);
+			this.err(
+				`invalid operation: shifted operand ${exprText(node.left)} (${operandKind(node.left, typeStr(lt), false)}) must be integer`,
+				node.left,
+			);
 		return lt;
 	},
 

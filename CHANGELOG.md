@@ -8,6 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Changed
+- **Breaking:** Like Go, `x op= y` and `x++` follow the same operator rules as `x op y`: `f <<= 1` on a float, `s++` on a string, `b += true` on a bool, and mixing a defined string type with `string` in `a += t` are compile errors. Fix each reported line as Go would.
 - **Breaking:** Like Go, numeric types no longer mix implicitly: `int + float64`, `float64 == int`, `%` or `&` on floats, and passing an `int` as a `float64` argument or assigning it to a `float64` variable are compile errors. Convert where the error points, for example `float64(n)`; these programs used to print wrong values or build a WebAssembly module the browser refused to load ([rules](docs/go-compatibility.md#numeric-operands-need-identical-types)).
 - **Breaking:** Like Go, different anonymous struct types, different anonymous interface types, and a local type that shadows an outer type of the same name are no longer assignable to each other. Make the two types identical or convert the value explicitly ([rules](docs/go-compatibility.md#type-identity)).
 - **Breaking:** Like Go, a Go `any` value no longer supports arithmetic, `++`, calls, indexing, slicing, `range` or use as a condition. Assert its type first (`v.(int) * 2`); browser globals, ECMAScript built-ins and `.d.ts` values stay dynamic and are unaffected ([rules](docs/go-compatibility.md#go-any-versus-javascript-values)).

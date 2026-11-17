@@ -308,7 +308,7 @@ test("int reaches float64 only through a conversion", () => {
 		[
 			"compound assignment",
 			"i := 3\n\tf := 1.5\n\tf += i\n\t_ = f",
-			"as float64 value in assignment",
+			"invalid operation: f += i (mismatched types float64 and int)",
 		],
 		[
 			"argument",

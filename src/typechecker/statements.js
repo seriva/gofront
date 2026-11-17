@@ -23,6 +23,7 @@ import {
 	is64BitInt,
 	isAny,
 	isBool,
+	isComplexOrNumeric,
 	isNil,
 	isString,
 	isUntyped,
@@ -358,13 +359,74 @@ export const statementCheckMethods = {
 		if (holder._ifaceBox) node._rangeBox = holder;
 	},
 
+	// `x++` is `x + 1` and `x op= y` is `x op y`: both type through the same
+	// path as a binary expression, on a synthetic node spelled as the statement.
+	_operatorStmtNode(stmt, op, left, right, spelling) {
+		return {
+			kind: "BinaryExpr",
+			op,
+			left,
+			right,
+			_spelling: spelling,
+			_line: stmt._line,
+			_col: stmt._col,
+			line: stmt.line,
+			col: stmt.col,
+		};
+	},
+
 	_checkIncDecStmt(stmt, scope) {
 		const t = this.checkExpr(stmt.expr, scope);
 		this._checkAssignTarget(stmt.expr);
-		this._checkDeclaredAnyOperator(stmt.op, t, stmt.expr);
+		const lt = t && this.resolveType(t);
+		if (!lt || lt._tainted) return;
+		const numeric =
+			lt.kind === "typeParam" ||
+			(isAny(lt) ? !lt._declared : isComplexOrNumeric(lt));
+		if (!numeric) {
+			this.err(
+				`invalid operation: ${exprText(stmt.expr)}${stmt.op} (non-numeric type ${typeStr(lt)})`,
+				stmt.expr,
+			);
+			return;
+		}
+		const one = { kind: "BasicLit", litKind: "INT", value: "1" };
+		this._positionLike(one, stmt);
+		const node = this._operatorStmtNode(
+			stmt,
+			stmt.op === "++" ? "+" : "-",
+			stmt.expr,
+			one,
+			`${exprText(stmt.expr)}${stmt.op}`,
+		);
+		this._typeBinaryOperands(node, lt, this.checkExpr(one, scope), scope);
 	},
 
-	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
+	_positionLike(node, at) {
+		node._line = at._line;
+		node._col = at._col;
+		node.line = at.line;
+		node.col = at.col;
+	},
+
+	// `x op= y`: the operands type as `x op y`, so one statement reports one
+	// error and a shift count is not converted to the left operand's type.
+	_checkCompoundOperands(stmt, i, lhsType, r, scope) {
+		const lt = lhsType && this.resolveType(lhsType);
+		const op = stmt.op.slice(0, -1);
+		const node = this._operatorStmtNode(
+			stmt,
+			op,
+			stmt.lhs[i],
+			stmt.rhs[i],
+			`${exprText(stmt.lhs[i])} ${stmt.op} ${exprText(stmt.rhs[i])}`,
+		);
+		if (op !== "<<" && op !== ">>")
+			this._checkConstOverflow(lt, r, stmt.rhs[i], "assignment");
+		this._typeBinaryOperands(node, lt, r, scope);
+	},
+
+	_checkAssignTypes(stmt, rhsFlat, lhsTypes, scope) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") {
 				if (stmt.op === "=" && stmt.rhs.length === lhsTypes.length)
@@ -380,23 +442,7 @@ export const statementCheckMethods = {
 					stmt.rhs[i],
 				);
 			if (stmt.op !== "=" && stmt.op !== ":=") {
-				if (
-					this._checkDeclaredAnyOperator(
-						stmt.op.slice(0, -1),
-						lhsTypes[i],
-						stmt.lhs[i],
-					)
-				)
-					continue;
-				this._checkCompoundIntegerOnly(stmt.op, lhsTypes[i], stmt.lhs[i]);
-			}
-			// A shift count is not converted to the left operand's type.
-			if (stmt.op === "<<=" || stmt.op === ">>=") {
-				if (
-					this._checkDeclaredAnyOperator(stmt.op.slice(0, -1), r, stmt.rhs[i])
-				)
-					continue;
-				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);
+				this._checkCompoundOperands(stmt, i, lhsTypes[i], r, scope);
 				continue;
 			}
 			if (
@@ -453,7 +499,7 @@ export const statementCheckMethods = {
 		// A rejected range index is not checked again as an ordinary value.
 		if (this._checkRangeIndexAssign(stmt, lhsTypes))
 			rhsFlat = [ANY, ...rhsFlat.slice(1)];
-		this._checkAssignTypes(stmt, rhsFlat, lhsTypes);
+		this._checkAssignTypes(stmt, rhsFlat, lhsTypes, scope);
 	},
 
 	// The index of a string, slice or array range is a typed `int`: Go assigns
