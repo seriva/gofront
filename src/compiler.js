@@ -333,7 +333,9 @@ function resolveImports(
 				const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
 				checker.addDefinitions(types, values);
 			} catch (e) {
-				throw new Error(`Cannot read '${dtsPath}': ${e.message}`);
+				throw new CompileError([
+					new Error(`Cannot read '${dtsPath}': ${e.message}`),
+				]);
 			}
 		}
 	}
@@ -373,11 +375,19 @@ function resolveImports(
 				const depKey = resolve(depDir);
 				const alreadyBundled = bundledDirs.has(depKey);
 				bundledDirs.add(depKey);
-				const dep = compileDir(depDir, {
-					...options,
-					bundledDirs,
-					isDependency: true,
-				});
+				let dep;
+				try {
+					dep = compileDir(depDir, {
+						...options,
+						bundledDirs,
+						isDependency: true,
+					});
+				} catch (e) {
+					// Tag the failing package (innermost wins) so callers can tell
+					// a dependency's error from the importer's own.
+					if (e instanceof CompileError && !e.packageDir) e.packageDir = depKey;
+					throw e;
+				}
 				if (!alreadyBundled) preambles.push(dep);
 				// A dependency that hands out `&xs[i]` makes whole-element
 				// stores in this package write in place too.
@@ -463,9 +473,11 @@ export function resolvePackageTarget(declared, pkgDir, options = {}) {
 	const t = overrides[key] ?? (key === "." ? overrides[""] : undefined);
 	if (t === undefined) return declared;
 	if (!PACKAGE_TARGETS.has(t))
-		throw new Error(
-			`gofront.json: invalid target '${t}' for package '${key}' (expected js, wasm or both)`,
-		);
+		throw new CompileError([
+			new Error(
+				`gofront.json: invalid target '${t}' for package '${key}' (expected js, wasm or both)`,
+			),
+		]);
 	return t;
 }
 

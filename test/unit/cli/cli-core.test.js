@@ -685,7 +685,13 @@ test("check (plain and dir/...) and test honour gofront.json targets", async () 
 			assert(threw, "expected invalid target error");
 		};
 		await expectInvalid(() => handleCheck(dir));
-		await expectInvalid(() => handleCheck(`${dir}/...`));
+		// Pattern mode collects the failure per package instead of throwing.
+		const collected = handleCheck(`${dir}/...`);
+		assertEqual(collected.failed, true);
+		assertContains(
+			collected.packages.map((p) => p.errors ?? "").join("\n"),
+			"invalid target 'native'",
+		);
 		// --js-only wins over the config.
 		handleCheck(dir, { forceTarget: "js" });
 		// test: the build failure is reported per package rather than thrown.

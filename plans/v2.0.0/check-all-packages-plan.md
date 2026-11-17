@@ -92,15 +92,15 @@ Probes 2026-11-17 (review), `.probes/` (deleted). Fixture: `a/a.go` `var x int =
 > Split from the former `web-platform-evolution-plan.md` Phase 5 (re-probed 2026-11-17). Estimated ~120–180 production LOC across `src/cli/cli-core.js`, `src/compiler.js`, `src/index.js`.
 
 ### Phase 1: Report every package and test file
-- [ ] Task 1.1: Collect per-package results in `gofront check <pattern>` (former 5.1)
+- [x] Task 1.1: Collect per-package results in `gofront check <pattern>` (former 5.1)
   - Files: `src/cli/cli-core.js` (`handleCheck`, `reportCheck`), `src/index.js` (exit code from `reportCheck`)
   - Test: `test/unit/cli/check-all-packages.test.js`: `a`, `b` failing in `x.go` → `handleCheck("<root>/...")` returns both with `status: "fail"` and their errors, `failed: true`; `reportCheck` output has `FAIL a`, `FAIL b`, the totals line, and returns 1; all-ok returns 0. Update `test/unit/cli/test-runner.test.js:470` from `assertThrows` to the collected result.
   - Done when: `gofront check ./pkg/...` no longer stops at the first failing package and exits 1 when any failed
-- [ ] Task 1.2: Type-check `_test.go` files through `compilePackageTests` (former 5.2)
+- [x] Task 1.2: Type-check `_test.go` files through `compilePackageTests` (former 5.2)
   - Files: `src/cli/cli-core.js` (`handleCheck` both modes, `runSingleShot` `checkOnly` on a directory)
   - Test: `check-all-packages.test.js`: a package whose only error is in `x_test.go` fails `handleCheck(dir)`, `handleCheck("<root>/...")` and `runSingleShot(dir, true, { checkOnly: true })` (returns 1); a test-only directory is checked (fails on its error, passes when clean) instead of `No .go files found`; no test function runs (a `TestX` that would `panic` leaves no output)
   - Done when: every `check` entry point on a directory compiles the same file set as `gofront test`, and `npm run check` passes
-- [ ] Task 1.3: Skip dependents of a failed package (former 5.3)
+- [x] Task 1.3: Skip dependents of a failed package (former 5.3)
   - Files: `src/compiler.js` (`resolveImports` local-package loop: tag `CompileError.packageDir`), `src/cli/cli-core.js` (`handleCheck`, `reportCheck`), `docs/usage.md` (check output, summary, skipped lines)
   - Test: `check-all-packages.test.js`: `c` imports failing `a` → `a`'s errors printed once, `c` `skipped (a failed)`; same with dependent sorting first (`aa` → `zz`); diamond (`c`, `d` → `a`); transitive (`c` → `b` → `a`); dependency outside the pattern root printed once under its relative path. A `test/unit/compiler/` case asserts `compileDir(c)` throws a `CompileError` with `packageDir` = `a`'s dir and unchanged `message`.
   - Done when: no error is reported twice and every skipped line names the innermost failed package
