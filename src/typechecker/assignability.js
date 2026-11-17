@@ -869,47 +869,31 @@ export const assignabilityMethods = {
 		);
 	},
 
-	// A value computed from a generic call (`3 + Sum[float64](1, 2)`) has the
-	// exact instantiated type, so the loose int/float64 promotion that plain
-	// code enjoys does not apply to it.
-	_isGenericCallResult(node) {
-		if (!node || typeof node !== "object") return false;
-		if (node.kind === "ParenExpr") return this._isGenericCallResult(node.expr);
-		if (node.kind === "BinaryExpr")
-			return (
-				this._isGenericCallResult(node.left) ||
-				this._isGenericCallResult(node.right)
-			);
-		return node.kind === "CallExpr" && Boolean(node.func?._genericFnType);
-	},
-
-	_isNumericCoercible(target, source) {
-		if (target.kind !== "basic" || source.kind !== "basic") return false;
-		const pair = `${target.name}:${source.name}`;
-		return pair === "float64:int";
-	},
-
-	// The lenient numeric pairs: accepted, except that a generic call result
-	// is a mismatch and a float64 never reaches an int implicitly.
-	// Returns true when the pair was handled.
+	// Go has no implicit conversion between `int` and `float64`: only an
+	// untyped constant (handled earlier) or an explicit `float64(n)` /
+	// `int(x)` crosses. Returns true when the pair was handled.
 	_checkNumericCoercion(target, source, node, ctx, operand) {
-		const floatToInt = this._isFloatToInt(target, source);
-		if (!floatToInt && !this._isNumericCoercible(target, source)) return false;
-		if (this._isGenericCallResult(node))
-			this.err(
-				`mismatched types ${typeStr(source)} and ${typeStr(target)} in ${ctx}`,
-				node,
-			);
-		else if (floatToInt)
-			this.err(
-				`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
-				node,
-			);
+		if (
+			!this._isIntToFloat(target, source) &&
+			!this._isFloatToInt(target, source)
+		)
+			return false;
+		this.err(
+			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
+			node,
+		);
 		return true;
 	},
 
-	// Go has no implicit float64 -> int conversion; only an untyped constant
-	// (handled earlier) or an explicit `int(x)` reaches an int.
+	_isIntToFloat(target, source) {
+		return (
+			target.kind === "basic" &&
+			source.kind === "basic" &&
+			target.name === "float64" &&
+			source.name === "int"
+		);
+	},
+
 	_isFloatToInt(target, source) {
 		return (
 			target.kind === "basic" &&

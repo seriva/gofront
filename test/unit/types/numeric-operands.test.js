@@ -277,6 +277,75 @@ func main() {
 	);
 });
 
+section("No implicit int to float64");
+
+test("int reaches float64 only through a conversion", () => {
+	const cases = [
+		[
+			"variable declaration",
+			"i := 3\n\tvar f float64 = i\n\t_ = f",
+			"cannot use i (variable of type int) as float64 value in variable declaration",
+		],
+		[
+			"assignment",
+			"i := 3\n\tf := 1.5\n\tf = i\n\t_ = f",
+			"cannot use i (variable of type int) as float64 value in assignment",
+		],
+		[
+			"compound assignment",
+			"i := 3\n\tf := 1.5\n\tf += i\n\t_ = f",
+			"as float64 value in assignment",
+		],
+		[
+			"argument",
+			"i := 3\n\t_ = half(i)",
+			"cannot use i (variable of type int) as float64 value in argument",
+		],
+		["return statement", "_ = back(2)", "as float64 value in return statement"],
+		[
+			"slice literal element",
+			"i := 3\n\t_ = []float64{1, i}",
+			"as float64 value",
+		],
+	];
+	for (const [, body, want] of cases) {
+		rejectsEverywhere(
+			`package main
+func half(x float64) float64 { return x / 2 }
+func back(n int) float64 { return n }
+func main() {
+	${body}
+}`,
+			want,
+		);
+	}
+});
+
+test("explicit conversions and untyped constants still reach float64", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func half(x float64) float64 { return x / 2 }
+func mean[T ~int | ~float64](xs []T) float64 {
+	var s float64
+	for _, x := range xs {
+		s += float64(x)
+	}
+	return s / float64(len(xs))
+}
+func main() {
+	i := 3
+	var f float64 = float64(i)
+	f += 1
+	f = f * 2
+	g := []float64{1, 2, float64(i)}
+	fmt.Println(f, half(float64(i)), half(4), g, mean([]int{1, 2, 4}))
+}
+`,
+		"8 1.5 2 [1 2 3] 2.3333333333333335\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

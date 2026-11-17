@@ -986,7 +986,7 @@ func f() int {
 	return 3 + Sum[float64](1, 2)
 }
 func main() { f() }`).errors,
-		"mismatched types",
+		"(value of type float64) as int value in return statement",
 	);
 	assertErrorContains(
 		compile(`package main

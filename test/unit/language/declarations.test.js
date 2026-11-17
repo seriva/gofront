@@ -327,17 +327,16 @@ func main() {
 });
 
 test("typed const int cannot implicitly assign to float64 param in strict Go", () => {
-	// In GoFront, typed int -> float64 is still allowed (existing promotion),
-	// but this test documents the behavior: typed const uses declared type
-	const { js, errors } = compile(`package main
+	const { errors } = compile(`package main
 const x int = 42
 func main() {
 	var f float64 = x
 	console.log(f)
 }`);
-	// GoFront allows int -> float64 promotion even for typed values
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "42");
+	assertErrorContains(
+		errors,
+		"cannot use x (variable of type int) as float64 value in variable declaration",
+	);
 });
 
 test("untyped float const in arithmetic with int var", () => {

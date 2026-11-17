@@ -222,7 +222,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/assignability.js`
   - Test: delete `// pending:` from the S7 cases (`operator % not defined on a (variable of type float64)`, the same for `&` and `|`). New reject case: compound `f %= 2.0`
   - Done when: those cases pass on `wasm` as compile errors instead of the `f64.and` crash, and `npm test` passes
-- [ ] Task 3.4: Remove the `float64:int` leniency (D1, S8)
+- [x] Task 3.4: Remove the `float64:int` leniency (D1, S8)
   - Files: `src/typechecker/assignability.js` (`_isNumericCoercible`, `_checkNumericCoercion`, `_isGenericCallResult`)
   - Test: delete `// pending:` from the S8 cases (`cannot use i (variable of type int) as float64 value in variable declaration`, the same for `argument`). Flip `typed const int cannot implicitly assign to float64 param in strict Go` (`test/unit/language/declarations.test.js:329`) to a negative test with that message
   - Done when: those tests pass, `npm test` and `npm run check` pass, and `example/`/`stdlib/` are unchanged

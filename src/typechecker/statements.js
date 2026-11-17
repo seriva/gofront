@@ -710,13 +710,13 @@ export const statementCheckMethods = {
 
 	// The yielded value is assigned to the target, so it must be assignable
 	// to it (`for s = range seq` with `s string` and `seq` yielding `int`).
-	// The lenient `float64 = int` pair of plain assignments is reported here:
-	// the iterator loop stores the yielded value without converting it.
+	// `float64 = int` is reported here in the plain "Cannot assign" form: the
+	// yielded value has no expression to quote.
 	_checkRangeIterAssignable(node, target, source) {
 		if (!target || !source) return;
 		const t = this.resolveType(target);
 		const v = this.resolveType(source);
-		if (this._isNumericCoercible(t, v)) {
+		if (this._isIntToFloat(t, v)) {
 			this.err(`Cannot assign ${typeStr(v)} to ${typeStr(t)}`, node);
 			return;
 		}
