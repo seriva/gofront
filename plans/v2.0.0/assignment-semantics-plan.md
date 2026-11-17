@@ -1,7 +1,8 @@
 # Assignment Semantics — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-16)  
+**Base branch:** main  
 **Related:** Fixes the spec-mandated assignment and value-semantics defects found by the differential fuzzer (`test/fuzz/difffuzz.js`, added in Phase 1) and the matching `plans/follow-ups.md` entries from [`../v1.9.3/follow-ups-2026-11-16-plan.md`](../v1.9.3/follow-ups-2026-11-16-plan.md) Phases 4–5 (PRs #212, #213). Independent of [`followup-fixes-plan.md`](followup-fixes-plan.md), which owns the `wasm` anonymous-struct layout (F17) that the fuzzer skips by default. Start after the v1.9.3 follow-ups plan merges (it edits the same assignment paths in `src/backend/js/statements.js` and `src/backend/wasm/emit-stmts.js`).  
 **Release note:** Assignments now keep Go's value semantics in more places: a struct reassigned inside a closure stays visible through earlier pointers, `p, *p = &b, x` stores through the old pointer, and comma-ok lookups into `*p` no longer crash in JavaScript. Calls in a comma-ok map key or a complex `+=` run once, and struct copies through a pointer on WebAssembly no longer share their arrays.  
 
@@ -34,6 +35,7 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
 | **Excluded: deferred** | `wasm` anonymous struct with an embedded field | `v := struct{ P }{P{3}}; w := v; w.P.M = 8; fmt.Println(v.M)` → wasm `0`, want `3`; such literals also emit invalid modules (fuzzer `--anon-embed`) | F17, owned by `followup-fixes-plan.md` Phase 2 |
 | **Excluded: deferred** | JS `new(T)` of an anonymous struct alias | ledger *JS anonymous struct alias* | Not an assignment defect; stays in `plans/follow-ups.md` |
 | **Excluded: runtime / platform** | Running the fuzzer in `npm test` or CI | — | CI has no Go toolchain, and v1.8.0 retired the real-Go runner by design. Fuzzer findings become unit tests with the Go output written in |
+| **Excluded: deferred** | Review follow-ups found while executing this plan (not caused by it; each repro reproduced on 2026-11-16 at plan completion) | **WASM struct assignment:** `v = w` of a struct with an embedded struct field shares the embedded value when `v` is captured by a closure. Repro: `v := V{P{-4}, 7}; w := v; f := func() { v.M = 5 }; v = w; f(); fmt.Println(w, v)` (V embeds P) → wasm got `{{5} 7} {{5} 7}`, want `{{-4} 7} {{5} 7}`. (feat/assignment-semantics-phase-1, assignment-semantics Phase 1, Out of Scope; also fuzz `--mode order --stmts 6 --case 1:2`, feat/assignment-semantics-phase-5, assignment-semantics Phase 5) <br>**Fuzzer transitive mutations:** `stmtConflicts` does not follow `ks(...)` calls inside closure bodies, so a statement can still depend on read-vs-call order. Repro: `node test/fuzz/difffuzz.js --mode order --stmts 12 --case 6873:0` → `xs[(f1(-4))&1] = ((a / 3) * -1)` passes `stmtConflicts`, want it regenerated. (PR #219, assignment-semantics Phase 1, Low) <br>**Fuzzer closure order:** `f0`–`f2` are declared before `ks` but may call it, so the batch is rejected by Go. Repro: `node test/fuzz/difffuzz.js --mode order --stmts 12 --case 6873:0` → got `Undefined: 'ks'`, want a valid Go program. (PR #219, assignment-semantics Phase 1, Out of Scope) <br>**Multi-assignment (non-Ident targets):** `lhsOperandBinds` only tracks `Ident` targets as assigned, so an operand mentioning a field or element target assigned in the same statement is read after the first store. Repro: `type SP struct{ P *int }; sa, sb := 1, 2; sp := SP{P: &sa}; sp.P, *sp.P = &sb, 99; fmt.Println(sa, sb)` → got `1 99`, want `99 2` (also `xs[0], *xs[0] = &xb, 99`). (PR #220, assignment-semantics Phase 2, Out of Scope) <br>**JS range-over-func assign form:** `for *p = range seq`, `for s = range seq` with `&s` taken, and `for arr = range seq` with `arr[:]` aliased do not store in place on `js`/`both`. Repro: `s := S{1}; p := &s; seq := func(yield func(S) bool) { yield(S{5}) }; for *p = range seq {}` → got `Invalid left-hand side in assignment`, want `{5}`; `for s = range seq {}` with `ps := &s` → got `{1} false`, want `{2} true`. (PR #221, assignment-semantics Phase 3, Out of Scope) <br>**Comma-ok into an address-taken struct:** `s, ok = m["k"]` and `s, ok = i.(S)` replace the variable instead of copying in place, so earlier pointers go stale on all targets. Repro: `s := S{1}; ps := &s; m := map[string]S{"k": {5}}; var ok bool; s, ok = m["k"]; fmt.Println(*ps, ps == &s)` → got `{1} false`, want `{5} true`. (PR #221, assignment-semantics Phase 3, Out of Scope) <br>**JS comma-ok into a generic `*T`:** `func f[T any](p *T, m map[string]T) { var ok bool; *p, ok = m["k"] }` crashes on `js`/`both`. Repro: call `f(&S{1}, map[string]S{"k": {5}})` → got `Invalid left-hand side in assignment`, want `{5} true`. (PR #221, assignment-semantics Phase 3, Out of Scope) <br>**JS complex compound assignment:** a call in the left-hand target with a call-free right-hand side runs three times, a `for` post `c += z` yields NaN, and `c += f()` on an address-taken `c` crashes. Repro: `m := map[string]complex128{"a": complex(1, 2)}; m[k()] += z` → got `k()` called 3 times on `js`/`both`, want 1; `for i := 0; i < 2; c += z { i++ }` → got `(NaN+NaNi)`, want `(2+2i)`; `p := &c; c += f()` → got `Cannot read properties of undefined (reading 're')`. (PR #222, assignment-semantics Phase 4, Out of Scope) <br>**JS comma-ok `:=` in a `for` initializer:** `for v, ok := m[k()]; ok; ok = false {}` crashes on `js`/`both`. Repro: `for v, ok := m[k()]; ok; ok = false { fmt.Println(v, ok, n) }` → got `number 5 is not iterable`, want `5 true 1`. (PR #222, assignment-semantics Phase 4, Out of Scope) <br>**WASM struct literal into a struct holding a value-struct field:** the field is shared, not copied. Repro: `type P struct{ A [2]int }; type W struct{ Q P }; p := P{[2]int{1, 2}}; var a W; pa := &a; *pa = W{Q: p}; pa.Q.A[0] = 9; fmt.Println(p, a)` → got `{[9 2]} {{[9 2]}}`, want `{[1 2]} {{[9 2]}}`. (PR #222, assignment-semantics Phase 4, Out of Scope) <br>**WASM captured struct assignment:** `w = v` of a struct variable `w` captured by a closure aliases `v` instead of copying it. Repro: `type V struct{ M, K int }; v := V{9, 5}; w := v; w = v; v.K = 7; fmt.Println(w); func() { _ = w.M }()` → wasm got `{9 7}`, want `{9 5}` (js/both right); fuzz `node test/fuzz/difffuzz.js --mode order --stmts 6 --case 2:18`. (feat/assignment-semantics-phase-5, assignment-semantics Phase 5, Out of Scope) | Out of this plan's scope; deferred at plan completion |
 
 ---
 
@@ -101,59 +103,59 @@ Make every assignment form follow what the Go spec requires, on `js`, `both` and
 > Scheduled from the 2026-11-16 differential fuzzer and the spec-mandated `plans/follow-ups.md` entries. The gc-order-only entries were closed into the *Excluded* row above.
 
 ### Phase 1: Spec-aware differential fuzzer
-- [ ] Task 1.1: Fuzzer only generates programs whose output the spec fixes
+- [x] Task 1.1: Fuzzer only generates programs whose output the spec fixes
   - Files: `test/fuzz/difffuzz.js` (alias groups, per-closure mutated groups, regenerate a statement whose calls mutate a group it names), `package.json` (`fuzz` script)
   - Test: `test/unit/cli/difffuzz.test.js` (no Go needed): import the generator through a new `--self-test` entry that generates 2,000 order-mode cases from seed 1 and asserts that no statement both calls a closure mutating group G and names a member of G elsewhere; and that `--replay` on a missing file exits non-zero with `ENOENT`
   - Done when: the self-test passes, and `npm run fuzz -- --mode order --seed 1 --batches 3 --cases 30 --stmts 6` no longer reports any finding whose minimal repro is in the gc-order *Excluded* row
-- [ ] Task 1.2: Deterministic replay of findings
+- [x] Task 1.2: Deterministic replay of findings
   - Files: `test/fuzz/difffuzz.js` (`--case <seed>:<n>` regenerates and replays one case; finding headers print it)
   - Test: `test/unit/cli/difffuzz.test.js`: `--self-test` also asserts that generating seed 7000 twice yields identical program text
   - Done when: a finding's header names a `--case` that reproduces it
 
 ### Phase 2: Shared left-hand operand rule (T1)
-- [ ] Task 2.1: `lhsOperandBinds` in `src/lower/assign-order.js`
+- [x] Task 2.1: `lhsOperandBinds` in `src/lower/assign-order.js`
   - Files: `src/lower/assign-order.js` (new), `src/lower/index.js` (export)
   - Test: `test/unit/compiler/assign-order.test.js`: on parsed and checked snippets, `i, xs[i] = 1, 5` binds `xs[i].index`; `p, *p = &b, 0` binds `(*p).operand`; `arr[i], x = f(), 5` binds `arr[i].expr`/`.index` (ordered); with `callOnly` the same statement binds nothing; `ps[n].A[k], x = …` descends into `ps[n]` instead of binding the struct value
   - Done when: the unit tests pass; nothing calls the function yet
-- [ ] Task 2.2: JS `_hoistLhsOperands` delegates to `lhsOperandBinds`
+- [x] Task 2.2: JS `_hoistLhsOperands` delegates to `lhsOperandBinds`
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/codegen-regressions.test.js` section *Assignment order: blanks, pointer targets, comma-ok*: T1 `p, *p = &b, 0` and the ledger `p, *p = &b, 99` (`99 20 20`) with `assertAllTargetsOutput` (fails on js/both first)
   - Done when: T1 passes on js/both and the existing gc-order sections pass unmodified
-- [ ] Task 2.3: WASM `_hoistLhsOperands` delegates to `lhsOperandBinds`
+- [x] Task 2.3: WASM `_hoistLhsOperands` delegates to `lhsOperandBinds`
   - Files: `src/backend/wasm/emit-stmts.js`
   - Test: the Task 2.2 tests now pass on wasm; add T1 inside a `for` post (`for k := 0; k < 1; p, *p, k = &b, 7, k+1 {}`) on all targets
   - Done when: `grep -n "ordered && l.kind" src/backend` finds nothing and all assignment-order sections pass
 
 ### Phase 3: JS stores keep identity and copies (I1–I7, X1, X3, V7)
-- [ ] Task 3.1: `_fnMutates` sees an enclosing function's `&x` for captured variables
+- [x] Task 3.1: `_fnMutates` sees an enclosing function's `&x` for captured variables
   - Files: `src/backend/js/expressions.js` (`_withFnCtx` parent link, `_fnMutates`), `src/lower/ownership.js` (a `declaresVar` helper if `fnMutates` needs it)
   - Test: `test/unit/language/value-semantics.test.js` new section *Whole-value stores in closures*: I1, I3, I4, I5, I6, I7 with `assertAllTargetsOutput`; I2 (arrays) as a control; a shadowing control (closure declares its own `s := S{9}`; outer `*ps` stays `{1}`)
   - Done when: all pass on every target
-- [ ] Task 3.2: Comma-ok results stored into a struct `*p`
+- [x] Task 3.2: Comma-ok results stored into a struct `*p`
   - Files: `src/backend/js/statements.js` (`_storeTarget`, used by `_genCommaOkMapIndex` and `_genCommaOkTypeAssert`)
   - Test: `codegen-regressions.test.js` *Assignment order: blanks, pointer targets, comma-ok*: X1 (`{5} true`), X3 (`{7} true`), plus a missing key (`*p, ok = m["z"]` → `{0} false`) with `assertAllTargetsOutput`
   - Done when: no `Invalid left-hand side` on js/both and all three print Go's output
-- [ ] Task 3.3: Range-over-func copies yielded arrays
+- [x] Task 3.3: Range-over-func copies yielded arrays
   - Files: `src/backend/js/statements.js` (`genIteratorFor` preambles)
   - Test: `test/unit/language/range-func.test.js`: V7 (`[1 2]`), the assign form (`var v [2]int; for v = range seq { v[0] = 9 }`), and a `[2][2]int` yield, with `assertAllTargetsOutput`
   - Done when: all three print Go's output on every target
 
 ### Phase 4: Calls run once (C1, C2, C4) and WASM deep copies through pointers (V1–V3)
-- [ ] Task 4.1: Non-strict comma-ok `:=` binds a map or key with a call once
+- [x] Task 4.1: Non-strict comma-ok `:=` binds a map or key with a call once
   - Files: `src/backend/js/statements.js` (`_genCommaOkMapIndex` non-strict define path)
   - Test: `codegen-regressions.test.js`: C1 and C2 with `assertJsTargetsOutput` and the call count printed (`1 true 1`, `1 1`); a call-free key keeps the fast path (assert the emitted JS has no `__m` temp)
   - Done when: both print Go's output on `js` and `both`, and `bundle-size.js` passes
-- [ ] Task 4.2: Complex compound assignment binds its right-hand call first
+- [x] Task 4.2: Complex compound assignment binds its right-hand call first
   - Files: `src/backend/js/statements.js` (`_genAssignStmt` dispatch order, `_genComplexCompoundAssign` map base/key)
   - Test: `codegen-regressions.test.js`: C4 (`(4+6i) 1`), `m[k()] += f()` on a `map[string]complex128` (each call once), `c *= f()` with `assertAllTargetsOutput`
   - Done when: each call runs once on every target
-- [ ] Task 4.3: WASM struct stores through a pointer deep-copy array and struct fields
+- [x] Task 4.3: WASM struct stores through a pointer deep-copy array and struct fields
   - Files: `src/backend/wasm/emit.js` (`_emitCopyFieldValue`, used by `emitCloneStruct`), `src/backend/wasm/emit-stmts.js` (`_emitStructDerefAssign`)
   - Test: `test/unit/language/value-semantics.test.js` *Struct value semantics*: V1, V2 (and the ledger `*p, x = s2, 9` → `[1 2]`), V3, and a composite-literal right-hand side (no extra copy: same output) with `assertAllTargetsOutput`
   - Done when: all pass on wasm, and `zero-alloc.js` passes
 
 ### Phase 5: Documentation and fuzzer sign-off
-- [ ] Task 5.1: Document evaluation order and the fuzzer
+- [x] Task 5.1: Document evaluation order and the fuzzer
   - Files: `docs/go-compatibility.md` (new *Evaluation order* row: calls run once in source order and multi-assignments evaluate their targets first, as Go requires; a variable read in the same statement as a call that changes it may see either value, which Go leaves unspecified, so GoFront and gc can differ, e.g. `a + f()`), `docs/architecture.md` (a short *Differential fuzzer* paragraph: what it generates, `npm run fuzz`, `--replay`, that findings become unit tests)
   - Test: `node test/fuzz/difffuzz.js --mode order --seed 1 --batches 20 --cases 30 --stmts 6` and `--mode arith --seed 1 --batches 20`, run by hand and recorded in the PR body
   - Done when: both runs report `0 distinct findings`, except findings outside this plan's scope (each logged in `plans/follow-ups.md` with its `--case`), and the docs rows exist

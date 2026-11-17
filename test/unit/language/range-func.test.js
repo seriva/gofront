@@ -557,6 +557,66 @@ func main() {
 	);
 });
 
+section("Range-over-func: yielded arrays are copies");
+
+test("a yielded array is a copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	arr := [2]int{1, 2}
+	seq := func(yield func([2]int) bool) { yield(arr) }
+	for v := range seq {
+		v[0] = 9
+	}
+	fmt.Println(arr)
+}
+`,
+		"[1 2]\n",
+	);
+});
+
+test("the assign form copies a yielded array", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	arr := [2]int{1, 2}
+	seq := func(yield func([2]int) bool) { yield(arr) }
+	var v [2]int
+	for v = range seq {
+		v[0] = 9
+	}
+	fmt.Println(arr, v)
+}
+`,
+		"[1 2] [9 2]\n",
+	);
+});
+
+test("a yielded nested array is a deep copy", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	arr := [2][2]int{{1, 2}, {3, 4}}
+	seq := func(yield func([2][2]int) bool) { yield(arr) }
+	for v := range seq {
+		v[1][0] = 9
+	}
+	fmt.Println(arr)
+}
+`,
+		"[[1 2] [3 4]]\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

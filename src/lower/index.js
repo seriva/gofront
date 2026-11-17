@@ -1,6 +1,7 @@
 // src/lower/index.js
 // Lowering step: analyzes AST and types to populate side-tables for backends (JS and WASM).
 
+export * from "./assign-order.js";
 export * from "./bounds.js";
 export * from "./boxing.js";
 export * from "./captures.js";

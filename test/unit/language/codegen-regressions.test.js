@@ -5,6 +5,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	compile,
 	runJs,
 	section,
@@ -437,6 +438,37 @@ g1 pixy
 	);
 });
 
+test("a *p target mentioning an assigned pointer binds its operand first", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a, b := 1, 2
+	p := &a
+	p, *p = &b, 0
+	fmt.Println(a, b)
+
+	x, y := 10, 20
+	q := &x
+	q, *q = &y, 99
+	fmt.Println(x, y, *q)
+
+	c, d := 1, 2
+	r := &c
+	for k := 0; k < 1; r, *r, k = &d, 7, k+1 {
+	}
+	fmt.Println(c, d)
+}
+`,
+		`0 2
+99 20 20
+7 2
+`,
+	);
+});
+
 test("plain-variable target operands are read after the right-hand call", async () => {
 	await assertAllTargetsOutput(
 		`package main
@@ -503,5 +535,138 @@ func main() {
 		`[0 9] [8 0] 1
 5 [0 9] 1
 `,
+	);
+});
+
+test("a comma-ok map lookup stores a struct into *p", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f int }
+
+func main() {
+	p := &S{1}
+	m := map[string]S{"k": {5}}
+	var ok bool
+	*p, ok = m["k"]
+	fmt.Println(*p, ok)
+	*p, ok = m["z"]
+	fmt.Println(*p, ok)
+}
+`,
+		`{5} true
+{0} false
+`,
+	);
+});
+
+test("a comma-ok type assertion stores a struct into *p", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ f int }
+
+func main() {
+	p := &S{1}
+	var i any = S{7}
+	var ok bool
+	*p, ok = i.(S)
+	fmt.Println(*p, ok)
+}
+`,
+		"{7} true\n",
+	);
+});
+
+section("Calls run once (comma-ok define, complex compound)");
+
+test("a non-strict comma-ok define runs the key call once (C1)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	k := func() string { n++; return "x" }
+	m := map[string]int{"x": 1}
+	v, ok := m[k()]
+	fmt.Println(v, ok, n)
+}
+`,
+		"1 true 1\n",
+	);
+});
+
+test("an if initializer comma-ok runs the key call once (C2)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	k := func() string { n++; return "x" }
+	m := map[string]int{"x": 1}
+	if v, ok := m[k()]; ok {
+		fmt.Println(v, n)
+	}
+}
+`,
+		"1 1\n",
+	);
+});
+
+test("a call-free comma-ok define keeps the unbound fast path", () => {
+	const { js } = compile(`package main
+func main() {
+	m := map[string]int{"x": 1}
+	key := "x"
+	v, ok := m[key]
+	println(v, ok)
+}`);
+	assert(!js.includes("__m"), `unexpected temp:\n${js}`);
+});
+
+test("complex += runs the right-hand call once (C4)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	f := func() complex128 { n++; return complex(3, 4) }
+	c := complex(1, 2)
+	c += f()
+	fmt.Println(c, n)
+}
+`,
+		"(4+6i) 1\n",
+	);
+});
+
+test("complex map and *= compound assignments run each call once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n, kn := 0, 0
+	f := func() complex128 { n++; return complex(1, 1) }
+	k := func() string { kn++; return "a" }
+	m := map[string]complex128{"a": complex(1, 2)}
+	m[k()] += f()
+	c := complex(2, 0)
+	c *= f()
+	fmt.Println(m["a"], c, n, kn)
+}
+`,
+		"(2+3i) (2+2i) 2 1\n",
 	);
 });

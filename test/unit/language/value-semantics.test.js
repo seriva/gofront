@@ -179,6 +179,79 @@ func main() { println(sum([]Vec{{1, 2}})) }`);
 	assert(!/__arr0\[__i0\]\.__clone\(\)/.test(js), `unexpected copy:\n${js}`);
 });
 
+test("a store through a pointer copies array fields (V1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A [2]int }
+
+func main() {
+	var s, s2 T
+	ps := &s
+	*ps = s2
+	ps.A[0] = 9
+	fmt.Println(s2, s)
+}
+`,
+		"{[0 0]} {[9 0]}\n",
+	);
+});
+
+test("a multi-assignment through a pointer copies array fields (V2)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A [2]int }
+
+func main() {
+	var s, s2 T
+	ps := &s
+	x := 0
+	*ps, x = s2, 1
+	ps.A[0] = 9
+	fmt.Println(s2, s, x)
+	p := &T{[2]int{5, 6}}
+	t2 := T{[2]int{1, 2}}
+	*p, x = t2, 9
+	t2.A[0] = 99
+	fmt.Println(*p, t2)
+}
+`,
+		"{[0 0]} {[9 0]} 1\n{[1 2]} {[99 2]}\n",
+	);
+});
+
+test("a store through a pointer copies nested struct fields (V3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ M int }
+type W struct {
+	Q P
+	A [2]int
+}
+
+func main() {
+	var a, b W
+	pa := &a
+	*pa = b
+	pa.Q.M = 3
+	pa.A[1] = 4
+	fmt.Println(b, a)
+	*pa = W{P{1}, [2]int{7, 8}}
+	fmt.Println(a)
+}
+`,
+		"{{0} [0 0]} {{3} [0 4]}\n{{1} [7 8]}\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {
@@ -1188,3 +1261,152 @@ func main() {
 		"5 0\n",
 	);
 });
+
+section("Whole-value stores in closures");
+
+const closureCase = (name, body, want) =>
+	test(name, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+closureCase(
+	"a struct reassigned in a closure stays visible through its pointer",
+	`	s := S{1}
+	ps := &s
+	f := func() { s = S{2} }
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n",
+);
+
+closureCase(
+	"a nested-block shadow in a closure does not detach the outer pointer",
+	`	s := S{1}
+	ps := &s
+	f := func() {
+		if true {
+			s := S{9}
+			_ = s
+		}
+		s = S{2}
+	}
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n",
+);
+
+closureCase(
+	"a nested-block array shadow in a closure keeps the outer slice view",
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	f := func() {
+		if true {
+			arr := [2]int{9, 9}
+			_ = arr
+		}
+		arr = [2]int{3, 4}
+	}
+	f()
+	fmt.Println(sl)`,
+	"[3 4]\n",
+);
+
+closureCase(
+	"an array reassigned in a closure keeps its identity",
+	`	arr := [2]int{1, 2}
+	pa := &arr
+	f := func() { arr = [2]int{3, 4} }
+	f()
+	fmt.Println(*pa, pa == &arr)`,
+	"[3 4] true\n",
+);
+
+closureCase(
+	"a multi-assignment in a closure stores through the pointer",
+	`	s := S{1}
+	ps := &s
+	j := 0
+	f := func() { s, j = S{2}, 1 }
+	f()
+	fmt.Println(*ps, j)`,
+	"{2} 1\n",
+);
+
+closureCase(
+	"copying another struct in a closure keeps the pointer identity",
+	`	s := S{1}
+	ps := &s
+	t := S{5}
+	f := func() { s = t; s.N = 5 }
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{5} true\n",
+);
+
+closureCase(
+	"assigning a dereferenced pointer in a closure keeps the pointer identity",
+	`	s := S{1}
+	ps := &s
+	f := func() { s = *ps; s.N = 5 }
+	f()
+	fmt.Println(*ps, ps == &s)`,
+	"{5} true\n",
+);
+
+closureCase(
+	"a pointer returned from another closure sees the store",
+	`	s := S{1}
+	get := func() *S { return &s }
+	set := func() { s = S{2} }
+	p := get()
+	set()
+	fmt.Println(p == &s, *p == s)`,
+	"true true\n",
+);
+
+closureCase(
+	"the address is taken after the closure is created",
+	`	s := S{1}
+	f := func() { s = S{2} }
+	ps := &s
+	f()
+	fmt.Println(*ps)`,
+	"{2}\n",
+);
+
+closureCase(
+	"a closure in a range body stores through the pointer",
+	`	s := S{1}
+	ps := &s
+	for i := 3; i < 4; i++ {
+		func() { s = S{i} }()
+	}
+	fmt.Println(*ps)`,
+	"{3}\n",
+);
+
+closureCase(
+	"a closure that declares its own struct does not touch the outer one",
+	`	s := S{1}
+	ps := &s
+	f := func() {
+		s := S{9}
+		s = S{8}
+		fmt.Println(s)
+	}
+	f()
+	fmt.Println(*ps)`,
+	"{8}\n{1}\n",
+);

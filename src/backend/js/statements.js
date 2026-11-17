@@ -7,6 +7,7 @@ import {
 	isRangeFor,
 	isSimpleIntRange,
 	isStringRangeType,
+	lhsOperandBinds,
 	loopVarsCapturedInLoop,
 	someChild,
 } from "../../lower/index.js";
@@ -273,10 +274,12 @@ export const statementGenMethods = {
 		const mapExpr = pre?.map ?? this.genExpr(rhsNode.expr);
 		const keyExpr = pre?.key ?? this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		const [vDeref, okDeref] = this._structDerefOperands(stmt);
 		hoisted?.restore();
 		// A name `:=` reuses is assigned, not declared again; an address-taken
 		// variable lives in a `{ value }` box.
-		const bind = (l, name, js) => {
+		const bind = (l, name, js, deref) => {
+			if (deref) return `Object.assign(${deref}, ${js});`;
 			const boxed = this._boxedVars.has(name);
 			if (isDefine && !l._redecl)
 				return `let ${name} = ${boxed ? `{ value: ${js} }` : js};`;
@@ -288,12 +291,21 @@ export const statementGenMethods = {
 		const copyVal = (js) =>
 			this._aggregateBase(valType) ? this._cloneJs(valType, js) : js;
 		if (isDefine && !this.strict) {
+			// Both reads use the map and key: a call in either runs once.
+			let m = mapExpr;
+			let k = keyExpr;
+			if (hasCallOrReceive([rhsNode.expr, rhsNode.index])) {
+				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+				m = `__m${this._tmpCounter}`;
+				k = `__k${this._tmpCounter}`;
+				this.line(`const ${m} = ${mapExpr}, ${k} = ${keyExpr};`);
+			}
 			if (vName !== "_") {
-				const val = this._nonStrictMapRead(mapExpr, keyExpr, valType, copyVal);
-				this.line(bind(vL, vName, val));
+				const val = this._nonStrictMapRead(m, k, valType, copyVal);
+				this.line(bind(vL, vName, val, vDeref));
 			}
 			if (okName !== "_") {
-				this.line(bind(okL, okName, `(${keyExpr}) in ${mapExpr}`));
+				this.line(bind(okL, okName, `(${k}) in ${m}`, okDeref));
 			}
 			return;
 		}
@@ -310,11 +322,14 @@ export const statementGenMethods = {
 					vL,
 					vName,
 					`(${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero}`,
+					vDeref,
 				),
 			);
 		}
 		if (okName !== "_") {
-			this.line(bind(okL, okName, `Boolean(${mTmp} && (${kTmp} in ${mTmp}))`));
+			this.line(
+				bind(okL, okName, `Boolean(${mTmp} && (${kTmp} in ${mTmp}))`, okDeref),
+			);
 		}
 	},
 
@@ -813,12 +828,13 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		if (stmt.op !== "=") for (const l of stmt.lhs) this._markDerefOpTarget(l);
 		this._markSelfReslice(stmt);
-		if (this._isComplexCompoundAssign(stmt)) {
-			this._genComplexCompoundAssign(stmt);
-			return;
-		}
+		// A right-hand call is bound first, so the complex path sees a temp.
 		if (this._isCompoundWithCall(stmt)) {
 			this._genCompoundWithCall(stmt);
+			return;
+		}
+		if (this._isComplexCompoundAssign(stmt)) {
+			this._genComplexCompoundAssign(stmt);
 			return;
 		}
 		if (stmt._commaOkMap) {
@@ -1023,53 +1039,25 @@ export const statementGenMethods = {
 	// variable) are bound: plain variables are read after the right-hand side.
 	_hoistLhsOperands(stmt, callOnly = false) {
 		if (stmt.op !== "=" || stmt.lhs.length < 2) return null;
-		const ordered = hasCallOrReceive(stmt.rhs) || hasCallOrReceive(stmt.lhs);
-		const assigned = new Set(
-			stmt.lhs
-				.filter((l) => l.kind === "Ident" && l.name !== "_")
-				.map((l) => l.name),
-		);
-		if (assigned.size === 0 && !ordered) return null;
-		const mentions = (n) =>
-			!!n &&
-			typeof n === "object" &&
-			((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
-		const isConst = (n) =>
-			n.kind === "BasicLit" ||
-			n._type?.kind === "untyped" ||
-			n._type?.kind === "namespace";
-		const needsTemp = (n) => {
-			if (!ordered) return mentions(n);
-			if (callOnly) return hasCallOrReceive(n) || mentions(n);
-			return !isConst(n);
-		};
+		const binds = lhsOperandBinds(stmt.lhs, stmt.rhs, {
+			callOnly,
+			isConst: (n) =>
+				n.kind === "BasicLit" ||
+				n._type?.kind === "untyped" ||
+				n._type?.kind === "namespace",
+			isAggregate: (n) => !!this._aggregateBase(n._type),
+		});
+		if (binds.length === 0) return null;
 		const lines = [];
 		const undo = [];
-		const visit = (l) => {
-			let keys;
-			if (l.kind === "IndexExpr") keys = ["expr", "index"];
-			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
-			else if (ordered && l.kind === "UnaryExpr" && l.op === "*")
-				keys = ["operand"];
-			else return;
-			for (const key of keys) {
-				const operand = l[key];
-				if (!needsTemp(operand)) continue;
-				// A struct or array value names the variable's storage in Go: hoist
-				// the operands inside it (`ps[n].A`) instead of the value.
-				if (key === "expr" && this._aggregateBase(operand._type)) {
-					visit(operand);
-					continue;
-				}
-				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-				const name = `__h${this._tmpCounter}`;
-				lines.push(`const ${name} = ${this.genExpr(operand)};`);
-				undo.push([l, key, operand]);
-				l[key] = { kind: "Ident", name, _type: operand._type };
-			}
-		};
-		for (const l of stmt.lhs) visit(l);
-		if (lines.length === 0) return null;
+		for (const { node, key } of binds) {
+			const operand = node[key];
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const name = `__h${this._tmpCounter}`;
+			lines.push(`const ${name} = ${this.genExpr(operand)};`);
+			undo.push([node, key, operand]);
+			node[key] = { kind: "Ident", name, _type: operand._type };
+		}
 		return {
 			lines,
 			restore: () => {
@@ -1084,12 +1072,25 @@ export const statementGenMethods = {
 		for (const l of hoisted?.lines ?? []) this.line(l);
 		const val = this.genExpr(stmt.rhs[0]);
 		const [vName, okName] = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
+		const derefs = this._structDerefOperands(stmt);
 		hoisted?.restore();
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__ta${this._tmpCounter}`;
 		this.line(`const ${tmp} = ${val};`);
-		if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
-		if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+		[vName, okName].forEach((name, i) => {
+			if (name === "_") return;
+			const js = `${tmp}[${i}]`;
+			this.line(
+				derefs[i] ? `Object.assign(${derefs[i]}, ${js});` : `${name} = ${js};`,
+			);
+		});
+	},
+
+	// For each target of `stmt`, the struct a `*p` target writes into, else null.
+	_structDerefOperands(stmt) {
+		return stmt.lhs.map((l) =>
+			this._isStructDerefTarget(l) ? this.genExpr(l.operand) : null,
+		);
 	},
 
 	// `a = [3]int{...}` / `s = S{...}` on a variable whose address (or an
@@ -2074,8 +2075,8 @@ export const statementGenMethods = {
 					if (lhs[i] !== "_") {
 						const yType = yieldTypes[i];
 						const isStruct =
-							this._isStructType(yType) ||
-							this._isStructType(stmt.init.lhs[i]?._type);
+							this._aggregateBase(yType) ||
+							this._aggregateBase(stmt.init.lhs[i]?._type);
 						const value = isStruct
 							? this._yieldClone(yType, stmt.init.lhs[i]._type, cbParams[i])
 							: cbParams[i];
@@ -2099,8 +2100,8 @@ export const statementGenMethods = {
 				if (lhs[i] !== "_") {
 					const yType = yieldTypes[i];
 					const isStruct =
-						this._isStructType(yType) ||
-						this._isStructType(stmt.init.lhs[i]?._type);
+						this._aggregateBase(yType) ||
+						this._aggregateBase(stmt.init.lhs[i]?._type);
 					if (isStruct) {
 						this.line(
 							`${cbParams[i]} = ${this._yieldClone(yType, stmt.init.lhs[i]._type, cbParams[i])};`,

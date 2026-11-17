@@ -1,5 +1,6 @@
 import {
 	closureMutates,
+	declaresVar,
 	fnMutates,
 	nodeMutatesVar,
 	rootIdentName,
@@ -1194,10 +1195,22 @@ export const expressionGenMethods = {
 	},
 
 	_fnMutates(name, addrOnly = false) {
-		return fnMutates(this._fnCtx?.body, name, addrOnly, this._fnCtx?.mut);
+		const ctx = this._fnCtx;
+		if (fnMutates(ctx?.body, name, addrOnly, ctx?.mut)) return true;
+		// A captured variable whose address an enclosing function takes: a
+		// whole-value store here must keep the variable's identity.
+		if (!addrOnly || !ctx?.parent || ctx.ownParams?.has(name)) return false;
+		if (declaresVar(ctx.body, name)) return false;
+		const saved = this._fnCtx;
+		this._fnCtx = ctx.parent;
+		try {
+			return this._fnMutates(name, addrOnly);
+		} finally {
+			this._fnCtx = saved;
+		}
 	},
 
-	_withFnCtx(body, fn) {
+	_withFnCtx(body, fn, ownParams = null) {
 		const prev = this._fnCtx;
 		// A function starts with no JS labels in scope (see
 		// `_emitIterTargetDispatch`).
@@ -1205,6 +1218,8 @@ export const expressionGenMethods = {
 		this._jsLabels = [];
 		this._fnCtx = {
 			body,
+			parent: prev,
+			ownParams: ownParams ? new Set(ownParams) : null,
 			mut: new Map(),
 			owned: new Set(),
 			borrowed: new Set(),
@@ -1846,11 +1861,14 @@ export const expressionGenMethods = {
 		this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
 		this._scanAddressTaken(expr.body);
 		this.out = [];
-		this._withFnCtx(expr.body, () =>
-			this.indented(() => {
-				this._emitParamCopies(expr.params);
-				this._withNamedReturns(expr, () => this._genBody(expr.body, expr));
-			}),
+		this._withFnCtx(
+			expr.body,
+			() =>
+				this.indented(() => {
+					this._emitParamCopies(expr.params);
+					this._withNamedReturns(expr, () => this._genBody(expr.body, expr));
+				}),
+			expr.params.map((p) => p.name),
 		);
 		const body = this.out.join("\n");
 		this.out = saved;
