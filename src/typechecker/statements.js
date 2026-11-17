@@ -421,8 +421,6 @@ export const statementCheckMethods = {
 			stmt.rhs[i],
 			`${exprText(stmt.lhs[i])} ${stmt.op} ${exprText(stmt.rhs[i])}`,
 		);
-		if (op !== "<<" && op !== ">>")
-			this._checkConstOverflow(lt, r, stmt.rhs[i], "assignment");
 		this._typeBinaryOperands(node, lt, r, scope);
 	},
 

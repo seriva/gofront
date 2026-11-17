@@ -313,15 +313,6 @@ export const assignabilityMethods = {
 		);
 	},
 
-	// `f %= 2.0` with a non-integer `f`: the same rule as the binary form.
-	_checkCompoundIntegerOnly(stmtOp, lhsType, lhsExpr) {
-		const op = stmtOp.slice(0, -1);
-		if (!INTEGER_ONLY_OPS.has(op)) return;
-		const t = lhsType && this.resolveType(lhsType);
-		if (!this._isTypedBasicOperand(t) || isInteger(t)) return;
-		this._reportIntegerOnly(op, t, lhsExpr);
-	},
-
 	_reportIntegerOnly(op, type, operand) {
 		const isConst = type.kind === "untyped";
 		const kind = operandKind(

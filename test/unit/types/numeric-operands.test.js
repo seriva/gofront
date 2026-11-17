@@ -392,6 +392,31 @@ func main() {
 	);
 });
 
+function assertOneError(body, message) {
+	const { errors } = compile(`package main\nfunc main() {\n${body}\n}\n`);
+	assertErrorContains(errors, message);
+	assertEqual(errors.length, 1, errors.join(" | "));
+}
+
+test("compound assignment reports one constant error", () => {
+	const over = "300 (untyped int constant) overflows int8";
+	const trunc = "1.5 (untyped float constant) truncated to int";
+	assertOneError("var x int8\nx += 300\n_ = x", over);
+	assertOneError('m := map[string]int8{}\nm["a"] += 300', over);
+	assertOneError("var x int\nx += 1.5\n_ = x", trunc);
+	assertOneError("var x int\nfor i := 0; i < 1; i += 1.5 {\n_ = x\n}", trunc);
+	assertOneError('m := map[string]int{}\nm["a"] += 1.5', trunc);
+	assertOneError(
+		"const f = 1.5\nvar x int\nx += f\n_ = x",
+		"1.5 (untyped float constant 1.5) truncated to int",
+	);
+});
+
+test("compound assignment on any reports only the operator", () => {
+	assertOneError("var v any = 2\nv += 1 << 64", "operator + not defined on v");
+	assertOneError("var v interface{} = 2\nv += 1 << 64", "Invalid operation");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
