@@ -22,6 +22,7 @@ import { terminationMethods } from "./termination.js";
 import {
 	ANY,
 	BOOL,
+	copyType,
 	defaultType,
 	ERROR,
 	INTRINSICS,
@@ -970,6 +971,7 @@ export class TypeChecker {
 					: { kind: "named", name: decl.name };
 			// Registered before the fields resolve so `Next *List[T]` finds the
 			// generic declaration it is part of.
+			named._declNode = decl;
 			if (preset?.declNode === decl) named._generic = preset;
 			else named._generic = { typeParams: typeParamTypes, declNode: decl };
 			this.types.set(decl.name, named);
@@ -1010,6 +1012,7 @@ export class TypeChecker {
 				? existing
 				: { kind: "named", name: decl.name };
 		named.underlying = underlying;
+		named._declNode = decl;
 		named._target = this.target;
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
@@ -1509,7 +1512,7 @@ export class TypeChecker {
 			: VOID;
 		const hasNamedReturns = this._injectNamedReturns(decl.returnType, inner);
 		if (hasNamedReturns && returnType)
-			returnType = { ...returnType, _hasNamedReturns: true };
+			returnType = copyType(returnType, { _hasNamedReturns: true });
 		return returnType;
 	}
 
@@ -1563,6 +1566,8 @@ export class TypeChecker {
 							vt,
 							spec.value[i] ?? spec.value[0],
 							"variable declaration",
+							undefined,
+							spec.names.length === spec.value.length,
 						);
 					scope.defineLocal(spec.names[i], varType, spec._namePos?.[i]);
 				}

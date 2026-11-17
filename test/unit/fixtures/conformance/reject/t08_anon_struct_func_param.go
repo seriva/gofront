@@ -1,4 +1,3 @@
-// pending: S1
 package main
 
 func g(s struct{ Y string }) {}
