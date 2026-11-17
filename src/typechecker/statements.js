@@ -303,9 +303,9 @@ export const statementCheckMethods = {
 		while (node.kind === "ParenExpr") node = node.expr;
 		if (node.kind === "Ident" && node.name === "_") return;
 		const bt = node.expr?._type;
-		const b = this._deepUnderlying(bt);
+		const b = this._coreUnderlying(bt, scope);
 		if (node.kind === "IndexExpr" && b?.kind === "map") return;
-		if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
+		if (node.kind === "SelectorExpr" && this._isMapElementOperand(node, scope))
 			this.err(
 				`cannot assign to struct field ${exprText(node)} in map`,
 				this._positioned(node),
@@ -934,6 +934,7 @@ export const statementCheckMethods = {
 		lhs.forEach((e, i) => {
 			if (e.kind === "Ident" && e.name === "_") return;
 			const target = this.checkExpr(e, scope);
+			this._checkAssignTarget(e, scope);
 			this._markRangeTargetBox(e, target, yieldParams[i]);
 			this._checkRangeIterAssignable(e, target, yieldParams[i]);
 		});
