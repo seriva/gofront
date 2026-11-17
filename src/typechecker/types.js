@@ -697,6 +697,179 @@ export function typeStr(t) {
 	}
 }
 
+// ── Type identity (Go spec §Type identity) ──────────────────
+// `typeStr` is for messages only: it prints every anonymous struct and
+// interface the same way, and drops the `__L<n>` suffix that tells shadowing
+// local types apart.  Decisions about whether two types are the same type
+// go through `identical`.
+
+// `any`, in each of its spellings, and the empty interface literal.
+function isAnyLike(t) {
+	if (isAny(t)) return true;
+	return (
+		t?.kind === "interface" &&
+		!t.name &&
+		t.methods.size === 0 &&
+		!t.unionConstraint &&
+		!t._typeSetEmbeds &&
+		!t._comparable
+	);
+}
+
+// The result list of a func type without its `void` placeholder.
+function funcResults(t) {
+	const out = [];
+	for (const r of t.returns ?? []) {
+		if (r?.kind === "tuple") out.push(...r.types);
+		else if (r && !isVoid(r)) out.push(r);
+	}
+	return out;
+}
+
+// A struct's fields in declaration order: { name, type, tag, embedded }.
+function structFieldList(t) {
+	if (t._structFields)
+		return t._structFields.flatMap((f) =>
+			f.embedded
+				? [
+						{
+							name: embeddedFieldName(f),
+							type: f.type,
+							tag: f.tag,
+							embedded: true,
+						},
+					]
+				: (f.names ?? []).map((name) => ({
+						name,
+						type: f.type,
+						tag: f.tag,
+						embedded: false,
+					})),
+		);
+	return [...t.fields].map(([name, type]) => ({
+		name,
+		type,
+		tag: null,
+		embedded: false,
+	}));
+}
+
+const sameList = (xs, ys, seen) =>
+	xs.length === ys.length && xs.every((x, i) => identicalIn(x, ys[i], seen));
+
+function identicalNamed(a, b, seen) {
+	if ((a._substOf ?? a) === (b._substOf ?? b)) return true;
+	if (!a._genericOf || a._genericOf !== b._genericOf) return false;
+	return sameList(a.typeArgs ?? [], b.typeArgs ?? [], seen);
+}
+
+function identicalStruct(a, b, seen) {
+	const xs = structFieldList(a);
+	const ys = structFieldList(b);
+	return (
+		xs.length === ys.length &&
+		xs.every((x, i) => {
+			const y = ys[i];
+			return (
+				x.name === y.name &&
+				x.embedded === y.embedded &&
+				(x.tag ?? null) === (y.tag ?? null) &&
+				identicalIn(x.type, y.type, seen)
+			);
+		})
+	);
+}
+
+function identicalInterface(a, b, seen) {
+	if (a.unionConstraint || b.unionConstraint) return false;
+	if (a._typeSetEmbeds || b._typeSetEmbeds) return false;
+	if (Boolean(a._comparable) !== Boolean(b._comparable)) return false;
+	if (a.methods.size !== b.methods.size) return false;
+	for (const [name, m] of a.methods) {
+		const other = b.methods.get(name);
+		if (!other || !identicalIn(m, other, seen)) return false;
+	}
+	return true;
+}
+
+function identicalFunc(a, b, seen) {
+	return (
+		Boolean(a.variadic) === Boolean(b.variadic) &&
+		sameList(a.params ?? [], b.params ?? [], seen) &&
+		sameList(funcResults(a), funcResults(b), seen)
+	);
+}
+
+// Compares the structure of two types of the same kind.
+function identicalShape(a, b, seen) {
+	switch (a.kind) {
+		case "basic":
+			return a.name === b.name;
+		case "untyped":
+			return a.base === b.base && Boolean(a.rune) === Boolean(b.rune);
+		case "slice":
+			return identicalIn(a.elem, b.elem, seen);
+		case "array":
+			return (
+				(a.size ?? null) === (b.size ?? null) &&
+				identicalIn(a.elem, b.elem, seen)
+			);
+		case "map":
+			return (
+				identicalIn(a.key, b.key, seen) && identicalIn(a.value, b.value, seen)
+			);
+		case "pointer":
+			return identicalIn(a.base, b.base, seen);
+		case "tuple":
+			return sameList(a.types, b.types, seen);
+		case "shared":
+			return a.shared === b.shared;
+		case "func":
+			return identicalFunc(a, b, seen);
+		case "struct":
+			return identicalStruct(a, b, seen);
+		case "interface":
+			return identicalInterface(a, b, seen);
+		case "named":
+			return identicalNamed(a, b, seen);
+		case "typeParam":
+		case "generic":
+		case "namespace":
+			return a.name === b.name;
+		default:
+			return false;
+	}
+}
+
+function identicalIn(a, b, seen) {
+	if (a === b) return true;
+	if (!a || !b) return (!a || isVoid(a)) && (!b || isVoid(b));
+	if (isAnyLike(a) || isAnyLike(b)) return isAnyLike(a) && isAnyLike(b);
+	if (a.kind !== b.kind) return false;
+	// A pair already being compared is assumed identical, which ends the
+	// recursion through a type that mentions itself.
+	let pending = seen.get(a);
+	if (!pending) {
+		pending = new Set();
+		seen.set(a, pending);
+	}
+	if (pending.has(b)) return true;
+	pending.add(b);
+	try {
+		return identicalShape(a, b, seen);
+	} finally {
+		pending.delete(b);
+	}
+}
+
+// Whether `a` and `b` are the same type.  Basic types match by name; a named
+// type only matches itself (or an instance of the same generic declaration
+// with identical type arguments); composite types match element by element;
+// the three kinds of `any` match each other.
+export function identical(a, b) {
+	return identicalIn(a, b, new Map());
+}
+
 // The field an embedded type declares is named after the type as written, so
 // an alias (`type A = Base; struct{ A }`) gives the field `A`.
 // Per struct type, the methods promoted into its method set from embedded

@@ -226,6 +226,8 @@ const SUBSTITUTE_DISPATCH = {
 		return {
 			kind: "named",
 			name: type.name,
+			// A copy is still the declaration it came from (see `identical`).
+			_substOf: type._substOf ?? type,
 			...(type.typeArgs && {
 				typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
 			}),

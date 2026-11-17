@@ -189,7 +189,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those tests pass and `npm test` passes
 
 ### Phase 2: Type identity (S1–S4)
-- [ ] Task 2.1: Structural `identical(a, b)`
+- [x] Task 2.1: Structural `identical(a, b)`
   - Files: `src/typechecker/types.js`
   - Test: `test/unit/types/identity.test.js` (new), on type objects resolved from small programs through the checker:
     - Different: anonymous structs that differ in field name, field type, tag, embedding or order; anonymous interfaces with different method sets; funcs with different param, result or variadic; `[2]int`/`[3]int`; outer `T`/inner `T__L1`; `Box[int]`/`Box[string]`; two packages' `P`.
