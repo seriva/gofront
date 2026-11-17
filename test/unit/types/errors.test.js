@@ -895,7 +895,7 @@ func main() {
 	v, ok = m["k"]
 	_ = v
 }`);
-	assertErrorContains(c2.errors, "cannot assign to const 'ok'");
+	assertErrorContains(c2.errors, "cannot assign to ok (neither addressable");
 
 	const c3 = compile(`package main
 func main() {

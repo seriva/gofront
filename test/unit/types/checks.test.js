@@ -47,12 +47,12 @@ const controlFlowErrorCases = [
 	[
 		"reassigning a const is an error",
 		"package main\nconst MaxSize = 10\nfunc main() {\n  MaxSize = 20\n}",
-		"const",
+		"cannot assign to MaxSize (neither addressable",
 	],
 	[
 		"reassigning a local const is an error",
 		"package main\nfunc main() {\n  const x = 5\n  x = 10\n}",
-		"const",
+		"cannot assign to x (neither addressable",
 	],
 ];
 

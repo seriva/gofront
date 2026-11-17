@@ -56,8 +56,6 @@ import {
 	VOID,
 } from "./types.js";
 
-const TEMPORARY_KINDS = new Set(["CallExpr", "CompositeLit", "TypeAssertExpr"]);
-
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -593,9 +591,32 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `&x` needs an addressable operand, or a composite literal (`&T{}`).
+	_errUnaddressableOperand(expr, ot) {
+		const o = expr.operand;
+		const u = this._deepUnderlying(ot);
+		const kind =
+			o.kind !== "Ident" && u?.kind === "struct" && ot?.kind === "named"
+				? `value of struct type ${typeStr(ot)}`
+				: operandKind(o, typeStr(ot));
+		return this.err(
+			`invalid operation: cannot take address of ${exprText(o)} (${kind})`,
+			this._positioned(expr),
+		);
+	},
+
 	_checkAddressOfExpr(expr, scope, ot) {
 		if (this._isMapElementOperand(expr.operand)) {
 			this._errMapElementAddress(expr);
+			return { kind: "pointer", base: ot };
+		}
+		let target = expr.operand;
+		while (target?.kind === "ParenExpr") target = target.expr;
+		if (
+			target?.kind !== "CompositeLit" &&
+			!this._isAddressable(target, scope)
+		) {
+			this._errUnaddressableOperand(expr, ot);
 			return { kind: "pointer", base: ot };
 		}
 		if (this._isScalarInteriorOperand(expr.operand, ot, scope)) {
@@ -678,7 +699,7 @@ export const expressionCheckMethods = {
 	// A pointer-receiver method needs `&recv`: a map element or the result of
 	// a call, conversion, literal or assertion has no address. A receiver that
 	// reaches the method through an embedded pointer needs none.
-	_reportUnaddressableRecv(expr) {
+	_reportUnaddressableRecv(expr, scope) {
 		if (this.receiversChecked) return false;
 		const recv = expr.expr;
 		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
@@ -686,7 +707,7 @@ export const expressionCheckMethods = {
 			this._errMapElementAddress(recv);
 			return true;
 		}
-		if (!this._isTemporaryOperand(recv)) return false;
+		if (this._isAddressable(recv, scope)) return false;
 		this.err(
 			`cannot call pointer method ${expr.field} on ${typeStr(recv._type)}`,
 			this._positioned(expr),
@@ -694,27 +715,37 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
-	// A value that exists only for the current expression: the result of a
-	// call, a literal or a type assertion, or a field or array element of one.
-	_isTemporaryOperand(node) {
-		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
-		if (TEMPORARY_KINDS.has(node?.kind)) return true;
-		if (node?.kind === "BinaryExpr") return true;
-		if (node?.kind === "UnaryExpr" && node.op !== "*") return true;
-		const bt = node?.expr?._type;
-		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
-			return this._isTemporaryOperand(node.expr);
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
-		return node?.kind === "IndexExpr" && b?.kind === "array"
-			? this._isTemporaryOperand(node.expr)
-			: false;
+	// Go's addressability rule: a variable, a pointer indirection, a slice
+	// element, a field of an addressable struct (or of any pointer), or an
+	// element of an addressable array (or of any pointer to an array).
+	// Constants, call results, literals, assertions, string and map elements,
+	// and fields or array elements of those are not. Operands whose type the
+	// checker does not model (JavaScript values, type parameters) count as
+	// addressable.
+	_isAddressable(node, scope) {
+		let n = node;
+		while (n?.kind === "ParenExpr") n = n.expr;
+		if (!n) return false;
+		if (n.kind === "Ident") return !scope?.lookupScope(n.name)?.isConst(n.name);
+		if (n.kind === "UnaryExpr") return n.op === "*";
+		if (n.kind !== "SelectorExpr" && n.kind !== "IndexExpr") return false;
+		const bt = n.expr?._type;
+		const b = this._deepUnderlying(bt) ?? bt;
+		if (n.kind === "IndexExpr") {
+			if (b?.kind === "slice" || b?.kind === "pointer") return true;
+			if (b?.kind === "map" || isString(b)) return false;
+			return b?.kind === "array" ? this._isAddressable(n.expr, scope) : true;
+		}
+		if (b?.kind !== "struct") return true;
+		if (this._promotedThroughPointer(bt, n.field)) return true;
+		return this._isAddressable(n.expr, scope);
 	},
 
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
 		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
-		if (this._reportUnaddressableRecv(expr)) return;
+		if (this._reportUnaddressableRecv(expr, scope)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {

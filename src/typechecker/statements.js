@@ -280,16 +280,6 @@ export const statementCheckMethods = {
 		return [resolvedBase.value, BOOL];
 	},
 
-	_checkConstAssignment(stmt, scope) {
-		for (const lhs of stmt.lhs) {
-			if (lhs.kind === "Ident" && lhs.name !== "_") {
-				const ownerScope = scope.lookupScope(lhs.name);
-				if (ownerScope?.isConst(lhs.name))
-					this.err(`cannot assign to const '${lhs.name}'`, lhs);
-			}
-		}
-	},
-
 	_isCommaOkTypeAssertAssign(stmt) {
 		return (
 			stmt.lhs.length === 2 &&
@@ -301,35 +291,29 @@ export const statementCheckMethods = {
 	_checkAssignLhsType(e, scope) {
 		if (e.kind === "Ident" && e.name === "_") return ANY;
 		const t = this.checkExpr(e, scope);
-		this._checkAssignTarget(e);
+		this._checkAssignTarget(e, scope);
 		return t;
 	},
 
 	// The left side of `=`, `op=`, `++` and `--` must be addressable or a map
-	// index: not a string element, nor a field or array element of a map entry.
-	_checkAssignTarget(e) {
+	// index: not a string element, a constant, the result of a call, literal
+	// or assertion, nor a field or array element of a map entry.
+	_checkAssignTarget(e, scope) {
 		let node = e;
 		while (node.kind === "ParenExpr") node = node.expr;
+		if (node.kind === "Ident" && node.name === "_") return;
 		const bt = node.expr?._type;
 		const b = this._deepUnderlying(bt);
-		if (node.kind === "IndexExpr" && isString(b))
-			this.err(
-				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
-				node,
-			);
-		else if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
+		if (node.kind === "IndexExpr" && b?.kind === "map") return;
+		if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
 			this.err(
 				`cannot assign to struct field ${exprText(node)} in map`,
 				this._positioned(node),
 			);
-		else if (
-			node.kind === "IndexExpr" &&
-			b?.kind === "array" &&
-			this._isMapElementOperand(node.expr)
-		)
+		else if (!this._isAddressable(node, scope))
 			this.err(
 				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
-				node,
+				this._positioned(node),
 			);
 	},
 
@@ -377,7 +361,7 @@ export const statementCheckMethods = {
 
 	_checkIncDecStmt(stmt, scope) {
 		const t = this.checkExpr(stmt.expr, scope);
-		this._checkAssignTarget(stmt.expr);
+		this._checkAssignTarget(stmt.expr, scope);
 		const lt = t && this.resolveType(t);
 		if (!lt || lt._tainted) return;
 		const numeric =
@@ -466,7 +450,6 @@ export const statementCheckMethods = {
 	_checkAssignStmt(stmt, scope) {
 		const commaOkMapTypes = this._checkAssignCommaOkMap(stmt, scope);
 		if (this._isCommaOkTypeAssertAssign(stmt)) stmt.rhs[0]._commaOk = true;
-		this._checkConstAssignment(stmt, scope);
 		let rhsFlat;
 		if (commaOkMapTypes) {
 			rhsFlat = commaOkMapTypes;
