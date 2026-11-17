@@ -13,7 +13,7 @@ var highPriority bool
 
 // ── Persistence (async/await + defer/recover) ─────────────────
 
-func safeJsonParse(raw string) (result any, err error) {
+func safeJsonParse(raw string) (result []any, err error) {
     defer func() {
         if r := recover(); r != nil {
             err = errors.New(fmt.Sprintf("%v", r))

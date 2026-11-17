@@ -6,6 +6,7 @@ func main() {
 	x := window.something
 	x()
 	_ = x[0]
+	x["a"] = 1
 	_ = x[1:]
 	for range x {
 	}

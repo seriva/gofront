@@ -942,6 +942,7 @@ export const expressionCheckMethods = {
 		}
 		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
+		if (bt?._declared) return this._declaredAnyOperand("index", expr.expr, bt);
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind !== "map")
@@ -1428,8 +1429,8 @@ export const expressionCheckMethods = {
 		return { kind: "tuple", types: [collType] };
 	},
 
-	// `cannot slice v (variable of type any)`: a Go `any` needs a type
-	// assertion before it can be sliced.
+	// `cannot index v (variable of type any)`: a Go `any` needs a type
+	// assertion before it can be indexed or sliced.
 	_declaredAnyOperand(verb, operand, type) {
 		return this.err(
 			`invalid operation: cannot ${verb} ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
@@ -1443,6 +1444,13 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
+		if (collType?._declared) {
+			const bad = this.err(
+				`cannot range over ${exprText(expr.expr)} (${operandKind(expr.expr, typeStr(collType))})`,
+				expr.expr,
+			);
+			return { kind: "tuple", types: [bad, bad] };
+		}
 		const resolved = this._underlyingOrCore(collType, scope);
 		// Backends range over the core type of a type parameter.
 		if (collType?.kind === "typeParam" && resolved !== collType)
