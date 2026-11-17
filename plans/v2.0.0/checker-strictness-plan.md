@@ -274,7 +274,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/statements.js` (`_checkSwitchStmt`), `src/typechecker/expressions.js` (map literal keys, `_checkStructCompositeLit`)
   - Test: delete `// pending:` from `s18` (`duplicate case 1 in expression switch`), `s18b` (`duplicate key "a" in map literal`) and `s19` (`too few values in struct literal of type S`). Non-constant duplicate cases stay valid
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 6.3: Impossible type assertions; generic functions used without instantiation (S20, S21)
+- [x] Task 6.3: Impossible type assertions; generic functions used without instantiation (S20, S21)
   - Files: `src/typechecker/expressions.js` (`_checkTypeAssertExpr`, value use of a generic func ident/selector), `src/typechecker/statements.js` (type-switch cases)
   - Test: delete `// pending:` from `s20` and its type-switch twin (`impossible type assertion: i.(S)` / `impossible type switch case`) and from `s21`/`s21b` (`cannot use generic function slices.Reverse without instantiation`). `f := Id[int]` and calls with inference stay valid
   - Done when: those cases pass and `npm test` passes

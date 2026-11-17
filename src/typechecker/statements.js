@@ -784,6 +784,7 @@ export const statementCheckMethods = {
 				this._markInterfaceCaseType(t, inner);
 				if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
 					this._markDynamicType(t, this.resolveTypeNode(t, inner));
+				this._checkTypeSwitchCase(stmt.expr, t, inner);
 			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or the switch operand's type
@@ -807,6 +808,20 @@ export const statementCheckMethods = {
 		}
 		this._typeSwitchDepth--;
 		this._switchDepth--;
+	},
+
+	// `case T:` in a switch on an interface value `x` needs a T that can be
+	// the dynamic type of `x`.
+	_checkTypeSwitchCase(operand, typeNode, scope) {
+		const srcType = operand._type;
+		if (!typeNode || !srcType || isAny(srcType) || srcType._tainted) return;
+		if (typeNode.kind === "TypeName" && typeNode.name === "nil") return;
+		const target = this.resolveTypeNode(typeNode, scope);
+		if (this._isImpossibleAssertion(srcType, target))
+			this.err(
+				`impossible type switch case: ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) cannot have dynamic type ${typeStr(target)}`,
+				typeNode,
+			);
 	},
 
 	_checkLabeledStmt(stmt, scope, returnType) {

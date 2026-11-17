@@ -203,10 +203,22 @@ const CHECK_EXPR_DELEGATE = {
 /** @type {ThisType<TypeChecker>} */
 export const expressionCheckMethods = {
 	checkExpr(expr, scope) {
-		const t = this._checkExpr(expr, scope);
+		let t = this._checkExpr(expr, scope);
+		if (t?.kind === "generic" && !expr._genericOk)
+			t = this._genericValueError(expr);
 		expr._type = t;
 		this._noteConst(expr, scope);
 		return t;
+	},
+
+	// A generic function is a value only once instantiated: its callee (type
+	// arguments inferred from the arguments) and `F[T]` are the two places it
+	// may stand uninstantiated, and they mark their operand `_genericOk`.
+	_genericValueError(expr) {
+		return this.err(
+			`cannot use generic function ${exprText(expr)} without instantiation`,
+			expr,
+		);
 	},
 
 	_checkExpr(expr, scope) {
@@ -964,6 +976,7 @@ export const expressionCheckMethods = {
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
+		expr.expr._genericOk = true;
 		const bt = this._derefArrayPtr(
 			expr,
 			"expr",
@@ -1443,10 +1456,31 @@ export const expressionCheckMethods = {
 					`invalid type assertion: ${typeStr(srcType)} is not an interface`,
 					expr,
 				);
+			} else if (this._isImpossibleAssertion(srcType, targetType)) {
+				this.err(
+					`impossible type assertion: ${exprText(expr.expr)}.(${typeStr(targetType)})\n\t${typeStr(targetType)} does not implement ${typeStr(srcType)}`,
+					expr,
+				);
 			}
 		}
 
 		return targetType;
+	},
+
+	// `x.(T)` with a concrete T can only succeed when T has every method of
+	// x's interface type. An interface T, an empty interface, a type parameter
+	// and JS-dynamic or unresolved types are never judged.
+	_isImpossibleAssertion(ifaceType, targetType) {
+		if (!targetType || targetType._tainted || isAny(targetType)) return false;
+		const iface = this.resolveType(
+			ifaceType.kind === "named" ? ifaceType.underlying : ifaceType,
+		);
+		if (iface?.kind !== "interface" || !iface.methods?.size) return false;
+		const target = this.resolveType(targetType);
+		if (!target || target.kind === "typeParam" || target.kind === "interface")
+			return false;
+		if (this._deepUnderlying(target)?.kind === "interface") return false;
+		return !this.implements(target, iface, null);
 	},
 
 	_rangeCollTypeTuple(resolved, collType) {
@@ -1522,6 +1556,7 @@ export const expressionCheckMethods = {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
 		// Generic instantiation: Foo[int] or Foo[int, string]
+		expr.expr._genericOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?.kind === "generic") {
 			const typeArgs = expr.typeArgs.map((ta) =>
@@ -1832,6 +1867,7 @@ export const expressionCheckMethods = {
 
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
+		expr.func._genericOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
 		// `slices.Sort[[]int](xs)` on an emitter-backed (non-generic) stdlib
 		// function: the type arguments are inferred, so call it as `slices.Sort(xs)`.

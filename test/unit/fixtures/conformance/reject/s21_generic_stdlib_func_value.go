@@ -1,4 +1,3 @@
-// pending: S21
 package main
 
 import (
