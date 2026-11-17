@@ -29,6 +29,7 @@
 | **In scope: core** | `dep-failure-attribution`: a dependency's `CompileError` is tagged with the failing package's directory where the compiler compiles it | `resolveImports` local-package loop, skipped dependents | |
 | **Excluded: deferred** | Import cycles crashing `check` | `Maximum call stack size exceeded` (each cycle package now reports it as its own failure instead of aborting the run) | [`incremental-builds-plan.md`](incremental-builds-plan.md) Task 1.1 (the package graph and cycle path) |
 | **Excluded: deferred** | External test packages (`package x_test`) | `Mixed package names in <dir>: ext, ext_test` | Unsupported by `gofront test` too; `check` now reports what `test` reports. Needs its own design (separate package compile) |
+| **Excluded: deferred** | Importing a test-only directory | `resolveGwDir` counts a directory with only `_test.go` files as a package, so `import "../testonly"` fails with `No .go files found in …/testonly`. Repro: `testonly/t_test.go` + `c/c.go` importing it, `gofront check <dir>/c` | Different root (`resolve-gw-dir-includes-tests`: import resolution, not check reporting); deferred by user 2026-11-17 |
 | **Excluded: deferred** | Single-file `check` (`gofront check main.go`, project `srcDir` resolving to `main.go`) | stays `runCompile(file, false)` | A file has no package test set; Go's `go vet file.go` also ignores tests |
 
 ---
