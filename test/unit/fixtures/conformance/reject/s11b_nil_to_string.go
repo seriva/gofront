@@ -1,4 +1,3 @@
-// pending: S11
 package main
 
 func main() {

@@ -1065,6 +1065,9 @@ outer:
 inner:
 	for i := 0; i < 3; i++ {
 		for j := 0; j < 3; j++ {
+			if i > 9 {
+				continue outer
+			}
 			if j == 1 {
 				continue inner
 			}

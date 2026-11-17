@@ -248,19 +248,19 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those cases pass, `npm test` and `npm run check` pass, and `cmp` of `example/**/app.js`/`app.wasm` differs only at the migrated sites
 
 ### Phase 5: Statements and assignments (S10–S16)
-- [ ] Task 5.1: Return count; `nil` to a non-nilable type (S10, S11)
+- [x] Task 5.1: Return count; `nil` to a non-nilable type (S10, S11)
   - Files: `src/typechecker/statements.js` (`_checkReturnStmt`), `src/typechecker/assignability.js` (`_assertAssignableEarlyReturn`: `nil` only into pointer, slice, map, func, interface and type-parameter targets; JS-dynamic `ANY` keeps accepting it)
   - Test: delete `// pending:` from `s10` (`too many return values`) and `s11`/`s11b` (`cannot use nil as int value in variable declaration`). Existing `nil` tests for maps, slices, funcs, pointers, interfaces and generics stay green
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 5.2: `range` operand kinds (S12)
+- [x] Task 5.2: `range` operand kinds (S12)
   - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`)
   - Test: delete `// pending:` from `s12`/`s12b` (`cannot range over 1.5 (untyped float constant)`, `cannot range over b (variable of type bool)`); range over int, string, slice, array, `*array`, map and iterator funcs stays green
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 5.3: Assignability of the left side (S13–S15)
+- [x] Task 5.3: Assignability of the left side (S13–S15)
   - Files: `src/typechecker/statements.js` (`_checkAssignStmt`, `++`/`--`), `src/typechecker/expressions.js` (pointer-receiver call on a non-addressable operand, reusing `_isMapElementOperand`)
   - Test: delete `// pending:` from `s13` (`cannot assign to s[0] (neither addressable nor a map index expression)`), `s14` (`cannot assign to struct field m["a"].X in map`) and `s15` (`cannot call pointer method Inc on C`). `m["a"] = P{2}`, `p.X = 1` through a pointer, and `v.Inc()` on an addressable `v` stay green
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 5.4: Undefined, misplaced and unused labels (S16)
+- [x] Task 5.4: Undefined, misplaced and unused labels (S16)
   - Files: `src/typechecker/statements.js` (`LabeledStmt`, `_checkBranchStmt`)
   - Test: delete `// pending:` from `s16` (`break label not defined: missing`) and `s16b` (`label L defined and not used`). New reject case: `continue L` where `L` labels a `switch` (`invalid continue label L`). Existing labeled `break`/`continue` tests (including range-over-func) stay green
   - Done when: those cases pass, the `wasm` hang in `s16` becomes a compile error, and `npm test` passes

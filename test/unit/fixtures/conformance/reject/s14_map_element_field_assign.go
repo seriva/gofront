@@ -1,4 +1,3 @@
-// pending: S14
 package main
 
 type P struct{ X int }

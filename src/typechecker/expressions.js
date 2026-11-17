@@ -1,6 +1,8 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
+import { newLabelScope } from "./statements.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
 	EXCLUDED_STDLIB_PACKAGES,
@@ -52,6 +54,8 @@ import {
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
+
+const TEMPORARY_KINDS = new Set(["CallExpr", "CompositeLit", "TypeAssertExpr"]);
 
 const NILABLE_KINDS = new Set([
 	"slice",
@@ -500,7 +504,7 @@ export const expressionCheckMethods = {
 		if (node?.kind !== "SelectorExpr" && node?.kind !== "IndexExpr")
 			return false;
 		const bt = node.expr?._type;
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt) ?? bt;
+		const b = this._deepUnderlying(bt) ?? bt;
 		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
 		if (b?.kind === "pointer" || b?.kind === "slice") return false;
 		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
@@ -645,17 +649,46 @@ export const expressionCheckMethods = {
 		return Boolean(generic?.methods?.get(field)?._ptrRecv);
 	},
 
+	// A pointer-receiver method needs `&recv`: a map element or the result of
+	// a call, conversion, literal or assertion has no address. A receiver that
+	// reaches the method through an embedded pointer needs none.
+	_reportUnaddressableRecv(expr) {
+		if (this.receiversChecked) return false;
+		const recv = expr.expr;
+		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
+		if (this._isMapElementOperand(recv)) {
+			this._errMapElementAddress(recv);
+			return true;
+		}
+		if (!this._isTemporaryOperand(recv)) return false;
+		this.err(
+			`cannot call pointer method ${expr.field} on ${typeStr(recv._type)}`,
+			this._positioned(expr),
+		);
+		return true;
+	},
+
+	// A value that exists only for the current expression: the result of a
+	// call, a literal or a type assertion, or a field or array element of one.
+	_isTemporaryOperand(node) {
+		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
+		if (TEMPORARY_KINDS.has(node?.kind)) return true;
+		if (node?.kind === "BinaryExpr") return true;
+		if (node?.kind === "UnaryExpr" && node.op !== "*") return true;
+		const bt = node?.expr?._type;
+		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
+			return this._isTemporaryOperand(node.expr);
+		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
+		return node?.kind === "IndexExpr" && b?.kind === "array"
+			? this._isTemporaryOperand(node.expr)
+			: false;
+	},
+
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
-	_markPtrRecvAddress(expr, base, ft, scope) {
-		if (!ft._ptrRecv) return;
-		if (
-			!this._promotedThroughPointer(expr.expr._type, expr.field) &&
-			this._isMapElementOperand(expr.expr)
-		) {
-			this._errMapElementAddress(expr.expr);
-			return;
-		}
+	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
+		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
+		if (this._reportUnaddressableRecv(expr)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
@@ -751,7 +784,7 @@ export const expressionCheckMethods = {
 		expr._isMethodValue = true;
 		if (baseType.kind === "pointer")
 			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
-		else this._markPtrRecvAddress(expr, base, ft, scope);
+		else this._markPtrRecvAddress(expr, base, ft, scope, recvT);
 	},
 
 	// Whether the identifier `name`, which resolved to `t`, names a type.  A
@@ -1144,11 +1177,14 @@ export const expressionCheckMethods = {
 			? copyType(ret, { _hasNamedReturns: true })
 			: ret;
 		const savedDefer = this._deferCount;
+		const savedLabels = this._labels;
 		this._deferCount = 0;
+		this._labels = newLabelScope();
 		this.checkBlock(expr.body, inner, bodyRet);
 		this._reportUnused(inner, expr);
 		if (this._deferCount > 0) expr.body._hasDefer = true;
 		this._deferCount = savedDefer;
+		this._labels = savedLabels;
 		const paramTypes = expr.params.map((p) =>
 			p.type ? this.resolveTypeNode(p.type, scope) : ANY,
 		);
@@ -1438,17 +1474,41 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	_rangeOperandError(node, type) {
+		const untyped = type?.kind === "untyped";
+		return this.err(
+			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)})`,
+			node,
+		);
+	},
+
+	// A range operand of a kind Go rejects: bool, float or complex values,
+	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
+	// parameters and kinds the checker models loosely are left alone.
+	_notRangeable(node, type) {
+		if (!type || type._tainted || isAny(type)) return false;
+		if (type.kind === "untyped")
+			return !(
+				type.base === "string" ||
+				type.base === "int" ||
+				(type.base === "float64" &&
+					constIntValue(this._constValue(node)) !== null)
+			);
+		const u = this._deepUnderlying(type);
+		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
+		return (
+			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
+		);
+	},
+
 	_checkRangeExpr(expr, scope) {
 		const collType = this._derefArrayPtr(
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		if (collType?._declared) {
-			const bad = this.err(
-				`cannot range over ${exprText(expr.expr)} (${operandKind(expr.expr, typeStr(collType))})`,
-				expr.expr,
-			);
+		if (collType?._declared || this._notRangeable(expr.expr, collType)) {
+			const bad = this._rangeOperandError(expr.expr, collType);
 			return { kind: "tuple", types: [bad, bad] };
 		}
 		const resolved = this._underlyingOrCore(collType, scope);

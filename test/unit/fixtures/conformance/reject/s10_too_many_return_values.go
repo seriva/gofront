@@ -1,4 +1,3 @@
-// pending: S10
 package main
 
 func f() int {

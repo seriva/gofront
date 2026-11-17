@@ -34,6 +34,31 @@ import {
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
+// Labels are scoped to a function body: `defined` holds every label seen so
+// far (to report a repeat) and `enclosing` the labeled statements around the
+// statement being checked, which are the only ones `break` and `continue` reach.
+export function newLabelScope() {
+	return { defined: new Set(), enclosing: [] };
+}
+
+const BREAKABLE_BODIES = new Set(["ForStmt", "SwitchStmt", "TypeSwitchStmt"]);
+const LABEL_BRANCHES = new Set(["break", "continue"]);
+// The label property a branch keyword needs: `break` any breakable statement,
+// `continue` a loop.
+const LABEL_TARGET = { break: "breakable", continue: "loop" };
+
+function newLabelEntry(stmt) {
+	// Stacked labels (`a: b: for {}`) all name the statement they precede.
+	let target = stmt.body;
+	while (target.kind === "LabeledStmt") target = target.body;
+	return {
+		name: stmt.label,
+		breakable: BREAKABLE_BODIES.has(target.kind),
+		loop: target.kind === "ForStmt",
+		used: false,
+	};
+}
+
 // Tag kinds with no nil value: `case nil` against them cannot compile.
 const NON_NILABLE_TAG_KINDS = new Set(["basic", "struct", "array"]);
 
@@ -63,7 +88,7 @@ export const statementCheckMethods = {
 				this._deferCount++;
 				break;
 			case "LabeledStmt":
-				this.checkStmt(stmt.body, scope, returnType);
+				this._checkLabeledStmt(stmt, scope, returnType);
 				break;
 			case "Block": {
 				const blockScope = new Scope(scope);
@@ -225,7 +250,37 @@ export const statementCheckMethods = {
 
 	_checkAssignLhsType(e, scope) {
 		if (e.kind === "Ident" && e.name === "_") return ANY;
-		return this.checkExpr(e, scope);
+		const t = this.checkExpr(e, scope);
+		this._checkAssignTarget(e);
+		return t;
+	},
+
+	// The left side of `=`, `op=`, `++` and `--` must be addressable or a map
+	// index: not a string element, nor a field or array element of a map entry.
+	_checkAssignTarget(e) {
+		let node = e;
+		while (node.kind === "ParenExpr") node = node.expr;
+		const bt = node.expr?._type;
+		const b = this._deepUnderlying(bt);
+		if (node.kind === "IndexExpr" && isString(b))
+			this.err(
+				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
+				node,
+			);
+		else if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
+			this.err(
+				`cannot assign to struct field ${exprText(node)} in map`,
+				this._positioned(node),
+			);
+		else if (
+			node.kind === "IndexExpr" &&
+			b?.kind === "array" &&
+			this._isMapElementOperand(node.expr)
+		)
+			this.err(
+				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
+				node,
+			);
 	},
 
 	// A source-written `any` operand still goes through assertAssignable so a
@@ -256,6 +311,7 @@ export const statementCheckMethods = {
 
 	_checkIncDecStmt(stmt, scope) {
 		const t = this.checkExpr(stmt.expr, scope);
+		this._checkAssignTarget(stmt.expr);
 		this._checkDeclaredAnyOperator(stmt.op, t, stmt.expr);
 	},
 
@@ -379,6 +435,8 @@ export const statementCheckMethods = {
 		) {
 			this.err("Missing return value", stmt);
 		}
+		if (isVoid(returnType) && this._reportReturnCount(stmt, types.length, 0))
+			return;
 		// Check each returned value is assignable to its declared type
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
@@ -401,6 +459,7 @@ export const statementCheckMethods = {
 				);
 				return;
 			}
+			if (this._reportReturnCount(stmt, types.length, expected.length)) return;
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
 					this.assertAssignable(
@@ -413,6 +472,17 @@ export const statementCheckMethods = {
 					);
 			}
 		}
+	},
+
+	// `return 1, 2` in a one-result func, `return 1` in a two-result one.
+	_reportReturnCount(stmt, have, want) {
+		if (have === want || have === 0) return false;
+		const many = have > want;
+		this.err(
+			`${many ? "too many" : "not enough"} return values (have ${have}, want ${want})`,
+			many ? (stmt.values[want] ?? stmt) : stmt,
+		);
+		return true;
 	},
 
 	// Checks each result of a forwarded multi-value call (`return f()`,
@@ -473,12 +543,13 @@ export const statementCheckMethods = {
 			else if (!isBool(ct) && !isAny(ct))
 				this.err("For condition must be bool", stmt);
 		} else {
-			const ct = this.checkExpr(stmt.cond.expr, inner);
-			if (ct?._declared)
-				this.err(
-					`cannot range over ${exprText(stmt.cond.expr)} (${operandKind(stmt.cond.expr, typeStr(ct))})`,
-					stmt.cond.expr,
-				);
+			const ct = this._derefArrayPtr(
+				stmt.cond,
+				"expr",
+				this.checkExpr(stmt.cond.expr, inner),
+			);
+			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
+				this._rangeOperandError(stmt.cond.expr, ct);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
 			if (core) stmt.cond.expr._coreType = core;
 			const info = iteratorYieldParams(ct);
@@ -694,7 +765,36 @@ export const statementCheckMethods = {
 		this._switchDepth--;
 	},
 
+	_checkLabeledStmt(stmt, scope, returnType) {
+		const labels = this._labels;
+		if (labels.defined.has(stmt.label))
+			this.err(`label ${stmt.label} already defined`, stmt);
+		labels.defined.add(stmt.label);
+		const entry = newLabelEntry(stmt);
+		labels.enclosing.push(entry);
+		this.checkStmt(stmt.body, scope, returnType);
+		labels.enclosing.pop();
+		if (!entry.used) this.err(`label ${stmt.label} defined and not used`, stmt);
+	},
+
+	// `break L` needs an enclosing labeled for, switch or select; `continue L`
+	// an enclosing labeled for. Returns true when `stmt` carried a label.
+	_checkBranchLabel(stmt) {
+		if (!stmt.label || !LABEL_BRANCHES.has(stmt.keyword)) return false;
+		const { keyword, label } = stmt;
+		const entry = this._labels.enclosing.findLast((e) => e.name === label);
+		if (entry) entry.used = true;
+		if (!entry) this.err(`${keyword} label not defined: ${label}`, stmt);
+		else if (!entry[LABEL_TARGET[keyword]])
+			this.err(`invalid ${keyword} label ${label}`, stmt);
+		return true;
+	},
+
 	_checkBranchStmt(stmt) {
+		if (!this._checkBranchLabel(stmt)) this._checkBranchKeyword(stmt);
+	},
+
+	_checkBranchKeyword(stmt) {
 		const kw = stmt.keyword;
 		if (kw === "goto")
 			this.err(

@@ -174,6 +174,8 @@ const SUBSTITUTE_DISPATCH = {
 		returns: type.returns.map((r) => s.substituteType(r, map)),
 		variadic: type.variadic,
 		async: type.async,
+		// A method copied from a generic embedded struct keeps its receiver kind.
+		...(Object.hasOwn(type, "_ptrRecv") && { _ptrRecv: type._ptrRecv }),
 	}),
 	struct: (s, type, map) => {
 		const fields = new Map();
