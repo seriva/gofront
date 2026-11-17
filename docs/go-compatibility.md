@@ -15,7 +15,7 @@ These features are intentional additions for the JavaScript platform:
 | `gofront/shared` | Zero-copy linear-memory buffers shared as TypedArrays across the JS↔WASM boundary. |
 | `.templ` files and `css` declarations | JSX-like component templates with scoped CSS, compiled to direct DOM calls. |
 | `gom` built-in package | Declarative DOM node builders available without an import. |
-| Browser globals (`document`, `console`, etc.) | Predeclared as dynamic JavaScript values for practical DOM access: arithmetic, calls, indexing and member access on them are not type-checked, unlike on a Go `any` (see [Type checking](#type-checking)). `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
+| Browser globals (`document`, `console`, etc.) | Predeclared as dynamic JavaScript values for practical DOM access: arithmetic, calls and indexing on them are not type-checked, unlike on a Go `any` (see [Type checking](#type-checking)). `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
 | `.d.ts` type imports (`import "js:./types.d.ts"`) | Type-safe interop with JavaScript libraries. |
 | `.d.ts` tuple return mapping | TypeScript `[A, B]` in return position maps directly to Go multi-value return `(A, B)` (e.g. React/Preact hooks `state, setState := useState(...)`). |
 | npm package resolution | Import types from `node_modules/` and `@types/` automatically. |
@@ -77,7 +77,7 @@ Consequences for portable code:
 
 ### Type checking
 
-GoFront rejects the invalid Go listed here, with the same verdict and message in `js`, `wasm` and `both` packages. The checker does not implement every rule of the Go specification; the rules below are the ones it enforces. Each error names a line and column: the leftmost token of the offending expression, or the declaring identifier for `declared and not used`.
+GoFront rejects the invalid Go listed here, with the same verdict and message in `js`, `wasm` and `both` packages. The checker does not implement every rule of the Go specification; the rules below are the ones it enforces. Each error names a line and column: the offending expression or operand, or the declaring identifier for `declared and not used`.
 
 #### Numeric operands need identical types
 
@@ -112,7 +112,7 @@ Two types are the same type only when Go says so:
 - Slices, arrays (with the same length), maps and pointers are identical when their element types are.
 - `byte` is `uint8` and `rune` is `int32`.
 
-A defined type and an unnamed type with the same underlying type assign to each other when one side is unnamed, in variable declarations, assignments, struct fields, composite literal elements, plain call arguments and returns:
+A defined struct type and an unnamed struct type with identical non-embedded fields assign to each other, in variable declarations, assignments, struct fields, composite literal elements, plain call arguments and returns:
 
 ```go
 type Point struct{ X, Y int }
@@ -121,7 +121,7 @@ var p Point = struct{ X, Y int }{1, 2} // ok
 var u struct{ X, Y int } = p           // ok
 ```
 
-`range` assignment, `switch` cases, multi-value calls, comma-ok forms, `defer` arguments, map keys and structs with embedded fields need an explicit conversion (`struct{ X, Y int }(p)`).
+`range` assignment, `switch` cases, multi-value calls, comma-ok forms, `defer` arguments, map keys and structs with embedded fields need an explicit conversion (`struct{ X, Y int }(p)`). Defined slice, array, map, func and interface types assign to the matching unnamed type in every context without a conversion.
 
 #### Go `any` versus JavaScript values
 
@@ -137,7 +137,7 @@ if s, ok := v.(string); ok { ... }
 
 A value is a Go `any` when your code declares it so (a variable, parameter, result, map or slice element of type `any`), or when it comes from `recover()`, `any(x)`, `x.(any)` or the `default:` clause of a type switch on an `any`.
 
-Values that come from JavaScript stay dynamic: browser globals and their members (`document`, `window`, `console`), ECMAScript built-ins (`Math`, `JSON`), values declared `any` in a `.d.ts` file, and the WebGL and WebGPU objects. The checker lets you do arithmetic on them, call them, index them, read members and assign them to a typed variable (`width := window.innerWidth * 2`) without an assertion. A dynamic value you store in a variable you declared as `any` is a Go `any` from then on.
+Values that come from JavaScript stay dynamic: browser globals and their members (`document`, `window`, `console`), ECMAScript built-ins (`Math`, `JSON`) and values declared `any` in a `.d.ts` file. Typed Web APIs such as `WebGL2RenderingContext`, `GPUDevice`, `ArrayBuffer` and TypedArrays are checked statically. The checker lets you do arithmetic on dynamic values, call them, index them, read members and assign them to a typed variable (`width := window.innerWidth * 2`) without an assertion. A dynamic value you store in a variable you declared as `any` is a Go `any` from then on.
 
 #### nil
 
@@ -147,9 +147,9 @@ Values that come from JavaScript stay dynamic: browser globals and their members
 
 - **Return counts**: `return 1, 2` in a function with one result is `too many return values (have 2, want 1)`.
 - **`range`** accepts integers, strings, slices, arrays, pointers to arrays, maps and iterator funcs. Floats, bools, structs, interfaces and a Go `any` are errors.
-- **Assignment targets** must be addressable or a map index. `s[0] = 'x'` on a string, `m[k].f = v` on a map of structs (assign the whole element, or keep pointers in the map), and `m[k][0] = v` on a map of arrays are errors.
+- **Invalid assignment targets**: `s[0] = 'x'` on a string, `m[k].f = v` on a map of structs (assign the whole element, or keep pointers in the map), and `m[k][0] = v` on a map of arrays are errors.
 - **Pointer methods** cannot be called on a value that is not addressable: `mk().Inc()` with `mk` returning a struct value is `cannot call pointer method Inc on C`. Store the result in a variable first.
-- **Labels** belong to one function. `break L` and `continue L` need `L` to label an enclosing statement (`continue` a loop), a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
+- **Labels** belong to one function. `break L` needs `L` to label an enclosing `for` or `switch` statement and `continue L` an enclosing loop, a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
 - **Unused values**: only calls and `await` expressions may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
 
 #### Literals and duplicates
