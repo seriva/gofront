@@ -1,4 +1,3 @@
-// pending: S17
 package main
 
 func f() {}

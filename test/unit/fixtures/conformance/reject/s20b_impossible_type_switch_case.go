@@ -1,4 +1,3 @@
-// pending: S20
 package main
 
 type I interface{ M() }

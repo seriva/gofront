@@ -1,4 +1,3 @@
-// pending: S21
 package main
 
 func Id[T any](x T) T { return x }

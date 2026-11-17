@@ -1,4 +1,3 @@
-// pending: S18
 package main
 
 func main() {

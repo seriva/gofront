@@ -386,12 +386,24 @@ export const statementParserMethods = {
 
 	_parseTypeSwitchTypeList() {
 		const parseOne = () => {
+			const tok = this.peek();
 			// nil is a keyword, not a type name, so handle it explicitly
 			if (this.check(T.NIL)) {
 				this.advance();
-				return { kind: "TypeName", name: "nil" };
+				return {
+					kind: "TypeName",
+					name: "nil",
+					_line: tok.line,
+					_col: tok.col,
+				};
 			}
-			return this.parseType();
+			const node = this.parseType();
+			// The case type is where a diagnostic about the case points.
+			if (node._line === undefined) {
+				node._line = tok.line;
+				node._col = tok.col;
+			}
+			return node;
 		};
 		const types = [parseOne()];
 		while (this.match(T.COMMA)) types.push(parseOne());

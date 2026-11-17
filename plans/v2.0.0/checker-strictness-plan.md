@@ -266,23 +266,23 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those cases pass, the `wasm` hang in `s16` becomes a compile error, and `npm test` passes
 
 ### Phase 6: Expressions, literals and docs (S17–S21, S23)
-- [ ] Task 6.1: Unused expression statements (S17)
+- [x] Task 6.1: Unused expression statements (S17)
   - Files: `src/typechecker/statements.js` (`checkStmt` `ExprStmt`)
   - Test: delete `// pending:` from `s17`/`s17b`/`s17c` (`x + 1 (value of type int) is not used`). Calls, `await` calls and conversions-as-calls to funcs stay valid statements
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 6.2: Duplicate `switch` cases and map keys; struct literal value count (S18, S19)
+- [x] Task 6.2: Duplicate `switch` cases and map keys; struct literal value count (S18, S19)
   - Files: `src/typechecker/statements.js` (`_checkSwitchStmt`), `src/typechecker/expressions.js` (map literal keys, `_checkStructCompositeLit`)
   - Test: delete `// pending:` from `s18` (`duplicate case 1 in expression switch`), `s18b` (`duplicate key "a" in map literal`) and `s19` (`too few values in struct literal of type S`). Non-constant duplicate cases stay valid
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 6.3: Impossible type assertions; generic functions used without instantiation (S20, S21)
+- [x] Task 6.3: Impossible type assertions; generic functions used without instantiation (S20, S21)
   - Files: `src/typechecker/expressions.js` (`_checkTypeAssertExpr`, value use of a generic func ident/selector), `src/typechecker/statements.js` (type-switch cases)
   - Test: delete `// pending:` from `s20` and its type-switch twin (`impossible type assertion: i.(S)` / `impossible type switch case`) and from `s21`/`s21b` (`cannot use generic function slices.Reverse without instantiation`). `f := Id[int]` and calls with inference stay valid
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 6.4: Local declarations shadow predeclared type names (S23)
+- [x] Task 6.4: Local declarations shadow predeclared type names (S23)
   - Files: `src/typechecker/resolve.js` (`resolveTypeNode` `TypeName`), `src/typechecker/expressions.js` (identifier lookup at `:227`)
   - Test: delete `// pending:` from the `s23`/`s23b` accept cases (`aliased`, `3`). The predeclared `int32`/`any` still resolve when not shadowed
   - Done when: those cases pass, `grep -rl "// pending:" test/unit/fixtures/conformance` prints nothing, and `npm test` passes
-- [ ] Task 6.5: Document the strict rules
+- [x] Task 6.5: Document the strict rules
   - Files: `docs/go-compatibility.md` (a *Type checking* section on numeric operands needing identical types and explicit conversions, `any` needing an assertion while browser globals and `.d.ts` values stay dynamic, with a short example of each fix; update the *Browser globals* row), `docs/language-support.md` (rows that mention numeric promotion or `any`, if any)
   - Test: none (docs only); `npm run check` stays green
   - Done when: the docs describe only current behaviour (no change history or plan references), and the section is the anchor the `CHANGELOG.md` **Breaking:** entry links to

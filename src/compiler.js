@@ -59,6 +59,7 @@ import {
 } from "./resolver.js";
 import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
 import {
+	BASIC_TYPES,
 	JS_BUILTIN_CLASSES,
 	TypeCheckError,
 	UnsupportedError,
@@ -737,6 +738,10 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
 	// A local type named after a JS built-in would shadow it in the bundle.
 	const foreign = new Set(JS_BUILTIN_CLASSES);
+	// A local type that shadows a predeclared type (`type int32 = string`)
+	// gets its own name, so `int32` keeps meaning the predeclared type
+	// everywhere else.
+	for (const name of Object.keys(BASIC_TYPES)) foreign.add(name);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
 	// A local type spelled like a package-level var, const or func would take
