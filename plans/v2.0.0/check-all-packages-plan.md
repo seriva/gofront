@@ -1,7 +1,7 @@
 # `gofront check` Reports Every Package — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 5) on 2026-11-17, re-probed and reviewed that day. Independent of every other v2.0.0 plan; can ship first. Shared code: Task 1.3 tags dependency failures in the local-package loop of `resolveImports` (`src/compiler.js`), which [`incremental-builds-plan.md`](incremental-builds-plan.md) Task 1.1 also rewrites (cycle detection, package graph): whichever lands second rebases.  
 **Release note:** `gofront check` now reports the errors of every package and its test files in one run instead of stopping at the first failing package.  
