@@ -282,7 +282,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/resolve.js` (`resolveTypeNode` `TypeName`), `src/typechecker/expressions.js` (identifier lookup at `:227`)
   - Test: delete `// pending:` from the `s23`/`s23b` accept cases (`aliased`, `3`). The predeclared `int32`/`any` still resolve when not shadowed
   - Done when: those cases pass, `grep -rl "// pending:" test/unit/fixtures/conformance` prints nothing, and `npm test` passes
-- [ ] Task 6.5: Document the strict rules
+- [x] Task 6.5: Document the strict rules
   - Files: `docs/go-compatibility.md` (a *Type checking* section on numeric operands needing identical types and explicit conversions, `any` needing an assertion while browser globals and `.d.ts` values stay dynamic, with a short example of each fix; update the *Browser globals* row), `docs/language-support.md` (rows that mention numeric promotion or `any`, if any)
   - Test: none (docs only); `npm run check` stays green
   - Done when: the docs describe only current behaviour (no change history or plan references), and the section is the anchor the `CHANGELOG.md` **Breaking:** entry links to
