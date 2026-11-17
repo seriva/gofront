@@ -229,7 +229,7 @@ export const expressionCheckMethods = {
 				// `(*int)(nil)`: a predeclared type named where a type may stand.
 				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
 					expr._isTypeRef = true;
-					return BASIC_TYPES[expr.name];
+					return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
 				}
 				if (!t) {
 					// The import of an excluded package already reported; its
@@ -1805,7 +1805,9 @@ export const expressionCheckMethods = {
 				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
 				expr,
 			);
-		if (isAny(fnType)) return ANY;
+		// `(any)(x)` / `type A = any; A(x)` convert like `any(x)`.
+		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef))
+			return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.
