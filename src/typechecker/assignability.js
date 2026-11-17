@@ -651,18 +651,20 @@ export const assignabilityMethods = {
 	},
 
 	// A struct value assigned between a defined struct type and an identical
-	// struct literal type is converted: the backends that give each struct type
-	// its own representation copy it into the target's. The conversion is
-	// attached to the expression producing the value, so it applies only when
-	// that expression yields exactly this one value; a forwarded multi-value
-	// call, a range clause or a missing operand has no such expression and
-	// returns false (the caller rejects the assignment). Structs with an
-	// embedded field are not converted either: wasm lays out an anonymous
-	// struct without its embeds. The conversion is an allow-list: only the
-	// contexts that pass `allowed` (variable initializers, assignments, struct
-	// fields, composite literal elements, plain call arguments and returns)
-	// get it; a map key, a range clause, a switch case or a deferred call's
-	// argument needs the explicit conversion.
+	// struct literal type is rewritten, in place, into the explicit conversion
+	// `T(v)`, so every backend sees exactly what the program could have
+	// written (a copy in the target's representation). The rewrite replaces
+	// the expression producing the value, so it applies only when that
+	// expression yields exactly this one value; a forwarded multi-value call,
+	// a comma-ok form, a range clause or a missing operand has no such
+	// expression and returns false (the caller rejects the assignment).
+	// Structs with an embedded field are not converted either: wasm lays out
+	// an anonymous struct without its embeds. The conversion is an allow-list:
+	// only the contexts that pass `allowed` (variable initializers,
+	// assignments with one value per target, struct fields, composite literal
+	// elements, plain call arguments and returns) get it; a map key, a range
+	// clause, a switch case or a deferred call's argument needs the explicit
+	// conversion.
 	_markStructCopy(target, source, tBase, sBase, operand, allowed = false) {
 		if (tBase?.kind !== "struct") return true;
 		if (target.kind === "pointer" || source.kind === "pointer") return true;
@@ -670,9 +672,86 @@ export const assignabilityMethods = {
 		if ([tBase, sBase].some((b) => b?._structFields?.some((f) => f.embedded)))
 			return false;
 		if (!operand || typeof operand !== "object" || !operand._type) return false;
+		// A node this rule already rewrote, reached again with its old type.
+		if (
+			operand._implicitStructConv &&
+			identical(this.resolveType(operand._type), target)
+		)
+			return true;
 		if (!identical(this.resolveType(operand._type), source)) return false;
-		operand._convertTo = target;
+		const typeNode = this._conversionTypeNode(target);
+		if (!typeNode) return false;
+		const inner = { ...operand };
+		for (const k of Object.keys(operand)) delete operand[k];
+		Object.assign(operand, {
+			kind: "TypeConversion",
+			targetType: typeNode,
+			expr: inner,
+			_type: target,
+			_implicitStructConv: true,
+			_line: inner._line,
+			_col: inner._col,
+		});
 		return true;
+	},
+
+	// The type node spelling `type` in a conversion, built from the resolved
+	// type so it needs no scope; null when the type has no such spelling here
+	// (a generic instance, a type parameter, a func or interface type, an
+	// embedded field, a mangled standard library name).
+	_conversionTypeNode(type) {
+		const t = this.resolveType(type);
+		if (!t) return null;
+		switch (t.kind) {
+			case "basic":
+				return t.name ? { kind: "TypeName", name: t.name } : null;
+			case "named":
+				return !t.typeArgs?.length &&
+					!t._generic &&
+					!t.name.includes("$") &&
+					this.types.get(t.name) === t
+					? { kind: "TypeName", name: t.name }
+					: null;
+			case "pointer": {
+				const base = this._conversionTypeNode(t.base);
+				return base && { kind: "PointerType", base };
+			}
+			case "slice": {
+				const elem = this._conversionTypeNode(t.elem);
+				return elem && { kind: "SliceType", elem };
+			}
+			case "array": {
+				const elem = this._conversionTypeNode(t.elem);
+				return (
+					elem &&
+					Number.isInteger(t.size) && {
+						kind: "ArrayType",
+						size: { kind: "BasicLit", litKind: "INT", value: String(t.size) },
+						elem,
+					}
+				);
+			}
+			case "map": {
+				const key = this._conversionTypeNode(t.key);
+				const value = this._conversionTypeNode(t.value);
+				return key && value && { kind: "MapType", key, value };
+			}
+			case "struct":
+				return this._structConversionTypeNode(t);
+			default:
+				return null;
+		}
+	},
+
+	_structConversionTypeNode(t) {
+		if (!t._structFields) return null;
+		const fields = [];
+		for (const f of t._structFields) {
+			const type = f.embedded ? null : this._conversionTypeNode(f.type);
+			if (!type) return null;
+			fields.push({ names: f.names, type, embedded: false, tag: f.tag });
+		}
+		return { kind: "StructType", fields };
 	},
 
 	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the

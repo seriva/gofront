@@ -1567,7 +1567,7 @@ export class TypeChecker {
 							spec.value[i] ?? spec.value[0],
 							"variable declaration",
 							undefined,
-							true,
+							spec.names.length === spec.value.length,
 						);
 					scope.defineLocal(spec.names[i], varType, spec._namePos?.[i]);
 				}

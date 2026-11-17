@@ -636,29 +636,6 @@ function complexConstNeg(e, depth) {
 
 export const expressionGenMethods = {
 	genExpr(expr) {
-		if (expr._convertTo && !expr._converting) {
-			// An implicit struct conversion the checker accepted: a struct
-			// literal type's value assigned to a defined struct type becomes an
-			// instance of its class, so its methods exist. The reverse copies a
-			// class instance into a plain object, so the value no longer carries
-			// the defined type's identity or methods.
-			expr._converting = true;
-			try {
-				const to = expr._convertTo;
-				const inner = this.genExpr(expr);
-				return (
-					this._genStructClassConversion(
-						to.kind === "named" ? to.name : undefined,
-						expr._type,
-						inner,
-					) ??
-					this._genAnonStructConversion(to, inner) ??
-					inner
-				);
-			} finally {
-				expr._converting = false;
-			}
-		}
 		if (expr._asComplex && !expr._complexWrapping) {
 			expr._complexWrapping = true;
 			try {
@@ -1198,15 +1175,14 @@ export const expressionGenMethods = {
 				Boolean(this._genericMapTag(expr._ifaceSrc)));
 		const js = this.genExpr(expr);
 		if (expr._ifaceBox || tagged) return js;
-		// An implicit struct conversion already produced a value of its target
-		// type, which is the type the copy must follow.
-		const type = expr._convertTo ?? expr._type;
 		if (
-			!(this._aggregateBase(type) || this._typeParamClone(type, js)) ||
+			!(
+				this._aggregateBase(expr._type) || this._typeParamClone(expr._type, js)
+			) ||
 			!this._isAddressableExpr(expr)
 		)
 			return js;
-		return this._cloneJs(type, js);
+		return this._cloneJs(expr._type, js);
 	},
 
 	_rootIdentName(e) {

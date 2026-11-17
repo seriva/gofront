@@ -100,7 +100,7 @@ export const statementCheckMethods = {
 			stmt.lhs[i],
 			"assignment",
 			this._assignOperand(stmt, i),
-			true,
+			stmt.rhs.length === stmt.lhs.length,
 		);
 		this._skipIfaceMark = false;
 	},
@@ -281,7 +281,7 @@ export const statementCheckMethods = {
 					stmt.lhs[i],
 					"assignment",
 					this._assignOperand(stmt, i),
-					true,
+					stmt.rhs.length === stmt.lhs.length,
 				);
 				this._skipIfaceMark = false;
 			}
