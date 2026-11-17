@@ -6,6 +6,7 @@ import { exprText, operandKind } from "./operand-text.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	anyKind,
 	BOOL,
 	CMP_OPS,
 	FLOAT64,
@@ -616,7 +617,21 @@ export const assignabilityMethods = {
 			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
 			return;
 		}
+		if (this._distinctEmptyInterfaces(t, s)) {
+			this.err(`cannot use ${typeStr(s)} as ${typeStr(t)} value`, node);
+			return;
+		}
 		this.assertAssignable(target, source, node);
+	},
+
+	// `*B` and `*any` differ when `B` is a defined empty interface.
+	_distinctEmptyInterfaces(t, s) {
+		return (
+			anyKind(t) === "go" &&
+			anyKind(s) === "go" &&
+			(t.kind === "named" || s.kind === "named") &&
+			!identical(t, s)
+		);
 	},
 
 	// Tags struct values / struct pointers flowing into an interface so codegen can

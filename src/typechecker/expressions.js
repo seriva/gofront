@@ -10,6 +10,7 @@ import {
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	anyKind,
 	BASIC_TYPES,
 	BOOL,
 	BROWSER_GLOBALS,
@@ -182,8 +183,12 @@ const NON_INTEGER_BASICS = new Set([
 	"complex128",
 	"bool",
 	"string",
-	"any",
 ]);
+
+// JS-dynamic `any` indexes anything; a Go `any` needs a type assertion.
+function nonIntegerBasic(u) {
+	return isAny(u) ? anyKind(u) === "go" : NON_INTEGER_BASICS.has(u.name);
+}
 
 // Method-name dispatch for _checkExpr — string values add no static call edges.
 const CHECK_EXPR_DELEGATE = {
@@ -353,7 +358,10 @@ export const expressionCheckMethods = {
 	},
 
 	_checkDeref(ot, expr) {
-		if (ot === ANY) return ANY;
+		// JS-dynamic values dereference freely; an error-recovery type has
+		// already been reported.
+		if (anyKind(ot) === "dynamic") return ANY;
+		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
 		if (ot.kind === "named" && ot.underlying?.kind === "pointer")
 			return ot.underlying.base;
@@ -1139,7 +1147,7 @@ export const expressionCheckMethods = {
 				t.base === "bool" || t.base === "string" || t.base === "complex128"
 			);
 		const u = this._deepUnderlying(t);
-		if (u?.kind === "basic") return NON_INTEGER_BASICS.has(u.name);
+		if (u?.kind === "basic") return nonIntegerBasic(u);
 		return NON_INTEGER_KINDS.has(u?.kind);
 	},
 

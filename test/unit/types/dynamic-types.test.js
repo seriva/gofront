@@ -4,6 +4,7 @@
 import {
 	assert,
 	assertAllTargetsOutput,
+	assertEqual,
 	assertErrorContains,
 	assertJsTargetsOutput,
 	assertProgramOutput,
@@ -1559,4 +1560,57 @@ func main() {
 `,
 		"p *main.S|&{4} false true\nv main.S|{5} true false\n",
 	);
+});
+
+section("Empty interface kinds");
+
+test("a defined empty interface (type MyAny any) takes any value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyAny any
+
+func main() {
+	var v MyAny = 2
+	var w MyAny = "s"
+	fmt.Println(v, w)
+}
+`,
+		"2 s\n",
+	);
+});
+
+test("a defined empty interface and any convert to each other", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var b B = 3
+	var a any = b
+	var p *B = &b
+	fmt.Println(a, *p)
+}
+`,
+		"3 3\n",
+	);
+});
+
+test("a JS-dynamic value indexes a slice on js", () => {
+	const { errors } = compile(
+		`package main
+
+func main() {
+	xs := []int{1, 2}
+	_ = xs[window.i]
+}
+`,
+		{ target: "js" },
+	);
+	assertEqual(errors.length, 0);
 });

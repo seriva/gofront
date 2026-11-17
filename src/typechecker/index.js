@@ -21,6 +21,7 @@ import { setupGlobals } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
+	anyKind,
 	BOOL,
 	copyType,
 	defaultType,
@@ -1000,6 +1001,7 @@ export class TypeChecker {
 			else if (inner?.kind === "struct")
 				underlying = { ...inner, name: decl.name, methods: new Map() };
 		}
+		underlying = this._definedEmptyInterface(underlying, decl);
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
 			this.types.set(decl.name, underlying);
@@ -1027,6 +1029,17 @@ export class TypeChecker {
 		}
 		this.types.set(decl.name, named);
 		this._defineTypeBinding(decl.name, named, scope);
+	}
+
+	// `type MyAny any` is a defined empty interface, like `type B interface{}`.
+	_definedEmptyInterface(underlying, decl) {
+		if (decl.isAlias) return underlying;
+		const inner =
+			underlying.kind === "named"
+				? this._deepUnderlying(underlying)
+				: underlying;
+		if (inner?.kind !== "basic" || anyKind(inner) !== "go") return underlying;
+		return { kind: "interface", methods: new Map() };
 	}
 
 	// Binds a declared type's name.  A type declared in a function binds the
@@ -1237,8 +1250,20 @@ export class TypeChecker {
 	// `name?={ cond }` sets the attribute when `cond` is true.
 	_checkTemplCondAttr(a, scope) {
 		const t = this._checkTemplExpr(a, a.tokens, scope);
-		if (t && !isBool(t) && !isAny(t))
-			this.err(`Conditional attribute '${a.name}' must be bool`, a.expr);
+		this._requireTemplBool(
+			t,
+			a.expr,
+			"conditional attribute",
+			`Conditional attribute '${a.name}' must be bool`,
+		);
+	}
+
+	// A templ condition is a bool or a JS-dynamic value; a Go `any` needs an
+	// assertion first.
+	_requireTemplBool(t, node, where, msg) {
+		if (anyKind(t) === "go")
+			this.err(`non-boolean condition in ${where}`, node);
+		else if (t && !isBool(t) && !isAny(t)) this.err(msg, node);
 	}
 
 	// `{ name... }` names a variadic parameter. A templ without a `children`
@@ -1254,8 +1279,12 @@ export class TypeChecker {
 
 	_checkTemplIf(n, scope) {
 		const ct = this._checkTemplExpr(n, n.condTokens, scope);
-		if (ct && !isBool(ct) && !isAny(ct))
-			this.err("If condition must be bool", n.expr);
+		this._requireTemplBool(
+			ct,
+			n.expr,
+			"if statement",
+			"If condition must be bool",
+		);
 		this._checkTemplNodes(n.then, scope);
 		this._checkTemplNodes(n.else_, scope);
 	}
