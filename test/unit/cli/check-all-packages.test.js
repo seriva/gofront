@@ -226,3 +226,38 @@ test("a failing dependency outside the pattern root prints once", () => {
 		},
 	);
 });
+
+test("dependent of a package whose .d.ts cannot be read is skipped", () => {
+	withTempDir(
+		{
+			"a/a.go": 'package a\nimport "js:missing.d.ts"\nvar X = 1\n',
+			"c/c.go": 'package c\nimport "../a"\nvar Z = a.X\n',
+		},
+		(dir) => {
+			const res = handleCheck(`${dir}/...`);
+			assertEqual(statusOf(res, "a"), "fail");
+			assertEqual(statusOf(res, "c"), "skipped");
+			const out = capture(() => reportCheck(res, dir));
+			assertEqual(count(out.err, "Cannot read"), 1);
+			assertContains(out.err, "a failed)");
+		},
+	);
+});
+
+test("dependent of a package with an invalid target override is skipped", () => {
+	withTempDir(
+		{
+			"gofront.json": JSON.stringify({ targets: { physics: "native" } }),
+			"src/main.go": 'package main\nimport "./physics"\nvar Z = physics.X\n',
+			"src/physics/physics.go": clean("physics"),
+		},
+		(dir) => {
+			const res = handleCheck(`${dir}/...`);
+			assertEqual(statusOf(res, "physics"), "fail");
+			assertEqual(statusOf(res, "src"), "skipped");
+			const out = capture(() => reportCheck(res, dir));
+			assertEqual(count(out.err, "invalid target 'native'"), 1);
+			assertContains(out.err, "physics failed)");
+		},
+	);
+});

@@ -333,7 +333,9 @@ function resolveImports(
 				const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
 				checker.addDefinitions(types, values);
 			} catch (e) {
-				throw new Error(`Cannot read '${dtsPath}': ${e.message}`);
+				throw new CompileError([
+					new Error(`Cannot read '${dtsPath}': ${e.message}`),
+				]);
 			}
 		}
 	}
@@ -471,9 +473,11 @@ export function resolvePackageTarget(declared, pkgDir, options = {}) {
 	const t = overrides[key] ?? (key === "." ? overrides[""] : undefined);
 	if (t === undefined) return declared;
 	if (!PACKAGE_TARGETS.has(t))
-		throw new Error(
-			`gofront.json: invalid target '${t}' for package '${key}' (expected js, wasm or both)`,
-		);
+		throw new CompileError([
+			new Error(
+				`gofront.json: invalid target '${t}' for package '${key}' (expected js, wasm or both)`,
+			),
+		]);
 	return t;
 }
 
