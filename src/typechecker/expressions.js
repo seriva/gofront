@@ -435,6 +435,7 @@ export const expressionCheckMethods = {
 		if (c.kind === "typeParam")
 			return this._constraintTerms(c.constraint, seen, scope);
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
+		scope = c._scope ?? scope;
 		const out = [];
 		for (const term of c.terms) {
 			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
@@ -450,7 +451,9 @@ export const expressionCheckMethods = {
 
 	// An interface's type set is the intersection of its own union and the
 	// type sets of the interfaces it embeds; null when it has none.
-	_interfaceTerms(iface, seen, scope) {
+	_interfaceTerms(iface, seen, outer) {
+		// Terms such as `~[]E` resolve in the scope that declared `E`.
+		const scope = iface._unionScope ?? outer;
 		const sets = [iface.unionConstraint, ...(iface._typeSetEmbeds ?? [])]
 			.filter(Boolean)
 			.map((s) => this._constraintTerms(s, new Set(seen), scope));

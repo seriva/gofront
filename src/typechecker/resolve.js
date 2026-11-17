@@ -281,6 +281,8 @@ export const resolveMethods = {
 				return { kind: "typeParam", name: node.name, constraint };
 			}
 			case "UnionConstraint":
+				// Terms such as `~[]E` resolve later in the scope that declares `E`.
+				node._scope ??= scope;
 				return node;
 			case "SliceType":
 				return { kind: "slice", elem: this.resolveTypeNode(node.elem, scope) };

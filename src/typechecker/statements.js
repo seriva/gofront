@@ -183,6 +183,11 @@ export const statementCheckMethods = {
 				this._checkRedeclAssign(scope.symbols.get(name), rhsFlat[i], stmt, i);
 				continue;
 			}
+			if (
+				stmt.rhs.length === stmt.lhs.length &&
+				this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment")
+			)
+				rhsFlat[i] = ANY;
 			if (stmt.rhs.length === stmt.lhs.length)
 				this._checkConstDefault(
 					rhsFlat[i],

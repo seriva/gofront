@@ -28,6 +28,7 @@ import {
 	INTRINSICS,
 	isAny,
 	isBool,
+	isNil,
 	isVoid,
 	JS_BUILTIN_CLASSES,
 	NATIVES,
@@ -1560,7 +1561,13 @@ export class TypeChecker {
 			if (spec.value) {
 				const valTypesFlat = this._varSpecValueTypes(spec, scope);
 				for (let i = 0; i < spec.names.length; i++) {
-					const vt = valTypesFlat[i] ?? ANY;
+					let vt = valTypesFlat[i] ?? ANY;
+					if (
+						!type &&
+						spec.names.length === spec.value.length &&
+						this._rejectUntypedNil(vt, spec.value[i], "variable declaration")
+					)
+						vt = ANY;
 					const varType = type ?? defaultType(vt) ?? ANY;
 					if (!type && spec.names.length === spec.value.length)
 						this._checkConstDefault(vt, spec.value[i], "variable declaration");
@@ -1626,6 +1633,12 @@ export class TypeChecker {
 	checkConstDecl(decl, scope) {
 		for (const spec of decl.decls) {
 			const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
+			spec.value.forEach((v, i) => {
+				if (isNil(valTypes[i])) {
+					this.err("nil is not constant", v);
+					valTypes[i] = ANY;
+				}
+			});
 			// Explicit type annotation → typed constant; otherwise preserve untyped
 			const type = spec.type
 				? this.resolveTypeNode(spec.type, scope)

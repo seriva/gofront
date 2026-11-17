@@ -138,7 +138,7 @@ export const constantCheckMethods = {
 		// Go does not compare complex constants.
 		if (!type || isComplex(this._deepUnderlying(type) ?? type)) return false;
 		const whole = constIntValue(v);
-		const key = whole !== null ? `i${whole}` : `${v.k}${String(v.v)}`;
+		const key = whole !== null ? `i${whole}` : this._constKey(v, type);
 		let bucket = seen.find((b) => identical(b.type, type));
 		if (!bucket) {
 			bucket = { type, keys: new Set() };
@@ -147,6 +147,15 @@ export const constantCheckMethods = {
 		if (bucket.keys.has(key)) return true;
 		bucket.keys.add(key);
 		return false;
+	},
+
+	// Key of a non-integral constant after conversion to `type`: a float32
+	// constant is rounded to float32 precision first.
+	_constKey(v, type) {
+		const u = this._deepUnderlying(type) ?? type;
+		if (v.k !== "FLOAT" || u?.name !== "float32") return `${v.k}${String(v.v)}`;
+		const r = Math.fround(v.v);
+		return Number.isInteger(r) ? `i${BigInt(r)}` : `FLOAT${r}`;
 	},
 
 	_constIdentityType(e, targetType) {
