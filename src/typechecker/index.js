@@ -978,7 +978,10 @@ export class TypeChecker {
 			if (preset?.declNode === decl) named._generic = preset;
 			else named._generic = { typeParams: typeParamTypes, declNode: decl };
 			this.types.set(decl.name, named);
-			const underlying = this.resolveTypeNode(decl.type, typeScope);
+			const underlying = this._definedEmptyInterface(
+				this.resolveTypeNode(decl.type, typeScope),
+				decl,
+			);
 			named.underlying = underlying;
 			named._target = this.target;
 			if (underlying.kind === "struct") {

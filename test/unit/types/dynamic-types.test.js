@@ -1601,6 +1601,39 @@ func main() {
 	);
 });
 
+test("a generic defined empty interface takes any value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] any
+
+func main() {
+	var b Box[int] = 2
+	fmt.Println(b)
+}
+`,
+		"2\n",
+	);
+});
+
+test("a JS-dynamic operand with a defined empty interface rejects the operator on js", () => {
+	const { errors } = compile(
+		`package main
+
+type MyAny any
+
+func main() {
+	var v MyAny = 2
+	_ = window.x + v
+}
+`,
+		{ target: "js" },
+	);
+	assertErrorContains(errors, "operator + not defined on v");
+});
+
 test("a JS-dynamic value indexes a slice on js", () => {
 	const { errors } = compile(
 		`package main

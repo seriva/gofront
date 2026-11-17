@@ -508,6 +508,10 @@ export const expressionCheckMethods = {
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
 				this.binaryResultType(expr.op, ANY, ANY, expr)
 			);
+		// A defined empty interface (`type MyAny any`, `interface{}`) is a Go
+		// `any` too.
+		const goAnyError = this._checkDeclaredAnyBinary(expr.op, lt, rt, expr);
+		if (goAnyError) return goAnyError;
 		this._checkConstOperands(expr.op, lt, rt, expr);
 		this._markTypeParamMapNil(expr, lt, rt, scope);
 		const res = this.binaryResultType(expr.op, lt, rt, expr);
@@ -631,12 +635,12 @@ export const expressionCheckMethods = {
 		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
-		if (expr.op === "*" && ot?._declared && !expr.operand._isTypeRef)
+		if (expr.op === "*" && anyKind(ot) === "go" && !expr.operand._isTypeRef)
 			return this.err(
 				`invalid operation: cannot indirect ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot))})`,
 				expr.operand,
 			);
-		if (expr.op !== "&" && expr.op !== "*" && ot?._declared)
+		if (expr.op !== "&" && expr.op !== "*" && anyKind(ot) === "go")
 			return this._checkDeclaredAnyOperator(expr.op, ot, expr.operand);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
@@ -1915,7 +1919,7 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
 		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
 			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
-		if (fnType?._declared && !expr.func._isTypeRef)
+		if (anyKind(fnType) === "go" && !expr.func._isTypeRef)
 			return this.err(
 				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
 				expr,
