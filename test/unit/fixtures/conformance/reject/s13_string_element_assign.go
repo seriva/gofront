@@ -1,4 +1,3 @@
-// pending: S13
 package main
 
 func main() {

@@ -54,6 +54,8 @@ import {
 	VOID,
 } from "./types.js";
 
+const TEMPORARY_KINDS = new Set(["CallExpr", "CompositeLit", "TypeAssertExpr"]);
+
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -646,17 +648,43 @@ export const expressionCheckMethods = {
 		return Boolean(generic?.methods?.get(field)?._ptrRecv);
 	},
 
+	// A pointer-receiver method needs `&recv`: a map element or the result of
+	// a call, conversion, literal or assertion has no address. A receiver that
+	// reaches the method through an embedded pointer needs none.
+	_reportUnaddressableRecv(expr) {
+		const recv = expr.expr;
+		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
+		if (this._isMapElementOperand(recv)) {
+			this._errMapElementAddress(recv);
+			return true;
+		}
+		if (!this._isTemporaryOperand(recv)) return false;
+		this.err(
+			`cannot call pointer method ${expr.field} on ${typeStr(recv._type)}`,
+			this._positioned(expr),
+		);
+		return true;
+	},
+
+	// A value that exists only for the current expression: the result of a
+	// call, a literal or a type assertion, or a field or array element of one.
+	_isTemporaryOperand(node) {
+		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
+		if (TEMPORARY_KINDS.has(node?.kind)) return true;
+		const bt = node?.expr?._type;
+		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
+			return this._isTemporaryOperand(node.expr);
+		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
+		return node?.kind === "IndexExpr" && b?.kind === "array"
+			? this._isTemporaryOperand(node.expr)
+			: false;
+	},
+
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope) {
 		if (!ft._ptrRecv) return;
-		if (
-			!this._promotedThroughPointer(expr.expr._type, expr.field) &&
-			this._isMapElementOperand(expr.expr)
-		) {
-			this._errMapElementAddress(expr.expr);
-			return;
-		}
+		if (this._reportUnaddressableRecv(expr)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {

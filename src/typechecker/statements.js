@@ -225,7 +225,37 @@ export const statementCheckMethods = {
 
 	_checkAssignLhsType(e, scope) {
 		if (e.kind === "Ident" && e.name === "_") return ANY;
-		return this.checkExpr(e, scope);
+		const t = this.checkExpr(e, scope);
+		this._checkAssignTarget(e);
+		return t;
+	},
+
+	// The left side of `=`, `op=`, `++` and `--` must be addressable or a map
+	// index: not a string element, nor a field or array element of a map entry.
+	_checkAssignTarget(e) {
+		let node = e;
+		while (node.kind === "ParenExpr") node = node.expr;
+		const bt = node.expr?._type;
+		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
+		if (node.kind === "IndexExpr" && isString(b))
+			this.err(
+				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
+				node,
+			);
+		else if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
+			this.err(
+				`cannot assign to struct field ${exprText(node)} in map`,
+				this._positioned(node),
+			);
+		else if (
+			node.kind === "IndexExpr" &&
+			b?.kind === "array" &&
+			this._isMapElementOperand(node.expr)
+		)
+			this.err(
+				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
+				node,
+			);
 	},
 
 	// A source-written `any` operand still goes through assertAssignable so a
@@ -256,6 +286,7 @@ export const statementCheckMethods = {
 
 	_checkIncDecStmt(stmt, scope) {
 		const t = this.checkExpr(stmt.expr, scope);
+		this._checkAssignTarget(stmt.expr);
 		this._checkDeclaredAnyOperator(stmt.op, t, stmt.expr);
 	},
 

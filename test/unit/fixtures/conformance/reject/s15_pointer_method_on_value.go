@@ -1,4 +1,3 @@
-// pending: S15
 package main
 
 type C struct{ n int }

@@ -256,7 +256,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`)
   - Test: delete `// pending:` from `s12`/`s12b` (`cannot range over 1.5 (untyped float constant)`, `cannot range over b (variable of type bool)`); range over int, string, slice, array, `*array`, map and iterator funcs stays green
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 5.3: Assignability of the left side (S13–S15)
+- [x] Task 5.3: Assignability of the left side (S13–S15)
   - Files: `src/typechecker/statements.js` (`_checkAssignStmt`, `++`/`--`), `src/typechecker/expressions.js` (pointer-receiver call on a non-addressable operand, reusing `_isMapElementOperand`)
   - Test: delete `// pending:` from `s13` (`cannot assign to s[0] (neither addressable nor a map index expression)`), `s14` (`cannot assign to struct field m["a"].X in map`) and `s15` (`cannot call pointer method Inc on C`). `m["a"] = P{2}`, `p.X = 1` through a pointer, and `v.Inc()` on an addressable `v` stay green
   - Done when: those cases pass and `npm test` passes
