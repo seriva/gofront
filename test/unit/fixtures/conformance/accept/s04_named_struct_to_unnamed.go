@@ -1,4 +1,3 @@
-// pending: S4
 package main
 
 import "fmt"

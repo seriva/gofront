@@ -757,9 +757,27 @@ function structFieldList(t) {
 const sameList = (xs, ys, seen) =>
 	xs.length === ys.length && xs.every((x, i) => identicalIn(x, ys[i], seen));
 
+// The declaration a named type comes from.  A package a program imports along
+// several paths, or a standard library package compiled for both targets, is
+// checked once per path, so the same declaration can have several type
+// objects.
+function declOf(t) {
+	return t._declNode ?? t._genericOf?.declNode ?? t._generic?.declNode;
+}
+
+// Whether two type objects are the same named type: a copy of one object, a
+// type from one declaration, or one of the several objects built for a type
+// whose declaration is parsed again per compilation.  Those carry no shared
+// declaration: the built-in types (DOM and WebGL classes, `.d.ts` classes) are
+// told apart by name, and standard library types by their mangled name
+// (`Time$$time`), which includes the package.
 function identicalNamed(a, b, seen) {
 	if ((a._substOf ?? a) === (b._substOf ?? b)) return true;
-	if (!a._genericOf || a._genericOf !== b._genericOf) return false;
+	const decl = declOf(a);
+	const sameName = a.name === b.name;
+	if (decl !== declOf(b)) {
+		if (!sameName || !String(a.name).includes("$$")) return false;
+	} else if (!decl && !sameName) return false;
 	return sameList(a.typeArgs ?? [], b.typeArgs ?? [], seen);
 }
 
@@ -860,6 +878,13 @@ function identicalIn(a, b, seen) {
 	} finally {
 		pending.delete(b);
 	}
+}
+
+// A shallow copy of `t` with `extra` added.  A copy of a named type is still
+// that type, which `identical` follows through `_substOf`.
+export function copyType(t, extra = {}) {
+	if (t?.kind !== "named") return { ...t, ...extra };
+	return { ...t, ...extra, _substOf: t._substOf ?? t };
 }
 
 // Whether `a` and `b` are the same type.  Basic types match by name; a named

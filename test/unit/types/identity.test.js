@@ -163,6 +163,24 @@ test("identical: the same type name in two packages differs", () => {
 	assert(!identical(p1, p2), "two packages' P differ");
 });
 
+test("identical: one declaration checked twice gives identical types", () => {
+	const src =
+		"package main\ntype P struct{ X int }\ntype G[V any] struct{ v V }\nvar a P\nvar g G[int]\nfunc main() {}\n";
+	const ast = new Parser(
+		new Lexer(src, "t.go").tokenize(),
+		"t.go",
+		src,
+	).parse();
+	const one = new TypeChecker();
+	one.check(ast);
+	const two = new TypeChecker();
+	two.check(ast);
+	const of = (c, n) => c.globals.symbols.get(n);
+	assert(of(one, "a") !== of(two, "a"), "two checks build two objects");
+	assert(identical(of(one, "a"), of(two, "a")), "P is one declaration");
+	assert(identical(of(one, "g"), of(two, "g")), "G[int] is one instance");
+});
+
 section("Type identity — identical types");
 
 same("recursive struct type with itself", "type L struct{ next *L }", "L", "L");

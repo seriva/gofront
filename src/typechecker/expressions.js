@@ -14,6 +14,7 @@ import {
 	COMPLEX64,
 	COMPLEX128,
 	compositeLitMaxIndex,
+	copyType,
 	displayTypeName,
 	ERROR,
 	embeddedFieldName,
@@ -1119,7 +1120,7 @@ export const expressionCheckMethods = {
 			? this.resolveTypeNode(expr.returnType, scope)
 			: VOID;
 		const bodyRet = this._injectNamedReturns(expr.returnType, inner)
-			? { ...ret, _hasNamedReturns: true }
+			? copyType(ret, { _hasNamedReturns: true })
 			: ret;
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;

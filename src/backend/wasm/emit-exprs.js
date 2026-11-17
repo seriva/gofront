@@ -54,6 +54,18 @@ export class ExprsEmitter {
 	emitExpr(expr, targetWasmType = null) {
 		if (!expr) return;
 
+		// An implicit conversion the checker accepted (a defined struct type
+		// assigned to an identical struct literal type, or back).
+		if (expr._convertTo && !expr._converting) {
+			expr._converting = true;
+			try {
+				this.emitTypeConversion({ targetType: expr._convertTo, expr });
+			} finally {
+				expr._converting = false;
+			}
+			return;
+		}
+
 		if (targetWasmType === "anyref") {
 			if (
 				(expr.kind === "Ident" && expr.name === "nil") ||

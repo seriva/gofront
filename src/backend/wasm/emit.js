@@ -1340,7 +1340,8 @@ export class FunctionEmitter {
 		if (
 			node.kind === "CompositeLit" ||
 			node.kind === "CallExpr" ||
-			(node.kind === "UnaryExpr" && node.op === "*")
+			(node.kind === "UnaryExpr" && node.op === "*") ||
+			node._convertTo
 		)
 			return;
 		const sInfo =

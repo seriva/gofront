@@ -1,4 +1,3 @@
-// pending: S2
 package main
 
 type T struct{ A int }

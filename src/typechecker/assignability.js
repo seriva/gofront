@@ -10,6 +10,7 @@ import {
 	CMP_OPS,
 	COMPLEX128,
 	FLOAT64,
+	identical,
 	is64BitInt,
 	isAny,
 	isBool,
@@ -73,7 +74,7 @@ function logicalResultType(lt, rt) {
 	if (lt?.kind === "untyped" && rt?.kind === "untyped") return UNTYPED_BOOL;
 	if (rt?.kind === "untyped" && isBool(lt)) return lt;
 	if (lt?.kind === "untyped" && isBool(rt)) return rt;
-	if (isBool(lt) && isBool(rt) && typeStr(lt) === typeStr(rt)) return lt;
+	if (isBool(lt) && isBool(rt) && identical(lt, rt)) return lt;
 	return BOOL;
 }
 
@@ -101,7 +102,7 @@ export const assignabilityMethods = {
 	// `B && bool` mixes two distinct bool types, which Go rejects.
 	_checkLogicalOperands(lt, rt, node) {
 		if (!node || lt?.kind === "untyped" || rt?.kind === "untyped") return;
-		if (!isBool(lt) || !isBool(rt) || typeStr(lt) === typeStr(rt)) return;
+		if (!isBool(lt) || !isBool(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
 			node,
@@ -215,7 +216,7 @@ export const assignabilityMethods = {
 	// mismatch in Go; untyped constants adapt to either side.
 	_checkIntegerCmpKinds(op, lt, rt, node) {
 		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return;
-		if (!isInteger(lt) || !isInteger(rt) || typeStr(lt) === typeStr(rt)) return;
+		if (!isInteger(lt) || !isInteger(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
 			node,
@@ -342,7 +343,7 @@ export const assignabilityMethods = {
 		if (this._checkIfaceToConcrete(target, source, node, ctx, operand)) return;
 		if (this._assertAssignableEarlyReturn(target, source)) return;
 		if (isPointer(target) && isPointer(source)) {
-			this.assertAssignable(
+			this._assertNestedAssignable(
 				target.base ?? target.underlying?.base,
 				source.base ?? source.underlying?.base,
 				node,
@@ -354,8 +355,28 @@ export const assignabilityMethods = {
 		if (this._checkArrayAssignable(target, source, node)) return;
 		if (this._checkTypedArrayAssignable(target, source, node)) return;
 		if (this._checkFuncAssignable(target, source, node)) return;
-		if (typeStr(target) !== typeStr(source))
-			this._assertAssignableTypeMismatch(target, source, node);
+		if (!identical(target, source))
+			this._assertAssignableTypeMismatch(target, source, node, operand ?? node);
+	},
+
+	// The element of an array or the base of a pointer: a struct type and a
+	// defined type over an identical struct are not interchangeable there,
+	// since the two do not share a representation.
+	_assertNestedAssignable(target, source, node) {
+		const t = this.resolveType(target);
+		const s = this.resolveType(source);
+		if (
+			t &&
+			s &&
+			(t.kind === "struct") !== (s.kind === "struct") &&
+			this._deepUnderlying(t)?.kind === "struct" &&
+			this._deepUnderlying(s)?.kind === "struct" &&
+			!identical(t, s)
+		) {
+			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
+			return;
+		}
+		this.assertAssignable(target, source, node);
 	},
 
 	// Tags struct values / struct pointers flowing into an interface so codegen can
@@ -560,7 +581,7 @@ export const assignabilityMethods = {
 		);
 	},
 
-	_assertAssignableTypeMismatch(target, source, node) {
+	_assertAssignableTypeMismatch(target, source, node, operand = node) {
 		let tBase = target.kind === "named" ? target.underlying : target;
 		tBase = this.resolveType(tBase);
 		if (tBase?.kind === "interface") {
@@ -589,12 +610,25 @@ export const assignabilityMethods = {
 			);
 			return;
 		}
-		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) return;
+		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) {
+			this._markStructCopy(target, source, tBase, operand);
+			return;
+		}
 		this.err(
 			`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
 			node,
 			this._seqToSliceHint(source, tBase, node),
 		);
+	},
+
+	// A struct value assigned between a defined struct type and an identical
+	// struct literal type is converted: the backends that give each struct type
+	// its own representation copy it into the target's.
+	_markStructCopy(target, source, tBase, operand) {
+		if (tBase?.kind !== "struct" || !operand || typeof operand !== "object")
+			return;
+		if (target.kind === "pointer" || source.kind === "pointer") return;
+		operand._convertTo = target;
 	},
 
 	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the
@@ -636,9 +670,7 @@ export const assignabilityMethods = {
 	_identicalUnderlyingLiteral(target, source, tBase, sBase) {
 		if ((target.kind === "named") === (source.kind === "named")) return false;
 		const unnamed = target.kind === "named" ? source : target;
-		return (
-			TYPE_LITERAL_KINDS.has(unnamed.kind) && typeStr(tBase) === typeStr(sBase)
-		);
+		return TYPE_LITERAL_KINDS.has(unnamed.kind) && identical(tBase, sBase);
 	},
 
 	_isUntypedAssignable(target, source) {
@@ -715,7 +747,7 @@ export const assignabilityMethods = {
 					`Cannot assign ${typeStr(source)} to ${typeStr(target)} (different array lengths)`,
 					node,
 				);
-			else this.assertAssignable(target.elem, source.elem, node);
+			else this._assertNestedAssignable(target.elem, source.elem, node);
 			return true;
 		}
 		if (
@@ -746,7 +778,7 @@ export const assignabilityMethods = {
 				? (target.underlying?._elemType ?? target._elemType)
 				: (source.underlying?._elemType ?? source._elemType);
 			const slice = targetSlice ?? sourceSlice;
-			if (isTypedArraySlice(slice) && typeStr(taElem) === typeStr(slice.elem))
+			if (isTypedArraySlice(slice) && identical(taElem, slice.elem))
 				return true;
 			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
 			return true;
@@ -755,7 +787,7 @@ export const assignabilityMethods = {
 		if (targetTa && sourceTa) {
 			const tElem = target.underlying?._elemType ?? target._elemType;
 			const sElem = source.underlying?._elemType ?? source._elemType;
-			if (typeStr(tElem) === typeStr(sElem)) return true;
+			if (identical(tElem, sElem)) return true;
 			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
 			return true;
 		}
@@ -780,47 +812,10 @@ export const assignabilityMethods = {
 
 	// ── Interface satisfaction ────────────────────────────────────────
 
-	// `interface{}` and `any` are the same type, but print differently.
-	_sigTypeStr(t) {
-		switch (t?.kind) {
-			case "interface":
-				if (
-					!t.name &&
-					t.methods.size === 0 &&
-					!t.unionConstraint &&
-					!t._typeSetEmbeds
-				)
-					return "any";
-				return typeStr(t);
-			case "slice":
-				return `[]${this._sigTypeStr(t.elem)}`;
-			case "array":
-				return `[${t.size ?? "..."}]${this._sigTypeStr(t.elem)}`;
-			case "pointer":
-				return `*${this._sigTypeStr(t.base)}`;
-			case "map":
-				return `map[${this._sigTypeStr(t.key)}]${this._sigTypeStr(t.value)}`;
-			case "tuple":
-				return `(${t.types.map((x) => this._sigTypeStr(x)).join(", ")})`;
-			case "func": {
-				const ret =
-					t.returns.length > 1
-						? `(${t.returns.map((x) => this._sigTypeStr(x)).join(", ")})`
-						: t.returns[0]
-							? this._sigTypeStr(t.returns[0])
-							: "void";
-				return `func(${t.params.map((x) => this._sigTypeStr(x)).join(", ")}) ${ret}`;
-			}
-			default:
-				return typeStr(t);
-		}
-	},
-
 	_sigParamsMatch(reqList, actList) {
 		if (reqList.length !== actList.length) return false;
 		for (let i = 0; i < reqList.length; i++) {
-			if (this._sigTypeStr(reqList[i]) !== this._sigTypeStr(actList[i]))
-				return false;
+			if (!identical(reqList[i], actList[i])) return false;
 		}
 		return true;
 	},

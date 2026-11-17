@@ -1,4 +1,3 @@
-// pending: S3
 package main
 
 func main() {
