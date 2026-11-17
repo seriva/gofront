@@ -15,6 +15,7 @@ import {
 	COMPLEX128,
 	compositeLitMaxIndex,
 	copyType,
+	DECLARED_ANY,
 	displayTypeName,
 	ERROR,
 	embeddedFieldName,
@@ -147,7 +148,7 @@ const BUILTIN_CHECK = {
 		if (e.args[0] && at?.[0]) s._markIfaceBox(ANY, at[0], e.args[0]);
 		return VOID;
 	},
-	recover: () => ANY,
+	recover: () => DECLARED_ANY,
 	error: () => ERROR,
 	min: (s, _n, e, at) => s._checkMinMax(e, at),
 	max: (s, _n, e, at) => s._checkMinMax(e, at),
@@ -228,7 +229,7 @@ export const expressionCheckMethods = {
 				// `(*int)(nil)`: a predeclared type named where a type may stand.
 				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
 					expr._isTypeRef = true;
-					return BASIC_TYPES[expr.name];
+					return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
 				}
 				if (!t) {
 					// The import of an excluded package already reported; its
@@ -302,7 +303,10 @@ export const expressionCheckMethods = {
 				const rt = this.checkExpr(expr.right, scope);
 				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
 				if (isAny(lt) || isAny(rt))
-					return this.binaryResultType(expr.op, ANY, ANY, expr);
+					return (
+						this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
+						this.binaryResultType(expr.op, ANY, ANY, expr)
+					);
 				this._checkConstOperands(expr.op, lt, rt, expr);
 				this._markTypeParamMapNil(expr, lt, rt, scope);
 				const res = this.binaryResultType(expr.op, lt, rt, expr);
@@ -593,6 +597,13 @@ export const expressionCheckMethods = {
 		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
+		if (expr.op === "*" && ot?._declared && !expr.operand._isTypeRef)
+			return this.err(
+				`invalid operation: cannot indirect ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot))})`,
+				expr.operand,
+			);
+		if (expr.op !== "&" && expr.op !== "*" && ot?._declared)
+			return this._checkDeclaredAnyOperator(expr.op, ot, expr.operand);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
 			return this._checkNumericUnaryOp(ot, expr);
@@ -931,6 +942,7 @@ export const expressionCheckMethods = {
 		}
 		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
+		if (bt?._declared) return this._declaredAnyOperand("index", expr.expr, bt);
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind !== "map")
@@ -1087,6 +1099,7 @@ export const expressionCheckMethods = {
 			this._checkIntegerConstOperand(bound, "index", scope);
 		}
 		if (bt?._tainted) return TAINTED_ANY;
+		if (bt?._declared) return this._declaredAnyOperand("slice", expr.expr, bt);
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array")
@@ -1416,12 +1429,28 @@ export const expressionCheckMethods = {
 		return { kind: "tuple", types: [collType] };
 	},
 
+	// `cannot index v (variable of type any)`: a Go `any` needs a type
+	// assertion before it can be indexed or sliced.
+	_declaredAnyOperand(verb, operand, type) {
+		return this.err(
+			`invalid operation: cannot ${verb} ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
+			operand,
+		);
+	},
+
 	_checkRangeExpr(expr, scope) {
 		const collType = this._derefArrayPtr(
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
+		if (collType?._declared) {
+			const bad = this.err(
+				`cannot range over ${exprText(expr.expr)} (${operandKind(expr.expr, typeStr(collType))})`,
+				expr.expr,
+			);
+			return { kind: "tuple", types: [bad, bad] };
+		}
 		const resolved = this._underlyingOrCore(collType, scope);
 		// Backends range over the core type of a type parameter.
 		if (collType?.kind === "typeParam" && resolved !== collType)
@@ -1771,7 +1800,14 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
 		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
 			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
-		if (isAny(fnType)) return ANY;
+		if (fnType?._declared && !expr.func._isTypeRef)
+			return this.err(
+				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
+				expr,
+			);
+		// `(any)(x)` / `type A = any; A(x)` convert like `any(x)`.
+		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef))
+			return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.

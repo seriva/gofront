@@ -1,4 +1,3 @@
-// pending: S9
 package main
 
 func get() any { return 2 }

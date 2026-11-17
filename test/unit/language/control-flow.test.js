@@ -433,7 +433,7 @@ func main() {
 test("closure over loop variable via capture", () => {
 	const { js } = compile(`package main
 func main() {
-  fns := []any{}
+  fns := []func() int{}
   for i := 0; i < 3; i++ {
     captured := i
     fns = append(fns, func() int { return captured })

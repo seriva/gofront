@@ -48,6 +48,8 @@ export const statementCheckMethods = {
 	checkStmt(stmt, scope, returnType) {
 		switch (stmt.kind) {
 			case "IncDecStmt":
+				this._checkIncDecStmt(stmt, scope);
+				break;
 			case "ExprStmt":
 				this.checkExpr(stmt.expr, scope);
 				break;
@@ -252,6 +254,11 @@ export const statementCheckMethods = {
 		if (holder._ifaceBox) node._rangeBox = holder;
 	},
 
+	_checkIncDecStmt(stmt, scope) {
+		const t = this.checkExpr(stmt.expr, scope);
+		this._checkDeclaredAnyOperator(stmt.op, t, stmt.expr);
+	},
+
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
@@ -263,10 +270,23 @@ export const statementCheckMethods = {
 					this.resolveType(r),
 					stmt.rhs[i],
 				);
-			if (stmt.op !== "=" && stmt.op !== ":=")
+			if (stmt.op !== "=" && stmt.op !== ":=") {
+				if (
+					this._checkDeclaredAnyOperator(
+						stmt.op.slice(0, -1),
+						lhsTypes[i],
+						stmt.lhs[i],
+					)
+				)
+					continue;
 				this._checkCompoundIntegerOnly(stmt.op, lhsTypes[i], stmt.lhs[i]);
+			}
 			// A shift count is not converted to the left operand's type.
 			if (stmt.op === "<<=" || stmt.op === ">>=") {
+				if (
+					this._checkDeclaredAnyOperator(stmt.op.slice(0, -1), r, stmt.rhs[i])
+				)
+					continue;
 				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);
 				continue;
 			}
@@ -428,7 +448,10 @@ export const statementCheckMethods = {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		const ct = this.checkExpr(stmt.cond, inner);
-		if (!isBool(ct) && !isAny(ct)) this.err("If condition must be bool", stmt);
+		if (ct?._declared)
+			this.err("non-boolean condition in if statement", stmt.cond);
+		else if (!isBool(ct) && !isAny(ct))
+			this.err("If condition must be bool", stmt);
 		const bodyScope = new Scope(inner);
 		this.checkBlock(stmt.body, bodyScope, returnType);
 		this._reportUnused(bodyScope, stmt);
@@ -445,10 +468,17 @@ export const statementCheckMethods = {
 	_checkForCond(stmt, inner) {
 		if (stmt.cond.kind !== "RangeExpr") {
 			const ct = this.checkExpr(stmt.cond, inner);
-			if (!isBool(ct) && !isAny(ct))
+			if (ct?._declared)
+				this.err("non-boolean condition in for statement", stmt.cond);
+			else if (!isBool(ct) && !isAny(ct))
 				this.err("For condition must be bool", stmt);
 		} else {
 			const ct = this.checkExpr(stmt.cond.expr, inner);
+			if (ct?._declared)
+				this.err(
+					`cannot range over ${exprText(stmt.cond.expr)} (${operandKind(stmt.cond.expr, typeStr(ct))})`,
+					stmt.cond.expr,
+				);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
 			if (core) stmt.cond.expr._coreType = core;
 			const info = iteratorYieldParams(ct);
@@ -550,7 +580,7 @@ export const statementCheckMethods = {
 			this.err(`cannot convert nil to type bool`, e);
 			return;
 		}
-		if (isAny(caseType) || isBool(caseType)) return;
+		if ((isAny(caseType) && !caseType._declared) || isBool(caseType)) return;
 		if (isUntyped(caseType) && caseType.base === "bool") return;
 		const under = this.resolveType(caseType.underlying ?? caseType);
 		if (isBool(under)) return;
