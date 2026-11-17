@@ -228,7 +228,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those tests pass, `npm test` and `npm run check` pass, and `example/`/`stdlib/` are unchanged
 
 ### Phase 4: Go `any` versus JS-dynamic values (S9)
-- [ ] Task 4.1: Go-side `any` producers yield `DECLARED_ANY` (S9a)
+- [x] Task 4.1: Go-side `any` producers yield `DECLARED_ANY` (S9a)
   - Files: `src/typechecker/expressions.js` (`recover`, the `any` identifier in conversions, `x.(any)`), `src/typechecker/statements.js` (type-switch `default`/multi-type binding)
   - Test: `test/unit/types/checks.test.js`:
     - `var n int = recover()` → `need type assertion`

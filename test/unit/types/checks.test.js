@@ -742,6 +742,76 @@ func main() {
 	assertEqual(ok.errors.length, 0);
 });
 
+const anyProducerCases = [
+	[
+		"recover()",
+		`package main
+func main() {
+  defer func() {
+    var n int = recover()
+    _ = n
+  }()
+}`,
+	],
+	[
+		"any(x) conversion",
+		`package main
+func main() {
+  var n int = any(2)
+  _ = n
+}`,
+	],
+	[
+		"v.(any) assertion",
+		`package main
+func main() {
+  var v any = 2
+  var n int = v.(any)
+  _ = n
+}`,
+	],
+	[
+		"type switch default binding",
+		`package main
+func main() {
+  var v any = 2
+  switch x := v.(type) {
+  case string:
+    _ = x
+  default:
+    var n int = x
+    _ = n
+  }
+}`,
+	],
+	[
+		"type switch multi-type case binding",
+		`package main
+func main() {
+  var v any = 2
+  switch x := v.(type) {
+  case string, bool:
+    var n int = x
+    _ = n
+  }
+}`,
+	],
+];
+for (const [name, src] of anyProducerCases) {
+	test(`${name} is a Go any: needs a type assertion`, () => {
+		assertErrorContains(compile(src).errors, "need type assertion");
+	});
+}
+
+test("a JS-dynamic any value stays assignable to int", () => {
+	const { errors } = compile(`package main
+func main() {
+  var n int = document.foo
+  _ = n
+}`);
+	assertEqual(errors.length, 0);
+});
+
 test("v, ok = x.(T) type assertion with = succeeds", () => {
 	const { js, errors } = compile(`package main
 func main() {

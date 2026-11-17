@@ -15,6 +15,7 @@ import {
 	COMPLEX128,
 	compositeLitMaxIndex,
 	copyType,
+	DECLARED_ANY,
 	displayTypeName,
 	ERROR,
 	embeddedFieldName,
@@ -147,7 +148,7 @@ const BUILTIN_CHECK = {
 		if (e.args[0] && at?.[0]) s._markIfaceBox(ANY, at[0], e.args[0]);
 		return VOID;
 	},
-	recover: () => ANY,
+	recover: () => DECLARED_ANY,
 	error: () => ERROR,
 	min: (s, _n, e, at) => s._checkMinMax(e, at),
 	max: (s, _n, e, at) => s._checkMinMax(e, at),
