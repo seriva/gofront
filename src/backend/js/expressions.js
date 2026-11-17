@@ -3682,8 +3682,9 @@ export const expressionGenMethods = {
 	_isIntDivision(expr) {
 		return (
 			expr.op === "/" &&
-			this.isIntType(expr.left._type) &&
-			this.isIntType(expr.right._type)
+			((this.isIntType(expr.left._type) && this.isIntType(expr.right._type)) ||
+				// `x / 2.0` types as int when x is an integer.
+				this.isIntType(expr._type))
 		);
 	},
 

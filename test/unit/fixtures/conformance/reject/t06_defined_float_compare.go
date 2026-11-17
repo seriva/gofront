@@ -1,4 +1,3 @@
-// pending: S6
 package main
 
 type Celsius float64

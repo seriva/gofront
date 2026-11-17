@@ -1,4 +1,3 @@
-// pending: S8
 package main
 
 func main() {

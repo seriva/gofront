@@ -1,4 +1,3 @@
-// pending: S8
 package main
 
 func half(x float64) float64 { return x / 2 }

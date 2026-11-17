@@ -24,6 +24,7 @@ import {
 	isString,
 	isTypedArraySlice,
 	isUntyped,
+	isVoid,
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
@@ -45,6 +46,9 @@ const TYPE_LITERAL_KINDS = new Set([
 	"array",
 	"struct",
 ]);
+
+// Operators defined on integer operands only.
+const INTEGER_ONLY_OPS = new Set(["%", "&", "|", "^", "&^"]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
@@ -122,7 +126,7 @@ export const assignabilityMethods = {
 		if ((op === "<<" || op === ">>") && isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
-			return this._binaryResultTypeNumeric(lt, rt);
+			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
 			return this._binaryResultTypeString(lt, rt);
 		if (node)
@@ -170,7 +174,7 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
 		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
-		this._checkIntegerCmpKinds(op, lt, rt, node);
+		this._checkCmpOperandTypes(lt, rt, node);
 		this._checkEqualityComparable(op, lt, rt, node);
 		// A comparison is an untyped bool: it also fits a defined bool type.
 		return UNTYPED_BOOL;
@@ -188,11 +192,14 @@ export const assignabilityMethods = {
 		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
+		this._checkIdenticalOperands(lt, rt, node);
 		if (isComplex64(lt) && isComplex64(rt)) return lt;
 		return COMPLEX128;
 	},
 
-	_binaryResultTypeNumeric(lt, rt) {
+	_binaryResultTypeNumeric(op, lt, rt, node) {
+		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
+		this._checkIntegerOnlyOperator(op, lt, rt, node);
 		const lName = lt.kind === "untyped" ? lt.base : lt.name;
 		const rName = rt.kind === "untyped" ? rt.base : rt.name;
 		const lFloat = lName === "float32" || lName === "float64";
@@ -200,27 +207,80 @@ export const assignabilityMethods = {
 		const isFloat = lFloat || rFloat;
 		if (lt.kind === "untyped" && rt.kind === "untyped")
 			return untypedIntegerKind(isFloat, lt, rt);
-		if (lt.kind === "untyped")
-			return isFloat && rt.name !== "float64" && rt.name !== "float32"
-				? FLOAT64
-				: rt;
-		if (rt.kind === "untyped")
-			return isFloat && lt.name !== "float64" && lt.name !== "float32"
-				? FLOAT64
-				: lt;
+		// An untyped constant takes the type of the typed operand.
+		if (lt.kind === "untyped") return rt;
+		if (rt.kind === "untyped") return lt;
 		if (lt.name === "float32" && rt.name === "float32") return lt;
 		return isFloat ? FLOAT64 : lt;
 	},
 
-	// Comparing two typed integers of different types (`byte != int`) is a
-	// mismatch in Go; untyped constants adapt to either side.
-	_checkIntegerCmpKinds(op, lt, rt, node) {
-		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return;
-		if (!isInteger(lt) || !isInteger(rt) || identical(lt, rt)) return;
+	// Two typed operands of an arithmetic operator must have identical types
+	// (`int + float64`, `Meters + Feet`); untyped constants adapt to either
+	// side. Returns false after reporting a mismatch.
+	_checkIdenticalOperands(lt, rt, node) {
+		if (!node || lt.kind === "untyped" || rt.kind === "untyped") return true;
+		if (identical(lt, rt)) return true;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
 			node,
 		);
+		return false;
+	},
+
+	// `%`, `&`, `|`, `^` and `&^` are defined on integers only. The typed
+	// operand decides; two untyped constants are integers unless one is a
+	// float constant (`5.5 % 2.0`).
+	_checkIntegerOnlyOperator(op, lt, rt, node) {
+		if (!node || !INTEGER_ONLY_OPS.has(op)) return;
+		const operands = [
+			[lt, node.left],
+			[rt, node.right],
+		];
+		const typed = operands.find(([t]) => t.kind !== "untyped");
+		const bad = (typed ? [typed] : operands).find(([t]) => !isInteger(t));
+		if (bad) this._reportIntegerOnly(op, bad[0], bad[1]);
+	},
+
+	// `f %= 2.0` with a non-integer `f`: the same rule as the binary form.
+	_checkCompoundIntegerOnly(stmtOp, lhsType, lhsExpr) {
+		const op = stmtOp.slice(0, -1);
+		if (!INTEGER_ONLY_OPS.has(op)) return;
+		const t = lhsType && this.resolveType(lhsType);
+		if (!this._isTypedBasicOperand(t) || isInteger(t)) return;
+		this._reportIntegerOnly(op, t, lhsExpr);
+	},
+
+	_reportIntegerOnly(op, type, operand) {
+		const isConst = type.kind === "untyped";
+		const kind = operandKind(
+			operand,
+			isConst ? type.base : typeStr(type),
+			isConst,
+		);
+		this.err(
+			`invalid operation: operator ${op} not defined on ${exprText(operand)} (${kind})`,
+			operand,
+		);
+	},
+
+	// Comparing two typed operands of basic types needs identical types
+	// (`float64 == int`, `Celsius == Fahrenheit`, `S == string`): neither is
+	// assignable to the other. Untyped constants, nil and interface or
+	// JS-dynamic operands adapt to either side.
+	_checkCmpOperandTypes(lt, rt, node) {
+		if (!node || !this._isTypedBasicOperand(lt)) return;
+		if (!this._isTypedBasicOperand(rt) || identical(lt, rt)) return;
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
+			node,
+		);
+	},
+
+	// A typed value whose underlying type is a number, string or bool.
+	_isTypedBasicOperand(t) {
+		if (!t || t.kind === "untyped" || isAny(t) || isNil(t)) return false;
+		const u = this._deepUnderlying(t);
+		return u?.kind === "basic" && !isAny(u) && !isNil(u) && !isVoid(u);
 	},
 
 	_checkComplexCmpOp(op, lt, rt, node) {
@@ -809,47 +869,31 @@ export const assignabilityMethods = {
 		);
 	},
 
-	// A value computed from a generic call (`3 + Sum[float64](1, 2)`) has the
-	// exact instantiated type, so the loose int/float64 promotion that plain
-	// code enjoys does not apply to it.
-	_isGenericCallResult(node) {
-		if (!node || typeof node !== "object") return false;
-		if (node.kind === "ParenExpr") return this._isGenericCallResult(node.expr);
-		if (node.kind === "BinaryExpr")
-			return (
-				this._isGenericCallResult(node.left) ||
-				this._isGenericCallResult(node.right)
-			);
-		return node.kind === "CallExpr" && Boolean(node.func?._genericFnType);
-	},
-
-	_isNumericCoercible(target, source) {
-		if (target.kind !== "basic" || source.kind !== "basic") return false;
-		const pair = `${target.name}:${source.name}`;
-		return pair === "float64:int";
-	},
-
-	// The lenient numeric pairs: accepted, except that a generic call result
-	// is a mismatch and a float64 never reaches an int implicitly.
-	// Returns true when the pair was handled.
+	// Go has no implicit conversion between `int` and `float64`: only an
+	// untyped constant (handled earlier) or an explicit `float64(n)` /
+	// `int(x)` crosses. Returns true when the pair was handled.
 	_checkNumericCoercion(target, source, node, ctx, operand) {
-		const floatToInt = this._isFloatToInt(target, source);
-		if (!floatToInt && !this._isNumericCoercible(target, source)) return false;
-		if (this._isGenericCallResult(node))
-			this.err(
-				`mismatched types ${typeStr(source)} and ${typeStr(target)} in ${ctx}`,
-				node,
-			);
-		else if (floatToInt)
-			this.err(
-				`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
-				node,
-			);
+		if (
+			!this._isIntToFloat(target, source) &&
+			!this._isFloatToInt(target, source)
+		)
+			return false;
+		this.err(
+			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
+			node,
+		);
 		return true;
 	},
 
-	// Go has no implicit float64 -> int conversion; only an untyped constant
-	// (handled earlier) or an explicit `int(x)` reaches an int.
+	_isIntToFloat(target, source) {
+		return (
+			target.kind === "basic" &&
+			source.kind === "basic" &&
+			target.name === "float64" &&
+			source.name === "int"
+		);
+	},
+
 	_isFloatToInt(target, source) {
 		return (
 			target.kind === "basic" &&

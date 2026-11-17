@@ -154,15 +154,26 @@ func main() {
 	assertEqual(runJs(js), "42");
 });
 
-test("int8, int16, int64 all accepted", () => {
+test("int8, int16, int64 all accepted with explicit conversions", () => {
 	const js = compile(`package main
 func main() {
 	var a int8 = 1
 	var b int16 = 2
 	var c int64 = 3
-	console.log(a + b + c)
+	console.log(int64(a) + int64(b) + c)
 }`).js;
 	assertEqual(runJs(js), "6");
+});
+
+test("int8 + int16 + int64 without conversions is a mismatch", () => {
+	const { errors } = compile(`package main
+func main() {
+	var a int8 = 1
+	var b int16 = 2
+	var c int64 = 3
+	console.log(a + b + c)
+}`);
+	assertErrorContains(errors, "mismatched types int8 and int16");
 });
 
 // ── Struct tags ───────────────────────────────────────────────
