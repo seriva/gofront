@@ -125,7 +125,7 @@ var u struct{ X, Y int } = p           // ok
 
 #### Go `any` versus JavaScript values
 
-A Go `any` holds a value of some type and says nothing about which one. You can compare it with `==` and `!=`, pass it where an interface is expected, and look inside it with a type assertion or a type switch. Arithmetic, unary operators, `++`, calls, indexing, slicing, `range` and use as a condition are errors until you assert the type:
+A Go `any` holds a value of some type and says nothing about which one. You can compare it with `==` and `!=`, pass it where `any` or `interface{}` is expected, and look inside it with a type assertion or a type switch. Arithmetic, unary operators, `++`, calls, indexing, slicing, `range` and use as a condition are errors until you assert the type:
 
 ```go
 var v any = 2
@@ -135,7 +135,7 @@ _ = v.(int) * 2 // ok
 if s, ok := v.(string); ok { ... }
 ```
 
-A value is a Go `any` when your code declares it so (a variable, parameter, result, map or slice element of type `any`), or when it comes from `recover()`, `any(x)`, `x.(any)` or the `default:` clause of a type switch.
+A value is a Go `any` when your code declares it so (a variable, parameter, result, map or slice element of type `any`), or when it comes from `recover()`, `any(x)`, `x.(any)` or the `default:` clause of a type switch on an `any`.
 
 Values that come from JavaScript stay dynamic: browser globals and their members (`document`, `window`, `console`), ECMAScript built-ins (`Math`, `JSON`), values declared `any` in a `.d.ts` file, and the WebGL and WebGPU objects. The checker lets you do arithmetic on them, call them, index them, read members and assign them to a typed variable (`width := window.innerWidth * 2`) without an assertion. A dynamic value you store in a variable you declared as `any` is a Go `any` from then on.
 
@@ -147,7 +147,7 @@ Values that come from JavaScript stay dynamic: browser globals and their members
 
 - **Return counts**: `return 1, 2` in a function with one result is `too many return values (have 2, want 1)`.
 - **`range`** accepts integers, strings, slices, arrays, pointers to arrays, maps and iterator funcs. Floats, bools, structs, interfaces and a Go `any` are errors.
-- **Assignment targets** must be addressable or a map index. `s[0] = 'x'` on a string, `m[k].f = v` on a map of structs (assign the whole element, or keep pointers in the map), and a field of a function result are errors.
+- **Assignment targets** must be addressable or a map index. `s[0] = 'x'` on a string, `m[k].f = v` on a map of structs (assign the whole element, or keep pointers in the map), and `m[k][0] = v` on a map of arrays are errors.
 - **Pointer methods** cannot be called on a value that is not addressable: `mk().Inc()` with `mk` returning a struct value is `cannot call pointer method Inc on C`. Store the result in a variable first.
 - **Labels** belong to one function. `break L` and `continue L` need `L` to label an enclosing statement (`continue` a loop), a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
 - **Unused values**: only calls and `await` expressions may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
