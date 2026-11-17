@@ -99,6 +99,20 @@ func main() {
 	);
 });
 
+test("an integer variable divided by an integral float constant truncates like an integer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func main() {
+	x := 3
+	y := x / 2.0
+	fmt.Println(y, y == 1, y*2)
+}
+`,
+		"1 true 2\n",
+	);
+});
+
 test("Celsius + float64 (typed) is a mismatch, Celsius + 1.5 is valid", () => {
 	rejectsEverywhere(
 		`package main
