@@ -154,7 +154,7 @@ Values that come from JavaScript stay dynamic: browser globals and their members
 
 #### Builtin operands
 
-- **`len`** takes a string, array, slice, map or channel: `len(5)` and `len(v)` with `v` a Go `any` are `invalid argument: ... for built-in len`. `delete` needs a map, `clear` a map or slice, `copy` and `append` slices (`copy` may take a string source into a `[]byte`), and `min` and `max` numbers or strings.
+- **`len`** takes a string, array (or pointer to one), slice or map: `len(5)`, `len(p)` with `p` an `*int`, and `len(v)` with `v` a Go `any` are `invalid argument: ... for built-in len`. `delete` needs a map, `clear` a map or slice, `copy` and `append` slices (`copy` may take a string source into a `[]byte`), and `min` and `max` integers, floats or strings.
 - **`append`** checks each element against the slice's element type (`append([]int{}, "a")` is an error) and `xs...` against the slice type, except that a string spreads into a `[]byte`. A call `f(xs...)` likewise needs `xs` to match the variadic parameter's slice type.
 - Dynamic JavaScript values (see above) are accepted by all of these.
 

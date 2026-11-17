@@ -102,7 +102,7 @@ const BUILTIN_CHECK = {
 			);
 			return st;
 		}
-		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
+		const sb = s._deepUnderlying(st);
 		if (sb?.kind === "slice") s._checkAppendArgs(sb, e, at);
 		return st;
 	},
@@ -176,10 +176,6 @@ const NON_INTEGER_BASICS = new Set([
 	"bool",
 	"string",
 ]);
-
-// Basic types `len` rejects: everything but strings.
-const NON_LEN_BASICS =
-	/^(bool|u?int(8|16|32|64)?|uintptr|byte|rune|float(32|64)|complex(64|128))$/;
 
 // JS-dynamic `any` indexes anything; a Go `any` needs a type assertion.
 function nonIntegerBasic(u) {
@@ -975,7 +971,10 @@ export const expressionCheckMethods = {
 	// `min` and `max` take ordered operands: numbers and strings.
 	_orderedOperandOk(t) {
 		if (!t || t._tainted) return true;
-		if (t.kind === "untyped") return t.base !== "bool" && t.base !== "nil";
+		if (t.kind === "untyped")
+			return (
+				t.base !== "bool" && t.base !== "nil" && !t.base.startsWith("complex")
+			);
 		if (anyKind(t) === "go") return false;
 		const u = this._deepUnderlying(t);
 		if (!u || u.kind === "typeParam" || isAny(u)) return true;
@@ -1095,12 +1094,17 @@ export const expressionCheckMethods = {
 	// copy(dst, src): element types must be identical when either side is a
 	// shared buffer (the wasm emitter uses one element type for both sides).
 	// `copy` takes slices; a string may be the source.
+	// Element type of a copy destination slice or shared buffer.
+	_copyElem(t) {
+		const u = this._deepUnderlying(t);
+		return u?.kind === "slice" || u?.kind === "shared"
+			? this.resolveType(u.elem)
+			: null;
+	},
+
 	_checkCopyOperands(e, dt, st) {
 		const bad = (t, i) => {
-			if (
-				i === 1 &&
-				this._isStringIntoBytes({ kind: "basic", name: "uint8" }, t)
-			)
+			if (i === 1 && this._isStringIntoBytes(this._copyElem(dt), t))
 				return false;
 			return !this._appendOperandOk(t);
 		};
@@ -2166,7 +2170,7 @@ export const expressionCheckMethods = {
 				if (fnType.variadic && paramIdx === fnType.params.length - 1)
 					this.assertAssignable(
 						{ kind: "slice", elem: fnType.params[paramIdx] },
-						argTypes[i],
+						this._deepUnderlying(argTypes[i]),
 						expr.args[i],
 						"argument",
 					);
@@ -2280,14 +2284,22 @@ export const expressionCheckMethods = {
 		return kind === "slice" || kind === "array";
 	},
 
-	// `len` takes a string, array, slice, map or channel; a Go `any` needs a
-	// type assertion first, while a JS-dynamic value is not judged.
+	// `len` takes a string, array (or pointer to one), slice or map; a Go `any`
+	// needs a type assertion first, while a JS-dynamic value is not judged.
 	_lenOperandOk(t) {
-		if (!t || t._tainted) return true;
+		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
 		if (t.kind === "untyped") return t.base === "string";
 		if (anyKind(t) === "go") return false;
-		const u = this._deepUnderlying(t);
-		return !(u?.kind === "basic" && NON_LEN_BASICS.test(u.name));
+		let u = this._deepUnderlying(t);
+		if (u?.kind === "pointer") u = this._deepUnderlying(u.base);
+		else if (u?.kind === "basic") return u.name === "string";
+		return (
+			u?.kind === "array" ||
+			u?.kind === "slice" ||
+			u?.kind === "map" ||
+			u?.kind === "shared" ||
+			u?.kind === "typeParam"
+		);
 	},
 
 	// `delete` takes a map; a type parameter and a JS-dynamic value are not
@@ -2305,8 +2317,7 @@ export const expressionCheckMethods = {
 	// `append` takes a slice; a type parameter and a JS-dynamic value are not
 	// judged, and arrays and shared buffers have their own messages.
 	_appendOperandOk(t) {
-		if (!t || t._tainted || t.kind === "typeParam" || t.kind === "untyped")
-			return true;
+		if (!t || t._tainted || t.kind === "typeParam") return true;
 		if (anyKind(t) === "go") return false;
 		const u = this._deepUnderlying(t);
 		if (!u || isAny(u)) return true;
@@ -2327,7 +2338,7 @@ export const expressionCheckMethods = {
 				if (!this._isStringIntoBytes(elem, at[i]))
 					this.assertAssignable(
 						{ kind: "slice", elem: sliceType.elem },
-						at[i],
+						this._deepUnderlying(at[i]),
 						arg,
 						"argument to append",
 					);
