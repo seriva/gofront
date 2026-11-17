@@ -125,7 +125,7 @@ var u struct{ X, Y int } = p           // ok
 
 #### Go `any` versus JavaScript values
 
-A Go `any` (or `interface{}`) holds a value of some type and says nothing about which one. You can compare it with `==` and `!=`, pass it where an interface is expected, and look inside it with a type assertion or a type switch. Arithmetic, unary operators, `++`, calls, indexing, slicing, `range` and use as a condition are errors until you assert the type:
+A Go `any` holds a value of some type and says nothing about which one. You can compare it with `==` and `!=`, pass it where an interface is expected, and look inside it with a type assertion or a type switch. Arithmetic, unary operators, `++`, calls, indexing, slicing, `range` and use as a condition are errors until you assert the type:
 
 ```go
 var v any = 2
@@ -150,7 +150,7 @@ Values that come from JavaScript stay dynamic: browser globals and their members
 - **Assignment targets** must be addressable or a map index. `s[0] = 'x'` on a string, `m[k].f = v` on a map of structs (assign the whole element, or keep pointers in the map), and a field of a function result are errors.
 - **Pointer methods** cannot be called on a value that is not addressable: `mk().Inc()` with `mk` returning a struct value is `cannot call pointer method Inc on C`. Store the result in a variable first.
 - **Labels** belong to one function. `break L` and `continue L` need `L` to label an enclosing statement (`continue` a loop), a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
-- **Unused values**: only calls (including `await` calls) and receive operations may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
+- **Unused values**: only calls and `await` expressions may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
 
 #### Literals and duplicates
 
@@ -178,7 +178,7 @@ A generic function is called with inferred type arguments (`Id(3)`) or instantia
 
 #### Names that shadow predeclared types
 
-A type declared inside a function may reuse a predeclared name, as in Go (`type int32 = string`, `type float64 struct{ X int }`). The name means the local type from its declaration to the end of the block and means the predeclared type everywhere else.
+A type declared inside a function may reuse a predeclared basic type name or `any`, as in Go (`type int32 = string`, `type float64 struct{ X int }`). The name means the local type from its declaration to the end of the block and means the predeclared type everywhere else; declaring the same name again in a nested block, or reusing `error` or `comparable`, is not supported.
 
 #### Internal compiler errors
 
