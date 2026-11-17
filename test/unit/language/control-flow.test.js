@@ -201,6 +201,17 @@ async func main() {
 	assertEqual(errors.length, 0);
 });
 
+test("await call is a valid expression statement", () => {
+	const { errors } = compile(`package main
+async func work() string {
+  return "hello"
+}
+async func main() {
+  await work()
+}`);
+	assertEqual(errors.length, 0);
+});
+
 test("async function literal", () => {
 	const { errors } = compile(`package main
 func main() {

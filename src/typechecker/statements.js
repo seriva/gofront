@@ -62,6 +62,33 @@ function newLabelEntry(stmt) {
 // Tag kinds with no nil value: `case nil` against them cannot compile.
 const NON_NILABLE_TAG_KINDS = new Set(["basic", "struct", "array"]);
 
+// Builtins whose only effect is their result: invalid as a statement.
+const VALUE_ONLY_BUILTINS = new Set([
+	"append",
+	"cap",
+	"complex",
+	"imag",
+	"len",
+	"make",
+	"min",
+	"max",
+	"new",
+	"real",
+]);
+
+// Whether an expression statement discards a value Go does not allow to be
+// discarded: everything except a function or method call, an `await` of one,
+// and a receive operation.
+function isUnusedExprStmt(expr) {
+	let e = expr;
+	while (e.kind === "ParenExpr") e = e.expr;
+	if (e.kind === "AwaitExpr") return false;
+	if (e.kind === "UnaryExpr") return e.op !== "<-";
+	if (e.kind !== "CallExpr") return true;
+	if (e._isTypeConversion || e.func?._isTypeRef) return true;
+	return VALUE_ONLY_BUILTINS.has(e._builtinName);
+}
+
 /** @type {ThisType<TypeChecker>} */
 export const statementCheckMethods = {
 	checkBlock(block, scope, returnType) {
@@ -70,13 +97,27 @@ export const statementCheckMethods = {
 		}
 	},
 
+	// Only calls and receive operations may stand alone as a statement. A
+	// conversion and the builtins that only compute a value are calls that do
+	// not qualify.
+	_checkExprStmt(stmt, scope) {
+		const type = this.checkExpr(stmt.expr, scope);
+		if (!isUnusedExprStmt(stmt.expr)) return;
+		if (type?._tainted) return;
+		const untyped = type?.kind === "untyped" && type.base !== "nil";
+		const what = untyped
+			? `untyped ${type.base} value`
+			: operandKind(stmt.expr, typeStr(type), false);
+		this.err(`${exprText(stmt.expr)} (${what}) is not used`, stmt.expr);
+	},
+
 	checkStmt(stmt, scope, returnType) {
 		switch (stmt.kind) {
 			case "IncDecStmt":
 				this._checkIncDecStmt(stmt, scope);
 				break;
 			case "ExprStmt":
-				this.checkExpr(stmt.expr, scope);
+				this._checkExprStmt(stmt, scope);
 				break;
 			case "DeferStmt":
 				if (stmt.call.kind !== "CallExpr")

@@ -1845,6 +1845,7 @@ export const expressionCheckMethods = {
 		this._checkSharedAllocSite(expr, scope);
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
+			expr._builtinName = fnType.name;
 			const argTypes = expr.args.map((a, i) => {
 				// new(T) — first arg is a type name, not a value expression
 				if (fnType.name === "new" && i === 0) return ANY;

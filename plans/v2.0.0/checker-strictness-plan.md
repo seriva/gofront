@@ -266,7 +266,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those cases pass, the `wasm` hang in `s16` becomes a compile error, and `npm test` passes
 
 ### Phase 6: Expressions, literals and docs (S17–S21, S23)
-- [ ] Task 6.1: Unused expression statements (S17)
+- [x] Task 6.1: Unused expression statements (S17)
   - Files: `src/typechecker/statements.js` (`checkStmt` `ExprStmt`)
   - Test: delete `// pending:` from `s17`/`s17b`/`s17c` (`x + 1 (value of type int) is not used`). Calls, `await` calls and conversions-as-calls to funcs stay valid statements
   - Done when: those cases pass and `npm test` passes
