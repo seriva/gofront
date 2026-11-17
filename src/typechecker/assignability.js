@@ -8,7 +8,6 @@ import {
 	ANY,
 	BOOL,
 	CMP_OPS,
-	COMPLEX128,
 	FLOAT64,
 	identical,
 	is64BitInt,
@@ -28,7 +27,6 @@ import {
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
-	STRING,
 	typeStr,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
@@ -156,7 +154,7 @@ export const assignabilityMethods = {
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
-			return this._binaryResultTypeString(lt, rt);
+			return this._binaryResultTypeString(lt, rt, node);
 		if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
@@ -206,11 +204,14 @@ export const assignabilityMethods = {
 			);
 	},
 
-	_binaryResultTypeString(lt, rt) {
+	// The result keeps the defined type of the typed operand (`S + S` is `S`);
+	// two typed operands must have identical types.
+	_binaryResultTypeString(lt, rt, node) {
 		if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
-		return STRING;
+		this._checkIdenticalOperands(lt, rt, node);
+		return lt;
 	},
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
@@ -235,8 +236,7 @@ export const assignabilityMethods = {
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
 		this._checkIdenticalOperands(lt, rt, node);
-		if (isComplex64(lt) && isComplex64(rt)) return lt;
-		return COMPLEX128;
+		return lt;
 	},
 
 	_binaryResultTypeNumeric(op, lt, rt, node) {

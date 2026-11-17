@@ -374,6 +374,24 @@ func main() {
 	);
 });
 
+test("string and complex results keep the defined operand type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type S string
+type MyC complex128
+func main() {
+	var a, b S = "x", "y"
+	var c S = a + b
+	var x, y MyC = 1i, 2i
+	var z MyC = x + y
+	fmt.Println(c, z)
+}
+`,
+		"xy (0+3i)\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

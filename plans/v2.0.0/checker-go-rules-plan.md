@@ -270,7 +270,7 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
   - Done when: both pass on all targets
 
 ### Phase 2: One operator typing path (root `operator-typing`)
-- [ ] Task 2.1: String and complex results keep defined types and require identical operands (R2.1–R2.3)
+- [x] Task 2.1: String and complex results keep defined types and require identical operands (R2.1–R2.3)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/numeric-operands.test.js` R2.1 (`xy`), R2.3 (`(0+3i)`) with `assertOutput`; reject fixture `defined_string_mismatch.go`
   - Done when: all targets give Go's result
