@@ -2,6 +2,7 @@
 
 import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
+import { newLabelScope } from "./statements.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
 	EXCLUDED_STDLIB_PACKAGES,
@@ -1173,11 +1174,14 @@ export const expressionCheckMethods = {
 			? copyType(ret, { _hasNamedReturns: true })
 			: ret;
 		const savedDefer = this._deferCount;
+		const savedLabels = this._labels;
 		this._deferCount = 0;
+		this._labels = newLabelScope();
 		this.checkBlock(expr.body, inner, bodyRet);
 		this._reportUnused(inner, expr);
 		if (this._deferCount > 0) expr.body._hasDefer = true;
 		this._deferCount = savedDefer;
+		this._labels = savedLabels;
 		const paramTypes = expr.params.map((p) =>
 			p.type ? this.resolveTypeNode(p.type, scope) : ANY,
 		);

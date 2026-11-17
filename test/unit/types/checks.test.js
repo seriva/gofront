@@ -983,7 +983,12 @@ test("labeled return statement is terminating", () => {
 	const { errors } = compile(`package main
 func f(x int) int {
 result:
-  return x * 2
+  for {
+    if x < 0 {
+      continue result
+    }
+    return x * 2
+  }
 }
 func main() { console.log(f(5)) }`);
 	assertEqual(errors.length, 0);

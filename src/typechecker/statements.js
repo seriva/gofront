@@ -34,6 +34,31 @@ import {
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
+// Labels are scoped to a function body: `defined` holds every label seen so
+// far (to report a repeat) and `enclosing` the labeled statements around the
+// statement being checked, which are the only ones `break` and `continue` reach.
+export function newLabelScope() {
+	return { defined: new Set(), enclosing: [] };
+}
+
+const BREAKABLE_BODIES = new Set(["ForStmt", "SwitchStmt", "TypeSwitchStmt"]);
+const LABEL_BRANCHES = new Set(["break", "continue"]);
+// The label property a branch keyword needs: `break` any breakable statement,
+// `continue` a loop.
+const LABEL_TARGET = { break: "breakable", continue: "loop" };
+
+function newLabelEntry(stmt) {
+	// Stacked labels (`a: b: for {}`) all name the statement they precede.
+	let target = stmt.body;
+	while (target.kind === "LabeledStmt") target = target.body;
+	return {
+		name: stmt.label,
+		breakable: BREAKABLE_BODIES.has(target.kind),
+		loop: target.kind === "ForStmt",
+		used: false,
+	};
+}
+
 // Tag kinds with no nil value: `case nil` against them cannot compile.
 const NON_NILABLE_TAG_KINDS = new Set(["basic", "struct", "array"]);
 
@@ -63,7 +88,7 @@ export const statementCheckMethods = {
 				this._deferCount++;
 				break;
 			case "LabeledStmt":
-				this.checkStmt(stmt.body, scope, returnType);
+				this._checkLabeledStmt(stmt, scope, returnType);
 				break;
 			case "Block": {
 				const blockScope = new Scope(scope);
@@ -736,7 +761,36 @@ export const statementCheckMethods = {
 		this._switchDepth--;
 	},
 
+	_checkLabeledStmt(stmt, scope, returnType) {
+		const labels = this._labels;
+		if (labels.defined.has(stmt.label))
+			this.err(`label ${stmt.label} already defined`, stmt);
+		labels.defined.add(stmt.label);
+		const entry = newLabelEntry(stmt);
+		labels.enclosing.push(entry);
+		this.checkStmt(stmt.body, scope, returnType);
+		labels.enclosing.pop();
+		if (!entry.used) this.err(`label ${stmt.label} defined and not used`, stmt);
+	},
+
+	// `break L` needs an enclosing labeled for, switch or select; `continue L`
+	// an enclosing labeled for. Returns true when `stmt` carried a label.
+	_checkBranchLabel(stmt) {
+		if (!stmt.label || !LABEL_BRANCHES.has(stmt.keyword)) return false;
+		const { keyword, label } = stmt;
+		const entry = this._labels.enclosing.findLast((e) => e.name === label);
+		if (entry) entry.used = true;
+		if (!entry) this.err(`${keyword} label not defined: ${label}`, stmt);
+		else if (!entry[LABEL_TARGET[keyword]])
+			this.err(`invalid ${keyword} label ${label}`, stmt);
+		return true;
+	},
+
 	_checkBranchStmt(stmt) {
+		if (!this._checkBranchLabel(stmt)) this._checkBranchKeyword(stmt);
+	},
+
+	_checkBranchKeyword(stmt) {
 		const kw = stmt.keyword;
 		if (kw === "goto")
 			this.err(

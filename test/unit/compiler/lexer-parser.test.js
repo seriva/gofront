@@ -10,6 +10,7 @@ import {
 	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
+	assertErrorContains,
 	assertProgramOutput,
 	assertThrows,
 	compile,
@@ -1295,23 +1296,16 @@ test("parser: empty labeled statement before a closing brace parses", () => {
 	assertEqual(fn.body.stmts[0].kind, "LabeledStmt");
 });
 
-test("parser: empty labeled statement compiles and runs", async () => {
-	await assertProgramOutput(
-		`package main
-
-import "fmt"
+test("parser: empty labeled statement is reported as unused", () => {
+	const { errors } = compile(`package main
 
 func f() {
 L:
 }
 
-func main() {
-	f()
-	fmt.Println("ok")
-}
-`,
-		"ok\n",
-	);
+func main() { f() }
+`);
+	assertErrorContains(errors, "label L defined and not used");
 });
 
 // ── Astral rune literals and raw-byte string escapes ──────────

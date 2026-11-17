@@ -260,7 +260,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/statements.js` (`_checkAssignStmt`, `++`/`--`), `src/typechecker/expressions.js` (pointer-receiver call on a non-addressable operand, reusing `_isMapElementOperand`)
   - Test: delete `// pending:` from `s13` (`cannot assign to s[0] (neither addressable nor a map index expression)`), `s14` (`cannot assign to struct field m["a"].X in map`) and `s15` (`cannot call pointer method Inc on C`). `m["a"] = P{2}`, `p.X = 1` through a pointer, and `v.Inc()` on an addressable `v` stay green
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 5.4: Undefined, misplaced and unused labels (S16)
+- [x] Task 5.4: Undefined, misplaced and unused labels (S16)
   - Files: `src/typechecker/statements.js` (`LabeledStmt`, `_checkBranchStmt`)
   - Test: delete `// pending:` from `s16` (`break label not defined: missing`) and `s16b` (`label L defined and not used`). New reject case: `continue L` where `L` labels a `switch` (`invalid continue label L`). Existing labeled `break`/`continue` tests (including range-over-func) stay green
   - Done when: those cases pass, the `wasm` hang in `s16` becomes a compile error, and `npm test` passes

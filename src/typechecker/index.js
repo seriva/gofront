@@ -15,7 +15,7 @@ import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
-import { statementCheckMethods } from "./statements.js";
+import { newLabelScope, statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
 import { setupGlobals } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
@@ -127,6 +127,7 @@ export class TypeChecker {
 		this._switchDepth = 0; // for break/fallthrough validation
 		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
+		this._labels = newLabelScope(); // labels of the current function body
 		this._imports = []; // tracked imports for unused-import detection
 		// Lazy body checking (Go-source stdlib): with `lazyBodies` set, checkAll
 		// types declarations only and `checkBody` types a function or method
@@ -1518,11 +1519,14 @@ export class TypeChecker {
 
 	_runFuncBody(decl, inner, returnType) {
 		const savedDefer = this._deferCount;
+		const savedLabels = this._labels;
 		this._deferCount = 0;
+		this._labels = newLabelScope();
 		this.checkBlock(decl.body, inner, returnType);
 		this._reportUnused(inner, decl);
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
+		this._labels = savedLabels;
 		decl._returnType = returnType;
 	}
 

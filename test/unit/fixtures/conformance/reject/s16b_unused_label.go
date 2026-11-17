@@ -1,4 +1,3 @@
-// pending: S16
 package main
 
 func main() {

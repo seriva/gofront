@@ -672,6 +672,9 @@ func main() {
 outer:
 inner:
 	for n := n + 1; n < 3; n++ {
+		if n > 5 {
+			break inner
+		}
 		continue outer
 	}
 	_ = n
