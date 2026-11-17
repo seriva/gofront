@@ -40,6 +40,16 @@ export class TypeCheckError extends Error {
 	}
 }
 
+// Valid Go that the compile target does not support yet (as opposed to a bug
+// in the compiler). A backend throws it where it would otherwise throw a bare
+// `Error`; the compiler reports it as a user error, not an internal one.
+export class UnsupportedError extends Error {
+	constructor(msg) {
+		super(msg);
+		this.name = "UnsupportedError";
+	}
+}
+
 export const BROWSER_GLOBALS = new Set([
 	"console",
 	"document",
@@ -823,6 +833,7 @@ export class Scope {
 		this._consts = new Set(); // names declared as const in this scope
 		this._constExprs = new Map(); // name -> AST initializer expr
 		this._locals = new Set(); // names declared as local variables (var / :=)
+		this._localNodes = new Map(); // local name -> node carrying its declaring position
 		this._used = new Set(); // names referenced in this scope
 		this._typeNames = new Set(); // names whose binding here is a type declaration
 	}
@@ -841,10 +852,16 @@ export class Scope {
 	bindsType(name) {
 		return this.lookupScope(name)?._typeNames.has(name) ?? false;
 	}
-	defineLocal(name, type) {
+	// `node` (optional) carries the position of the declaring identifier.
+	defineLocal(name, type, node = null) {
 		this.symbols.set(name, type);
 		this._typeNames.delete(name);
 		if (name !== "_") this._locals.add(name);
+		if (node && typeof node === "object") this._localNodes.set(name, node);
+	}
+	// The node a local was declared at, or null when none was recorded.
+	localNode(name) {
+		return this._localNodes.get(name) ?? null;
 	}
 	defineConst(name, type, expr = null) {
 		this.symbols.set(name, type);

@@ -335,7 +335,10 @@ export class TypeChecker {
 
 	_reportUnused(scope, node) {
 		for (const name of scope.unusedLocals()) {
-			this.err(`'${name}' declared and not used`, node);
+			this.err(
+				`'${name}' declared and not used`,
+				scope.localNode(name) ?? node,
+			);
 		}
 	}
 
@@ -1561,11 +1564,12 @@ export class TypeChecker {
 							spec.value[i] ?? spec.value[0],
 							"variable declaration",
 						);
-					scope.defineLocal(spec.names[i], varType);
+					scope.defineLocal(spec.names[i], varType, spec._namePos?.[i]);
 				}
 			} else {
 				if (!type) type = ANY;
-				for (const name of spec.names) scope.defineLocal(name, type);
+				for (let i = 0; i < spec.names.length; i++)
+					scope.defineLocal(spec.names[i], type, spec._namePos?.[i]);
 			}
 		}
 		this._sharedAllocOk = savedSharedAlloc;

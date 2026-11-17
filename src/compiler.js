@@ -47,7 +47,7 @@ import {
 	wasmMarker,
 } from "./link/wasm.js";
 import { lower, takesElementAddress } from "./lower/index.js";
-import { Parser } from "./parser/index.js";
+import { ParseError, Parser } from "./parser/index.js";
 import { TemplParser } from "./parser/templ.js";
 import {
 	bindUntypedImports,
@@ -60,6 +60,8 @@ import {
 import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
 import {
 	JS_BUILTIN_CLASSES,
+	TypeCheckError,
+	UnsupportedError,
 	WASM_SUPPORTED_STDLIB,
 } from "./typechecker/types.js";
 
@@ -83,6 +85,60 @@ export class CompileError extends Error {
 		this.name = "CompileError";
 		this.errors = errors;
 	}
+}
+
+const ISSUES_URL = "https://github.com/seriva/gofront/issues";
+
+// A failure of the compiler itself (lowering, code generation, linking or the
+// validity check of the emitted WebAssembly) as opposed to a problem in the
+// user's program. `cause` holds the original error.
+export class InternalCompilerError extends Error {
+	constructor(cause) {
+		const detail = cause instanceof Error ? cause.message : String(cause);
+		super(
+			`internal compiler error: ${detail}\nThis is a bug in GoFront, not in your program; please report it at ${ISSUES_URL}`,
+			{ cause },
+		);
+		this.name = "InternalCompilerError";
+	}
+}
+
+// Runs `fn` as a compiler stage that has no user diagnostics of its own: a
+// `CompileError` passes through, an `UnsupportedError`, `TypeCheckError` or
+// `ParseError` becomes one, and anything else is a compiler bug and becomes an
+// `InternalCompilerError`.
+export function asInternalError(fn) {
+	try {
+		return fn();
+	} catch (e) {
+		if (e instanceof CompileError || e instanceof InternalCompilerError)
+			throw e;
+		// A malformed templ expression is parsed leniently and raised by the
+		// code generator.
+		if (
+			e instanceof UnsupportedError ||
+			e instanceof TypeCheckError ||
+			e instanceof ParseError
+		)
+			throw new CompileError([e]);
+		throw new InternalCompilerError(e);
+	}
+}
+
+// Throws `InternalCompilerError` when the engine rejects `bytes` as a
+// WebAssembly module: the compiler must never hand out a module the browser
+// refuses to load.
+export function validateWasm(bytes) {
+	if (WebAssembly.validate(bytes)) return;
+	let detail = "the module does not validate";
+	try {
+		new WebAssembly.Module(bytes);
+	} catch (e) {
+		detail = e.message;
+	}
+	throw new InternalCompilerError(
+		new Error(`the generated WebAssembly is invalid: ${detail}`),
+	);
 }
 
 export function clearParseCache() {
@@ -144,14 +200,12 @@ export function gwFilesIn(dir, { includeTests = false } = {}) {
 // wasm-opt when requested and produce the wasm source map.
 function finishWasm(options, merged, pkgTarget, outputDir) {
 	const wantMap = Boolean(options.sourceMap && !options.isDependency);
-	let { wasm, wat, sourceMapInfo, stringTable } = linkIntoBundle(
-		options,
-		merged,
-		pkgTarget,
-		{
+	let { wasm, wat, sourceMapInfo, stringTable } = asInternalError(() =>
+		linkIntoBundle(options, merged, pkgTarget, {
 			sourceMappingURL: wantMap ? WASM_MAP_URL : null,
-		},
+		}),
 	);
+	if (wasm) validateWasm(wasm);
 	let wasmOptInfo = null;
 	let wasmSourceMap =
 		wantMap && wasm ? buildWasmMap(sourceMapInfo, outputDir) : null;
@@ -575,14 +629,16 @@ export function compileFiles(files, options = {}) {
 	for (const w of checker.warnings) log.warn(w);
 
 	// ── 4. Code generation ────────────────────────────────────────
-	const emitTarget = registerPackageUnit(options, {
-		key: resolve(fromDir),
-		pkgName,
-		pkgTarget,
-		programs: [...programs, ...codecs],
-		types: checker.types,
-		bundledPackages,
-	});
+	const emitTarget = asInternalError(() =>
+		registerPackageUnit(options, {
+			key: resolve(fromDir),
+			pkgName,
+			pkgTarget,
+			programs: [...programs, ...codecs],
+			types: checker.types,
+			bundledPackages,
+		}),
+	);
 
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
 	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
@@ -593,9 +649,11 @@ export function compileFiles(files, options = {}) {
 	const mainJs =
 		emitTarget === "wasm"
 			? wasmMarker(pkgName)
-			: codegen.generateAll([...programs, ...codecs], {
-					isTest: options.isTest ?? false,
-				});
+			: asInternalError(() =>
+					codegen.generateAll([...programs, ...codecs], {
+						isTest: options.isTest ?? false,
+					}),
+				);
 	logWarnings(codegen.warnings);
 	const warnings = [...checker.warnings, ...codegen.warnings];
 
@@ -606,8 +664,11 @@ export function compileFiles(files, options = {}) {
 		mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
 	};
 
-	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	finishStdlibJs(merged, options, [...programs, ...codecs], emitTarget);
+	const merged = asInternalError(() => {
+		const chunks = mergeCompilationChunks([...preambles, mainChunk]);
+		finishStdlibJs(chunks, options, [...programs, ...codecs], emitTarget);
+		return chunks;
+	});
 	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
 		options,
 		merged,
@@ -708,10 +769,12 @@ export function compileWasm(source, options = {}) {
 		return { wasm: null, errors };
 	}
 
-	const lowerRes = lower([ast], checker);
-	const res = compileWasmModule([ast], checker, lowerRes, {
-		...options,
-		exportAll: options.exportAll ?? true,
+	const res = asInternalError(() => {
+		const lowerRes = lower([ast], checker);
+		return compileWasmModule([ast], checker, lowerRes, {
+			...options,
+			exportAll: options.exportAll ?? true,
+		});
 	});
 
 	if (checker.errors?.length > 0) {

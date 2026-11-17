@@ -32,7 +32,7 @@
 //     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
 //     handed out by this facade) may be passed back in.
 
-import { shadowsJsGlobal } from "../../typechecker/types.js";
+import { shadowsJsGlobal, UnsupportedError } from "../../typechecker/types.js";
 import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
@@ -590,7 +590,8 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 		else collectFuncMeta(fn, meta, errors, mod);
 	}
 
-	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
+	if (errors.length > 0)
+		throw new UnsupportedError([...new Set(errors)].join("\n"));
 	return meta;
 }
 
@@ -851,7 +852,8 @@ function collectNeeds(meta) {
 	for (const c of meta.consts ?? []) {
 		if (c.dynamic) visitNeed(c.desc, needs, errors, mod);
 	}
-	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
+	if (errors.length > 0)
+		throw new UnsupportedError([...new Set(errors)].join("\n"));
 	for (const desc of needs.ifaces.values())
 		desc.concrete = concreteCandidates(desc, needs, meta, mod);
 	return needs;

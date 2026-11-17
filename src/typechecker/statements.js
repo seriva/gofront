@@ -117,7 +117,7 @@ export const statementCheckMethods = {
 					stmt.rhs[i],
 					"variable declaration",
 				);
-			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
+			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY, stmt.lhs[i]);
 		}
 	},
 
@@ -684,7 +684,7 @@ export const statementCheckMethods = {
 			const name = lhs[i].name ?? lhs[i];
 			if (name === "_") continue;
 			const varType = info.yieldParams[i] ?? ANY;
-			scope.defineLocal(name, varType);
+			scope.defineLocal(name, varType, lhs[i]);
 		}
 	},
 

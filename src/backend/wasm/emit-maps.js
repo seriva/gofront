@@ -2,6 +2,7 @@
 // FunctionEmitter mixin: map runtime helpers (key hash/eq, get/set/delete,
 // iteration, clone) and zero values.
 
+import { UnsupportedError } from "../../typechecker/types.js";
 import {
 	isArrayType,
 	isComplex,
@@ -265,7 +266,7 @@ export class MapsEmitter {
 			return;
 		}
 		const unsupported = this._unsupportedMapKey(keyGoType);
-		if (unsupported) throw new Error(unsupported);
+		if (unsupported) throw new UnsupportedError(unsupported);
 		// Pointers/channels: identity equality via ref.eq; no stable hash is
 		// available for GC references, so they share a single bucket.
 		this.pushInstruction({ op: "i32.const", value: 0 });
@@ -411,7 +412,7 @@ export class MapsEmitter {
 			return;
 		}
 		const unsupported = this._unsupportedMapKey(keyGoType);
-		if (unsupported) throw new Error(unsupported);
+		if (unsupported) throw new UnsupportedError(unsupported);
 		this.pushInstruction({ op: "local.get", index: k1Local });
 		this.pushInstruction({ op: "local.get", index: k2Local });
 		this.pushInstruction("ref.eq");

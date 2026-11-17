@@ -141,11 +141,11 @@ The review probes ran 2026-11-13 against `src/` at 1.9.2 (`27a09f85`) through `c
 Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` off epic branch `feat/checker-strictness`). Phase 1 needs `test-harness-hardening-plan.md` Phase 1 merged (`CompileError`, production-path `compile()`).
 
 ### Phase 1: Diagnostics groundwork (S24–S26, corpus)
-- [ ] Task 1.1: Positions on every expression node, and on unused-variable errors
+- [x] Task 1.1: Positions on every expression node, and on unused-variable errors
   - Files: `src/parser/expressions.js`, `src/typechecker/types.js` (`Scope` records each local's declaring node), `src/typechecker/index.js` (`_reportUnused`)
   - Test: `test/unit/parser/positions.test.js` (new): every `BinaryExpr`, `CallExpr`, `SelectorExpr`, `IndexExpr`, `SliceExpr`, `KeyValueExpr`, `CompositeLit`, `TypeAssertExpr`, `AwaitExpr` in a sample program has `_line`/`_col` at its leftmost token. `test/unit/types/checks.test.js`: `"s" + a` on line 6 reports `at line 6:`; `f(1)` reports its line; `s.B` reports its line; `x := 1` unused on line 4 reports `at line 4:2`
   - Done when: the new tests pass, `npm test` passes, and `cmp` of `example/**/app.js`/`app.wasm` before and after `npm run build` shows no difference
-- [ ] Task 1.2: Conformance corpus runner, seeded
+- [x] Task 1.2: Conformance corpus runner, seeded
   - Files: `test/unit/types/conformance.test.js` (new), `test/unit/fixtures/conformance/reject/*.go`, `test/unit/fixtures/conformance/accept/*.go`
   - Test: the runner itself; one reject file per isolated repro, marked `// pending: S<n>`:
     - S1: `s01`, `s01b`, `t07`, `t08`
@@ -176,14 +176,14 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
 
     The repro text for each ID is in *Verified Gaps* (and in `.probes/review-2026-11-13/` while it exists).
   - Done when: `node test/unit/run.js types/conformance.test.js` passes with every case either pending or passing; deleting a `// pending:` line makes that case fail; the file runs in under 30 s (`DEBUG_TIMINGS=1`)
-- [ ] Task 1.3: Validate linked WebAssembly and report internal compiler errors
+- [x] Task 1.3: Validate linked WebAssembly and report internal compiler errors
   - Files: `src/compiler.js` (`InternalCompilerError`, exported `validateWasm(bytes)` called from `finishWasm`, wrapping of the lowering/codegen/link stages), `src/typechecker/types.js` (`UnsupportedError`)
   - Test: `test/unit/compiler/internal-errors.test.js` (new):
     - `validateWasm` throws `InternalCompilerError` for a hand-encoded module whose function body is `i32.add` on an empty stack, and returns for a valid one.
     - An exported `asInternalError(fn)` wraps a thunk that throws `Error("boom")` into `InternalCompilerError` with `message` starting `internal compiler error: boom` and containing the issues URL, keeps `cause`, and passes `CompileError` through unchanged.
     - `UnsupportedError` and `TypeCheckError` thrown inside the wrapped stage come out as `CompileError`.
   - Done when: the new tests pass, `npm test` passes, and `compileFiles` never returns `wasm` bytes that fail `WebAssembly.validate`
-- [ ] Task 1.4: Backend "not supported" diagnostics are user errors
+- [x] Task 1.4: Backend "not supported" diagnostics are user errors
   - Files: `src/backend/wasm/boundary.js` (`unsupportedMsg` sites), `src/backend/wasm/emit-maps.js` (`_unsupportedMapKey` sites)
   - Test: in `test/unit/wasm/map-keys.test.js` and `test/unit/wasm/boundary.test.js`, the existing unsupported-key and unsupported-boundary cases additionally assert the thrown error is a `CompileError`, not an `InternalCompilerError`, and that the message has no `internal compiler error` prefix
   - Done when: those tests pass and `npm test` passes

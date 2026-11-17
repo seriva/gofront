@@ -331,7 +331,13 @@ export const declarationParseMethods = {
 
 	parseVarSpec() {
 		const at = this.peek();
+		const nameStart = this.pos;
 		const names = this.parseIdentList();
+		// `a, b` is IDENT COMMA IDENT: the token of each name, for diagnostics.
+		const _namePos = names.map((_, i) => {
+			const tok = this.tokens[nameStart + 2 * i];
+			return { _line: tok.line, _col: tok.col };
+		});
 		let type = null;
 		let value = null;
 		if (
@@ -342,7 +348,7 @@ export const declarationParseMethods = {
 			type = this.parseType();
 		}
 		if (this.match(T.ASSIGN)) value = this.parseExprList();
-		return { names, type, value, _line: at.line, _col: at.col };
+		return { names, type, value, _line: at.line, _col: at.col, _namePos };
 	},
 
 	parseConstDecl() {
