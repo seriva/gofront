@@ -103,8 +103,9 @@ if (args[0] === "test") {
 if (args[0] === "check") {
 	const { targetDir, forceTarget } = parseCheckArgs(args.slice(1));
 	try {
-		reportCheck(handleCheck(targetDir, { forceTarget }), targetDir);
-		process.exit(0);
+		process.exit(
+			reportCheck(handleCheck(targetDir, { forceTarget }), targetDir),
+		);
 	} catch (e) {
 		log.fail(e.message);
 		process.exit(1);

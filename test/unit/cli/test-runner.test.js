@@ -467,7 +467,13 @@ test("handleCheck with dir/... type-checks every package below the root", () => 
 				join(dir, "bad", "bad.go"),
 				'package bad\nfunc F() int { return "x" }\n',
 			);
-			assertThrows(() => handleCheck(`${dir}/...`));
+			const bad = handleCheck(`${dir}/...`);
+			assertEqual(bad.failed, true);
+			assertEqual(bad.packages.length, 2);
+			assertEqual(
+				bad.packages.find((p) => p.dir.endsWith("bad")).status,
+				"fail",
+			);
 		},
 	);
 });
