@@ -145,7 +145,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/parser/expressions.js`, `src/typechecker/types.js` (`Scope` records each local's declaring node), `src/typechecker/index.js` (`_reportUnused`)
   - Test: `test/unit/parser/positions.test.js` (new): every `BinaryExpr`, `CallExpr`, `SelectorExpr`, `IndexExpr`, `SliceExpr`, `KeyValueExpr`, `CompositeLit`, `TypeAssertExpr`, `AwaitExpr` in a sample program has `_line`/`_col` at its leftmost token. `test/unit/types/checks.test.js`: `"s" + a` on line 6 reports `at line 6:`; `f(1)` reports its line; `s.B` reports its line; `x := 1` unused on line 4 reports `at line 4:2`
   - Done when: the new tests pass, `npm test` passes, and `cmp` of `example/**/app.js`/`app.wasm` before and after `npm run build` shows no difference
-- [ ] Task 1.2: Conformance corpus runner, seeded
+- [x] Task 1.2: Conformance corpus runner, seeded
   - Files: `test/unit/types/conformance.test.js` (new), `test/unit/fixtures/conformance/reject/*.go`, `test/unit/fixtures/conformance/accept/*.go`
   - Test: the runner itself; one reject file per isolated repro, marked `// pending: S<n>`:
     - S1: `s01`, `s01b`, `t07`, `t08`
