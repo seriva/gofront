@@ -182,7 +182,7 @@ A type declared inside a function may reuse a predeclared basic type name or `an
 
 #### Internal compiler errors
 
-A failure inside the compiler after type checking (lowering, code generation or linking), and a linked WebAssembly module that fails `WebAssembly.validate`, stop the build with `internal compiler error: ...` and a link to the issue tracker. These are bugs in GoFront, not problems in your program; the build never writes an invalid `app.wasm`. Valid Go that a target does not support yet, such as an unsupported value across the WebAssembly boundary, stays an ordinary compile error that names the construct.
+A failure inside the compiler after type checking (lowering, code generation or linking), and a linked WebAssembly module that fails `WebAssembly.validate`, stop the build with `internal compiler error: ...` and a link to the issue tracker. These are bugs in GoFront, not problems in your program; the build never writes an invalid `app.wasm`. Valid Go that a target does not support, such as an unsupported value across the WebAssembly boundary, stays an ordinary compile error that names the construct.
 
 ### Semantic differences
 
