@@ -639,8 +639,9 @@ export const expressionGenMethods = {
 		if (expr._convertTo && !expr._converting) {
 			// An implicit struct conversion the checker accepted: a struct
 			// literal type's value assigned to a defined struct type becomes an
-			// instance of its class, so its methods exist. The reverse needs
-			// nothing: a class instance already holds the literal type's fields.
+			// instance of its class, so its methods exist. The reverse copies a
+			// class instance into a plain object, so the value no longer carries
+			// the defined type's identity or methods.
 			expr._converting = true;
 			try {
 				const to = expr._convertTo;
@@ -650,7 +651,9 @@ export const expressionGenMethods = {
 						to.kind === "named" ? to.name : undefined,
 						expr._type,
 						inner,
-					) ?? inner
+					) ??
+					this._genAnonStructConversion(to, inner) ??
+					inner
 				);
 			} finally {
 				expr._converting = false;
@@ -1195,14 +1198,15 @@ export const expressionGenMethods = {
 				Boolean(this._genericMapTag(expr._ifaceSrc)));
 		const js = this.genExpr(expr);
 		if (expr._ifaceBox || tagged) return js;
+		// An implicit struct conversion already produced a value of its target
+		// type, which is the type the copy must follow.
+		const type = expr._convertTo ?? expr._type;
 		if (
-			!(
-				this._aggregateBase(expr._type) || this._typeParamClone(expr._type, js)
-			) ||
+			!(this._aggregateBase(type) || this._typeParamClone(type, js)) ||
 			!this._isAddressableExpr(expr)
 		)
 			return js;
-		return this._cloneJs(expr._type, js);
+		return this._cloneJs(type, js);
 	},
 
 	_rootIdentName(e) {
