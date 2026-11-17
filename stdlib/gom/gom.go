@@ -61,7 +61,9 @@ func (a *attr) Mount(el any, refs any) {
 type prop struct{ name, value string }
 
 func (p *prop) Mount(el any, refs any) {
-	el[p.name] = p.value
+	// Object(el) is the element itself as a JS-dynamic value, so the property
+	// name can be computed.
+	Object(el)[p.name] = p.value
 }
 
 type style struct{ css string }

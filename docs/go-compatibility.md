@@ -15,7 +15,7 @@ These features are intentional additions for the JavaScript platform:
 | `gofront/shared` | Zero-copy linear-memory buffers shared as TypedArrays across the JS↔WASM boundary. |
 | `.templ` files and `css` declarations | JSX-like component templates with scoped CSS, compiled to direct DOM calls. |
 | `gom` built-in package | Declarative DOM node builders available without an import. |
-| Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
+| Browser globals (`document`, `console`, etc.) | Predeclared as dynamic JavaScript values for practical DOM access: arithmetic, calls and indexing on them are not type-checked, unlike on a Go `any` (see [Type checking](#type-checking)). `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
 | `.d.ts` type imports (`import "js:./types.d.ts"`) | Type-safe interop with JavaScript libraries. |
 | `.d.ts` tuple return mapping | TypeScript `[A, B]` in return position maps directly to Go multi-value return `(A, B)` (e.g. React/Preact hooks `state, setState := useState(...)`). |
 | npm package resolution | Import types from `node_modules/` and `@types/` automatically. |
@@ -74,6 +74,115 @@ Consequences for portable code:
 - **`strings` offsets**: `strings.Index`, `LastIndex`, `IndexRune`, `IndexFunc` and the other search functions return UTF-16 code unit offsets, the same units as `len(s)` and `s[i:j]`, so `s[strings.Index(s, sub):]` always works. For ASCII text they equal Go's byte offsets; for other text they differ, as `len` does. `bytes` functions work on UTF-8 bytes and return byte offsets.
 - **Escape sequences**: `\xNN` and octal escapes are raw bytes, as in Go: `"\xc3\xa9"` is `é`, while a lone `"\xc3"` is one invalid byte, so `[]byte("\xc3")` has length 1. Astral rune literals such as `'😀'` are one rune.
 - **Format offsets**: Byte offsets reported by `json.SyntaxError.Offset` count UTF-8 input bytes, matching Go.
+
+### Type checking
+
+GoFront rejects the invalid Go listed here, with the same verdict and message in `js`, `wasm` and `both` packages. The checker does not implement every rule of the Go specification; the rules below are the ones it enforces. Each error names a line and column: the offending expression or operand, or the declaring identifier for `declared and not used`.
+
+#### Numeric operands need identical types
+
+Go does not convert between numeric types implicitly, and neither does GoFront. Convert one operand, or the argument, where the error points:
+
+```go
+n := 3
+f := 1.5
+total := n + f          // invalid operation: n + f (mismatched types int and float64)
+total = float64(n) + f  // ok
+
+func half(x float64) float64 { return x / 2 }
+half(n)          // cannot use n (variable of type int) as float64 value in argument
+half(float64(n)) // ok
+```
+
+- **Arithmetic** (`+ - * /`, including `complex64` and `complex128`) needs two operands of identical type. A defined type such as `type Celsius float64` only mixes with itself, so `Celsius + Fahrenheit` and `Celsius + float64` are errors.
+- **Comparison** (`== != < <= > >=`) needs one operand assignable to the other, which for numbers and strings means identical types: `float64 == int` and `Celsius == Fahrenheit` are errors.
+- **Untyped constants** adapt to the other operand: `x + 1.5` and `x * 2` are fine for a `float64` `x`, and `1 << n` takes its type from the context. The shift count of `<<` and `>>` may have any integer type.
+- **Integer-only operators**: `%`, `&`, `|`, `^` and `&^` (and their compound forms) need integer operands; `f % 2` on a `float64` is `operator % not defined on f (variable of type float64)`.
+- **Assignment contexts** (variable declarations, assignments, call arguments, returns, struct fields, composite literal elements) follow the same rule: an `int` is not a `float64` value.
+- **Conversions** between numeric types, from a number to a string, and between a string and `[]byte` or `[]rune` are always explicit. Converting a struct to another struct type ignores field tags when the field names, types and order match.
+
+#### Type identity
+
+Two types are the same type only when Go says so:
+
+- A defined type (`type T ...`) is identical only to itself. A type declared inside a function that shadows an outer `T` is a different type, and so is a same-named type from another package.
+- An instantiated generic type (`Box[int]`) is identical to another instance of the same declaration with identical type arguments.
+- Unnamed struct types are identical when they have the same fields in the same order with the same names, types, embedding and tags; `struct{ X int }` and `struct{ Y string }` are different types.
+- Unnamed interface types are identical when they have the same methods with identical signatures. Func types are identical when parameters and results match; parameter names do not count.
+- Slices, arrays (with the same length), maps and pointers are identical when their element types are.
+- `byte` is `uint8` and `rune` is `int32`.
+
+A defined struct type and an unnamed struct type with identical non-embedded fields assign to each other, in variable declarations, assignments, struct fields, composite literal elements, plain call arguments and returns:
+
+```go
+type Point struct{ X, Y int }
+
+var p Point = struct{ X, Y int }{1, 2} // ok
+var u struct{ X, Y int } = p           // ok
+```
+
+`range` assignment, `switch` cases, multi-value calls, comma-ok forms, `defer` arguments, map keys and structs with embedded fields need an explicit conversion (`struct{ X, Y int }(p)`). Defined slice, array, map, func and interface types assign to the matching unnamed type in every context without a conversion.
+
+#### Go `any` versus JavaScript values
+
+A Go `any` holds a value of some type and says nothing about which one. You can compare it with `==` and `!=`, pass it where `any` or `interface{}` is expected, and look inside it with a type assertion or a type switch. Arithmetic, unary operators, `++`, calls, indexing, slicing, `range` and use as a condition are errors until you assert the type:
+
+```go
+var v any = 2
+_ = v * 2       // invalid operation: operator * not defined on v (variable of type any)
+_ = v.(int) * 2 // ok
+
+if s, ok := v.(string); ok { ... }
+```
+
+A value is a Go `any` when your code declares it so (a variable, parameter, result, map or slice element of type `any`), or when it comes from `recover()`, `any(x)`, `x.(any)` or the `default:` clause of a type switch on an `any`.
+
+Values that come from JavaScript stay dynamic: browser globals and their members (`document`, `window`, `console`), ECMAScript built-ins (`Math`, `JSON`) and values declared `any` in a `.d.ts` file. Typed Web APIs such as `WebGL2RenderingContext`, `GPUDevice`, `ArrayBuffer` and TypedArrays are checked statically. The checker lets you do arithmetic on dynamic values, call them, index them, read members and assign them to a typed variable (`width := window.innerWidth * 2`) without an assertion. A dynamic value you store in a variable you declared as `any` is a Go `any` from then on.
+
+#### nil
+
+`nil` is a value of pointer, slice, map, func and interface types. `var n int = nil` and `var s string = nil` are errors, as is any other assignment of `nil` to a number, string, bool or array. Dynamic JavaScript values (see above) accept `nil`.
+
+#### Statements and assignments
+
+- **Return counts**: `return 1, 2` in a function with one result is `too many return values (have 2, want 1)`.
+- **`range`** accepts integers, strings, slices, arrays, pointers to arrays, maps and iterator funcs. Floats, bools, structs, interfaces and a Go `any` are errors.
+- **Invalid assignment targets**: `s[0] = 'x'` on a string, `m[k].f = v` on a map of structs (assign the whole element, or keep pointers in the map), and `m[k][0] = v` on a map of arrays are errors.
+- **Pointer methods** cannot be called on a value that is not addressable: `mk().Inc()` with `mk` returning a struct value is `cannot call pointer method Inc on C`. Store the result in a variable first.
+- **Labels** belong to one function. `break L` needs `L` to label an enclosing `for` or `switch` statement and `continue L` an enclosing loop, a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
+- **Unused values**: only calls and `await` expressions may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
+
+#### Literals and duplicates
+
+- **Struct literals**: a positional literal lists every field (`S{1}` for a struct with two fields is `too few values in struct literal of type S`); a keyed literal may omit fields, and the two forms do not mix.
+- **Duplicate `switch` cases** of integer, float or string constants are `duplicate case 1 in expression switch`; constants are compared by value after conversion to the tag's type, so `1` and `0x1` collide and `case a:` with a variable does not. A `switch` on an interface keeps the constants' own types (`case 1` and `case 1.0` differ). Boolean and complex constants are not compared.
+- **Duplicate map keys** in a literal, `map[string]int{"a": 1, "a": 2}`, are `duplicate key "a" in map literal`, with the same value rules; boolean keys are compared too. Duplicate indexes in a slice or array literal are an error as well.
+
+#### Type assertions
+
+A type assertion `x.(T)` or a type switch case `case T:` on an interface value `x` is an error when `T` is a concrete type that can never be the dynamic type of `x`, because `T` lacks a method of `x`'s interface (or has it only on the pointer receiver):
+
+```go
+type I interface{ M() }
+type S struct{}
+
+var i I
+_ = i.(S) // impossible type assertion: i.(S)
+```
+
+Asserting to an interface type, and asserting on an empty interface or `any`, is always allowed.
+
+#### Generic functions as values
+
+A generic function is called with inferred type arguments (`Id(3)`) or instantiated explicitly before it is used as a value (`f := Id[int]`, `slices.SortFunc(xs, cmp.Compare[int])`). Using it without either, as in `f := Id` or `fmt.Println(slices.Reverse)`, is `cannot use generic function Id without instantiation`. GoFront does not infer the type arguments from the target of an assignment or from a parameter type, so `var f func(int) int = Id` and `slices.SortFunc(xs, cmp.Compare)` need the explicit `[int]`.
+
+#### Names that shadow predeclared types
+
+A type declared inside a function may reuse a predeclared basic type name or `any`, as in Go (`type int32 = string`, `type float64 struct{ X int }`). The name means the local type from its declaration to the end of the block and means the predeclared type everywhere else; declaring the same name again in a nested block, or reusing `error` or `comparable`, is not supported.
+
+#### Internal compiler errors
+
+A failure inside the compiler after type checking (lowering, code generation or linking), and a linked WebAssembly module that fails `WebAssembly.validate`, stop the build with `internal compiler error: ...` and a link to the issue tracker. These are bugs in GoFront, not problems in your program; the build never writes an invalid `app.wasm`. Valid Go that a target does not support, such as an unsupported value across the WebAssembly boundary, stays an ordinary compile error that names the construct.
 
 ### Semantic differences
 

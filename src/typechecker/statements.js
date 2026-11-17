@@ -34,8 +34,60 @@ import {
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
+// Labels are scoped to a function body: `defined` holds every label seen so
+// far (to report a repeat) and `enclosing` the labeled statements around the
+// statement being checked, which are the only ones `break` and `continue` reach.
+export function newLabelScope() {
+	return { defined: new Set(), enclosing: [] };
+}
+
+const BREAKABLE_BODIES = new Set(["ForStmt", "SwitchStmt", "TypeSwitchStmt"]);
+const LABEL_BRANCHES = new Set(["break", "continue"]);
+// The label property a branch keyword needs: `break` any breakable statement,
+// `continue` a loop.
+const LABEL_TARGET = { break: "breakable", continue: "loop" };
+
+function newLabelEntry(stmt) {
+	// Stacked labels (`a: b: for {}`) all name the statement they precede.
+	let target = stmt.body;
+	while (target.kind === "LabeledStmt") target = target.body;
+	return {
+		name: stmt.label,
+		breakable: BREAKABLE_BODIES.has(target.kind),
+		loop: target.kind === "ForStmt",
+		used: false,
+	};
+}
+
 // Tag kinds with no nil value: `case nil` against them cannot compile.
 const NON_NILABLE_TAG_KINDS = new Set(["basic", "struct", "array"]);
+
+// Builtins whose only effect is their result: invalid as a statement.
+const VALUE_ONLY_BUILTINS = new Set([
+	"append",
+	"cap",
+	"complex",
+	"imag",
+	"len",
+	"make",
+	"min",
+	"max",
+	"new",
+	"real",
+]);
+
+// Whether an expression statement discards a value Go does not allow to be
+// discarded: everything except a function or method call, an `await` of one,
+// and a receive operation.
+function isUnusedExprStmt(expr) {
+	let e = expr;
+	while (e.kind === "ParenExpr") e = e.expr;
+	if (e.kind === "AwaitExpr") return false;
+	if (e.kind === "UnaryExpr") return e.op !== "<-";
+	if (e.kind !== "CallExpr") return true;
+	if (e._isTypeConversion || e.func?._isTypeRef) return true;
+	return VALUE_ONLY_BUILTINS.has(e._builtinName);
+}
 
 /** @type {ThisType<TypeChecker>} */
 export const statementCheckMethods = {
@@ -45,20 +97,39 @@ export const statementCheckMethods = {
 		}
 	},
 
+	// Only calls and receive operations may stand alone as a statement. A
+	// conversion and the builtins that only compute a value are calls that do
+	// not qualify.
+	_checkExprStmt(stmt, scope) {
+		const type = this.checkExpr(stmt.expr, scope);
+		if (!isUnusedExprStmt(stmt.expr)) return;
+		if (type?._tainted) return;
+		const untyped = type?.kind === "untyped" && type.base !== "nil";
+		const what = untyped
+			? `untyped ${type.base} value`
+			: operandKind(stmt.expr, typeStr(type), false);
+		this.err(`${exprText(stmt.expr)} (${what}) is not used`, stmt.expr);
+	},
+
 	checkStmt(stmt, scope, returnType) {
 		switch (stmt.kind) {
 			case "IncDecStmt":
+				this._checkIncDecStmt(stmt, scope);
+				break;
 			case "ExprStmt":
-				this.checkExpr(stmt.expr, scope);
+				this._checkExprStmt(stmt, scope);
 				break;
 			case "DeferStmt":
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
+				// The arguments are evaluated at the defer, into temps of their
+				// own type: they take no implicit struct conversion.
+				else stmt.call._isDeferCall = true;
 				this.checkExpr(stmt.call, scope);
 				this._deferCount++;
 				break;
 			case "LabeledStmt":
-				this.checkStmt(stmt.body, scope, returnType);
+				this._checkLabeledStmt(stmt, scope, returnType);
 				break;
 			case "Block": {
 				const blockScope = new Scope(scope);
@@ -97,6 +168,7 @@ export const statementCheckMethods = {
 			stmt.lhs[i],
 			"assignment",
 			this._assignOperand(stmt, i),
+			stmt.rhs.length === stmt.lhs.length,
 		);
 		this._skipIfaceMark = false;
 	},
@@ -117,7 +189,7 @@ export const statementCheckMethods = {
 					stmt.rhs[i],
 					"variable declaration",
 				);
-			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
+			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY, stmt.lhs[i]);
 		}
 	},
 
@@ -219,7 +291,37 @@ export const statementCheckMethods = {
 
 	_checkAssignLhsType(e, scope) {
 		if (e.kind === "Ident" && e.name === "_") return ANY;
-		return this.checkExpr(e, scope);
+		const t = this.checkExpr(e, scope);
+		this._checkAssignTarget(e);
+		return t;
+	},
+
+	// The left side of `=`, `op=`, `++` and `--` must be addressable or a map
+	// index: not a string element, nor a field or array element of a map entry.
+	_checkAssignTarget(e) {
+		let node = e;
+		while (node.kind === "ParenExpr") node = node.expr;
+		const bt = node.expr?._type;
+		const b = this._deepUnderlying(bt);
+		if (node.kind === "IndexExpr" && isString(b))
+			this.err(
+				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
+				node,
+			);
+		else if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
+			this.err(
+				`cannot assign to struct field ${exprText(node)} in map`,
+				this._positioned(node),
+			);
+		else if (
+			node.kind === "IndexExpr" &&
+			b?.kind === "array" &&
+			this._isMapElementOperand(node.expr)
+		)
+			this.err(
+				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
+				node,
+			);
 	},
 
 	// A source-written `any` operand still goes through assertAssignable so a
@@ -248,6 +350,12 @@ export const statementCheckMethods = {
 		if (holder._ifaceBox) node._rangeBox = holder;
 	},
 
+	_checkIncDecStmt(stmt, scope) {
+		const t = this.checkExpr(stmt.expr, scope);
+		this._checkAssignTarget(stmt.expr);
+		this._checkDeclaredAnyOperator(stmt.op, t, stmt.expr);
+	},
+
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
@@ -259,8 +367,23 @@ export const statementCheckMethods = {
 					this.resolveType(r),
 					stmt.rhs[i],
 				);
+			if (stmt.op !== "=" && stmt.op !== ":=") {
+				if (
+					this._checkDeclaredAnyOperator(
+						stmt.op.slice(0, -1),
+						lhsTypes[i],
+						stmt.lhs[i],
+					)
+				)
+					continue;
+				this._checkCompoundIntegerOnly(stmt.op, lhsTypes[i], stmt.lhs[i]);
+			}
 			// A shift count is not converted to the left operand's type.
 			if (stmt.op === "<<=" || stmt.op === ">>=") {
+				if (
+					this._checkDeclaredAnyOperator(stmt.op.slice(0, -1), r, stmt.rhs[i])
+				)
+					continue;
 				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);
 				continue;
 			}
@@ -277,6 +400,7 @@ export const statementCheckMethods = {
 					stmt.lhs[i],
 					"assignment",
 					this._assignOperand(stmt, i),
+					stmt.op === "=" && stmt.rhs.length === stmt.lhs.length,
 				);
 				this._skipIfaceMark = false;
 			}
@@ -352,6 +476,8 @@ export const statementCheckMethods = {
 		) {
 			this.err("Missing return value", stmt);
 		}
+		if (isVoid(returnType) && this._reportReturnCount(stmt, types.length, 0))
+			return;
 		// Check each returned value is assignable to its declared type
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
@@ -374,6 +500,7 @@ export const statementCheckMethods = {
 				);
 				return;
 			}
+			if (this._reportReturnCount(stmt, types.length, expected.length)) return;
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
 					this.assertAssignable(
@@ -381,9 +508,22 @@ export const statementCheckMethods = {
 						types[i],
 						stmt.values[i] ?? stmt,
 						"return statement",
+						undefined,
+						true,
 					);
 			}
 		}
+	},
+
+	// `return 1, 2` in a one-result func, `return 1` in a two-result one.
+	_reportReturnCount(stmt, have, want) {
+		if (have === want || have === 0) return false;
+		const many = have > want;
+		this.err(
+			`${many ? "too many" : "not enough"} return values (have ${have}, want ${want})`,
+			many ? (stmt.values[want] ?? stmt) : stmt,
+		);
+		return true;
 	},
 
 	// Checks each result of a forwarded multi-value call (`return f()`,
@@ -419,7 +559,10 @@ export const statementCheckMethods = {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		const ct = this.checkExpr(stmt.cond, inner);
-		if (!isBool(ct) && !isAny(ct)) this.err("If condition must be bool", stmt);
+		if (ct?._declared)
+			this.err("non-boolean condition in if statement", stmt.cond);
+		else if (!isBool(ct) && !isAny(ct))
+			this.err("If condition must be bool", stmt);
 		const bodyScope = new Scope(inner);
 		this.checkBlock(stmt.body, bodyScope, returnType);
 		this._reportUnused(bodyScope, stmt);
@@ -436,10 +579,18 @@ export const statementCheckMethods = {
 	_checkForCond(stmt, inner) {
 		if (stmt.cond.kind !== "RangeExpr") {
 			const ct = this.checkExpr(stmt.cond, inner);
-			if (!isBool(ct) && !isAny(ct))
+			if (ct?._declared)
+				this.err("non-boolean condition in for statement", stmt.cond);
+			else if (!isBool(ct) && !isAny(ct))
 				this.err("For condition must be bool", stmt);
 		} else {
-			const ct = this.checkExpr(stmt.cond.expr, inner);
+			const ct = this._derefArrayPtr(
+				stmt.cond,
+				"expr",
+				this.checkExpr(stmt.cond.expr, inner),
+			);
+			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
+				this._rangeOperandError(stmt.cond.expr, ct);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
 			if (core) stmt.cond.expr._coreType = core;
 			const info = iteratorYieldParams(ct);
@@ -481,6 +632,7 @@ export const statementCheckMethods = {
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		if (stmt.tag) this.checkExpr(stmt.tag, inner);
 		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
+		const seenCases = [];
 		this._switchDepth++;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
@@ -488,6 +640,8 @@ export const statementCheckMethods = {
 				for (const e of c.list) {
 					this.checkExpr(e, caseScope);
 					this._checkCaseValue(stmt.tag, e);
+					if (this._isDuplicateConst(seenCases, e, stmt.tag?._type, false))
+						this.err(`duplicate case ${exprText(e)} in expression switch`, e);
 					if (stmt.tag) this._tagFloat32Const(stmt.tag._type, e._type, e);
 					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
 				}
@@ -541,7 +695,7 @@ export const statementCheckMethods = {
 			this.err(`cannot convert nil to type bool`, e);
 			return;
 		}
-		if (isAny(caseType) || isBool(caseType)) return;
+		if ((isAny(caseType) && !caseType._declared) || isBool(caseType)) return;
 		if (isUntyped(caseType) && caseType.base === "bool") return;
 		const under = this.resolveType(caseType.underlying ?? caseType);
 		if (isBool(under)) return;
@@ -630,6 +784,7 @@ export const statementCheckMethods = {
 				this._markInterfaceCaseType(t, inner);
 				if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
 					this._markDynamicType(t, this.resolveTypeNode(t, inner));
+				this._checkTypeSwitchCase(stmt.expr, t, inner);
 			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or the switch operand's type
@@ -655,7 +810,50 @@ export const statementCheckMethods = {
 		this._switchDepth--;
 	},
 
+	// `case T:` in a switch on an interface value `x` needs a T that can be
+	// the dynamic type of `x`.
+	_checkTypeSwitchCase(operand, typeNode, scope) {
+		const srcType = operand._type;
+		if (!typeNode || !srcType || isAny(srcType) || srcType._tainted) return;
+		if (typeNode.kind === "TypeName" && typeNode.name === "nil") return;
+		const target = this.resolveTypeNode(typeNode, scope);
+		if (this._isImpossibleAssertion(srcType, target))
+			this.err(
+				`impossible type switch case: ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) cannot have dynamic type ${typeStr(target)}`,
+				typeNode,
+			);
+	},
+
+	_checkLabeledStmt(stmt, scope, returnType) {
+		const labels = this._labels;
+		if (labels.defined.has(stmt.label))
+			this.err(`label ${stmt.label} already defined`, stmt);
+		labels.defined.add(stmt.label);
+		const entry = newLabelEntry(stmt);
+		labels.enclosing.push(entry);
+		this.checkStmt(stmt.body, scope, returnType);
+		labels.enclosing.pop();
+		if (!entry.used) this.err(`label ${stmt.label} defined and not used`, stmt);
+	},
+
+	// `break L` needs an enclosing labeled for, switch or select; `continue L`
+	// an enclosing labeled for. Returns true when `stmt` carried a label.
+	_checkBranchLabel(stmt) {
+		if (!stmt.label || !LABEL_BRANCHES.has(stmt.keyword)) return false;
+		const { keyword, label } = stmt;
+		const entry = this._labels.enclosing.findLast((e) => e.name === label);
+		if (entry) entry.used = true;
+		if (!entry) this.err(`${keyword} label not defined: ${label}`, stmt);
+		else if (!entry[LABEL_TARGET[keyword]])
+			this.err(`invalid ${keyword} label ${label}`, stmt);
+		return true;
+	},
+
 	_checkBranchStmt(stmt) {
+		if (!this._checkBranchLabel(stmt)) this._checkBranchKeyword(stmt);
+	},
+
+	_checkBranchKeyword(stmt) {
 		const kw = stmt.keyword;
 		if (kw === "goto")
 			this.err(
@@ -684,7 +882,7 @@ export const statementCheckMethods = {
 			const name = lhs[i].name ?? lhs[i];
 			if (name === "_") continue;
 			const varType = info.yieldParams[i] ?? ANY;
-			scope.defineLocal(name, varType);
+			scope.defineLocal(name, varType, lhs[i]);
 		}
 	},
 
@@ -701,13 +899,13 @@ export const statementCheckMethods = {
 
 	// The yielded value is assigned to the target, so it must be assignable
 	// to it (`for s = range seq` with `s string` and `seq` yielding `int`).
-	// The lenient `float64 = int` pair of plain assignments is reported here:
-	// the iterator loop stores the yielded value without converting it.
+	// `float64 = int` is reported here in the plain "Cannot assign" form: the
+	// yielded value has no expression to quote.
 	_checkRangeIterAssignable(node, target, source) {
 		if (!target || !source) return;
 		const t = this.resolveType(target);
 		const v = this.resolveType(source);
-		if (this._isNumericCoercible(t, v)) {
+		if (this._isIntToFloat(t, v)) {
 			this.err(`Cannot assign ${typeStr(v)} to ${typeStr(t)}`, node);
 			return;
 		}

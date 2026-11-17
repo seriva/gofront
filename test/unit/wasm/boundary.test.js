@@ -2,6 +2,7 @@
 // Phase 5a/5b: JS <-> WASM boundary (values, slices, handles) and
 // Phase 5c: single app.wasm linking through the compiler pipeline.
 
+import { CompileError, InternalCompilerError } from "../../../src/compiler.js";
 import {
 	assert,
 	assertEqual,
@@ -636,11 +637,21 @@ func main() { pkg.Touch() }
 
 async function expectCompileError(files, expected) {
 	let msg = "";
+	let err = null;
 	try {
 		await compileHybridProject(files);
 	} catch (e) {
+		err = e;
 		msg = e.message;
 	}
+	assert(
+		err instanceof CompileError && !(err instanceof InternalCompilerError),
+		`expected a user CompileError, got ${err?.name}: ${msg}`,
+	);
+	assert(
+		!msg.includes("internal compiler error"),
+		`a user diagnostic must not be reported as an internal error: ${msg}`,
+	);
 	assert(
 		msg.includes(expected),
 		`expected error containing ${JSON.stringify(expected)}\ngot: ${JSON.stringify(msg)}`,

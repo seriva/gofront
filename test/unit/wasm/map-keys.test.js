@@ -1,10 +1,14 @@
 // GoFront test suite — WASM unhashable map key panics name the dynamic type
 
 import { fileURLToPath } from "node:url";
+import { FunctionEmitter } from "../../../src/backend/wasm/emit.js";
+import { CompileError, InternalCompilerError } from "../../../src/compiler.js";
 import {
+	assert,
 	assertAllTargetsOutput,
 	assertProgramOutput,
 	assertWasmProgramOutput,
+	compileWasm,
 	section,
 	summarize,
 	test,
@@ -208,6 +212,41 @@ func main() {
 }
 `,
 		"203 150 7 8 9\n",
+	);
+});
+
+section("WASM map keys the backend cannot hash are user errors");
+
+test("an unsupported map key type is a CompileError, not an internal error", () => {
+	const original = FunctionEmitter.prototype._unsupportedMapKey;
+	FunctionEmitter.prototype._unsupportedMapKey = () =>
+		"map key type 'chan' is not supported on wasm";
+	let err = null;
+	try {
+		compileWasm(`package main
+
+func main() {
+	var x int
+	m := map[*int]int{}
+	m[&x] = 1
+}
+`);
+	} catch (e) {
+		err = e;
+	} finally {
+		FunctionEmitter.prototype._unsupportedMapKey = original;
+	}
+	assert(
+		err instanceof CompileError && !(err instanceof InternalCompilerError),
+		`expected a user CompileError, got ${err?.name}: ${err?.message}`,
+	);
+	assert(
+		!err.message.includes("internal compiler error"),
+		`message: ${err.message}`,
+	);
+	assert(
+		err.message.includes("map key type 'chan' is not supported on wasm"),
+		`message: ${err.message}`,
 	);
 });
 

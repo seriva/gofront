@@ -154,15 +154,26 @@ func main() {
 	assertEqual(runJs(js), "42");
 });
 
-test("int8, int16, int64 all accepted", () => {
+test("int8, int16, int64 all accepted with explicit conversions", () => {
 	const js = compile(`package main
 func main() {
 	var a int8 = 1
 	var b int16 = 2
 	var c int64 = 3
-	console.log(a + b + c)
+	console.log(int64(a) + int64(b) + c)
 }`).js;
 	assertEqual(runJs(js), "6");
+});
+
+test("int8 + int16 + int64 without conversions is a mismatch", () => {
+	const { errors } = compile(`package main
+func main() {
+	var a int8 = 1
+	var b int16 = 2
+	var c int64 = 3
+	console.log(a + b + c)
+}`);
+	assertErrorContains(errors, "mismatched types int8 and int16");
 });
 
 // ── Struct tags ───────────────────────────────────────────────
@@ -731,6 +742,76 @@ func main() {
 	assertEqual(ok.errors.length, 0);
 });
 
+const anyProducerCases = [
+	[
+		"recover()",
+		`package main
+func main() {
+  defer func() {
+    var n int = recover()
+    _ = n
+  }()
+}`,
+	],
+	[
+		"any(x) conversion",
+		`package main
+func main() {
+  var n int = any(2)
+  _ = n
+}`,
+	],
+	[
+		"v.(any) assertion",
+		`package main
+func main() {
+  var v any = 2
+  var n int = v.(any)
+  _ = n
+}`,
+	],
+	[
+		"type switch default binding",
+		`package main
+func main() {
+  var v any = 2
+  switch x := v.(type) {
+  case string:
+    _ = x
+  default:
+    var n int = x
+    _ = n
+  }
+}`,
+	],
+	[
+		"type switch multi-type case binding",
+		`package main
+func main() {
+  var v any = 2
+  switch x := v.(type) {
+  case string, bool:
+    var n int = x
+    _ = n
+  }
+}`,
+	],
+];
+for (const [name, src] of anyProducerCases) {
+	test(`${name} is a Go any: needs a type assertion`, () => {
+		assertErrorContains(compile(src).errors, "need type assertion");
+	});
+}
+
+test("a JS-dynamic any value stays assignable to int", () => {
+	const { errors } = compile(`package main
+func main() {
+  var n int = document.foo
+  _ = n
+}`);
+	assertEqual(errors.length, 0);
+});
+
 test("v, ok = x.(T) type assertion with = succeeds", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -902,7 +983,12 @@ test("labeled return statement is terminating", () => {
 	const { errors } = compile(`package main
 func f(x int) int {
 result:
-  return x * 2
+  for {
+    if x < 0 {
+      continue result
+    }
+    return x * 2
+  }
 }
 func main() { console.log(f(5)) }`);
 	assertEqual(errors.length, 0);
@@ -973,15 +1059,19 @@ func main() {
 });
 
 test("user-declared any is permissive — no cascade suppression via taint", () => {
-	// GoFront treats 'any' like TS's any: permissive, not Go's strict interface{}.
-	// TAINTED_ANY (error-derived any) suppresses cascades; user 'any' does not taint.
+	// GoFront treats 'any' like TS's any for member access, but arithmetic on a
+	// Go `any` is rejected; TAINTED_ANY (error-derived any) suppresses cascades.
 	const { errors } = compile(`package main
 func main() {
   var x any
   x.SomeMethod()
   _ = x + 1
 }`);
-	assertEqual(errors.length, 0);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"operator + not defined on x (variable of type any)",
+	);
 });
 
 test("function literal assignable to named function type", () => {

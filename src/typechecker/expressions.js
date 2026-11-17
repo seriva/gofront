@@ -1,6 +1,8 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
+import { newLabelScope } from "./statements.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
 	EXCLUDED_STDLIB_PACKAGES,
@@ -14,6 +16,8 @@ import {
 	COMPLEX64,
 	COMPLEX128,
 	compositeLitMaxIndex,
+	copyType,
+	DECLARED_ANY,
 	displayTypeName,
 	ERROR,
 	embeddedFieldName,
@@ -21,6 +25,7 @@ import {
 	FLOAT64,
 	FMT_PRINT_FUNCS,
 	INT,
+	identical,
 	is64BitInt,
 	isAny,
 	isArray,
@@ -49,6 +54,8 @@ import {
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
+
+const TEMPORARY_KINDS = new Set(["CallExpr", "CompositeLit", "TypeAssertExpr"]);
 
 const NILABLE_KINDS = new Set([
 	"slice",
@@ -114,6 +121,7 @@ const BUILTIN_CHECK = {
 	delete: (s, _n, e, at) => {
 		const mt = s._deepUnderlying(at[0]);
 		if (mt?.kind === "map" && e.args[1]) {
+			s.assertAssignable(mt.key, at[1], e.args[1]);
 			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
 			s._markIfaceKey(mt, e.args[1], at[1]);
 		}
@@ -144,7 +152,7 @@ const BUILTIN_CHECK = {
 		if (e.args[0] && at?.[0]) s._markIfaceBox(ANY, at[0], e.args[0]);
 		return VOID;
 	},
-	recover: () => ANY,
+	recover: () => DECLARED_ANY,
 	error: () => ERROR,
 	min: (s, _n, e, at) => s._checkMinMax(e, at),
 	max: (s, _n, e, at) => s._checkMinMax(e, at),
@@ -195,10 +203,22 @@ const CHECK_EXPR_DELEGATE = {
 /** @type {ThisType<TypeChecker>} */
 export const expressionCheckMethods = {
 	checkExpr(expr, scope) {
-		const t = this._checkExpr(expr, scope);
+		let t = this._checkExpr(expr, scope);
+		if (t?.kind === "generic" && !expr._genericOk)
+			t = this._genericValueError(expr);
 		expr._type = t;
 		this._noteConst(expr, scope);
 		return t;
+	},
+
+	// A generic function is a value only once instantiated: its callee (type
+	// arguments inferred from the arguments) and `F[T]` are the two places it
+	// may stand uninstantiated, and they mark their operand `_genericOk`.
+	_genericValueError(expr) {
+		return this.err(
+			`cannot use generic function ${exprText(expr)} without instantiation`,
+			expr,
+		);
 	},
 
 	_checkExpr(expr, scope) {
@@ -225,7 +245,7 @@ export const expressionCheckMethods = {
 				// `(*int)(nil)`: a predeclared type named where a type may stand.
 				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
 					expr._isTypeRef = true;
-					return BASIC_TYPES[expr.name];
+					return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
 				}
 				if (!t) {
 					// The import of an excluded package already reported; its
@@ -299,7 +319,10 @@ export const expressionCheckMethods = {
 				const rt = this.checkExpr(expr.right, scope);
 				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
 				if (isAny(lt) || isAny(rt))
-					return this.binaryResultType(expr.op, ANY, ANY, expr);
+					return (
+						this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
+						this.binaryResultType(expr.op, ANY, ANY, expr)
+					);
 				this._checkConstOperands(expr.op, lt, rt, expr);
 				this._markTypeParamMapNil(expr, lt, rt, scope);
 				const res = this.binaryResultType(expr.op, lt, rt, expr);
@@ -434,7 +457,7 @@ export const expressionCheckMethods = {
 		if (sets.length === 0 || sets.includes(null)) return null;
 		const [first, ...rest] = sets;
 		return first.filter((t) =>
-			rest.every((set) => set.some((u) => typeStr(u) === typeStr(t))),
+			rest.every((set) => set.some((u) => identical(u, t))),
 		);
 	},
 
@@ -493,7 +516,7 @@ export const expressionCheckMethods = {
 		if (node?.kind !== "SelectorExpr" && node?.kind !== "IndexExpr")
 			return false;
 		const bt = node.expr?._type;
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt) ?? bt;
+		const b = this._deepUnderlying(bt) ?? bt;
 		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
 		if (b?.kind === "pointer" || b?.kind === "slice") return false;
 		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
@@ -590,6 +613,13 @@ export const expressionCheckMethods = {
 		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
+		if (expr.op === "*" && ot?._declared && !expr.operand._isTypeRef)
+			return this.err(
+				`invalid operation: cannot indirect ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot))})`,
+				expr.operand,
+			);
+		if (expr.op !== "&" && expr.op !== "*" && ot?._declared)
+			return this._checkDeclaredAnyOperator(expr.op, ot, expr.operand);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
 			return this._checkNumericUnaryOp(ot, expr);
@@ -631,17 +661,46 @@ export const expressionCheckMethods = {
 		return Boolean(generic?.methods?.get(field)?._ptrRecv);
 	},
 
+	// A pointer-receiver method needs `&recv`: a map element or the result of
+	// a call, conversion, literal or assertion has no address. A receiver that
+	// reaches the method through an embedded pointer needs none.
+	_reportUnaddressableRecv(expr) {
+		if (this.receiversChecked) return false;
+		const recv = expr.expr;
+		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
+		if (this._isMapElementOperand(recv)) {
+			this._errMapElementAddress(recv);
+			return true;
+		}
+		if (!this._isTemporaryOperand(recv)) return false;
+		this.err(
+			`cannot call pointer method ${expr.field} on ${typeStr(recv._type)}`,
+			this._positioned(expr),
+		);
+		return true;
+	},
+
+	// A value that exists only for the current expression: the result of a
+	// call, a literal or a type assertion, or a field or array element of one.
+	_isTemporaryOperand(node) {
+		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
+		if (TEMPORARY_KINDS.has(node?.kind)) return true;
+		if (node?.kind === "BinaryExpr") return true;
+		if (node?.kind === "UnaryExpr" && node.op !== "*") return true;
+		const bt = node?.expr?._type;
+		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
+			return this._isTemporaryOperand(node.expr);
+		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
+		return node?.kind === "IndexExpr" && b?.kind === "array"
+			? this._isTemporaryOperand(node.expr)
+			: false;
+	},
+
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
-	_markPtrRecvAddress(expr, base, ft, scope) {
-		if (!ft._ptrRecv) return;
-		if (
-			!this._promotedThroughPointer(expr.expr._type, expr.field) &&
-			this._isMapElementOperand(expr.expr)
-		) {
-			this._errMapElementAddress(expr.expr);
-			return;
-		}
+	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
+		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
+		if (this._reportUnaddressableRecv(expr)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
@@ -737,7 +796,7 @@ export const expressionCheckMethods = {
 		expr._isMethodValue = true;
 		if (baseType.kind === "pointer")
 			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
-		else this._markPtrRecvAddress(expr, base, ft, scope);
+		else this._markPtrRecvAddress(expr, base, ft, scope, recvT);
 	},
 
 	// Whether the identifier `name`, which resolved to `t`, names a type.  A
@@ -834,8 +893,7 @@ export const expressionCheckMethods = {
 		const terms = this._constraintTerms(tp.constraint, new Set(), scope);
 		if (!terms || terms.length === 0) return null;
 		const unders = terms.map((t) => this._deepUnderlying(this.resolveType(t)));
-		const key = typeStr(unders[0]);
-		if (unders.some((u) => !u || typeStr(u) !== key)) return null;
+		if (unders.some((u) => !u || !identical(u, unders[0]))) return null;
 		return unders[0];
 	},
 
@@ -918,6 +976,7 @@ export const expressionCheckMethods = {
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
+		expr.expr._genericOk = true;
 		const bt = this._derefArrayPtr(
 			expr,
 			"expr",
@@ -929,6 +988,7 @@ export const expressionCheckMethods = {
 		}
 		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
+		if (bt?._declared) return this._declaredAnyOperand("index", expr.expr, bt);
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind !== "map")
@@ -992,15 +1052,22 @@ export const expressionCheckMethods = {
 			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
 		};
 		const [dt, st] = at;
-		if (!sharedInfo(dt) && !sharedInfo(st)) return INT;
 		const de = elemOf(dt);
 		const se = elemOf(st);
+		if (!sharedInfo(dt) && !sharedInfo(st)) {
+			if (de && se && !isAny(de) && !isAny(se) && !identical(de, se))
+				this.err(
+					`arguments to copy ${exprText(e.args[0])} and ${exprText(e.args[1])} have different element types (${typeStr(dt)} vs ${typeStr(st)})`,
+					e,
+				);
+			return INT;
+		}
 		if (!de || !se) {
 			this.err(
 				`copy: cannot copy between ${typeStr(dt)} and ${typeStr(st)}`,
 				e,
 			);
-		} else if (typeStr(de) !== typeStr(se)) {
+		} else if (!identical(de, se)) {
 			this.err(
 				`copy: element types differ (${typeStr(dt)} vs ${typeStr(st)})`,
 				e,
@@ -1078,6 +1145,7 @@ export const expressionCheckMethods = {
 			this._checkIntegerConstOperand(bound, "index", scope);
 		}
 		if (bt?._tainted) return TAINTED_ANY;
+		if (bt?._declared) return this._declaredAnyOperand("slice", expr.expr, bt);
 		if (isAny(bt)) return ANY;
 		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array")
@@ -1119,14 +1187,17 @@ export const expressionCheckMethods = {
 			? this.resolveTypeNode(expr.returnType, scope)
 			: VOID;
 		const bodyRet = this._injectNamedReturns(expr.returnType, inner)
-			? { ...ret, _hasNamedReturns: true }
+			? copyType(ret, { _hasNamedReturns: true })
 			: ret;
 		const savedDefer = this._deferCount;
+		const savedLabels = this._labels;
 		this._deferCount = 0;
+		this._labels = newLabelScope();
 		this.checkBlock(expr.body, inner, bodyRet);
 		this._reportUnused(inner, expr);
 		if (this._deferCount > 0) expr.body._hasDefer = true;
 		this._deferCount = savedDefer;
+		this._labels = savedLabels;
 		const paramTypes = expr.params.map((p) =>
 			p.type ? this.resolveTypeNode(p.type, scope) : ANY,
 		);
@@ -1145,7 +1216,7 @@ export const expressionCheckMethods = {
 			srcElem &&
 			!isAny(tgtElem) &&
 			!isAny(srcElem) &&
-			typeStr(tgtElem) !== typeStr(srcElem)
+			!identical(tgtElem, srcElem)
 		)
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
@@ -1168,7 +1239,7 @@ export const expressionCheckMethods = {
 		let i = 0;
 		for (const [name, type] of a.fields) {
 			const [bn, bt] = bf[i++];
-			if (name !== bn || typeStr(type) !== typeStr(bt)) return false;
+			if (name !== bn || !identical(type, bt)) return false;
 		}
 		return true;
 	},
@@ -1249,7 +1320,8 @@ export const expressionCheckMethods = {
 	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr) {
 		const sBase = this._deepUnderlying(srcPtr.base);
 		const tBase = this._deepUnderlying(tgtPtr.base);
-		if (typeStr(sBase) === typeStr(tBase)) return true;
+		// Two struct types are one wasm type only when they are one declaration.
+		if (identical(sBase, tBase) && sBase?.name === tBase?.name) return true;
 		if (!this._sameStructFields(sBase, tBase)) return false;
 		// WebAssembly struct types are nominal: the two pointers could not
 		// share one object.
@@ -1322,7 +1394,7 @@ export const expressionCheckMethods = {
 			);
 			return;
 		}
-		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
+		if (identical(srcResolved, tgtResolved)) return;
 		if (this._sameStructFields(srcResolved, tgtResolved)) return;
 		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
 		if (isString(srcResolved) && isString(tgtResolved)) return;
@@ -1384,10 +1456,31 @@ export const expressionCheckMethods = {
 					`invalid type assertion: ${typeStr(srcType)} is not an interface`,
 					expr,
 				);
+			} else if (this._isImpossibleAssertion(srcType, targetType)) {
+				this.err(
+					`impossible type assertion: ${exprText(expr.expr)}.(${typeStr(targetType)})\n\t${typeStr(targetType)} does not implement ${typeStr(srcType)}`,
+					expr,
+				);
 			}
 		}
 
 		return targetType;
+	},
+
+	// `x.(T)` with a concrete T can only succeed when T has every method of
+	// x's interface type. An interface T, an empty interface, a type parameter
+	// and JS-dynamic or unresolved types are never judged.
+	_isImpossibleAssertion(ifaceType, targetType) {
+		if (!targetType || targetType._tainted || isAny(targetType)) return false;
+		const iface = this.resolveType(
+			ifaceType.kind === "named" ? ifaceType.underlying : ifaceType,
+		);
+		if (iface?.kind !== "interface" || !iface.methods?.size) return false;
+		const target = this.resolveType(targetType);
+		if (!target || target.kind === "typeParam" || target.kind === "interface")
+			return false;
+		if (this._deepUnderlying(target)?.kind === "interface") return false;
+		return !this.implements(target, iface, null);
 	},
 
 	_rangeCollTypeTuple(resolved, collType) {
@@ -1406,12 +1499,52 @@ export const expressionCheckMethods = {
 		return { kind: "tuple", types: [collType] };
 	},
 
+	// `cannot index v (variable of type any)`: a Go `any` needs a type
+	// assertion before it can be indexed or sliced.
+	_declaredAnyOperand(verb, operand, type) {
+		return this.err(
+			`invalid operation: cannot ${verb} ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
+			operand,
+		);
+	},
+
+	_rangeOperandError(node, type) {
+		const untyped = type?.kind === "untyped";
+		return this.err(
+			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)})`,
+			node,
+		);
+	},
+
+	// A range operand of a kind Go rejects: bool, float or complex values,
+	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
+	// parameters and kinds the checker models loosely are left alone.
+	_notRangeable(node, type) {
+		if (!type || type._tainted || isAny(type)) return false;
+		if (type.kind === "untyped")
+			return !(
+				type.base === "string" ||
+				type.base === "int" ||
+				(type.base === "float64" &&
+					constIntValue(this._constValue(node)) !== null)
+			);
+		const u = this._deepUnderlying(type);
+		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
+		return (
+			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
+		);
+	},
+
 	_checkRangeExpr(expr, scope) {
 		const collType = this._derefArrayPtr(
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
+		if (collType?._declared || this._notRangeable(expr.expr, collType)) {
+			const bad = this._rangeOperandError(expr.expr, collType);
+			return { kind: "tuple", types: [bad, bad] };
+		}
 		const resolved = this._underlyingOrCore(collType, scope);
 		// Backends range over the core type of a type parameter.
 		if (collType?.kind === "typeParam" && resolved !== collType)
@@ -1423,6 +1556,7 @@ export const expressionCheckMethods = {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
 		// Generic instantiation: Foo[int] or Foo[int, string]
+		expr.expr._genericOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?.kind === "generic") {
 			const typeArgs = expr.typeArgs.map((ta) =>
@@ -1733,6 +1867,7 @@ export const expressionCheckMethods = {
 
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
+		expr.func._genericOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
 		// `slices.Sort[[]int](xs)` on an emitter-backed (non-generic) stdlib
 		// function: the type arguments are inferred, so call it as `slices.Sort(xs)`.
@@ -1746,6 +1881,7 @@ export const expressionCheckMethods = {
 		this._checkSharedAllocSite(expr, scope);
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
+			expr._builtinName = fnType.name;
 			const argTypes = expr.args.map((a, i) => {
 				// new(T) — first arg is a type name, not a value expression
 				if (fnType.name === "new" && i === 0) return ANY;
@@ -1761,7 +1897,14 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
 		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
 			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
-		if (isAny(fnType)) return ANY;
+		if (fnType?._declared && !expr.func._isTypeRef)
+			return this.err(
+				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
+				expr,
+			);
+		// `(any)(x)` / `type A = any; A(x)` convert like `any(x)`.
+		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef))
+			return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.
@@ -1953,7 +2096,17 @@ export const expressionCheckMethods = {
 			}
 			const targetParam = fnType.params[paramIdx];
 			const node = expr._multiForward ? null : expr.args[i];
-			this.assertAssignable(targetParam, argTypes[i], node, "argument");
+			// A forwarded call carries no per-argument node: report at the call.
+			this._forwardedCall = expr._multiForward ? expr : null;
+			this.assertAssignable(
+				targetParam,
+				argTypes[i],
+				node,
+				"argument",
+				undefined,
+				!expr._isDeferCall,
+			);
+			this._forwardedCall = null;
 		}
 		// `g(f())`: per-element box marks for lowering to split the forward.
 		if (
@@ -2202,9 +2355,19 @@ export const expressionCheckMethods = {
 			}
 			const fieldType = base.fields.get(fieldName);
 			const vt = this.checkExpr(elem, scope);
-			if (fieldType) this.assertAssignable(fieldType, vt, elem);
+			if (fieldType)
+				this.assertAssignable(
+					fieldType,
+					vt,
+					elem,
+					"assignment",
+					undefined,
+					true,
+				);
 			elem._positionalField = fieldName;
 		}
+		if (expr.elems.length < fieldNames.length)
+			this.err(`too few values in struct literal of type ${typeStr(t)}`, expr);
 		return t;
 	},
 
@@ -2219,7 +2382,14 @@ export const expressionCheckMethods = {
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
 					const vt = this.checkExpr(elem.value, scope);
-					this.assertAssignable(fieldType, vt, elem.value);
+					this.assertAssignable(
+						fieldType,
+						vt,
+						elem.value,
+						"assignment",
+						undefined,
+						true,
+					);
 				} else {
 					this.err(`Unknown field '${keyName}'`, elem.key);
 				}
@@ -2257,11 +2427,25 @@ export const expressionCheckMethods = {
 					);
 				} else {
 					const vt = this.checkExpr(elem.value, scope);
-					this.assertAssignable(base.elem, vt, elem.value);
+					this.assertAssignable(
+						base.elem,
+						vt,
+						elem.value,
+						"assignment",
+						undefined,
+						true,
+					);
 				}
 			} else {
 				const et = this.checkExpr(elem, scope);
-				this.assertAssignable(base.elem, et, elem);
+				this.assertAssignable(
+					base.elem,
+					et,
+					elem,
+					"assignment",
+					undefined,
+					true,
+				);
 			}
 		}
 
@@ -2280,6 +2464,7 @@ export const expressionCheckMethods = {
 	},
 
 	_checkMapCompositeLit(expr, scope, t, base) {
+		const seenKeys = [];
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				let kt;
@@ -2301,8 +2486,20 @@ export const expressionCheckMethods = {
 					vt = this.checkExpr(elem.value, scope);
 				}
 				this.assertAssignable(base.key, kt, elem.key);
+				if (this._isDuplicateConst(seenKeys, elem.key, base.key, true))
+					this.err(
+						`duplicate key ${exprText(elem.key)} in map literal`,
+						elem.key,
+					);
 				this._markIfaceKey(base, elem.key, kt);
-				this.assertAssignable(base.value, vt, elem.value);
+				this.assertAssignable(
+					base.value,
+					vt,
+					elem.value,
+					"assignment",
+					undefined,
+					true,
+				);
 			}
 		}
 		return t;

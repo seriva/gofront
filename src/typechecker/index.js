@@ -15,13 +15,14 @@ import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
-import { statementCheckMethods } from "./statements.js";
+import { newLabelScope, statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
 import { setupGlobals } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
 	BOOL,
+	copyType,
 	defaultType,
 	ERROR,
 	INTRINSICS,
@@ -126,6 +127,7 @@ export class TypeChecker {
 		this._switchDepth = 0; // for break/fallthrough validation
 		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
+		this._labels = newLabelScope(); // labels of the current function body
 		this._imports = []; // tracked imports for unused-import detection
 		// Lazy body checking (Go-source stdlib): with `lazyBodies` set, checkAll
 		// types declarations only and `checkBody` types a function or method
@@ -335,7 +337,10 @@ export class TypeChecker {
 
 	_reportUnused(scope, node) {
 		for (const name of scope.unusedLocals()) {
-			this.err(`'${name}' declared and not used`, node);
+			this.err(
+				`'${name}' declared and not used`,
+				scope.localNode(name) ?? node,
+			);
 		}
 	}
 
@@ -967,6 +972,7 @@ export class TypeChecker {
 					: { kind: "named", name: decl.name };
 			// Registered before the fields resolve so `Next *List[T]` finds the
 			// generic declaration it is part of.
+			named._declNode = decl;
 			if (preset?.declNode === decl) named._generic = preset;
 			else named._generic = { typeParams: typeParamTypes, declNode: decl };
 			this.types.set(decl.name, named);
@@ -1007,6 +1013,7 @@ export class TypeChecker {
 				? existing
 				: { kind: "named", name: decl.name };
 		named.underlying = underlying;
+		named._declNode = decl;
 		named._target = this.target;
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
@@ -1506,17 +1513,20 @@ export class TypeChecker {
 			: VOID;
 		const hasNamedReturns = this._injectNamedReturns(decl.returnType, inner);
 		if (hasNamedReturns && returnType)
-			returnType = { ...returnType, _hasNamedReturns: true };
+			returnType = copyType(returnType, { _hasNamedReturns: true });
 		return returnType;
 	}
 
 	_runFuncBody(decl, inner, returnType) {
 		const savedDefer = this._deferCount;
+		const savedLabels = this._labels;
 		this._deferCount = 0;
+		this._labels = newLabelScope();
 		this.checkBlock(decl.body, inner, returnType);
 		this._reportUnused(inner, decl);
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
+		this._labels = savedLabels;
 		decl._returnType = returnType;
 	}
 
@@ -1560,12 +1570,15 @@ export class TypeChecker {
 							vt,
 							spec.value[i] ?? spec.value[0],
 							"variable declaration",
+							undefined,
+							spec.names.length === spec.value.length,
 						);
-					scope.defineLocal(spec.names[i], varType);
+					scope.defineLocal(spec.names[i], varType, spec._namePos?.[i]);
 				}
 			} else {
 				if (!type) type = ANY;
-				for (const name of spec.names) scope.defineLocal(name, type);
+				for (let i = 0; i < spec.names.length; i++)
+					scope.defineLocal(spec.names[i], type, spec._namePos?.[i]);
 			}
 		}
 		this._sharedAllocOk = savedSharedAlloc;

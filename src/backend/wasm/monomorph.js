@@ -867,6 +867,9 @@ export function monomorphise(programs, checker) {
 	// The programs were checked once already, where `//gofront:native` is
 	// limited to the standard library; this pass only re-annotates them.
 	monoChecker.nativesChecked = true;
+	// Likewise the receivers of pointer methods: the first check decided which
+	// are addressable, so a mangled instance name never reports one here.
+	monoChecker.receiversChecked = true;
 	if (checker?.types) {
 		for (const [name, type] of checker.types.entries()) {
 			if (!monoChecker.types.has(name)) {

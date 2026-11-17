@@ -266,10 +266,11 @@ section("recover()");
 
 test("recover catches a panic and returns the message", () => {
 	const js = compile(`package main
+import "errors"
 func safeDo(fn func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = error(r)
+			err = errors.New(r.(string))
 		}
 	}()
 	fn()
@@ -279,17 +280,18 @@ func main() {
 	err := safeDo(func() {
 		panic("something went wrong")
 	})
-	console.log(err)
+	console.log(err.Error())
 }`).js;
 	assertEqual(runJs(js), "something went wrong");
 });
 
 test("recover returns nil when no panic", () => {
 	const js = compile(`package main
+import "errors"
 func safeDo(fn func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = error(r)
+			err = errors.New(r.(string))
 		}
 	}()
 	fn()

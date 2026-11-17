@@ -119,6 +119,16 @@ function _isTypeIntroducerToken(tt) {
 	);
 }
 
+// Records the leftmost token of an expression on its node (unless the node
+// already carries a position) and returns the node.
+function at(node, tok) {
+	if (node._line === undefined) {
+		node._line = tok.line;
+		node._col = tok.col;
+	}
+	return node;
+}
+
 export const expressionParserMethods = {
 	parseExprList(noCompLit = false) {
 		const exprs = [this.parseExpr(0, noCompLit)];
@@ -129,13 +139,14 @@ export const expressionParserMethods = {
 	// noCompLit=true disables composite literal parsing in if/for/switch conditions
 	// to resolve the ambiguity between "if x {" and "if Type{ } {"
 	parseExpr(minPrec = 0, noCompLit = false) {
+		const start = this.peek();
 		let left = this.parseUnary(noCompLit);
 		while (true) {
 			const prec = PREC[this.peek().type];
 			if (!prec || prec <= minPrec) break;
 			const op = this.advance().value;
 			const right = this.parseExpr(prec, noCompLit);
-			left = { kind: "BinaryExpr", left, op, right };
+			left = at({ kind: "BinaryExpr", left, op, right }, start);
 		}
 		return left;
 	},
@@ -154,12 +165,13 @@ export const expressionParserMethods = {
 		}
 		if (t.type === T.AWAIT) {
 			this.advance();
-			return { kind: "AwaitExpr", expr: this.parseUnary(noCompLit) };
+			return at({ kind: "AwaitExpr", expr: this.parseUnary(noCompLit) }, t);
 		}
 		return this.parsePostfix(noCompLit);
 	},
 
 	parsePostfix(noCompLit = false) {
+		const start = this.peek();
 		let expr = this.parsePrimary();
 		while (true) {
 			const t = this.peek();
@@ -172,15 +184,15 @@ export const expressionParserMethods = {
 					if (this.check(T.TYPE)) {
 						this.advance();
 						this.expect(T.RPAREN);
-						expr = { kind: "TypeSwitchExpr", expr };
+						expr = at({ kind: "TypeSwitchExpr", expr }, start);
 					} else {
 						const type = this.parseType();
 						this.expect(T.RPAREN);
-						expr = { kind: "TypeAssertExpr", expr, type };
+						expr = at({ kind: "TypeAssertExpr", expr, type }, start);
 					}
 				} else {
 					const field = this.advance().value;
-					expr = { kind: "SelectorExpr", expr, field };
+					expr = at({ kind: "SelectorExpr", expr, field }, start);
 				}
 			} else if (t.type === T.LBRACKET) {
 				// Check if this looks like generic type args: Ident[Type](...)  or Ident[Type]{...}
@@ -197,6 +209,7 @@ export const expressionParserMethods = {
 						expr,
 						typeArgs: literalArgs,
 						_line: expr._line,
+						_col: expr._col,
 					};
 				} else if (plainArgs) {
 					this.advance(); // consume [
@@ -208,6 +221,7 @@ export const expressionParserMethods = {
 						expr,
 						typeArgs,
 						_line: expr._line,
+						_col: expr._col,
 					};
 				} else {
 					this.advance();
@@ -222,20 +236,20 @@ export const expressionParserMethods = {
 							max = this.parseExpr();
 						}
 						this.expect(T.RBRACKET);
-						expr = { kind: "SliceExpr", expr, low, high, max };
+						expr = at({ kind: "SliceExpr", expr, low, high, max }, start);
 					} else {
 						this.expect(T.RBRACKET);
-						expr = { kind: "IndexExpr", expr, index: low };
+						expr = at({ kind: "IndexExpr", expr, index: low }, start);
 					}
 				}
 			} else if (t.type === T.LPAREN) {
-				expr = this.parseCall(expr);
+				expr = at(this.parseCall(expr), start);
 			} else if (
 				t.type === T.LBRACE &&
 				!noCompLit &&
 				this.isCompositeLitContext(expr)
 			) {
-				expr = this.parseCompositeLit(expr);
+				expr = at(this.parseCompositeLit(expr), start);
 			} else {
 				break;
 			}
@@ -389,7 +403,7 @@ export const expressionParserMethods = {
 						if (this.match(T.ELLIPSIS)) arg._spread = true;
 						args.push(arg);
 					} else {
-						args.push({ kind: "TypeExpr", type: typeNode });
+						args.push(at({ kind: "TypeExpr", type: typeNode }, t));
 					}
 				} else {
 					const arg = this.parseExpr();
@@ -419,9 +433,11 @@ export const expressionParserMethods = {
 	},
 
 	parseCompositeLit(typeExpr) {
+		const open = this.peek();
 		this.expect(T.LBRACE);
 		const elems = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
+			const elemStart = this.peek();
 			// Implicit composite literal: {X: 1} inside []Point{{X:1}} or map[string]Point{"a": {X:1}}
 			if (this.check(T.LBRACE)) {
 				const lit = this.parseCompositeLit(null); // null typeExpr = inferred
@@ -430,7 +446,9 @@ export const expressionParserMethods = {
 					const val = this.check(T.LBRACE)
 						? this.parseCompositeLit(null)
 						: this.parseExpr();
-					elems.push({ kind: "KeyValueExpr", key: lit, value: val });
+					elems.push(
+						at({ kind: "KeyValueExpr", key: lit, value: val }, elemStart),
+					);
 				} else {
 					elems.push(lit);
 				}
@@ -441,7 +459,9 @@ export const expressionParserMethods = {
 					const val = this.check(T.LBRACE)
 						? this.parseCompositeLit(null)
 						: this.parseExpr();
-					elems.push({ kind: "KeyValueExpr", key: first, value: val });
+					elems.push(
+						at({ kind: "KeyValueExpr", key: first, value: val }, elemStart),
+					);
 				} else {
 					elems.push(first);
 				}
@@ -449,7 +469,10 @@ export const expressionParserMethods = {
 			this.match(T.COMMA);
 		}
 		this.expect(T.RBRACE);
-		return { kind: "CompositeLit", typeExpr, elems };
+		const lit = { kind: "CompositeLit", typeExpr, elems };
+		// An elided type starts at its `{`; otherwise the caller positions the
+		// literal at the start of its type.
+		return typeExpr === null ? at(lit, open) : lit;
 	},
 
 	parsePrimary() {

@@ -201,6 +201,17 @@ async func main() {
 	assertEqual(errors.length, 0);
 });
 
+test("await call is a valid expression statement", () => {
+	const { errors } = compile(`package main
+async func work() string {
+  return "hello"
+}
+async func main() {
+  await work()
+}`);
+	assertEqual(errors.length, 0);
+});
+
 test("async function literal", () => {
 	const { errors } = compile(`package main
 func main() {
@@ -433,7 +444,7 @@ func main() {
 test("closure over loop variable via capture", () => {
 	const { js } = compile(`package main
 func main() {
-  fns := []any{}
+  fns := []func() int{}
   for i := 0; i < 3; i++ {
     captured := i
     fns = append(fns, func() int { return captured })
@@ -672,6 +683,9 @@ func main() {
 outer:
 inner:
 	for n := n + 1; n < 3; n++ {
+		if n > 5 {
+			break inner
+		}
 		continue outer
 	}
 	_ = n
