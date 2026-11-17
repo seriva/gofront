@@ -218,7 +218,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/assignability.js` (`_checkIntegerCmpKinds` → `_checkCmpOperandTypes`)
   - Test: delete `// pending:` from the S6 cases (`mismatched types float64 and int`, `Celsius and Fahrenheit`, `S and string`); `s09h` (`any == 2`) and `window == nil` stay accepted
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 3.3: `%` and bit operators require integer operands (S7)
+- [x] Task 3.3: `%` and bit operators require integer operands (S7)
   - Files: `src/typechecker/assignability.js`
   - Test: delete `// pending:` from the S7 cases (`operator % not defined on a (variable of type float64)`, the same for `&` and `|`). New reject case: compound `f %= 2.0`
   - Done when: those cases pass on `wasm` as compile errors instead of the `f64.and` crash, and `npm test` passes

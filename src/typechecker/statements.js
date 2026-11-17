@@ -263,6 +263,8 @@ export const statementCheckMethods = {
 					this.resolveType(r),
 					stmt.rhs[i],
 				);
+			if (stmt.op !== "=" && stmt.op !== ":=")
+				this._checkCompoundIntegerOnly(stmt.op, lhsTypes[i], stmt.lhs[i]);
 			// A shift count is not converted to the left operand's type.
 			if (stmt.op === "<<=" || stmt.op === ">>=") {
 				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);

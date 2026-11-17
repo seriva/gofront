@@ -47,6 +47,9 @@ const TYPE_LITERAL_KINDS = new Set([
 	"struct",
 ]);
 
+// Operators defined on integer operands only.
+const INTEGER_ONLY_OPS = new Set(["%", "&", "|", "^", "&^"]);
+
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
@@ -123,7 +126,7 @@ export const assignabilityMethods = {
 		if ((op === "<<" || op === ">>") && isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
-			return this._binaryResultTypeNumeric(lt, rt, node);
+			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
 			return this._binaryResultTypeString(lt, rt);
 		if (node)
@@ -194,7 +197,9 @@ export const assignabilityMethods = {
 		return COMPLEX128;
 	},
 
-	_binaryResultTypeNumeric(lt, rt, node) {
+	_binaryResultTypeNumeric(op, lt, rt, node) {
+		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
+		this._checkIntegerOnlyOperator(op, lt, rt, node);
 		const lName = lt.kind === "untyped" ? lt.base : lt.name;
 		const rName = rt.kind === "untyped" ? rt.base : rt.name;
 		const lFloat = lName === "float32" || lName === "float64";
@@ -205,7 +210,6 @@ export const assignabilityMethods = {
 		// An untyped constant takes the type of the typed operand.
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
-		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
 		if (lt.name === "float32" && rt.name === "float32") return lt;
 		return isFloat ? FLOAT64 : lt;
 	},
@@ -221,6 +225,42 @@ export const assignabilityMethods = {
 			node,
 		);
 		return false;
+	},
+
+	// `%`, `&`, `|`, `^` and `&^` are defined on integers only. The typed
+	// operand decides; two untyped constants are integers unless one is a
+	// float constant (`5.5 % 2.0`).
+	_checkIntegerOnlyOperator(op, lt, rt, node) {
+		if (!node || !INTEGER_ONLY_OPS.has(op)) return;
+		const operands = [
+			[lt, node.left],
+			[rt, node.right],
+		];
+		const typed = operands.find(([t]) => t.kind !== "untyped");
+		const bad = (typed ? [typed] : operands).find(([t]) => !isInteger(t));
+		if (bad) this._reportIntegerOnly(op, bad[0], bad[1]);
+	},
+
+	// `f %= 2.0` with a non-integer `f`: the same rule as the binary form.
+	_checkCompoundIntegerOnly(stmtOp, lhsType, lhsExpr) {
+		const op = stmtOp.slice(0, -1);
+		if (!INTEGER_ONLY_OPS.has(op)) return;
+		const t = lhsType && this.resolveType(lhsType);
+		if (!this._isTypedBasicOperand(t) || isInteger(t)) return;
+		this._reportIntegerOnly(op, t, lhsExpr);
+	},
+
+	_reportIntegerOnly(op, type, operand) {
+		const isConst = type.kind === "untyped";
+		const kind = operandKind(
+			operand,
+			isConst ? type.base : typeStr(type),
+			isConst,
+		);
+		this.err(
+			`invalid operation: operator ${op} not defined on ${exprText(operand)} (${kind})`,
+			operand,
+		);
 	},
 
 	// Comparing two typed operands of basic types needs identical types

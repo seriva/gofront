@@ -218,6 +218,65 @@ func main() {
 	);
 });
 
+section("Integer-only operators");
+
+test("% and bit operators reject floats, including through constants", () => {
+	rejectsEverywhere(
+		`package main
+func main() {
+	f := 1.5
+	_ = f % 2
+}`,
+		"operator % not defined on f (variable of type float64)",
+	);
+	rejectsEverywhere(
+		`package main
+func main() {
+	f := 1.5
+	_ = 3 & f
+}`,
+		"operator & not defined on f (variable of type float64)",
+	);
+	rejectsEverywhere(
+		`package main
+func main() {
+	_ = 5.5 % 2.0
+}`,
+		"operator % not defined on 5.5 (untyped float constant)",
+	);
+	rejectsEverywhere(
+		`package main
+type Celsius float64
+func main() {
+	var c Celsius = 1
+	c &^= 1
+}`,
+		"operator &^ not defined on c (variable of type Celsius)",
+	);
+});
+
+test("integers keep every integer-only operator, with untyped constants", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type Mode uint8
+func Mod[T ~int | ~int64](a, b T) T { return a % b }
+func main() {
+	var x uint8 = 14
+	var m Mode = 6
+	n := 7
+	x %= 5
+	m |= 1
+	m ^= 2
+	n &^= 2
+	n %= 4
+	fmt.Println(x, m, n, 7%3, n&1|2^1, m&^1, Mod(9, 4), n%2.0)
+}
+`,
+		"4 5 1 1 2 4 1 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

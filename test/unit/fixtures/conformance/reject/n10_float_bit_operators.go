@@ -1,4 +1,3 @@
-// pending: S7
 package main
 
 func main() {
