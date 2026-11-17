@@ -261,7 +261,7 @@ export const statementCheckMethods = {
 		let node = e;
 		while (node.kind === "ParenExpr") node = node.expr;
 		const bt = node.expr?._type;
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
+		const b = this._deepUnderlying(bt);
 		if (node.kind === "IndexExpr" && isString(b))
 			this.err(
 				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
@@ -543,7 +543,11 @@ export const statementCheckMethods = {
 			else if (!isBool(ct) && !isAny(ct))
 				this.err("For condition must be bool", stmt);
 		} else {
-			const ct = this.checkExpr(stmt.cond.expr, inner);
+			const ct = this._derefArrayPtr(
+				stmt.cond,
+				"expr",
+				this.checkExpr(stmt.cond.expr, inner),
+			);
 			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
 				this._rangeOperandError(stmt.cond.expr, ct);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;

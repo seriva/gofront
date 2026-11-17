@@ -504,7 +504,7 @@ export const expressionCheckMethods = {
 		if (node?.kind !== "SelectorExpr" && node?.kind !== "IndexExpr")
 			return false;
 		const bt = node.expr?._type;
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt) ?? bt;
+		const b = this._deepUnderlying(bt) ?? bt;
 		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
 		if (b?.kind === "pointer" || b?.kind === "slice") return false;
 		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
@@ -672,6 +672,8 @@ export const expressionCheckMethods = {
 	_isTemporaryOperand(node) {
 		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
 		if (TEMPORARY_KINDS.has(node?.kind)) return true;
+		if (node?.kind === "BinaryExpr") return true;
+		if (node?.kind === "UnaryExpr" && node.op !== "*") return true;
 		const bt = node?.expr?._type;
 		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
 			return this._isTemporaryOperand(node.expr);
@@ -683,8 +685,8 @@ export const expressionCheckMethods = {
 
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
-	_markPtrRecvAddress(expr, base, ft, scope) {
-		if (!ft._ptrRecv) return;
+	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
+		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
 		if (this._reportUnaddressableRecv(expr)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
@@ -781,7 +783,7 @@ export const expressionCheckMethods = {
 		expr._isMethodValue = true;
 		if (baseType.kind === "pointer")
 			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
-		else this._markPtrRecvAddress(expr, base, ft, scope);
+		else this._markPtrRecvAddress(expr, base, ft, scope, recvT);
 	},
 
 	// Whether the identifier `name`, which resolved to `t`, names a type.  A
