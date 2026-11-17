@@ -95,31 +95,20 @@ const BUILTIN_CHECK = {
 			);
 			return st;
 		}
-		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
-		if (sb?.kind === "slice") {
-			const is64 = is64BitInt(sb.elem);
-			for (let i = 1; i < e.args.length; i++) {
-				if (e.args[i]._spread)
-					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
-				if (!e.args[i]._spread && at[i]) {
-					if (is64) e.args[i]._is64Bit = true;
-					s._tagComplexConst(
-						s.resolveType(sb.elem),
-						s.resolveType(at[i]),
-						e.args[i],
-					);
-					s._markIfaceBox(
-						s.resolveType(sb.elem),
-						s.resolveType(at[i]),
-						e.args[i],
-					);
-				}
-			}
+		if (!s._appendOperandOk(st)) {
+			s.err(
+				`invalid append: argument must be a slice; have ${exprText(e.args[0])} (${s._capOperandKind(e.args[0], st)})`,
+				e,
+			);
+			return st;
 		}
+		const sb = s._deepUnderlying(st);
+		if (sb?.kind === "slice") s._checkAppendArgs(sb, e, at);
 		return st;
 	},
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
 	delete: (s, _n, e, at) => {
+		s._checkDeleteOperand(e, at[0]);
 		const mt = s._deepUnderlying(at[0]);
 		if (mt?.kind === "map" && e.args[1]) {
 			s.assertAssignable(mt.key, at[1], e.args[1]);
@@ -157,7 +146,10 @@ const BUILTIN_CHECK = {
 	error: () => ERROR,
 	min: (s, _n, e, at) => s._checkMinMax(e, at),
 	max: (s, _n, e, at) => s._checkMinMax(e, at),
-	clear: () => VOID,
+	clear: (s, _n, e, at) => {
+		s._checkClearOperand(e, at[0]);
+		return VOID;
+	},
 	complex: (s, _n, e, at) => s._checkBuiltinComplex(e, at),
 	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
 	imag: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
@@ -964,7 +956,40 @@ export const expressionCheckMethods = {
 	// conversion; other values are keyed as they are.
 	// Untyped constant operands take the result type, so a float32 result
 	// rounds them like the typed operands.
+	// `clear` takes a map or a slice.
+	_checkClearOperand(e, t) {
+		if (!t || t._tainted || t.kind === "typeParam" || anyKind(t) === "dynamic")
+			return;
+		const kind = this._deepUnderlying(t)?.kind;
+		if (kind === "map" || kind === "slice") return;
+		this.err(
+			`invalid argument: cannot clear ${exprText(e.args[0])} (${this._capOperandKind(e.args[0], t)}): argument must be (or constrained by) map or slice`,
+			e,
+		);
+	},
+
+	// `min` and `max` take ordered operands: numbers and strings.
+	_orderedOperandOk(t) {
+		if (!t || t._tainted) return true;
+		if (t.kind === "untyped")
+			return (
+				t.base !== "bool" && t.base !== "nil" && !t.base.startsWith("complex")
+			);
+		if (anyKind(t) === "go") return false;
+		const u = this._deepUnderlying(t);
+		if (!u || u.kind === "typeParam" || isAny(u)) return true;
+		return u.kind === "basic" && !/^(bool|complex(64|128))$/.test(u.name);
+	},
+
 	_checkMinMax(e, at) {
+		for (let i = 0; i < e.args.length; i++) {
+			if (this._orderedOperandOk(at[i])) continue;
+			this.err(
+				`invalid argument: ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], at[i])}) cannot be ordered`,
+				e,
+			);
+			return ANY;
+		}
 		const rt = minMaxType(at);
 		for (let i = 0; i < e.args.length; i++)
 			this._tagFloat32Const(rt, at[i], e.args[i]);
@@ -1068,12 +1093,39 @@ export const expressionCheckMethods = {
 
 	// copy(dst, src): element types must be identical when either side is a
 	// shared buffer (the wasm emitter uses one element type for both sides).
+	// `copy` takes slices; a string may be the source.
+	// Element type of a copy destination slice or shared buffer.
+	_copyElem(t) {
+		const u = this._deepUnderlying(t);
+		return u?.kind === "slice" || u?.kind === "shared"
+			? this.resolveType(u.elem)
+			: null;
+	},
+
+	_checkCopyOperands(e, dt, st) {
+		const bad = (t, i) => {
+			if (i === 1 && this._isStringIntoBytes(this._copyElem(dt), t))
+				return false;
+			return !this._appendOperandOk(t);
+		};
+		for (const [i, t] of [dt, st].entries()) {
+			if (!bad(t, i)) continue;
+			this.err(
+				`invalid copy: argument must be a slice; have ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], t)})`,
+				e,
+			);
+			return false;
+		}
+		return true;
+	},
+
 	_checkBuiltinCopy(e, at) {
 		const elemOf = (t) => {
 			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
 			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
 		};
 		const [dt, st] = at;
+		if (!this._checkCopyOperands(e, dt, st)) return INT;
 		const de = elemOf(dt);
 		const se = elemOf(st);
 		if (!sharedInfo(dt) && !sharedInfo(st)) {
@@ -2114,6 +2166,14 @@ export const expressionCheckMethods = {
 					: i;
 			if (expr.args[i]?._spread) {
 				this._rejectSeqAsSlice(argTypes[i], expr.args[i], "a spread argument");
+				// `f(xs...)` passes xs as the whole variadic slice.
+				if (fnType.variadic && paramIdx === fnType.params.length - 1)
+					this.assertAssignable(
+						{ kind: "slice", elem: fnType.params[paramIdx] },
+						this._deepUnderlying(argTypes[i]),
+						expr.args[i],
+						"argument",
+					);
 				continue;
 			}
 			const targetParam = fnType.params[paramIdx];
@@ -2215,7 +2275,7 @@ export const expressionCheckMethods = {
 	// one with no single core type is left to instantiation. Unknown and
 	// `any` operands (JS interop) are not judged.
 	_capOperandOk(t, scope) {
-		if (!t || t._tainted || isAny(t)) return true;
+		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
 		if (t.kind === "typeParam") {
 			const core = this._coreType(t, scope);
 			return !core || core.kind === "slice" || core.kind === "array";
@@ -2224,8 +2284,85 @@ export const expressionCheckMethods = {
 		return kind === "slice" || kind === "array";
 	},
 
+	// `len` takes a string, array (or pointer to one), slice or map; a Go `any`
+	// needs a type assertion first, while a JS-dynamic value is not judged.
+	_lenOperandOk(t) {
+		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
+		if (t.kind === "untyped") return t.base === "string";
+		if (anyKind(t) === "go") return false;
+		let u = this._deepUnderlying(t);
+		if (u?.kind === "pointer") u = this._deepUnderlying(u.base);
+		else if (u?.kind === "basic") return u.name === "string";
+		return (
+			u?.kind === "array" ||
+			u?.kind === "slice" ||
+			u?.kind === "map" ||
+			u?.kind === "shared" ||
+			u?.kind === "typeParam"
+		);
+	},
+
+	// `delete` takes a map; a type parameter and a JS-dynamic value are not
+	// judged.
+	_checkDeleteOperand(expr, t) {
+		if (!t || t._tainted || t.kind === "typeParam" || anyKind(t) === "dynamic")
+			return;
+		if (this._deepUnderlying(t)?.kind === "map") return;
+		this.err(
+			`invalid argument: ${exprText(expr.args[0])} (${this._capOperandKind(expr.args[0], t)}) is not a map`,
+			expr,
+		);
+	},
+
+	// `append` takes a slice; a type parameter and a JS-dynamic value are not
+	// judged, and arrays and shared buffers have their own messages.
+	_appendOperandOk(t) {
+		if (!t || t._tainted || t.kind === "typeParam") return true;
+		if (anyKind(t) === "go") return false;
+		const u = this._deepUnderlying(t);
+		if (!u || isAny(u)) return true;
+		return u.kind === "slice" || u.kind === "shared" || u.kind === "typeParam";
+	},
+
+	// Each appended element must be assignable to the slice's element type;
+	// `xs...` must be assignable to the slice type, except that a string
+	// spreads into a `[]byte`.
+	_checkAppendArgs(sliceType, e, at) {
+		const elem = this.resolveType(sliceType.elem);
+		const is64 = is64BitInt(sliceType.elem);
+		for (let i = 1; i < e.args.length; i++) {
+			const arg = e.args[i];
+			if (!at[i]) continue;
+			if (arg._spread) {
+				this._rejectSeqAsSlice(at[i], arg, "a spread argument");
+				if (!this._isStringIntoBytes(elem, at[i]))
+					this.assertAssignable(
+						{ kind: "slice", elem: sliceType.elem },
+						this._deepUnderlying(at[i]),
+						arg,
+						"argument to append",
+					);
+				continue;
+			}
+			if (is64) arg._is64Bit = true;
+			this.assertAssignable(elem, at[i], arg, "argument to append", arg, true);
+		}
+	},
+
+	_isStringIntoBytes(elem, t) {
+		const u = this._deepUnderlying(t);
+		const isString =
+			t?.kind === "untyped" ? t.base === "string" : u?.name === "string";
+		return isString && elem?.kind === "basic" && elem.name === "uint8";
+	},
+
 	_checkBuiltinLen(name, expr, argTypes, scope) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
+		if (name === "len" && !this._lenOperandOk(argTypes[0]))
+			this.err(
+				`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for built-in len`,
+				expr,
+			);
 		const operand = expr.args?.[0];
 		if (expr.args?.length === 1)
 			argTypes[0] = this._derefArrayPtr(expr.args, 0, argTypes[0]);

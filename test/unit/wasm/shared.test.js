@@ -348,7 +348,7 @@ func main() {
 	copy(buf, m)
 }
 `);
-	assertErrorContains(r2.errors, "cannot copy between");
+	assertErrorContains(r2.errors, "invalid copy: argument must be a slice");
 	const ok = compile(`package main
 
 import "gofront/shared"

@@ -290,15 +290,15 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
   - Done when: `grep -rn "ot === ANY" src/typechecker` is empty and `NON_INTEGER_BASICS` has no `"any"`
 
 ### Phase 4: Builtin operand contracts (root `builtin-operands`)
-- [ ] Task 4.1: `len`, `cap`, `delete` and spread check operand kinds (R4.1, R4.2, R4.4, R4.5, R4.10)
+- [x] Task 4.1: `len`, `cap`, `delete` and spread check operand kinds (R4.1, R4.2, R4.4, R4.5, R4.10)
   - Files: `src/typechecker/expressions.js`
   - Test: reject fixtures `builtin_len_any.go`, `builtin_len_empty_iface.go`, `builtin_len_int.go`, `builtin_delete_any.go`, `spread_any.go`; accept JS-dynamic `len(window.x)` on `js`
   - Done when: Go's messages on all targets, no wasm ICE
-- [ ] Task 4.2: `append` checks its slice, element and spread assignability (R4.3, R4.6, R4.7, R4.12)
+- [x] Task 4.2: `append` checks its slice, element and spread assignability (R4.3, R4.6, R4.7, R4.12)
   - Files: `src/typechecker/expressions.js`
   - Test: reject fixtures `append_any.go`, `append_elem_struct.go`, `append_elem_string_to_int.go`, `append_spread_mismatch.go`; accept `append([]struct{ X int }{}, A{5})` (assignable; its `wasm` codegen is `wasm-struct-types-plan.md` W1.8, so the accept case runs `js`/`both` until that lands) and `append(b, "x"...)` on `[]byte`
   - Done when: Go's messages on all targets
-- [ ] Task 4.3: `clear`, `copy`, `min` and `max` check operand kinds (R4.8, R4.9, R4.11)
+- [x] Task 4.3: `clear`, `copy`, `min` and `max` check operand kinds (R4.8, R4.9, R4.11)
   - Files: `src/typechecker/expressions.js`
   - Test: reject fixtures `builtin_clear_any.go`, `builtin_copy_any.go`, `builtin_min_any.go`; the existing `copy`/`min`/`max` accept cases unchanged
   - Done when: Go's messages on all targets, no wasm ICE

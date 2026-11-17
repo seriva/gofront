@@ -152,6 +152,12 @@ Values that come from JavaScript stay dynamic: browser globals and their members
 - **Labels** belong to one function. `break L` needs `L` to label an enclosing `for` or `switch` statement and `continue L` an enclosing loop, a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
 - **Unused values**: only calls and `await` expressions may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
 
+#### Builtin operands
+
+- **`len`** takes a string, array (or pointer to one), slice or map: `len(5)`, `len(p)` with `p` an `*int`, and `len(v)` with `v` a Go `any` are `invalid argument: ... for built-in len`. `delete` needs a map, `clear` a map or slice, `copy` and `append` slices (`copy` may take a string source into a `[]byte`), and `min` and `max` integers, floats or strings.
+- **`append`** checks each element against the slice's element type (`append([]int{}, "a")` is an error) and `xs...` against the slice type, except that a string spreads into a `[]byte`. A call `f(xs...)` likewise needs `xs` to match the variadic parameter's slice type.
+- Dynamic JavaScript values (see above) are accepted by all of these.
+
 #### Literals and duplicates
 
 - **Struct literals**: a positional literal lists every field (`S{1}` for a struct with two fields is `too few values in struct literal of type S`); a keyed literal may omit fields, and the two forms do not mix.

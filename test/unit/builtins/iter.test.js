@@ -677,7 +677,7 @@ func main() {
 	assertErrorContains(errors, "use slices.Collect(seq) for a slice");
 });
 
-test("plain func types keep len/cap/spread leniency", () => {
+test("len of a plain func is the generic operand error, not the iterator hint", () => {
 	const errors = compileErrors(`package main
 
 func main() {
@@ -685,7 +685,8 @@ func main() {
 	_ = len(f)
 }
 `);
-	assertEqual(errors[0].message, "");
+	assertErrorContains(errors, "for built-in len");
+	assert(!errors[0].message.includes("slices.Collect"));
 });
 
 section("strings and bytes: sequence members");
