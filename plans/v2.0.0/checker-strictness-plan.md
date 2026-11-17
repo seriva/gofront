@@ -248,7 +248,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Done when: those cases pass, `npm test` and `npm run check` pass, and `cmp` of `example/**/app.js`/`app.wasm` differs only at the migrated sites
 
 ### Phase 5: Statements and assignments (S10–S16)
-- [ ] Task 5.1: Return count; `nil` to a non-nilable type (S10, S11)
+- [x] Task 5.1: Return count; `nil` to a non-nilable type (S10, S11)
   - Files: `src/typechecker/statements.js` (`_checkReturnStmt`), `src/typechecker/assignability.js` (`_assertAssignableEarlyReturn`: `nil` only into pointer, slice, map, func, interface and type-parameter targets; JS-dynamic `ANY` keeps accepting it)
   - Test: delete `// pending:` from `s10` (`too many return values`) and `s11`/`s11b` (`cannot use nil as int value in variable declaration`). Existing `nil` tests for maps, slices, funcs, pointers, interfaces and generics stay green
   - Done when: those cases pass and `npm test` passes

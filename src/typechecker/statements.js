@@ -379,6 +379,8 @@ export const statementCheckMethods = {
 		) {
 			this.err("Missing return value", stmt);
 		}
+		if (isVoid(returnType) && this._reportReturnCount(stmt, types.length, 0))
+			return;
 		// Check each returned value is assignable to its declared type
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
@@ -401,6 +403,7 @@ export const statementCheckMethods = {
 				);
 				return;
 			}
+			if (this._reportReturnCount(stmt, types.length, expected.length)) return;
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
 					this.assertAssignable(
@@ -413,6 +416,17 @@ export const statementCheckMethods = {
 					);
 			}
 		}
+	},
+
+	// `return 1, 2` in a one-result func, `return 1` in a two-result one.
+	_reportReturnCount(stmt, have, want) {
+		if (have === want || have === 0) return false;
+		const many = have > want;
+		this.err(
+			`${many ? "too many" : "not enough"} return values (have ${have}, want ${want})`,
+			many ? (stmt.values[want] ?? stmt) : stmt,
+		);
+		return true;
 	},
 
 	// Checks each result of a forwarded multi-value call (`return f()`,

@@ -48,6 +48,10 @@ const TYPE_LITERAL_KINDS = new Set([
 ]);
 
 // Operators defined on integer operands only.
+// Basic types that are not number, string or bool types: JS-dynamic `any`,
+// the types of `nil` and `void`, and the `comparable` constraint.
+const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
+
 const INTEGER_ONLY_OPS = new Set(["%", "&", "|", "^", "&^"]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
@@ -431,7 +435,8 @@ export const assignabilityMethods = {
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
 		if (this._checkIfaceToConcrete(target, source, node, ctx, operand)) return;
-		if (this._assertAssignableEarlyReturn(target, source)) return;
+		if (this._assertAssignableEarlyReturn(target, source, operand ?? node, ctx))
+			return;
 		if (isPointer(target) && isPointer(source)) {
 			this._assertNestedAssignable(
 				target.base ?? target.underlying?.base,
@@ -667,7 +672,21 @@ export const assignabilityMethods = {
 		return !!base && base.kind !== "interface" && base.kind !== "typeParam";
 	},
 
-	_assertAssignableEarlyReturn(target, source) {
+	// `nil` only has a value in a pointer, slice, map, func, chan, interface or
+	// type-parameter type. JS-dynamic `any` and the other kinds the checker
+	// models loosely (`shared`, `simd`) keep accepting it.
+	_checkNilTarget(target, node, ctx) {
+		const u = this._deepUnderlying(target);
+		const nilless =
+			u?.kind === "struct" ||
+			u?.kind === "array" ||
+			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name));
+		if (nilless)
+			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, node);
+	},
+
+	_assertAssignableEarlyReturn(target, source, node, ctx) {
+		if (isNil(source)) this._checkNilTarget(target, node, ctx);
 		return (
 			target?.kind === "typeParam" ||
 			source?.kind === "typeParam" ||
