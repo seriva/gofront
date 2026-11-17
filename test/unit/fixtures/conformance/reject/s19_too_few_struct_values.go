@@ -1,4 +1,3 @@
-// pending: S19
 package main
 
 type S struct {

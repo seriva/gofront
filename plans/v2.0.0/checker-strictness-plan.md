@@ -270,7 +270,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
   - Files: `src/typechecker/statements.js` (`checkStmt` `ExprStmt`)
   - Test: delete `// pending:` from `s17`/`s17b`/`s17c` (`x + 1 (value of type int) is not used`). Calls, `await` calls and conversions-as-calls to funcs stay valid statements
   - Done when: those cases pass and `npm test` passes
-- [ ] Task 6.2: Duplicate `switch` cases and map keys; struct literal value count (S18, S19)
+- [x] Task 6.2: Duplicate `switch` cases and map keys; struct literal value count (S18, S19)
   - Files: `src/typechecker/statements.js` (`_checkSwitchStmt`), `src/typechecker/expressions.js` (map literal keys, `_checkStructCompositeLit`)
   - Test: delete `// pending:` from `s18` (`duplicate case 1 in expression switch`), `s18b` (`duplicate key "a" in map literal`) and `s19` (`too few values in struct literal of type S`). Non-constant duplicate cases stay valid
   - Done when: those cases pass and `npm test` passes

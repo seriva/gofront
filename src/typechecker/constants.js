@@ -18,6 +18,7 @@ import {
 import {
 	compositeLitMaxIndex,
 	defaultType,
+	identical,
 	isAny,
 	isComplex,
 	isComplex64,
@@ -122,6 +123,44 @@ export const constantCheckMethods = {
 		if (!init) return;
 		expr._complexInit = init;
 		if (typed64) expr._c64Const = true;
+	},
+
+	// Records the constant `e` (a `switch` case or a map key) in `seen` and
+	// returns true when an equal constant of the same type was recorded
+	// before. Constants compare by value after conversion to `targetType`, so
+	// `1` and `0x1` collide for an `int` and `1` and `1.0` for a `float64`; for
+	// an interface target the constant keeps its own (default) type, so `1`
+	// and `1.0` differ. Expressions that are not constants never collide.
+	_isDuplicateConst(seen, e, targetType, includeBool) {
+		const v = e?._const;
+		if (!v || (v.k === "BOOL" && !includeBool)) return false;
+		const type = this._constIdentityType(e, targetType);
+		// Go does not compare complex constants.
+		if (!type || isComplex(this._deepUnderlying(type) ?? type)) return false;
+		const whole = constIntValue(v);
+		const key = whole !== null ? `i${whole}` : `${v.k}${String(v.v)}`;
+		let bucket = seen.find((b) => identical(b.type, type));
+		if (!bucket) {
+			bucket = { type, keys: new Set() };
+			seen.push(bucket);
+		}
+		if (bucket.keys.has(key)) return true;
+		bucket.keys.add(key);
+		return false;
+	},
+
+	_constIdentityType(e, targetType) {
+		const target = targetType ? this.resolveType(targetType) : null;
+		if (target?._tainted || target?.kind === "typeParam") return null;
+		if (
+			target &&
+			!isAny(target) &&
+			this._deepUnderlying(target)?.kind !== "interface"
+		)
+			return target;
+		const own = e._type ? this.resolveType(e._type) : null;
+		if (!own || own._tainted) return null;
+		return isUntyped(own) ? defaultType(own) : own;
 	},
 
 	// Raw evaluation result, memoized on checked nodes: a value, a value with

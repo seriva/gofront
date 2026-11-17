@@ -632,6 +632,7 @@ export const statementCheckMethods = {
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		if (stmt.tag) this.checkExpr(stmt.tag, inner);
 		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
+		const seenCases = [];
 		this._switchDepth++;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
@@ -639,6 +640,8 @@ export const statementCheckMethods = {
 				for (const e of c.list) {
 					this.checkExpr(e, caseScope);
 					this._checkCaseValue(stmt.tag, e);
+					if (this._isDuplicateConst(seenCases, e, stmt.tag?._type, false))
+						this.err(`duplicate case ${exprText(e)} in expression switch`, e);
 					if (stmt.tag) this._tagFloat32Const(stmt.tag._type, e._type, e);
 					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
 				}

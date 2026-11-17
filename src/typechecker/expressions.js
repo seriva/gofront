@@ -2330,6 +2330,8 @@ export const expressionCheckMethods = {
 				);
 			elem._positionalField = fieldName;
 		}
+		if (expr.elems.length < fieldNames.length)
+			this.err(`too few values in struct literal of type ${typeStr(t)}`, expr);
 		return t;
 	},
 
@@ -2426,6 +2428,7 @@ export const expressionCheckMethods = {
 	},
 
 	_checkMapCompositeLit(expr, scope, t, base) {
+		const seenKeys = [];
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				let kt;
@@ -2447,6 +2450,11 @@ export const expressionCheckMethods = {
 					vt = this.checkExpr(elem.value, scope);
 				}
 				this.assertAssignable(base.key, kt, elem.key);
+				if (this._isDuplicateConst(seenKeys, elem.key, base.key, true))
+					this.err(
+						`duplicate key ${exprText(elem.key)} in map literal`,
+						elem.key,
+					);
 				this._markIfaceKey(base, elem.key, kt);
 				this.assertAssignable(
 					base.value,
