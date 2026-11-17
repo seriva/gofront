@@ -290,7 +290,7 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
   - Done when: `grep -rn "ot === ANY" src/typechecker` is empty and `NON_INTEGER_BASICS` has no `"any"`
 
 ### Phase 4: Builtin operand contracts (root `builtin-operands`)
-- [ ] Task 4.1: `len`, `cap`, `delete` and spread check operand kinds (R4.1, R4.2, R4.4, R4.5, R4.10)
+- [x] Task 4.1: `len`, `cap`, `delete` and spread check operand kinds (R4.1, R4.2, R4.4, R4.5, R4.10)
   - Files: `src/typechecker/expressions.js`
   - Test: reject fixtures `builtin_len_any.go`, `builtin_len_empty_iface.go`, `builtin_len_int.go`, `builtin_delete_any.go`, `spread_any.go`; accept JS-dynamic `len(window.x)` on `js`
   - Done when: Go's messages on all targets, no wasm ICE

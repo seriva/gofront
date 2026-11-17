@@ -120,6 +120,7 @@ const BUILTIN_CHECK = {
 	},
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
 	delete: (s, _n, e, at) => {
+		s._checkDeleteOperand(e, at[0]);
 		const mt = s._deepUnderlying(at[0]);
 		if (mt?.kind === "map" && e.args[1]) {
 			s.assertAssignable(mt.key, at[1], e.args[1]);
@@ -184,6 +185,10 @@ const NON_INTEGER_BASICS = new Set([
 	"bool",
 	"string",
 ]);
+
+// Basic types `len` rejects: everything but strings.
+const NON_LEN_BASICS =
+	/^(bool|u?int(8|16|32|64)?|uintptr|byte|rune|float(32|64)|complex(64|128))$/;
 
 // JS-dynamic `any` indexes anything; a Go `any` needs a type assertion.
 function nonIntegerBasic(u) {
@@ -2114,6 +2119,14 @@ export const expressionCheckMethods = {
 					: i;
 			if (expr.args[i]?._spread) {
 				this._rejectSeqAsSlice(argTypes[i], expr.args[i], "a spread argument");
+				// `f(xs...)` passes xs as the whole variadic slice.
+				if (fnType.variadic && paramIdx === fnType.params.length - 1)
+					this.assertAssignable(
+						{ kind: "slice", elem: fnType.params[paramIdx] },
+						argTypes[i],
+						expr.args[i],
+						"argument",
+					);
 				continue;
 			}
 			const targetParam = fnType.params[paramIdx];
@@ -2215,7 +2228,7 @@ export const expressionCheckMethods = {
 	// one with no single core type is left to instantiation. Unknown and
 	// `any` operands (JS interop) are not judged.
 	_capOperandOk(t, scope) {
-		if (!t || t._tainted || isAny(t)) return true;
+		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
 		if (t.kind === "typeParam") {
 			const core = this._coreType(t, scope);
 			return !core || core.kind === "slice" || core.kind === "array";
@@ -2224,8 +2237,35 @@ export const expressionCheckMethods = {
 		return kind === "slice" || kind === "array";
 	},
 
+	// `len` takes a string, array, slice, map or channel; a Go `any` needs a
+	// type assertion first, while a JS-dynamic value is not judged.
+	_lenOperandOk(t) {
+		if (!t || t._tainted) return true;
+		if (t.kind === "untyped") return t.base === "string";
+		if (anyKind(t) === "go") return false;
+		const u = this._deepUnderlying(t);
+		return !(u?.kind === "basic" && NON_LEN_BASICS.test(u.name));
+	},
+
+	// `delete` takes a map; a type parameter and a JS-dynamic value are not
+	// judged.
+	_checkDeleteOperand(expr, t) {
+		if (!t || t._tainted || t.kind === "typeParam" || anyKind(t) === "dynamic")
+			return;
+		if (this._deepUnderlying(t)?.kind === "map") return;
+		this.err(
+			`invalid argument: ${exprText(expr.args[0])} (${this._capOperandKind(expr.args[0], t)}) is not a map`,
+			expr,
+		);
+	},
+
 	_checkBuiltinLen(name, expr, argTypes, scope) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
+		if (name === "len" && !this._lenOperandOk(argTypes[0]))
+			this.err(
+				`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for built-in len`,
+				expr,
+			);
 		const operand = expr.args?.[0];
 		if (expr.args?.length === 1)
 			argTypes[0] = this._derefArrayPtr(expr.args, 0, argTypes[0]);
