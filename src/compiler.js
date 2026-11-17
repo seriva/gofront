@@ -373,11 +373,19 @@ function resolveImports(
 				const depKey = resolve(depDir);
 				const alreadyBundled = bundledDirs.has(depKey);
 				bundledDirs.add(depKey);
-				const dep = compileDir(depDir, {
-					...options,
-					bundledDirs,
-					isDependency: true,
-				});
+				let dep;
+				try {
+					dep = compileDir(depDir, {
+						...options,
+						bundledDirs,
+						isDependency: true,
+					});
+				} catch (e) {
+					// Tag the failing package (innermost wins) so callers can tell
+					// a dependency's error from the importer's own.
+					if (e instanceof CompileError && !e.packageDir) e.packageDir = depKey;
+					throw e;
+				}
 				if (!alreadyBundled) preambles.push(dep);
 				// A dependency that hands out `&xs[i]` makes whole-element
 				// stores in this package write in place too.

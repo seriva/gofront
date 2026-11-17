@@ -23,7 +23,12 @@ import {
 	sep,
 } from "node:path";
 import { isGoFrontWasm } from "../backend/wasm/index.js";
-import { compileDir, compileSingleFile } from "../compiler.js";
+import {
+	CompileError,
+	compileDir,
+	compilePackageTests,
+	compileSingleFile,
+} from "../compiler.js";
 import { copyAssets } from "./asset-manager.js";
 import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
 import { createDevServer } from "./dev-server.js";
@@ -49,6 +54,7 @@ export function runCompile(inputPath, isDir, options) {
 		forceTarget = null,
 		targetOverrides = null,
 		rootDir = null,
+		checkTests = false,
 	} = options ?? {};
 	const targetOpts = { natives };
 	if (forceTarget) targetOpts.forceTarget = forceTarget;
@@ -57,7 +63,10 @@ export function runCompile(inputPath, isDir, options) {
 
 	if (isDir) {
 		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		return compileDir(inputPath, {
+		// `check` compiles the file set `gofront test` compiles, including
+		// `_test.go` files, without running anything.
+		const compileFn = checkTests ? compilePackageTests : compileDir;
+		return compileFn(inputPath, {
 			sourceMap,
 			outputDir,
 			emitWat,
@@ -569,6 +578,44 @@ export function parseCheckArgs(argv) {
 	};
 }
 
+// Type-checks each package directory and records its result instead of
+// throwing, so one failing package never hides another. A package whose
+// dependency failed is `skipped`; a failing dependency outside `dirs` is
+// recorded once as its own failed package.
+function checkPackages(dirs, options) {
+	const packages = [];
+	const inPattern = new Set(dirs.map((d) => resolve(d)));
+	const reportedExternal = new Set();
+	for (const dir of dirs) {
+		const pkgStart = performance.now();
+		const pkg = { dir, status: "ok" };
+		try {
+			runCompile(dir, true, options);
+		} catch (e) {
+			const depDir = e instanceof CompileError ? e.packageDir : undefined;
+			if (depDir && depDir !== resolve(dir)) {
+				pkg.status = "skipped";
+				pkg.dep = depDir;
+				if (!inPattern.has(depDir) && !reportedExternal.has(depDir)) {
+					reportedExternal.add(depDir);
+					packages.push({
+						dir: depDir,
+						status: "fail",
+						errors: e.message,
+						elapsedMs: "0",
+					});
+				}
+			} else {
+				pkg.status = "fail";
+				pkg.errors = e?.message ?? String(e);
+			}
+		}
+		pkg.elapsedMs = (performance.now() - pkgStart).toFixed(0);
+		packages.push(pkg);
+	}
+	return packages;
+}
+
 export function handleCheck(targetDir = ".", options = {}) {
 	const pattern = parsePackagePattern(targetDir);
 	if (pattern) {
@@ -578,17 +625,19 @@ export function handleCheck(targetDir = ".", options = {}) {
 		}
 		const targetOpts = projectTargetOptions(detectProject(pattern), options);
 		const startMs = performance.now();
-		const packages = [];
-		for (const dir of dirs) {
-			const pkgStart = performance.now();
-			runCompile(dir, true, { ...options, ...targetOpts });
-			packages.push({
-				dir,
-				elapsedMs: (performance.now() - pkgStart).toFixed(0),
-			});
-		}
+		const packages = checkPackages(dirs, {
+			...options,
+			...targetOpts,
+			checkTests: true,
+		});
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
-		return { target: targetDir, compileTarget: pattern, elapsedMs, packages };
+		return {
+			target: targetDir,
+			compileTarget: pattern,
+			elapsedMs,
+			packages,
+			failed: packages.some((p) => p.status !== "ok"),
+		};
 	}
 
 	const project = detectProject(targetDir);
@@ -614,6 +663,7 @@ export function handleCheck(targetDir = ".", options = {}) {
 	runCompile(compileTarget, targetIsDir, {
 		...options,
 		...projectTargetOptions(project, options),
+		checkTests: true,
 	});
 	const elapsedMs = (performance.now() - startMs).toFixed(0);
 	return { target: targetDir, compileTarget, elapsedMs };
@@ -972,20 +1022,36 @@ Usage:
   gofront --version              Print version
 `.trim();
 
-// Print the `gofront check` result: one OK line per package, then a total.
-export function reportCheck({ elapsedMs, packages }, targetDir) {
-	const okLine = (label, t) =>
-		log.info(`${colors.cyan(label)} — ${colors.green("OK")} ${ms(t)}`);
-	if (packages) {
-		for (const pkg of packages) {
-			okLine(relative(process.cwd(), pkg.dir) || ".", pkg.elapsedMs);
-		}
+// Print the `gofront check` result: one line per package, then a total.
+// Returns the process exit code (1 when any package failed).
+export function reportCheck({ elapsedMs, packages, failed }, targetDir) {
+	if (!packages) {
 		log.info(
-			`${colors.bold(`${packages.length} packages`)} — ${colors.bold(colors.green("OK"))} ${ms(elapsedMs)}`,
+			`${colors.cyan(targetDir)} — ${colors.green("OK")} ${ms(elapsedMs)}`,
 		);
-	} else {
-		okLine(targetDir, elapsedMs);
+		return 0;
 	}
+	const rel = (dir) => relative(process.cwd(), dir) || ".";
+	const count = (status) => packages.filter((p) => p.status === status).length;
+	for (const pkg of packages) {
+		if (pkg.status === "ok") {
+			log.info(
+				`${colors.cyan(rel(pkg.dir))} — ${colors.green("OK")} ${ms(pkg.elapsedMs)}`,
+			);
+		} else if (pkg.status === "skipped") {
+			log.info(
+				`${colors.cyan(rel(pkg.dir))} — ${colors.yellow(`skipped (${rel(pkg.dep)} failed)`)}`,
+			);
+		} else {
+			console.error(`${colors.bold(colors.red("FAIL"))} ${rel(pkg.dir)}`);
+			console.error(formatDiagnostic(pkg.errors));
+		}
+	}
+	const summary = `${packages.length} packages — ${count("ok")} ok, ${count("fail")} failed, ${count("skipped")} skipped`;
+	log.info(
+		`${colors.bold(failed ? colors.red(summary) : colors.green(summary))} ${ms(elapsedMs)}`,
+	);
+	return failed ? 1 : 0;
 }
 
 // Print the `gofront build` summary lines.
@@ -1038,6 +1104,7 @@ export function runSingleShot(inputPath, isDir, flags) {
 			dumpAst,
 			wasmOpt,
 			forceTarget,
+			checkTests: checkOnly,
 		});
 	} catch (e) {
 		log.fail(e.message);

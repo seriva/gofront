@@ -15,8 +15,8 @@ gofront build [dir] --no-mangle              minify but keep original identifier
 gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
 gofront build [dir] --js-only                compile every package to JS (alias --target js; also for dev/check/-o)
 gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
-gofront check <dir>                          type-check a single package
-gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
+gofront check <dir>                          type-check a single package and its _test.go files
+gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`) and report all errors
 gofront test <dir> [--dom]                   run tests for a single package
 gofront test <dir>/... [--dom] [-v] [-run <regex>] [-bench <regex>]  run tests recursively
 gofront <file.go>                            compile single file → stdout
@@ -27,7 +27,7 @@ gofront <input> -o out.js --wasm-opt         compile + optimize wasm with Binary
 gofront <input> -o out.js --emit-wat         also write app.wat
 gofront <input> -o out.js --no-natives       run the Go bodies of standard library functions instead of host fast paths
 gofront <input> -o out.js --copy-assets      compile + copy static assets
-gofront <input> --check                      type-check only (single file / directory)
+gofront <input> --check                      type-check only (single file / directory; a directory includes its _test.go files)
 gofront <input> --watch                      watch for changes and recompile
 gofront <input> -o out.js --serve            watch + serve with live reload (legacy; prefer gofront dev)
 gofront <input> --source-map                 append inline source map
@@ -47,6 +47,23 @@ repository root to compile every example into `example/<name>/app.js` (the hybri
 example also writes `app.wasm`), then serve the example's directory, for example
 `npx serve example/simple`, and open it in a browser. Without the build step the page
 cannot load `app.js`.
+
+### Checking packages
+
+`gofront check <dir>/...` type-checks every package below `<dir>`, including `_test.go` files, and
+reports the errors of all failing packages in one run. A package that imports a failed package is
+listed as skipped, and the run exits with status 1 when anything failed:
+
+```
+FAIL pkg/a
+Type error in x.go at line 2:13: Cannot assign untyped string to int
+  ...
+gofront: pkg/c — skipped (pkg/a failed)
+gofront: pkg/ok — OK (8ms)
+gofront: 3 packages — 1 ok, 1 failed, 1 skipped (20ms)
+```
+
+No test function runs; `gofront test` does that.
 
 ### Project configuration
 
