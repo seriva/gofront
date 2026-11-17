@@ -1,7 +1,7 @@
 # v2.0.0 Checker Strictness — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-17)  
 **Base branch:** main  
 **Related:** Starts after [`test-harness-hardening-plan.md`](test-harness-hardening-plan.md) Phase 1 (`CompileError` with one entry per error, `compile()` on the production path, crashes propagate). Must merge before [`web-platform-evolution-plan.md`](web-platform-evolution-plan.md) Phase 6, which extends assignability, and Phase 7, which turns `any` DOM values into `int`/`float64`; independent of its Phases 1–5. Non-breaking half of the same review: [`../v1.9.3/js-codegen-fixes-plan.md`](../v1.9.3/js-codegen-fixes-plan.md).  
 **Release note:** **Breaking:** the compiler now rejects programs that Go rejects, such as mixing numeric types (`int + float64`, or passing an `int` where a `float64` is expected), assigning between different anonymous struct or interface types, and doing arithmetic on an `any` value (values from browser globals and `.d.ts` declarations are unaffected). Add the conversion (`float64(n)`) or type assertion the error points at; these programs used to compile and then print wrong values or produce a WebAssembly module the browser refused to load.  
@@ -12,7 +12,7 @@
 
 Make the type checker reject the invalid Go it accepts today. In the 2026-11-13 review 31 of 68 deliberately invalid programs compiled; on `wasm` most of them then fail in the browser with `CompileError: WebAssembly.instantiate()`, on `js` they print wrong values or throw. Three root causes cover most cases: type identity is decided by comparing printed type names, numeric operands are never required to have the same type, and a Go `any` obtained through some paths is treated like the checker's permissive JS-interop `any`.
 
-v2.0.0 is the release where backward compatibility is not a goal (`web-platform-evolution-plan.md`, user decision 2026-11-13), and Phase 7 of that plan already makes users revisit DOM code. Landing strictness first means one migration instead of two. The measured migration cost is small: `example/*` and `stdlib/` need no change, two unit tests encode the old leniency, and SimpleFPS has 10–11 `int` → `float64` call arguments (*Verified Gaps* S27).
+v2.0.0 is the release where backward compatibility is not a goal (`web-platform-evolution-plan.md`, user decision 2026-11-13), and Phase 7 of that plan already makes users revisit DOM code. Landing strictness first means one migration instead of two. The measured migration cost is small: four sites in `stdlib/gom/gom.go` and `example/{simple,gom,templ}/src/store.go` index or `range` over a Go `any`, two unit tests encode the old leniency, and SimpleFPS has 10–11 `int` → `float64` call arguments (*Verified Gaps* S27).
 
 **Done means:**
 - Every repro S1–S21 and S23 in *Verified Gaps* is a compile error with its message and line:col on `js`, `both` and `wasm`, or compiles and prints Go's output (the false rejections S4 and S23). Proof: `node test/unit/run.js types/conformance.test.js` passes, and `grep -rl "// pending:" test/unit/fixtures/conformance` prints nothing.
@@ -242,7 +242,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
 - [x] Task 4.2: Operators on a Go `any` are errors
   - Files: `src/typechecker/assignability.js` (`_binaryResultTypeNonComplex`), `src/typechecker/expressions.js` (unary operators), `src/typechecker/statements.js` (`++`/`--`, compound assignment)
   - Test: delete `// pending:` from the S9 arithmetic and unary cases (`s09`, `s09c`–`s09e`, `s09i`, `s09j`, `r1`–`r4`): `invalid operation: operator * not defined on v (variable of type any)`. New reject case: `v++`. The `.d.ts` compile-only accept case stays green
-  - Done when: those cases pass, `npm test` passes, and `npm run check` passes (their 14 arithmetic sites are JS-dynamic)
+  - Done when: those cases pass, `npm test` passes, and `npm run check` passes (the examples' 14 arithmetic sites are JS-dynamic)
 - [x] Task 4.3: Calls, indexing, `range` and conditions on a Go `any` are errors
   - Files: `src/typechecker/expressions.js` (call, `IndexExpr`, `SliceExpr`, `_checkRangeExpr`), `src/typechecker/statements.js` (`if`/`for` conditions, `!`/`&&`/`||` operands); migration: `stdlib/gom/gom.go`, `example/{simple,gom,templ}/src/store.go`
   - Test: delete `// pending:` from `s09f`, `s09g` and the call/range halves of `a04` (`cannot call non-function v (variable of type any)`, `cannot range over v (variable of type any)`, `cannot index v (variable of type any)`, `non-boolean condition in if statement`); `grep -rl "// pending: S9" test/unit/fixtures/conformance` prints nothing
