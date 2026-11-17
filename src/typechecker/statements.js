@@ -281,7 +281,7 @@ export const statementCheckMethods = {
 					stmt.lhs[i],
 					"assignment",
 					this._assignOperand(stmt, i),
-					stmt.rhs.length === stmt.lhs.length,
+					stmt.op === "=" && stmt.rhs.length === stmt.lhs.length,
 				);
 				this._skipIfaceMark = false;
 			}

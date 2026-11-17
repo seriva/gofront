@@ -709,7 +709,7 @@ export const assignabilityMethods = {
 				return !t.typeArgs?.length &&
 					!t._generic &&
 					!t.name.includes("$") &&
-					this.types.get(t.name) === t
+					this.types.get(t.name) === (t._substOf ?? t)
 					? { kind: "TypeName", name: t.name }
 					: null;
 			case "pointer": {
