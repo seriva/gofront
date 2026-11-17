@@ -47,7 +47,7 @@ import {
 	wasmMarker,
 } from "./link/wasm.js";
 import { lower, takesElementAddress } from "./lower/index.js";
-import { Parser } from "./parser/index.js";
+import { ParseError, Parser } from "./parser/index.js";
 import { TemplParser } from "./parser/templ.js";
 import {
 	bindUntypedImports,
@@ -104,8 +104,8 @@ export class InternalCompilerError extends Error {
 }
 
 // Runs `fn` as a compiler stage that has no user diagnostics of its own: a
-// `CompileError` passes through, an `UnsupportedError` or `TypeCheckError`
-// becomes one, and anything else is a compiler bug and becomes an
+// `CompileError` passes through, an `UnsupportedError`, `TypeCheckError` or
+// `ParseError` becomes one, and anything else is a compiler bug and becomes an
 // `InternalCompilerError`.
 export function asInternalError(fn) {
 	try {
@@ -113,7 +113,13 @@ export function asInternalError(fn) {
 	} catch (e) {
 		if (e instanceof CompileError || e instanceof InternalCompilerError)
 			throw e;
-		if (e instanceof UnsupportedError || e instanceof TypeCheckError)
+		// A malformed templ expression is parsed leniently and raised by the
+		// code generator.
+		if (
+			e instanceof UnsupportedError ||
+			e instanceof TypeCheckError ||
+			e instanceof ParseError
+		)
 			throw new CompileError([e]);
 		throw new InternalCompilerError(e);
 	}

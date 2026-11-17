@@ -6,6 +6,7 @@ import {
 	InternalCompilerError,
 	validateWasm,
 } from "../../../src/compiler.js";
+import { ParseError } from "../../../src/parser/index.js";
 import {
 	TypeCheckError,
 	UnsupportedError,
@@ -110,10 +111,11 @@ test("an InternalCompilerError is not wrapped twice", () => {
 	assert(err === original, "same object");
 });
 
-test("UnsupportedError and TypeCheckError come out as CompileError", () => {
+test("UnsupportedError, TypeCheckError and ParseError come out as CompileError", () => {
 	for (const thrown of [
 		new UnsupportedError("not supported yet"),
 		new TypeCheckError("bad", null, "main.go", null),
+		new ParseError("bad token", { line: 1, col: 1, type: "EOF", value: "" }),
 	]) {
 		let err = null;
 		try {

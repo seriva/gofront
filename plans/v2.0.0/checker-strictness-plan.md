@@ -183,7 +183,7 @@ Each phase is one `/dev-loop` (phase branch `feat/checker-strictness-phase-<N>` 
     - An exported `asInternalError(fn)` wraps a thunk that throws `Error("boom")` into `InternalCompilerError` with `message` starting `internal compiler error: boom` and containing the issues URL, keeps `cause`, and passes `CompileError` through unchanged.
     - `UnsupportedError` and `TypeCheckError` thrown inside the wrapped stage come out as `CompileError`.
   - Done when: the new tests pass, `npm test` passes, and `compileFiles` never returns `wasm` bytes that fail `WebAssembly.validate`
-- [ ] Task 1.4: Backend "not supported" diagnostics are user errors
+- [x] Task 1.4: Backend "not supported" diagnostics are user errors
   - Files: `src/backend/wasm/boundary.js` (`unsupportedMsg` sites), `src/backend/wasm/emit-maps.js` (`_unsupportedMapKey` sites)
   - Test: in `test/unit/wasm/map-keys.test.js` and `test/unit/wasm/boundary.test.js`, the existing unsupported-key and unsupported-boundary cases additionally assert the thrown error is a `CompileError`, not an `InternalCompilerError`, and that the message has no `internal compiler error` prefix
   - Done when: those tests pass and `npm test` passes

@@ -7,6 +7,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+- **Type errors point at the offending expression**: errors on operators, calls, field selections, indexing, composite literals and type assertions now report a line and column, and `declared and not used` points at the variable instead of the enclosing function. A build that would produce an invalid WebAssembly module now stops with an `internal compiler error` that links to the issue tracker, and "not yet supported" diagnostics for wasm map keys and boundary types stay ordinary compile errors.
+
 ### Fixed
 - **Assignments keep Go's value semantics in more places**: a struct or array reassigned inside a closure stays visible through earlier pointers, `p, *p = &b, x` stores through the old pointer, and comma-ok lookups and type assertions into a `*p` of a concrete type no longer crash in JavaScript. Arrays yielded by a range-over-func loop are copies, a call in a comma-ok `:=` map lookup or on the right side of a complex compound assignment now runs once, and storing a struct variable through a pointer on WebAssembly copies its array and struct fields.
 - **Valid Go no longer breaks or misbehaves in the generated JavaScript**: functions, variables, local types and `templ` or `css` components named after JavaScript built-ins (`Map`, `BigInt`, `NaN`), and names starting with `__`, now work; a call in a divisor, shift count or multiple assignment runs once and in Go's order; and anonymous structs copy their array and struct fields and work in literals that omit the type. `recover()` on WebAssembly now returns the panic value with its type and slice-bounds panics report the bounds as Go does; hand-written JavaScript reaches a renamed function through a `$`-suffixed name such as `Map$` ([details](docs/go-compatibility.md#names-that-shadow-js-globals)).
