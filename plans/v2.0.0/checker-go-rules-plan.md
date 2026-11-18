@@ -330,11 +330,11 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: `grep -rn 'kind === "named" ? [a-zA-Z.]*\.underlying' src/typechecker` lists only sites with a comment saying why one level is intended
 
 ### Phase 7: Range over integers (root `range-int-operand`)
-- [ ] Task 7.1: Range over an integer permits one iteration variable (R7.1, R7.5)
+- [x] Task 7.1: Range over an integer permits one iteration variable (R7.1, R7.5)
   - Files: `src/typechecker/statements.js` (`_checkForCond`)
   - Test: reject fixtures `range_int_two_vars.go`, `range_int_var_two_vars.go`; accept `for i := range 3` and `n := 3; for i := range n`
   - Done when: Go's messages on all targets, no wasm ICE
-- [ ] Task 7.2: A constant range operand must be of integer kind (R7.2–R7.4)
+- [x] Task 7.2: A constant range operand must be of integer kind (R7.2–R7.4)
   - Files: `src/typechecker/expressions.js` (`_rangeOperandError`), `src/typechecker/statements.js`
   - Test: reject fixtures `range_float_const.go` (`const k = 2.0`), `range_float_const_integral.go` (`const n = 3.0`), `range_float_lit.go` (`range 1e3`); accept `for i := range 'a'` and `const n = 3; for i := range n`; the `const k float64 = 2` control stays rejected
   - Done when: Go's messages on all targets, no wasm ICE

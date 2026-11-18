@@ -1653,8 +1653,7 @@ export const expressionCheckMethods = {
 			return !(
 				type.base === "string" ||
 				type.base === "int" ||
-				(type.base === "float64" &&
-					constIntValue(this._constValue(node)) !== null)
+				type.base === "rune"
 			);
 		const u = this._deepUnderlying(type);
 		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
