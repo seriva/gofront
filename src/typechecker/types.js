@@ -1059,16 +1059,25 @@ export class Scope {
 		this._localNodes = new Map(); // local name -> node carrying its declaring position
 		this._used = new Set(); // names referenced in this scope
 		this._typeNames = new Set(); // names whose binding here is a type declaration
+		this._packages = new Set(); // names bound here to an imported package
 	}
 	define(name, type) {
 		this.symbols.set(name, type);
 		this._typeNames.delete(name);
+		this._packages.delete(name);
+	}
+	// Binds `name` to an imported package's namespace (not a variable).
+	definePackage(name, ns) {
+		this.symbols.set(name, ns);
+		this._typeNames.delete(name);
+		this._packages.add(name);
 	}
 	// Binds `name` to a type declaration (`type T ...`, `type T = ...`): a
 	// reference to it names a type, whatever other bindings share its name.
 	defineType(name, type) {
 		this.symbols.set(name, type);
 		this._typeNames.add(name);
+		this._packages.delete(name);
 	}
 	// True when the binding `name` resolves to is a type declaration, not a
 	// variable, constant, function, parameter or package that shares the name.
@@ -1079,6 +1088,7 @@ export class Scope {
 	defineLocal(name, type, node = null) {
 		this.symbols.set(name, type);
 		this._typeNames.delete(name);
+		this._packages.delete(name);
 		if (name !== "_") this._locals.add(name);
 		if (node && typeof node === "object") this._localNodes.set(name, node);
 	}
@@ -1089,6 +1099,7 @@ export class Scope {
 	defineConst(name, type, expr = null) {
 		this.symbols.set(name, type);
 		this._typeNames.delete(name);
+		this._packages.delete(name);
 		this._consts.add(name);
 		if (expr) this._constExprs.set(name, expr);
 	}

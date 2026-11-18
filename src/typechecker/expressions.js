@@ -546,10 +546,10 @@ export const expressionCheckMethods = {
 		const owner = scope?.lookupScope(n.name);
 		if (!owner) return !BUILTIN_IDENTS.has(n.name);
 		if (owner.isConst(n.name)) return false;
-		// A package name binds its own namespace; a variable merely typed with
-		// a namespace-shaped declaration (`var v VNode`) is named differently.
-		const sym = owner.symbols.get(n.name);
-		if (sym?.kind === "namespace" && sym.name === n.name) return false;
+		// A package name is bound as a package; a variable typed with a
+		// namespace-shaped declaration (`var Widget Widget`) is still a variable.
+		if (owner._packages.has(n.name)) return false;
+		if (owner.symbols.get(n.name)?.kind === "builtin") return false;
 		return !(owner === this.globals && this._funcDeclNames?.has(n.name));
 	},
 

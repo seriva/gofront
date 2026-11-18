@@ -545,7 +545,7 @@ function bindStdlibImport(checker, p, spec, pkg) {
 	}
 	const name = alias ?? pkg.pkgName;
 	const ns = { ...pkg.namespace, name };
-	checker.globals.define(name, ns);
+	checker.globals.definePackage(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);

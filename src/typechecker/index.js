@@ -170,6 +170,8 @@ export class TypeChecker {
 		for (const [name, type] of values) {
 			if (typeNames ? typeNames.has(name) : types.get(name) === type)
 				this.globals.defineType(name, type);
+			else if (type?.kind === "namespace" && type.name === name)
+				this.globals.definePackage(name, type);
 			else this.globals.define(name, type);
 			if (external) this._externalNames.add(name);
 		}
@@ -198,7 +200,7 @@ export class TypeChecker {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
-		this.globals.define(pkgName, {
+		this.globals.definePackage(pkgName, {
 			kind: "namespace",
 			name: pkgName,
 			members,

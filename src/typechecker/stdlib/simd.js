@@ -119,5 +119,5 @@ export function setupSimdGlobals(globals, types) {
 		},
 	};
 
-	globals.define("simd", { kind: "namespace", name: "simd", members });
+	globals.definePackage("simd", { kind: "namespace", name: "simd", members });
 }
