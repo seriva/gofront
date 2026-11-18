@@ -626,7 +626,7 @@ export const statementCheckMethods = {
 				"expr",
 				this.checkExpr(stmt.cond.expr, inner),
 			);
-			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
+			if (ct?._declared || this._notRangeable(ct))
 				this._rangeOperandError(stmt.cond.expr, ct);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
 			if (core) stmt.cond.expr._coreType = core;
