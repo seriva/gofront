@@ -968,6 +968,37 @@ func main() {
 	assertErrorContains(errors, "missingVar");
 });
 
+test("a forwarded call argument of the wrong type reports the call and its position", () => {
+	const { errors } = compile(`package main
+func f() (float64, float64) { return 1, 2 }
+func g(a int, b float64) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot use f() (value of type float64) as int value in argument to g",
+	);
+	assertEqual(errors[0].line, 5);
+	assertEqual(errors[0].col, 4);
+});
+
+test("a forwarded call returned from a func with no results reports the tuple", () => {
+	const { errors } = compile(`package main
+func g() (int, string) { return 1, "a" }
+func f() {
+	return g()
+}
+func main() { f() }`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"too many return values (have (int, string), want ())",
+	);
+	assertEqual(errors[0].line, 4);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

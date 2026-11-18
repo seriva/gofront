@@ -443,7 +443,7 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Files: `src/typechecker/assignability.js` (`_checkNumericCoercion`), `src/typechecker/statements.js` (forwarded-call arguments, `:546`)
   - Test: reject fixture `forwarded_tuple_arg_type.go` (`f()` text, one error); `test/unit/types/errors.test.js` asserts `9:3`
   - Done when: Go's text, count and position
-- [ ] Task 11.2: Forwarded tuple returns report the tuple's arity (R10.2)
+- [x] Task 11.2: Forwarded tuple returns report the tuple's arity (R10.2)
   - Files: `src/typechecker/statements.js`
   - Test: reject fixture `return_forwarded_tuple_void.go` (`have (int, string)`)
   - Done when: Go's text on all targets

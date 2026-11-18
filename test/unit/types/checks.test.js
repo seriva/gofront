@@ -1246,7 +1246,10 @@ test("return forwarding a call with the wrong result count still errors", () => 
 func two() (int, int) { return 1, 2 }
 func f() (int, int, int) { return two() }
 func main() { _, _, _ = f() }`);
-	assertErrorContains(errors, "return count mismatch");
+	assertErrorContains(
+		errors,
+		"not enough return values (have (int, int), want (int, int, int))",
+	);
 });
 
 test("grouped named results (r, theta float64)", async () => {
