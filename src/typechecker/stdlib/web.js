@@ -350,12 +350,12 @@ export function setupWebGlobals(globals, types) {
 
 	types.set("ArrayBuffer", arrayBuffer);
 	types.set("DataView", dataView);
-	globals.define("ArrayBuffer", arrayBuffer);
-	globals.define("DataView", dataView);
+	globals.defineType("ArrayBuffer", arrayBuffer);
+	globals.defineType("DataView", dataView);
 
 	for (const ta of typedArrays) {
 		types.set(ta.name, ta);
-		globals.define(ta.name, ta);
+		globals.defineType(ta.name, ta);
 	}
 
 	// WebGL constants map
@@ -398,8 +398,8 @@ export function setupWebGlobals(globals, types) {
 
 	types.set("WebGLRenderingContext", webglContext);
 	types.set("WebGL2RenderingContext", webgl2Context);
-	globals.define("WebGLRenderingContext", webglContext);
-	globals.define("WebGL2RenderingContext", webgl2Context);
+	globals.defineType("WebGLRenderingContext", webglContext);
+	globals.defineType("WebGL2RenderingContext", webgl2Context);
 
 	// WebGPU types
 	const { queueMethods, deviceMethods, adapterMethods } = createWebGPUMethods();
@@ -440,7 +440,7 @@ export function setupWebGlobals(globals, types) {
 	types.set("GPUQueue", gpuQueue);
 	types.set("GPUDevice", gpuDevice);
 	types.set("GPUAdapter", gpuAdapter);
-	globals.define("GPUQueue", gpuQueue);
-	globals.define("GPUDevice", gpuDevice);
-	globals.define("GPUAdapter", gpuAdapter);
+	globals.defineType("GPUQueue", gpuQueue);
+	globals.defineType("GPUDevice", gpuDevice);
+	globals.defineType("GPUAdapter", gpuAdapter);
 }

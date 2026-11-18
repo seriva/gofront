@@ -56,8 +56,6 @@ import {
 	VOID,
 } from "./types.js";
 
-const TEMPORARY_KINDS = new Set(["CallExpr", "CompositeLit", "TypeAssertExpr"]);
-
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -524,13 +522,13 @@ export const expressionCheckMethods = {
 
 	// Go: map elements are not addressable, nor are fields and array elements
 	// reached from one by value (`&m[k]`, `&m[k].f`, `&m[k][i]` on an array).
-	_isMapElementOperand(operand) {
+	_isMapElementOperand(operand, scope) {
 		let node = operand;
 		while (node?.kind === "ParenExpr") node = node.expr;
 		if (node?.kind !== "SelectorExpr" && node?.kind !== "IndexExpr")
 			return false;
 		const bt = node.expr?._type;
-		const b = this._deepUnderlying(bt) ?? bt;
+		const b = this._coreUnderlying(bt, scope) ?? bt;
 		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
 		if (b?.kind === "pointer" || b?.kind === "slice") return false;
 		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
@@ -539,7 +537,22 @@ export const expressionCheckMethods = {
 			this._promotedThroughPointer(bt, node.field)
 		)
 			return false;
-		return this._isMapElementOperand(node.expr);
+		return this._isMapElementOperand(node.expr, scope);
+	},
+
+	// An identifier names a variable unless it is a constant, a package name, a
+	// builtin or a declared function.
+	_isAddressableIdent(n, scope) {
+		const owner = scope?.lookupScope(n.name);
+		if (!owner) return !BUILTIN_IDENTS.has(n.name);
+		if (owner.isConst(n.name)) return false;
+		// A type name is not a value; shadowing it with a variable clears the mark.
+		if (owner._typeNames.has(n.name)) return false;
+		// A package name is bound as a package; a variable typed with a
+		// namespace-shaped declaration (`var Widget Widget`) is still a variable.
+		if (owner._packages.has(n.name)) return false;
+		if (owner.symbols.get(n.name)?.kind === "builtin") return false;
+		return !(owner === this.globals && this._funcDeclNames?.has(n.name));
 	},
 
 	// Whether field or method `name` of struct type `t` is promoted through an
@@ -593,9 +606,32 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `&x` needs an addressable operand, or a composite literal (`&T{}`).
+	_errUnaddressableOperand(expr, ot) {
+		const o = expr.operand;
+		const u = this._deepUnderlying(ot);
+		const kind =
+			o.kind !== "Ident" && u?.kind === "struct" && ot?.kind === "named"
+				? `value of struct type ${typeStr(ot)}`
+				: operandKind(o, typeStr(ot));
+		return this.err(
+			`invalid operation: cannot take address of ${exprText(o)} (${kind})`,
+			this._positioned(expr),
+		);
+	},
+
 	_checkAddressOfExpr(expr, scope, ot) {
-		if (this._isMapElementOperand(expr.operand)) {
+		if (this._isMapElementOperand(expr.operand, scope)) {
 			this._errMapElementAddress(expr);
+			return { kind: "pointer", base: ot };
+		}
+		let target = expr.operand;
+		while (target?.kind === "ParenExpr") target = target.expr;
+		if (
+			target?.kind !== "CompositeLit" &&
+			!this._isAddressable(target, scope)
+		) {
+			this._errUnaddressableOperand(expr, ot);
 			return { kind: "pointer", base: ot };
 		}
 		if (this._isScalarInteriorOperand(expr.operand, ot, scope)) {
@@ -678,15 +714,15 @@ export const expressionCheckMethods = {
 	// A pointer-receiver method needs `&recv`: a map element or the result of
 	// a call, conversion, literal or assertion has no address. A receiver that
 	// reaches the method through an embedded pointer needs none.
-	_reportUnaddressableRecv(expr) {
+	_reportUnaddressableRecv(expr, scope) {
 		if (this.receiversChecked) return false;
 		const recv = expr.expr;
 		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
-		if (this._isMapElementOperand(recv)) {
+		if (this._isMapElementOperand(recv, scope)) {
 			this._errMapElementAddress(recv);
 			return true;
 		}
-		if (!this._isTemporaryOperand(recv)) return false;
+		if (this._isAddressable(recv, scope)) return false;
 		this.err(
 			`cannot call pointer method ${expr.field} on ${typeStr(recv._type)}`,
 			this._positioned(expr),
@@ -694,27 +730,47 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
-	// A value that exists only for the current expression: the result of a
-	// call, a literal or a type assertion, or a field or array element of one.
-	_isTemporaryOperand(node) {
-		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
-		if (TEMPORARY_KINDS.has(node?.kind)) return true;
-		if (node?.kind === "BinaryExpr") return true;
-		if (node?.kind === "UnaryExpr" && node.op !== "*") return true;
-		const bt = node?.expr?._type;
-		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
-			return this._isTemporaryOperand(node.expr);
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
-		return node?.kind === "IndexExpr" && b?.kind === "array"
-			? this._isTemporaryOperand(node.expr)
-			: false;
+	// Go's addressability rule: a variable, a pointer indirection, a slice
+	// element, a field of an addressable struct (or of any pointer), or an
+	// element of an addressable array (or of any pointer to an array).
+	// Constants, call results, literals, assertions, string and map elements,
+	// and fields or array elements of those are not. Operands whose type the
+	// checker does not model (JavaScript values, type parameters) count as
+	// addressable.
+	_isAddressable(node, scope) {
+		let n = node;
+		while (n?.kind === "ParenExpr") n = n.expr;
+		if (!n) return false;
+		if (n.kind === "Ident") return this._isAddressableIdent(n, scope);
+		if (n.kind === "UnaryExpr") return n.op === "*";
+		if (n.kind === "IndexExpr") return this._isAddressableIndex(n, scope);
+		if (n.kind === "SelectorExpr") return this._isAddressableSelector(n, scope);
+		return false;
+	},
+
+	_isAddressableIndex(n, scope) {
+		const b = this._coreUnderlying(n.expr?._type, scope) ?? n.expr?._type;
+		if (b?.kind === "slice" || b?.kind === "pointer") return true;
+		if (b?.kind === "map" || isString(b)) return false;
+		return b?.kind === "array" ? this._isAddressable(n.expr, scope) : true;
+	},
+
+	_isAddressableSelector(n, scope) {
+		// Method values and method expressions are values, not variables.
+		if (n._isMethodValue || n._isMethodExpr) return false;
+		const bt = n.expr?._type;
+		if (bt?.kind === "namespace") return !bt._consts?.has(n.field);
+		const b = this._coreUnderlying(bt, scope) ?? bt;
+		if (b?.kind !== "struct") return true;
+		if (this._promotedThroughPointer(bt, n.field)) return true;
+		return this._isAddressable(n.expr, scope);
 	},
 
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
 		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
-		if (this._reportUnaddressableRecv(expr)) return;
+		if (this._reportUnaddressableRecv(expr, scope)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
@@ -2664,6 +2720,15 @@ export const expressionCheckMethods = {
 		return t;
 	},
 };
+
+// Predeclared identifiers that are not variables.
+const BUILTIN_IDENTS = new Set([
+	...Object.keys(BUILTIN_CHECK),
+	"nil",
+	"true",
+	"false",
+	"iota",
+]);
 
 // Builtins whose calls may be constant expressions (`len("abc")`).
 const CONST_BUILTINS = new Set([

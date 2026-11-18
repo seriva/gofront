@@ -304,11 +304,11 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
   - Done when: Go's messages on all targets, no wasm ICE
 
 ### Phase 5: Addressability (root `addressability`)
-- [ ] Task 5.1: `_isAddressable` and assignment targets (R5.1–R5.6, R5.9–R5.12)
+- [x] Task 5.1: `_isAddressable` and assignment targets (R5.1–R5.6, R5.9–R5.12)
   - Files: `src/typechecker/expressions.js`, `src/typechecker/statements.js`
   - Test: reject fixtures `assign_call_field.go`, `assign_lit_field.go`, `assign_lit_elem.go`, `incdec_call_field.go`, `opassign_call_field.go`, `assign_call_array_elem.go`, `range_assign_call_field.go`, `tuple_assign_call_field.go`, `assign_assert_field.go`, `assign_call_field_elem.go`; controls `m[k] = v`, `ptr().X = 1`, `mk()[0] = 1` on a slice result, `m[1].X = 2` (existing message)
   - Done when: Go's message on all targets; existing addressable fixtures pass
-- [ ] Task 5.2: `&` and method receivers use `_isAddressable` (R5.7, R5.8, R5.13)
+- [x] Task 5.2: `&` and method receivers use `_isAddressable` (R5.7, R5.8, R5.13)
   - Files: `src/typechecker/expressions.js`
   - Test: reject fixtures `addr_call_field.go`, `addr_call.go`, `addr_lit_elem.go` (Go's message on all targets, before the `wasm` address rule); `&T{}` and existing `addressable_*` fixtures pass
   - Done when: `_reportUnaddressableRecv` and the `&` check call `_isAddressable`; `_isTemporaryOperand` is deleted

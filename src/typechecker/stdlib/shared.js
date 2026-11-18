@@ -42,7 +42,11 @@ export function setupSharedGlobals(globals, types) {
 		members[name] = t;
 		members[`New${name}`] = { kind: "func", params: [INT], returns: [t] };
 	}
-	globals.define("shared", { kind: "namespace", name: "shared", members });
+	globals.definePackage("shared", {
+		kind: "namespace",
+		name: "shared",
+		members,
+	});
 }
 
 // Returns the SHARED_KINDS entry for a (possibly named) shared type, or null.

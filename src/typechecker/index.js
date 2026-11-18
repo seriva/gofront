@@ -170,6 +170,8 @@ export class TypeChecker {
 		for (const [name, type] of values) {
 			if (typeNames ? typeNames.has(name) : types.get(name) === type)
 				this.globals.defineType(name, type);
+			else if (type?.kind === "namespace" && type.name === name)
+				this.globals.definePackage(name, type);
 			else this.globals.define(name, type);
 			if (external) this._externalNames.add(name);
 		}
@@ -198,7 +200,7 @@ export class TypeChecker {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
-		this.globals.define(pkgName, {
+		this.globals.definePackage(pkgName, {
 			kind: "namespace",
 			name: pkgName,
 			members,
@@ -1055,7 +1057,11 @@ export class TypeChecker {
 			return;
 		}
 		scope.defineType(name, type);
-		this.globals.symbols.set(name, type);
+		const g = this.globals;
+		// A package-level value of the same name stays a value.
+		if (g.symbols.has(name) && !g._typeNames.has(name))
+			g.symbols.set(name, type);
+		else g.defineType(name, type);
 	}
 
 	_registerLocalTypePlaceholder(decl, scope) {
@@ -1514,7 +1520,7 @@ export class TypeChecker {
 		// comes later in the list (`[S ~[]E, E any]`).
 		const params = decl.typeParams.map((tp) => {
 			const t = { kind: "typeParam", name: tp.name, constraint: ANY };
-			inner.define(tp.name, t);
+			inner.defineType(tp.name, t);
 			return t;
 		});
 		decl.typeParams.forEach((tp, i) => {
@@ -1536,7 +1542,7 @@ export class TypeChecker {
 	_injectGenericReceiverTypeParams(inner, recvNamedType) {
 		if (!recvNamedType?._generic) return;
 		for (const tp of recvNamedType._generic.typeParams) {
-			inner.define(tp.name, tp);
+			inner.defineType(tp.name, tp);
 		}
 	}
 
