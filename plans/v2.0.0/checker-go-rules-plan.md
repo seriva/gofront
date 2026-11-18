@@ -27,13 +27,14 @@ Close the checker gaps the checker-strictness reviews found, by fixing the mecha
 |---|---|---|---|
 | **In scope: core** | Root `untyped-conversion`: an untyped constant or `nil` operand is converted to the other operand's or target's type (with representability), and has a default type or none (`nil`) | R1.1–R1.14 | |
 | **In scope: core** | Root `operator-typing`: every operator form (`x op y`, `x op= y`, `x++`) types through `binaryResultType`, and string/complex results keep the operand's defined type | R2.1–R2.10 | |
-| **In scope: core** | Root `empty-interface-kinds`: one classification of JS-dynamic `any`, Go `any` (every spelling), defined empty interfaces and error-tainted types | R3.1–R3.5 | |
+| **In scope: core** | Root `empty-interface-kinds`: one classification of JS-dynamic `any`, Go `any` (every spelling), defined empty interfaces and error-tainted types | R3.1–R3.5, R15 | |
 | **In scope: core** | Root `builtin-operands`: builtins check their operand kinds and element assignability from one contract per builtin | R4.1–R4.12 | |
 | **In scope: core** | Root `addressability`: one `_isAddressable(expr)` per the spec, used by every assignment form and `&` | R5.1–R5.13 | |
-| **In scope: core** | Root `ad-hoc-type-structure`: checks read a named type's underlying type through `_deepUnderlying` and struct identity through `identical`, never one level or field-by-field, in the checker and in both backends | R6.1–R6.8 | |
+| **In scope: core** | Root `ad-hoc-type-structure`: checks read a named type's underlying type through `_deepUnderlying` and struct identity through `identical`, never one level or field-by-field, in the checker and in both backends | R6.1–R6.8, R14 | |
 | **In scope: core** | Root `range-int-operand`: range over an integer or constant operand | R7.1–R7.5 | |
-| **In scope: core** | Root `predeclared-scope`: user declarations shadow predeclared and imported names at package and block scope, without replacing the universe entry other code (stdlib signatures, generated Go, backends) relies on | R8.1–R8.11 | |
-| **In scope: core** | Roots `generic-body-check`, `generic-func-value`: generic bodies are checked against the constraint once, at the definition; an instantiated generic function is a value | R9.1–R9.10 | |
+| **In scope: core** | Root `predeclared-scope`: user declarations shadow predeclared and imported names at package and block scope, without replacing the universe entry other code (stdlib signatures, generated Go, backends) relies on | R8.1–R8.11, R16 | |
+| **In scope: core** | Roots `generic-body-check`, `generic-func-value`: generic bodies are checked against the constraint once, at the definition, including the other operand of an operator; an instantiated generic function is a value | R9.1–R9.10, R11 | |
+| **In scope: core** | Roots `builtin-type-param-constraints`, `comparable-constraint`: builtins in a generic body and `comparable` type arguments are checked against the type set | R12, R13 | |
 | **In scope: core** | Roots `forwarded-tuple`, `node-positions`, `error-classification`: diagnostics only (count, position, error class); no change to accepted programs | R10.1–R10.8 | |
 | **Excluded: deferred** | Entries that no longer reproduce against real Go | *Duplicate bool cases* (`switch b { case 1 == 1: case true: }`), *Impossible assertions* (`i.(J)` with conflicting `M`): `go run` (1.26.10) accepts both | Not defects: Go accepts them. Deleted |
 | **Excluded: deferred** | `wasm` struct layout | *WASM map keys* (`map[struct{ X int }]int` lookup → `0`, want `10`), *WASM struct conversion* (`struct{ E }(a)` → invalid wasm), sibling `append(s, A{5})` into `[]struct{ X int }` → invalid wasm (Go: `1`) | Root `wasm-struct-field-list`, scheduled in [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Phase 1 (W1.6–W1.8) |
@@ -219,6 +220,70 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
 | R10.6 | `error-classification` | `css bad(x string) { color: red; }` (`.templ`) | `CompileError` (unsupported) | `InternalCompilerError` (`genCssDecl` throws `Error`, `src/backend/js/templ.js:35`) |
 | R10.7 | `error-classification` | `compileWasm("…_ = f + 1i…")` (`src/compiler.js:763`) | `InternalCompilerError` (module fails `WebAssembly.validate`) | `{ errors: [] }`, `validate(wasm) === false` |
 | R10.8 | `error-classification` | R9.1 on `wasm` | `CompileError` | `InternalCompilerError` (`monomorph.js` re-check throws `Error`); fixed by R9.1, kept as a regression test |
+
+### Review follow-ups (2026-11-18)
+
+Scheduled from `plans/follow-ups.md`; each repro re-probed on `feat/checker-go-rules` at `a6767693` plus Phase 9 unmerged (`#242`, `a050ed96`) unless noted. Entry *Generic type declared over a struct type* no longer reproduces (`Pair[string, int](Named[int]{…})` compiles); deleted.
+
+#### R11 `generic-body-check` (operand side)
+Root: `_checkTypeParamOperator` and `_binaryResultTypeTypeParam` (`assignability.js`) look only at the operand that is a type parameter. The other operand is never converted to (untyped) or matched with (typed) the type parameter, an untyped left operand of a shift is typed as the count, and unary `!` tests `isBool` without the type set.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R11.1 | `func F[T ~int](a T, b int) T { return a + b }` | `mismatched types T and int` | accepted (js/wasm) |
+| R11.2 *sibling* | same with `a + 1.5`; `T ~int \| ~float64` with `a + 1.5` stays valid; `func F[T ~int8](a T) T { return a + 200 }` | `cannot convert 1.5 (untyped float constant) to type T`; ok; `cannot use 200 … overflows` | accepted |
+| R11.3 *sibling* | `func F[T ~bool](a T, b int) T { return a && b }`; `a == b` with `b int` | `mismatched types` | accepted |
+| R11.4 | `func F[T ~uint8](s T) int { return 1 << s }; F(uint8(10))` | `1024` | js prints `0`; wasm panics `Error: 10` |
+| R11.5 *sibling* | `1.5 << s`, `"a" << s` with `s T ~uint` | `shifted operand … must be integer` | accepted |
+| R11.6 | `func F[T ~bool](a T) T { return !a }` | accepted | `! requires bool` |
+| control | `a + b` (both `T`), `1 << s` with `s T ~uint` printed through `%T` → `int`, `a << 1`, `!a` with `T ~bool \| ~int` rejected | as Go | correct (must stay) |
+
+#### R12 `builtin-type-param-constraints`
+Root: the operand checks of `len`, `cap`, `clear`, `delete`, `append`, `copy`, `min`, `max` (`expressions.js:_lenOperandOk`, `_appendOperandOk`, `_checkDeleteOperand`, `_checkClearOperand`, `_orderedOperandOk`) return early for a `typeParam`, so a generic body is not checked against the type set.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R12.1 | `func f[T any](v T) int { return len(v) }` | `invalid argument: v (variable of type T constrained by any) for built-in len` | accepted (js/wasm) |
+| R12.2 *sibling* | `append(v, 1)`, `delete(v, 1)` with `T any`; `min(a, b)` with `T any` | `invalid argument … for built-in append` / `delete` / `invalid argument: a … cannot be ordered` | accepted |
+| control | `len(v)` with `T ~[]int \| ~string`; `cap(v)` with `T ~int` | ok; `invalid argument` | correct (must stay) |
+
+#### R13 `comparable-constraint`
+Root: `resolve.js:checkConstraint` returns early for `comparable`, so no type argument is ever checked against it, whether explicit, inferred at a call, or inferred in a partial instantiation.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R13.1 | `func c[C comparable](x C) {}; type P struct{ S []int }; c(P{})` | `P does not satisfy comparable` | accepted |
+| R13.2 *sibling* | `c(map[int]int{})`; `c(func(){})`; `c[[]int](nil)` | `… does not satisfy comparable` | accepted |
+| R13.3 *sibling* | `func g[T any](x T) { c(x) }` | `T does not satisfy comparable` | accepted |
+| R13.4 *sibling* | `Pair[int](1, func(){})` with `B comparable`; `_ = slices.Index[[]func()]` | `func() does not satisfy comparable` | accepted (js ICE on the second without Phase 9) |
+| control | `c(e)` with `e error` (interface types satisfy `comparable` since Go 1.20) | ok | correct (must stay) |
+
+#### R14 `ad-hoc-type-structure` (generic types over a struct)
+Root: `index.js:_genericUnderlyingOver` leaves the defined type in place for `type W[T any] S[T]` (JS has no class for it), so every read of `.underlying` one level deep sees a named type.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R14.1 | `type S[T any] struct{ X T }; type W[T any] S[T]; var w W[int]; w.X = 42; fmt.Println(w.X)` | `42` | js/both `Cannot set properties of null` |
+| R14.2 *sibling* | `type S[T any] struct{ P *T }; type W[T any] S[T]; var s []W[int]; var a any = s` | `__ifs(s, ["P"])` as for `[]S[int]` | `__ity(s, …)` without the pointer-field list |
+| control | `W[int](s)`, `W[int]{X: 3}`, `[]W[int]` asserted back from `any` (runtime) | `1`, `3 {3}`, `1` | correct on all targets (must stay) |
+
+#### R15 `empty-interface-kinds` (condition text)
+Root: `statements.js:_checkIfStmt` and `_checkForCond` word the error themselves for every non-boolean type.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R15.1 | `x := 1; if x {}`; `type MyAny any; var v MyAny; if v {}` | `non-boolean condition in if statement` | `If condition must be bool` |
+| R15.2 *sibling* | `for v {}` with the same `v`; `var v any; if v {}` | `non-boolean condition in for statement` | `For condition must be bool`; `non-boolean condition in if statement` for plain `any` (correct) |
+| control | `switch { case v: }`, `_ = v && true`, `_ = !v` with `v MyAny` | Go's messages | already Go's wording (must stay) |
+
+#### R16 `predeclared-scope` (constants)
+Root: `src/lexer/tokens.js` makes `true`, `false` and `nil` keyword tokens, so no declaration form can name them.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R16.1 | `func main() { true := 1; fmt.Println(true) }`; same with `nil` | `1` | `'[object Object]' declared and not used` |
+| R16.2 *sibling* | `func f(false int) int { return false }`; `var true = 5`; `const true = 1`; `type S struct{ nil int }; s.nil`; `for nil := range 2` | their values | `Parse error: Expected type, got 'false'`; `expected 'IDENT'` (x3); `'[object Object]' declared and not used` |
+| control | `x := true; y := nil` uses | universe values | correct (must stay) |
 
 ---
 
@@ -433,3 +498,73 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Test: accept fixtures `defined_over_defined_types.go`, `range_func_defined_over_defined.go`, `defined_chain_slice.go`, `generic_defined_over_generic.go`; reject fixture `copy_defined_chain_elem_mismatch.go`
   - Done when: Go's result on all targets; no declared type but a generic type declared over a struct type (ledger *Generic type declared over a struct type*) has a defined type as `underlying`
   - Fuzzer: with the kinds `MI2`, `MS2`, `I2` the grid has 55 entries fewer and 50 more than at `564d9663`. 44 of the 50 are `MI2`/`MS2`/`I2` now disagreeing exactly where `MI`/`MS`/`I` already do (they were rejected for the wrong reason before); the other 6 are `*I`/`[2]I` against `*I2`/`[2]I2` in `assign` and `*I` against `*I2` in `conv`, where the old representation agreed with Go by accident and the open roots `nested-assignability`/`dual-conversion-check` (checker-operand-rules O5) now show.
+
+### Phase 16: Operands of type-parameter operators (root `generic-body-check`, operand side)
+*Scheduled from review follow-ups (2026-11-18): the Phase 9 operand-matching, untyped-shift and unary `!` entries. Builds on Phase 9's `_checkTypeParamOperator`; lands after it.*
+- [ ] Task 16.1: The other operand of a type-parameter operator is converted to or identical with the type parameter (R11.1–R11.3)
+  - Files: `src/typechecker/assignability.js` (`_checkTypeParamOperator`, `_binaryResultTypeTypeParam`, `convertUntyped` for `typeParam`)
+  - Test: reject fixtures `generic_add_int_param.go`, `generic_add_float_const.go`, `generic_and_bool_int.go`, `generic_add_int8_overflow.go`; accept `a + 1`, `a + 1.5` with `T ~int | ~float64`
+  - Done when: Go's message on all targets; an untyped constant must be representable in every term of the type set
+- [ ] Task 16.2: An untyped left operand of a shift keeps its untyped type (R11.4, R11.5)
+  - Files: `src/typechecker/assignability.js`
+  - Test: `test/unit/types/generics.test.js` R11.4 prints `1024` on all targets; reject fixtures `generic_shift_float_const_left.go`, `generic_shift_string_left.go`
+  - Done when: `x := 1 << s` is `int` with `s T ~uint`
+- [ ] Task 16.3: Unary `!` on a type parameter tests its type set (R11.6)
+  - Files: `src/typechecker/expressions.js` (`_checkBoolUnaryOp`)
+  - Test: accept fixture `generic_not_bool_param.go`; reject `!a` with `T ~bool | ~int` and `T any`
+  - Done when: result type is `T`; controls unchanged
+
+### Phase 17: Builtins on type parameters (root `builtin-type-param-constraints`)
+*Scheduled from review follow-ups (2026-11-18).*
+- [ ] Task 17.1: `len`, `cap`, `clear` and `delete` check every term of the type set (R12.1, R12.2)
+  - Files: `src/typechecker/expressions.js` (`_lenOperandOk`, `_checkClearOperand`, `_checkDeleteOperand`)
+  - Test: reject fixtures `generic_len_any.go`, `generic_clear_any.go`, `generic_delete_any.go`; accept `len` with `T ~[]int | ~string`
+  - Done when: one `CompileError` per definition on all targets, no ICE
+- [ ] Task 17.2: `append`, `copy`, `min` and `max` check the type set (R12.2)
+  - Files: `src/typechecker/expressions.js` (`_appendOperandOk`, `_orderedOperandOk`)
+  - Test: reject fixtures `generic_append_any.go`, `generic_min_any.go`; accept `min` with `T cmp.Ordered`
+  - Done when: as Task 17.1
+
+### Phase 18: `comparable` is a constraint (root `comparable-constraint`)
+*Scheduled from review follow-ups (2026-11-18): *Bare comparable constraint* (routed here: same mechanism as the inferred-argument entry).*
+- [ ] Task 18.1: `checkConstraint` tests `comparable` on explicit, call-inferred and partially instantiated type arguments (R13.1, R13.2, R13.4)
+  - Files: `src/typechecker/resolve.js` (`checkConstraint`)
+  - Test: reject fixtures `comparable_struct_slice.go`, `comparable_map.go`, `comparable_func_inferred.go`, `comparable_index_value.go`; accept `error`, structs of comparable fields, pointers, channels, arrays
+  - Done when: Go's message on all targets; no wasm ICE for `slices.Index[[]func()]`
+- [ ] Task 18.2: A type parameter satisfies `comparable` only through its constraint (R13.3)
+  - Files: `src/typechecker/resolve.js`
+  - Test: reject `generic_any_to_comparable.go`; accept `T comparable` and `T cmp.Ordered` forwarded to `comparable`
+  - Done when: as Task 18.1
+
+### Phase 19: Generic types declared over a struct (root `ad-hoc-type-structure`)
+*Scheduled from review follow-ups (2026-11-18): *JS generic over struct* and *One-level underlying sites*.*
+- [ ] Task 19.1: JS field stores and reads on a generic type over a struct use the struct (R14.1)
+  - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js` (both test `t.underlying?.kind === "struct"` one level deep)
+  - Test: `test/unit/types/generics.test.js` R14.1 prints `42` on all targets
+  - Done when: reads go through `_deepUnderlying`; no `Cannot set properties of null`
+- [ ] Task 19.2: The checker's one-level `.underlying` reads see the struct (R14.2)
+  - Files: `src/typechecker/assignability.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`, `src/typechecker/types.js` (the sites listed in the ledger entry)
+  - Test: R14.2 annotations equal `[]S[int]`'s; the controls unchanged
+  - Done when: `grep -rn "\.underlying\.kind" src/typechecker` shows no read that skips a named link
+
+### Phase 20: Non-boolean conditions (root `empty-interface-kinds`, wording)
+*Scheduled from review follow-ups (2026-11-18).*
+- [ ] Task 20.1: `if` and `for` conditions report Go's `non-boolean condition in <stmt> statement` (R15.1, R15.2)
+  - Files: `src/typechecker/statements.js` (`_checkIfStmt`, `_checkForCond`)
+  - Test: reject fixtures `if_nonbool_int.go`, `if_nonbool_defined_any.go`, `for_nonbool_defined_any.go`
+  - Done when: every non-boolean type gets the one wording
+- [ ] Task 20.2: Existing assertions and docs use the new wording
+  - Files: tests that match `must be bool`; `docs/go-compatibility.md` where it quotes the message
+  - Test: `npm test`
+  - Done when: `grep -rn "condition must be bool" src test docs` finds nothing
+
+### Phase 21: `true`, `false` and `nil` can be redeclared (root `predeclared-scope`)
+*Scheduled from review follow-ups (2026-11-18).*
+- [ ] Task 21.1: The lexer reads `true`, `false` and `nil` as identifiers; the parser and checker resolve them through the universe scope (R16.1)
+  - Files: `src/lexer/tokens.js`, `src/parser/expressions.js`, `src/typechecker/expressions.js`
+  - Test: `test/unit/language/shadowing.test.js` R16.1 prints `1` on all targets; the controls
+  - Done when: `x := true` and `y := nil` still type as before
+- [ ] Task 21.2: Every declaration form accepts them (R16.2)
+  - Files: `src/parser/declarations.js`, `src/parser/statements.js`, `src/backend/js/expressions.js`
+  - Test: R16.2 programs print Go's output on all targets
+  - Done when: shadowed names are mangled like other shadowed predeclared names (Phase 8)
