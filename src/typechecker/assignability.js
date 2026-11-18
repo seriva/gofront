@@ -107,6 +107,21 @@ function untypedClass(t) {
 	return t.base === "bool" || t.base === "string" ? t.base : "number";
 }
 
+// Which operand types an operator accepts, by operator class.
+function opClass(op) {
+	if (INTEGER_ONLY_OPS.has(op)) return "int";
+	if (op === "+") return "add";
+	if (op === "-" || op === "*" || op === "/") return "num";
+	return "ord";
+}
+
+const TYPE_PARAM_OP_PREDICATES = {
+	int: (t) => isInteger(t),
+	add: (t) => isComplexOrNumeric(t) || isString(t),
+	num: (t) => isComplexOrNumeric(t),
+	ord: (t) => isNumeric(t) || isString(t),
+};
+
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
@@ -116,7 +131,7 @@ export const assignabilityMethods = {
 			// `x == nil` with a type parameter takes the same nil rule.
 			if (node && CMP_OPS.has(op) && !this.convertUntyped(lt, rt, node))
 				return UNTYPED_BOOL;
-			return this._binaryResultTypeTypeParam(op, lt, rt);
+			return this._binaryResultTypeTypeParam(op, lt, rt, node);
 		}
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) {
@@ -140,10 +155,56 @@ export const assignabilityMethods = {
 		);
 	},
 
-	_binaryResultTypeTypeParam(op, lt, rt) {
-		if (CMP_OPS.has(op)) return UNTYPED_BOOL;
+	_binaryResultTypeTypeParam(op, lt, rt, node) {
+		if (CMP_OPS.has(op)) {
+			this._checkTypeParamOperator(op, lt, rt, node);
+			return UNTYPED_BOOL;
+		}
 		if (LOG_OPS.has(op)) return BOOL;
+		this._checkTypeParamOperator(op, lt, rt, node);
 		return lt?.kind === "typeParam" ? lt : rt;
+	},
+
+	// An operator on a type parameter needs every type in its constraint's
+	// type set to support it; a constraint without a type set supports none.
+	// A shifted operand is the left one and a shift count any integer.
+	_checkTypeParamOperator(op, lt, rt, node) {
+		if (!node || op === "==" || op === "!=") return;
+		const left = lt?.kind === "typeParam";
+		const tp = left ? lt : rt;
+		const operand = left ? node.left : node.right;
+		const isShift = op === "<<" || op === ">>";
+		if (isShift && !left) return;
+		const pred = TYPE_PARAM_OP_PREDICATES[isShift ? "int" : opClass(op)];
+		if (this._typeParamAllows(tp, (t) => pred(this._deepUnderlying(t) ?? t)))
+			return;
+		const kind = `${operandKind(operand, typeStr(tp), false)} constrained by ${this._constraintText(tp)}`;
+		if (CMP_OPS.has(op))
+			this.err(
+				`invalid operation: ${exprText(node)} (type parameter ${typeStr(tp)} cannot use operator ${op})`,
+				node,
+			);
+		else if (isShift)
+			this.err(
+				`invalid operation: shifted operand ${exprText(operand)} (${kind}) must be integer`,
+				operand,
+			);
+		else
+			this.err(
+				`invalid operation: operator ${op} not defined on ${exprText(operand)} (${kind})`,
+				operand,
+			);
+	},
+
+	_constraintText(tp) {
+		const c = tp.constraint;
+		if (!c || isAny(c)) return "any";
+		if (c.kind === "TypeName") return c.name;
+		try {
+			return typeStr(c);
+		} catch {
+			return "its constraint";
+		}
 	},
 
 	_binaryResultTypeNonComplex(op, lt, rt, node) {
