@@ -1694,25 +1694,26 @@ export const expressionCheckMethods = {
 					expr,
 				);
 			}
-			// Check constraints
-			for (
-				let i = 0;
-				i < baseType.typeParams.length && i < typeArgs.length;
-				i++
-			) {
-				const tp = baseType.typeParams[i];
-				const constraint = tp.constraint
-					? this.resolveTypeNode(
-							tp.constraint,
-							this._typeArgScope(baseType.typeParams, typeArgs, scope),
-						)
-					: null;
-				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+			this._checkTypeArgConstraints(baseType, typeArgs, scope, expr);
+			const allArgs = this._inferRemainingTypeArgs(baseType, typeArgs, scope);
+			// As a value (not a callee) every type parameter must be known.
+			if (allArgs.length < baseType.typeParams.length && !expr._genericOk) {
+				return this.err(
+					`cannot infer ${baseType.typeParams[allArgs.length].name} in ${exprText(expr)}`,
+					expr,
+				);
 			}
-			expr._typeArgs = typeArgs;
-			if (expr.expr) expr.expr._typeArgs = typeArgs;
+			this._checkTypeArgConstraints(
+				baseType,
+				allArgs,
+				scope,
+				expr,
+				typeArgs.length,
+			);
+			expr._typeArgs = allArgs;
+			if (expr.expr) expr.expr._typeArgs = allArgs;
 			expr._genericFnType = baseType;
-			return this.instantiateGenericFunc(baseType, typeArgs);
+			return this.instantiateGenericFunc(baseType, allArgs);
 		}
 		// The parser's type-arg heuristic mistakes `xs[d.Field]` (uppercase field
 		// selector as index) for a generic instantiation. When the base is an
@@ -1726,6 +1727,53 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		return baseType;
+	},
+
+	// `slices.Sort[[]int]` as a value: the type parameters the explicit
+	// arguments leave out, when a constraint determines them (`S ~[]E`), are
+	// inferred like in a call. The result is the longest inferable prefix.
+	// `scope` resolves the calling function's type parameters, so an explicit
+	// argument `S ~[]E` unifies through its core type.
+	_inferRemainingTypeArgs(fnType, typeArgs, scope) {
+		const params = fnType.typeParams;
+		if (typeArgs.length >= params.length) return typeArgs;
+		const map = new Map();
+		typeArgs.forEach((t, i) => {
+			map.set(params[i].name, t);
+		});
+		const saved = this._inferScope;
+		this._inferScope = scope;
+		try {
+			this._inferFromCoreTypes(params, map);
+		} finally {
+			this._inferScope = saved;
+		}
+		const out = [...typeArgs];
+		for (let i = typeArgs.length; i < params.length; i++) {
+			const t = map.get(params[i].name);
+			if (!t) break;
+			out.push(t);
+		}
+		return out;
+	},
+
+	// Checks `typeArgs[from..]` against the constraints of `fnType`'s type
+	// parameters.
+	_checkTypeArgConstraints(fnType, typeArgs, scope, node, from = 0) {
+		for (
+			let i = from;
+			i < fnType.typeParams.length && i < typeArgs.length;
+			i++
+		) {
+			const tp = fnType.typeParams[i];
+			const constraint = tp.constraint
+				? this.resolveTypeNode(
+						tp.constraint,
+						this._typeArgScope(fnType.typeParams, typeArgs, scope),
+					)
+				: null;
+			if (constraint) this.checkConstraint(typeArgs[i], constraint, node);
+		}
 	},
 
 	// Emitter-backed stdlib helpers (`slices.Sort`, `maps.Keys`) take `any`
@@ -1908,6 +1956,13 @@ export const expressionCheckMethods = {
 			);
 			return null;
 		}
+		this._checkTypeArgConstraints(
+			generic,
+			typeArgs,
+			scope,
+			expr,
+			inst._typeArgs.length,
+		);
 		inst._typeArgs = typeArgs;
 		if (inst.expr) inst.expr._typeArgs = typeArgs;
 		return this.instantiateGenericFunc(generic, typeArgs);

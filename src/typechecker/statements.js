@@ -366,8 +366,13 @@ export const statementCheckMethods = {
 		const lt = t && this.resolveType(t);
 		if (!lt || lt._tainted) return;
 		const numeric =
-			lt.kind === "typeParam" ||
-			(isAny(lt) ? !lt._declared : isComplexOrNumeric(lt));
+			lt.kind === "typeParam"
+				? this._typeParamAllows(lt, (t) =>
+						isComplexOrNumeric(this._deepUnderlying(t) ?? t),
+					)
+				: isAny(lt)
+					? !lt._declared
+					: isComplexOrNumeric(lt);
 		if (!numeric) {
 			this.err(
 				`invalid operation: ${exprText(stmt.expr)}${stmt.op} (non-numeric type ${typeStr(lt)})`,

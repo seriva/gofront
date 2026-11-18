@@ -2499,6 +2499,340 @@ func main() {
 	);
 });
 
+section(
+	"Generics — instantiated function values infer constraint type parameters",
+);
+
+test("R9.3 slices.Sort[[]int] as a value sorts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func main() {
+	xs := []int{2, 1}
+	f := slices.Sort[[]int]
+	f(xs)
+	fmt.Println(xs)
+}
+`,
+		"[1 2]\n",
+	);
+});
+
+test("R9.9 partially instantiated user generic keeps the inferred element type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Z[S ~[]E, E any](s S) E {
+	var z E
+	return z
+}
+
+func main() {
+	f := Z[[]int]
+	fmt.Println(f([]int{3}))
+}
+`,
+		"0\n",
+	);
+});
+
+test("R9.10 slices.Index[[]int] as a value finds the element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func main() {
+	f := slices.Index[[]int]
+	fmt.Println(f([]int{4, 5}, 5))
+}
+`,
+		"1\n",
+	);
+});
+
+test("fully instantiated slices.Sort[[]int, int] and partial First[[]int] still work", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func First[S ~[]E, E any](s S) E { return s[0] }
+
+func main() {
+	xs := []int{2, 1}
+	g := slices.Sort[[]int, int]
+	g(xs)
+	f := First[[]int]
+	fmt.Println(xs, f(xs))
+}
+`,
+		"[1 2] 1\n",
+	);
+});
+
+section("Generics — review fixes: func values, operators on type parameters");
+
+test("generic func value over an enclosing type parameter infers its element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Outer[S ~[]E, E int | string](xs S) {
+	f := slices.Sort[S]
+	f(xs)
+}
+
+func Z[S ~[]E, E any](s S) E {
+	var z E
+	return z
+}
+
+func Outer2[S ~[]E, E any](xs S) E {
+	f := Z[S]
+	return f(xs)
+}
+
+func main() {
+	xs := []int{2, 1}
+	Outer(xs)
+	fmt.Println(xs, Outer2([]int{5}))
+}
+`,
+		"[1 2] 0\n",
+	);
+});
+
+test("inferred type argument that fails its constraint is rejected", () => {
+	const { errors } = compile(`package main
+
+import "slices"
+
+func main() {
+	_ = slices.Sort[[]func()]
+}
+`);
+	assertErrorContains(errors, "does not satisfy");
+});
+
+test("partial instantiation with an uninferable type parameter is rejected as a value", () => {
+	const { errors } = compile(`package main
+
+func G[A, B any](a A) B {
+	var b B
+	return b
+}
+
+func main() {
+	f := G[int]
+	_ = f
+}
+`);
+	assertErrorContains(errors, "cannot infer B");
+});
+
+test("string type parameter cannot be incremented", () => {
+	const { errors } = compile(`package main
+
+func F[T ~string](a T) T {
+	a++
+	return a
+}
+`);
+	assertErrorContains(errors, "non-numeric type");
+});
+
+test("mixed string/int type parameter cannot be incremented", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int | ~string](a T) T {
+	a++
+	return a
+}
+`);
+	assertErrorContains(errors, "non-numeric type");
+});
+
+test("&& on an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](a, b T) bool {
+	return a && b
+}
+`);
+	assertErrorContains(errors, "operator && not defined on a");
+});
+
+test("|| on an int type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int](a, b T) bool {
+	return a || b
+}
+`);
+	assertErrorContains(errors, "operator || not defined on a");
+});
+
+test("&& on a ~bool type parameter has the type parameter's type", () => {
+	const { errors } = compile(`package main
+
+func F[T ~bool](a, b T) T {
+	return a && b
+}
+
+func main() {
+	_ = F(true, false)
+}
+`);
+	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
+});
+
+test("shift count of an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](x int, s T) int {
+	return x << s
+}
+`);
+	assertErrorContains(errors, "shift count");
+});
+
+test("compound shift count of an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](x int, s T) int {
+	x <<= s
+	return x
+}
+`);
+	assertErrorContains(errors, "shift count");
+});
+
+test("shift count type parameter that is not integer is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int, U any](a T, b U) T {
+	return a << b
+}
+`);
+	assertErrorContains(errors, "shift count");
+});
+
+test("shift of a type parameter by a fractional constant is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int](a T) T {
+	return a << 1.5
+}
+`);
+	assertErrorContains(errors, "not an integer");
+});
+
+test("shift of a type parameter by a negative constant is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int](a T) T {
+	return a << -1
+}
+`);
+	assertErrorContains(errors, "negative");
+});
+
+test("shift of a concrete operand by an integer type parameter is valid", () => {
+	const { errors } = compile(`package main
+
+func F[T ~uint](x int, s T) int {
+	return x << s
+}
+
+func main() {
+	_ = F(1, uint(2))
+}
+`);
+	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
+});
+
+test("== on an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](a, b T) bool {
+	return a == b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("== on a slice-constrained type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~[]int](a, b T) bool {
+	return a == b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("!= on a mixed type set with a slice is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int | ~[]int](a, b T) bool {
+	return a != b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("== on a method-only constraint is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T interface{ M() }](a, b T) bool {
+	return a == b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("== on comparable, ordered and nil-comparable type parameters stays valid", () => {
+	const { errors } = compile(`package main
+
+import "cmp"
+
+func A[T comparable](a, b T) bool { return a == b }
+func B[T cmp.Ordered](a, b T) bool { return a != b }
+func C[T ~[]int](a T) bool { return a == nil }
+func D[T interface {
+	comparable
+	M()
+}](a, b T) bool {
+	return a == b
+}
+
+func main() {
+	_ = A(1, 2)
+	_ = B(1, 2)
+	_ = C([]int{})
+}
+`);
+	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

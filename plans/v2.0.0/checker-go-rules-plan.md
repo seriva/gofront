@@ -419,11 +419,11 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: all targets print Go's output, no ICE; builtin dispatch reads `expr._builtinName`, not the callee name
 
 ### Phase 9: Generic bodies and generic function values (roots `generic-body-check`, `generic-func-value`)
-- [ ] Task 9.1: Operators on type parameters are checked against the type set at the definition (R9.1, R9.2, R9.4–R9.8, R10.8)
+- [x] Task 9.1: Operators on type parameters are checked against the type set at the definition (R9.1, R9.2, R9.4–R9.8, R10.8)
   - Files: `src/typechecker/assignability.js`
   - Test: reject fixtures `generic_mod_float_term.go` (called), `generic_mod_float_term_unused.go`, `generic_add_any.go`, `generic_sub_int_string.go`, `generic_lt_comparable.go`, `generic_shift_float_term.go`, `generic_mod_assign_float_term.go`; accept `M[T ~int | ~int64]` with `%`, `T ~int | ~string` with `+`, `T cmp.Ordered` with `<`, `T comparable` with `==`
   - Done when: one `CompileError` per definition on all targets, no ICE
-- [ ] Task 9.2: Instantiated generic functions as values infer constraint type parameters (R9.3, R9.9, R9.10)
+- [x] Task 9.2: Instantiated generic functions as values infer constraint type parameters (R9.3, R9.9, R9.10)
   - Files: `src/typechecker/expressions.js` (`_checkInstantiationExpr`), `src/typechecker/resolve.js` (`_inferFromCoreTypes`)
   - Test: `test/unit/types/generics.test.js` R9.3 prints `[1 2]`, R9.9 prints `0`, R9.10 prints `1`; the `slices.Sort[[]int, int]` and partial `First[[]int]` controls unchanged
   - Done when: all pass on all targets
