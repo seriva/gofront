@@ -493,13 +493,10 @@ export const statementCheckMethods = {
 		const target = lhsTypes[0];
 		if (!target || isAny(target) || typeStr(target) === "int") return false;
 		const coll = this.resolveType(range.expr._coreType ?? range.expr._type);
-		const cu =
-			coll?.kind === "named" ? this.resolveType(coll.underlying) : coll;
+		const cu = this._deepUnderlying(coll);
 		if (!isString(cu) && cu?.kind !== "slice" && cu?.kind !== "array")
 			return false;
-		const tu = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		const tu = this.resolveType(this._deepUnderlying(target));
 		if (tu?.kind === "interface") return false;
 		this.err(`Cannot assign int to ${typeStr(target)}`, lhs);
 		return true;
@@ -636,7 +633,7 @@ export const statementCheckMethods = {
 			if (info) {
 				stmt.cond._isIterator = true;
 				stmt.cond._yieldParams = info.yieldParams;
-			} else if (ct?.kind === "func") {
+			} else if (this._deepUnderlying(ct)?.kind === "func") {
 				this.err("cannot range over func: not an iterator function", stmt);
 			}
 		}
@@ -788,9 +785,7 @@ export const statementCheckMethods = {
 		if (t.kind === "TypeName" && (t.name === "nil" || t.name === "error"))
 			return;
 		const resolved = this.resolveTypeNode(t, scope);
-		const u = this.resolveType(
-			resolved?.kind === "named" ? resolved.underlying : resolved,
-		);
+		const u = this.resolveType(this._deepUnderlying(resolved));
 		if (u?.kind === "interface") t._type = resolved;
 	},
 
@@ -913,9 +908,7 @@ export const statementCheckMethods = {
 	},
 
 	_checkRangeIterInvalidFunc(iterType, initStmt) {
-		const underlying =
-			iterType?.kind === "named" ? iterType.underlying : iterType;
-		if (underlying?.kind === "func")
+		if (this._deepUnderlying(iterType)?.kind === "func")
 			this.err("cannot range over func: not an iterator function", initStmt);
 	},
 

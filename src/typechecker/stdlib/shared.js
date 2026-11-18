@@ -55,6 +55,7 @@ export function setupSharedGlobals(globals, types) {
 
 // Returns the SHARED_KINDS entry for a (possibly named) shared type, or null.
 export function sharedInfo(t) {
+	// One level is enough: a defined type's underlying type is never itself a defined type.
 	const u = t?.kind === "named" ? t.underlying : t;
 	if (u?.kind !== "shared") return null;
 	return { name: u.shared, ...SHARED_KINDS[u.shared] };

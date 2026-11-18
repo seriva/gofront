@@ -353,8 +353,8 @@ export const expressionCheckMethods = {
 		if (anyKind(ot) === "dynamic") return ANY;
 		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
-		if (ot.kind === "named" && ot.underlying?.kind === "pointer")
-			return ot.underlying.base;
+		const ou = this._deepUnderlying(ot);
+		if (ou?.kind === "pointer") return ou.base;
 		this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
 		return ANY;
 	},
@@ -417,7 +417,7 @@ export const expressionCheckMethods = {
 		for (const term of c.terms) {
 			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
 			const inner =
-				t?.kind === "named" && t.underlying?.kind === "interface"
+				this._deepUnderlying(t)?.kind === "interface"
 					? this._constraintTerms(t, seen, scope)
 					: [t];
 			if (inner === null) return null;
@@ -446,7 +446,7 @@ export const expressionCheckMethods = {
 	// vectors) lives inline in its parent struct, array or global, so wasm has
 	// no stable address for it.  Type parameters are checked per instantiation.
 	_isScalarStorageType(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t) ?? t;
+		const u = this.resolveType(this._deepUnderlying(t)) ?? t;
 		const k = u?.kind;
 		if (!k || u._tainted) return false;
 		return k !== "struct" && k !== "array" && k !== "typeParam";
@@ -561,7 +561,7 @@ export const expressionCheckMethods = {
 	_selectorPath(t, name, depth) {
 		if (!t || depth > 8) return null;
 		if (t.kind === "named" && t.methods?.has(name)) return "value";
-		const st = this.resolveType(t.kind === "named" ? t.underlying : t) ?? t;
+		const st = this.resolveType(this._deepUnderlying(t)) ?? t;
 		if (st?.kind !== "struct") return null;
 		for (const f of st._structFields ?? [])
 			if (!f.embedded && f.names?.includes(name)) return "value";
@@ -588,7 +588,7 @@ export const expressionCheckMethods = {
 	},
 
 	_isFuncType(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t) ?? t;
+		const u = this.resolveType(this._deepUnderlying(t)) ?? t;
 		return u?.kind === "func";
 	},
 
@@ -829,9 +829,7 @@ export const expressionCheckMethods = {
 
 	_checkMethodExprSelector(expr, baseType) {
 		const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
-		const base = this.resolveType(
-			recvBase.kind === "named" ? recvBase.underlying : recvBase,
-		);
+		const base = this.resolveType(this._deepUnderlying(recvBase));
 		const methodType = this._resolveMethodExprType(recvBase, base, expr.field);
 		if (
 			this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
@@ -859,9 +857,7 @@ export const expressionCheckMethods = {
 			baseType.kind === "pointer"
 				? (this.resolveType(baseType.base) ?? baseType.base)
 				: baseType;
-		const base = this.resolveType(
-			recvT?.kind === "named" ? recvT.underlying : recvT,
-		);
+		const base = this.resolveType(this._deepUnderlying(recvT));
 		if (base?.kind === "interface" && base.methods?.has(expr.field)) {
 			// `i.M` binds the interface value; the call dispatches when it runs.
 			expr._isMethodValue = true;
@@ -997,7 +993,7 @@ export const expressionCheckMethods = {
 	// One step of underlying type, or the core type for a type parameter.
 	_underlyingOrCore(t, scope) {
 		if (t?.kind === "typeParam") return this._coreType(t, scope) ?? t;
-		return t?.kind === "named" ? t.underlying : t;
+		return this._deepUnderlying(t);
 	},
 
 	_markCompositeKey(key, kb, node, srcType) {
@@ -1059,7 +1055,7 @@ export const expressionCheckMethods = {
 
 	_markIfaceKey(mapType, node, srcType) {
 		const key = this.resolveType(mapType.key);
-		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		const kb = this._deepUnderlying(key);
 		const src = srcType && this.resolveType(srcType);
 		if (node && src?.kind === "typeParam") {
 			// Generic code: whether the key is boxed depends on the type argument,
@@ -1182,7 +1178,7 @@ export const expressionCheckMethods = {
 
 	_checkBuiltinCopy(e, at) {
 		const elemOf = (t) => {
-			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			const u = this.resolveType(this._deepUnderlying(t));
 			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
 		};
 		const [dt, st] = at;
@@ -1217,7 +1213,7 @@ export const expressionCheckMethods = {
 	_derefArrayPtr(holder, key, t) {
 		if (t?.kind !== "pointer") return t;
 		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
-		const under = base?.kind === "named" ? base.underlying : base;
+		const under = this._deepUnderlying(base);
 		if (under?.kind !== "array") return t;
 		holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
 		holder[key]._type = t.base;
@@ -1369,14 +1365,18 @@ export const expressionCheckMethods = {
 	// Struct types with identical field names and types convert to each other.
 	_sameStructFields(a, b) {
 		if (a?.kind !== "struct" || b?.kind !== "struct") return false;
-		if (a.fields.size !== b.fields.size) return false;
-		const bf = [...b.fields];
-		let i = 0;
-		for (const [name, type] of a.fields) {
-			const [bn, bt] = bf[i++];
-			if (name !== bn || !identical(type, bt)) return false;
-		}
-		return true;
+		return identical(a, b, { ignoreTags: true });
+	},
+
+	// Conversion to a type literal that Go rejects: a non-array to an array,
+	// or a struct to a struct whose fields differ.
+	_isInvalidLitConv(tgt, src, srcType) {
+		return (
+			this._isInvalidArrayConv(tgt, src, srcType) ||
+			(tgt?.kind === "struct" &&
+				src?.kind === "struct" &&
+				!this._sameStructFields(src, tgt))
+		);
 	},
 
 	_isInvalidArrayConv(tgt, src, srcType) {
@@ -1399,10 +1399,8 @@ export const expressionCheckMethods = {
 			this._checkIfaceTargetConversion(srcType, targetType, expr.expr)
 		)
 			return targetType;
-		const srcResolved =
-			srcType?.kind === "named" ? srcType.underlying : srcType;
-		const tgtResolved =
-			targetType?.kind === "named" ? targetType.underlying : targetType;
+		const srcResolved = this._deepUnderlying(srcType);
+		const tgtResolved = this._deepUnderlying(targetType);
 		if (isNumeric(targetType) && isComplex(srcType)) {
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
@@ -1433,7 +1431,7 @@ export const expressionCheckMethods = {
 			);
 			return targetType;
 		}
-		if (this._isInvalidArrayConv(tgtResolved, srcResolved, srcType)) {
+		if (this._isInvalidLitConv(tgtResolved, srcResolved, srcType)) {
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
 				expr,
@@ -1475,9 +1473,7 @@ export const expressionCheckMethods = {
 	_checkIfaceTargetConversion(srcType, targetType, operand) {
 		// `error("msg")` builds an error value (GoFront extension).
 		if (targetType === ERROR && isString(srcType)) return false;
-		const base = this.resolveType(
-			targetType.kind === "named" ? targetType.underlying : targetType,
-		);
+		const base = this.resolveType(this._deepUnderlying(targetType));
 		if (base?.kind !== "interface" || !operand) return false;
 		this.assertAssignable(targetType, srcType, operand, "conversion");
 		return true;
@@ -1489,9 +1485,8 @@ export const expressionCheckMethods = {
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
 		if (this._checkIfaceTargetConversion(srcType, targetType, expr.args?.[0]))
 			return;
-		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
-		const tgtResolved =
-			targetType.kind === "named" ? targetType.underlying : targetType;
+		const srcResolved = this._deepUnderlying(srcType);
+		const tgtResolved = this._deepUnderlying(targetType);
 
 		// `nil` converts to any type that has a nil value.
 		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
@@ -1584,7 +1579,7 @@ export const expressionCheckMethods = {
 		// In Go, the source of a type assertion must be an interface type.
 		// We allow `any` (which is GoFront's basic any) and interface types.
 		if (srcType && !isAny(srcType)) {
-			let underlying = srcType.kind === "named" ? srcType.underlying : srcType;
+			let underlying = this._deepUnderlying(srcType);
 			underlying = this.resolveType(underlying);
 			if (underlying?.kind !== "interface") {
 				this.err(
@@ -1607,9 +1602,7 @@ export const expressionCheckMethods = {
 	// and JS-dynamic or unresolved types are never judged.
 	_isImpossibleAssertion(ifaceType, targetType) {
 		if (!targetType || targetType._tainted || isAny(targetType)) return false;
-		const iface = this.resolveType(
-			ifaceType.kind === "named" ? ifaceType.underlying : ifaceType,
-		);
+		const iface = this.resolveType(this._deepUnderlying(ifaceType));
 		if (iface?.kind !== "interface" || !iface.methods?.size) return false;
 		const target = this.resolveType(targetType);
 		if (!target || target.kind === "typeParam" || target.kind === "interface")
@@ -1780,7 +1773,7 @@ export const expressionCheckMethods = {
 		if (expr.args?.length !== 1) return false;
 		const target = expr._conversionTargetType;
 		if (expr._isTypeConversion && target)
-			return isInteger(target.kind === "named" ? target.underlying : target);
+			return isInteger(this._deepUnderlying(target));
 		return (
 			expr.func?.kind === "Ident" && SIZED_INT_NAMES.includes(expr.func.name)
 		);
@@ -1879,8 +1872,11 @@ export const expressionCheckMethods = {
 	},
 
 	_resolveCallFnType(fnType, argTypes, expr, scope) {
-		if (fnType.kind === "named" && fnType.underlying?.kind === "func")
-			fnType = fnType.underlying;
+		if (
+			fnType.kind === "named" &&
+			this._deepUnderlying(fnType)?.kind === "func"
+		)
+			fnType = this._deepUnderlying(fnType);
 		if (fnType.kind === "generic") {
 			const resolved = this._resolveGenericFnType(
 				fnType,
@@ -1975,7 +1971,7 @@ export const expressionCheckMethods = {
 				? this.resolveTypeNode(constraint, scope)
 				: constraint,
 		);
-		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
+		const base = this._deepUnderlying(c);
 		if (base?.kind !== "interface") return false;
 		if (base.unionConstraint) return true;
 		return (base._typeSetEmbeds ?? []).some((e) =>
@@ -2126,7 +2122,7 @@ export const expressionCheckMethods = {
 	_inferArgTypes(expr, argTypes) {
 		return argTypes.map((t, i) => {
 			if (!expr.args?.[i]?._spread) return t;
-			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			const u = this.resolveType(this._deepUnderlying(t));
 			return u?.kind === "slice" ? u.elem : t;
 		});
 	},
@@ -2523,7 +2519,7 @@ export const expressionCheckMethods = {
 			expr.typeExpr === null
 				? (hintType ?? ANY)
 				: this.resolveTypeNode(expr.typeExpr, scope);
-		const base = t.kind === "named" ? t.underlying : t;
+		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
 		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);

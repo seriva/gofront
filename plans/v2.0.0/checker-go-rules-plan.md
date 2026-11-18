@@ -316,15 +316,15 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
 ### Phase 6: Type structure through shared helpers (root `ad-hoc-type-structure`)
 Checker only; the backend sites are Phase 10. The phase spans 8 files because Task 6.3 is a mechanical one-expression substitution per site.
 *After Task 15.3 (2026-11-18) a defined type's `underlying` is no longer a defined type, so a one-level lookup already reaches the underlying type: R6.1, R6.2, R6.6 (Task 6.1), R6.7 (Task 6.2) and R6.8 (Task 10.2) give Go's result on all targets (fixtures under Task 15.3). Still open here: R6.3 and R6.4 (Task 6.2), which are not chain defects, and the lookups a generic type declared over a struct type needs (the one case that keeps a defined `underlying`). Task 6.3's sweep is then tidying, not a fix.*
-- [ ] Task 6.1: Defined types over named types use `_deepUnderlying` in assertions, assignability and expressions (R6.1, R6.2, R6.6)
+- [x] Task 6.1: Defined types over named types use `_deepUnderlying` in assertions, assignability and expressions (R6.1, R6.2, R6.6)
   - Files: `src/typechecker/expressions.js`, `src/typechecker/assignability.js`, `src/typechecker/constants.js`
   - Test: `test/unit/types/identity.test.js` R6.1/R6.2 print `true`, R6.6 prints `hi`
   - Done when: all targets print Go's output; one-level underlying lookups in `expressions.js`, `assignability.js` and `constants.js` are replaced or documented
-- [ ] Task 6.2: Range condition and struct conversion use the underlying type and `identical` (R6.3, R6.4, R6.7)
+- [x] Task 6.2: Range condition and struct conversion use the underlying type and `identical` (R6.3, R6.4, R6.7)
   - Files: `src/typechecker/statements.js` (`_checkForCond` and remaining one-level lookups), `src/typechecker/expressions.js` (`_sameStructFields` → `identical`), `src/typechecker/stdlib/shared.js`
   - Test: reject fixtures `range_defined_func.go`, `convert_embedded_vs_named_field.go`; accept fixture `range_func_defined_over_defined.go` (R6.7 prints `1`)
   - Done when: Go's results on all targets, no ICE
-- [ ] Task 6.3: Sweep remaining one-level underlying lookups in `types.js`, `index.js` and `resolve.js`
+- [x] Task 6.3: Sweep remaining one-level underlying lookups in `types.js`, `index.js` and `resolve.js`
   - Files: `src/typechecker/types.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/identity.test.js` checks (no codegen) that the chain `type A B; type B C; type C []int` type-checks in `len`, `range`, index, conversion and `append`; the all-target fixture is Task 10.2
   - Done when: `grep -rn 'kind === "named" ? [a-zA-Z.]*\.underlying' src/typechecker` lists only sites with a comment saying why one level is intended

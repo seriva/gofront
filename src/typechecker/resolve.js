@@ -22,6 +22,7 @@ import {
 	TAINTED_ANY,
 	typedArrayConstructorForElem,
 	typeStr,
+	underlyingOf,
 	VOID,
 	WASM_STDLIB_MEMBERS,
 } from "./types.js";
@@ -676,7 +677,7 @@ export const resolveMethods = {
 					.split(".")
 					.pop();
 				if (embedName) fields.set(embedName, ft);
-				const base = inner.kind === "named" ? inner.underlying : inner;
+				const base = this._deepUnderlying(inner);
 				if (base?.kind === "struct") {
 					for (const [k, v] of base.fields.entries()) fields.set(k, v);
 				}
@@ -732,7 +733,7 @@ export const resolveMethods = {
 	// `typeSetEmbeds`; returns true when it makes the interface comparable-only.
 	_mergeInterfaceEmbed(embed, scope, methods, typeSetEmbeds) {
 		const resolved = this.resolveTypeNode(embed, scope);
-		const base = resolved?.kind === "named" ? resolved.underlying : resolved;
+		const base = this._deepUnderlying(resolved);
 		if (base === COMPARABLE) return true;
 		if (base?.kind !== "interface") {
 			if (!isAny(resolved))
@@ -1105,7 +1106,7 @@ export const resolveMethods = {
 	// Go's comparability: slices, maps and funcs are not comparable, nor are
 	// arrays and structs that contain them.
 	_isComparable(t, seen = new Set()) {
-		const base = t?.kind === "named" ? t.underlying : t;
+		const base = this._deepUnderlying(t);
 		if (!base || seen.has(base)) return true;
 		seen.add(base);
 		switch (base.kind) {
@@ -1151,8 +1152,7 @@ export const resolveMethods = {
 			this._checkUnionConstraint(typeArg, constraint, node);
 			return;
 		}
-		const base =
-			constraint.kind === "named" ? constraint.underlying : constraint;
+		const base = this._deepUnderlying(constraint);
 		if (base?.kind === "interface")
 			this._checkInterfaceConstraint(typeArg, base, constraint, node);
 	},
@@ -1210,8 +1210,7 @@ export const resolveMethods = {
 			baseType = this.resolveType(baseType.base);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
 			return baseType.methods.get(field);
-		let base = baseType.kind === "named" ? baseType.underlying : baseType;
-		base = this.resolveType(base);
+		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
 	},
 
@@ -1334,7 +1333,7 @@ export const resolveMethods = {
 		if (taName) {
 			const taType = this.types.get(taName);
 			if (taType) {
-				const underlying = taType.kind === "named" ? taType.underlying : taType;
+				const underlying = this._deepUnderlying(taType);
 				if (underlying?.fields?.has(field)) return underlying.fields.get(field);
 				if (underlying?.methods?.has(field)) {
 					const m = underlying.methods.get(field);
@@ -1449,7 +1448,7 @@ function _processJsonField(
 	if (f.embedded) {
 		const isPtr = f.type.kind === "pointer" || f.type.kind === "PointerType";
 		const inner = isPtr ? f.type.base : f.type;
-		const embedStruct = inner.kind === "named" ? inner.underlying : inner;
+		const embedStruct = underlyingOf(inner);
 		const embedName = (
 			f.astType?.name ??
 			f.astType?.base?.name ??
@@ -1542,8 +1541,7 @@ function compareIndex(a, b) {
 
 export function resolveJsonFields(structType) {
 	if (!structType) return [];
-	const underlying =
-		structType.kind === "named" ? structType.underlying : structType;
+	const underlying = underlyingOf(structType);
 	if (underlying?.kind !== "struct") return [];
 	if (underlying._jsonFields) return underlying._jsonFields;
 

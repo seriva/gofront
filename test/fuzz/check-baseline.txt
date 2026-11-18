@@ -6391,7 +6391,6 @@ conv:value:struct,MI2:go-reject/gf-accept # O5
 conv:value:struct,MI:go-reject/gf-accept # O5
 conv:value:struct,MS2:go-reject/gf-accept # O5
 conv:value:struct,MS:go-reject/gf-accept # O5
-conv:value:struct,PS:go-reject/gf-accept # O5
 conv:value:struct,Tany:go-reject/gf-accept # type-param-value
 conv:value:struct,Tcomparable:go-reject/gf-accept # type-param-value
 conv:value:struct,Tnum:go-reject/gf-accept # type-param-value
