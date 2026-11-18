@@ -1,6 +1,7 @@
 // src/backend/wasm/module-emitter.js
 // ModuleEmitter: Module IR builder that registers types, imports, globals and functions.
 
+import { namedUnderlying } from "../shared/named-underlying.js";
 import { wTypeKey } from "./boundary.js";
 import { hasErrorUsage } from "./prescan.js";
 import {
@@ -1522,7 +1523,7 @@ export class ModuleEmitter {
 				if (!named) return t.name === "error" && methodName === "Error";
 				t = named;
 			} else if (t.kind === "named") {
-				t = t.underlying ?? this.checker?.types?.get(t.name)?.underlying;
+				t = namedUnderlying(t, this.checker);
 			} else if (t.kind === "interface") {
 				return t.methods?.has?.(methodName) ?? false;
 			} else if (t.kind === "InterfaceType") {

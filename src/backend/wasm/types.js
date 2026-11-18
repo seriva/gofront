@@ -3,6 +3,7 @@
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
 import { isComplex, isComplex64 } from "../../typechecker/types.js";
+import { namedUnderlying } from "../shared/named-underlying.js";
 
 export { isComplex, isComplex64 };
 
@@ -110,9 +111,8 @@ export function toWasmType(goType, checker = null, mod = null) {
 			return toWasmType(goType.underlying, checker, mod);
 		}
 		// A bare `{ kind: "named", name }` (method receivers): look it up.
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved?.underlying)
-			return toWasmType(resolved.underlying, checker, mod);
+		const under = namedUnderlying(goType, checker);
+		if (under) return toWasmType(under, checker, mod);
 	}
 
 	// Untyped constants
@@ -734,9 +734,8 @@ export function isInterfaceType(goType, checker = null) {
 	}
 	if (goType.kind === "named") {
 		if (goType.name === "any" || goType.name === "interface{}") return true;
-		if (goType.underlying) return isInterfaceType(goType.underlying, checker);
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved) return isInterfaceType(resolved, checker);
+		const under = namedUnderlying(goType, checker);
+		if (under) return isInterfaceType(under, checker);
 	}
 	return false;
 }
@@ -775,10 +774,8 @@ export function isNonEmptyInterface(goType, checker = null) {
 	}
 	if (goType.kind === "named") {
 		if (goType.name === "any" || goType.name === "interface{}") return false;
-		if (goType.underlying)
-			return isNonEmptyInterface(goType.underlying, checker);
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved) return isNonEmptyInterface(resolved, checker);
+		const under = namedUnderlying(goType, checker);
+		if (under) return isNonEmptyInterface(under, checker);
 	}
 	if (goType.kind === "interface" || goType.kind === "InterfaceType") {
 		if (goType.methods instanceof Map) return goType.methods.size > 0;

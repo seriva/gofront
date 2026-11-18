@@ -2,6 +2,10 @@
 // Tests for Phase H4 Task H4.1: Non-empty interfaces in WASM and JS-strict parity.
 
 import {
+	isInterfaceType,
+	isNonEmptyInterface,
+} from "../../../src/backend/wasm/types.js";
+import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
@@ -1749,4 +1753,11 @@ func main() {
 `,
 		"inner\ninner\n",
 	);
+});
+
+test("Interface predicates terminate on a named placeholder registered in the type table", () => {
+	const placeholder = { kind: "named", name: "L", underlying: null };
+	const checker = { types: new Map([["L", placeholder]]) };
+	assertEqual(isInterfaceType(placeholder, checker), false);
+	assertEqual(isNonEmptyInterface(placeholder, checker), false);
 });
