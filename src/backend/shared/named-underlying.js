@@ -9,3 +9,19 @@ export function namedUnderlying(t, checker) {
 	const entry = checker?.types?.get(t.name);
 	return entry && entry !== t ? (entry.underlying ?? null) : null;
 }
+
+// The first non-`named` type reached by following `namedUnderlying` from `t`
+// (`t` itself when it is not a `named` type).  Returns null when a named type
+// has no underlying type or the chain is a cycle (`type A B; type B A`
+// registered in the checker's table), so callers never recurse forever.
+export function namedBase(t, checker) {
+	const seen = new Set();
+	let cur = t;
+	while (cur?.kind === "named") {
+		if (seen.has(cur) || seen.has(cur.name) || seen.size > 64) return null;
+		seen.add(cur);
+		seen.add(cur.name);
+		cur = namedUnderlying(cur, checker);
+	}
+	return cur ?? null;
+}

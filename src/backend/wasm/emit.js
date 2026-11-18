@@ -4,6 +4,7 @@
 // map and stdlib emission live in the emit-*.js mixins composed at the bottom.
 
 import { hasDefer, hasDirectRecover } from "../../lower/functions.js";
+import { namedBase } from "../shared/named-underlying.js";
 import { BuiltinsEmitter } from "./emit-builtins.js";
 import { ExprsEmitter } from "./emit-exprs.js";
 import { MapsEmitter } from "./emit-maps.js";
@@ -1589,7 +1590,8 @@ export class FunctionEmitter {
 		if (t.size?.value !== undefined) return Number(t.size.value);
 		if (typeof t.len === "number") return t.len;
 		if (t.len?.value !== undefined) return Number(t.len.value);
-		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
+		if (t.kind === "named")
+			return this._getArraySize(namedBase(t, this.mod.checker), defaultSize);
 		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
 			return this._getArraySize(
 				this.mod.checker.types.get(t.name),
@@ -1602,7 +1604,8 @@ export class FunctionEmitter {
 	_getArrayElemType(t) {
 		if (!t) return null;
 		if (t.elem) return t.elem;
-		if (t.underlying) return this._getArrayElemType(t.underlying);
+		if (t.kind === "named")
+			return this._getArrayElemType(namedBase(t, this.mod.checker));
 		if (t.kind === "ArrayType") return t.elem;
 		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
 			return this._getArrayElemType(this.mod.checker.types.get(t.name));

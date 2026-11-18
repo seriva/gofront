@@ -4,6 +4,7 @@
 
 import { hasCallOrReceive } from "../../lower/walk.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { namedBase } from "../shared/named-underlying.js";
 import {
 	anonIfaceName,
 	ERROR_STRUCT,
@@ -89,7 +90,8 @@ export class BuiltinsEmitter {
 	_getSliceElemType(t) {
 		if (!t) return null;
 		if (t.elem) return t.elem;
-		if (t.underlying) return this._getSliceElemType(t.underlying);
+		if (t.kind === "named")
+			return this._getSliceElemType(namedBase(t, this.mod.checker));
 		if (t.kind === "SliceType") return t.elem;
 		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
 			return this._getSliceElemType(this.mod.checker.types.get(t.name));

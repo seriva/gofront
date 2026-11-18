@@ -436,7 +436,7 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
 - [x] Task 10.2: `wasm` element and size lookups loop over `underlying` (R6.8)
   - Files: `src/backend/wasm/emit.js` (`_getArrayElemType`, `_getArraySize`), `src/backend/wasm/types.js`, `src/backend/wasm/module-emitter.js`, `src/backend/shared/named-underlying.js`, `src/backend/wasm/globals.js`, `src/backend/js/expressions.js`
   - Test: accept fixture `defined_chain_slice.go` (`type A B; type B C; type C []int` in `len`, `append`, `range`, index, `[]int(s)`), all targets; the `type M2 M1` map control unchanged
-  - Done when: passes on all targets; every backend site that reads the underlying of a checker `named` type goes through `namedUnderlying` (`src/backend/shared/named-underlying.js`, which also guards a self-referencing placeholder); name lookups of source-level `TypeName`/`Ident` nodes stay
+  - Done when: passes on all targets; no backend site resolves a named type through `checker.types.get(t.name)` of its own name
 
 ### Phase 11: Forwarded tuples (root `forwarded-tuple`)
 - [ ] Task 11.1: Forwarded tuple arguments report the call and its position (R10.1)
