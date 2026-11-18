@@ -439,7 +439,7 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: passes on all targets; no backend site resolves a named type through `checker.types.get(t.name)` of its own name
 
 ### Phase 11: Forwarded tuples (root `forwarded-tuple`)
-- [ ] Task 11.1: Forwarded tuple arguments report the call and its position (R10.1)
+- [x] Task 11.1: Forwarded tuple arguments report the call and its position (R10.1)
   - Files: `src/typechecker/assignability.js` (`_checkNumericCoercion`), `src/typechecker/statements.js` (forwarded-call arguments, `:546`)
   - Test: reject fixture `forwarded_tuple_arg_type.go` (`f()` text, one error); `test/unit/types/errors.test.js` asserts `9:3`
   - Done when: Go's text, count and position

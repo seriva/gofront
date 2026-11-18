@@ -709,27 +709,33 @@ export const assignabilityMethods = {
 		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
-		if (this._checkIfaceToConcrete(target, source, node, ctx, operand)) return;
+		// The results of a forwarded call (`g(f())`) have no node of their own:
+		// errors report at the call that yields them, as Go does. The rewrites
+		// above and `_markStructCopy` never see it, since they would tag or
+		// rewrite that one call once per result.
+		const at = node ?? this._forwardedCall;
+		if (this._checkIfaceToConcrete(target, source, at, ctx, operand)) return;
 		if (this._assertAssignableEarlyReturn(target, source, operand ?? node, ctx))
 			return;
 		if (isPointer(target) && isPointer(source)) {
 			this._assertNestedAssignable(
 				target.base ?? target.underlying?.base,
 				source.base ?? source.underlying?.base,
-				node,
+				at,
 			);
 			return;
 		}
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-		if (this._checkNumericCoercion(target, source, node, ctx, operand)) return;
-		if (this._checkArrayAssignable(target, source, node)) return;
-		if (this._checkTypedArrayAssignable(target, source, node)) return;
-		if (this._checkFuncAssignable(target, source, node)) return;
+		if (this._checkNumericCoercion(target, source, at, ctx, operand ?? at))
+			return;
+		if (this._checkArrayAssignable(target, source, at)) return;
+		if (this._checkTypedArrayAssignable(target, source, at)) return;
+		if (this._checkFuncAssignable(target, source, at)) return;
 		if (!identical(target, source))
 			this._assertAssignableTypeMismatch(
 				target,
 				source,
-				node,
+				at,
 				operand ?? node,
 				structCopy,
 			);
@@ -1012,7 +1018,7 @@ export const assignabilityMethods = {
 				return;
 			this.err(
 				`Cannot assign ${typeStr(source)} to ${typeStr(target)} here: convert it explicitly with ${typeStr(target)}(v)`,
-				node ?? this._forwardedCall,
+				node,
 			);
 			return;
 		}
