@@ -1,6 +1,5 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
-import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
 import { newLabelScope } from "./statements.js";
 import {
@@ -1647,14 +1646,13 @@ export const expressionCheckMethods = {
 	// A range operand of a kind Go rejects: bool, float or complex values,
 	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
 	// parameters and kinds the checker models loosely are left alone.
-	_notRangeable(node, type) {
+	_notRangeable(type) {
 		if (!type || type._tainted || isAny(type)) return false;
 		if (type.kind === "untyped")
 			return !(
 				type.base === "string" ||
 				type.base === "int" ||
-				(type.base === "float64" &&
-					constIntValue(this._constValue(node)) !== null)
+				type.base === "rune"
 			);
 		const u = this._deepUnderlying(type);
 		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
@@ -1669,7 +1667,7 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		if (collType?._declared || this._notRangeable(expr.expr, collType)) {
+		if (collType?._declared || this._notRangeable(collType)) {
 			const bad = this._rangeOperandError(expr.expr, collType);
 			return { kind: "tuple", types: [bad, bad] };
 		}

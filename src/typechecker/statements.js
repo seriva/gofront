@@ -24,6 +24,7 @@ import {
 	isAny,
 	isBool,
 	isComplexOrNumeric,
+	isInteger,
 	isNil,
 	isString,
 	isUntyped,
@@ -625,7 +626,7 @@ export const statementCheckMethods = {
 				"expr",
 				this.checkExpr(stmt.cond.expr, inner),
 			);
-			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
+			if (ct?._declared || this._notRangeable(ct))
 				this._rangeOperandError(stmt.cond.expr, ct);
 			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
 			if (core) stmt.cond.expr._coreType = core;
@@ -954,11 +955,28 @@ export const statementCheckMethods = {
 		}
 	},
 
+	// Ranging over an integer yields only the count: `for i, v := range n`
+	// has no second value to bind.
+	_checkRangeIntVars(lhs, operand, type, scope) {
+		if (lhs.length < 2 || !type || type._tainted) return;
+		const untyped = type.kind === "untyped";
+		const u = untyped ? null : this._coreUnderlying(type, scope);
+		const isInt = untyped
+			? type.base === "int" || type.base === "rune"
+			: u?.kind === "basic" && isInteger(u);
+		if (!isInt) return;
+		this.err(
+			`range over ${exprText(operand)} (${operandKind(operand, untyped ? type.base : typeStr(type), untyped)}) permits only one iteration variable`,
+			lhs[1],
+		);
+	},
+
 	_checkRangeIterStmt(initStmt, scope, _returnType) {
 		const rangeExpr = initStmt.rhs[0];
 		const iterType = this.checkExpr(rangeExpr.expr, scope);
 		const info = iteratorYieldParams(iterType);
 		if (!info) {
+			this._checkRangeIntVars(initStmt.lhs, rangeExpr.expr, iterType, scope);
 			this._checkRangeIterInvalidFunc(iterType, initStmt);
 			return null;
 		}
