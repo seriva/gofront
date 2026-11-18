@@ -775,7 +775,7 @@ export class BuiltinsEmitter {
 
 	_emitBuiltinPrint(call) {
 		const { func, args } = call;
-		const isPrintln = func.name === "println";
+		const isPrintln = call._builtinName === "println";
 		if (args.length === 0 && isPrintln) {
 			const logIdx = this.mod.getPrintlnEmptyIndex();
 			this.pushInstruction({ op: "call", funcIndex: logIdx });
@@ -1027,7 +1027,7 @@ export class BuiltinsEmitter {
 	// propagates, -0 < +0), integers `select` on lt/gt, strings compare via the
 	// string import.  A single operand is the result itself.
 	_emitBuiltinMinMax(call, targetWasmType) {
-		const isMin = call.func.name === "min";
+		const isMin = call._builtinName === "min";
 		const goType = call._type ?? this._resolveExprGoType(call.args[0]);
 		const wType =
 			goType?.kind === "untyped" && typeof targetWasmType === "string"
@@ -1080,7 +1080,10 @@ export class BuiltinsEmitter {
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
-		switch (func.name) {
+		// The checker names a call to the predeclared builtin; a user
+		// declaration spelled `len` or `max` is an ordinary call.
+		const name = func.name === "string" ? "string" : call._builtinName;
+		switch (name) {
 			case "len":
 				this._emitBuiltinLen(call, targetWasmType);
 				return true;

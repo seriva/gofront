@@ -90,7 +90,8 @@ const RECEIVER_STEP = {
 	ReturnStmt: (s, reads) => branches(reads, s.values),
 	ExprStmt: (s, reads) => {
 		if (reads(s.expr)) return "deref";
-		const panics = s.expr?.kind === "CallExpr" && s.expr.func?.name === "panic";
+		const panics =
+			s.expr?.kind === "CallExpr" && s.expr._builtinName === "panic";
 		return panics ? "stop" : "next";
 	},
 	DefineStmt: (s, reads, name) => {
@@ -2181,7 +2182,7 @@ export const expressionGenMethods = {
 		const funcExpr =
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
 		if (funcExpr.kind === "Ident") {
-			const builtin = this._genBuiltinIdent(funcExpr.name, expr);
+			const builtin = this._genBuiltinIdent(expr._builtinName, expr);
 			if (builtin !== undefined) return builtin;
 		}
 

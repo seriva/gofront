@@ -1916,3 +1916,327 @@ func main() {
 		"7\n",
 	);
 });
+
+// ── Predeclared names shadowed by user declarations ──────────
+
+const prog = (body) => `package main\n\nimport "fmt"\n\n${body}\n`;
+
+test("a local type named error does not leak to other functions", async () => {
+	await assertAllTargetsOutput(
+		prog(`type MyErr struct{ Msg string }
+
+func (MyErr) Error() string { return "e" }
+
+func f1() {
+	type error struct{ Msg string }
+	_ = error{}
+}
+
+func f2() error { return MyErr{} }
+
+func main() { fmt.Println(f2()) }`),
+		"e\n",
+	);
+});
+
+test("nested local types of one name keep their own scope", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 = string
+
+func main() {
+	var a int32 = "hi"
+	{
+		type int32 = bool
+		var b int32 = true
+		_ = b
+	}
+	var c int32 = a
+	fmt.Println(c)
+}`),
+		"hi\n",
+	);
+});
+
+test("a package-level type int32 shadows the predeclared type", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 = string
+
+func main() {
+	var x int32 = "a"
+	fmt.Println(x)
+}`),
+		"a\n",
+	);
+});
+
+test("a package-level type any shadows the predeclared alias", async () => {
+	await assertAllTargetsOutput(
+		prog(`type any = int
+
+func main() {
+	var x any = 3
+	fmt.Println(x + 1)
+}`),
+		"4\n",
+	);
+});
+
+test("a local type any = int still works", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	type any = int
+	var x any = 3
+	fmt.Println(x + 1)
+}`),
+		"4\n",
+	);
+});
+
+test("func len shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func len() int { return 1 }
+
+func main() { fmt.Println(len()) }`),
+		"1\n",
+	);
+});
+
+test("a local len closure shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	len := func() int { return 1 }
+	fmt.Println(len())
+}`),
+		"1\n",
+	);
+});
+
+test("func max shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func max(a, b int) int { return a }
+
+func main() { fmt.Println(max(1, 2)) }`),
+		"1\n",
+	);
+});
+
+test("func append shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func append(x int) int { return x + 1 }
+
+func main() { fmt.Println(append(1)) }`),
+		"2\n",
+	);
+});
+
+test("func println shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+func println(s string) {}
+
+func main() { println("x") }
+`,
+		"",
+	);
+});
+
+test("parameter len and locals named copy and new are plain values", async () => {
+	await assertAllTargetsOutput(
+		prog(`func f(len int) int { return len + 1 }
+
+func main() {
+	copy := 5
+	new := 2
+	fmt.Println(f(1), copy, new)
+}`),
+		"2 5 2\n",
+	);
+});
+
+// ── Defined package-level types named after predeclared types ──
+
+test("a defined type int32 string prints with %T and %v", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 string
+
+func main() {
+	var x int32 = "hi"
+	fmt.Printf("%T %v\\n", x, x)
+}`),
+		"main.int32 hi\n",
+	);
+});
+
+test("a defined type int32 int supports arithmetic and printing", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 int
+
+func main() {
+	var v int32 = 7
+	fmt.Println(v + 1)
+}`),
+		"8\n",
+	);
+});
+
+test("a defined struct type any prints its fields", async () => {
+	await assertAllTargetsOutput(
+		prog(`type any struct{ X int }
+
+func main() {
+	v := any{X: 7}
+	fmt.Println(v)
+}`),
+		"{7}\n",
+	);
+});
+
+test("a defined type int32 works as a struct field under json.Marshal", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type int32 string
+
+type S struct{ X int32 }
+
+func main() {
+	b, _ := json.Marshal(S{X: "hi"})
+	fmt.Println(string(b))
+}
+`,
+		'{"X":"hi"}\n',
+	);
+});
+
+test("a defined type int32 as a function result", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 string
+
+func f() int32 { return "ok" }
+
+func main() { fmt.Println(f()) }`),
+		"ok\n",
+	);
+});
+
+test("a package-level type comparable shadows the predeclared constraint", async () => {
+	await assertAllTargetsOutput(
+		prog(`type comparable = int
+
+func main() {
+	var x comparable = 7
+	fmt.Println(x + 1)
+}`),
+		"8\n",
+	);
+});
+
+test("a local type comparable shadows the predeclared constraint", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	type comparable = int
+	var x comparable = 7
+	fmt.Println(x + 1)
+}`),
+		"8\n",
+	);
+});
+
+// ── Calls to user declarations spelled like builtins ─────────
+
+test("a user len in an index expression is an ordinary call", async () => {
+	await assertAllTargetsOutput(
+		prog(`func len() int { return 1 }
+
+func main() {
+	xs := []int{10, 20, 30}
+	fmt.Println(xs[len()])
+}`),
+		"20\n",
+	);
+});
+
+test("a user len as a loop bound is an ordinary call", async () => {
+	await assertAllTargetsOutput(
+		prog(`func len() int { return 3 }
+
+func main() {
+	xs := []int{1, 2, 3, 4, 5}
+	s := 0
+	for i := 0; i < len(); i++ {
+		s += xs[i]
+	}
+	fmt.Println(s)
+}`),
+		"6\n",
+	);
+});
+
+test("a user panic does not terminate a function", () => {
+	const { errors } = compile(
+		prog(`func panic() {}
+
+func f() int { panic() }
+
+func main() { fmt.Println(f()) }`),
+	);
+	assertErrorContains(errors, "missing return");
+});
+
+test("a user println that recovers catches a deferred panic", async () => {
+	await assertAllTargetsOutput(
+		prog(`func println() { _ = recover() }
+
+func f() {
+	defer println()
+	panic("boom")
+}
+
+func main() {
+	f()
+	fmt.Println("done")
+}`),
+		"done\n",
+	);
+});
+
+test("a user panic statement is not a terminating builtin in JS output", async () => {
+	await assertAllTargetsOutput(
+		prog(`func panic(s string) { fmt.Println("p", s) }
+
+func main() {
+	xs := []int{1}
+	i := 0
+	panic("a")
+	fmt.Println(xs[i])
+}`),
+		"p a\n1\n",
+	);
+});
+
+test("deferred builtins are called directly, not hoisted into a variable", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	m := map[string]int{"a": 1}
+	defer fmt.Println(len(m))
+	defer delete(m, "a")
+}`),
+		"1\n",
+	);
+	await assertAllTargetsOutput(
+		prog(`func f() (s string) {
+	defer func() { s = fmt.Sprint(recover()) }()
+	defer panic("boom")
+	return "no"
+}
+
+func main() { fmt.Println(f()) }`),
+		"boom\n",
+	);
+});

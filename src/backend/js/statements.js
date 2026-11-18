@@ -60,8 +60,7 @@ const isStableIndex = (e, assigned) => {
 			);
 		case "CallExpr":
 			return (
-				e.func?.kind === "Ident" &&
-				(e.func.name === "len" || e.func.name === "cap") &&
+				(e._builtinName === "len" || e._builtinName === "cap") &&
 				e.args.every((a) => isStableIndex(a, assigned))
 			);
 		default:
@@ -71,8 +70,7 @@ const isStableIndex = (e, assigned) => {
 
 const isLenCap = (e) =>
 	e.kind === "CallExpr" &&
-	e.func?.kind === "Ident" &&
-	(e.func.name === "len" || e.func.name === "cap");
+	(e._builtinName === "len" || e._builtinName === "cap");
 
 // A call (other than `len`/`cap`), receive or await in `n` (not inside a
 // function literal): it may change variables and fields.

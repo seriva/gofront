@@ -122,6 +122,93 @@ func main() {
 	);
 });
 
+for (const decl of ["type strings = int", "type strings int"]) {
+	test(`a local \`${decl}\` does not hide the strings import`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func other() int {
+	${decl}
+	var x strings = 3
+	return int(x)
+}
+
+func main() { fmt.Println(other(), strings.ToUpper("ab")) }
+`,
+			"3 AB\n",
+		);
+	});
+}
+
+test("a local type named like an import works inside its own function", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func other() string {
+	type strings struct{ S string }
+	v := strings{S: "q"}
+	return v.S
+}
+
+func main() { fmt.Println(other(), strings.ToUpper("ab")) }
+`,
+		"q AB\n",
+	);
+});
+
+test("a nested local alias of the same name keeps the outer one", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type T = string
+	var a T = "hi"
+	{
+		type T = bool
+		var b T = true
+		_ = b
+	}
+	var c T = a
+	fmt.Println(c)
+}
+`,
+		"hi\n",
+	);
+});
+
+test("a nested local defined type of the same name keeps the outer one", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type T int
+	var a T = 1
+	if true {
+		type T string
+		var b T = "x"
+		fmt.Print(b, " ")
+	}
+	fmt.Println(a)
+}
+`,
+		"x 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -85,9 +85,9 @@ export function _scanImportsInBody(node, mod) {
 		prepareWasmNative(mod, node);
 		if (
 			func.kind === "Ident" &&
-			(func.name === "print" || func.name === "println")
+			(node._builtinName === "print" || node._builtinName === "println")
 		) {
-			const isPrintln = func.name === "println";
+			const isPrintln = node._builtinName === "println";
 			if (args.length === 0 && isPrintln) {
 				mod.getPrintlnEmptyIndex();
 			}
