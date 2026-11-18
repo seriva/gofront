@@ -108,9 +108,11 @@ export function isMapRangeType(iterType) {
 }
 
 export function isStringRangeType(iterType) {
+	let t = iterType;
+	while (t?.kind === "named" && t.underlying) t = t.underlying;
 	return (
-		(iterType?.kind === "basic" && iterType.name === "string") ||
-		(iterType?.kind === "untyped" && iterType.base === "string")
+		(t?.kind === "basic" && t.name === "string") ||
+		(t?.kind === "untyped" && t.base === "string")
 	);
 }
 

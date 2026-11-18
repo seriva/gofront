@@ -25,7 +25,7 @@ Plan: [`checker-go-rules-plan.md`](checker-go-rules-plan.md). Run each phase as 
 - [ ] **Phase 7** (range over integers): unchanged. The grid has no `range` section, so this phase is not under the fuzzer gate unless one is added first.
 - [ ] **Phase 8** (predeclared names): unchanged in scope; it can read the object kind from `Scope` instead of matching names.
 - [ ] **Phase 9** (generics): 2,079 baseline entries tagged `R9` are operators on type parameters, so this phase should remove most of them.
-- [ ] **Phase 10** (backends): only R6.5 (JS range over a defined string) is left; R6.8 already passes.
+- [x] **Phase 10** (backends): only R6.5 (JS range over a defined string) is left; R6.8 already passes.
 - [ ] **Phases 11–14** (diagnostics, universe `error`, docs): unchanged.
 
 ### Fuzzer gate, after each phase

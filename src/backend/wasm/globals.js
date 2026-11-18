@@ -4,6 +4,7 @@
 
 import { foldConstExpr } from "../../typechecker/const-fold.js";
 import { orderPackageInits } from "../../typechecker/init-order.js";
+import { namedUnderlying } from "../shared/named-underlying.js";
 import { _someNode } from "./prescan.js";
 import {
 	isStringType,
@@ -81,7 +82,9 @@ function _isPointerGoType(t, mod) {
 	const named =
 		t.kind === "named" || t.kind === "TypeName" || t.kind === "Ident";
 	const under = named
-		? (t.underlying ?? mod.checker?.types?.get(t.name)?.underlying)
+		? t.kind === "named"
+			? namedUnderlying(t, mod.checker)
+			: (t.underlying ?? mod.checker?.types?.get(t.name)?.underlying)
 		: null;
 	return under ? _isPointerGoType(under, mod) : false;
 }

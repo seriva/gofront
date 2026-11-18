@@ -3,6 +3,7 @@
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
 import { isComplex, isComplex64 } from "../../typechecker/types.js";
+import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 
 export { isComplex, isComplex64 };
 
@@ -110,9 +111,8 @@ export function toWasmType(goType, checker = null, mod = null) {
 			return toWasmType(goType.underlying, checker, mod);
 		}
 		// A bare `{ kind: "named", name }` (method receivers): look it up.
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved?.underlying)
-			return toWasmType(resolved.underlying, checker, mod);
+		const under = namedUnderlying(goType, checker);
+		if (under) return toWasmType(under, checker, mod);
 	}
 
 	// Untyped constants
@@ -531,13 +531,7 @@ export function isSliceType(goType, checker = null) {
 		const resolved = checker?.types?.get(goType.name);
 		if (resolved) return isSliceType(resolved, checker);
 	}
-	if (goType.kind === "named" && goType.underlying) {
-		return isSliceType(goType.underlying, checker);
-	}
-	if (goType.kind === "named" && !goType.underlying) {
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved && resolved !== goType) return isSliceType(resolved, checker);
-	}
+	if (goType.kind === "named") return isSliceType(namedBase(goType, checker));
 	return goType.kind === "slice" || goType.kind === "SliceType";
 }
 
@@ -576,8 +570,7 @@ export function isTaggedSliceType(goType, checker = null) {
 	let elem = getSliceElemType(goType, checker);
 	// A source-level element (`uint8` in a case list) is a TypeName node.
 	for (let i = 0; i < 16 && elem; i++) {
-		if (elem.kind === "named")
-			elem = elem.underlying ?? checker?.types?.get(elem.name);
+		if (elem.kind === "named") elem = namedBase(elem, checker);
 		else if (elem.kind === "TypeName" || elem.kind === "Ident")
 			elem = checker?.types?.get(elem.name) ?? {
 				kind: "basic",
@@ -595,10 +588,10 @@ export function isTaggedSliceType(goType, checker = null) {
 export function getSliceElemType(t, checker = null) {
 	if (!t) return null;
 	if (t.elem) return t.elem;
-	if (t.underlying?.elem) return t.underlying.elem;
-	if (t.name && checker?.types?.has(t.name)) {
-		const resolved = checker.types.get(t.name);
-		return getSliceElemType(resolved, checker);
+	if (t.kind === "named") return getSliceElemType(namedBase(t, checker));
+	if (t.underlying) return getSliceElemType(t.underlying, checker);
+	if (t.kind === "TypeName" && checker?.types?.has(t.name)) {
+		return getSliceElemType(checker.types.get(t.name), checker);
 	}
 	return null;
 }
@@ -608,7 +601,7 @@ export function isRuneSlice(goType, checker = null) {
 	if (!isSliceType(goType, checker)) return false;
 	let t = goType;
 	while (t && !t.elem) {
-		if (t.kind === "named") t = t.underlying;
+		if (t.kind === "named") t = namedBase(t, checker);
 		else if (t.kind === "TypeName" || t.kind === "Ident")
 			t = checker?.types?.get(t.name);
 		else return false;
@@ -637,9 +630,7 @@ export function isArrayType(goType, checker = null) {
 		const resolved = checker?.types?.get(goType.name);
 		if (resolved) return isArrayType(resolved, checker);
 	}
-	if (goType.kind === "named" && goType.underlying) {
-		return isArrayType(goType.underlying, checker);
-	}
+	if (goType.kind === "named") return isArrayType(namedBase(goType, checker));
 	return goType.kind === "array" || goType.kind === "ArrayType";
 }
 
@@ -649,13 +640,7 @@ export function isMapType(goType, checker = null) {
 		const resolved = checker?.types?.get(goType.name);
 		if (resolved) return isMapType(resolved, checker);
 	}
-	if (goType.kind === "named" && goType.underlying) {
-		return isMapType(goType.underlying, checker);
-	}
-	if (goType.kind === "named" && !goType.underlying) {
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved && resolved !== goType) return isMapType(resolved, checker);
-	}
+	if (goType.kind === "named") return isMapType(namedBase(goType, checker));
 	return goType.kind === "map" || goType.kind === "MapType";
 }
 
@@ -666,14 +651,8 @@ export function getMapKeyValTypes(goType, checker = null) {
 		const resolved = checker?.types?.get(goType.name);
 		if (resolved) return getMapKeyValTypes(resolved, checker);
 	}
-	if (goType.kind === "named" && goType.underlying) {
-		return getMapKeyValTypes(goType.underlying, checker);
-	}
-	if (goType.kind === "named" && !goType.underlying) {
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved && resolved !== goType)
-			return getMapKeyValTypes(resolved, checker);
-	}
+	if (goType.kind === "named")
+		return getMapKeyValTypes(namedBase(goType, checker), checker);
 	if (goType.kind === "map" || goType.kind === "MapType") {
 		const key = goType.key ?? goType.keyType;
 		const val =
@@ -692,11 +671,8 @@ export function isStringType(goType, checker = null) {
 	}
 	if (goType.kind === "named") {
 		if (goType.name === "string") return true;
-		if (goType.underlying) return isStringType(goType.underlying, checker);
 		// A bare `{ kind: "named", name }` (interface candidates) resolves by name.
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved && resolved !== goType && resolved.kind === "named")
-			return isStringType(resolved, checker);
+		return isStringType(namedBase(goType, checker), checker);
 	}
 	if (goType.kind === "basic") return goType.name === "string";
 	if (goType.kind === "untyped") return goType.base === "string";
@@ -735,9 +711,8 @@ export function isInterfaceType(goType, checker = null) {
 	}
 	if (goType.kind === "named") {
 		if (goType.name === "any" || goType.name === "interface{}") return true;
-		if (goType.underlying) return isInterfaceType(goType.underlying, checker);
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved) return isInterfaceType(resolved, checker);
+		const under = namedUnderlying(goType, checker);
+		if (under) return isInterfaceType(under, checker);
 	}
 	return false;
 }
@@ -776,10 +751,8 @@ export function isNonEmptyInterface(goType, checker = null) {
 	}
 	if (goType.kind === "named") {
 		if (goType.name === "any" || goType.name === "interface{}") return false;
-		if (goType.underlying)
-			return isNonEmptyInterface(goType.underlying, checker);
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved) return isNonEmptyInterface(resolved, checker);
+		const under = namedUnderlying(goType, checker);
+		if (under) return isNonEmptyInterface(under, checker);
 	}
 	if (goType.kind === "interface" || goType.kind === "InterfaceType") {
 		if (goType.methods instanceof Map) return goType.methods.size > 0;

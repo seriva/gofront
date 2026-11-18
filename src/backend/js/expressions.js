@@ -23,6 +23,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { namedUnderlying } from "../shared/named-underlying.js";
 import { jsBindingName, jsClassName, jsMemberName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
@@ -962,30 +963,21 @@ export const expressionGenMethods = {
 	_isStructType(t) {
 		if (!t) return false;
 		if (t.name && this.structNames.has(t.name)) return true;
-		const base =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const base = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		if (base?.name && this.structNames.has(base.name)) return true;
 		return base?.kind === "struct";
 	},
 
 	_isStructPointerType(t) {
 		if (!t) return false;
-		const pt =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const pt = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		if (pt?.kind !== "pointer") return false;
 		return this._isStructType(pt.base);
 	},
 
 	_isScalarPointerType(t) {
 		if (!t) return false;
-		const pt =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const pt = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		if (pt?.kind !== "pointer") return false;
 		return !this._isStructType(pt.base);
 	},
@@ -1016,10 +1008,7 @@ export const expressionGenMethods = {
 
 	_aggregateBase(t) {
 		if (!t) return null;
-		const b =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const b = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		return b?.kind === "struct" || b?.kind === "array" ? b : null;
 	},
 
