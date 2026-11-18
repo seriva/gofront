@@ -461,7 +461,7 @@ export const assignabilityMethods = {
 	},
 
 	_isNonComparableKind(t) {
-		const base = t?.kind === "named" ? t.underlying : t;
+		const base = this._deepUnderlying(t);
 		return (
 			base?.kind === "slice" || base?.kind === "map" || base?.kind === "func"
 		);
@@ -498,7 +498,7 @@ export const assignabilityMethods = {
 	},
 
 	_float32Base(t) {
-		const r = t?.kind === "named" ? t.underlying : t;
+		const r = this._deepUnderlying(t);
 		return r?.kind === "basic" || r?.kind === "untyped" ? r.name : null;
 	},
 
@@ -666,9 +666,7 @@ export const assignabilityMethods = {
 		const named = this._namedMethodBoxSource(source);
 		if (named)
 			return { box: named.ptr ? "named_ptr" : "named", type: named.type };
-		const sBase = this.resolveType(
-			source.kind === "named" ? source.underlying : source,
-		);
+		const sBase = this.resolveType(this._deepUnderlying(source));
 		const info = this._classifyIfaceBox(sBase);
 		if (!info) return null;
 		return { box: info.box, ptrFields: info.ptrFields };
@@ -729,9 +727,7 @@ export const assignabilityMethods = {
 			return { box: "value", ptrFields: pf.length > 0 ? pf : null };
 		}
 		if (sBase?.kind === "pointer") {
-			const st = this.resolveType(
-				sBase.base?.kind === "named" ? sBase.base.underlying : sBase.base,
-			);
+			const st = this.resolveType(this._deepUnderlying(sBase.base));
 			if (st?.kind === "struct") {
 				const pf = this._getStructPtrFields(st);
 				return { box: "ptr", ptrFields: pf.length > 0 ? pf : null };
@@ -811,18 +807,14 @@ export const assignabilityMethods = {
 	// An interface type (named or literal) with at least one method.
 	_isMethodIfaceTarget(target) {
 		if (!target || isAny(target)) return false;
-		const base = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		const base = this.resolveType(this._deepUnderlying(target));
 		return base?.kind === "interface" && base.methods?.size > 0;
 	},
 
 	_isConcreteTarget(target) {
 		if (!target || target.kind === "typeParam" || isAny(target)) return false;
 		if (isNil(target) || isUntyped(target)) return false;
-		const base = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		const base = this.resolveType(this._deepUnderlying(target));
 		return !!base && base.kind !== "interface" && base.kind !== "typeParam";
 	},
 
@@ -852,7 +844,7 @@ export const assignabilityMethods = {
 		operand = node,
 		structCopy = false,
 	) {
-		let tBase = target.kind === "named" ? target.underlying : target;
+		let tBase = this._deepUnderlying(target);
 		tBase = this.resolveType(tBase);
 		if (tBase?.kind === "interface") {
 			if (tBase.methods.size === 0) return;
@@ -863,9 +855,7 @@ export const assignabilityMethods = {
 				);
 			return;
 		}
-		const sBase = this.resolveType(
-			source.kind === "named" ? source.underlying : source,
-		);
+		const sBase = this.resolveType(this._deepUnderlying(source));
 		if (sharedInfo(source) && tBase?.kind === "slice") {
 			this.err(
 				`cannot use ${typeStr(source)} as ${typeStr(target)}: a linear-memory buffer cannot be passed as a GC slice without an explicit copy`,
@@ -1151,8 +1141,8 @@ export const assignabilityMethods = {
 	},
 
 	_checkFuncAssignable(target, source, node) {
-		const tFunc = target.kind === "named" ? target.underlying : target;
-		const sFunc = source.kind === "named" ? source.underlying : source;
+		const tFunc = this._deepUnderlying(target);
+		const sFunc = this._deepUnderlying(source);
 		if (tFunc?.kind === "func" && sFunc?.kind === "func") {
 			if (!this._implementsMethod(tFunc, sFunc)) {
 				this.err(
@@ -1201,7 +1191,7 @@ export const assignabilityMethods = {
 		const isPtr = srcType?.kind === "pointer";
 		// *T has the full method set of T (value + pointer receivers).
 		if (srcType?.kind === "pointer") srcType = this.resolveType(srcType.base);
-		let base = srcType.kind === "named" ? srcType.underlying : srcType;
+		let base = this._deepUnderlying(srcType);
 		base = this.resolveType(base);
 		// Interface → interface: the source's method set must cover the target's.
 		if (base?.kind === "interface") {

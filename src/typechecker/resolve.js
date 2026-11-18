@@ -676,6 +676,7 @@ export const resolveMethods = {
 					.split(".")
 					.pop();
 				if (embedName) fields.set(embedName, ft);
+				// One level is enough: a defined type's underlying type is never itself a defined type.
 				const base = inner.kind === "named" ? inner.underlying : inner;
 				if (base?.kind === "struct") {
 					for (const [k, v] of base.fields.entries()) fields.set(k, v);
@@ -732,6 +733,7 @@ export const resolveMethods = {
 	// `typeSetEmbeds`; returns true when it makes the interface comparable-only.
 	_mergeInterfaceEmbed(embed, scope, methods, typeSetEmbeds) {
 		const resolved = this.resolveTypeNode(embed, scope);
+		// One level is enough: a defined type's underlying type is never itself a defined type.
 		const base = resolved?.kind === "named" ? resolved.underlying : resolved;
 		if (base === COMPARABLE) return true;
 		if (base?.kind !== "interface") {
@@ -1105,6 +1107,7 @@ export const resolveMethods = {
 	// Go's comparability: slices, maps and funcs are not comparable, nor are
 	// arrays and structs that contain them.
 	_isComparable(t, seen = new Set()) {
+		// One level is enough: a defined type's underlying type is never itself a defined type.
 		const base = t?.kind === "named" ? t.underlying : t;
 		if (!base || seen.has(base)) return true;
 		seen.add(base);
@@ -1151,6 +1154,7 @@ export const resolveMethods = {
 			this._checkUnionConstraint(typeArg, constraint, node);
 			return;
 		}
+		// One level is enough: a defined type's underlying type is never itself a defined type.
 		const base =
 			constraint.kind === "named" ? constraint.underlying : constraint;
 		if (base?.kind === "interface")
@@ -1210,6 +1214,7 @@ export const resolveMethods = {
 			baseType = this.resolveType(baseType.base);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
 			return baseType.methods.get(field);
+		// One level is enough: a defined type's underlying type is never itself a defined type.
 		let base = baseType.kind === "named" ? baseType.underlying : baseType;
 		base = this.resolveType(base);
 		return this._dispatchFieldType(base, baseType, field, node);
@@ -1334,6 +1339,7 @@ export const resolveMethods = {
 		if (taName) {
 			const taType = this.types.get(taName);
 			if (taType) {
+				// One level is enough: a defined type's underlying type is never itself a defined type.
 				const underlying = taType.kind === "named" ? taType.underlying : taType;
 				if (underlying?.fields?.has(field)) return underlying.fields.get(field);
 				if (underlying?.methods?.has(field)) {
@@ -1449,6 +1455,7 @@ function _processJsonField(
 	if (f.embedded) {
 		const isPtr = f.type.kind === "pointer" || f.type.kind === "PointerType";
 		const inner = isPtr ? f.type.base : f.type;
+		// One level is enough: a defined type's underlying type is never itself a defined type.
 		const embedStruct = inner.kind === "named" ? inner.underlying : inner;
 		const embedName = (
 			f.astType?.name ??
@@ -1542,6 +1549,7 @@ function compareIndex(a, b) {
 
 export function resolveJsonFields(structType) {
 	if (!structType) return [];
+	// One level is enough: a defined type's underlying type is never itself a defined type.
 	const underlying =
 		structType.kind === "named" ? structType.underlying : structType;
 	if (underlying?.kind !== "struct") return [];

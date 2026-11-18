@@ -571,6 +571,7 @@ export function typedArrayConstructorForElem(elemType) {
 
 export function isTypedArraySlice(type) {
 	if (!type) return false;
+	// One level is enough: a defined type's underlying type is never itself a defined type.
 	const base = type.kind === "named" ? type.underlying : type;
 	if (base?.kind !== "slice") return false;
 	return typedArrayConstructorForElem(base.elem) !== null;
@@ -806,6 +807,11 @@ function identicalNamed(a, b, seen) {
 	return sameList(a.typeArgs ?? [], b.typeArgs ?? [], seen);
 }
 
+// Struct tags matter for identity but not for conversions (`ignoreTags`).
+function sameTag(x, y, seen) {
+	return seen.ignoreTags || (x.tag ?? null) === (y.tag ?? null);
+}
+
 function identicalStruct(a, b, seen) {
 	const xs = structFieldList(a);
 	const ys = structFieldList(b);
@@ -816,7 +822,7 @@ function identicalStruct(a, b, seen) {
 			return (
 				x.name === y.name &&
 				x.embedded === y.embedded &&
-				(x.tag ?? null) === (y.tag ?? null) &&
+				sameTag(x, y, seen) &&
 				identicalIn(x.type, y.type, seen)
 			);
 		})
@@ -916,8 +922,11 @@ export function copyType(t, extra = {}) {
 // type only matches itself (or an instance of the same generic declaration
 // with identical type arguments); composite types match element by element;
 // the three kinds of `any` match each other.
-export function identical(a, b) {
-	return identicalIn(a, b, new Map());
+// With `ignoreTags`, struct tags are not compared (the rule for conversions).
+export function identical(a, b, { ignoreTags = false } = {}) {
+	const seen = new Map();
+	seen.ignoreTags = ignoreTags;
+	return identicalIn(a, b, seen);
 }
 
 // The field an embedded type declares is named after the type as written, so
@@ -969,6 +978,7 @@ function promotedFieldDepth(struct, name, path = new Set()) {
 	let best = null;
 	for (const e of struct._embeds ?? []) {
 		const inner = e?.kind === "pointer" ? e.base : e;
+		// One level is enough: a defined type's underlying type is never itself a defined type.
 		const st = inner?.kind === "named" ? inner.underlying : inner;
 		if (st?.kind !== "struct" || !st._structFields) continue;
 		const sub = declaresField(st, name)
@@ -1036,6 +1046,7 @@ export function displayTypeName(name) {
  * func returning bool with 0-2 params.
  */
 export function iteratorYieldParams(t) {
+	// One level is enough: a defined type's underlying type is never itself a defined type.
 	const fn = t?.kind === "named" ? t.underlying : t;
 	if (fn?.kind !== "func") return null;
 	if (fn.params.length !== 1) return null;

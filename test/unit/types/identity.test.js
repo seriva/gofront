@@ -236,4 +236,21 @@ test("identical: a type is identical to itself and untyped nothing is void", () 
 	assert(!identical(a, undefined));
 });
 
+test("a chain of defined types type-checks in len, range, index, conversion and append", () => {
+	check(`package main
+type A B
+type B C
+type C []int
+func main() {
+	s := A{1, 2}
+	_ = len(s)
+	for range s {
+	}
+	_ = s[0]
+	_ = []int(s)
+	s = append(s, 3)
+}
+`);
+});
+
 summarize();

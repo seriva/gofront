@@ -352,7 +352,7 @@ export const constantCheckMethods = {
 
 	// Converts a constant to Go type `t` (basic or named over a basic type).
 	_convertConstTo(v, t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+		const u = this.resolveType(this._deepUnderlying(t));
 		if (u?.kind !== "basic") return null;
 		const r = convertConst(v, u.name);
 		return r?.overflow ? { ...r, typeName: typeStr(t) } : r;
@@ -363,9 +363,7 @@ export const constantCheckMethods = {
 	// A null `ctx` reports an operand converted to the other operand's type.
 	_checkConstOverflow(target, source, node, ctx) {
 		if (source?.kind !== "untyped" || !node?._const) return false;
-		const base = this.resolveType(
-			target?.kind === "named" ? target.underlying : target,
-		);
+		const base = this.resolveType(this._deepUnderlying(target));
 		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
 		const i = constIntValue(node._const);
 		const range = this._intRange(target);
@@ -374,9 +372,7 @@ export const constantCheckMethods = {
 		// A float or complex target holds the constant as a Number: Go rounds
 		// the same way, so the JS backend has nothing to warn about.
 		if (!range && node.kind) {
-			const u = this.resolveType(
-				target?.kind === "named" ? target.underlying : target,
-			);
+			const u = this.resolveType(this._deepUnderlying(target));
 			if (u?.kind === "basic" && /^(float|complex)/.test(u.name))
 				node._floatConst = true;
 		}
@@ -458,7 +454,7 @@ export const constantCheckMethods = {
 	},
 
 	_intRange(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+		const u = this.resolveType(this._deepUnderlying(t));
 		return u?.kind === "basic" ? (INT_RANGES[u.name] ?? null) : null;
 	},
 };
