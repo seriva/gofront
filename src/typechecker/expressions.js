@@ -1709,10 +1709,11 @@ export const expressionCheckMethods = {
 					: null;
 				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 			}
-			expr._typeArgs = typeArgs;
-			if (expr.expr) expr.expr._typeArgs = typeArgs;
+			const allArgs = this._inferRemainingTypeArgs(baseType, typeArgs);
+			expr._typeArgs = allArgs;
+			if (expr.expr) expr.expr._typeArgs = allArgs;
 			expr._genericFnType = baseType;
-			return this.instantiateGenericFunc(baseType, typeArgs);
+			return this.instantiateGenericFunc(baseType, allArgs);
 		}
 		// The parser's type-arg heuristic mistakes `xs[d.Field]` (uppercase field
 		// selector as index) for a generic instantiation. When the base is an
@@ -1726,6 +1727,26 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		return baseType;
+	},
+
+	// `slices.Sort[[]int]` as a value: the type parameters the explicit
+	// arguments leave out, when a constraint determines them (`S ~[]E`), are
+	// inferred like in a call. The result is the longest inferable prefix.
+	_inferRemainingTypeArgs(fnType, typeArgs) {
+		const params = fnType.typeParams;
+		if (typeArgs.length >= params.length) return typeArgs;
+		const map = new Map();
+		typeArgs.forEach((t, i) => {
+			map.set(params[i].name, t);
+		});
+		this._inferFromCoreTypes(params, map);
+		const out = [...typeArgs];
+		for (let i = typeArgs.length; i < params.length; i++) {
+			const t = map.get(params[i].name);
+			if (!t) break;
+			out.push(t);
+		}
+		return out;
 	},
 
 	// Emitter-backed stdlib helpers (`slices.Sort`, `maps.Keys`) take `any`

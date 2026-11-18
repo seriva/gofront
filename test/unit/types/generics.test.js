@@ -2499,6 +2499,91 @@ func main() {
 	);
 });
 
+section(
+	"Generics — instantiated function values infer constraint type parameters",
+);
+
+test("R9.3 slices.Sort[[]int] as a value sorts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func main() {
+	xs := []int{2, 1}
+	f := slices.Sort[[]int]
+	f(xs)
+	fmt.Println(xs)
+}
+`,
+		"[1 2]\n",
+	);
+});
+
+test("R9.9 partially instantiated user generic keeps the inferred element type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Z[S ~[]E, E any](s S) E {
+	var z E
+	return z
+}
+
+func main() {
+	f := Z[[]int]
+	fmt.Println(f([]int{3}))
+}
+`,
+		"0\n",
+	);
+});
+
+test("R9.10 slices.Index[[]int] as a value finds the element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func main() {
+	f := slices.Index[[]int]
+	fmt.Println(f([]int{4, 5}, 5))
+}
+`,
+		"1\n",
+	);
+});
+
+test("fully instantiated slices.Sort[[]int, int] and partial First[[]int] still work", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func First[S ~[]E, E any](s S) E { return s[0] }
+
+func main() {
+	xs := []int{2, 1}
+	g := slices.Sort[[]int, int]
+	g(xs)
+	f := First[[]int]
+	fmt.Println(xs, f(xs))
+}
+`,
+		"[1 2] 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
