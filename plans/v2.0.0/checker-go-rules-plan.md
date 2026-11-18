@@ -315,6 +315,7 @@ Root (R9.1–R9.2, R9.4–R9.8): `_binaryResultTypeTypeParam` (`assignability.js
 
 ### Phase 6: Type structure through shared helpers (root `ad-hoc-type-structure`)
 Checker only; the backend sites are Phase 10. The phase spans 8 files because Task 6.3 is a mechanical one-expression substitution per site.
+*After Task 15.3 (2026-11-18) a defined type's `underlying` is no longer a defined type, so a one-level lookup already reaches the underlying type: R6.1, R6.2, R6.6 (Task 6.1), R6.7 (Task 6.2) and R6.8 (Task 10.2) give Go's result on all targets (fixtures under Task 15.3). Still open here: R6.3 and R6.4 (Task 6.2), which are not chain defects, and the lookups a generic type declared over a struct type needs (the one case that keeps a defined `underlying`). Task 6.3's sweep is then tidying, not a fix.*
 - [ ] Task 6.1: Defined types over named types use `_deepUnderlying` in assertions, assignability and expressions (R6.1, R6.2, R6.6)
   - Files: `src/typechecker/expressions.js`, `src/typechecker/assignability.js`, `src/typechecker/constants.js`
   - Test: `test/unit/types/identity.test.js` R6.1/R6.2 print `true`, R6.6 prints `hi`
@@ -416,3 +417,19 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `docs/go-compatibility.md`
   - Test: none (docs)
   - Done when: `docs/go-compatibility.md` describes the new rejections (R1, R2, R4, R5, R7, R9) and the fixed defined-type and predeclared-name cases (R3, R6, R8)
+
+### Phase 15: Object kinds and underlying types at declaration (roots `addressability`, `ad-hoc-type-structure`)
+*Scheduled from review follow-ups (2026-11-18): the Phase 5 addressability entries and the `copy` entry routed here from `plans/follow-ups.md`. Landed before Phases 6–14 so they build on it. Gate for the remaining phases: `npm run fuzz:check` (checker-operand-rules Phase 1) passes, with the phase's fixed entries removed from `test/fuzz/check-baseline.txt`.*
+- [x] Task 15.1: A scope binds each name to one object `{ kind, type, node, local }` (`kind`: `var`, `const`, `type`, `func`, `pkg`, `builtin`); a namespace records its members' kinds (`_kinds`)
+  - Files: `src/typechecker/types.js` (`Scope`), `src/typechecker/index.js` (`addDefinitions`, `addPackageNamespace`, `getExportedKinds`, `_registerFuncDecl`), `src/compiler.js` (`exportedKinds` replaces `exportedTypeNames`), `src/link/stdlib.js` (`stdlibNamespace`), `src/typechecker/stdlib/shared.js`, `src/typechecker/stdlib/simd.js`, `src/dts-parser.js` (types and nested namespaces of a `.d.ts` namespace)
+  - Test: the unit suite unchanged but for `test/unit/types/identity.test.js` reading `globals.get`
+  - Done when: `Scope` has no `_consts`, `_typeNames`, `_packages`, `_locals` or `_localNodes` and the checker no `_funcDeclNames`; `lookup()` still returns a type
+- [x] Task 15.2: Addressability reads the object kind (ledger *Package functions*, *Package-qualified type names*, *Dot-imported functions*)
+  - Files: `src/typechecker/expressions.js` (`_isAddressableIdent`, `_isAddressableSelector`, `_isNamespaceVariable`)
+  - Test: reject fixtures `assign_package_members.go`, `assign_imported_members/`, `assign_dot_imported_names/`, `addr_dts_nested_type_name/`; accept fixtures `assign_imported_variables/`, `assign_dts_namespace_members/` (a `.d.ts` namespace's values and functions stay assignable properties)
+  - Done when: Go's message on all targets; the ten `names:assign:*` and `names:addr:*` entries are gone from the fuzzer baseline and no entry is added
+- [x] Task 15.3: A type declared over a defined type takes that type's underlying type at its declaration (R6.1, R6.2, R6.6, R6.7, R6.8, ledger *copy on defined slices*)
+  - Files: `src/typechecker/index.js` (`collectType`, `_underlyingOver`, `_genericUnderlyingOver`), `src/typechecker/resolve.js` (`instantiateGenericWithArgs`)
+  - Test: accept fixtures `defined_over_defined_types.go`, `range_func_defined_over_defined.go`, `defined_chain_slice.go`, `generic_defined_over_generic.go`; reject fixture `copy_defined_chain_elem_mismatch.go`
+  - Done when: Go's result on all targets; no declared type but a generic type declared over a struct type (ledger *Generic type declared over a struct type*) has a defined type as `underlying`
+  - Fuzzer: with the kinds `MI2`, `MS2`, `I2` the grid has 55 entries fewer and 50 more than at `564d9663`. 44 of the 50 are `MI2`/`MS2`/`I2` now disagreeing exactly where `MI`/`MS`/`I` already do (they were rejected for the wrong reason before); the other 6 are `*I`/`[2]I` against `*I2`/`[2]I2` in `assign` and `*I` against `*I2` in `conv`, where the old representation agreed with Go by accident and the open roots `nested-assignability`/`dual-conversion-check` (checker-operand-rules O5) now show.
