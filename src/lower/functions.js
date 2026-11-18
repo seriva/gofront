@@ -255,6 +255,7 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 		index >= 0 &&
 		call.func?.kind === "Ident" &&
 		pkgFuncNames &&
+		call._builtinName === undefined &&
 		!pkgFuncNames.has(call.func.name)
 	) {
 		// Hoist local function variable (e.g. fn := f1; defer fn(); fn = f2)

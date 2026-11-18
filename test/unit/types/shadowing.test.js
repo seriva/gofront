@@ -2219,3 +2219,24 @@ func main() {
 		"p a\n1\n",
 	);
 });
+
+test("deferred builtins are called directly, not hoisted into a variable", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	m := map[string]int{"a": 1}
+	defer fmt.Println(len(m))
+	defer delete(m, "a")
+}`),
+		"1\n",
+	);
+	await assertAllTargetsOutput(
+		prog(`func f() (s string) {
+	defer func() { s = fmt.Sprint(recover()) }()
+	defer panic("boom")
+	return "no"
+}
+
+func main() { fmt.Println(f()) }`),
+		"boom\n",
+	);
+});
