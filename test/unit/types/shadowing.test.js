@@ -1916,3 +1916,140 @@ func main() {
 		"7\n",
 	);
 });
+
+// ── Predeclared names shadowed by user declarations ──────────
+
+const prog = (body) => `package main\n\nimport "fmt"\n\n${body}\n`;
+
+test("a local type named error does not leak to other functions", async () => {
+	await assertAllTargetsOutput(
+		prog(`type MyErr struct{ Msg string }
+
+func (MyErr) Error() string { return "e" }
+
+func f1() {
+	type error struct{ Msg string }
+	_ = error{}
+}
+
+func f2() error { return MyErr{} }
+
+func main() { fmt.Println(f2()) }`),
+		"e\n",
+	);
+});
+
+test("nested local types of one name keep their own scope", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 = string
+
+func main() {
+	var a int32 = "hi"
+	{
+		type int32 = bool
+		var b int32 = true
+		_ = b
+	}
+	var c int32 = a
+	fmt.Println(c)
+}`),
+		"hi\n",
+	);
+});
+
+test("a package-level type int32 shadows the predeclared type", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 = string
+
+func main() {
+	var x int32 = "a"
+	fmt.Println(x)
+}`),
+		"a\n",
+	);
+});
+
+test("a package-level type any shadows the predeclared alias", async () => {
+	await assertAllTargetsOutput(
+		prog(`type any = int
+
+func main() {
+	var x any = 3
+	fmt.Println(x + 1)
+}`),
+		"4\n",
+	);
+});
+
+test("a local type any = int still works", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	type any = int
+	var x any = 3
+	fmt.Println(x + 1)
+}`),
+		"4\n",
+	);
+});
+
+test("func len shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func len() int { return 1 }
+
+func main() { fmt.Println(len()) }`),
+		"1\n",
+	);
+});
+
+test("a local len closure shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	len := func() int { return 1 }
+	fmt.Println(len())
+}`),
+		"1\n",
+	);
+});
+
+test("func max shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func max(a, b int) int { return a }
+
+func main() { fmt.Println(max(1, 2)) }`),
+		"1\n",
+	);
+});
+
+test("func append shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		prog(`func append(x int) int { return x + 1 }
+
+func main() { fmt.Println(append(1)) }`),
+		"2\n",
+	);
+});
+
+test("func println shadows the builtin", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+func println(s string) {}
+
+func main() { println("x") }
+`,
+		"",
+	);
+});
+
+test("parameter len and locals named copy and new are plain values", async () => {
+	await assertAllTargetsOutput(
+		prog(`func f(len int) int { return len + 1 }
+
+func main() {
+	copy := 5
+	new := 2
+	fmt.Println(f(1), copy, new)
+}`),
+		"2 5 2\n",
+	);
+});

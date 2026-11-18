@@ -340,15 +340,15 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: Go's messages on all targets, no wasm ICE
 
 ### Phase 8: Predeclared names can be shadowed (root `predeclared-scope`)
-- [ ] Task 8.1: Local types named after predeclared types or imports and nested local types are renamed per block (R8.1, R8.2, R8.6)
+- [x] Task 8.1: Local types named after predeclared types or imports and nested local types are renamed per block (R8.1, R8.2, R8.6)
   - Files: `src/compiler.js` (`mangleLocalTypes`), `src/link/type-names.js` (`renameLocalTypes`)
   - Test: `test/unit/types/shadowing.test.js` R8.1 prints `e`, R8.2 prints `hi`; `test/unit/language/local-types.test.js` R8.6 (alias and defined type) prints `3 AB`, and a local `type strings` used inside its own function still works
   - Done when: all targets print Go's output
-- [ ] Task 8.2: Package-level type declarations shadow predeclared types (R8.3, R8.10)
-  - Files: `src/typechecker/resolve.js` (`resolveTypeNode`)
+- [x] Task 8.2: Package-level type declarations shadow predeclared types (R8.3, R8.10)
+  - Files: `src/link/type-names.js` (`mangleCollidingTypes`), `src/compiler.js` (`mangleLocalTypes`)
   - Test: `shadowing.test.js` R8.3 prints `a`, R8.10 prints `4`; local `type any = int` control unchanged
   - Done when: all targets print Go's output
-- [ ] Task 8.3: Calls to user declarations named after builtins emit as ordinary calls (R8.4, R8.5, R8.7–R8.9)
+- [x] Task 8.3: Calls to user declarations named after builtins emit as ordinary calls (R8.4, R8.5, R8.7–R8.9)
   - Files: `src/backend/js/expressions.js` (`genCall`/`_genBuiltinIdent`), `src/backend/wasm/emit-builtins.js` (`_emitBuiltinCall`), `src/backend/wasm/prescan.js`
   - Test: `shadowing.test.js` R8.4 (`1`), R8.5 (`1`), R8.7 (`1`), R8.8 (`2`), R8.9 (no output) with `assertOutput`; the `func f(len int)`, `copy := 5`, `new := 2` controls unchanged
   - Done when: all targets print Go's output, no ICE; builtin dispatch reads `expr._builtinName`, not the callee name

@@ -753,17 +753,43 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 	return ast;
 }
 
+// The names the programs' imports can bind: the alias, or the last path
+// element (the one before a `/v2` suffix).
+function importedNames(programs) {
+	const names = new Set();
+	for (const p of programs)
+		for (const decl of p.imports ?? [])
+			for (const imp of decl.imports ?? []) {
+				if (imp.alias && imp.alias !== ".") names.add(imp.alias);
+				const parts = String(imp.path).split("/");
+				names.add(parts.at(-1));
+				if (/^v\d+$/.test(parts.at(-1)) && parts.length > 1)
+					names.add(parts.at(-2));
+			}
+	return names;
+}
+
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
-	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
+	const renamed = mangleCollidingTypes(
+		programs,
+		pkgKey,
+		pkgName,
+		owners,
+		new Set(Object.keys(BASIC_TYPES)),
+	);
 	// A local type named after a JS built-in would shadow it in the bundle.
 	const foreign = new Set(JS_BUILTIN_CLASSES);
 	// A local type that shadows a predeclared type (`type int32 = string`)
 	// gets its own name, so `int32` keeps meaning the predeclared type
 	// everywhere else.
 	for (const name of Object.keys(BASIC_TYPES)) foreign.add(name);
+	foreign.add("error");
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
+	// A local type spelled like an import would hide the package in the other
+	// functions of the file.
+	for (const name of importedNames(programs)) foreign.add(name);
 	// A local type spelled like a package-level var, const or func would take
 	// over that value inside its function.
 	for (const p of programs)

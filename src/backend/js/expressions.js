@@ -2181,7 +2181,7 @@ export const expressionGenMethods = {
 		const funcExpr =
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
 		if (funcExpr.kind === "Ident") {
-			const builtin = this._genBuiltinIdent(funcExpr.name, expr);
+			const builtin = this._genBuiltinIdent(expr._builtinName, expr);
 			if (builtin !== undefined) return builtin;
 		}
 

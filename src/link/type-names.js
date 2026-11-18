@@ -18,10 +18,24 @@ function topLevelTypeNames(programs) {
 
 // Registers the package's type names in `owners` (name -> package key) and
 // renames those another package registered first.  Returns Map<name, mangled>
-// for the renamed types, empty when nothing collides.
-export function mangleCollidingTypes(programs, pkgKey, pkgName, owners) {
+// for the renamed types, empty when nothing collides.  A type named after a
+// predeclared type (`type int32 = string`, `type any = int`) is renamed too:
+// `predeclared` holds those names, and the checker and both backends key types
+// by bare name, so the package's `int32` must not meet the predeclared one
+// that other packages (the Go-source stdlib) spell.
+export function mangleCollidingTypes(
+	programs,
+	pkgKey,
+	pkgName,
+	owners,
+	predeclared = new Set(),
+) {
 	const renamed = new Map();
 	for (const name of topLevelTypeNames(programs)) {
+		if (predeclared.has(name)) {
+			renamed.set(name, `${name}$$${pkgName}`);
+			continue;
+		}
 		const owner = owners.get(name);
 		if (owner === undefined) owners.set(name, pkgKey);
 		else if (owner !== pkgKey) renamed.set(name, `${name}$$${pkgName}`);

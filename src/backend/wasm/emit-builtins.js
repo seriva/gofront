@@ -1080,7 +1080,10 @@ export class BuiltinsEmitter {
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
-		switch (func.name) {
+		// The checker names a call to the predeclared builtin; a user
+		// declaration spelled `len` or `max` is an ordinary call.
+		const name = func.name === "string" ? "string" : call._builtinName;
+		switch (name) {
 			case "len":
 				this._emitBuiltinLen(call, targetWasmType);
 				return true;
