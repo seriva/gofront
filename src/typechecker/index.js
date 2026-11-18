@@ -157,27 +157,31 @@ export class TypeChecker {
 	// browser-global-named members get the same `$` renaming as local ones.
 	// `consts` (dot-imported GoFront packages) maps constant names to their
 	// folded values.
-	// `typeNames` (dot-imported GoFront packages) lists the names the package
-	// declares as types; without it a value that is its type-table entry counts.
+	// `kinds` (dot-imported GoFront packages) maps each name to what the
+	// package declares it as (see Scope); without it a value that is its
+	// type-table entry counts as a type and any other value as a variable.
 	addDefinitions(
 		types,
 		values,
-		{ external = true, consts = null, typeNames = null } = {},
+		{ external = true, consts = null, kinds = null } = {},
 	) {
 		for (const [name, type] of types) {
 			this.types.set(name, type);
 		}
 		for (const [name, type] of values) {
-			if (typeNames ? typeNames.has(name) : types.get(name) === type)
+			const kind = kinds?.get(name);
+			if (kinds ? kind === "type" : types.get(name) === type)
 				this.globals.defineType(name, type);
 			else if (type?.kind === "namespace" && type.name === name)
 				this.globals.definePackage(name, type);
+			else if (kind === "func") this.globals.defineFunc(name, type);
+			else if (kind === "const") this.globals.defineConst(name, type);
 			else this.globals.define(name, type);
 			if (external) this._externalNames.add(name);
 		}
 		for (const [name, v] of consts ?? []) {
 			if (!v || !values.has(name)) continue;
-			this.globals._consts.add(name);
+			this.globals.defineConst(name, values.get(name));
 			this._importedConsts.set(name, v);
 		}
 	}
@@ -196,7 +200,15 @@ export class TypeChecker {
 	// `target` is the imported package's compile target ("js"/"wasm"/"both").
 	// `consts` maps the package's constant names to their folded value (see
 	// typechecker/const-fold.js), or null when the folder cannot evaluate one.
-	addPackageNamespace(pkgName, symbols, types, target = null, consts = null) {
+	// `kinds` maps each member to what the package declares it as (see Scope).
+	addPackageNamespace(
+		pkgName,
+		symbols,
+		types,
+		target = null,
+		consts = null,
+		kinds = null,
+	) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
@@ -207,6 +219,7 @@ export class TypeChecker {
 			_gofront: true,
 			_target: target,
 			_consts: consts,
+			_kinds: kinds,
 		});
 		for (const [name, type] of types) {
 			const prior = this.types.get(name);
@@ -249,7 +262,7 @@ export class TypeChecker {
 	// Used by the compiler to expose a package's exports to importers.
 	getExportedSymbols() {
 		const out = new Map();
-		for (const [name, type] of this.globals.symbols) {
+		for (const [name, { type }] of this.globals.objects) {
 			if (type?.kind === "builtin") continue; // skip built-ins
 			if (type === ANY && !name[0].match(/[A-Z]/)) continue; // skip browser globals
 			out.set(name, type);
@@ -259,16 +272,19 @@ export class TypeChecker {
 
 	getExportedConsts() {
 		const out = new Map();
-		for (const name of this.globals._consts) {
+		for (const name of this.globals.names("const")) {
 			if (!this.globals.lookupConstExpr(name)) continue;
 			out.set(name, this._constValue({ kind: "Ident", name }, this.globals));
 		}
 		return out;
 	}
 
-	// Names the package declares as types (see addDefinitions).
-	getExportedTypeNames() {
-		return new Set(this.globals._typeNames);
+	// What the package declares each of its names as (see Scope), for
+	// importers: a member reached through the package keeps its kind.
+	getExportedKinds() {
+		const out = new Map();
+		for (const [name, { kind }] of this.globals.objects) out.set(name, kind);
+		return out;
 	}
 
 	getExportedTypes() {
@@ -966,7 +982,7 @@ export class TypeChecker {
 								name: tp.name,
 								constraint: tp.constraint,
 							};
-				typeScope.define(tp.name, t);
+				typeScope.defineType(tp.name, t);
 				return t;
 			});
 			const existing = this.types.get(decl.name);
@@ -1059,8 +1075,8 @@ export class TypeChecker {
 		scope.defineType(name, type);
 		const g = this.globals;
 		// A package-level value of the same name stays a value.
-		if (g.symbols.has(name) && !g._typeNames.has(name))
-			g.symbols.set(name, type);
+		const bound = g.object(name);
+		if (bound && bound.kind !== "type") bound.type = type;
 		else g.defineType(name, type);
 	}
 
@@ -1079,7 +1095,7 @@ export class TypeChecker {
 		const typeScope = new Scope(this.globals);
 		const typeParamTypes = decl.typeParams.map((tp) => {
 			const t = { kind: "typeParam", name: tp.name, constraint: tp.constraint };
-			typeScope.define(tp.name, t);
+			typeScope.defineType(tp.name, t);
 			return t;
 		});
 		// Resolve once with the parameters in scope to report errors in the
@@ -1106,7 +1122,7 @@ export class TypeChecker {
 					name: tp.name,
 					constraint: tp.constraint,
 				};
-				resolveScope.define(tp.name, t);
+				resolveScope.defineType(tp.name, t);
 				return t;
 			});
 		}
@@ -1115,28 +1131,30 @@ export class TypeChecker {
 			if (recvNamedType?._generic) {
 				resolveScope = new Scope(this.globals);
 				for (const tp of recvNamedType._generic.typeParams)
-					resolveScope.define(tp.name, tp);
+					resolveScope.defineType(tp.name, tp);
 			}
 		}
 		return { resolveScope, typeParamTypes };
 	}
 
 	_registerFuncDecl(decl, funcType, typeParamTypes) {
-		if (this.globals.symbols.has(decl.name) && decl.name !== "init")
+		if (this.globals.has(decl.name) && decl.name !== "init")
 			this.err(`${decl.name} redeclared in this block`, decl);
 		if (decl.native) funcType.native = decl.native;
-		this._funcDeclNames ??= new Set();
-		this._funcDeclNames.add(decl.name);
 		if (typeParamTypes) {
-			this.globals.define(decl.name, {
-				kind: "generic",
-				name: decl.name,
-				typeParams: typeParamTypes,
-				underlying: funcType,
-				declNode: decl,
-			});
+			this.globals.defineFunc(
+				decl.name,
+				{
+					kind: "generic",
+					name: decl.name,
+					typeParams: typeParamTypes,
+					underlying: funcType,
+					declNode: decl,
+				},
+				decl,
+			);
 		} else {
-			this.globals.define(decl.name, funcType);
+			this.globals.defineFunc(decl.name, funcType, decl);
 		}
 	}
 
@@ -1379,10 +1397,10 @@ export class TypeChecker {
 			variadic: false,
 			async: false,
 		};
-		if (this.globals.symbols.has(decl.name) && decl.name !== "init") {
+		if (this.globals.has(decl.name) && decl.name !== "init") {
 			this.err(`${decl.name} redeclared in this block`, decl);
 		}
-		this.globals.define(decl.name, funcType);
+		this.globals.defineFunc(decl.name, funcType, decl);
 	}
 
 	_collectTemplDecl(decl) {
@@ -1402,10 +1420,10 @@ export class TypeChecker {
 			variadic: isVariadic,
 			async: false,
 		};
-		if (this.globals.symbols.has(decl.name) && decl.name !== "init") {
+		if (this.globals.has(decl.name) && decl.name !== "init") {
 			this.err(`${decl.name} redeclared in this block`, decl);
 		}
-		this.globals.define(decl.name, funcType);
+		this.globals.defineFunc(decl.name, funcType, decl);
 	}
 
 	_checkIntrinsic(decl) {
@@ -1416,7 +1434,7 @@ export class TypeChecker {
 				`intrinsic '${decl.intrinsic}' must not have a body`,
 				decl,
 			);
-		const got = typeStr(this.globals.symbols.get(decl.name));
+		const got = typeStr(this.globals.get(decl.name));
 		if (got !== want)
 			this.err(
 				`intrinsic '${decl.intrinsic}' must have type ${want}, not ${got}`,

@@ -119,5 +119,17 @@ export function setupSimdGlobals(globals, types) {
 		},
 	};
 
-	globals.definePackage("simd", { kind: "namespace", name: "simd", members });
+	// The two vector types; every other member is a function.
+	const kinds = new Map(
+		Object.keys(members).map((name) => [
+			name,
+			name === "F32x4" || name === "Mask32x4" ? "type" : "func",
+		]),
+	);
+	globals.definePackage("simd", {
+		kind: "namespace",
+		name: "simd",
+		members,
+		_kinds: kinds,
+	});
 }

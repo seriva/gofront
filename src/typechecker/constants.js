@@ -118,7 +118,7 @@ export const constantCheckMethods = {
 		const typed64 = !isUntyped(expr._type) && isComplex64(expr._type);
 		if (!typed64 && !(isUntyped(expr._type) && isComplex(expr._type))) return;
 		const owner = scope.lookupScope(expr.name);
-		if (!owner?._consts.has(expr.name)) return;
+		if (!owner?.isConst(expr.name)) return;
 		const init = owner.lookupConstExpr(expr.name);
 		if (!init) return;
 		expr._complexInit = init;
@@ -249,13 +249,13 @@ export const constantCheckMethods = {
 			const early = scope.lookupConstExpr(expr.name);
 			return early ? this._constValue(early, scope) : null;
 		}
-		if (!owner._consts.has(expr.name)) return null;
+		if (!owner.isConst(expr.name)) return null;
 		const init = owner.lookupConstExpr(expr.name);
 		const v = init
 			? this._constValue(init, owner)
 			: (this._importedConsts?.get(expr.name) ?? null);
 		if (!v) return null;
-		const declared = owner.symbols.get(expr.name);
+		const declared = owner.get(expr.name);
 		if (!declared || declared.kind === "untyped" || declared.kind === "any")
 			return v;
 		const typed = this._convertConstTo(v, declared);

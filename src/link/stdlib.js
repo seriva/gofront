@@ -277,13 +277,15 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, jsOnly) {
 	const members = {};
 	const mangle = new Map();
 	const consts = new Map();
+	const kinds = new Map();
 	for (const name of [...values, ...types]) {
-		const t = checker.globals.symbols.get(name + suffix);
-		if (!/^[A-Z]/.test(name) || t === undefined) continue;
-		members[name] = t;
+		const obj = checker.globals.object(name + suffix);
+		if (!/^[A-Z]/.test(name) || obj?.type === undefined) continue;
+		members[name] = obj.type;
+		kinds.set(name, obj.kind);
 		mangle.set(name, name + suffix);
 		// An exported constant's folded value, so importers fold `pkg.Name`.
-		if (checker.globals._consts.has(name + suffix)) {
+		if (obj.kind === "const") {
 			const v = checker._constValue(
 				{ kind: "Ident", name: name + suffix },
 				checker.globals,
@@ -300,6 +302,7 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, jsOnly) {
 		_jsOnly: jsOnly,
 		_mangle: mangle,
 		_consts: consts,
+		_kinds: kinds,
 	};
 }
 

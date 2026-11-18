@@ -31,7 +31,7 @@ export function setupGlobals(globals, types) {
 		"real",
 		"imag",
 	])
-		globals.define(name, { kind: "builtin", name });
+		globals.defineBuiltin(name, { kind: "builtin", name });
 	setupSharedGlobals(globals, types);
 	setupSimdGlobals(globals, types);
 	setupWebGlobals(globals, types);

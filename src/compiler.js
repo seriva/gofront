@@ -11,7 +11,7 @@
 //     js:              string,          // generated JS bundle (may include dep preamble)
 //     exportedSymbols: Map<name, type>, // for importers to build a namespace
 //     exportedTypes:   Map<name, type>,
-//     exportedTypeNames: Set<name>,     // names declared as types, for dot imports
+//     exportedKinds:   Map<name, kind>, // what each name is declared as (see Scope)
 //   }
 //
 // Local imports (`import "./subpkg"`) are compiled recursively and bundled inline.
@@ -442,7 +442,7 @@ function resolveImports(
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
 						external: false,
 						consts: dep.exportedConsts,
-						typeNames: dep.exportedTypeNames,
+						kinds: dep.exportedKinds,
 					});
 					continue;
 				}
@@ -454,6 +454,7 @@ function resolveImports(
 					dep.exportedTypes,
 					dep.target,
 					dep.exportedConsts,
+					dep.exportedKinds,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -726,7 +727,7 @@ export function compileFiles(files, options = {}) {
 			renamedTypes,
 		),
 		exportedConsts: checker.getExportedConsts(),
-		exportedTypeNames: checker.getExportedTypeNames(),
+		exportedKinds: checker.getExportedKinds(),
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,

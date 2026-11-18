@@ -32,7 +32,7 @@ function pair(decls, ta, tb) {
 	const { checker } = check(
 		`package main\n${decls}\nvar a ${ta}\nvar b ${tb}\nfunc main() {}\n`,
 	);
-	return [checker.globals.symbols.get("a"), checker.globals.symbols.get("b")];
+	return [checker.globals.get("a"), checker.globals.get("b")];
 }
 
 function differs(name, decls, ta, tb) {
@@ -158,8 +158,8 @@ test("identical: the same type name in two packages differs", () => {
 	const decl = "type P struct{ X int }\nvar a P\n";
 	const one = check(`package main\n${decl}func main() {}\n`);
 	const two = check(`package main\n${decl}func main() {}\n`);
-	const p1 = one.checker.globals.symbols.get("a");
-	const p2 = two.checker.globals.symbols.get("a");
+	const p1 = one.checker.globals.get("a");
+	const p2 = two.checker.globals.get("a");
 	assert(!identical(p1, p2), "two packages' P differ");
 });
 
@@ -175,7 +175,7 @@ test("identical: one declaration checked twice gives identical types", () => {
 	one.check(ast);
 	const two = new TypeChecker();
 	two.check(ast);
-	const of = (c, n) => c.globals.symbols.get(n);
+	const of = (c, n) => c.globals.get(n);
 	assert(of(one, "a") !== of(two, "a"), "two checks build two objects");
 	assert(identical(of(one, "a"), of(two, "a")), "P is one declaration");
 	assert(identical(of(one, "g"), of(two, "g")), "G[int] is one instance");

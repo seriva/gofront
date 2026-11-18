@@ -579,12 +579,14 @@ export const resolveMethods = {
 	_tagDeclTypeIdent(node, scope) {
 		if (BASIC_TYPES[node.name] || node.name === "comparable") return;
 		const owner = scope?.lookupScope(node.name);
-		const bound = owner?.symbols.get(node.name);
+		const bound = owner?.get(node.name);
 		if (bound?.kind === "typeParam") node._namesTypeParam = true;
 		else if (bound?.kind === "aliasArg") return;
 		// Dot-imported and predeclared types are known by the type table only.
 		else if (
-			owner ? owner._typeNames.has(node.name) : this.types.has(node.name)
+			owner
+				? owner.object(node.name).kind === "type"
+				: this.types.has(node.name)
 		)
 			node._namesDeclType = true;
 	},
@@ -822,7 +824,7 @@ export const resolveMethods = {
 		// Resolve the declaration with its type params in scope (as typeParams,
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
-		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
+		for (const tp of generic.typeParams) typeScope.defineType(tp.name, tp);
 		building.push(key);
 		generic._buildSizes.push(size);
 		let instantiated;
@@ -925,7 +927,7 @@ export const resolveMethods = {
 	// whose argument is known unifies `E` with that argument's element type.
 	_inferFromCoreTypes(typeParams, map) {
 		const scope = new Scope(this.globals);
-		for (const tp of typeParams) scope.define(tp.name, tp);
+		for (const tp of typeParams) scope.defineType(tp.name, tp);
 		for (let round = 0; round < typeParams.length; round++) {
 			const before = map.size;
 			for (const tp of typeParams) {

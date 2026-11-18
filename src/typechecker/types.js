@@ -1049,58 +1049,62 @@ export function iteratorYieldParams(t) {
 
 // ── Scope / environment ──────────────────────────────────────
 
+// What a name is bound to, as in Go: a variable (also a parameter or
+// result), a constant, a type, a declared function, an imported package or a
+// builtin. A scope maps each name it declares to one object
+// `{ kind, type, node, local }`: `kind` is "var", "const", "type", "func",
+// "pkg" or "builtin"; `type` is the type of the value, or the type itself for
+// a type name; `node` the declaring node, when one was given; `local` marks a
+// `var` or `:=` declaration, which must be used.
 export class Scope {
 	constructor(parent = null) {
 		this.parent = parent;
-		this.symbols = new Map();
-		this._consts = new Set(); // names declared as const in this scope
+		this.objects = new Map(); // name -> object declared in this scope
 		this._constExprs = new Map(); // name -> AST initializer expr
-		this._locals = new Set(); // names declared as local variables (var / :=)
-		this._localNodes = new Map(); // local name -> node carrying its declaring position
 		this._used = new Set(); // names referenced in this scope
-		this._typeNames = new Set(); // names whose binding here is a type declaration
-		this._packages = new Set(); // names bound here to an imported package
 	}
+	_bind(name, kind, type, node = null, local = false) {
+		this.objects.set(name, { kind, type, node, local });
+	}
+	// Binds `name` to a value: a variable, parameter or result.
 	define(name, type) {
-		this.symbols.set(name, type);
-		this._typeNames.delete(name);
-		this._packages.delete(name);
+		this._bind(name, "var", type);
+	}
+	// Binds `name` to a predeclared function such as `len`.
+	defineBuiltin(name, type) {
+		this._bind(name, "builtin", type);
+	}
+	// Binds `name` to a declared function (`func name(...)`), which is a value
+	// but not a variable.
+	defineFunc(name, type, node = null) {
+		this._bind(name, "func", type, node);
 	}
 	// Binds `name` to an imported package's namespace (not a variable).
 	definePackage(name, ns) {
-		this.symbols.set(name, ns);
-		this._typeNames.delete(name);
-		this._packages.add(name);
+		this._bind(name, "pkg", ns);
 	}
 	// Binds `name` to a type declaration (`type T ...`, `type T = ...`): a
 	// reference to it names a type, whatever other bindings share its name.
 	defineType(name, type) {
-		this.symbols.set(name, type);
-		this._typeNames.add(name);
-		this._packages.delete(name);
+		this._bind(name, "type", type);
 	}
 	// True when the binding `name` resolves to is a type declaration, not a
 	// variable, constant, function, parameter or package that shares the name.
 	bindsType(name) {
-		return this.lookupScope(name)?._typeNames.has(name) ?? false;
+		return this.lookupObject(name)?.kind === "type";
 	}
 	// `node` (optional) carries the position of the declaring identifier.
 	defineLocal(name, type, node = null) {
-		this.symbols.set(name, type);
-		this._typeNames.delete(name);
-		this._packages.delete(name);
-		if (name !== "_") this._locals.add(name);
-		if (node && typeof node === "object") this._localNodes.set(name, node);
+		const at = node && typeof node === "object" ? node : null;
+		this._bind(name, "var", type, at, name !== "_");
 	}
 	// The node a local was declared at, or null when none was recorded.
 	localNode(name) {
-		return this._localNodes.get(name) ?? null;
+		const obj = this.objects.get(name);
+		return obj?.local ? obj.node : null;
 	}
 	defineConst(name, type, expr = null) {
-		this.symbols.set(name, type);
-		this._typeNames.delete(name);
-		this._packages.delete(name);
-		this._consts.add(name);
+		this._bind(name, "const", type);
 		if (expr) this._constExprs.set(name, expr);
 	}
 	lookupConstExpr(name) {
@@ -1109,29 +1113,50 @@ export class Scope {
 		return null;
 	}
 	isConst(name) {
-		if (this._consts.has(name)) return true;
 		// Don't walk parent — shadowing a const with a var in a child scope is valid
-		return false;
+		return this.objects.get(name)?.kind === "const";
+	}
+	// Whether this scope itself declares `name`.
+	has(name) {
+		return this.objects.has(name);
+	}
+	// The type `name` is bound to in this scope itself, if it declares it.
+	get(name) {
+		return this.objects.get(name)?.type;
+	}
+	// The object `name` is bound to in this scope itself, if it declares it.
+	object(name) {
+		return this.objects.get(name);
+	}
+	// Names this scope declares as `kind`.
+	*names(kind) {
+		for (const [name, obj] of this.objects) if (obj.kind === kind) yield name;
 	}
 	lookup(name) {
-		if (this.symbols.has(name)) {
+		const obj = this.objects.get(name);
+		if (obj) {
 			this._used.add(name);
-			return this.symbols.get(name);
+			return obj.type;
 		}
 		if (this.parent) return this.parent.lookup(name);
 		return null;
 	}
+	// The object `name` resolves to from this scope, or null. Unlike `lookup`
+	// this does not count as a use of the name.
+	lookupObject(name) {
+		return this.lookupScope(name)?.objects.get(name) ?? null;
+	}
 	// Lookup which scope owns the name (to check const flag)
 	lookupScope(name) {
-		if (this.symbols.has(name)) return this;
+		if (this.objects.has(name)) return this;
 		if (this.parent) return this.parent.lookupScope(name);
 		return null;
 	}
 	// Returns local variable names that were never referenced
 	unusedLocals() {
 		const unused = [];
-		for (const name of this._locals) {
-			if (!this._used.has(name)) unused.push(name);
+		for (const [name, obj] of this.objects) {
+			if (obj.local && !this._used.has(name)) unused.push(name);
 		}
 		return unused;
 	}

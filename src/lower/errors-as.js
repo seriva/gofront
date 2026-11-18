@@ -178,7 +178,7 @@ export function generateErrorsAs(programs, _checker, pkgName) {
 	// The shared function is generic: once it is checked, its call sites take
 	// the type arguments the checker would have inferred.
 	const link = (chk) => {
-		const generic = chk.globals.symbols.get(sharedName);
+		const generic = chk.globals.get(sharedName);
 		for (const call of sharedSites) {
 			const typeArgs = [call.args[1]._type.base];
 			for (const n of [call, call.func]) {

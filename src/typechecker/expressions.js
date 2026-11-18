@@ -462,7 +462,7 @@ export const expressionCheckMethods = {
 		if (node.kind === "Ident") {
 			if (scope.lookupScope(node.name) !== this.globals) return false;
 			if (scope.isConst?.(node.name)) return false;
-			const sym = this.globals.symbols.get(node.name);
+			const sym = this.globals.get(node.name);
 			if (sym?.kind === "func" || sym?.kind === "namespace") return false;
 		} else if (node.kind !== "SelectorExpr" && node.kind !== "IndexExpr") {
 			return false;
@@ -540,19 +540,14 @@ export const expressionCheckMethods = {
 		return this._isMapElementOperand(node.expr, scope);
 	},
 
-	// An identifier names a variable unless it is a constant, a package name, a
-	// builtin or a declared function.
+	// An identifier is addressable when it names a variable: not a constant,
+	// type, declared function, package or builtin (see Scope). A variable
+	// typed with a namespace-shaped declaration (`var Widget Widget`) is still
+	// a variable, and shadowing any other name with a variable makes it one.
 	_isAddressableIdent(n, scope) {
-		const owner = scope?.lookupScope(n.name);
-		if (!owner) return !BUILTIN_IDENTS.has(n.name);
-		if (owner.isConst(n.name)) return false;
-		// A type name is not a value; shadowing it with a variable clears the mark.
-		if (owner._typeNames.has(n.name)) return false;
-		// A package name is bound as a package; a variable typed with a
-		// namespace-shaped declaration (`var Widget Widget`) is still a variable.
-		if (owner._packages.has(n.name)) return false;
-		if (owner.symbols.get(n.name)?.kind === "builtin") return false;
-		return !(owner === this.globals && this._funcDeclNames?.has(n.name));
+		const obj = scope?.lookupObject(n.name);
+		if (!obj) return !BUILTIN_IDENTS.has(n.name);
+		return obj.kind === "var";
 	},
 
 	// Whether field or method `name` of struct type `t` is promoted through an
@@ -759,11 +754,21 @@ export const expressionCheckMethods = {
 		// Method values and method expressions are values, not variables.
 		if (n._isMethodValue || n._isMethodExpr) return false;
 		const bt = n.expr?._type;
-		if (bt?.kind === "namespace") return !bt._consts?.has(n.field);
+		if (bt?.kind === "namespace") return this._isNamespaceVariable(bt, n.field);
 		const b = this._coreUnderlying(bt, scope) ?? bt;
 		if (b?.kind !== "struct") return true;
 		if (this._promotedThroughPointer(bt, n.field)) return true;
 		return this._isAddressable(n.expr, scope);
+	},
+
+	// Whether member `field` of namespace `ns` is a variable. A package says
+	// what each member is (`_kinds`, see Scope): only its variables are. A
+	// member a JavaScript declaration does not classify is a property, which
+	// may be assigned unless it is a constant.
+	_isNamespaceVariable(ns, field) {
+		const kind = ns._kinds?.get(field);
+		if (kind) return kind === "var";
+		return !ns._consts?.has(field);
 	},
 
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
@@ -875,7 +880,7 @@ export const expressionCheckMethods = {
 	_namesType(name, t, scope) {
 		if (!this.types.has(name)) return false;
 		const owner = scope.lookupScope(name);
-		if (owner?._typeNames.has(name)) return true;
+		if (owner?.object(name).kind === "type") return true;
 		// A binding the source declared as a variable, constant, function,
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
@@ -1836,9 +1841,7 @@ export const expressionCheckMethods = {
 					this._isConstExpr(e.left, scope) && this._isConstExpr(e.right, scope)
 				);
 			case "Ident":
-				return !!(scope ?? this.globals)
-					.lookupScope(e.name)
-					?._consts.has(e.name);
+				return (scope ?? this.globals).lookupObject(e.name)?.kind === "const";
 			case "SelectorExpr": {
 				// Package members: constant unless the package says otherwise.
 				const ns =
@@ -1990,7 +1993,7 @@ export const expressionCheckMethods = {
 		const direct =
 			callee.kind === "Ident"
 				? scope.lookupScope(callee.name) === this.globals &&
-					Boolean(this._funcDeclNames?.has(callee.name))
+					this.globals.object(callee.name).kind === "func"
 				: callee.kind === "SelectorExpr" && Boolean(callee._stdName);
 		expr._native = native && direct ? native : null;
 	},

@@ -29,6 +29,7 @@ export const SHARED_KINDS = {
 
 export function setupSharedGlobals(globals, types) {
 	const members = {};
+	const kinds = new Map();
 	for (const [name, info] of Object.entries(SHARED_KINDS)) {
 		const t = {
 			kind: "named",
@@ -40,12 +41,15 @@ export function setupSharedGlobals(globals, types) {
 		]);
 		types.set(t.name, t);
 		members[name] = t;
+		kinds.set(name, "type");
 		members[`New${name}`] = { kind: "func", params: [INT], returns: [t] };
+		kinds.set(`New${name}`, "func");
 	}
 	globals.definePackage("shared", {
 		kind: "namespace",
 		name: "shared",
 		members,
+		_kinds: kinds,
 	});
 }
 
