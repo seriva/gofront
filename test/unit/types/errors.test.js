@@ -984,6 +984,46 @@ func main() {
 	assertEqual(errors[0].col, 4);
 });
 
+test("a forwarded call yielding an any needs an assertion for a concrete parameter", () => {
+	const { errors } = compile(`package main
+func f() (any, int) { return "oops", 2 }
+func g(a int, b int) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot use f() (value of type any) as int value in argument to g: need type assertion",
+	);
+	assertEqual(errors[0].line, 5);
+});
+
+test("a forwarded call yielding an any needs an assertion for a method interface", () => {
+	const { errors } = compile(`package main
+type I interface{ M() }
+func f() (any, int) { return nil, 1 }
+func g(a I, b int) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot use f() (value of type any) as I value in argument to g: need type assertion",
+	);
+});
+
+test("a forwarded call yielding an any is accepted for any parameters", () => {
+	const { errors } = compile(`package main
+func f() (any, int) { return "ok", 2 }
+func g(a any, b int) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 0);
+});
+
 test("a forwarded call returned from a func with no results reports the tuple", () => {
 	const { errors } = compile(`package main
 func g() (int, string) { return 1, "a" }
