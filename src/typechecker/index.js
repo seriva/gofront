@@ -1057,7 +1057,11 @@ export class TypeChecker {
 			return;
 		}
 		scope.defineType(name, type);
-		this.globals.symbols.set(name, type);
+		const g = this.globals;
+		// A package-level value of the same name stays a value.
+		if (g.symbols.has(name) && !g._typeNames.has(name))
+			g.symbols.set(name, type);
+		else g.defineType(name, type);
 	}
 
 	_registerLocalTypePlaceholder(decl, scope) {
@@ -1516,7 +1520,7 @@ export class TypeChecker {
 		// comes later in the list (`[S ~[]E, E any]`).
 		const params = decl.typeParams.map((tp) => {
 			const t = { kind: "typeParam", name: tp.name, constraint: ANY };
-			inner.define(tp.name, t);
+			inner.defineType(tp.name, t);
 			return t;
 		});
 		decl.typeParams.forEach((tp, i) => {
@@ -1538,7 +1542,7 @@ export class TypeChecker {
 	_injectGenericReceiverTypeParams(inner, recvNamedType) {
 		if (!recvNamedType?._generic) return;
 		for (const tp of recvNamedType._generic.typeParams) {
-			inner.define(tp.name, tp);
+			inner.defineType(tp.name, tp);
 		}
 	}
 
