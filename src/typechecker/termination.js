@@ -6,11 +6,7 @@
 /** @type {ThisType<TypeChecker>} */
 export const terminationMethods = {
 	_isPanicCall(expr) {
-		return (
-			expr?.kind === "CallExpr" &&
-			expr?.func?.kind === "Ident" &&
-			expr?.func?.name === "panic"
-		);
+		return expr?.kind === "CallExpr" && expr?._builtinName === "panic";
 	},
 
 	_isTerminating(stmt) {

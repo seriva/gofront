@@ -776,7 +776,7 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 		pkgKey,
 		pkgName,
 		owners,
-		new Set(Object.keys(BASIC_TYPES)),
+		new Set([...Object.keys(BASIC_TYPES), "error", "comparable"]),
 	);
 	// A local type named after a JS built-in would shadow it in the bundle.
 	const foreign = new Set(JS_BUILTIN_CLASSES);
@@ -785,6 +785,7 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 	// everywhere else.
 	for (const name of Object.keys(BASIC_TYPES)) foreign.add(name);
 	foreign.add("error");
+	foreign.add("comparable");
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
 	// A local type spelled like an import would hide the package in the other

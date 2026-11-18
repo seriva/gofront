@@ -22,7 +22,9 @@ function topLevelTypeNames(programs) {
 // predeclared type (`type int32 = string`, `type any = int`) is renamed too:
 // `predeclared` holds those names, and the checker and both backends key types
 // by bare name, so the package's `int32` must not meet the predeclared one
-// that other packages (the Go-source stdlib) spell.
+// that other packages (the Go-source stdlib) spell.  It takes the local-type
+// `Name__L<n>` form rather than `Name$$pkg`, which later stages read as a type
+// of another package.
 export function mangleCollidingTypes(
 	programs,
 	pkgKey,
@@ -33,7 +35,7 @@ export function mangleCollidingTypes(
 	const renamed = new Map();
 	for (const name of topLevelTypeNames(programs)) {
 		if (predeclared.has(name)) {
-			renamed.set(name, `${name}$$${pkgName}`);
+			renamed.set(name, `${name}__L${++localTypeCounter}`);
 			continue;
 		}
 		const owner = owners.get(name);
@@ -79,6 +81,9 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 		if (!node || typeof node !== "object") return;
 		if (Array.isArray(node)) {
 			const seen = new Set(visible);
+			// Renames wait until every nested block was scanned, so a nested
+			// redeclaration of the name has its own name by then.
+			const renames = [];
 			for (let i = 0; i < node.length; i++) {
 				const d = node[i];
 				scan(d, seen);
@@ -92,19 +97,22 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 							[d.name, `${d.name}__L${++localTypeCounter}`],
 						]);
 						const end = stop >= 0 ? stop : node.length - 1;
-						for (let j = i; j <= end; j++) {
-							// The shadowing declaration's own right-hand side and type
-							// are evaluated before its new value is in scope.
-							const target =
-								j === stop && node[j].kind === "DefineStmt"
-									? node[j].rhs
-									: node[j];
-							renameTypeRefs(target, renamed, new Set(), new Set());
-						}
+						renames.push(() => {
+							for (let j = i; j <= end; j++) {
+								// The shadowing declaration's own right-hand side and type
+								// are evaluated before its new value is in scope.
+								const target =
+									j === stop && node[j].kind === "DefineStmt"
+										? node[j].rhs
+										: node[j];
+								renameTypeRefs(target, renamed, new Set(), new Set());
+							}
+						});
 						changed = true;
 					}
 				} else if (d) for (const n of valueNames(d)) seen.add(n);
 			}
+			for (const rename of renames) rename();
 			return;
 		}
 		const here = FUNC_KINDS.has(node.kind)

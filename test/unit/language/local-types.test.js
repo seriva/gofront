@@ -166,6 +166,49 @@ func main() { fmt.Println(other(), strings.ToUpper("ab")) }
 	);
 });
 
+test("a nested local alias of the same name keeps the outer one", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type T = string
+	var a T = "hi"
+	{
+		type T = bool
+		var b T = true
+		_ = b
+	}
+	var c T = a
+	fmt.Println(c)
+}
+`,
+		"hi\n",
+	);
+});
+
+test("a nested local defined type of the same name keeps the outer one", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type T int
+	var a T = 1
+	if true {
+		type T string
+		var b T = "x"
+		fmt.Print(b, " ")
+	}
+	fmt.Println(a)
+}
+`,
+		"x 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

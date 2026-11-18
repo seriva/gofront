@@ -1200,10 +1200,7 @@ export class ExprsEmitter {
 				}
 				break;
 			case "CallExpr":
-				if (
-					expr.func?.kind === "Ident" &&
-					(expr.func.name === "len" || expr.func.name === "cap")
-				) {
+				if (expr._builtinName === "len" || expr._builtinName === "cap") {
 					return true;
 				}
 				break;

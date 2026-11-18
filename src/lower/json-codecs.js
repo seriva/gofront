@@ -1333,8 +1333,7 @@ function buildsValue(node) {
 	if (node.kind === "UnaryExpr") return node.op === "&";
 	return (
 		node.kind === "CallExpr" &&
-		node.func?.kind === "Ident" &&
-		(node.func.name === "make" || node.func.name === "new")
+		(node._builtinName === "make" || node._builtinName === "new")
 	);
 }
 

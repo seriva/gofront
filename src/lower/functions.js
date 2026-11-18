@@ -42,11 +42,7 @@ export function hasDirectRecover(body) {
 		if (!node || typeof node !== "object") return false;
 		if (Array.isArray(node)) return node.some(walk);
 		if (node.kind === "FuncLit") return false;
-		if (
-			node.kind === "CallExpr" &&
-			node.func?.kind === "Ident" &&
-			node.func.name === "recover"
-		)
+		if (node.kind === "CallExpr" && node._builtinName === "recover")
 			return true;
 		return someChild(node, walk);
 	};
@@ -55,31 +51,13 @@ export function hasDirectRecover(body) {
 	return result;
 }
 
-const BUILTIN_FUNC_NAMES = new Set([
-	"println",
-	"print",
-	"panic",
-	"recover",
-	"make",
-	"new",
-	"len",
-	"cap",
-	"append",
-	"copy",
-	"delete",
-	"close",
-	"clear",
-	"min",
-	"max",
-]);
-
 export function normalizeDefers(programOrPrograms) {
 	defargCounter = 0;
 	const programs = Array.isArray(programOrPrograms)
 		? programOrPrograms
 		: [programOrPrograms];
 
-	const pkgFuncNames = new Set(BUILTIN_FUNC_NAMES);
+	const pkgFuncNames = new Set();
 	// Package-level funcs/methods whose body calls recover() directly.  A
 	// `defer f()` whose callee is one of these must keep recover armed when the
 	// synthesized wrapper forwards the call.
@@ -130,10 +108,11 @@ function normalizeBlockDefers(node, ctx) {
 // Does the deferred callee possibly call recover() directly?  Known package
 // funcs/methods are looked up; unknown callees (closure variables, func
 // values) are assumed to, so recover stays armed through the wrapper.
-function deferCalleeMayRecover(funcExpr, ctx) {
+function deferCalleeMayRecover(call, ctx) {
 	if (!ctx) return false;
+	const funcExpr = call.func;
 	if (funcExpr.kind === "Ident") {
-		if (BUILTIN_FUNC_NAMES.has(funcExpr.name)) return false;
+		if (call._builtinName !== undefined) return false;
 		if (ctx.pkgFuncNames.has(funcExpr.name))
 			return ctx.recoverFuncs.has(funcExpr.name);
 		return true;
@@ -385,7 +364,7 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 		// The wrapper only forwards to the real deferred callee; when that
 		// callee may call recover() directly, recover must stay armed across
 		// the wrapper frame.
-		_deferForward: deferCalleeMayRecover(call.func, ctx),
+		_deferForward: deferCalleeMayRecover(call, ctx),
 	};
 	if (call.func?.kind === "FuncLit") normalizeBlockDefers(call.func.body, ctx);
 	stmt.call = {

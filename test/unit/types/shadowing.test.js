@@ -2053,3 +2053,169 @@ func main() {
 		"2 5 2\n",
 	);
 });
+
+// ── Defined package-level types named after predeclared types ──
+
+test("a defined type int32 string prints with %T and %v", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 string
+
+func main() {
+	var x int32 = "hi"
+	fmt.Printf("%T %v\\n", x, x)
+}`),
+		"main.int32 hi\n",
+	);
+});
+
+test("a defined type int32 int supports arithmetic and printing", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 int
+
+func main() {
+	var v int32 = 7
+	fmt.Println(v + 1)
+}`),
+		"8\n",
+	);
+});
+
+test("a defined struct type any prints its fields", async () => {
+	await assertAllTargetsOutput(
+		prog(`type any struct{ X int }
+
+func main() {
+	v := any{X: 7}
+	fmt.Println(v)
+}`),
+		"{7}\n",
+	);
+});
+
+test("a defined type int32 works as a struct field under json.Marshal", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type int32 string
+
+type S struct{ X int32 }
+
+func main() {
+	b, _ := json.Marshal(S{X: "hi"})
+	fmt.Println(string(b))
+}
+`,
+		'{"X":"hi"}\n',
+	);
+});
+
+test("a defined type int32 as a function result", async () => {
+	await assertAllTargetsOutput(
+		prog(`type int32 string
+
+func f() int32 { return "ok" }
+
+func main() { fmt.Println(f()) }`),
+		"ok\n",
+	);
+});
+
+test("a package-level type comparable shadows the predeclared constraint", async () => {
+	await assertAllTargetsOutput(
+		prog(`type comparable = int
+
+func main() {
+	var x comparable = 7
+	fmt.Println(x + 1)
+}`),
+		"8\n",
+	);
+});
+
+test("a local type comparable shadows the predeclared constraint", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	type comparable = int
+	var x comparable = 7
+	fmt.Println(x + 1)
+}`),
+		"8\n",
+	);
+});
+
+// ── Calls to user declarations spelled like builtins ─────────
+
+test("a user len in an index expression is an ordinary call", async () => {
+	await assertAllTargetsOutput(
+		prog(`func len() int { return 1 }
+
+func main() {
+	xs := []int{10, 20, 30}
+	fmt.Println(xs[len()])
+}`),
+		"20\n",
+	);
+});
+
+test("a user len as a loop bound is an ordinary call", async () => {
+	await assertAllTargetsOutput(
+		prog(`func len() int { return 3 }
+
+func main() {
+	xs := []int{1, 2, 3, 4, 5}
+	s := 0
+	for i := 0; i < len(); i++ {
+		s += xs[i]
+	}
+	fmt.Println(s)
+}`),
+		"6\n",
+	);
+});
+
+test("a user panic does not terminate a function", () => {
+	const { errors } = compile(
+		prog(`func panic() {}
+
+func f() int { panic() }
+
+func main() { fmt.Println(f()) }`),
+	);
+	assertErrorContains(errors, "missing return");
+});
+
+test("a user println that recovers catches a deferred panic", async () => {
+	await assertAllTargetsOutput(
+		prog(`func println() { _ = recover() }
+
+func f() {
+	defer println()
+	panic("boom")
+}
+
+func main() {
+	f()
+	fmt.Println("done")
+}`),
+		"done\n",
+	);
+});
+
+test("a user panic statement is not a terminating builtin in JS output", async () => {
+	await assertAllTargetsOutput(
+		prog(`func panic(s string) { fmt.Println("p", s) }
+
+func main() {
+	xs := []int{1}
+	i := 0
+	panic("a")
+	fmt.Println(xs[i])
+}`),
+		"p a\n1\n",
+	);
+});

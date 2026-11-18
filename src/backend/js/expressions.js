@@ -90,7 +90,8 @@ const RECEIVER_STEP = {
 	ReturnStmt: (s, reads) => branches(reads, s.values),
 	ExprStmt: (s, reads) => {
 		if (reads(s.expr)) return "deref";
-		const panics = s.expr?.kind === "CallExpr" && s.expr.func?.name === "panic";
+		const panics =
+			s.expr?.kind === "CallExpr" && s.expr._builtinName === "panic";
 		return panics ? "stop" : "next";
 	},
 	DefineStmt: (s, reads, name) => {
