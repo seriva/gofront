@@ -2,6 +2,14 @@ package main
 
 import "fmt"
 
+func count[T ~int](x T) int {
+	c := 0
+	for i := range x {
+		c += int(i)
+	}
+	return c
+}
+
 func main() {
 	for i := range 3 {
 		fmt.Print(i)
@@ -17,8 +25,9 @@ func main() {
 	for i := range 'a' {
 		_ = i
 	}
+	fmt.Print(count(3))
 	fmt.Println()
 }
 
 // Output:
-// 012012012
+// 0120120123

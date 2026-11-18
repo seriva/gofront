@@ -957,10 +957,10 @@ export const statementCheckMethods = {
 
 	// Ranging over an integer yields only the count: `for i, v := range n`
 	// has no second value to bind.
-	_checkRangeIntVars(lhs, operand, type) {
+	_checkRangeIntVars(lhs, operand, type, scope) {
 		if (lhs.length < 2 || !type || type._tainted) return;
 		const untyped = type.kind === "untyped";
-		const u = untyped ? null : this._deepUnderlying(type);
+		const u = untyped ? null : this._coreUnderlying(type, scope);
 		const isInt = untyped
 			? type.base === "int" || type.base === "rune"
 			: u?.kind === "basic" && isInteger(u);
@@ -976,7 +976,7 @@ export const statementCheckMethods = {
 		const iterType = this.checkExpr(rangeExpr.expr, scope);
 		const info = iteratorYieldParams(iterType);
 		if (!info) {
-			this._checkRangeIntVars(initStmt.lhs, rangeExpr.expr, iterType);
+			this._checkRangeIntVars(initStmt.lhs, rangeExpr.expr, iterType, scope);
 			this._checkRangeIterInvalidFunc(iterType, initStmt);
 			return null;
 		}
