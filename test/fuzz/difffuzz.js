@@ -50,7 +50,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { compileFiles } from "../../src/compiler.js";
+import { compileProgram, firstLine } from "./gofront-run.js";
 
 // ── CLI ──────────────────────────────────────────────────────
 
@@ -528,14 +528,6 @@ const work = mkdtempSync(join(tmpdir(), "gofront-fuzz-"));
 process.on("exit", () => rmSync(work, { recursive: true, force: true }));
 let fileNo = 0;
 
-function firstLine(s) {
-	return (
-		String(s)
-			.split("\n")
-			.find((l) => l.trim()) ?? ""
-	);
-}
-
 function runGo(src) {
 	const dir = join(work, `go${fileNo++}`);
 	mkdirSync(dir);
@@ -577,19 +569,14 @@ async function runGofront(src, target) {
 		out += s;
 	});
 	try {
-		let res;
-		try {
-			res = compileFiles([goPath], { forceTarget: target });
-		} catch (e) {
-			return { kind: "compile", out: "", err: firstLine(e.message) };
-		}
-		const wasm = target === "wasm" ? res.wasm : null;
-		if (wasm && !WebAssembly.validate(wasm))
+		const compiled = compileProgram(goPath, target);
+		if (compiled.kind !== "ok")
 			return {
-				kind: "invalid-wasm",
+				kind: compiled.kind === "ice" ? "compile" : compiled.kind,
 				out: "",
-				err: "WebAssembly.validate failed",
+				err: compiled.err,
 			};
+		const { res, wasm } = compiled;
 		const prelude = [
 			`const __sink = globalThis.${SINKS}.get(${id});`,
 			"const process = { stdout: { write: (s) => __sink(String(s)) } };",
