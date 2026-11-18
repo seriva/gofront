@@ -830,8 +830,15 @@ export const resolveMethods = {
 		let instantiated;
 		try {
 			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
+			instantiated = this.substituteType(underlying, map);
+			// `type W[T any] V[T]`: W[int]'s underlying type is V[int]'s.
+			if (instantiated.kind === "named")
+				instantiated = this._genericUnderlyingOver(
+					instantiated,
+					generic.declNode,
+				);
 			instantiated = this._definedEmptyInterface(
-				this.substituteType(underlying, map),
+				instantiated,
 				generic.declNode,
 			);
 		} finally {

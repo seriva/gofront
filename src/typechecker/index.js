@@ -996,10 +996,11 @@ export class TypeChecker {
 			if (preset?.declNode === decl) named._generic = preset;
 			else named._generic = { typeParams: typeParamTypes, declNode: decl };
 			this.types.set(decl.name, named);
-			const underlying = this._definedEmptyInterface(
-				this.resolveTypeNode(decl.type, typeScope),
-				decl,
-			);
+			let underlying = this.resolveTypeNode(decl.type, typeScope);
+			// `type W[T any] V[T]`: W's underlying type is V[T]'s.
+			if (underlying.kind === "named")
+				underlying = this._genericUnderlyingOver(underlying, decl);
+			underlying = this._definedEmptyInterface(underlying, decl);
 			named.underlying = underlying;
 			named._target = this.target;
 			if (underlying.kind === "struct") {
@@ -1014,14 +1015,9 @@ export class TypeChecker {
 		// resolve so `next *L` finds it; package-level types already are.
 		this._registerLocalTypePlaceholder(decl, scope);
 		let underlying = this.resolveTypeNode(decl.type, this.globals);
-		// `type W V` with V a named array: W's underlying type is V's array.
-		if (!decl.isAlias && underlying.kind === "named") {
-			const inner = this._deepUnderlying(underlying);
-			if (inner?.kind === "array") underlying = inner;
-			// `type S Base` with Base a struct: S gets its own copy of the fields.
-			else if (inner?.kind === "struct")
-				underlying = { ...inner, name: decl.name, methods: new Map() };
-		}
+		// `type W V` with V a defined type: W's underlying type is V's.
+		if (!decl.isAlias && underlying.kind === "named")
+			underlying = this._underlyingOver(underlying, decl);
 		underlying = this._definedEmptyInterface(underlying, decl);
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
@@ -1050,6 +1046,34 @@ export class TypeChecker {
 		}
 		this.types.set(decl.name, named);
 		this._defineTypeBinding(decl.name, named, scope);
+	}
+
+	// The underlying type of a type declared over the defined type `base`
+	// (`type W V`): V's underlying type, followed through every defined type V
+	// is itself declared over, so the underlying type of a defined type is
+	// not a defined type again (but see `_genericUnderlyingOver`). A struct or
+	// interface type carries the name of its declaration, so W gets its own
+	// copy (and none of V's methods). `base` is returned as it is while a type
+	// on the way is not collected yet, which only an invalid cycle
+	// (`type A B; type B A`) leaves behind.
+	_underlyingOver(base, decl) {
+		let inner = base;
+		for (let i = 0; inner?.kind === "named" && i < 32; i++)
+			inner = this.resolveType(inner).underlying;
+		if (!inner || inner.kind === "named") return base;
+		if (inner.kind === "struct")
+			return { ...inner, name: decl.name, methods: new Map() };
+		if (inner.kind === "interface") return { ...inner, name: decl.name };
+		return inner;
+	}
+
+	// `_underlyingOver` for a generic declaration (`type W[T any] V[T]`) or one
+	// of its instances. A generic type declared over a struct type stays
+	// declared over it: JS output has no class of its own for such a type and
+	// constructs V's.
+	_genericUnderlyingOver(base, decl) {
+		const over = this._underlyingOver(base, decl);
+		return over.kind === "struct" ? base : over;
 	}
 
 	// `type MyAny any` is a defined empty interface, like `type B interface{}`.
