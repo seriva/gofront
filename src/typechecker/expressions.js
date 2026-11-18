@@ -546,6 +546,8 @@ export const expressionCheckMethods = {
 		const owner = scope?.lookupScope(n.name);
 		if (!owner) return !BUILTIN_IDENTS.has(n.name);
 		if (owner.isConst(n.name)) return false;
+		// A type name is not a value; shadowing it with a variable clears the mark.
+		if (owner._typeNames.has(n.name)) return false;
 		// A package name is bound as a package; a variable typed with a
 		// namespace-shaped declaration (`var Widget Widget`) is still a variable.
 		if (owner._packages.has(n.name)) return false;
