@@ -493,8 +493,7 @@ export const statementCheckMethods = {
 		const target = lhsTypes[0];
 		if (!target || isAny(target) || typeStr(target) === "int") return false;
 		const coll = this.resolveType(range.expr._coreType ?? range.expr._type);
-		const cu =
-			coll?.kind === "named" ? this.resolveType(coll.underlying) : coll;
+		const cu = this._deepUnderlying(coll);
 		if (!isString(cu) && cu?.kind !== "slice" && cu?.kind !== "array")
 			return false;
 		const tu = this.resolveType(this._deepUnderlying(target));

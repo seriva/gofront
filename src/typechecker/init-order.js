@@ -12,6 +12,8 @@
 // receiver or statement hides the package-level one from the next statement to
 // the end of its block, and not outside it.
 
+import { underlyingOf } from "./types.js";
+
 function forEachChildNode(node, fn) {
 	for (const key of Object.keys(node)) {
 		if (key.charCodeAt(0) === 95) continue; // "_" side tables
@@ -61,7 +63,7 @@ function methodKeyOf(t, name, funcs, depth = 0) {
 		const key = `${typeName}.${name}`;
 		if (typeName && funcs.has(key)) return key;
 	}
-	for (const e of x.underlying?._embeds ?? []) {
+	for (const e of underlyingOf(x)?._embeds ?? []) {
 		const key = methodKeyOf(e, name, funcs, depth + 1);
 		if (key) return key;
 	}
@@ -75,7 +77,7 @@ function methodKeyOf(t, name, funcs, depth = 0) {
 function litHasExprKeys(lit) {
 	let t = lit._type;
 	for (let i = 0; t && i < 8; i++) {
-		if (t.kind === "named") t = t.underlying;
+		if (t.kind === "named") t = underlyingOf(t);
 		else if (t.kind === "pointer") t = t.base;
 		else break;
 	}

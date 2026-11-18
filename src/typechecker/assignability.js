@@ -647,7 +647,7 @@ export const assignabilityMethods = {
 			return;
 		if (target.kind === "typeParam") return;
 		let tBase = this.resolveType(target);
-		if (tBase?.kind === "named") tBase = this.resolveType(tBase.underlying);
+		tBase = this._deepUnderlying(tBase);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
 		// The static type behind the interface value: codegen derives the
 		// fmt metadata (Stringer elements of slices and maps) from it.
@@ -680,7 +680,7 @@ export const assignabilityMethods = {
 		let t = isPtr ? source.base : source;
 		if (t?.kind === "TypeName" || t?.kind === "Ident") t = this.resolveType(t);
 		if (t?.kind !== "named") return null;
-		const u = this.resolveType(t.underlying);
+		const u = this._deepUnderlying(t);
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		const methods = t.methods ?? t._generic?.methods;
 		// A user-declared named basic type without methods is boxed as well, so
@@ -711,7 +711,7 @@ export const assignabilityMethods = {
 		for (const [fname, ftype] of st.fields.entries()) {
 			const full = prefix ? `${prefix}.${fname}` : fname;
 			const rf = this.resolveType(ftype);
-			const bf = rf?.kind === "named" ? this.resolveType(rf.underlying) : rf;
+			const bf = this._deepUnderlying(rf);
 			if (isPointer(bf)) {
 				ptrs.push(full);
 			} else if (bf?.kind === "struct") {
@@ -1038,7 +1038,7 @@ export const assignabilityMethods = {
 		if (isUntyped(target)) return true;
 		// Named types with a basic underlying type (`type Mode string`) accept
 		// untyped constants of that kind, as in Go.
-		if (target.kind === "named") target = this.resolveType(target.underlying);
+		target = this._deepUnderlying(target);
 		if (target?.kind !== "basic") return false;
 		return (
 			(UNTYPED_COMPAT[source.base]?.has(target.name) ?? false) ||

@@ -912,8 +912,7 @@ export class TypeChecker {
 	_offerEmbedMethods(struct, embed, best) {
 		const isPtr = embed.kind === "pointer";
 		const inner = isPtr ? embed.base : embed;
-		// One level is enough: a defined type's underlying type is never itself a defined type.
-		const base = inner.kind === "named" ? inner.underlying : inner;
+		const base = this._deepUnderlying(inner);
 		// Two candidates at the same depth make the name ambiguous, as does
 		// an ambiguous name of the embedded type.
 		const offer = (name, depth, source, viaPtr, ambiguous = false) => {

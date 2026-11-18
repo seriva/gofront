@@ -334,7 +334,7 @@ export const constantCheckMethods = {
 		}
 		t = this.resolveType(t);
 		if (t?.kind === "pointer") t = this.resolveType(t.base);
-		if (t?.kind === "named") t = this.resolveType(t.underlying);
+		t = this._deepUnderlying(t);
 		return t?.kind === "array" && Number.isInteger(t.size) ? t.size : null;
 	},
 

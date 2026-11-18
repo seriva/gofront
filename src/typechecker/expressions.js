@@ -353,8 +353,8 @@ export const expressionCheckMethods = {
 		if (anyKind(ot) === "dynamic") return ANY;
 		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
-		if (ot.kind === "named" && ot.underlying?.kind === "pointer")
-			return ot.underlying.base;
+		const ou = this._deepUnderlying(ot);
+		if (ou?.kind === "pointer") return ou.base;
 		this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
 		return ANY;
 	},
@@ -417,7 +417,7 @@ export const expressionCheckMethods = {
 		for (const term of c.terms) {
 			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
 			const inner =
-				t?.kind === "named" && t.underlying?.kind === "interface"
+				this._deepUnderlying(t)?.kind === "interface"
 					? this._constraintTerms(t, seen, scope)
 					: [t];
 			if (inner === null) return null;
@@ -1055,7 +1055,7 @@ export const expressionCheckMethods = {
 
 	_markIfaceKey(mapType, node, srcType) {
 		const key = this.resolveType(mapType.key);
-		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		const kb = this._deepUnderlying(key);
 		const src = srcType && this.resolveType(srcType);
 		if (node && src?.kind === "typeParam") {
 			// Generic code: whether the key is boxed depends on the type argument,
@@ -1872,8 +1872,11 @@ export const expressionCheckMethods = {
 	},
 
 	_resolveCallFnType(fnType, argTypes, expr, scope) {
-		if (fnType.kind === "named" && fnType.underlying?.kind === "func")
-			fnType = fnType.underlying;
+		if (
+			fnType.kind === "named" &&
+			this._deepUnderlying(fnType)?.kind === "func"
+		)
+			fnType = this._deepUnderlying(fnType);
 		if (fnType.kind === "generic") {
 			const resolved = this._resolveGenericFnType(
 				fnType,
@@ -1968,7 +1971,7 @@ export const expressionCheckMethods = {
 				? this.resolveTypeNode(constraint, scope)
 				: constraint,
 		);
-		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
+		const base = this._deepUnderlying(c);
 		if (base?.kind !== "interface") return false;
 		if (base.unionConstraint) return true;
 		return (base._typeSetEmbeds ?? []).some((e) =>
