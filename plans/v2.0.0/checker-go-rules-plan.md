@@ -429,11 +429,11 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: all pass on all targets
 
 ### Phase 10: Backends read the full underlying type (root `ad-hoc-type-structure`, backend half)
-- [ ] Task 10.1: JS range over a defined string type decodes runes (R6.5)
+- [x] Task 10.1: JS range over a defined string type decodes runes (R6.5)
   - Files: `src/lower/range.js` (`isStringRangeType`), `src/backend/js/statements.js`
   - Test: `test/unit/language/range-iter.test.js` R6.5 prints `0:a 1:b`, and `fmt.Println(i, r)` over `Word("é")` prints `0 233`, on all targets
   - Done when: passes on all targets
-- [ ] Task 10.2: `wasm` element and size lookups loop over `underlying` (R6.8)
+- [x] Task 10.2: `wasm` element and size lookups loop over `underlying` (R6.8)
   - Files: `src/backend/wasm/emit.js` (`_getArrayElemType`, `_getArraySize`), `src/backend/wasm/types.js`, `src/backend/wasm/module-emitter.js`
   - Test: accept fixture `defined_chain_slice.go` (`type A B; type B C; type C []int` in `len`, `append`, `range`, index, `[]int(s)`), all targets; the `type M2 M1` map control unchanged
   - Done when: passes on all targets; no backend site resolves a named type through `checker.types.get(t.name)` of its own name

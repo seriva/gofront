@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -362,6 +363,30 @@ func main() {
 	}
 }`);
 	assertErrorContains(errors, "cannot range over func");
+});
+
+section("Range over a defined string type");
+
+test("range over a defined string type decodes runes", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type Word string
+func main() {
+	for i, r := range Word("ab") {
+		fmt.Printf("%v:%c ", i, r)
+	}
+	fmt.Println()
+	for i, r := range Word("é") {
+		fmt.Println(i, r)
+	}
+	type W2 Word
+	for i, r := range W2("hé") {
+		fmt.Println(i, r)
+	}
+}`,
+		"0:a 1:b \n0 233\n0 104\n1 233\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

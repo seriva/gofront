@@ -89,11 +89,10 @@ export class BuiltinsEmitter {
 	_getSliceElemType(t) {
 		if (!t) return null;
 		if (t.elem) return t.elem;
-		if (t.underlying?.elem) return t.underlying.elem;
+		if (t.underlying) return this._getSliceElemType(t.underlying);
 		if (t.kind === "SliceType") return t.elem;
-		if (t.name && this.mod.checker?.types?.has(t.name)) {
-			const resolved = this.mod.checker.types.get(t.name);
-			return this._getSliceElemType(resolved);
+		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
+			return this._getSliceElemType(this.mod.checker.types.get(t.name));
 		}
 		return null;
 	}

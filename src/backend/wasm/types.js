@@ -595,10 +595,9 @@ export function isTaggedSliceType(goType, checker = null) {
 export function getSliceElemType(t, checker = null) {
 	if (!t) return null;
 	if (t.elem) return t.elem;
-	if (t.underlying?.elem) return t.underlying.elem;
-	if (t.name && checker?.types?.has(t.name)) {
-		const resolved = checker.types.get(t.name);
-		return getSliceElemType(resolved, checker);
+	if (t.underlying) return getSliceElemType(t.underlying, checker);
+	if (t.kind === "TypeName" && checker?.types?.has(t.name)) {
+		return getSliceElemType(checker.types.get(t.name), checker);
 	}
 	return null;
 }

@@ -1590,9 +1590,11 @@ export class FunctionEmitter {
 		if (typeof t.len === "number") return t.len;
 		if (t.len?.value !== undefined) return Number(t.len.value);
 		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
-		if (t.name && this.mod.checker?.types?.has(t.name)) {
-			const resolved = this.mod.checker.types.get(t.name);
-			if (resolved !== t) return this._getArraySize(resolved, defaultSize);
+		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
+			return this._getArraySize(
+				this.mod.checker.types.get(t.name),
+				defaultSize,
+			);
 		}
 		return defaultSize;
 	}
@@ -1600,11 +1602,10 @@ export class FunctionEmitter {
 	_getArrayElemType(t) {
 		if (!t) return null;
 		if (t.elem) return t.elem;
-		if (t.underlying?.elem) return t.underlying.elem;
+		if (t.underlying) return this._getArrayElemType(t.underlying);
 		if (t.kind === "ArrayType") return t.elem;
-		if (t.name && this.mod.checker?.types?.has(t.name)) {
-			const resolved = this.mod.checker.types.get(t.name);
-			return this._getArrayElemType(resolved);
+		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
+			return this._getArrayElemType(this.mod.checker.types.get(t.name));
 		}
 		return null;
 	}
