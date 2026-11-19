@@ -8,6 +8,16 @@ features (e.g. `plans/v1.8.0/`).
 
 ---
 
+## v2.1.0
+
+**Theme: Post-2.0.0 cleanup & compiler shrinking (Idea).** Follow-up pass after v2.0.0 ships to trim accumulated SLOC in `test/` and `src/` once the v2.0.0 checker, WASM, and typed-web-platform refactors have settled.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Post-2.0.0 cleanup & shrinking | Medium | Idea | Decide whether to retire or keep `test/fuzz/` (`check-baseline.txt` already empties in v2.0.0 `checker-operand-rules`), consolidate overlapping `test/unit/` tests and conformance fixtures, drop leftover `JS_DYNAMIC_ANY` escape hatches after `typed-web-platform`, and run a backend shrinking pass over `src/backend/wasm/` and `src/backend/js/`. Expand with `/bs-plan` after v2.0.0 ships. See [post-2.0-cleanup-plan.md](v2.1.0/post-2.0-cleanup-plan.md). |
+
+---
+
 ## v2.0.0
 
 **Theme: Go-faithful compiler and a typed web platform (Draft, breaking).** Turn GoFront into a complete web application toolchain without giving up the pure Node.js ESM compiler or the **no runtime** principle (no scheduler, no runtime reflection, no garbage-collected runtime threads): compile-time asset embedding, fast incremental `gofront dev` rebuilds, whole-program dead-code elimination, typed web APIs and reactive `gom` signals in `.templ`; a checker and backends that follow the Go spec (reject the invalid Go 1.x accepted, keep value semantics on every target); and a hardened unit test harness underneath. Backward compatibility is not a goal (user decision 2026-11-13): it may break source that compiled on 1.x when that removes a class of problem, and the 2.0.0 changelog gathers every **Breaking:** entry into one migration section. Motivating consumer: SimpleFPS (`seriva/simplefps`).
