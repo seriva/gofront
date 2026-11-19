@@ -196,7 +196,16 @@ func Sum[T ~int | ~float64](a, b T) T { return a + b } // ok
 func Add[T any](a, b T) T { return a + b }             // invalid operation: operator + not defined on a
 ```
 
-Narrow the constraint (an integer-only set for `%`, `cmp.Ordered` for `<`) to fix these.
+The same rule applies to the builtins `len`, `cap`, `append`, `copy`, `clear`, `delete`, `min` and `max`: every type in the constraint must be a valid argument, so `len(v)` needs a constraint such as `~[]int | ~string`, and `append` and `copy` need every slice in it to have the same element type:
+
+```go
+func Len[T any](v T) int { return len(v) }
+// invalid argument: v (variable of type T constrained by any) for built-in len
+
+func Size[T ~[]int | ~string](v T) int { return len(v) } // ok
+```
+
+Narrow the constraint (an integer-only set for `%`, `cmp.Ordered` for `<` and `min`) to fix these.
 
 #### Generic functions as values
 

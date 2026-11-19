@@ -3134,6 +3134,47 @@ func main() {
 	);
 });
 
+// R12: a builtin's operand in a generic body is checked against the type
+// set once, at the definition; instantiating the function (wasm
+// monomorphisation) adds no second error and no internal compiler error.
+const R12_BUILTINS = [
+	["len(v)", "_ = len(v)", "for built-in len"],
+	["cap(v)", "_ = cap(v)", "for cap"],
+	["clear(v)", "clear(v)", "cannot clear v"],
+	["delete(v, 1)", "delete(v, 1)", "is not a map"],
+	[
+		"append(v, 1)",
+		"_ = append(v, 1)",
+		"invalid append: argument must be a slice",
+	],
+	["copy(v, v)", "copy(v, v)", "invalid copy: argument must be a slice"],
+	["min(v, v)", "_ = min(v, v)", "cannot be ordered"],
+	["max(v, v)", "_ = max(v, v)", "cannot be ordered"],
+];
+
+for (const [name, stmt, msg] of R12_BUILTINS) {
+	test(`R12 ${name} with T any is one error per definition on every target`, () => {
+		const src = `package main
+
+func F[T any](v T) {
+	${stmt}
+}
+
+func main() {
+	F(map[int]int{})
+	F([]int{})
+}
+`;
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(src, { target });
+			assertEqual(errors.length, 1);
+			assertEqual(errors[0].line, 4);
+			assertErrorContains(errors, `v (variable of type T constrained by any)`);
+			assertErrorContains(errors, msg);
+		}
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
