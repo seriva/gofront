@@ -834,7 +834,7 @@ export const assignabilityMethods = {
 		const at = node ?? this._forwardedCall;
 		if (this._checkIfaceToConcrete(target, source, at, ctx, operand ?? at))
 			return;
-		if (this._assertAssignableEarlyReturn(target, source, operand ?? node, ctx))
+		if (this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx))
 			return;
 		if (isPointer(target) && isPointer(source)) {
 			this._assertNestedAssignable(
@@ -877,11 +877,21 @@ export const assignabilityMethods = {
 			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
 			return;
 		}
+		// An element or base mentioning a type parameter must be identical.
+		if (this._isTypeParamMismatch(t, s)) {
+			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
+			return;
+		}
 		if (this._distinctEmptyInterfaces(t, s)) {
 			this.err(`cannot use ${typeStr(s)} as ${typeStr(t)} value`, node);
 			return;
 		}
 		this.assertAssignable(target, source, node);
+	},
+
+	_isTypeParamMismatch(t, s) {
+		if (t?.kind !== "typeParam" && s?.kind !== "typeParam") return false;
+		return !identical(t, s) && !t?._tainted && !s?._tainted;
 	},
 
 	// `*B` and `*any` differ when `B` is a defined empty interface.
@@ -1088,12 +1098,103 @@ export const assignabilityMethods = {
 
 	_assertAssignableEarlyReturn(target, source, node, ctx) {
 		if (isNil(source)) this._checkNilTarget(target, node, ctx);
-		return (
-			target?.kind === "typeParam" ||
-			source?.kind === "typeParam" ||
-			isAny(target) ||
-			isAny(source) ||
-			isNil(source)
+		if (target?.kind === "typeParam" || source?.kind === "typeParam") {
+			if (!isNil(source) && !this._typeParamAssignable(target, source, node))
+				this._reportTypeParamAssign(target, source, node, ctx);
+			return true;
+		}
+		return isAny(target) || isAny(source) || isNil(source);
+	},
+
+	// Whether a value of `source` is assignable where `target` is wanted, one
+	// of them being a type parameter (Go's assignability: identical types, an
+	// untyped constant every type of the type set represents, a value of a
+	// type parameter to an unnamed type or an interface its type set
+	// satisfies, or a value to a type parameter every type of whose set takes
+	// it). JS-dynamic `any` stays unchecked.
+	_typeParamAssignable(target, source, node) {
+		if (identical(target, source)) return true;
+		if (anyKind(source) !== "go" && isAny(source)) return true;
+		if (source._tainted || target._tainted) return true;
+		if (target.kind === "typeParam")
+			return this._toTypeParamOk(target, source, node);
+		return this._fromTypeParamOk(target, source);
+	},
+
+	_toTypeParamOk(target, source, node) {
+		const terms = this._constraintTerms(target.constraint, new Set());
+		if (!terms || terms.length === 0) return false;
+		if (source.kind === "untyped")
+			return terms.every((t) => this._untypedFitsKind(source, node, t));
+		if (source.kind === "typeParam" || this._isNamedType(source)) return false;
+		return terms.every((t) => this._assignableQuietly(t, source));
+	},
+
+	// Whether untyped constant `source` converts to `term`: same kind (number,
+	// bool, string) and, for a known value, representable.
+	_untypedFitsKind(source, node, term) {
+		const u = this._deepUnderlying(term) ?? term;
+		const cls = untypedClass(source);
+		const kindOk =
+			cls === "number"
+				? isComplexOrNumeric(u)
+				: cls === "bool"
+					? isBool(u)
+					: isString(u);
+		return kindOk && this._untypedFitsTerm(source, node, term);
+	},
+
+	_fromTypeParamOk(target, source) {
+		if (isAny(target)) return true;
+		const base = this.resolveType(this._deepUnderlying(target));
+		if (base?.kind === "interface") {
+			if (base.methods.size === 0) return true;
+			const c = this._typeParamConstraintIface(source);
+			return !!c && this.implements(c, base, null);
+		}
+		if (this._isNamedType(target)) return false;
+		const terms = this._constraintTerms(source.constraint, new Set());
+		if (!terms || terms.length === 0) return false;
+		return terms.every((t) => this._assignableQuietly(target, t));
+	},
+
+	// Whether `t` is a defined type: a named type or a predeclared basic type.
+	// A type parameter is not (it is checked on its own).
+	_isNamedType(t) {
+		return t.kind === "named" || t.kind === "basic" || isAny(t);
+	},
+
+	// The interface a type parameter's constraint spells, or null.
+	_typeParamConstraintIface(tp) {
+		let c = tp.constraint;
+		if (c && !c.kind) return null;
+		if (
+			c?.kind === "TypeName" ||
+			c?.kind === "InterfaceType" ||
+			c?.kind === "GenericTypeName" ||
+			c?.kind === "InstantiationExpr" ||
+			c?.kind === "IndexExpr"
+		)
+			c = this.resolveTypeNode(c, this.globals);
+		const u = this.resolveType(this._deepUnderlying(c));
+		return u?.kind === "interface" ? u : null;
+	},
+
+	_reportTypeParamAssign(target, source, node, ctx) {
+		let what;
+		if (source.kind === "untyped") {
+			const cmp = node?.kind === "BinaryExpr" && CMP_OPS.has(node.op);
+			what = cmp ? "untyped bool value" : operandKind(node, source.base, true);
+		} else {
+			const named =
+				source.kind === "typeParam"
+					? `${typeStr(source)} constrained by ${this._constraintText(source)}`
+					: typeStr(source);
+			what = operandKind(node, named, false);
+		}
+		this.err(
+			`cannot use ${exprText(node)} (${what}) as ${typeStr(target)} value in ${ctx}`,
+			node,
 		);
 	},
 
