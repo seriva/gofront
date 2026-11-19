@@ -78,7 +78,7 @@ function minMaxType(at) {
 // Each value is (self, name, expr, argTypes, scope) => returnType.
 const BUILTIN_CHECK = {
 	len: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
-	cap: (s, n, e, at, sc) => s._checkBuiltinLen(n, e, at, sc),
+	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
 	append: (s, _n, e, at) => {
 		const st = at[0] ?? ANY;
 		if (isArray(st)) {
@@ -401,6 +401,12 @@ export const expressionCheckMethods = {
 	_typeParamAllows(tp, pred) {
 		const terms = this._constraintTerms(tp.constraint, new Set());
 		return terms !== null && terms.length > 0 && terms.every(pred);
+	},
+
+	// Whether `pred` holds for `t`, or for every type in its type set when `t`
+	// is a type parameter (the builtins' operand rule).
+	_typeSetOk(t, pred) {
+		return t?.kind === "typeParam" ? this._typeParamAllows(t, pred) : pred(t);
 	},
 
 	// `scope` resolves the type parameters a term mentions (`~[]E`); it
@@ -1031,12 +1037,15 @@ export const expressionCheckMethods = {
 	// conversion; other values are keyed as they are.
 	// Untyped constant operands take the result type, so a float32 result
 	// rounds them like the typed operands.
-	// `clear` takes a map or a slice.
+	// `clear` takes a map or a slice (every type in a type parameter's type
+	// set).
 	_checkClearOperand(e, t) {
-		if (!t || t._tainted || t.kind === "typeParam" || anyKind(t) === "dynamic")
-			return;
-		const kind = this._deepUnderlying(t)?.kind;
-		if (kind === "map" || kind === "slice") return;
+		if (!t || t._tainted || anyKind(t) === "dynamic") return;
+		const ok = (u) => {
+			const kind = this._deepUnderlying(u)?.kind;
+			return kind === "map" || kind === "slice";
+		};
+		if (this._typeSetOk(t, ok)) return;
 		this.err(
 			`invalid argument: cannot clear ${exprText(e.args[0])} (${this._capOperandKind(e.args[0], t)}): argument must be (or constrained by) map or slice`,
 			e,
@@ -2393,29 +2402,36 @@ export const expressionCheckMethods = {
 
 	_capOperandKind(operand, type) {
 		const untypedConst = type?.kind === "untyped" && type.base !== "nil";
-		return untypedConst
-			? operandKind(operand, type.base, true)
-			: operandKind(operand, typeStr(type), false);
+		if (untypedConst) return operandKind(operand, type.base, true);
+		const kind = operandKind(operand, typeStr(type), false);
+		return type?.kind === "typeParam"
+			? `${kind} constrained by ${this._constraintText(type)}`
+			: kind;
 	},
 
 	// `cap` takes a slice or an array (a pointer to an array is dereferenced
-	// before this check). A type parameter needs a slice or array core type;
-	// one with no single core type is left to instantiation. Unknown and
-	// `any` operands (JS interop) are not judged.
-	_capOperandOk(t, scope) {
+	// before this check); a type parameter needs one for every type in its
+	// type set, where `~*[N]E` also counts. Unknown and `any` operands (JS
+	// interop) are not judged.
+	_capOperandOk(t) {
 		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
-		if (t.kind === "typeParam") {
-			const core = this._coreType(t, scope);
-			return !core || core.kind === "slice" || core.kind === "array";
-		}
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => {
+				let b = this._deepUnderlying(u);
+				if (b?.kind === "pointer") b = this._deepUnderlying(b.base);
+				return b?.kind === "slice" || b?.kind === "array";
+			});
 		const kind = this._deepUnderlying(t)?.kind;
 		return kind === "slice" || kind === "array";
 	},
 
-	// `len` takes a string, array (or pointer to one), slice or map; a Go `any`
-	// needs a type assertion first, while a JS-dynamic value is not judged.
+	// `len` takes a string, array (or pointer to one), slice or map, for every
+	// type in a type parameter's type set; a Go `any` needs a type assertion
+	// first, while a JS-dynamic value is not judged.
 	_lenOperandOk(t) {
 		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => this._lenOperandOk(u));
 		if (t.kind === "untyped") return t.base === "string";
 		if (anyKind(t) === "go") return false;
 		let u = this._deepUnderlying(t);
@@ -2425,17 +2441,16 @@ export const expressionCheckMethods = {
 			u?.kind === "array" ||
 			u?.kind === "slice" ||
 			u?.kind === "map" ||
-			u?.kind === "shared" ||
-			u?.kind === "typeParam"
+			u?.kind === "shared"
 		);
 	},
 
-	// `delete` takes a map; a type parameter and a JS-dynamic value are not
-	// judged.
+	// `delete` takes a map (every type in a type parameter's type set); a
+	// JS-dynamic value is not judged.
 	_checkDeleteOperand(expr, t) {
-		if (!t || t._tainted || t.kind === "typeParam" || anyKind(t) === "dynamic")
+		if (!t || t._tainted || anyKind(t) === "dynamic") return;
+		if (this._typeSetOk(t, (u) => this._deepUnderlying(u)?.kind === "map"))
 			return;
-		if (this._deepUnderlying(t)?.kind === "map") return;
 		this.err(
 			`invalid argument: ${exprText(expr.args[0])} (${this._capOperandKind(expr.args[0], t)}) is not a map`,
 			expr,
@@ -2484,7 +2499,7 @@ export const expressionCheckMethods = {
 		return isString && elem?.kind === "basic" && elem.name === "uint8";
 	},
 
-	_checkBuiltinLen(name, expr, argTypes, scope) {
+	_checkBuiltinLen(name, expr, argTypes) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
 		if (name === "len" && !this._lenOperandOk(argTypes[0]))
 			this.err(
@@ -2507,7 +2522,7 @@ export const expressionCheckMethods = {
 					`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
 					expr,
 				);
-			} else if (!this._capOperandOk(argTypes[0], scope)) {
+			} else if (!this._capOperandOk(argTypes[0])) {
 				this.err(
 					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
 					expr,
