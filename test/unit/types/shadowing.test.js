@@ -1981,6 +1981,18 @@ func main() {
 	);
 });
 
+test("a package-level type error prints through fmt.Println", async () => {
+	await assertAllTargetsOutput(
+		prog(`type error int
+
+func main() {
+	var e error = 3
+	fmt.Println(e)
+}`),
+		"3\n",
+	);
+});
+
 test("a local type any = int still works", async () => {
 	await assertAllTargetsOutput(
 		prog(`func main() {

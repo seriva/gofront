@@ -185,6 +185,8 @@ export class TypeSpeller {
 			array: () => `[${t.size}]${sp(t.elem)}`,
 			map: () => `map[${sp(t.key)}]${sp(t.value)}`,
 			struct: () => this.spellStruct(t),
+			// A package's own `type error` is renamed before checking, so the
+			// name is the universe interface and the spelling cannot be shadowed.
 			interface: () => (t.name === "error" ? "error" : "any"),
 			func: () => this.funcString(t, sp),
 		};

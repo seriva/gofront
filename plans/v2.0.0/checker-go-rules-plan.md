@@ -471,7 +471,7 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
 
 ### Phase 14: Universe `error` survives a package-level `type error` (root `predeclared-scope`)
 Last behavior phase: carries the docs update for Phases 1–14.
-- [ ] Task 14.1: Generated Go does not spell a shadowed universe name (R8.11, `fmt.Println` form)
+- [x] Task 14.1: Generated Go does not spell a shadowed universe name (R8.11, `fmt.Println` form)
   - Files: `src/lower/fmt-formatters.js`, `src/lower/json-codecs.js`, `src/lower/gen-types.js`
   - Test: `test/unit/types/shadowing.test.js` R8.11 `fmt.Println(e)` prints `3` on all targets
   - Done when: passes; `gofront_gen.go` for programs without the shadow is byte-identical
