@@ -608,10 +608,8 @@ export const statementCheckMethods = {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		const ct = this.checkExpr(stmt.cond, inner);
-		if (ct?._declared)
+		if (ct?._declared || (!isBool(ct) && !isAny(ct)))
 			this.err("non-boolean condition in if statement", stmt.cond);
-		else if (!isBool(ct) && !isAny(ct))
-			this.err("If condition must be bool", stmt);
 		const bodyScope = new Scope(inner);
 		this.checkBlock(stmt.body, bodyScope, returnType);
 		this._reportUnused(bodyScope, stmt);
@@ -628,10 +626,8 @@ export const statementCheckMethods = {
 	_checkForCond(stmt, inner) {
 		if (stmt.cond.kind !== "RangeExpr") {
 			const ct = this.checkExpr(stmt.cond, inner);
-			if (ct?._declared)
+			if (ct?._declared || (!isBool(ct) && !isAny(ct)))
 				this.err("non-boolean condition in for statement", stmt.cond);
-			else if (!isBool(ct) && !isAny(ct))
-				this.err("For condition must be bool", stmt);
 		} else {
 			const ct = this._derefArrayPtr(
 				stmt.cond,

@@ -1258,7 +1258,7 @@ test("a non-bool if condition is a type error", () => {
 	const { build, check } = checkTempl("if name {\n\t\t<p>x</p>\n\t}");
 	for (const r of [build, check]) {
 		assertEqual(r.code, 1);
-		assertContains(r.stderr, "If condition must be bool");
+		assertContains(r.stderr, "non-boolean condition in if statement");
 	}
 });
 

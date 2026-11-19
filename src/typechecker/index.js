@@ -1324,7 +1324,7 @@ export class TypeChecker {
 			ct,
 			n.expr,
 			"if statement",
-			"If condition must be bool",
+			"non-boolean condition in if statement",
 		);
 		this._checkTemplNodes(n.then, scope);
 		this._checkTemplNodes(n.else_, scope);
