@@ -69,9 +69,9 @@ const SELF_TEST = args.includes("--self-test");
 // run reports them like any other disagreement; listing them here keeps a
 // case the grid renders wrongly from hiding among them.
 const UNPARSED = [
-	/^conv:value:func,/, // `(func())(x)`
+	/^conv:(value:func,|func:)/, // `(func())(x)`, `(func(T))(x)`
 	/^conv:ptr:(slice|array|map|func|struct),/, // `(*[]int)(x)`
-	/^conv:(array|slice):func,/, // `([]func())(x)`
+	/^conv:(array|slice|map):func,/, // `([]func())(x)`, `(map[string]func())(x)`
 	/^recv:decl:(ptr-ptr-struct|slice-literal|struct-literal)$/, // `func (r **P)`
 	/^names:call:(predeclared-type|shadow-type-\w+|shadow-any)$/, // `int()`
 	/^names:type:(nil|predeclared-const|shadow-const-var|shadow-nil-var)$/, // `var v nil`
@@ -144,8 +144,13 @@ const TAG_RULES = [
 	[(e) => unparsed(caseKey(e)), "parser-conversion-type"],
 	[/^range:\w+:T\w+:/, "R18"],
 	[/^range:\w+:1<<63:/, "O4"],
+	[/^builtins:arity:/, "R20"],
+	[/^builtins:\w+:T\w+:/, "R12"],
+	[/^comparable:constraint:/, "R13"],
+	[/^comparable:mapkey:/, "map-key-comparability"],
 	[/^binary:==:(struct,P|P,struct):invalid-wasm$/, "W1"],
 	[/[:,](1\+0i|1i|1e40|1e400)[,:]/, "O4"],
+	[/^builtins:(complex|real|imag):/, "builtin-complex-operands"],
 	[/^(binary:==|switch:tag):.*:invalid-wasm$/, "wasm-iface-equality"],
 	[/^incdec:.*:invalid-wasm$/, "O8"],
 	[/^names:\w+:shadow-/, "R8"],
@@ -330,6 +335,12 @@ const LEDGER_KEYS = [
 	"range:none:1<<63",
 	"range:kv:int",
 	"range:assign:funcnoiter",
+	"comparable:constraint:PS",
+	"comparable:constraint:Tany",
+	"comparable:mapkey:SAS",
+	"builtins:len:Tany",
+	"builtins:arity:clear-0",
+	"builtins:complex:int",
 ];
 
 const CLASSES = new Set([

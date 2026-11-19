@@ -231,6 +231,8 @@ const WRAPPERS = [
 	["ptr", (t) => `*${t}`],
 	["array", (t) => `[2]${t}`],
 	["slice", (t) => `[]${t}`],
+	["map", (t) => `map[string]${t}`],
+	["func", (t) => `func(${t})`],
 ];
 
 // `use(targetType, operandExpr)` is the body of a case that moves a value of
@@ -530,6 +532,101 @@ function* nameCases() {
 		}
 }
 
+// ── Comparable: map keys and the comparable constraint ───────
+
+const COMPARABLE_DECLS = [
+	"type SA struct{ A [2]int }",
+	"type SAS struct{ A [2][]int }",
+	"func cmp[T comparable]() {}",
+];
+
+const COMPARABLE_EXTRA = [
+	typed("arrslice", "[2][]int"),
+	typed("arrfunc", "[2]func()"),
+	typed("SA", "SA"),
+	typed("SAS", "SAS"),
+	typed("ptrps", "*PS"),
+];
+
+function* comparableCases() {
+	for (const k of [...VARS, ...COMPARABLE_EXTRA]) {
+		const t = typeIn(k, "a");
+		yield {
+			key: `comparable:mapkey:${k.id}`,
+			src: render({
+				decls: COMPARABLE_DECLS,
+				tparams: t.tparams,
+				body: [`var m map[${t.type}]int`, "_ = m"],
+			}),
+		};
+		yield {
+			key: `comparable:constraint:${k.id}`,
+			src: render({
+				decls: COMPARABLE_DECLS,
+				tparams: t.tparams,
+				body: [`cmp[${t.type}]()`],
+			}),
+		};
+	}
+}
+
+// ── Builtins: operand kinds and arity ────────────────────────
+
+const BUILTIN_TPARAMS = [
+	{ ...tparam("Tslice", "~[]int"), inst: "[]int" },
+	{ ...tparam("Tstr", "~string"), inst: "string" },
+	{ ...tparam("Tmap", "~map[string]int"), inst: "map[string]int" },
+	{ ...tparam("Tslicestr", "~[]int | ~string"), inst: "string" },
+];
+
+const BUILTIN_OPS = [
+	["len", (x) => [`_ = len(${x})`]],
+	["cap", (x) => [`_ = cap(${x})`]],
+	["clear", (x) => [`clear(${x})`]],
+	["delete", (x) => [`delete(${x}, "a")`]],
+	["append", (x) => [`_ = append(${x}, 1)`]],
+	["copy", (x) => [`_ = copy(${x}, ${x})`]],
+	["min", (x) => [`_ = min(${x}, ${x})`]],
+	["real", (x) => [`_ = real(${x})`]],
+	["imag", (x) => [`_ = imag(${x})`]],
+	["complex", (x) => [`_ = complex(${x}, ${x})`]],
+];
+
+const BUILTIN_ARITY = [
+	["len-0", "_ = len()"],
+	["len-2", "_ = len([]int{}, []int{})"],
+	["cap-0", "_ = cap()"],
+	["clear-0", "clear()"],
+	["delete-1", "delete(map[string]int{})"],
+	["append-0", "_ = append()"],
+	["copy-1", "_ = copy([]int{})"],
+	["min-0", "_ = min()"],
+	["max-0", "_ = max()"],
+	["complex-1", "_ = complex(1.0)"],
+	["real-0", "_ = real()"],
+	["imag-0", "_ = imag()"],
+];
+
+function* builtinCases() {
+	for (const [op, body] of BUILTIN_OPS)
+		for (const k of [...ALL, ...BUILTIN_TPARAMS]) {
+			const a = operand(k, "a");
+			yield {
+				key: `builtins:${op}:${k.id}`,
+				src: render({
+					...a,
+					targs: k.constraint ? [k.inst ?? "int"] : undefined,
+					body: body(a.expr),
+				}),
+			};
+		}
+	for (const [id, stmt] of BUILTIN_ARITY)
+		yield {
+			key: `builtins:arity:${id}`,
+			src: render({ body: [stmt] }),
+		};
+}
+
 // ── The grid ─────────────────────────────────────────────────
 
 const SECTIONS = {
@@ -544,6 +641,8 @@ const SECTIONS = {
 	switch: switchCases,
 	range: rangeCases,
 	names: nameCases,
+	comparable: comparableCases,
+	builtins: builtinCases,
 };
 
 export const SECTION_NAMES = Object.keys(SECTIONS);
