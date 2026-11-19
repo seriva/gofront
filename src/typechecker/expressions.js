@@ -1880,7 +1880,10 @@ export const expressionCheckMethods = {
 					expr,
 				);
 			}
+			const errorsBefore = this.errors.length;
 			this._checkTypeArgConstraints(baseType, typeArgs, scope, expr);
+			// A rejected explicit argument already explains the call.
+			if (this.errors.length > errorsBefore) return TAINTED_ANY;
 			const allArgs = this._inferRemainingTypeArgs(baseType, typeArgs, scope);
 			// As a value (not a callee) every type parameter must be known.
 			if (allArgs.length < baseType.typeParams.length && !expr._genericOk) {
@@ -1958,7 +1961,13 @@ export const expressionCheckMethods = {
 						this._typeArgScope(fnType.typeParams, typeArgs, scope),
 					)
 				: null;
-			if (constraint) this.checkConstraint(typeArgs[i], constraint, node);
+			if (constraint)
+				this.checkConstraint(typeArgs[i], constraint, node, {
+					typeParams: fnType.typeParams,
+					typeArgs,
+					name: tp.name,
+					scope,
+				});
 		}
 	},
 
@@ -2491,7 +2500,13 @@ export const expressionCheckMethods = {
 						this._typeArgScope(fnType.typeParams, typeArgs, scope),
 					)
 				: null;
-			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+			if (constraint)
+				this.checkConstraint(typeArgs[i], constraint, expr, {
+					typeParams: fnType.typeParams,
+					typeArgs,
+					name: tp.name,
+					scope,
+				});
 		}
 		expr._typeArgs = typeArgs;
 		if (expr.func) expr.func._typeArgs = typeArgs;
