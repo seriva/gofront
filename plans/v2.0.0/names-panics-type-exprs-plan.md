@@ -26,7 +26,7 @@ Fix the remaining review follow-ups by root cause: generated names that collide 
 | **In scope: core** | Root `js-name-collision`: every generated JS identifier (package-level type classes, `wasm` facade classes and helpers) is escaped from JS globals and reserved words by one rule | F2, F30, L12 | |
 | **In scope: target-specific** | Root `wasm-bounds-width`: a Go integer that `wasm` narrows to `i32` (`_emitIndexExprToI32` and its callers: slice expressions, `make`, integer `range`; the `oob32`/`oob64` index paths) is checked and reported at its Go width and signedness | F19 (+F19a, F19lo, F19s, F19m, F19r), F22 (+F22s, F22u) | |
 | **In scope: target-specific** | Root `wasm-panic-value`: the host message of an uncaught `wasm` panic is built by one runtime formatter from the value's dynamic Go type, as Go's `printpanicval` does | F20 (+F20u32, F20m, F20g, F20d, F20i), F21 (+F21b, F21c) | |
-| **In scope: core** | Root `type-in-expression`: a type written where an expression is parsed (type arguments with struct tags, parenthesised type literals, alias callees) is recognised as a type | L1 (+L1e), L2 (+L2f, L2g, L2h), L3 (+L3e, L3p) | |
+| **In scope: core** | Root `type-in-expression`: a type written where an expression is parsed (type arguments with struct tags, parenthesised type literals, alias callees) is recognised as a type, and a type keyword that names a value in scope (`func bool()`, `string := …`) is called as that value | L1 (+L1e), L2 (+L2f, L2g, L2h), L3 (+L3e, L3p), L15 (+L15s, L15e, L15i) | |
 | **Excluded: deferred** | Message of an uncaught `wasm` panic whose value is a struct (or pointer, slice, map, func) implementing neither `error` nor `Stringer` | `panic(P{3})` → `Error: [panic object]`; Go prints `panic: (main.P) 0x…` | Go's text holds an address, so there is no exact target. `recover()` already returns the right value |
 | **Excluded: runtime / platform** | `panic(nil)` and a nil interface value on `js`/`both` | `recover()` returns `nil`, `%T` prints `<nil>` | Nil slices, maps, funcs, pointers and interfaces all lower to `null` on JS, so a nil `any` cannot be told apart at the `panic` site without boxing every interface value; documented in Task 3.3 |
 | **Excluded: deferred** | Package-level `js`/`both` struct types, or types with methods, named after JS built-ins | `type Set int` with a method → `type Set shadows the JavaScript global Set; rename the type` | Documented clear error, not a miscompile; Task 1.3 only renames the method-less case that slips past the check (F2) |
@@ -111,6 +111,11 @@ Root: where the parser or checker expects an expression, a type is recognised on
 | L3d | `new(struct{ A [2]int })` | `0` | same |
 | L3e | `(map[string]int)(nil)`, `(func() int)(nil)` | `0 true` | same |
 | L3p | `(*[]int)(nil)`, `(*struct{ X int })(nil)` | `true true` | same |
+| L3f *sibling (review 2026-11-19)* | `var f func(); _ = (func())(f)`; `([]func())(x)`; `(func() int)(f)`; `(*map[int]int)(p)` | ok | `Expected type, got ')'` / `expected '{'` (ledger *Parenthesised conversion types*, fuzz tag `parser-conversion-type`; covered by Task 4.2) |
+| L15 (ledger *Shadowed type keywords as callees*, PR #241) | `func bool() int { return 20 }; func main() { fmt.Println(bool()) }` | `20` | `Parse error: Unexpected token in expression: ')'` on all targets; root `src/parser/expressions.js:parsePrimary` parses a `TYPE_KEYWORDS` identifier followed by `(` as a `TypeConversion` without asking whether the name is a value in scope |
+| L15s *sibling* | `string := func() int { return 3 }; fmt.Println(string())` | `3` | same parse error |
+| L15e *sibling* | `func error() int { return 1 }; fmt.Println(error())` | `1` | same parse error |
+| L15i *sibling* | `int := func(x float64) float64 { return x * 2 }; fmt.Println(int(1.5))` | `3` | `'int' declared and not used` (parsed as a conversion) |
 | control | `(*p).f`, `(*T)(nil)` | `4 true` | OK |
 | Go error | `([]int){1, 2}` | `syntax error: cannot parenthesize type in composite literal` | `Parse error … expected '{'` |
 
@@ -201,3 +206,14 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/typechecker/expressions.js` (conversion branch keys on `_isTypeRef`)
   - Test: `test/unit/types/checks.test.js`: L1 → `{1}`, L1c → `0`, L1d → `2`, L1e → `0 true` with `assertAllTargetsOutput`; generic alias control unchanged; `type A = struct{ X int }; A(1)` → `cannot convert`
   - Done when: all pass; no `Cannot call non-function type` for a type callee
+
+### Phase 5: Type keywords that name values (root `type-in-expression`, callee side)
+*Scheduled from review follow-ups (2026-11-19): ledger *Shadowed type keywords as callees*. Same decision point as Phase 4 (`parsePrimary` choosing type or expression); lands after it.*
+- [ ] Task 5.1: `parsePrimary` parses `<type keyword>(…)` as a call node the checker resolves (L15, L15s, L15e)
+  - Files: `src/parser/expressions.js` (`parsePrimary`, `TYPE_KEYWORDS`)
+  - Test: `test/unit/types/shadowing.test.js`: L15 → `20`, L15s → `3`, L15e → `1` with `assertAllTargetsOutput`; `int(1.5)`, `string(rune(65))`, `[]byte("a")` still convert
+  - Done when: all pass on every target; no parse error for a keyword callee with zero arguments
+- [ ] Task 5.2: The checker resolves a keyword callee to the value in scope before the predeclared type (L15i)
+  - Files: `src/typechecker/expressions.js` (conversion-or-call decision keyed on the scope object `kind`)
+  - Test: `shadowing.test.js`: L15i → `3` on all targets; a package-level `func string() int` used beside `string(b)` in another package keeps the conversion there
+  - Done when: passes; `'int' declared and not used` no longer reported for a called local

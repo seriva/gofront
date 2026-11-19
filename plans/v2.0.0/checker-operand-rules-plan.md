@@ -35,6 +35,7 @@ The checker-go-rules reviews kept finding the same shape of gap: a Go rule about
 | **In scope: core** | Root `receiver-base-type`: a receiver's base type is a defined, non-pointer, non-interface type declared in the package (spec *Method declarations*) | O6.1–O6.6 | |
 | **In scope: core** | Root `switch-tag-comparison`: the tag must be comparable and each case is a comparison `tag == e` under the Phase 2 rule (spec *Expression switches*) | O7.1–O7.5 | |
 | **In scope: core** | Operator codegen of the forms above: JS mixed interface/concrete `==`, complex `++`/`--` on both backends | O8.1–O8.4 | |
+| **In scope: core** | Root `type-comparability`: one predicate for whether a type is comparable (spec *Comparison operators*), used by map key types, `==`/`!=` on structs and arrays, and the `wasm` map-key helpers | O9.1–O9.4 | |
 | **Excluded: runtime / platform** | Channels, `select`, goroutines in grid cases | `chan int` operands (parse error by design) | **No runtime** principle; the grid omits `chan` kinds |
 | **Excluded: runtime / platform** | JS-dynamic `any` (`anyKind === "dynamic"`) stays permissive | `.d.ts` values, browser globals in grid cases | Typed by typed-web-platform Phase 4; the grid uses Go `any` only |
 | **Excluded: runtime / platform** | `js` package narrow-integer arithmetic does not wrap | ledger *Non-strict JS int wrap* (`var x uint8 = 255; x++` → `256` on `js`) | Documented behaviour (`docs/go-compatibility.md` *Integer arithmetic*): `js` packages use float64 numbers. Entry deleted from the ledger |
@@ -111,6 +112,8 @@ Root: the constant folder has no complex kind (`src/typechecker/const-fold.js` h
 | O4.8 *sibling* | `_ = float32(1e40)` | `cannot convert 1e40 (untyped float constant 1e+40) to type float32` | accepted on all targets |
 | O4.9 *sibling* | `var f float64 = 1e400` | `cannot use 1e400 (…) as float64 value in variable declaration (overflows)` | accepted on all targets |
 | O4.10 *sibling* | `var c complex64 = 1e40` | `cannot use 1e40 (…) as complex64 value in variable declaration (overflows)` | accepted on all targets |
+| O4.11 (ledger *Range constant overflow*, review 2026-11-19) | `for i := range 1 << 63 { _ = i }` | `cannot use 1 << 63 (untyped int constant 9223372036854775808) as int value in range clause (overflows)` | accepted on all targets (runs without end); root `expressions.js:_checkRangeExpr` and `statements.js:_checkForCond` never call `_checkConstOverflow` |
+| control | `range 1e100`, `range int8(200)` | `cannot range over 1e100 …`; `constant 200 overflows int8` | rejected (must stay) |
 
 #### O5 `nested-assignability`, `dual-conversion-check`
 
@@ -125,6 +128,8 @@ Root (assignability): `assertAssignable` checks a pointer's base through `_asser
 | O5.5 (ledger *Pointer conversion*) | `type B interface{}; var p *B; _ = (*any)(p)` | ok | `cannot convert *B to *any` |
 | O5.6 *sibling* | `type MyInt int; var s []int; _ = []MyInt(s)` | `cannot convert s (variable of type []int) to type []MyInt` | accepted on all targets |
 | O5.7 controls | `(*MyInt)(&x)`; `(*B)(&a)` with tag-only differences (js); `(*float64)(p)` rejected | `1`; `1`; rejected | same (must stay; the `wasm` struct-pointer blocker message stays) |
+| O5.8 (ledger *Conversion to type literal*, review 2026-11-19) | `_ = struct{ X int }(1)`; *sibling* `[]int(1)`, `map[int]int(1)` | `cannot convert 1 (untyped int constant) to type struct{X int}` / `[]int` / `map[int]int` | accepted on all targets: `_checkTypeConversion` returns before `_checkConversionValidity` for a type-literal target |
+| control | `type S struct{ X int }; S(1)`; `[2]int(1)` | `cannot convert 1 (untyped int constant) to type S` | rejected (message differs: `cannot convert untyped int to S`; must stay rejected) |
 
 #### O6 `receiver-base-type`
 
@@ -163,6 +168,17 @@ Root (JS equality): `_isStructEquality` (`src/backend/js/expressions.js:3650`) r
 | O8.3 (ledger *Complex ++/--*) | `var c complex128 = 1i; c++; fmt.Println(c)` | `(1+1i)` | js/both `(NaN+NaNi)`; wasm ICE (invalid module) |
 | O8.4 *sibling* | `var c complex64 = 1i; c--; fmt.Println(c)` | `(-1+1i)` | js/both `(NaN+NaNi)`; wasm ICE |
 | control | `var c complex128 = 1i; c += 1`; `var i, j I = P{1}, P{1}; i == j` | `(1+1i)`; `true` | same on all targets (must stay) |
+
+#### O9 `type-comparability` (review follow-ups 2026-11-19)
+
+Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*, PR #245; re-probed with `go run` go1.26 and `runProgram` on `js`/`both`/`wasm` at `60ce661f`). Root: the checker has no comparability predicate: `grep -rn "invalid map key\|cannot be compared" src/typechecker` finds nothing, so a map type accepts any key type and `==` on a struct or array never checks its fields; `src/backend/wasm/types.js:isUnhashableGoType` reads one level of `underlying`. checker-go-rules Phase 18 (`comparable` constraint) needs the same predicate: whichever phase lands first adds it, the other reuses it.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| O9.1 (ledger) | `type S1 []int; type A1 [2]S1; type Box struct{ Arr A1 }; var m map[Box]int` | `invalid map key type Box` | accepted on all targets |
+| O9.2 *sibling* | `map[[]int]int`; `map[func()]int`; `type S []int; map[S]int`; `type A1 [2][]int; map[A1]int`; `type F func(); type G F; map[G]int` | `invalid map key type …` | accepted on all targets |
+| O9.3 *sibling* | `type Box struct{ S []int }; map[Box]int`; nested `struct{ I In }` with `In struct{ S []int }` | `invalid map key type Box` | accepted on all targets |
+| O9.4 *sibling* | `type Box struct{ S []int }; a, b := Box{}, Box{}; _ = a == b` (also through a nested struct) | `invalid operation: a == b (struct containing []int cannot be compared)` | accepted on all targets |
 
 ---
 
@@ -254,6 +270,10 @@ Root (JS equality): `_isStructEquality` (`src/backend/js/expressions.js:3650`) r
   - Files: `src/typechecker/constants.js`
   - Test: reject fixtures `float32_cmp_overflow.go`, `float32_var_overflow.go`, `float32_const_overflow.go`, `float32_conv_overflow.go`, `float64_overflow.go`, `complex64_overflow.go`; `test/unit/language/float32-consts.test.js` max finite `float32` still compiles
   - Done when: Go's messages on all targets; `# O4` keys removed
+- [ ] Task 4.4: A constant `range` operand must be representable as `int` (O4.11)
+  - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`), `src/typechecker/statements.js` (`_checkForCond`)
+  - Test: reject fixture `range_const_overflow.go` (`… as int value in range clause (overflows)`); `range 1 << 62` and the O4.11 controls unchanged
+  - Done when: Go's message on all targets; both paths call `_checkConstOverflow`
 
 ### Phase 5: Assignability and conversions (roots `nested-assignability`, `dual-conversion-check`)
 - [ ] Task 5.1: Pointer and array element types must be identical; composite mismatches use Go's message (O5.1–O5.4)
@@ -262,7 +282,7 @@ Root (JS equality): `_isStructEquality` (`src/backend/js/expressions.js:3650`) r
   - Done when: Go's messages on all targets, no wasm ICE
 - [ ] Task 5.2: One `_convertible` for every conversion form (O5.5–O5.7)
   - Files: `src/typechecker/expressions.js`
-  - Test: accept fixture `ptr_conv_defined_empty_iface.go`; reject fixture `slice_conv_elem_mismatch.go`; O5.7 controls in `test/unit/types/pointers.test.js`
+  - Test: accept fixture `ptr_conv_defined_empty_iface.go`; reject fixtures `slice_conv_elem_mismatch.go`, `conv_untyped_to_struct_literal.go`, `conv_untyped_to_slice_literal.go`, `conv_untyped_to_map_literal.go` (O5.8); O5.7 and O5.8 controls in `test/unit/types/pointers.test.js`
   - Done when: both conversion paths call `_convertible`; `# O5` keys removed
 
 ### Phase 6: Method receivers (root `receiver-base-type`)
@@ -298,3 +318,18 @@ Root (JS equality): `_isStructEquality` (`src/backend/js/expressions.js:3650`) r
   - Files: `docs/go-compatibility.md`
   - Test: none (docs); `npm run fuzz:check` baseline holds only `# excluded:` keys
   - Done when: the doc lists the rules of Phases 2–7 that now match Go and no longer lists them as differences
+
+### Phase 9: Comparable types (root `type-comparability`)
+*Scheduled from review follow-ups (2026-11-19): ledger *Unhashable array chain in struct map key*. Lands after Phase 8; carries its own docs line since Task 8.3 documents Phases 2–7.*
+- [ ] Task 9.1: One `isComparable(t)` predicate; map types reject non-comparable keys (O9.1–O9.3)
+  - Files: `src/typechecker/types.js` (`isComparable`, reusing checker-go-rules Phase 18's if it has landed), `src/typechecker/resolve.js` (map type resolution)
+  - Test: reject fixtures `map_key_slice.go`, `map_key_func_chain.go`, `map_key_struct_slice_field.go`, `map_key_array_of_slice_in_struct.go`; `map[struct{ X int }]int`, `map[[2]int]int`, `map[any]int`, `map[*T]int` stay valid
+  - Done when: Go's `invalid map key type …` on all targets
+- [ ] Task 9.2: `==`/`!=` on a struct or array require comparable fields and elements (O9.4)
+  - Files: `src/typechecker/assignability.js` (`_checkCmpOperandTypes`)
+  - Test: reject fixtures `struct_cmp_slice_field.go`, `struct_cmp_nested_slice_field.go`; comparisons of comparable structs and arrays unchanged
+  - Done when: Go's `struct containing []int cannot be compared` on all targets
+- [ ] Task 9.3: `wasm` map-key helpers read the full underlying type; docs
+  - Files: `src/backend/wasm/types.js` (`isUnhashableGoType` through `isComparable` or `_deepUnderlying`), `docs/go-compatibility.md`
+  - Test: a `test/unit/wasm/map-keys.test.js` test over valid defined key chains (`type K [2]P; type P struct{ X int }`; `type K2 K`) prints Go's output (control: no failing repro was found once Task 9.1 rejects invalid keys, so this pins the helper to the predicate)
+  - Done when: passes; `isUnhashableGoType` has no one-level `.underlying` read; the doc lists the map-key and struct-comparison rejections

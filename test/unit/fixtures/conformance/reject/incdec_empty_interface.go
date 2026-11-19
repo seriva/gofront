@@ -1,3 +1,4 @@
+// pending: type-text-elided
 package main
 
 func main() {

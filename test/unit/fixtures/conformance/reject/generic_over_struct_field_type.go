@@ -1,3 +1,4 @@
+// pending: assign-message-text
 package main
 
 type S[T any] struct{ X T }
