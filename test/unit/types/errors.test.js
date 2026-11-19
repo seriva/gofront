@@ -1125,6 +1125,43 @@ func main() { f(1) }`;
 	}
 });
 
+test("too many range-over-iterator variables are reported at the extra variable", () => {
+	for (const [head, at] of [
+		["a, b := range iter", "at line 5:9"],
+		["a, b = range iter", "at line 5:9"],
+	]) {
+		const { errors } = compile(`package main
+
+func main() {
+	iter := func(yield func(int) bool) { yield(1) }
+	for ${head} {
+	}
+}`);
+		assertErrorContains(errors, "range over iterator: too many loop variables");
+		assertErrorContains(errors, at);
+	}
+});
+
+test("an assignment mismatch in a for, if or switch header is positioned", () => {
+	for (const [head, at] of [
+		["for a := f(); false; {\n\t}", "at line 6:6"],
+		["if a := f(); false {\n\t}", "at line 6:5"],
+		["switch a := f(); a {\n\t}", "at line 6:9"],
+		["for a, b := 1; false; {\n\t}", "at line 6:6"],
+		["for a := 0; false; a, b = 1 {\n\t}", "at line 6:21"],
+	]) {
+		const { errors } = compile(`package main
+
+func f() (int, int) { return 1, 2 }
+
+func main() {
+	${head}
+}`);
+		assertErrorContains(errors, "assignment mismatch");
+		assertErrorContains(errors, at);
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

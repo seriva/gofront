@@ -425,7 +425,17 @@ export const statementParserMethods = {
 		return s;
 	},
 
+	// Records the position of the statement's first token, so header statements
+	// (`for`/`if`/`switch` init and post) that bypass parseStmt carry one too.
 	parseSimpleStmtRaw(noCompLit = false) {
+		const start = this.peek();
+		const stmt = this._parseSimpleStmtBody(noCompLit);
+		stmt._line = start.line;
+		stmt._col = start.col;
+		return stmt;
+	},
+
+	_parseSimpleStmtBody(noCompLit) {
 		// Parse left-hand side (could be expr list for multi-assign)
 		const first = this.parseExpr(0, noCompLit);
 		const t = this.peek();

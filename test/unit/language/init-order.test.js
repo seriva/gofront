@@ -262,6 +262,19 @@ test("constants that refer to each other are an initialization cycle", () => {
 	}
 });
 
+test("a constant cycle is reported at the constant's line and column", () => {
+	for (const [src, at] of [
+		["const (\n\tA = B\n\tB = A\n)", "at line 4:2"],
+		["const A = B\nconst B = A", "at line 3:7"],
+	]) {
+		const { errors } = compile(
+			`package main\n\n${src}\n\nfunc main() { println(1) }\n`,
+		);
+		assertErrorContains(errors, "initialization cycle");
+		assertErrorContains(errors, at);
+	}
+});
+
 test("constants declared out of order and iota groups are not cycles", async () => {
 	await assertProgramOutput(
 		prog(

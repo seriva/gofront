@@ -390,18 +390,19 @@ export const declarationParseMethods = {
 				}
 				// Substitute iota deeply in a cloned expression AST
 				const value = rawExprs.map((v) => this._substituteIota(v, iotaVal));
-				decls.push({ names, type, value });
+				decls.push({ names, type, value, _line: at.line, _col: at.col });
 				iotaVal++;
 				this.semi();
 			}
 			this.expect(T.RPAREN);
 		} else {
+			const at = this.peek();
 			const names = this.parseIdentList();
 			let type = null;
 			if (!this.check(T.ASSIGN)) type = this.parseType();
 			this.expect(T.ASSIGN);
 			const value = this.parseExprList();
-			decls.push({ names, type, value });
+			decls.push({ names, type, value, _line: at.line, _col: at.col });
 		}
 		this.semi();
 		return { kind: "ConstDecl", decls };

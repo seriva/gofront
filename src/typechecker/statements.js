@@ -1001,7 +1001,7 @@ export const statementCheckMethods = {
 		if (lhs.length > info.yieldParams.length) {
 			this.err(
 				`range over iterator: too many loop variables (got ${lhs.length}, max ${info.yieldParams.length})`,
-				initStmt,
+				lhs[info.yieldParams.length],
 			);
 		}
 
