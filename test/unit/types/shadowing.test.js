@@ -2289,3 +2289,72 @@ func main() { fmt.Println(f()) }`),
 		"boom\n",
 	);
 });
+
+test("true, false and nil can be declared as locals", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	true := 1
+	fmt.Println(true)
+	nil := 2
+	fmt.Println(nil)
+	false := "f"
+	fmt.Println(false)
+}`),
+		"1\n2\nf\n",
+	);
+});
+
+test("true, false and nil keep their universe meaning without a declaration", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	x := true
+	var y error = nil
+	var z *int = nil
+	fmt.Println(x, false, y == nil, z == nil)
+	switch v := any(1).(type) {
+	case nil:
+		fmt.Println("nil", v)
+	default:
+		fmt.Println("other")
+	}
+}`),
+		"true false true true\nother\n",
+	);
+});
+
+test("a local true does not leak to the next function", async () => {
+	await assertAllTargetsOutput(
+		prog(`func f() int {
+	true := 5
+	return true
+}
+
+func main() {
+	fmt.Println(f(), true)
+}`),
+		"5 true\n",
+	);
+});
+
+test("every declaration form accepts true, false and nil", async () => {
+	await assertAllTargetsOutput(
+		prog(`type S struct{ nil int }
+
+func f(false int) int { return false }
+
+var true = 5
+
+const nil = 7
+
+func main() {
+	s := S{nil: 3}
+	fmt.Println(f(4), true, nil, s.nil)
+	n := 0
+	for nil := range 2 {
+		n += nil + 10
+	}
+	fmt.Println(n)
+}`),
+		"4 5 7 3\n21\n",
+	);
+});

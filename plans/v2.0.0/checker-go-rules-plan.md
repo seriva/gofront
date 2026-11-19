@@ -684,11 +684,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 21: `true`, `false` and `nil` can be redeclared (root `predeclared-scope`)
 *Scheduled from review follow-ups (2026-11-18).*
-- [ ] Task 21.1: The lexer reads `true`, `false` and `nil` as identifiers; the parser and checker resolve them through the universe scope (R16.1)
+- [x] Task 21.1: The lexer reads `true`, `false` and `nil` as identifiers; the parser and checker resolve them through the universe scope (R16.1)
   - Files: `src/lexer/tokens.js`, `src/parser/expressions.js`, `src/typechecker/expressions.js`
   - Test: `test/unit/language/shadowing.test.js` R16.1 prints `1` on all targets; the controls
   - Done when: `x := true` and `y := nil` still type as before
-- [ ] Task 21.2: Every declaration form accepts them (R16.2)
+- [x] Task 21.2: Every declaration form accepts them (R16.2)
   - Files: `src/parser/declarations.js`, `src/parser/statements.js`, `src/backend/js/expressions.js`
   - Test: R16.2 programs print Go's output on all targets
   - Done when: shadowed names are mangled like other shadowed predeclared names (Phase 8)

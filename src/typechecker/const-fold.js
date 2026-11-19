@@ -361,8 +361,6 @@ function foldExpr(expr, resolve) {
 		case "BasicLit":
 			return constFromLit(expr);
 		case "Ident": {
-			if (expr.name === "true" || expr.name === "false")
-				return { k: BOOL, v: expr.name === "true" };
 			const lit = resolve(expr.name);
 			return lit ? constFromLit(lit) : null;
 		}

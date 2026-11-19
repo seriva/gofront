@@ -74,7 +74,6 @@ const UNPARSED = [
 	/^conv:(array|slice|map):func,/, // `([]func())(x)`, `(map[string]func())(x)`
 	/^recv:decl:(ptr-ptr-struct|slice-literal|struct-literal)$/, // `func (r **P)`
 	/^names:call:(predeclared-type|shadow-type-\w+|shadow-any)$/, // `int()`
-	/^names:type:(nil|predeclared-const|shadow-const-var|shadow-nil-var)$/, // `var v nil`
 ];
 const unparsed = (key) => UNPARSED.some((re) => re.test(key));
 

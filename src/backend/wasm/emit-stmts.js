@@ -479,7 +479,7 @@ export class StmtsEmitter {
 	}
 
 	_independentIdent(node, roots) {
-		if (node._const || node.name === "nil") return true;
+		if (node._const) return true;
 		if (roots.has(node.name)) return false;
 		const local = this.resolveLocal(node.name);
 		return !!local && !local.isBoxed;

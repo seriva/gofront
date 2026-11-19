@@ -505,19 +505,6 @@ export const expressionParserMethods = {
 			this.advance();
 			return { kind: "ImagLit", value: t.value };
 		}
-		if (t.type === T.TRUE) {
-			this.advance();
-			return { kind: "BasicLit", litKind: "BOOL", value: "true" };
-		}
-		if (t.type === T.FALSE) {
-			this.advance();
-			return { kind: "BasicLit", litKind: "BOOL", value: "false" };
-		}
-		if (t.type === T.NIL) {
-			this.advance();
-			return { kind: "BasicLit", litKind: "NIL", value: "null" };
-		}
-
 		// Parenthesised expression
 		if (t.type === T.LPAREN) {
 			this.advance();

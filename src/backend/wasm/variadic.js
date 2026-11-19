@@ -49,7 +49,7 @@ function packCallArgs(call) {
 			? {
 					kind: "TypeConversion",
 					targetType: sliceType,
-					expr: { kind: "Ident", name: "nil" },
+					expr: { kind: "BasicLit", litKind: "NIL", value: "null" },
 					_type: sliceType,
 					_line: call._line,
 					_col: call._col,
