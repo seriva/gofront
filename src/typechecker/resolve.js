@@ -1101,12 +1101,15 @@ export const resolveMethods = {
 	},
 
 	// Go's comparability: slices, maps and funcs are not comparable, nor are
-	// arrays and structs that contain them.
+	// arrays and structs that contain them. A type parameter is comparable
+	// only when every type in its constraint's type set is.
 	_isComparable(t, seen = new Set()) {
 		const base = this._deepUnderlying(t);
 		if (!base || seen.has(base)) return true;
 		seen.add(base);
 		switch (base.kind) {
+			case "typeParam":
+				return this._typeParamComparable(base);
 			case "slice":
 			case "map":
 			case "func":
