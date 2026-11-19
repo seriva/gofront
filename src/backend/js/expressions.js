@@ -34,6 +34,7 @@ export function comparesToNil(node, name) {
 	if (!node || typeof node !== "object") return false;
 	if (node.kind === "BinaryExpr" && (node.op === "==" || node.op === "!=")) {
 		const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+		// Receivers are scanned before the checker has turned `nil` into a literal.
 		const isNil = (e) =>
 			(e?.kind === "Ident" && e.name === "nil") ||
 			(e?.kind === "BasicLit" && e.litKind === "NIL");
@@ -3715,10 +3716,7 @@ export const expressionGenMethods = {
 	},
 
 	_isNilLiteral(expr) {
-		return (
-			(expr.kind === "Ident" && expr.name === "nil") ||
-			(expr.kind === "BasicLit" && expr.litKind === "NIL")
-		);
+		return expr.kind === "BasicLit" && expr.litKind === "NIL";
 	},
 
 	// Top-level JS operator a BinaryExpr compiles to, or null when the output is atomic.

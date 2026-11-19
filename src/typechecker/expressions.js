@@ -236,6 +236,14 @@ export const expressionCheckMethods = {
 				return UNTYPED_COMPLEX;
 			case "Ident": {
 				const t = scope.lookup(expr.name);
+				// `true`, `false` and `nil` are universe constants: with no
+				// declaration in scope the identifier is the literal.
+				if (!t && Object.hasOwn(UNIVERSE_LITERALS, expr.name)) {
+					const { litKind, value } = UNIVERSE_LITERALS[expr.name];
+					delete expr.name;
+					Object.assign(expr, { kind: "BasicLit", litKind, value });
+					return this._checkExpr(expr, scope);
+				}
 				// `(*int)(nil)`: a predeclared type named where a type may stand.
 				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
 					expr._isTypeRef = true;
@@ -2879,6 +2887,13 @@ export const expressionCheckMethods = {
 		}
 		return t;
 	},
+};
+
+// The universe constants, as the literal each stands for.
+const UNIVERSE_LITERALS = {
+	true: { litKind: "BOOL", value: "true" },
+	false: { litKind: "BOOL", value: "false" },
+	nil: { litKind: "NIL", value: "null" },
 };
 
 // Predeclared identifiers that are not variables.

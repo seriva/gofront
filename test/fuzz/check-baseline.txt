@@ -5657,19 +5657,12 @@ names:addr:field:wasm-reject # excluded: wasm takes no address of a scalar varia
 names:addr:func-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:pkg-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:shadow-builtin-pkg-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
-names:addr:shadow-const-var:go-accept/gf-reject # R8
-names:addr:shadow-nil-var:go-accept/gf-reject # R8
-names:assign:shadow-const-var:go-accept/gf-reject # R8
-names:assign:shadow-nil-var:go-accept/gf-reject # R8
 names:conv:shadow-type-defined:go-reject/gf-accept # R8
 names:conv:shadow-type-local:go-reject/gf-accept # R8
 names:conv:shadow-type-var:go-reject/gf-accept # R8
-names:incdec:shadow-const-var:go-accept/gf-reject # R8
-names:incdec:shadow-nil-var:go-accept/gf-reject # R8
 names:lit:field:go-reject/gf-accept # type-as-value
 names:lit:method-expr:go-reject/gf-accept # type-as-value
 names:lit:method-value:go-reject/gf-accept # type-as-value
-names:lit:predeclared-const:go-reject/gf-accept # type-as-value
 names:lit:predeclared-type:go-reject/gf-accept # type-as-value
 names:lit:qualified-const:go-reject/gf-accept # type-as-value
 names:lit:qualified-func:go-reject/gf-accept # type-as-value
@@ -5690,8 +5683,6 @@ names:value:pkg-alias:go-reject/gf-accept # type-as-value
 names:value:pkg-type:go-reject/gf-accept # type-as-value
 names:value:qualified-type:go-reject/gf-accept # type-as-value
 names:value:shadow-any:go-reject/gf-accept # R8
-names:value:shadow-const-var:go-accept/gf-reject # R8
-names:value:shadow-nil-var:go-accept/gf-reject # R8
 names:value:shadow-package-type:go-reject/gf-accept # R8
 names:value:shadow-type-alias:go-reject/gf-accept # R8
 names:value:shadow-type-defined:go-reject/gf-accept # R8

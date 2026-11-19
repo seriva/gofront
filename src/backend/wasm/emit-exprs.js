@@ -55,10 +55,7 @@ export class ExprsEmitter {
 		if (!expr) return;
 
 		if (targetWasmType === "anyref") {
-			if (
-				(expr.kind === "Ident" && expr.name === "nil") ||
-				(expr.kind === "BasicLit" && expr.litKind === "NIL")
-			) {
+			if (expr.kind === "BasicLit" && expr.litKind === "NIL") {
 				this.pushInstruction({ op: "ref.null", heapType: "any" });
 				return;
 			}
@@ -1586,18 +1583,6 @@ export class ExprsEmitter {
 	}
 
 	emitIdent(ident, targetWasmType = null) {
-		if (ident.name === "true") {
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			return;
-		}
-		if (ident.name === "false") {
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			return;
-		}
-		if (ident.name === "nil") {
-			this._emitNilValue(ident._type, targetWasmType);
-			return;
-		}
 		// A named untyped complex constant that takes type complex64 is built
 		// from its initializer, like a complex literal, not read from its
 		// complex128 global.
@@ -2231,9 +2216,7 @@ export class ExprsEmitter {
 			op === ">" ||
 			op === ">=";
 
-		const isNil = (n) =>
-			(n.kind === "BasicLit" && n.litKind === "NIL") ||
-			(n.kind === "Ident" && n.name === "nil");
+		const isNil = (n) => n.kind === "BasicLit" && n.litKind === "NIL";
 
 		if ((op === "==" || op === "!=") && (isNil(left) || isNil(right))) {
 			const nonNil = isNil(right) ? left : right;
@@ -2943,10 +2926,7 @@ export class ExprsEmitter {
 		const toWType = this.toWasmType(targetType);
 
 		// `[]T(nil)` and `(*T)(nil)`: the target type's nil, not a converted value.
-		if (
-			(expr.kind === "Ident" && expr.name === "nil") ||
-			(expr.kind === "BasicLit" && expr.litKind === "NIL")
-		) {
+		if (expr.kind === "BasicLit" && expr.litKind === "NIL") {
 			this._emitNilValue(targetType, toWType);
 			return;
 		}

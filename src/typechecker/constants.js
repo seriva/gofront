@@ -71,6 +71,24 @@ function nonIntegerConstKind(v) {
 	return `${v.k.toLowerCase()} constant`;
 }
 
+// An unshadowed universe `true` / `false` that no checkExpr has turned into a
+// literal yet (package-level array lengths), or null for any other name.
+function universeBool(name) {
+	return name === "true" || name === "false"
+		? { k: "BOOL", v: name === "true" }
+		: null;
+}
+
+// The identifier `nil` with no declaration of that name in scope.
+function isUnshadowedNil(e, scope) {
+	return (
+		e?.kind === "Ident" &&
+		e.name === "nil" &&
+		!scope.lookupScope("nil") &&
+		!scope.lookupConstExpr("nil")
+	);
+}
+
 const NEGATIVE_SHIFT_ERROR = "invalid shift count: negative shift count";
 
 /** @type {ThisType<import('./index.js').TypeChecker>} */
@@ -90,6 +108,7 @@ export const constantCheckMethods = {
 		while (e?.kind === "ParenExpr") e = e.expr;
 		if (e?.kind === "ImagLit") return "untyped complex constant";
 		if (e?.kind === "BasicLit" && e.litKind === "NIL") return "untyped nil";
+		if (isUnshadowedNil(e, scope ?? this.globals)) return "untyped nil";
 		let v = null;
 		try {
 			v = this._constValue(expr, scope);
@@ -247,7 +266,7 @@ export const constantCheckMethods = {
 		// no symbol yet, but its initializer is registered.
 		if (!owner) {
 			const early = scope.lookupConstExpr(expr.name);
-			return early ? this._constValue(early, scope) : null;
+			return early ? this._constValue(early, scope) : universeBool(expr.name);
 		}
 		if (!owner.isConst(expr.name)) return null;
 		const init = owner.lookupConstExpr(expr.name);

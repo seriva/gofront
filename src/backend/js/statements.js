@@ -17,7 +17,7 @@ import {
 	isComplex64,
 	isTypedArraySlice,
 } from "../../typechecker/types.js";
-import { jsMemberName } from "./names.js";
+import { jsMemberName, jsSafeName } from "./names.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -445,7 +445,7 @@ export const statementGenMethods = {
 					body.labels = labels;
 				}
 				const hoisted = this._hoistForInit(body);
-				for (const label of labels) this.line(`${label}:`);
+				for (const label of labels) this.line(`${jsSafeName(label)}:`);
 				// Labels in scope of the JS function being emitted (see
 				// `_emitIterTargetDispatch`).
 				const prevLabels = this._jsLabels ?? [];
@@ -1352,7 +1352,7 @@ export const statementGenMethods = {
 		}
 		if (this._innerLoopLabels?.has(stmt.label)) {
 			if (stmt.keyword !== "fallthrough")
-				this.line(`${stmt.keyword} ${stmt.label};`);
+				this.line(`${stmt.keyword} ${jsSafeName(stmt.label)};`);
 			return;
 		}
 		if (this._currentIterLoopLabels?.includes(stmt.label)) {
@@ -1373,7 +1373,9 @@ export const statementGenMethods = {
 		}
 		if (stmt.keyword !== "fallthrough")
 			this.line(
-				stmt.label ? `${stmt.keyword} ${stmt.label};` : `${stmt.keyword};`,
+				stmt.label
+					? `${stmt.keyword} ${jsSafeName(stmt.label)};`
+					: `${stmt.keyword};`,
 			);
 		// fallthrough: omit — JS switch falls through naturally without a break
 	},
@@ -1954,10 +1956,12 @@ export const statementGenMethods = {
 		this.line(`if (${targetFlag}) {`);
 		this.indented(() => {
 			for (const { name, loop } of labels) {
-				this.line(`if (${targetFlag} === "break$${name}") break ${name};`);
+				this.line(
+					`if (${targetFlag} === "break$${name}") break ${jsSafeName(name)};`,
+				);
 				if (loop)
 					this.line(
-						`if (${targetFlag} === "continue$${name}") continue ${name};`,
+						`if (${targetFlag} === "continue$${name}") continue ${jsSafeName(name)};`,
 					);
 			}
 			if (!inIter) return;

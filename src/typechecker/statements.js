@@ -794,11 +794,24 @@ export const statementCheckMethods = {
 	// type so backends test its method set.
 	_markInterfaceCaseType(t, scope) {
 		if (!t || (t.kind !== "InterfaceType" && t.kind !== "TypeName")) return;
-		if (t.kind === "TypeName" && (t.name === "nil" || t.name === "error"))
+		if (
+			t.kind === "TypeName" &&
+			(this._isUniverseNil(t, scope) || t.name === "error")
+		)
 			return;
 		const resolved = this.resolveTypeNode(t, scope);
 		const u = this.resolveType(this._deepUnderlying(resolved));
 		if (u?.kind === "interface") t._type = resolved;
+	},
+
+	// `nil` named in a type position (`case nil:`) with no declaration of that
+	// name in scope.
+	_isUniverseNil(node, scope) {
+		return (
+			node?.kind === "TypeName" &&
+			node.name === "nil" &&
+			!scope.lookupScope("nil")
+		);
 	},
 
 	// Records the resolved type of a composite type node used as an assertion
@@ -840,7 +853,7 @@ export const statementCheckMethods = {
 				// for multi-type and default clauses, as Go does.
 				// `case nil` binds the switch expression's own type, as in Go.
 				const only = c.types?.length === 1 ? c.types[0] : null;
-				const isNilCase = only?.kind === "TypeName" && only.name === "nil";
+				const isNilCase = this._isUniverseNil(only, inner);
 				const bindType = isNilCase
 					? (stmt.expr._type ?? ANY)
 					: only
@@ -864,7 +877,7 @@ export const statementCheckMethods = {
 	_checkTypeSwitchCase(operand, typeNode, scope) {
 		const srcType = operand._type;
 		if (!typeNode || !srcType || isAny(srcType) || srcType._tainted) return;
-		if (typeNode.kind === "TypeName" && typeNode.name === "nil") return;
+		if (this._isUniverseNil(typeNode, scope)) return;
 		const target = this.resolveTypeNode(typeNode, scope);
 		if (this._isImpossibleAssertion(srcType, target))
 			this.err(

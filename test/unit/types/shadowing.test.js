@@ -2289,3 +2289,211 @@ func main() { fmt.Println(f()) }`),
 		"boom\n",
 	);
 });
+
+test("true, false and nil can be declared as locals", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	true := 1
+	fmt.Println(true)
+	nil := 2
+	fmt.Println(nil)
+	false := "f"
+	fmt.Println(false)
+}`),
+		"1\n2\nf\n",
+	);
+});
+
+test("true, false and nil keep their universe meaning without a declaration", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+	x := true
+	var y error = nil
+	var z *int = nil
+	fmt.Println(x, false, y == nil, z == nil)
+	switch v := any(1).(type) {
+	case nil:
+		fmt.Println("nil", v)
+	default:
+		fmt.Println("other")
+	}
+}`),
+		"true false true true\nother\n",
+	);
+});
+
+test("a local true does not leak to the next function", async () => {
+	await assertAllTargetsOutput(
+		prog(`func f() int {
+	true := 5
+	return true
+}
+
+func main() {
+	fmt.Println(f(), true)
+}`),
+		"5 true\n",
+	);
+});
+
+test("every declaration form accepts true, false and nil", async () => {
+	await assertAllTargetsOutput(
+		prog(`type S struct{ nil int }
+
+func f(false int) int { return false }
+
+var true = 5
+
+const nil = 7
+
+func main() {
+	s := S{nil: 3}
+	fmt.Println(f(4), true, nil, s.nil)
+	n := 0
+	for nil := range 2 {
+		n += nil + 10
+	}
+	fmt.Println(n)
+}`),
+		"4 5 7 3\n21\n",
+	);
+});
+
+test("a local type named true or false is mangled and does not leak", async () => {
+	for (const n of ["true", "false"])
+		await assertAllTargetsOutput(
+			prog(`func f() int {
+	type ${n} int
+	var x ${n} = 7
+	{
+		type ${n} string
+		var y ${n} = "s"
+		_ = y
+	}
+	return int(x)
+}
+
+func main() { fmt.Println(f(), ${n}) }`),
+			`7 ${n}\n`,
+		);
+});
+
+test("a local type named nil does not break nil", async () => {
+	for (const decl of ["type nil int", "type nil = int"])
+		await assertAllTargetsOutput(
+			prog(`func f() int {
+	${decl}
+	var x nil = 1
+	return int(x)
+}
+
+func main() {
+	var p *int = nil
+	fmt.Println(f(), p == nil)
+}`),
+			"1 true\n",
+		);
+});
+
+test("a package-level type named nil keeps generated code working", async () => {
+	await assertAllTargetsOutput(
+		prog(`type nil struct{ X int }
+
+func main() {
+	v := nil{X: 7}
+	fmt.Println(v, []int{1, 2})
+}`),
+		"{7} [1 2]\n",
+	);
+});
+
+test("array lengths of unshadowed true, false and nil are non-integer constants", () => {
+	const cases = [
+		[
+			"const a = true\ntype A [a]int",
+			"invalid array length a (bool constant): must be integer",
+		],
+		[
+			"type A [true]int",
+			"invalid array length true (bool constant): must be integer",
+		],
+		["type A [true == true]int", "(bool constant): must be integer"],
+		[
+			"type A [nil]int",
+			"invalid array length nil (untyped nil): must be integer",
+		],
+	];
+	for (const [decl, msg] of cases) {
+		const { errors } = compile(`package main\n${decl}\nfunc main() {}\n`, {
+			target: "js",
+		});
+		assertErrorContains(errors, msg);
+	}
+});
+
+test("nil in a type assertion or type switch honours a declared nil", async () => {
+	await assertAllTargetsOutput(
+		prog(`type nil int
+
+func main() {
+	var v any = nil(5)
+	x, ok := v.(nil)
+	fmt.Println(x, ok)
+}`),
+		"5 true\n",
+	);
+	await assertAllTargetsOutput(
+		prog(`type nil int
+
+func main() {
+	switch x := any(nil(3)).(type) {
+	case nil:
+		fmt.Println("matched nil type:", x)
+	}
+}`),
+		"matched nil type: 3\n",
+	);
+	await assertAllTargetsOutput(
+		prog(`type nil interface{ M() }
+type S struct{}
+
+func (S) M() {}
+
+func main() {
+	switch x := any(S{}).(type) {
+	case nil:
+		x.M()
+		fmt.Println("matched")
+	}
+}`),
+		"matched\n",
+	);
+	const { errors } = compile(
+		prog(`func main() {
+	nil := 1
+	fmt.Println(nil)
+	switch any(1).(type) {
+	case nil:
+	}
+}`),
+		{ target: "js" },
+	);
+	assertErrorContains(errors, "Unknown type 'nil'");
+});
+
+test("labels and branches named true or false compile", async () => {
+	await assertAllTargetsOutput(
+		prog(`func main() {
+true:
+	for {
+		break true
+	}
+false:
+	for i := 0; i < 2; i++ {
+		continue false
+	}
+	fmt.Println("ok")
+}`),
+		"ok\n",
+	);
+});

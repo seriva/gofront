@@ -769,23 +769,28 @@ function importedNames(programs) {
 	return names;
 }
 
+// Predeclared names besides the basic types that a declared type may shadow.
+const PREDECLARED_NAMES = ["error", "comparable", "true", "false", "nil"];
+
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
+	const predeclared = new Set([
+		...Object.keys(BASIC_TYPES),
+		...PREDECLARED_NAMES,
+	]);
 	const renamed = mangleCollidingTypes(
 		programs,
 		pkgKey,
 		pkgName,
 		owners,
-		new Set([...Object.keys(BASIC_TYPES), "error", "comparable"]),
+		predeclared,
 	);
 	// A local type named after a JS built-in would shadow it in the bundle.
 	const foreign = new Set(JS_BUILTIN_CLASSES);
 	// A local type that shadows a predeclared type (`type int32 = string`)
 	// gets its own name, so `int32` keeps meaning the predeclared type
 	// everywhere else.
-	for (const name of Object.keys(BASIC_TYPES)) foreign.add(name);
-	foreign.add("error");
-	foreign.add("comparable");
+	for (const name of predeclared) foreign.add(name);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
 	// A local type spelled like an import would hide the package in the other
