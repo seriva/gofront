@@ -129,7 +129,10 @@ func main() {
 	z := complex(1)
 	_ = z
 }`);
-	assertErrorContains(errors, "complex() requires exactly 2 arguments");
+	assertErrorContains(
+		errors,
+		"not enough arguments for complex(1) (expected 2, found 1)",
+	);
 });
 
 test("error: real() on non-complex type", () => {

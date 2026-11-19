@@ -2177,15 +2177,6 @@ binary:==:uint,array:go-reject/gf-accept # O2
 binary:==:uint,error:go-reject/gf-accept # O2
 binary:==:uint,ptr:go-reject/gf-accept # O2
 binary:==:uint,struct:go-reject/gf-accept # O2
-builtins:arity:append-0:ice # R20
-builtins:arity:cap-0:ice # R20
-builtins:arity:clear-0:ice # R20
-builtins:arity:copy-1:ice # R20
-builtins:arity:delete-1:go-reject/gf-accept # R20
-builtins:arity:len-0:ice # R20
-builtins:arity:len-2:go-reject/gf-accept # R20
-builtins:arity:max-0:go-reject/gf-accept # R20
-builtins:arity:min-0:go-reject/gf-accept # R20
 builtins:complex:1+0i:go-accept/gf-reject # O4
 builtins:complex:1e400:go-reject/gf-accept # O4
 builtins:complex:MI2:go-reject/gf-accept # builtin-complex-operands

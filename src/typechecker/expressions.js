@@ -72,8 +72,37 @@ const NILABLE_KINDS = new Set([
 function minMaxType(at) {
 	const typed = at.find((t) => t && t.kind !== "untyped");
 	if (typed) return typed;
-	return at.find((t) => t?.base === "float64") ?? at[0] ?? ANY;
+	return (
+		at.find((t) => t?.base === "float64") ??
+		at.find((t) => t?.rune) ??
+		at[0] ??
+		ANY
+	);
 }
+
+// The kind rank of an untyped constant: int < rune < float64.
+function untypedRank(t) {
+	return t?.base === "float64" ? 2 : t?.rune ? 1 : 0;
+}
+
+// Argument counts per builtin: [min, max] (max Infinity when variadic).
+const BUILTIN_ARITY = {
+	len: [1, 1],
+	cap: [1, 1],
+	append: [1, Infinity],
+	copy: [2, 2],
+	delete: [2, 2],
+	make: [1, Infinity],
+	new: [1, 1],
+	panic: [1, 1],
+	recover: [0, 0],
+	min: [1, Infinity],
+	max: [1, Infinity],
+	clear: [1, 1],
+	complex: [2, 2],
+	real: [1, 1],
+	imag: [1, 1],
+};
 
 // Dispatch table for builtin function type checking.
 // Each value is (self, name, expr, argTypes, scope) => returnType.
@@ -123,6 +152,7 @@ const BUILTIN_CHECK = {
 		// `make(S, n)` with S a type parameter makes its core type.
 		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
 		if (core) ta._coreType = core;
+		s._checkMakeArity(e, core ?? made);
 		for (const size of e.args.slice(1, 3))
 			s._checkIntegerConstOperand(size, "size", sc);
 		return made;
@@ -1110,22 +1140,93 @@ export const expressionCheckMethods = {
 		if (anyKind(t) === "go") return false;
 		const u = this._deepUnderlying(t);
 		if (!u || isAny(u)) return true;
-		return u.kind === "basic" && !/^(bool|complex(64|128))$/.test(u.name);
+		return (
+			u.kind === "basic" && !/^(bool|nil|void|complex(64|128))$/.test(u.name)
+		);
 	},
 
 	_checkMinMax(e, at) {
 		for (let i = 0; i < e.args.length; i++) {
 			if (this._orderedOperandOk(at[i])) continue;
-			this.err(
-				`invalid argument: ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], at[i])}) cannot be ordered`,
-				e,
-			);
+			const what = isNil(at[i])
+				? "nil"
+				: `${exprText(e.args[i])} (${this._capOperandKind(e.args[i], at[i])})`;
+			this.err(`invalid argument: ${what} cannot be ordered`, e);
 			return ANY;
 		}
+		if (!this._unifyMinMaxArgs(e, at)) return ANY;
 		const rt = minMaxType(at);
 		for (let i = 0; i < e.args.length; i++)
 			this._tagFloat32Const(rt, at[i], e.args[i]);
 		return rt;
+	},
+
+	// The arguments meet one at a time, as the operands of a binary operator
+	// do: typed arguments are identical, an untyped constant converts to the
+	// typed type, and untyped constants share a kind class. Returns false
+	// after reporting a mismatch.
+	// The untyped constant argument `j` meets the typed type `tt` (argument
+	// `i` is the later of the two and names the mismatch).
+	_fitMinMaxConst(e, ut, j, tt, tNode, i, untypedFirst) {
+		const uNode = e.args[j];
+		const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
+		const node = untypedFirst
+			? { op: e.func?.name, left: uNode, right: tNode }
+			: { op: e.func?.name, left: tNode, right: uNode };
+		if (tt.kind === "typeParam")
+			return this._convertUntypedToTypeParam(tt, ut, uNode, node, report);
+		const [lt, rt] = untypedFirst ? [ut, tt] : [tt, ut];
+		if (!this.convertUntyped(lt, rt, node, report)) return false;
+		return !this._checkConstOverflow(tt, ut, uNode);
+	},
+
+	_unifyMinMaxArgs(e, at) {
+		let typed = null;
+		let typedNode = null;
+		let acc = null; // the untyped constants seen so far, as one type
+		const pending = []; // untyped arguments before the first typed one
+		for (let i = 0; i < e.args.length; i++) {
+			const cur = at[i];
+			const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
+			if (cur?.kind !== "untyped") {
+				if (typed && !this._minMaxIdentical(typed, cur)) {
+					report(typed, cur);
+					return false;
+				}
+				if (!typed) {
+					typed = cur;
+					typedNode = e.args[i];
+					for (const j of pending)
+						if (!this._fitMinMaxConst(e, at[j], j, typed, typedNode, i, true))
+							return false;
+				}
+				continue;
+			}
+			if (typed) {
+				if (!this._fitMinMaxConst(e, cur, i, typed, typedNode, i, false))
+					return false;
+				continue;
+			}
+			const node = { op: e.func?.name, left: e.args[0], right: e.args[i] };
+			if (acc && !this.convertUntyped(acc, cur, node, report)) return false;
+			if (!acc || untypedRank(cur) > untypedRank(acc)) acc = cur;
+			pending.push(i);
+		}
+		return true;
+	},
+
+	_minMaxIdentical(lt, rt) {
+		if (lt?._tainted || rt?._tainted || isAny(lt) || isAny(rt)) return true;
+		if (lt.kind !== "typeParam" && !this._isTypedBasicOperand(lt)) return true;
+		if (rt.kind !== "typeParam" && !this._isTypedBasicOperand(rt)) return true;
+		return identical(lt, rt);
+	},
+
+	_reportMinMaxMismatch(lt, rt, arg) {
+		this.err(
+			`invalid argument: mismatched types ${this._operandTypeStr(lt)} (previous argument) and ${this._operandTypeStr(rt)} (type of ${exprText(arg)})`,
+			arg,
+		);
 	},
 
 	_markIfaceKey(mapType, node, srcType) {
@@ -2648,7 +2749,37 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `make` takes a size (and a capacity) for a slice, an optional size for
+	// a map or channel.
+	_checkMakeArity(e, t) {
+		const kind = this._deepUnderlying(t)?.kind;
+		const [lo, hi] = kind === "slice" ? [2, 3] : [1, 2];
+		if (!["slice", "map", "chan"].includes(kind)) return;
+		if (e.args.length >= lo && e.args.length <= hi) return;
+		this.err(
+			`invalid operation: make(${[typeStr(t), ...e.args.slice(1).map(exprText)].join(", ")}) expects ${lo} or ${hi} arguments; found ${e.args.length}`,
+			e,
+		);
+	},
+
+	// Go reports a wrong argument count before looking at any operand.
+	_checkBuiltinArity(name, expr) {
+		const range = BUILTIN_ARITY[name];
+		if (!range) return true;
+		const found = expr.args.length;
+		const [min, max] = range;
+		if (found >= min && found <= max) return true;
+		const [what, expected] =
+			found < min ? ["not enough", min] : ["too many", max];
+		this.err(
+			`${what} arguments for ${exprText(expr)} (expected ${expected}, found ${found})`,
+			expr,
+		);
+		return false;
+	},
+
 	checkBuiltin(name, expr, argTypes, scope) {
+		if (!this._checkBuiltinArity(name, expr)) return ANY;
 		const gen = BUILTIN_CHECK[name];
 		return gen ? gen(this, name, expr, argTypes, scope) : ANY;
 	},
@@ -2816,10 +2947,6 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinComplex(expr, argTypes) {
-		if (expr.args.length !== 2) {
-			this.err("complex() requires exactly 2 arguments", expr);
-			return ANY;
-		}
 		const crt = argTypes[0];
 		const cit = argTypes[1];
 		if (!isNumeric(crt)) {
@@ -2850,10 +2977,6 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinRealImag(name, expr, argTypes) {
-		if (expr.args.length !== 1) {
-			this.err(`${name}() requires exactly 1 argument`, expr);
-			return ANY;
-		}
 		const zt = argTypes[0];
 		if (!isComplex(zt)) {
 			this.err(`cannot use ${typeStr(zt)} as complex in ${name}()`, expr);
