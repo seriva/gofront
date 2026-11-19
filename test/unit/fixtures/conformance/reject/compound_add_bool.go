@@ -1,3 +1,4 @@
+// pending: operator-message-text
 package main
 
 func main() {

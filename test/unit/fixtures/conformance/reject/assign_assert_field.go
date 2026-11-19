@@ -1,3 +1,4 @@
+// pending: operand-text
 package main
 
 type P struct{ X int }

@@ -1,3 +1,4 @@
+// pending: operand-text
 package main
 
 func main() {
