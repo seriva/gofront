@@ -1117,9 +1117,13 @@ export const resolveMethods = {
 			case "array":
 				return this._isComparable(base.elem, seen);
 			case "struct":
-				return [...(base.fields?.values() ?? [])].every((f) =>
-					this._isComparable(f, seen),
-				);
+				// Declared fields only: base.fields also holds promoted fields and
+				// collapses repeated blank names.
+				return (
+					base._structFields
+						? base._structFields.map((f) => f.type)
+						: [...(base.fields?.values() ?? [])]
+				).every((f) => this._isComparable(f, seen));
 			default:
 				return true;
 		}
