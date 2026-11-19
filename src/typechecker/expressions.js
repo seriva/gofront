@@ -79,7 +79,7 @@ function minMaxType(at) {
 const BUILTIN_CHECK = {
 	len: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
 	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
-	append: (s, _n, e, at) => {
+	append: (s, _n, e, at, sc) => {
 		const st = at[0] ?? ANY;
 		if (isArray(st)) {
 			s.err(`cannot append to array (type ${typeStr(st)})`, e);
@@ -100,14 +100,13 @@ const BUILTIN_CHECK = {
 			return st;
 		}
 		if (s._reportSliceElemMismatch("append", e.args[0], st, e)) return st;
-		const sb = s._deepUnderlying(st);
+		const sb = s._builtinSliceType(st, sc);
 		if (sb?.kind === "slice") s._checkAppendArgs(sb, e, at);
 		return st;
 	},
-	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
-	delete: (s, _n, e, at) => {
-		s._checkDeleteOperand(e, at[0]);
-		const mt = s._deepUnderlying(at[0]);
+	copy: (s, _n, e, at, sc) => s._checkBuiltinCopy(e, at, sc),
+	delete: (s, _n, e, at, sc) => {
+		const mt = s._checkDeleteOperand(e, at[0], sc);
 		if (mt?.kind === "map" && e.args[1]) {
 			s.assertAssignable(mt.key, at[1], e.args[1]);
 			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
@@ -1192,14 +1191,23 @@ export const expressionCheckMethods = {
 
 	_checkCopyOperands(e, dt, st) {
 		// A string source (or a type parameter whose type set holds strings and
-		// byte slices) copies into a `[]byte`.
-		const ok = (t, i) =>
-			this._typeSetOk(
+		// byte slices) copies into a `[]byte`; strings mixed with other slices
+		// leave no single source element type.
+		const ok = (t, i) => {
+			const tpElem =
+				t?.kind === "typeParam" ? this._typeSetPart(t, "slice", "elem") : null;
+			const strOk =
+				!tpElem?.type ||
+				(tpElem.type.kind === "basic" && tpElem.type.name === "uint8");
+			return this._typeSetOk(
 				t,
 				(u) =>
-					(i === 1 && this._isStringIntoBytes(this._copyElem(dt), u)) ||
+					(i === 1 &&
+						strOk &&
+						this._isStringIntoBytes(this._copyElem(dt), u)) ||
 					this._appendOperandOk(u),
 			);
+		};
 		for (const [i, t] of [dt, st].entries()) {
 			if (!ok(t, i)) {
 				this.err(
@@ -1217,24 +1225,43 @@ export const expressionCheckMethods = {
 	// the slices in its type set; reports and returns true when they differ.
 	_reportSliceElemMismatch(builtin, operand, t, e) {
 		if (t?.kind !== "typeParam") return false;
-		const elems = (this._constraintTerms(t.constraint, new Set()) ?? [])
-			.map((u) => this._deepUnderlying(u))
-			.filter((u) => u?.kind === "slice")
-			.map((u) => this.resolveType(u.elem));
-		const other = elems.find((el) => !identical(el, elems[0]));
+		const { type, other } = this._typeSetPart(t, "slice", "elem");
 		if (!other) return false;
 		this.err(
-			`invalid ${builtin}: mismatched slice element types ${typeStr(elems[0])} and ${typeStr(other)} in ${exprText(operand)} (${this._capOperandKind(operand, t)})`,
+			`invalid ${builtin}: mismatched slice element types ${typeStr(type)} and ${typeStr(other)} in ${exprText(operand)} (${this._capOperandKind(operand, t)})`,
 			e,
 		);
 		return true;
 	},
 
-	_checkBuiltinCopy(e, at) {
-		const elemOf = (t) => {
-			const u = this.resolveType(this._deepUnderlying(t));
-			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
+	// The `part` ("elem" or "key") that the `kind` ("slice" or "map") types in
+	// type parameter `t`'s type set share: `{ type, other }`, where `other` is
+	// the first one that differs from `type` (undefined when they all agree).
+	_typeSetPart(t, kind, part, scope) {
+		const parts = (this._constraintTerms(t.constraint, new Set(), scope) ?? [])
+			.map((u) => this._deepUnderlying(this.resolveType(u)))
+			.filter((u) => u?.kind === kind)
+			.map((u) => this.resolveType(u[part]));
+		return {
+			type: parts[0],
+			other: parts.find((p) => !identical(p, parts[0])),
 		};
+	},
+
+	// The slice (or shared buffer) type `append` and `copy` check an operand
+	// against; a type parameter stands for a slice of the element type its
+	// type set shares.
+	_builtinSliceType(t, scope) {
+		if (t?.kind === "typeParam") {
+			const { type, other } = this._typeSetPart(t, "slice", "elem", scope);
+			return type && !other ? { kind: "slice", elem: type } : null;
+		}
+		const u = this.resolveType(this._deepUnderlying(t));
+		return u?.kind === "slice" || u?.kind === "shared" ? u : null;
+	},
+
+	_checkBuiltinCopy(e, at, scope) {
+		const elemOf = (t) => this._builtinSliceType(t, scope)?.elem ?? null;
 		const [dt, st] = at;
 		if (!this._checkCopyOperands(e, dt, st)) return INT;
 		const de = elemOf(dt);
@@ -1242,7 +1269,7 @@ export const expressionCheckMethods = {
 		if (!sharedInfo(dt) && !sharedInfo(st)) {
 			if (de && se && !isAny(de) && !isAny(se) && !identical(de, se))
 				this.err(
-					`arguments to copy ${exprText(e.args[0])} and ${exprText(e.args[1])} have different element types (${typeStr(dt)} vs ${typeStr(st)})`,
+					`invalid copy: arguments ${exprText(e.args[0])} (${this._capOperandKind(e.args[0], dt)}) and ${exprText(e.args[1])} (${this._capOperandKind(e.args[1], st)}) have different element types ${typeStr(this.resolveType(de))} and ${typeStr(this.resolveType(se))}`,
 					e,
 				);
 			return INT;
@@ -2444,8 +2471,9 @@ export const expressionCheckMethods = {
 		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
 		if (t.kind === "typeParam")
 			return this._typeParamAllows(t, (u) => {
-				let b = this._deepUnderlying(u);
-				if (b?.kind === "pointer") b = this._deepUnderlying(b.base);
+				const b = this._deepUnderlying(u);
+				if (b?.kind === "pointer")
+					return this._deepUnderlying(b.base)?.kind === "array";
 				return b?.kind === "slice" || b?.kind === "array";
 			});
 		const kind = this._deepUnderlying(t)?.kind;
@@ -2461,9 +2489,11 @@ export const expressionCheckMethods = {
 			return this._typeParamAllows(t, (u) => this._lenOperandOk(u));
 		if (t.kind === "untyped") return t.base === "string";
 		if (anyKind(t) === "go") return false;
-		let u = this._deepUnderlying(t);
-		if (u?.kind === "pointer") u = this._deepUnderlying(u.base);
-		else if (u?.kind === "basic") return u.name === "string";
+		const u = this._deepUnderlying(t);
+		// A pointer counts only when it points to an array.
+		if (u?.kind === "pointer")
+			return this._deepUnderlying(u.base)?.kind === "array";
+		if (u?.kind === "basic") return u.name === "string";
 		return (
 			u?.kind === "array" ||
 			u?.kind === "slice" ||
@@ -2472,16 +2502,29 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	// `delete` takes a map (every type in a type parameter's type set); a
-	// JS-dynamic value is not judged.
-	_checkDeleteOperand(expr, t) {
-		if (!t || t._tainted || anyKind(t) === "dynamic") return;
-		if (this._typeSetOk(t, (u) => this._deepUnderlying(u)?.kind === "map"))
-			return;
+	// `delete` takes a map (every type in a type parameter's type set, all
+	// with one key type); a JS-dynamic value is not judged. Returns the map
+	// type the key is checked against (for a type parameter, a map of the
+	// shared key type), or null.
+	_checkDeleteOperand(expr, t, scope) {
+		if (!t || t._tainted || anyKind(t) === "dynamic")
+			return this._deepUnderlying(t);
+		const arg = expr.args[0];
+		if (!this._typeSetOk(t, (u) => this._deepUnderlying(u)?.kind === "map")) {
+			this.err(
+				`invalid argument: ${exprText(arg)} (${this._capOperandKind(arg, t)}) is not a map`,
+				expr,
+			);
+			return null;
+		}
+		if (t.kind !== "typeParam") return this._deepUnderlying(t);
+		const { type, other } = this._typeSetPart(t, "map", "key", scope);
+		if (!other) return { kind: "map", key: type };
 		this.err(
-			`invalid argument: ${exprText(expr.args[0])} (${this._capOperandKind(expr.args[0], t)}) is not a map`,
+			`invalid argument: maps of ${exprText(arg)} (${this._capOperandKind(arg, t)}) must have identical key types`,
 			expr,
 		);
+		return null;
 	},
 
 	// `append` takes a slice (every type in a type parameter's type set); a
