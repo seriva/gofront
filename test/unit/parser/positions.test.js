@@ -1,6 +1,8 @@
 // GoFront test suite — every expression node carries its leftmost token position
 
+import { readFileSync } from "node:fs";
 import {
+	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -175,6 +177,27 @@ test("an unused variable nested in a block reports its own line", () => {
 		"package main\n\nfunc main() {\n\tif true {\n\t\tfor i := 0; i < 1; i++ {\n\t\t\ty := 2\n\t\t}\n\t}\n}\n",
 	);
 	assertErrorContains(errors, "at line 6:4");
+});
+
+section("Parser — iota-substituted constants");
+
+test("every const literal in example/gom/src/types.go has a position", () => {
+	const file = "example/gom/src/types.go";
+	const ast = parse(readFileSync(file, "utf8"));
+	const lits = collect(collect(ast, "ConstDecl"), "BasicLit");
+	assert(lits.length >= 5, `walk found ${lits.length} const literals`);
+	for (const lit of lits)
+		assert(
+			Number.isInteger(lit._line) && Number.isInteger(lit._col),
+			`BasicLit ${lit.value} has no position`,
+		);
+});
+
+test("an iota literal sits where the iota (or the implied repeat) was", () => {
+	const src = "package main\n\nconst (\n\tA = iota\n\tB\n)\n";
+	const [a, b] = collect(parse(src), "BasicLit");
+	assertEqual(`${a.value}@${a._line}:${a._col}`, "0@4:6");
+	assertEqual(`${b.value}@${b._line}:${b._col}`, "1@4:6");
 });
 
 summarize();

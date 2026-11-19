@@ -359,6 +359,7 @@ export const declarationParseMethods = {
 			let prevRawExprs = null; // raw AST (with iota Idents) from the previous spec
 			let prevType = null;
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {
+				const at = this.peek();
 				const names = this.parseIdentList();
 				let type = null;
 				let rawExprs; // before iota substitution
@@ -377,7 +378,13 @@ export const declarationParseMethods = {
 				} else {
 					// Omitted expression — repeat previous expression with updated iota
 					rawExprs = prevRawExprs ?? [
-						{ kind: "BasicLit", litKind: "INT", value: String(iotaVal) },
+						{
+							kind: "BasicLit",
+							litKind: "INT",
+							value: String(iotaVal),
+							_line: at.line,
+							_col: at.col,
+						},
 					];
 					type = prevType ?? null;
 				}
@@ -404,7 +411,13 @@ export const declarationParseMethods = {
 	_substituteIota(node, val) {
 		if (!node || typeof node !== "object") return node;
 		if (node.kind === "Ident" && node.name === "iota") {
-			return { kind: "BasicLit", litKind: "INT", value: String(val) };
+			return {
+				kind: "BasicLit",
+				litKind: "INT",
+				value: String(val),
+				_line: node._line,
+				_col: node._col,
+			};
 		}
 		// Shallow-clone the node, then recursively substitute in all child properties
 		const clone = { ...node };
