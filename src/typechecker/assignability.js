@@ -603,7 +603,7 @@ export const assignabilityMethods = {
 	// kind must fit (`string == 'a'`, `int == nil`, `float64 + 1i`). Reports
 	// and returns false on a mismatch; true when nothing is wrong or there is
 	// nothing to convert.
-	convertUntyped(lt, rt, node) {
+	convertUntyped(lt, rt, node, report = this._reportMismatch) {
 		const ln = isNil(lt);
 		const rn = isNil(rt);
 		if (ln && rn) {
@@ -618,10 +618,18 @@ export const assignabilityMethods = {
 			fits = untypedClass(lt) === untypedClass(rt);
 		else if (ln || rn) fits = !this._nilMismatch(ln ? rt : lt);
 		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
-			return this._convertUntypedConst(rt, lt, node.left, lt, rt, node);
+			return this._convertUntypedConst(rt, lt, node.left, lt, rt, node, report);
 		else if (rt?.kind === "untyped" && lt?.kind !== "untyped")
-			return this._convertUntypedConst(lt, rt, node.right, lt, rt, node);
-		if (!fits) this._reportMismatch(lt, rt, node);
+			return this._convertUntypedConst(
+				lt,
+				rt,
+				node.right,
+				lt,
+				rt,
+				node,
+				report,
+			);
+		if (!fits) report.call(this, lt, rt, node);
 		return fits;
 	},
 
@@ -646,7 +654,15 @@ export const assignabilityMethods = {
 
 	// An untyped constant `untyped` (operand `untypedNode`) meets the typed
 	// operand `typed`: its kind must be one the type can hold.
-	_convertUntypedConst(typed, untyped, untypedNode, lt, rt, node) {
+	_convertUntypedConst(
+		typed,
+		untyped,
+		untypedNode,
+		lt,
+		rt,
+		node,
+		report = this._reportMismatch,
+	) {
 		const u = this._deepUnderlying(typed);
 		if (!u || typed._tainted || typed.kind === "typeParam") return true;
 		let fits = !CONST_REJECTING_KINDS.has(u.kind);
@@ -665,7 +681,7 @@ export const assignabilityMethods = {
 				return false;
 			}
 		}
-		if (!fits) this._reportMismatch(lt, rt, node);
+		if (!fits) report.call(this, lt, rt, node);
 		return fits;
 	},
 

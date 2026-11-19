@@ -1141,10 +1141,64 @@ export const expressionCheckMethods = {
 			);
 			return ANY;
 		}
+		if (!this._unifyMinMaxArgs(e, at)) return ANY;
 		const rt = minMaxType(at);
 		for (let i = 0; i < e.args.length; i++)
 			this._tagFloat32Const(rt, at[i], e.args[i]);
 		return rt;
+	},
+
+	// The arguments meet one at a time, as the operands of a binary operator
+	// do: typed arguments are identical, an untyped constant converts to the
+	// typed type, and untyped constants share a kind class. Returns false
+	// after reporting a mismatch.
+	_unifyMinMaxArgs(e, at) {
+		let acc = at[0];
+		let accNode = e.args[0];
+		for (let i = 1; i < e.args.length; i++) {
+			const cur = at[i];
+			const node = { op: e.func?.name, left: accNode, right: e.args[i] };
+			const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
+			const accTyped = acc?.kind !== "untyped";
+			const curTyped = cur?.kind !== "untyped";
+			if (accTyped && curTyped) {
+				if (!this._minMaxIdentical(acc, cur)) {
+					report(acc, cur);
+					return false;
+				}
+				continue;
+			}
+			if (!this.convertUntyped(acc, cur, node, report)) return false;
+			const untypedNode = accTyped ? e.args[i] : accNode;
+			if (accTyped !== curTyped) {
+				const typed = accTyped ? acc : cur;
+				if (this._checkConstOverflow(typed, accTyped ? cur : acc, untypedNode))
+					return false;
+			}
+			if (accTyped) continue;
+			if (curTyped) {
+				acc = cur;
+				accNode = e.args[i];
+			} else if (cur.base !== "int" && cur.base !== "rune") {
+				acc = cur;
+				accNode = e.args[i];
+			}
+		}
+		return true;
+	},
+
+	_minMaxIdentical(lt, rt) {
+		if (lt?._tainted || rt?._tainted || isAny(lt) || isAny(rt)) return true;
+		if (lt.kind !== "typeParam" && !this._isTypedBasicOperand(lt)) return true;
+		if (rt.kind !== "typeParam" && !this._isTypedBasicOperand(rt)) return true;
+		return identical(lt, rt);
+	},
+
+	_reportMinMaxMismatch(lt, rt, arg) {
+		this.err(
+			`invalid argument: mismatched types ${this._operandTypeStr(lt)} (previous argument) and ${this._operandTypeStr(rt)} (type of ${exprText(arg)})`,
+			arg,
+		);
 	},
 
 	_markIfaceKey(mapType, node, srcType) {

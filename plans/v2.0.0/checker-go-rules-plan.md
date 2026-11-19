@@ -744,7 +744,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/typechecker/expressions.js` (an arity table beside `BUILTIN_CHECK`, checked in `checkBuiltin` before the entry runs)
   - Test: `test/unit/builtins/arity.test.js` (table over every builtin, too few and too many, all targets): Go's `not enough arguments for len() (expected 1, found 0)` / `too many arguments …`
   - Done when: no ICE and no accepted program in the table; `complex`/`real`/`imag` use the shared check
-- [ ] Task 25.2: `min`/`max` unify their arguments (R20.4, R20.5)
+- [x] Task 25.2: `min`/`max` unify their arguments (R20.4, R20.5)
   - Files: `src/typechecker/expressions.js` (`_checkMinMax`, `minMaxType`), `src/typechecker/assignability.js` (`convertUntyped`)
   - Test: reject fixtures `minmax_untyped_mismatch.go`, `minmax_int_float.go`, `minmax_int_untyped_float.go`; R20 controls
   - Done when: Go's messages on all targets, no wasm invalid module
