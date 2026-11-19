@@ -929,6 +929,35 @@ func main() {
 	assertEqual(runJs(js), "0 1 2");
 });
 
+test("iota in an unparenthesised const declaration is 0", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const A = iota
+const B int8 = iota
+const X, Y = 1 << iota, iota + 5
+
+func main() {
+	const L = iota
+	fmt.Println(A, B, X, Y, L)
+	fmt.Printf("%T\\n", B)
+}
+`,
+		"0 0 1 5 0\nint8\n",
+	);
+});
+
+test("iota outside a const declaration is still an error", () => {
+	const { errors } = compile(`package main
+func main() {
+	var x = iota
+	_ = x
+}`);
+	assertErrorContains(errors, "iota");
+});
+
 test("package-level var initialized with const declared afterwards executes without TDZ", () => {
 	const { js, errors } = compile(`package main
 var InitialSize = DefaultCap * 2

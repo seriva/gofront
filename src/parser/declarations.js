@@ -401,7 +401,8 @@ export const declarationParseMethods = {
 			let type = null;
 			if (!this.check(T.ASSIGN)) type = this.parseType();
 			this.expect(T.ASSIGN);
-			const value = this.parseExprList();
+			// A lone spec is the first of its declaration: iota is 0.
+			const value = this.parseExprList().map((v) => this._substituteIota(v, 0));
 			decls.push({ names, type, value, _line: at.line, _col: at.col });
 		}
 		this.semi();
