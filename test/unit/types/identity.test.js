@@ -14,7 +14,7 @@ import {
 	identical,
 	TAINTED_ANY,
 } from "../../../src/typechecker/types.js";
-import { assert, section, summarize, test } from "../helpers.js";
+import { assert, assertEqual, section, summarize, test } from "../helpers.js";
 
 function check(source) {
 	const tokens = new Lexer(source, "test.go").tokenize();
@@ -251,6 +251,45 @@ func main() {
 	s = append(s, 3)
 }
 `);
+});
+
+// The interface boxing the checker records on each initializer of `var a any
+// = …`, by variable name.
+function ifaceBoxes(source) {
+	const { ast } = check(source);
+	const boxes = new Map();
+	for (const d of ast.decls) {
+		if (d.kind !== "VarDecl") continue;
+		for (const spec of d.decls) {
+			const v = spec.value?.[0];
+			if (v?._ifaceBox) boxes.set(spec.names[0], v);
+		}
+	}
+	return boxes;
+}
+
+test("R14.2 a generic type declared over a struct type boxes like the struct", () => {
+	const boxes = ifaceBoxes(`package main
+type S[T any] struct{ P *T }
+type W[T any] S[T]
+var s []S[int]
+var w []W[int]
+var a any = s
+var b any = w
+func main() {}
+`);
+	const a = boxes.get("a");
+	const b = boxes.get("b");
+	assert(a && b, `boxed initializers: ${[...boxes.keys()]}`);
+	assertEqual(b._ifaceBox, a._ifaceBox);
+	assertEqual(JSON.stringify(b._ifacePtrFields), JSON.stringify(["P"]));
+	const t = check(`package main
+type S[T any] struct{ P *T }
+type W[T any] S[T]
+var w W[int]
+func main() {}
+`).checker.globals.get("w");
+	assertEqual(t.underlying?.kind, "struct");
 });
 
 summarize();

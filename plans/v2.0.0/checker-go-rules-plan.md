@@ -661,11 +661,12 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 19: Generic types declared over a struct (root `ad-hoc-type-structure`)
 *Scheduled from review follow-ups (2026-11-18): *JS generic over struct* and *One-level underlying sites*.*
-- [ ] Task 19.1: JS field stores and reads on a generic type over a struct use the struct (R14.1)
+*Landed (2026-11-19) as the root fix rather than per-site `_deepUnderlying` reads: `_genericUnderlyingOver` is deleted, so `type W[T any] S[T]` and its instances take a struct copy named `W` as `underlying` (as `_underlyingOver` already did for non-generic declarations), and the JS backend's `_definedStructAst` emits a generic class `W` with fields from the checked type. Every one-level `.underlying` read (checker and backends) then sees the struct; no declared type keeps a defined `underlying`.*
+- [x] Task 19.1: JS field stores and reads on a generic type over a struct use the struct (R14.1)
   - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js` (both test `t.underlying?.kind === "struct"` one level deep)
   - Test: `test/unit/types/generics.test.js` R14.1 prints `42` on all targets
   - Done when: reads go through `_deepUnderlying`; no `Cannot set properties of null`
-- [ ] Task 19.2: The checker's one-level `.underlying` reads see the struct (R14.2)
+- [x] Task 19.2: The checker's one-level `.underlying` reads see the struct (R14.2)
   - Files: `src/typechecker/assignability.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`, `src/typechecker/types.js` (the sites listed in the ledger entry)
   - Test: R14.2 annotations equal `[]S[int]`'s; the controls unchanged
   - Done when: `grep -rn "\.underlying\.kind" src/typechecker` shows no read that skips a named link
