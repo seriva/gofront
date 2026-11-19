@@ -22,6 +22,7 @@ export function hasErrorUsage(programs) {
 				for (const x of n) scan(x);
 				return;
 			}
+			// `error` is the universe interface by name (see `isErrorType`).
 			if (
 				(n.kind === "Ident" ||
 					n.kind === "TypeName" ||

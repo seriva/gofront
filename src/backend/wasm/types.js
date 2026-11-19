@@ -2,7 +2,7 @@
 // Maps GoFront types to WasmGC types and manages type registry.
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
-import { isComplex, isComplex64 } from "../../typechecker/types.js";
+import { ERROR, isComplex, isComplex64 } from "../../typechecker/types.js";
 import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 
 export { isComplex, isComplex64 };
@@ -725,9 +725,15 @@ export function isBoolGoType(goType) {
 	);
 }
 
-// The built-in `error` interface (checker ERROR type or its name).
+// The built-in `error` interface (checker ERROR type or its name).  The name
+// test covers AST type nodes and substituted copies of ERROR, and is safe:
+// every user type spelled `error`, package-level or local, is renamed to
+// `error__L<n>` before checking (`mangleCollidingTypes`, `renameLocalTypes`),
+// so in the backend the bare name only ever denotes the universe interface.
+// The other `name === "error"` tests in this backend rely on the same rename.
 export function isErrorType(goType) {
 	if (!goType) return false;
+	if (goType === ERROR) return true;
 	if (goType.kind === "interface") return goType.name === "error";
 	if (
 		(goType.kind === "named" ||

@@ -1981,6 +1981,55 @@ func main() {
 	);
 });
 
+test("a package-level type error prints through fmt.Println", async () => {
+	await assertAllTargetsOutput(
+		prog(`type error int
+
+func main() {
+	var e error = 3
+	fmt.Println(e)
+}`),
+		"3\n",
+	);
+});
+
+test("a package-level type error with fmt.Print compiles on every target", async () => {
+	await assertAllTargetsOutput(
+		prog(`type error int
+
+func main() {
+	var e error = 3
+	_ = e
+	fmt.Print("")
+}`),
+		"",
+	);
+});
+
+test("an error-returning stdlib call still works next to a package-level type error", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+type error int
+
+func main() {
+	var e error = 3
+	_, err := strconv.Atoi("x")
+	fmt.Println(e, err != nil)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+}
+`,
+		'3 true\nstrconv.Atoi: parsing "x": invalid syntax\n',
+	);
+});
+
 test("a local type any = int still works", async () => {
 	await assertAllTargetsOutput(
 		prog(`func main() {

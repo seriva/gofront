@@ -219,6 +219,8 @@ export class JsonCodecGen extends TypeSpeller {
 			case "map":
 				return `map[${this.refl(t.key)}]${this.refl(t.value)}`;
 			case "interface":
+				// A package's own `type error` is renamed before checking, so the
+				// name is the universe interface and the spelling cannot be shadowed.
 				return t.name === "error" ? "error" : "interface {}";
 			case "namespace":
 				return t.name;

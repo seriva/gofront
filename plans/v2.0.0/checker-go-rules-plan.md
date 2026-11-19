@@ -471,15 +471,15 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
 
 ### Phase 14: Universe `error` survives a package-level `type error` (root `predeclared-scope`)
 Last behavior phase: carries the docs update for Phases 1–14.
-- [ ] Task 14.1: Generated Go does not spell a shadowed universe name (R8.11, `fmt.Println` form)
+- [x] Task 14.1: Generated Go does not spell a shadowed universe name (R8.11, `fmt.Println` form)
   - Files: `src/lower/fmt-formatters.js`, `src/lower/json-codecs.js`, `src/lower/gen-types.js`
   - Test: `test/unit/types/shadowing.test.js` R8.11 `fmt.Println(e)` prints `3` on all targets
   - Done when: passes; `gofront_gen.go` for programs without the shadow is byte-identical
-- [ ] Task 14.2: `wasm` identifies universe `error` by identity (R8.11, `fmt.Print` form)
+- [x] Task 14.2: `wasm` identifies universe `error` by identity (R8.11, `fmt.Print` form)
   - Files: `src/backend/wasm/index.js`, `src/backend/wasm/types.js`, `src/backend/wasm/boundary.js`
   - Test: `shadowing.test.js` R8.11 `_ = e; fmt.Print("")` compiles to a valid module on `wasm`; an `error`-returning stdlib call still works next to the shadow
   - Done when: passes; no `types.get("error")` or `name === "error"` test remains in `src/backend/wasm/` without a comment saying why the name is safe
-- [ ] Task 14.3: Document the new rejections and fixed cases
+- [x] Task 14.3: Document the new rejections and fixed cases
   - Files: `docs/go-compatibility.md`
   - Test: none (docs)
   - Done when: `docs/go-compatibility.md` describes the new rejections (R1, R2, R4, R5, R7, R9) and the fixed defined-type and predeclared-name cases (R3, R6, R8)
