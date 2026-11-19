@@ -2833,6 +2833,33 @@ func main() {
 	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
 });
 
+section("Generics — operands of type-parameter operators");
+
+test("R11.4 an untyped constant shifted by a type parameter keeps its untyped type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func F[T ~uint8](s T) int { return 1 << s }
+
+func G[T ~uint](s T) {
+	x := 1 << s
+	fmt.Printf("%T %v\\n", x, x)
+}
+
+func H[T ~uint](s T) int { return 1.0 << s }
+
+func main() {
+	fmt.Println(F(uint8(10)))
+	G(uint(4))
+	fmt.Println(H(uint(3)))
+}
+`,
+		"1024\nint 16\n8\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

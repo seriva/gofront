@@ -29,6 +29,7 @@ import {
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
+	TAINTED_ANY,
 	typeStr,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
@@ -177,8 +178,12 @@ export const assignabilityMethods = {
 					: BOOL;
 		}
 		this._checkTypeParamOperator(op, lt, rt, node);
-		if (isShift && lt?.kind !== "typeParam" && lt?.kind !== "untyped")
-			return lt;
+		// A shift has its left operand's type: `1 << s` stays an untyped
+		// integer that its context types, never the count's type.
+		if (isShift)
+			return !node || this._isShiftableUntyped(lt, node.left)
+				? lt
+				: TAINTED_ANY;
 		return lt?.kind === "typeParam" ? lt : rt;
 	},
 
@@ -270,11 +275,7 @@ export const assignabilityMethods = {
 		if (isShift) this._checkTypeParamShiftCount(rt, node);
 		const left = lt?.kind === "typeParam";
 		if (isShift && !left) {
-			if (lt?.kind !== "untyped" && !isInteger(lt))
-				this.err(
-					`invalid operation: shifted operand ${exprText(node.left)} (${operandKind(node.left, typeStr(lt), false)}) must be integer`,
-					node.left,
-				);
+			this._checkShiftedOperand(lt, node.left);
 			return;
 		}
 		const tp = left ? lt : rt;
@@ -388,12 +389,40 @@ export const assignabilityMethods = {
 	// type or an untyped constant representable as uint.
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
-		if (node && lt.kind !== "untyped" && !isInteger(lt))
+		if (!node) return lt;
+		this._checkShiftedOperand(lt, node.left);
+		// `"a" << s` was reported: the result has no type to check further.
+		return this._isShiftableUntyped(lt, node.left) ? lt : TAINTED_ANY;
+	},
+
+	// The shifted operand of a shift whose operand is not a type parameter: an
+	// integer, or an untyped constant representable as an integer (`1.0 << s`
+	// is valid, `1.5 << s` and `"a" << s` are not). An imaginary constant has
+	// no tracked value and is left alone.
+	_checkShiftedOperand(lt, left) {
+		if (lt?.kind !== "untyped") {
+			if (!isInteger(lt))
+				this.err(
+					`invalid operation: shifted operand ${exprText(left)} (${operandKind(left, typeStr(lt), false)}) must be integer`,
+					left,
+				);
+			return;
+		}
+		if (!this._isShiftableUntyped(lt, left))
 			this.err(
-				`invalid operation: shifted operand ${exprText(node.left)} (${operandKind(node.left, typeStr(lt), false)}) must be integer`,
-				node.left,
+				`invalid operation: shifted operand ${this._untypedConstText(lt, left)} must be integer`,
+				left,
 			);
-		return lt;
+	},
+
+	_isShiftableUntyped(lt, left) {
+		if (lt?.kind !== "untyped" || lt.base === "complex128" || isNil(lt))
+			return true;
+		const v = left?._const;
+		return (
+			lt.base === "int" ||
+			(lt.base === "float64" && (!v || constIntValue(v) !== null))
+		);
 	},
 
 	// Reports a shift count that is not an integer or is a negative constant.

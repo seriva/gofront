@@ -628,7 +628,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/typechecker/assignability.js` (`_checkTypeParamOperator`, `_binaryResultTypeTypeParam`, `convertUntyped` for `typeParam`)
   - Test: reject fixtures `generic_add_int_param.go`, `generic_add_float_const.go`, `generic_and_bool_int.go`, `generic_add_int8_overflow.go`; accept `a + 1`, `2.0 * a` with `T ~int | ~float64` (Go rejects `a + 1.5` there)
   - Done when: Go's message on all targets; an untyped constant must be representable in every term of the type set
-- [ ] Task 16.2: An untyped left operand of a shift keeps its untyped type (R11.4, R11.5)
+- [x] Task 16.2: An untyped left operand of a shift keeps its untyped type (R11.4, R11.5)
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/generics.test.js` R11.4 prints `1024` on all targets; reject fixtures `generic_shift_float_const_left.go`, `generic_shift_string_left.go`
   - Done when: `x := 1 << s` is `int` with `s T ~uint`
