@@ -1785,17 +1785,23 @@ export const expressionCheckMethods = {
 
 	_rangeOperandError(node, type) {
 		const untyped = type?.kind === "untyped";
+		const via =
+			type?.kind === "typeParam"
+				? ` constrained by ${this._constraintText(type)}`
+				: "";
 		return this.err(
-			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)})`,
+			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)}${via})`,
 			node,
 		);
 	},
 
 	// A range operand of a kind Go rejects: bool, float or complex values,
-	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
-	// parameters and kinds the checker models loosely are left alone.
+	// structs, interfaces, non-array pointers, nil, and a type parameter with no
+	// core type (`_rangeCore` resolves one that has it first). JS-dynamic `any`
+	// and kinds the checker models loosely are left alone.
 	_notRangeable(type) {
 		if (!type || type._tainted || isAny(type)) return false;
+		if (type.kind === "typeParam") return true;
 		if (type.kind === "untyped")
 			return !(
 				type.base === "string" ||
@@ -1804,9 +1810,22 @@ export const expressionCheckMethods = {
 			);
 		const u = this._deepUnderlying(type);
 		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
+		if (u?.kind === "pointer" && type._viaCore)
+			return this._deepUnderlying(u.base)?.kind !== "array";
 		return (
 			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
 		);
+	},
+
+	// The type a `range` operand is read as: a type parameter stands for its
+	// core type, which is recorded on the operand for the backends. A type
+	// parameter without one stays as it is, and `_notRangeable` rejects it.
+	_rangeCore(type, operand, scope) {
+		if (type?.kind !== "typeParam") return type;
+		const core = this._coreType(type, scope);
+		if (!core) return type;
+		operand._coreType = core;
+		return core.kind === "pointer" ? { ...core, _viaCore: true } : core;
 	},
 
 	_checkRangeExpr(expr, scope) {
@@ -1815,15 +1834,15 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		if (collType?._declared || this._notRangeable(collType)) {
+		const core = this._rangeCore(collType, expr.expr, scope);
+		if (collType?._declared || this._notRangeable(core)) {
 			const bad = this._rangeOperandError(expr.expr, collType);
 			return { kind: "tuple", types: [bad, bad] };
 		}
-		const resolved = this._underlyingOrCore(collType, scope);
-		// Backends range over the core type of a type parameter.
-		if (collType?.kind === "typeParam" && resolved !== collType)
-			expr.expr._coreType = resolved;
-		return this._rangeCollTypeTuple(resolved, collType);
+		return this._rangeCollTypeTuple(
+			this._underlyingOrCore(core, scope),
+			collType,
+		);
 	},
 
 	_checkInstantiationExpr(expr, scope) {

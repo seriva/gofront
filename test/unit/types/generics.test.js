@@ -3344,6 +3344,109 @@ func main() {
 	);
 });
 
+// ═════════════════════════════════════════════════════════════
+// Type parameters through their core type
+// ═════════════════════════════════════════════════════════════
+
+section("Generics — core type of a type parameter");
+
+const CORE_TYPE_REJECTS = [
+	[
+		"range over a float type parameter",
+		`func f[T ~float64](x T) { for i := range x { _ = i } }
+func main() { f(2.0) }`,
+		"cannot range over x (variable of type T constrained by ~float64)",
+	],
+	[
+		"range over a bool type parameter",
+		`func f[T ~bool](x T) { for range x {} }
+func main() { f(true) }`,
+		"cannot range over x (variable of type T constrained by ~bool)",
+	],
+	[
+		"range over a type parameter of any constraint",
+		`func f[T any](x T) { for range x {} }
+func main() { f(1) }`,
+		"cannot range over x (variable of type T constrained by any)",
+	],
+	[
+		"range over a type parameter with a mixed union",
+		`func f[T ~[]int | ~string](x T) { for range x {} }
+func main() { f("a") }`,
+		"cannot range over x (variable of type T constrained by ~[]int | ~string)",
+	],
+	[
+		"range over a type parameter whose core type is not an iterator",
+		`func run[F ~func(int)](fn F) { for range fn {} }
+func main() { run(func(int) {}) }`,
+		"cannot range over func",
+	],
+	[
+		"two iteration variables over a one-value iterator type parameter",
+		`func f[A ~func(func(int) bool)](a A) { for i, v := range a { _, _ = i, v } }
+func main() {}`,
+		"too many loop variables (got 2, max 1)",
+	],
+	[
+		"a field read of a type parameter with a struct core type",
+		`func f[T ~struct{ X int }](t T) int { return t.X }
+func main() { _ = f(struct{ X int }{1}) }`,
+		"t.X undefined (type T has no field or method X)",
+	],
+	[
+		"a field write through a type parameter with a struct core type",
+		`func f[T ~struct{ X int }](mk func() T) { mk().X = 1 }
+func main() {}`,
+		"mk().X undefined (type T has no field or method X)",
+	],
+	[
+		"a field read of a type parameter with a pointer core type",
+		`type S struct{ X int }
+func f[T interface{ *S }](t T) int { return t.X }
+func main() {}`,
+		"t.X undefined (type T has no field or method X)",
+	],
+	[
+		"a method the constraint does not declare",
+		`type N interface{ M() int }
+func f[T N](t T) int { return t.Other() }
+func main() {}`,
+		"t.Other undefined (type T has no field or method Other)",
+	],
+];
+
+for (const [name, body, msg] of CORE_TYPE_REJECTS) {
+	test(`${name} is rejected on every target`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\n${body}`, { target });
+			assertErrorContains(errors, msg);
+		}
+	});
+}
+
+test("a type parameter ranges and calls methods through its constraint", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type N interface{ M() int }
+type A struct{}
+
+func (A) M() int { return 3 }
+
+func call[T N](t T) int { return t.M() }
+func sum[S ~[]int](s S) int { t := 0; for _, v := range s { t += v }; return t }
+func cnt[T ~int](n T) { for i := range n { fmt.Print(i, " ") }; fmt.Println() }
+
+func main() {
+	fmt.Println(call(A{}), sum([]int{2, 3}))
+	cnt(3)
+}`,
+		"3 5\n0 1 2 \n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

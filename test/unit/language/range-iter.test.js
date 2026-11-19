@@ -389,6 +389,22 @@ func main() {
 	);
 });
 
+section("Range over a function-typed type parameter");
+
+test("range over a type parameter with an iterator core type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func run[F ~func(func(int) bool)](fn F) { for x := range fn { fmt.Println(x) } }
+func run2[F ~func(func(int) bool)](fn F) { var x int; for x = range fn { fmt.Println(x) } }
+func main() {
+	run(func(y func(int) bool) { y(7) })
+	run2(func(y func(int) bool) { y(8) })
+}`,
+		"7\n8\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
