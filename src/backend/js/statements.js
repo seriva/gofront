@@ -963,6 +963,7 @@ export const statementGenMethods = {
 				active[0].l.startsWith("{") && !active[0].l.startsWith("({")
 					? `(${active[0].l})`
 					: active[0].l;
+			rhsVal = this._compoundShiftCount(stmt, rhsVal);
 			if (stmt.op === "&^=") this.line(`${targetL} &= ~(${rhsVal});`);
 			else this.line(`${targetL} ${stmt.op} ${rhsVal};`);
 		} else if (hoisted) {
@@ -2201,6 +2202,13 @@ export const statementGenMethods = {
 		);
 	},
 
+	// The right operand of a compound assignment emitted as the JS operator:
+	// the count of `<<=` / `>>=` as a JS number (`_looseShiftCount`).
+	_compoundShiftCount(stmt, rhsJs) {
+		if (stmt.op !== "<<=" && stmt.op !== ">>=") return rhsJs;
+		return this._looseShiftCount(rhsJs, stmt.rhs[0]?._type);
+	},
+
 	// The single-expression form of `_genStrictCompound` for `for` post
 	// statements: the emitted statement is lifted back out of the output.
 	_inlineStrictCompound(stmt, rhsJs) {
@@ -2243,7 +2251,7 @@ export const statementGenMethods = {
 			}
 			if (stmt.op === "&^=")
 				return `${this.genExpr(stmt.lhs[0])} &= ~(${rhs[0]})`;
-			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
+			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${this._compoundShiftCount(stmt, rhs[0])}`;
 		}
 		// Target operands that must run first (calls, or a variable the
 		// statement assigns) and `*p` struct targets need statements: lift them

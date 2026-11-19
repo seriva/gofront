@@ -29,6 +29,7 @@ import {
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
+	TAINTED_ANY,
 	typeStr,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
@@ -157,6 +158,13 @@ export const assignabilityMethods = {
 	},
 
 	_binaryResultTypeTypeParam(op, lt, rt, node) {
+		const isShift = op === "<<" || op === ">>";
+		if (!isShift && !this._matchTypeParamOperands(op, lt, rt, node))
+			return CMP_OPS.has(op)
+				? UNTYPED_BOOL
+				: lt?.kind === "typeParam"
+					? lt
+					: rt;
 		if (CMP_OPS.has(op)) {
 			this._checkTypeParamOperator(op, lt, rt, node);
 			return UNTYPED_BOOL;
@@ -170,10 +178,88 @@ export const assignabilityMethods = {
 					: BOOL;
 		}
 		this._checkTypeParamOperator(op, lt, rt, node);
-		const isShift = op === "<<" || op === ">>";
-		if (isShift && lt?.kind !== "typeParam" && lt?.kind !== "untyped")
-			return lt;
+		// A shift has its left operand's type: `1 << s` stays an untyped
+		// integer that its context types, never the count's type.
+		if (isShift)
+			return !node || this._isShiftableUntyped(lt, node.left)
+				? lt
+				: TAINTED_ANY;
 		return lt?.kind === "typeParam" ? lt : rt;
+	},
+
+	// The operands of a non-shift operator on a type parameter get one type
+	// first, as in Go: an untyped constant converts to the type parameter and
+	// a typed operand must be identical to it (`a + b` with `b int` is a
+	// mismatch). A comparison with an interface or `nil` operand follows the
+	// comparison rules instead. Reports and returns false on a mismatch.
+	_matchTypeParamOperands(op, lt, rt, node) {
+		if (!node) return true;
+		if (isNil(lt) || isNil(rt)) {
+			if (CMP_OPS.has(op)) return true;
+			this._reportMismatch(lt, rt, node);
+			return false;
+		}
+		if (lt?.kind === "untyped")
+			return this._convertUntypedToTypeParam(rt, lt, node.left, node);
+		if (rt?.kind === "untyped")
+			return this._convertUntypedToTypeParam(lt, rt, node.right, node);
+		if (identical(lt, rt)) return true;
+		const other = lt?.kind === "typeParam" ? rt : lt;
+		if (!other || other._tainted || isAny(other)) return true;
+		if (CMP_OPS.has(op) && this._deepUnderlying(other)?.kind === "interface")
+			return true;
+		this._reportMismatch(lt, rt, node);
+		return false;
+	},
+
+	// An untyped constant `c` (operand `cNode`) meets type parameter `tp`. Go
+	// converts it only when its kind (number, bool, string) is the kind of
+	// every type in the type set, else the types are mismatched; the constant
+	// must then be representable in every type of the set.
+	_convertUntypedToTypeParam(tp, c, cNode, node) {
+		const [lt, rt] = node.left === cNode ? [c, tp] : [tp, c];
+		const cls = untypedClass(c);
+		const all = (pred) =>
+			this._typeParamAllows(tp, (t) => pred(this._deepUnderlying(t) ?? t));
+		if (
+			all(isComplexOrNumeric) !== (cls === "number") ||
+			all(isBool) !== (cls === "bool") ||
+			all(isString) !== (cls === "string")
+		) {
+			this._reportMismatch(lt, rt, node);
+			return false;
+		}
+		const terms = this._constraintTerms(tp.constraint, new Set()) ?? [];
+		if (terms.every((t) => this._untypedFitsTerm(c, cNode, t))) return true;
+		this.err(
+			`cannot convert ${this._untypedConstText(c, cNode)} to type ${typeStr(tp)}`,
+			cNode,
+		);
+		return false;
+	},
+
+	// Whether untyped constant `c` converts to `term` of a type set: a complex
+	// constant needs a complex type and a known value must be representable.
+	_untypedFitsTerm(c, cNode, term) {
+		const u = this._deepUnderlying(term) ?? term;
+		if (c.base === "complex128") return isComplex(u);
+		const v = cNode?._const;
+		if (!v || isComplex(u) || u?.kind !== "basic") return true;
+		const r = this._convertConstTo(v, u);
+		return !!r && !r.overflow;
+	},
+
+	// `1.5 (untyped float constant)`, `half (untyped float constant 0.5)`: Go
+	// adds the value when the operand's text is not the value itself.
+	_untypedConstText(c, cNode) {
+		const base = c.rune ? "rune" : c.base === "complex128" ? "complex" : c.base;
+		const kind = operandKind(cNode, base, true);
+		const text = exprText(cNode);
+		const v = cNode?._const;
+		const value = v && (v.k === "INT" || v.k === "FLOAT") ? String(v.v) : null;
+		return value === null || value === text
+			? `${text} (${kind})`
+			: `${text} (${kind} ${value})`;
 	},
 
 	// An operator on a type parameter needs every type in its constraint's
@@ -189,11 +275,7 @@ export const assignabilityMethods = {
 		if (isShift) this._checkTypeParamShiftCount(rt, node);
 		const left = lt?.kind === "typeParam";
 		if (isShift && !left) {
-			if (lt?.kind !== "untyped" && !isInteger(lt))
-				this.err(
-					`invalid operation: shifted operand ${exprText(node.left)} (${operandKind(node.left, typeStr(lt), false)}) must be integer`,
-					node.left,
-				);
+			this._checkShiftedOperand(lt, node.left);
 			return;
 		}
 		const tp = left ? lt : rt;
@@ -275,6 +357,14 @@ export const assignabilityMethods = {
 		if (!c || isAny(c)) return "any";
 		if (c.kind === "TypeName") return c.name;
 		try {
+			// An inline union (`[T ~bool | ~int]`) keeps its terms as AST nodes.
+			if (c.kind === "UnionConstraint")
+				return c.terms
+					.map(
+						(t) =>
+							`${t.approx ? "~" : ""}${typeStr(t.resolved ?? this.resolveTypeNode(t.type, c._scope ?? this.globals))}`,
+					)
+					.join(" | ");
 			return typeStr(c);
 		} catch {
 			return "its constraint";
@@ -307,12 +397,40 @@ export const assignabilityMethods = {
 	// type or an untyped constant representable as uint.
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
-		if (node && lt.kind !== "untyped" && !isInteger(lt))
+		if (!node) return lt;
+		this._checkShiftedOperand(lt, node.left);
+		// `"a" << s` was reported: the result has no type to check further.
+		return this._isShiftableUntyped(lt, node.left) ? lt : TAINTED_ANY;
+	},
+
+	// The shifted operand of a shift whose operand is not a type parameter: an
+	// integer, or an untyped constant representable as an integer (`1.0 << s`
+	// is valid, `1.5 << s` and `"a" << s` are not). An imaginary constant has
+	// no tracked value and is left alone.
+	_checkShiftedOperand(lt, left) {
+		if (lt?.kind !== "untyped") {
+			if (!isInteger(lt))
+				this.err(
+					`invalid operation: shifted operand ${exprText(left)} (${operandKind(left, typeStr(lt), false)}) must be integer`,
+					left,
+				);
+			return;
+		}
+		if (!this._isShiftableUntyped(lt, left))
 			this.err(
-				`invalid operation: shifted operand ${exprText(node.left)} (${operandKind(node.left, typeStr(lt), false)}) must be integer`,
-				node.left,
+				`invalid operation: shifted operand ${this._untypedConstText(lt, left)} must be integer`,
+				left,
 			);
-		return lt;
+	},
+
+	_isShiftableUntyped(lt, left) {
+		if (lt?.kind !== "untyped" || lt.base === "complex128" || isNil(lt))
+			return true;
+		const v = left?._const;
+		return (
+			lt.base === "int" ||
+			(lt.base === "float64" && (!v || constIntValue(v) !== null))
+		);
 	},
 
 	// Reports a shift count that is not an integer or is a negative constant.

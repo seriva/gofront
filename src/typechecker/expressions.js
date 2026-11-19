@@ -359,6 +359,18 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBoolUnaryOp(ot, expr) {
+		// `!a` on a type parameter needs every type in its type set to be a
+		// bool type, and keeps the type parameter's type.
+		if (ot?.kind === "typeParam") {
+			if (
+				!this._typeParamAllows(ot, (t) => isBool(this._deepUnderlying(t) ?? t))
+			)
+				this.err(
+					`invalid operation: operator ! not defined on ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot), false)} constrained by ${this._constraintText(ot)})`,
+					expr.operand,
+				);
+			return ot;
+		}
 		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
 		// `!` keeps an untyped or defined bool type.
 		return isBool(ot) ? ot : BOOL;
@@ -512,11 +524,18 @@ export const expressionCheckMethods = {
 		this._tagFloat32Const(rt, lt, expr.left);
 		this._tagComplex64Const(lt, rt, expr.right);
 		this._tagComplex64Const(rt, lt, expr.left);
+		this._markUntyped64Operands(expr, lt, rt);
+		return res;
+	},
+
+	// An untyped operand beside a 64-bit integer is emitted as a BigInt on
+	// JS.  A shift's operand never takes the type of its count.
+	_markUntyped64Operands(expr, lt, rt) {
+		if (expr.op === "<<" || expr.op === ">>") return;
 		if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 			expr.right._is64Bit = true;
 		if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
 			expr.left._is64Bit = true;
-		return res;
 	},
 
 	// Go: map elements are not addressable, nor are fields and array elements
