@@ -3094,6 +3094,46 @@ func main() {
 	);
 });
 
+test("converting between instantiations of one generic type tags the target's", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Phantom[T any] struct{ X int }
+type P struct{ X string }
+type Q[T any] P
+type SameUnder[A, B any] struct {
+	X int
+	Y string
+}
+
+func conv[T any](p Phantom[int]) any { return Phantom[T](p) }
+
+func main() {
+	var a any = Phantom[string](Phantom[int]{X: 42})
+	_, ok1 := a.(Phantom[string])
+	_, ok2 := a.(Phantom[int])
+	fmt.Println(ok1, ok2)
+	var b any = Q[int](Q[string]{X: "c"})
+	_, ok3 := b.(Q[int])
+	_, ok4 := b.(Q[string])
+	fmt.Println(ok3, ok4)
+	var c any = SameUnder[bool, float64](SameUnder[int, string]{X: 1, Y: "hi"})
+	_, ok5 := c.(SameUnder[bool, float64])
+	_, ok6 := c.(SameUnder[int, string])
+	fmt.Println(ok5, ok6)
+	d := conv[bool](Phantom[int]{X: 7})
+	_, ok7 := d.(Phantom[bool])
+	_, ok8 := d.(Phantom[int])
+	fmt.Println(ok7, ok8)
+	fmt.Println(a, b, c, d)
+}
+`,
+		"true false\ntrue false\ntrue false\ntrue false\n{42} {c} {1 hi} {7}\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

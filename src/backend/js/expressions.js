@@ -2094,7 +2094,10 @@ export const expressionGenMethods = {
 		const target = this.checker?.types.get(targetName);
 		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
 			return null;
-		if (srcType?.name === targetName) return null;
+		// Two instances of one generic type share a name but not their type
+		// arguments, so only a non-generic same-type conversion is a no-op.
+		if (srcType?.name === targetName && !targetType?.typeArgs?.length)
+			return null;
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
 		const cls = this._dequalify(targetName);
