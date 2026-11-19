@@ -1958,6 +1958,28 @@ func main() {
 	);
 });
 
+section("A rejected range operand");
+
+test("a range assignment over a non-iterator func reports once", () => {
+	for (const lhs of ["x", "x, y"]) {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(
+				`package main
+func fn(int) {}
+func main() {
+	var x, y int
+	for ${lhs} = range fn {
+		_, _ = x, y
+	}
+}`,
+				{ target },
+			);
+			assertErrorContains(errors, "cannot range over func");
+			assertEqual(errors.length, 1);
+		}
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

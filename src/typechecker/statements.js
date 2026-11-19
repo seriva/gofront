@@ -31,6 +31,7 @@ import {
 	isVoid,
 	iteratorYieldParams,
 	Scope,
+	TAINTED_ANY,
 	typeStr,
 } from "./types.js";
 
@@ -303,6 +304,8 @@ export const statementCheckMethods = {
 		let node = e;
 		while (node.kind === "ParenExpr") node = node.expr;
 		if (node.kind === "Ident" && node.name === "_") return;
+		// A target that already failed to check has been reported.
+		if (node._type?._tainted) return;
 		const bt = node.expr?._type;
 		const b = this._coreUnderlying(bt, scope);
 		if (node.kind === "IndexExpr" && b?.kind === "map") return;
@@ -629,15 +632,15 @@ export const statementCheckMethods = {
 			if (ct?._declared || (!isBool(ct) && !isAny(ct)))
 				this.err("non-boolean condition in for statement", stmt.cond);
 		} else {
-			const ct = this._derefArrayPtr(
+			const operand = this._derefArrayPtr(
 				stmt.cond,
 				"expr",
 				this.checkExpr(stmt.cond.expr, inner),
+				inner,
 			);
-			if (ct?._declared || this._notRangeable(ct))
-				this._rangeOperandError(stmt.cond.expr, ct);
-			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
-			if (core) stmt.cond.expr._coreType = core;
+			const ct = this._rangeCore(operand, stmt.cond.expr, inner);
+			if (operand?._declared || this._notRangeable(ct))
+				this._rangeOperandError(stmt.cond.expr, operand);
 			const info = iteratorYieldParams(ct);
 			if (info) {
 				stmt.cond._isIterator = true;
@@ -934,8 +937,9 @@ export const statementCheckMethods = {
 
 	// Reported at the range operand, as Go does.
 	_checkRangeIterInvalidFunc(iterType, operand) {
-		if (this._deepUnderlying(iterType)?.kind === "func")
-			this.err("cannot range over func: not an iterator function", operand);
+		if (this._deepUnderlying(iterType)?.kind !== "func") return false;
+		this.err("cannot range over func: not an iterator function", operand);
+		return true;
 	},
 
 	_bindRangeIterDefineVars(lhs, info, scope) {
@@ -982,7 +986,7 @@ export const statementCheckMethods = {
 
 	// Ranging over an integer yields only the count: `for i, v := range n`
 	// has no second value to bind.
-	_checkRangeIntVars(lhs, operand, type, scope) {
+	_checkRangeIntVars(lhs, operand, type, scope, written = type) {
 		if (lhs.length < 2 || !type || type._tainted) return;
 		const untyped = type.kind === "untyped";
 		const u = untyped ? null : this._coreUnderlying(type, scope);
@@ -990,19 +994,44 @@ export const statementCheckMethods = {
 			? type.base === "int" || type.base === "rune"
 			: u?.kind === "basic" && isInteger(u);
 		if (!isInt) return;
+		const via =
+			written?.kind === "typeParam"
+				? ` constrained by ${this._constraintText(written)}`
+				: "";
 		this.err(
-			`range over ${exprText(operand)} (${operandKind(operand, untyped ? type.base : typeStr(type), untyped)}) permits only one iteration variable`,
+			`range over ${exprText(operand)} (${operandKind(operand, untyped ? type.base : typeStr(written), untyped)}${via}) permits only one iteration variable`,
 			lhs[1],
 		);
 	},
 
 	_checkRangeIterStmt(initStmt, scope, _returnType) {
 		const rangeExpr = initStmt.rhs[0];
-		const iterType = this.checkExpr(rangeExpr.expr, scope);
+		const operand = this.checkExpr(rangeExpr.expr, scope);
+		const iterType = this._rangeCore(operand, rangeExpr.expr, scope);
 		const info = iteratorYieldParams(iterType);
 		if (!info) {
-			this._checkRangeIntVars(initStmt.lhs, rangeExpr.expr, iterType, scope);
-			this._checkRangeIterInvalidFunc(iterType, rangeExpr.expr);
+			this._checkRangeIntVars(
+				initStmt.lhs,
+				rangeExpr.expr,
+				iterType,
+				scope,
+				operand,
+			);
+			const rejected = this._checkRangeIterInvalidFunc(
+				iterType,
+				rangeExpr.expr,
+			);
+			// A rejected operand is not checked again as an assignment source.
+			if (rejected) {
+				if (initStmt.kind === "DefineStmt")
+					this._bindRangeIterDefineVars(
+						initStmt.lhs,
+						{ yieldParams: initStmt.lhs.map(() => TAINTED_ANY) },
+						scope,
+					);
+				else this._checkRangeIterAssignVars(initStmt.lhs, scope);
+				return { yieldParams: [], rejected };
+			}
 			return null;
 		}
 

@@ -710,15 +710,15 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 23: Type parameters through their core type (root `type-param-core-type`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Range over type parameter*, *Range over func type parameter*, *Field access on type parameter*.*
-- [ ] Task 23.1: `range` over a type parameter decides rangeability and the iterator form from its core type (R18.1–R18.4)
+- [x] Task 23.1: `range` over a type parameter decides rangeability and the iterator form from its core type (R18.1–R18.4)
   - Files: `src/typechecker/statements.js` (`_checkForCond`, `_checkRangeIterStmt`), `src/typechecker/expressions.js` (`_checkRangeExpr`)
   - Test: reject fixtures `range_param_float.go`, `range_param_bool.go`, `range_param_any.go`, `range_param_mixed_union.go`, `range_param_func_not_iterator.go`; `test/unit/language/range-iter.test.js` R18.4 prints `7` on all targets
   - Done when: Go's messages on all targets, no wasm ICE; `_coreType` is computed before `_notRangeable` and `iteratorYieldParams` on all three paths; the 25 `# R18` keys of `npm run fuzz:check` (section `range`, which also finds `for i, v := range a` with `T ~func(func(int) bool)`: one iteration variable only) are gone
-- [ ] Task 23.2: A type parameter has no fields (R18.5, R18.6)
+- [x] Task 23.2: A type parameter has no fields (R18.5, R18.6)
   - Files: `src/typechecker/resolve.js` (`fieldType`)
   - Test: reject fixtures `param_field_read.go`, `param_field_write.go`, `param_ptr_core_field.go`; methods of the constraint (`t.M()`) still resolve
   - Done when: Go's `t.X undefined (type T has no field or method X)` on all targets
-- [ ] Task 23.3: A rejected range operand is not checked again as an assignment (R18.7)
+- [x] Task 23.3: A rejected range operand is not checked again as an assignment (R18.7)
   - Files: `src/typechecker/statements.js` (`_checkForStmt`, `_checkRangeIterStmt` return value)
   - Test: reject fixtures `range_assign_non_iterator_func.go`, `range_assign2_non_iterator_func.go` with one `// ERROR` each; `test/unit/types/checks.test.js` asserts exactly one error for both; R18.7 controls
   - Done when: one error per statement on all targets

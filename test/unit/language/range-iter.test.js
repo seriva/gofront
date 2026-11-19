@@ -389,6 +389,62 @@ func main() {
 	);
 });
 
+section("Range over a function-typed type parameter");
+
+test("range over a type parameter with an iterator core type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func run[F ~func(func(int) bool)](fn F) { for x := range fn { fmt.Println(x) } }
+func run2[F ~func(func(int) bool)](fn F) { var x int; for x = range fn { fmt.Println(x) } }
+func main() {
+	run(func(y func(int) bool) { y(7) })
+	run2(func(y func(int) bool) { y(8) })
+}`,
+		"7\n8\n",
+	);
+});
+
+test("range over a type parameter with a pointer-to-array core type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func f[T ~*[3]int](p T) int {
+	s := 0
+	for i := range p { s += i }
+	return s
+}
+func g[T ~*[3]int](p T) int {
+	s := 0
+	for i, v := range p { s += i + v }
+	return s
+}
+func h[T ~*[3]int](p T) int {
+	s := 0
+	for range p { s++ }
+	return s
+}
+func k[T ~*[3]int](p T) int {
+	var i, v int
+	for i, v = range p { i += v }
+	return i
+}
+func main() {
+	a := [3]int{10, 20, 30}
+	fmt.Println(f(&a), g(&a), h(&a), k(&a))
+}`,
+		"3 63 3 32\n",
+	);
+});
+
+test("a non-iterator func range reports one error", () => {
+	const { errors } = compile(`package main
+func fn(int) {}
+func main() { for x := range fn { _ = x + 1 } }`);
+	assertErrorContains(errors, "not an iterator function");
+	assertEqual(errors.length, 1);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

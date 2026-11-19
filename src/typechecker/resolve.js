@@ -1216,10 +1216,34 @@ export const resolveMethods = {
 			return baseType?._tainted ? TAINTED_ANY : ANY;
 		if (this._isTransparentPointerField(baseType, field))
 			baseType = this.resolveType(baseType.base);
+		const param = this._typeParamOperand(baseType, field);
+		if (param) return this._fieldTypeTypeParam(param, baseType, field, node);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
 			return baseType.methods.get(field);
 		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
+	},
+
+	// The type parameter a selector reads through: `t` or `*t`. Its fields
+	// are never reachable, even when its core type is a struct.
+	_typeParamOperand(baseType, field) {
+		if (baseType.kind === "typeParam") return baseType;
+		if (baseType.kind !== "pointer" || field === "value") return null;
+		const base = this.resolveType(baseType.base);
+		return base?.kind === "typeParam" ? base : null;
+	},
+
+	// A type parameter has the methods of its constraint and nothing else.
+	_fieldTypeTypeParam(param, baseType, field, node) {
+		const c = this._deepUnderlying(this.resolveType(param.constraint));
+		if (c?._tainted || c?._isOpen) return ANY;
+		if (baseType === param && c?.kind === "interface") {
+			if (c.methods?.has(field)) return c.methods.get(field);
+		}
+		return this.err(
+			`${exprText(node?.expr)}.${field} undefined (type ${typeStr(baseType)} has no field or method ${field})`,
+			node,
+		);
 	},
 
 	_isTransparentPointerField(baseType, field) {

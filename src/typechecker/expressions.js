@@ -301,7 +301,11 @@ export const expressionCheckMethods = {
 					}
 					return this.err(`Undefined: '${expr.name}'`, expr);
 				}
-				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
+				// A value whose type is a type parameter is not the type parameter.
+				if (
+					this._namesType(expr.name, t, scope) ||
+					(t.kind === "typeParam" && scope.bindsType(expr.name))
+				)
 					expr._isTypeRef = true;
 				// JS output keeps the Go name of what names a type: a type is a
 				// class under that name, and a type parameter is looked up by it.
@@ -383,12 +387,16 @@ export const expressionCheckMethods = {
 		return this.err(`${typeStr(t)} (type) is not an expression`, expr);
 	},
 
-	_checkDeref(ot, expr) {
+	_checkDeref(ot, expr, scope) {
 		// JS-dynamic values dereference freely; an error-recovery type has
 		// already been reported.
 		if (anyKind(ot) === "dynamic") return ANY;
 		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
+		if (ot.kind === "typeParam") {
+			const core = this._coreType(ot, scope);
+			if (core?.kind === "pointer") return core.base;
+		}
 		const ou = this._deepUnderlying(ot);
 		if (ou?.kind === "pointer") return ou.base;
 		this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
@@ -738,7 +746,7 @@ export const expressionCheckMethods = {
 				expr._isTypeRef = true;
 				return this._typeRefOperand(expr, { kind: "pointer", base: ot });
 			}
-			return this._checkDeref(ot, expr);
+			return this._checkDeref(ot, expr, scope);
 		}
 		return ot;
 	},
@@ -1328,7 +1336,17 @@ export const expressionCheckMethods = {
 	// Go's shorthand for pointers to arrays: `p[i]`, `p[lo:hi]`, `len(p)` and
 	// `range p` mean `(*p)[i]` and so on.  The operand is rewritten to an
 	// explicit dereference so every backend sees the array.
-	_derefArrayPtr(holder, key, t) {
+	// With `scope`, a type parameter whose core type is such a pointer counts.
+	_derefArrayPtr(holder, key, t, scope) {
+		if (scope && t?.kind === "typeParam") {
+			const core = this._coreType(t, scope);
+			if (core?.kind !== "pointer") return t;
+			const under = this._deepUnderlying(core.base);
+			if (under?.kind !== "array") return t;
+			holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
+			holder[key]._type = core.base;
+			return core.base;
+		}
 		if (t?.kind !== "pointer") return t;
 		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
 		const under = this._deepUnderlying(base);
@@ -1785,17 +1803,23 @@ export const expressionCheckMethods = {
 
 	_rangeOperandError(node, type) {
 		const untyped = type?.kind === "untyped";
+		const via =
+			type?.kind === "typeParam"
+				? ` constrained by ${this._constraintText(type)}`
+				: "";
 		return this.err(
-			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)})`,
+			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)}${via})`,
 			node,
 		);
 	},
 
 	// A range operand of a kind Go rejects: bool, float or complex values,
-	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
-	// parameters and kinds the checker models loosely are left alone.
+	// structs, interfaces, non-array pointers, nil, and a type parameter with no
+	// core type (`_rangeCore` resolves one that has it first). JS-dynamic `any`
+	// and kinds the checker models loosely are left alone.
 	_notRangeable(type) {
 		if (!type || type._tainted || isAny(type)) return false;
+		if (type.kind === "typeParam") return true;
 		if (type.kind === "untyped")
 			return !(
 				type.base === "string" ||
@@ -1804,9 +1828,22 @@ export const expressionCheckMethods = {
 			);
 		const u = this._deepUnderlying(type);
 		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
+		if (u?.kind === "pointer" && type._viaCore)
+			return this._deepUnderlying(u.base)?.kind !== "array";
 		return (
 			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
 		);
+	},
+
+	// The type a `range` operand is read as: a type parameter stands for its
+	// core type, which is recorded on the operand for the backends. A type
+	// parameter without one stays as it is, and `_notRangeable` rejects it.
+	_rangeCore(type, operand, scope) {
+		if (type?.kind !== "typeParam") return type;
+		const core = this._coreType(type, scope);
+		if (!core) return type;
+		operand._coreType = core;
+		return core.kind === "pointer" ? { ...core, _viaCore: true } : core;
 	},
 
 	_checkRangeExpr(expr, scope) {
@@ -1814,16 +1851,17 @@ export const expressionCheckMethods = {
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
+			scope,
 		);
-		if (collType?._declared || this._notRangeable(collType)) {
+		const core = this._rangeCore(collType, expr.expr, scope);
+		if (collType?._declared || this._notRangeable(core)) {
 			const bad = this._rangeOperandError(expr.expr, collType);
 			return { kind: "tuple", types: [bad, bad] };
 		}
-		const resolved = this._underlyingOrCore(collType, scope);
-		// Backends range over the core type of a type parameter.
-		if (collType?.kind === "typeParam" && resolved !== collType)
-			expr.expr._coreType = resolved;
-		return this._rangeCollTypeTuple(resolved, collType);
+		return this._rangeCollTypeTuple(
+			this._underlyingOrCore(core, scope),
+			collType,
+		);
 	},
 
 	_checkInstantiationExpr(expr, scope) {
