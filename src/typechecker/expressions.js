@@ -75,6 +75,25 @@ function minMaxType(at) {
 	return at.find((t) => t?.base === "float64") ?? at[0] ?? ANY;
 }
 
+// Argument counts per builtin: [min, max] (max Infinity when variadic).
+const BUILTIN_ARITY = {
+	len: [1, 1],
+	cap: [1, 1],
+	append: [1, Infinity],
+	copy: [2, 2],
+	delete: [2, 2],
+	make: [1, Infinity],
+	new: [1, 1],
+	panic: [1, 1],
+	recover: [0, 0],
+	min: [1, Infinity],
+	max: [1, Infinity],
+	clear: [1, 1],
+	complex: [2, 2],
+	real: [1, 1],
+	imag: [1, 1],
+};
+
 // Dispatch table for builtin function type checking.
 // Each value is (self, name, expr, argTypes, scope) => returnType.
 const BUILTIN_CHECK = {
@@ -2648,7 +2667,24 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// Go reports a wrong argument count before looking at any operand.
+	_checkBuiltinArity(name, expr) {
+		const range = BUILTIN_ARITY[name];
+		if (!range) return true;
+		const found = expr.args.length;
+		const [min, max] = range;
+		if (found >= min && found <= max) return true;
+		const [what, expected] =
+			found < min ? ["not enough", min] : ["too many", max];
+		this.err(
+			`${what} arguments for ${exprText(expr)} (expected ${expected}, found ${found})`,
+			expr,
+		);
+		return false;
+	},
+
 	checkBuiltin(name, expr, argTypes, scope) {
+		if (!this._checkBuiltinArity(name, expr)) return ANY;
 		const gen = BUILTIN_CHECK[name];
 		return gen ? gen(this, name, expr, argTypes, scope) : ANY;
 	},
@@ -2816,10 +2852,6 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinComplex(expr, argTypes) {
-		if (expr.args.length !== 2) {
-			this.err("complex() requires exactly 2 arguments", expr);
-			return ANY;
-		}
 		const crt = argTypes[0];
 		const cit = argTypes[1];
 		if (!isNumeric(crt)) {
@@ -2850,10 +2882,6 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinRealImag(name, expr, argTypes) {
-		if (expr.args.length !== 1) {
-			this.err(`${name}() requires exactly 1 argument`, expr);
-			return ANY;
-		}
 		const zt = argTypes[0];
 		if (!isComplex(zt)) {
 			this.err(`cannot use ${typeStr(zt)} as complex in ${name}()`, expr);
