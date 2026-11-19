@@ -459,11 +459,12 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: both pass
 
 ### Phase 13: Error classification (root `error-classification`)
-- [ ] Task 13.1: Unsupported `templ` CSS arguments are a `CompileError` (R10.6)
+- [x] Task 13.1: Unsupported `templ` CSS arguments are a `CompileError` (R10.6)
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js` R10.6 throws `CompileError`, not `InternalCompilerError`
   - Done when: passes
-- [ ] Task 13.2: `compileWasm` validates its module (R10.7)
+- [x] Task 13.2: `compileWasm` validates its module (R10.7)
+  - Note: the R10.7 repro (`f + 1i`) is now rejected by the checker, but other sources still yield an invalid module (`var a int; var b any; _ = a == b`, follow-up `wasm-iface-equality`); the tests pin that a valid module is unchanged and that a stubbed invalid body raises `InternalCompilerError` via `validateWasm`.
   - Files: `src/compiler.js` (`compileWasm`)
   - Test: `test/unit/compiler/compile-result.test.js` R10.7 `compileWasm` returns an `InternalCompilerError`
   - Done when: passes; valid modules unchanged

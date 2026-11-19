@@ -685,6 +685,36 @@ templ Bad() {
 
 section("templ — css declarations");
 
+test("parameterized css declaration is a CompileError, not an internal error", () => {
+	let err = null;
+	try {
+		compilePkg({
+			"main.go": `package main
+func main() {
+	gom.Mount("#app", Card())
+}`,
+			"card.templ": `package main
+
+css bad(x string) {
+	color: red;
+}
+
+templ Card() {
+	<div class={ bad("a") }>hi</div>
+}
+`,
+		});
+	} catch (e) {
+		err = e;
+	}
+	assert(err !== null, "expected an error");
+	assertEqual(err.name, "CompileError");
+	assertContains(
+		err.message,
+		"parameterized css declarations are not yet supported",
+	);
+});
+
 test("basic css declaration generates scoped class and function", () => {
 	const { js } = compilePkg({
 		"main.go": `package main
