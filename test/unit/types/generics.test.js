@@ -3224,7 +3224,7 @@ func main() { f(1) }`,
 		`func g(a, b int) {}
 func h[T any](f func() (T, int)) { g(f()) }
 func main() { h(func() (int, int) { return 1, 2 }) }`,
-		"as int value in argument to g",
+		"cannot use f() (value of type T constrained by any) as int value in argument to g",
 	],
 	[
 		"a pointer to a type parameter used as a pointer to an interface",
@@ -3257,6 +3257,39 @@ func main() { f([]int{1}) }`,
 		"cannot convert xs (variable of type []T) to type []uint",
 	],
 	[
+		"a slice of a generic struct converted to another instantiation",
+		`type S[T any] struct{ X T }
+func f[T any](s []S[T]) []S[int] { return []S[int](s) }
+func main() { _ = f([]S[string]{{X: "a"}}) }`,
+		"cannot convert s (variable of type []S[T]) to type []S[int]",
+	],
+	[
+		"an array of a generic struct converted to another instantiation",
+		`type S[T any] struct{ X T }
+func f[T any](a [2]S[T]) [2]S[int] { return [2]S[int](a) }
+func main() { _ = f([2]S[string]{}) }`,
+		"cannot convert a (variable of type [2]S[T]) to type [2]S[int]",
+	],
+	[
+		"a map of a generic struct converted to another instantiation",
+		`type S[T any] struct{ X T }
+func f[T any](m map[string]S[T]) map[string]S[int] { return map[string]S[int](m) }
+func main() { _ = f(map[string]S[string]{}) }`,
+		"cannot convert m (variable of type map[string]S[T]) to type map[string]S[int]",
+	],
+	[
+		"a slice of an anonymous struct with a type parameter converted to a concrete one",
+		`func f[T any](s []struct{ X T }) []struct{ X int } { return []struct{ X int }(s) }
+func main() { _ = f([]struct{ X string }{}) }`,
+		"cannot convert s (variable of type []struct",
+	],
+	[
+		"an array of an anonymous struct with a type parameter converted to a concrete one",
+		`func f[T any](a [2]struct{ X T }) [2]struct{ X int } { return [2]struct{ X int }(a) }
+func main() { _ = f([2]struct{ X string }{}) }`,
+		"cannot convert a (variable of type [2]struct",
+	],
+	[
 		"a constant truncated by a type of the set",
 		`func f[T ~int | ~float64]() T { return T(1.5) }
 func main() { f[int]() }`,
@@ -3269,6 +3302,8 @@ for (const [name, body, msg] of TYPE_PARAM_VALUE_REJECTS) {
 		for (const target of ["js", "both", "wasm"]) {
 			const { errors } = compile(`package main\n${body}`, { target });
 			assertErrorContains(errors, msg);
+			if (msg.startsWith("cannot use f()"))
+				assert(!errors.some((e) => String(e).includes("?:?")), "has position");
 		}
 	});
 }

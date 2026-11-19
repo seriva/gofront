@@ -834,7 +834,7 @@ export const assignabilityMethods = {
 		const at = node ?? this._forwardedCall;
 		if (this._checkIfaceToConcrete(target, source, at, ctx, operand ?? at))
 			return;
-		if (this._assertAssignableEarlyReturn(target, source, operand ?? node, ctx))
+		if (this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx))
 			return;
 		if (isPointer(target) && isPointer(source)) {
 			this._assertNestedAssignable(

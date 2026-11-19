@@ -196,17 +196,28 @@ const CHECK_EXPR_DELEGATE = {
 };
 
 // Whether `t` is, or is built from, a type parameter.
-function mentionsTypeParam(t) {
-	switch (t?.kind) {
-		case "typeParam":
-			return true;
+function mentionsTypeParam(t, seen = new Set()) {
+	if (!t || typeof t !== "object" || seen.has(t)) return false;
+	if (t.kind === "typeParam") return true;
+	seen.add(t);
+	const any = (list) =>
+		[...(list ?? [])].some((x) => mentionsTypeParam(x, seen));
+	switch (t.kind) {
 		case "pointer":
-			return mentionsTypeParam(t.base);
+			return mentionsTypeParam(t.base, seen);
 		case "slice":
 		case "array":
-			return mentionsTypeParam(t.elem);
+			return mentionsTypeParam(t.elem, seen);
 		case "map":
-			return mentionsTypeParam(t.key) || mentionsTypeParam(t.value);
+			return mentionsTypeParam(t.key, seen) || mentionsTypeParam(t.value, seen);
+		case "named":
+			return any(t.typeArgs);
+		case "struct":
+			return any(t.typeArgs) || any(t.fields?.values());
+		case "func":
+			return any(t.params) || any(t.returns);
+		case "interface":
+			return any(t.methods?.values());
 		default:
 			return false;
 	}
