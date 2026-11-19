@@ -330,8 +330,10 @@ export const assignabilityMethods = {
 			[rt, node.right],
 		]) {
 			if (t?.kind !== "typeParam" || this._typeParamComparable(t)) continue;
+			const empty =
+				this._constraintTerms(t.constraint, new Set())?.length === 0;
 			this.err(
-				`invalid operation: ${exprText(node)} (incomparable types in type set)`,
+				`invalid operation: ${exprText(node)} (${empty ? "empty type set" : "incomparable types in type set"})`,
 				operand,
 			);
 			return;
@@ -344,7 +346,7 @@ export const assignabilityMethods = {
 			return terms.every(
 				(t) => t.name === "comparable" || this._isComparable(t),
 			);
-		if (terms) return true;
+		if (terms) return false;
 		let c = tp.constraint;
 		if (c?.kind === "TypeName" || c?.kind === "InterfaceType")
 			c = this.resolveTypeNode(c, this.globals);

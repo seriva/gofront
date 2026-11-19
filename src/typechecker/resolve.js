@@ -384,19 +384,36 @@ export const resolveMethods = {
 	// Composite terms (`~[]E`) are their own underlying type and may mention
 	// type parameters that are not in `scope`, so only a type name is checked.
 	_checkApproxTerms(union, scope) {
-		for (const term of union.terms) {
-			if (!term.approx || term.type?.kind !== "TypeName") continue;
-			const t = this.resolveTypeNode(term.type, scope);
-			const base = this._deepUnderlying(t);
-			if (!base || t._tainted || base._tainted) continue;
-			if (base.kind === "interface")
-				this.err(`invalid use of ~ (${typeStr(t)} is an interface)`, term);
-			else if (t.kind === "named" && !identical(base, t))
-				this.err(
-					`invalid use of ~ (underlying type of ${typeStr(t)} is ${typeStr(base)})`,
-					term,
-				);
+		for (const term of union.terms)
+			if (term.approx) this._checkApproxTerm(term, scope);
+	},
+
+	_checkApproxTerm(term, scope) {
+		if (term.type?.kind === "GenericTypeName") {
+			// `~Box[int]` names a defined type; a generic alias is its target.
+			const g = this.types.get(term.type.name)?._generic;
+			if (g && !g.isAlias)
+				this.err("invalid use of ~ (an instantiated generic type)", term);
+			return;
 		}
+		if (term.type?.kind !== "TypeName") return;
+		const t = this.resolveTypeNode(term.type, scope);
+		const base = this._deepUnderlying(t);
+		if (!base || t._tainted || base._tainted) return;
+		if (t.kind === "typeParam")
+			this.err(
+				`invalid use of ~ (type in term ~${typeStr(t)} cannot be a type parameter)`,
+				term,
+			);
+		else if (base === COMPARABLE)
+			this.err("invalid use of ~ (comparable is an interface)", term);
+		else if (base.kind === "interface")
+			this.err(`invalid use of ~ (${typeStr(t)} is an interface)`, term);
+		else if (t.kind === "named" && !identical(base, t))
+			this.err(
+				`invalid use of ~ (underlying type of ${typeStr(t)} is ${typeStr(base)})`,
+				term,
+			);
 	},
 
 	// Marks the constraint positions of top-level declarations before any
@@ -925,7 +942,12 @@ export const resolveMethods = {
 			const tp = typeParams[i];
 			if (tp.constraint) {
 				const constraint = this.resolveTypeNode(tp.constraint, this.globals);
-				this.checkConstraint(typeArgs[i], constraint, declNode);
+				this.checkConstraint(typeArgs[i], constraint, declNode, {
+					typeParams,
+					typeArgs,
+					name: tp.name,
+					scope: this.globals,
+				});
 			}
 			aliasScope.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
 		}
@@ -1032,6 +1054,10 @@ export const resolveMethods = {
 		}
 		if (paramType.kind === "func" && argType.kind === "func")
 			this._inferFromFuncPair(paramType, argType, map);
+		this._inferFromAggregatePair(paramType, argType, map);
+	},
+
+	_inferFromAggregatePair(paramType, argType, map) {
 		if (paramType.kind === "tuple" && argType.kind === "tuple") {
 			for (
 				let i = 0;
@@ -1039,6 +1065,12 @@ export const resolveMethods = {
 				i++
 			)
 				this._inferFromPair(paramType.types[i], argType.types[i], map);
+		}
+		if (paramType.kind === "struct" && argType.kind === "struct") {
+			const [pf, af] = [paramType._structFields, argType._structFields];
+			if (pf && af && pf.length === af.length)
+				for (const [i, f] of pf.entries())
+					this._inferFromPair(f.type, af[i].type, map);
 		}
 	},
 
@@ -1121,6 +1153,7 @@ export const resolveMethods = {
 			t.key,
 			t.value,
 			t.base,
+			...(t._structFields?.map((f) => f.type) ?? []),
 			...(t.params ?? []),
 			...(t.returns ?? []),
 		].some((c) => this._mentionsTypeParam(c));
@@ -1131,37 +1164,51 @@ export const resolveMethods = {
 	_structMatches(arg, pattern) {
 		if (!pattern || pattern.kind === "typeParam") return true;
 		if (!this._mentionsTypeParam(pattern)) return identical(arg, pattern);
-		if (arg?.kind !== pattern.kind) return false;
-		const all = (xs, ys) =>
-			xs.length === ys.length &&
-			xs.every((x, i) => this._structMatches(x, ys[i]));
+		return arg?.kind === pattern.kind && this._shapeMatches(arg, pattern);
+	},
+
+	_shapeMatches(arg, pattern) {
+		const m = (a, p) => this._structMatches(a, p);
 		switch (pattern.kind) {
 			case "slice":
-				return this._structMatches(arg.elem, pattern.elem);
-			case "array":
-				return (
-					arg.len === pattern.len && this._structMatches(arg.elem, pattern.elem)
-				);
 			case "pointer":
-				return this._structMatches(arg.base, pattern.base);
+				return m(arg.elem ?? arg.base, pattern.elem ?? pattern.base);
+			case "array":
+				return arg.size === pattern.size && m(arg.elem, pattern.elem);
 			case "chan":
-				return (
-					arg.dir === pattern.dir && this._structMatches(arg.elem, pattern.elem)
-				);
+				return arg.dir === pattern.dir && m(arg.elem, pattern.elem);
 			case "map":
-				return (
-					this._structMatches(arg.key, pattern.key) &&
-					this._structMatches(arg.value, pattern.value)
-				);
+				return m(arg.key, pattern.key) && m(arg.value, pattern.value);
 			case "func":
-				return (
-					Boolean(arg.variadic) === Boolean(pattern.variadic) &&
-					all(arg.params, pattern.params) &&
-					all(arg.returns, pattern.returns)
-				);
+				return this._funcMatches(arg, pattern);
+			case "struct":
+				return this._structFieldsMatch(arg, pattern);
 			default:
 				return true;
 		}
+	},
+
+	_funcMatches(arg, pattern) {
+		const all = (xs, ys) =>
+			xs.length === ys.length &&
+			xs.every((x, i) => this._structMatches(x, ys[i]));
+		return (
+			Boolean(arg.variadic) === Boolean(pattern.variadic) &&
+			all(arg.params, pattern.params) &&
+			all(arg.returns, pattern.returns)
+		);
+	},
+
+	_structFieldsMatch(arg, pattern) {
+		const [af, pf] = [arg._structFields, pattern._structFields];
+		if (!af || !pf || af.length !== pf.length) return false;
+		const names = (f) => (f.names ?? []).join("|");
+		return pf.every(
+			(f, i) =>
+				Boolean(f.embedded) === Boolean(af[i].embedded) &&
+				names(f) === names(af[i]) &&
+				this._structMatches(af[i].type, f.type),
+		);
 	},
 
 	// Whether `typeArg` is in the type set of a union: some term holds it.
@@ -1194,8 +1241,11 @@ export const resolveMethods = {
 			return this._interfaceAccepts(typeArg, base, active);
 		if (!approx) return identical(typeArg, t);
 		const want = this._deepUnderlying(t);
-		if (typeArg?.kind === "typeParam" || want?.kind !== "basic") return true;
-		return identical(this._deepUnderlying(typeArg), want);
+		if (typeArg?.kind === "typeParam") return true;
+		const under = this._deepUnderlying(typeArg);
+		return want?.kind === "basic"
+			? identical(under, want)
+			: this._structMatches(under, want);
 	},
 
 	// An interface's type set is the intersection of its own union and the
@@ -1255,16 +1305,27 @@ export const resolveMethods = {
 			);
 			return;
 		}
-		if (base.methods.size === 0 && !base.unionConstraint) return;
-		if (base.unionConstraint) {
-			this.checkConstraint(typeArg, base.unionConstraint, node);
-			return;
-		}
-		if (!this.implements(typeArg, base, node))
+		if (this._unsatisfiedInterface(typeArg, base, node))
 			this.err(
 				`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
 				node,
 			);
+	},
+
+	// Whether `typeArg` is outside the type set of `base` or lacks its methods.
+	// A lone union reports its own, more precise, error and counts as satisfied.
+	_unsatisfiedInterface(typeArg, base, node) {
+		const embeds = base._typeSetEmbeds?.length ?? 0;
+		const hasMethods = base.methods.size > 0;
+		if (base.unionConstraint && !embeds && !hasMethods) {
+			this._checkUnionConstraint(typeArg, base.unionConstraint, node);
+			return false;
+		}
+		const inSet =
+			!(base.unionConstraint || embeds) ||
+			typeArg?._tainted ||
+			this._interfaceAccepts(typeArg, base, new Set());
+		return !inSet || (hasMethods && !this.implements(typeArg, base, node));
 	},
 
 	// `ctx` (`{ typeParams, typeArgs, name, scope }`) names the generic

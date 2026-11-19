@@ -3497,6 +3497,89 @@ func main() { F[int, int, int](1) }`,
 func main() { _ = F[int] }`,
 		"S (type int) does not satisfy ~[]E",
 	],
+	[
+		"an empty type set rejects an inferred argument",
+		`func F[T interface{ ~int; ~string }](x T) {}
+func main() { F(1) }`,
+		"does not satisfy",
+	],
+	[
+		"an empty type set rejects an explicit argument",
+		`func F[T interface{ ~int; ~string }](x T) {}
+func main() { _ = F[int] }`,
+		"does not satisfy",
+	],
+	[
+		"a further union element narrows the first",
+		`func F[T interface{ ~int | ~string; ~int }](x T) T { return x }
+func main() { _ = F("a") }`,
+		"does not satisfy",
+	],
+	[
+		"embedded constraint interfaces intersect",
+		`type A interface{ ~int }
+type B interface{ ~string }
+func F[T interface{ A; B }](x T) {}
+func main() { F(1) }`,
+		"does not satisfy",
+	],
+	[
+		"methods alongside a union are still required",
+		`func F[T interface{ ~int; M() }](x T) {}
+func main() { F(1) }`,
+		"does not satisfy constraint",
+	],
+	[
+		"a named composite constraint rejects a non-matching argument",
+		`type C interface{ ~[]int }
+func F[T C](x T) {}
+func main() { F(1) }`,
+		"does not satisfy",
+	],
+	[
+		"a substituted composite term rejects a non-matching argument",
+		`type Slice[E any] interface{ ~[]E }
+func F[S Slice[E], E any](s S) {}
+func main() { F[int, int](1) }`,
+		"does not satisfy",
+	],
+	[
+		"an array term of another length",
+		`func F[A ~[2]E, E any](a A) E { var z E; return z }
+func main() { _ = F[[3]int] }`,
+		"does not satisfy ~[2]E",
+	],
+	[
+		"== on a type parameter with an empty type set",
+		`func F[T interface{ ~int; ~string }](a, b T) bool { return a == b }
+func main() {}`,
+		"empty type set",
+	],
+	[
+		"~comparable",
+		`func F[T ~comparable](a T) {}
+func main() {}`,
+		"invalid use of ~",
+	],
+	[
+		"~ over a type parameter",
+		`func F[E any, T ~E](a T) {}
+func main() {}`,
+		"cannot be a type parameter",
+	],
+	[
+		"~ over an instantiated generic type",
+		`type Box[E any] struct{ v E }
+func F[T ~Box[int]](a T) {}
+func main() {}`,
+		"invalid use of ~",
+	],
+	[
+		"a generic alias checks its constraint with the other arguments",
+		`type A[S ~[]E, E any] = []S
+func main() { var x A[int, int]; _ = x }`,
+		"does not satisfy",
+	],
 ];
 
 for (const [name, body, msg] of TYPE_SET_REJECTS) {
@@ -3507,6 +3590,26 @@ for (const [name, body, msg] of TYPE_SET_REJECTS) {
 		}
 	});
 }
+
+test("struct approximation patterns and generic aliases of ~ terms compile", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MySt struct{ X int }
+type Slice[E any] = []E
+
+func F[S ~struct{ X E }, E any](s S) E { var z E; return z }
+func G[T ~Slice[int]](t T) int { return len(t) }
+
+func main() {
+	f := F[MySt]
+	fmt.Println(f(MySt{1}), G([]int{1}))
+}`,
+		"0 1\n",
+	);
+});
 
 test("valid approximation terms and intersected unions still compile", async () => {
 	await assertAllTargetsOutput(
