@@ -673,11 +673,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 20: Non-boolean conditions (root `empty-interface-kinds`, wording)
 *Scheduled from review follow-ups (2026-11-18).*
-- [ ] Task 20.1: `if` and `for` conditions report Go's `non-boolean condition in <stmt> statement` (R15.1, R15.2)
+- [x] Task 20.1: `if` and `for` conditions report Go's `non-boolean condition in <stmt> statement` (R15.1, R15.2)
   - Files: `src/typechecker/statements.js` (`_checkIfStmt`, `_checkForCond`)
   - Test: reject fixtures `if_nonbool_int.go`, `if_nonbool_defined_any.go`, `for_nonbool_defined_any.go`
   - Done when: every non-boolean type gets the one wording
-- [ ] Task 20.2: Existing assertions and docs use the new wording
+- [x] Task 20.2: Existing assertions and docs use the new wording
   - Files: tests that match `must be bool`; `docs/go-compatibility.md` where it quotes the message
   - Test: `npm test`
   - Done when: `grep -rn "condition must be bool" src test docs` finds nothing
