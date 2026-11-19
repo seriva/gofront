@@ -12,6 +12,7 @@ import {
 	compile,
 	compileDir,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	Lexer,
 	runJs,
@@ -2937,6 +2938,199 @@ func main() {
 }
 `,
 		"1024 1024 1024\nG runtime error: negative shift amount\nH runtime error: negative shift amount\nL runtime error: negative shift amount\n",
+	);
+});
+
+test("R14.1 fields of a generic type declared over a struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[T any] struct{ X T }
+type W[T any] S[T]
+
+func main() {
+	var w W[int]
+	w.X = 42
+	fmt.Println(w.X)
+	p := &w
+	p.X = 7
+	fmt.Println(w.X)
+	v := W[int]{X: 3}
+	v.X++
+	fmt.Println(v.X, v)
+	ws := []W[int]{{X: 1}}
+	ws[0].X = 5
+	fmt.Println(ws[0].X)
+}
+`,
+		"42\n7\n4 {4}\n5\n",
+	);
+});
+
+test("R14.1 methods of a generic type declared over a struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[T any] struct{ X T }
+
+func (s S[T]) SM() T { return s.X }
+
+type W[T any] S[T]
+
+func (w W[T]) Get() T { return w.X }
+func (w *W[T]) Set(v T) { w.X = v }
+func (w *W[T]) IsNil() bool { return w == nil }
+
+type Getter interface{ Get() int }
+type Niler interface{ IsNil() bool }
+
+func main() {
+	w := W[int]{X: 3}
+	w.Set(9)
+	var g Getter = w
+	fmt.Println(w.Get(), g.Get())
+	s := S[int]{X: 1}
+	w2 := W[int](s)
+	w2.X = 2
+	fmt.Println(s.X, w2.Get(), S[int](w2).SM())
+	var a any = w2
+	_, ok := a.(S[int])
+	_, ok2 := a.(W[int])
+	fmt.Println(ok, ok2)
+	var p *W[int]
+	var n Niler = p
+	fmt.Println(n != nil, n.IsNil())
+	var b any = []W[int]{{X: 1}, {X: 2}}
+	fmt.Println(b.([]W[int])[1].X)
+}
+`,
+		"9 9\n1 2 2\nfalse true\ntrue true\n2\n",
+	);
+});
+
+test("defined types over another package's struct get a class", async () => {
+	for (const target of ["js", "both", "wasm"]) {
+		const directive = target === "js" ? "" : `//gofront:target ${target}\n`;
+		const { lines } = await compileHybridProject({
+			"sub/sub.go": `${target === "js" ? "" : "//gofront:target both\n"}package sub
+
+type S struct{ X int }
+`,
+			"main.go": `${directive}package main
+
+import (
+	"fmt"
+	"./sub"
+)
+
+type W[T any] sub.S
+type V sub.S
+
+func (w W[T]) Get() int { return w.X }
+func (v V) Get() int    { return v.X }
+
+func main() {
+	w := W[int]{X: 5}
+	w.X++
+	v := V(sub.S{X: 2})
+	var a any = W[string](sub.S{X: 3})
+	_, ok1 := a.(W[string])
+	_, ok2 := a.(W[int])
+	fmt.Println(w.X, w, w.Get(), v, v.Get(), ok1, ok2)
+}
+`,
+		});
+		assertEqual(lines.join("\n"), "6 {6} 6 {2} 2 true false", target);
+	}
+});
+
+test("converting a struct to a generic defined type tags the target's instantiation", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[A, B any] struct {
+	X A
+	Y B
+}
+type W[A, B any] S[B, A]
+type V[A, B any] S[A, int]
+type P struct{ X string }
+type Q[T any] P
+
+func conv[T any](s S[string, T]) any { return W[T, string](s) }
+
+func main() {
+	var a any = W[int, string](S[string, int]{X: "a", Y: 1})
+	_, ok1 := a.(W[int, string])
+	_, ok2 := a.(W[string, int])
+	fmt.Println(ok1, ok2)
+	var b any = V[string, bool](S[string, int]{X: "b"})
+	_, ok3 := b.(V[string, bool])
+	_, ok4 := b.(V[string, int])
+	fmt.Println(ok3, ok4)
+	var c any = Q[string](P{X: "c"})
+	_, ok5 := c.(Q[string])
+	_, ok6 := c.(Q[int])
+	fmt.Println(ok5, ok6)
+	w := W[int, string](S[string, int]{X: "d", Y: 2})
+	var d any = S[string, int](w)
+	_, ok7 := d.(S[string, int])
+	_, ok8 := d.(S[int, string])
+	fmt.Println(ok7, ok8)
+	e := conv[bool](S[string, bool]{X: "e", Y: true})
+	_, ok9 := e.(W[bool, string])
+	_, ok10 := e.(W[string, bool])
+	fmt.Println(ok9, ok10)
+	fmt.Println(a, b, c, d, e)
+}
+`,
+		"true false\ntrue false\ntrue false\ntrue false\ntrue false\n{a 1} {b 0} {c} {d 2} {e true}\n",
+	);
+});
+
+test("converting between instantiations of one generic type tags the target's", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Phantom[T any] struct{ X int }
+type P struct{ X string }
+type Q[T any] P
+type SameUnder[A, B any] struct {
+	X int
+	Y string
+}
+
+func conv[T any](p Phantom[int]) any { return Phantom[T](p) }
+
+func main() {
+	var a any = Phantom[string](Phantom[int]{X: 42})
+	_, ok1 := a.(Phantom[string])
+	_, ok2 := a.(Phantom[int])
+	fmt.Println(ok1, ok2)
+	var b any = Q[int](Q[string]{X: "c"})
+	_, ok3 := b.(Q[int])
+	_, ok4 := b.(Q[string])
+	fmt.Println(ok3, ok4)
+	var c any = SameUnder[bool, float64](SameUnder[int, string]{X: 1, Y: "hi"})
+	_, ok5 := c.(SameUnder[bool, float64])
+	_, ok6 := c.(SameUnder[int, string])
+	fmt.Println(ok5, ok6)
+	d := conv[bool](Phantom[int]{X: 7})
+	_, ok7 := d.(Phantom[bool])
+	_, ok8 := d.(Phantom[int])
+	fmt.Println(ok7, ok8)
+	fmt.Println(a, b, c, d)
+}
+`,
+		"true false\ntrue false\ntrue false\ntrue false\n{42} {c} {1 hi} {7}\n",
 	);
 });
 

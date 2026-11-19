@@ -523,9 +523,9 @@ export function is64BitUnsigned(t) {
 	return cur?.kind === "basic" && cur.name === "uint64";
 }
 
-// Underlying type with chains of defined types followed through; generic types
-// declared over a struct type (`type W[T any] S[T]`) keep a defined type as
-// their underlying one.
+// Underlying type with chains of defined types followed through. A declared
+// type's `underlying` is never a defined type; only a type whose declaration
+// is still being collected (or an invalid cycle) leaves one in place.
 export function underlyingOf(t) {
 	let u = t;
 	for (let i = 0; u?.kind === "named" && i < 32; i++) u = u.underlying;
