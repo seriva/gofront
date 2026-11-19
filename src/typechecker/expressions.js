@@ -359,6 +359,18 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBoolUnaryOp(ot, expr) {
+		// `!a` on a type parameter needs every type in its type set to be a
+		// bool type, and keeps the type parameter's type.
+		if (ot?.kind === "typeParam") {
+			if (
+				!this._typeParamAllows(ot, (t) => isBool(this._deepUnderlying(t) ?? t))
+			)
+				this.err(
+					`invalid operation: operator ! not defined on ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot), false)} constrained by ${this._constraintText(ot)})`,
+					expr.operand,
+				);
+			return ot;
+		}
 		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
 		// `!` keeps an untyped or defined bool type.
 		return isBool(ot) ? ot : BOOL;

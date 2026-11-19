@@ -357,6 +357,14 @@ export const assignabilityMethods = {
 		if (!c || isAny(c)) return "any";
 		if (c.kind === "TypeName") return c.name;
 		try {
+			// An inline union (`[T ~bool | ~int]`) keeps its terms as AST nodes.
+			if (c.kind === "UnionConstraint")
+				return c.terms
+					.map(
+						(t) =>
+							`${t.approx ? "~" : ""}${typeStr(t.resolved ?? this.resolveTypeNode(t.type, c._scope ?? this.globals))}`,
+					)
+					.join(" | ");
 			return typeStr(c);
 		} catch {
 			return "its constraint";

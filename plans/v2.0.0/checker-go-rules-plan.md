@@ -632,7 +632,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/typechecker/assignability.js`
   - Test: `test/unit/types/generics.test.js` R11.4 prints `1024` on all targets; reject fixtures `generic_shift_float_const_left.go`, `generic_shift_string_left.go`
   - Done when: `x := 1 << s` is `int` with `s T ~uint`
-- [ ] Task 16.3: Unary `!` on a type parameter tests its type set (R11.6)
+- [x] Task 16.3: Unary `!` on a type parameter tests its type set (R11.6)
   - Files: `src/typechecker/expressions.js` (`_checkBoolUnaryOp`)
   - Test: accept fixture `generic_not_bool_param.go`; reject `!a` with `T ~bool | ~int` and `T any`
   - Done when: result type is `T`; controls unchanged
