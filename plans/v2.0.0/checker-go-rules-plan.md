@@ -725,15 +725,15 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 24: Constraint type sets (root `constraint-type-sets`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Constraint set elements* and *Approximation of composite types*.*
-- [ ] Task 24.1: An interface's union elements intersect (R19.1)
+- [x] Task 24.1: An interface's union elements intersect (R19.1)
   - Files: `src/typechecker/resolve.js` (`unionConstraint` built per element, intersected), `src/typechecker/index.js` (constraint collection)
   - Test: reject fixture `constraint_union_intersection_empty.go`; accept `constraint_union_intersection.go` (prints `3`)
   - Done when: Go's result on all targets
-- [ ] Task 24.2: `~T` requires `T`'s underlying type to be itself and not an interface (R19.2, R19.3)
+- [x] Task 24.2: `~T` requires `T`'s underlying type to be itself and not an interface (R19.2, R19.3)
   - Files: `src/typechecker/resolve.js`
   - Test: reject fixtures `approx_defined_type.go`, `approx_interface.go`; `~int`, `~[]E`, `~struct{…}` stay valid
   - Done when: Go's `invalid use of ~` on all targets
-- [ ] Task 24.3: Approximation terms over composite types match by structure (R19.4, R19.5)
+- [x] Task 24.3: Approximation terms over composite types match by structure (R19.4, R19.5)
   - Files: `src/typechecker/resolve.js` (`_unionAccepts`)
   - Test: reject fixtures `approx_map_non_map.go`, `approx_slice_explicit_int.go` (`S (type int) does not satisfy ~[]E`); `F([]int{1, 2})` prints `2`
   - Done when: Go's messages on all targets
