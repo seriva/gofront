@@ -235,7 +235,7 @@ Root: `_checkTypeParamOperator` and `_binaryResultTypeTypeParam` (`assignability
 | ID | Program | Go | GoFront |
 |---|---|---|---|
 | R11.1 | `func F[T ~int](a T, b int) T { return a + b }` | `mismatched types T and int` | accepted (js/wasm) |
-| R11.2 *sibling* | same with `a + 1.5`; `T ~int \| ~float64` with `a + 1.5` stays valid; `func F[T ~int8](a T) T { return a + 200 }` | `cannot convert 1.5 (untyped float constant) to type T`; ok; `cannot use 200 … overflows` | accepted |
+| R11.2 *sibling* | same with `a + 1.5`; `T ~int \| ~float64` with `a + 1` stays valid (`a + 1.5` is rejected too: 1.5 is not representable in `int`); `func F[T ~int8](a T) T { return a + 200 }` | `cannot convert 1.5 (untyped float constant) to type T`; ok; `cannot convert 200 (untyped int constant) to type T` | accepted |
 | R11.3 *sibling* | `func F[T ~bool](a T, b int) T { return a && b }`; `a == b` with `b int` | `mismatched types` | accepted |
 | R11.4 | `func F[T ~uint8](s T) int { return 1 << s }; F(uint8(10))` | `1024` | js prints `0`; wasm panics `Error: 10` |
 | R11.5 *sibling* | `1.5 << s`, `"a" << s` with `s T ~uint` | `shifted operand … must be integer` | accepted |
@@ -624,9 +624,9 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 16: Operands of type-parameter operators (root `generic-body-check`, operand side)
 *Scheduled from review follow-ups (2026-11-18): the Phase 9 operand-matching, untyped-shift and unary `!` entries. Builds on Phase 9's `_checkTypeParamOperator`; lands after it.*
-- [ ] Task 16.1: The other operand of a type-parameter operator is converted to or identical with the type parameter (R11.1–R11.3)
+- [x] Task 16.1: The other operand of a type-parameter operator is converted to or identical with the type parameter (R11.1–R11.3)
   - Files: `src/typechecker/assignability.js` (`_checkTypeParamOperator`, `_binaryResultTypeTypeParam`, `convertUntyped` for `typeParam`)
-  - Test: reject fixtures `generic_add_int_param.go`, `generic_add_float_const.go`, `generic_and_bool_int.go`, `generic_add_int8_overflow.go`; accept `a + 1`, `a + 1.5` with `T ~int | ~float64`
+  - Test: reject fixtures `generic_add_int_param.go`, `generic_add_float_const.go`, `generic_and_bool_int.go`, `generic_add_int8_overflow.go`; accept `a + 1`, `2.0 * a` with `T ~int | ~float64` (Go rejects `a + 1.5` there)
   - Done when: Go's message on all targets; an untyped constant must be representable in every term of the type set
 - [ ] Task 16.2: An untyped left operand of a shift keeps its untyped type (R11.4, R11.5)
   - Files: `src/typechecker/assignability.js`
