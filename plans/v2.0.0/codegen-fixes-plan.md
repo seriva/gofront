@@ -1,4 +1,4 @@
-# Review Follow-ups (2026-11-18) — Design Plan
+# JS and `wasm` Codegen Fixes — Design Plan
 
 **Version:** v2.0.0  
 **Status:** Draft  

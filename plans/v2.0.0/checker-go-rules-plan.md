@@ -364,7 +364,7 @@ Root: `expressions.js:_checkExpr` (`Ident` case) marks a type name `_isTypeRef` 
 | R22.5 *sibling* | `fmt.Println(int)`; `_ = int + 1` | `int (type) is not an expression` | `Undefined: 'int'` (rejected; message only) |
 
 #### R8.12 `predeclared-scope` (generated Go, builtins) *sibling*
-Root: as R8.11, for builtins instead of `error`: `src/lower/fmt-formatters.js` writes `len(x)` and `make(…)`, and `src/lower/json-codecs.js` writes `len` and `append`, into `gofront_gen.go`, where a package function named after the builtin resolves first. Re-probed 2026-11-19 at `ea84ff8d` (Task 14.1 done, which pins only `error`): still failing. From ledger *Shadowed builtins in wasm stdlib generics* (its `wasm`-only `append`/`new` part has a different root, scheduled in [`follow-ups-2026-11-18-plan.md`](follow-ups-2026-11-18-plan.md)).
+Root: as R8.11, for builtins instead of `error`: `src/lower/fmt-formatters.js` writes `len(x)` and `make(…)`, and `src/lower/json-codecs.js` writes `len` and `append`, into `gofront_gen.go`, where a package function named after the builtin resolves first. Re-probed 2026-11-19 at `ea84ff8d` (Task 14.1 done, which pins only `error`): still failing. From ledger *Shadowed builtins in wasm stdlib generics* (its `wasm`-only `append`/`new` part has a different root, scheduled in [`codegen-fixes-plan.md`](codegen-fixes-plan.md)).
 
 | ID | Program | Go | GoFront |
 |---|---|---|---|
@@ -678,7 +678,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
 - [ ] Task 23.1: `range` over a type parameter decides rangeability and the iterator form from its core type (R18.1–R18.4)
   - Files: `src/typechecker/statements.js` (`_checkForCond`, `_checkRangeIterStmt`), `src/typechecker/expressions.js` (`_checkRangeExpr`)
   - Test: reject fixtures `range_param_float.go`, `range_param_bool.go`, `range_param_any.go`, `range_param_mixed_union.go`, `range_param_func_not_iterator.go`; `test/unit/language/range-iter.test.js` R18.4 prints `7` on all targets
-  - Done when: Go's messages on all targets, no wasm ICE; `_coreType` is computed before `_notRangeable` and `iteratorYieldParams` on all three paths
+  - Done when: Go's messages on all targets, no wasm ICE; `_coreType` is computed before `_notRangeable` and `iteratorYieldParams` on all three paths; the 25 `# R18` keys of `npm run fuzz:check` (section `range`, which also finds `for i, v := range a` with `T ~func(func(int) bool)`: one iteration variable only) are gone
 - [ ] Task 23.2: A type parameter has no fields (R18.5, R18.6)
   - Files: `src/typechecker/resolve.js` (`fieldType`)
   - Test: reject fixtures `param_field_read.go`, `param_field_write.go`, `param_ptr_core_field.go`; methods of the constraint (`t.M()`) still resolve

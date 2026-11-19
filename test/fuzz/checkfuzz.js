@@ -142,6 +142,8 @@ const TAG_RULES = [
 	],
 	[/^conv:ptr:.*:wasm-reject$/, "excluded: wasm converts no struct pointers"],
 	[(e) => unparsed(caseKey(e)), "parser-conversion-type"],
+	[/^range:\w+:T\w+:/, "R18"],
+	[/^range:\w+:1<<63:/, "O4"],
 	[/^binary:==:(struct,P|P,struct):invalid-wasm$/, "W1"],
 	[/[:,](1\+0i|1i|1e40|1e400)[,:]/, "O4"],
 	[/^(binary:==|switch:tag):.*:invalid-wasm$/, "wasm-iface-equality"],
@@ -321,6 +323,13 @@ const LEDGER_KEYS = [
 	"names:assign:dot-func",
 	"names:type:local-type",
 	"names:call:shadow-builtin-func",
+	"range:key:Tfloat",
+	"range:key:Tmixed",
+	"range:none:Tfuncnoiter",
+	"range:key:Titer1",
+	"range:none:1<<63",
+	"range:kv:int",
+	"range:assign:funcnoiter",
 ];
 
 const CLASSES = new Set([

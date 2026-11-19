@@ -95,7 +95,8 @@ function render(c) {
 	lines.push(...PRELUDE, "", ...(c.decls ?? []), "");
 	const tparams = c.tparams ?? [];
 	const generic = tparams.length ? `[${tparams.join(", ")}]` : "";
-	const inst = tparams.length ? `[${tparams.map(() => "int").join(", ")}]` : "";
+	const targs = c.targs ?? tparams.map(() => "int");
+	const inst = tparams.length ? `[${targs.join(", ")}]` : "";
 	lines.push(
 		`func f${generic}(${(c.params ?? []).join(", ")}) {`,
 		...[...(c.locals ?? []), ...c.body].map((l) => `\t${l}`),
@@ -349,6 +350,56 @@ function* switchCases() {
 	}
 }
 
+// A range clause accepts a string, array, pointer to array, slice, map,
+// integer or iterator function (spec *For statements with range clause*),
+// through the core type of a type parameter, and permits one or two iteration
+// variables depending on the operand. Channels are left out: GoFront has no
+// runtime for them.
+const ITER_DECLS = ["type Seq func(func(int) bool)"];
+const RANGE_KINDS = [
+	typed("ptrarray", "*[2]int"),
+	typed("iter0", "func(func() bool)"),
+	typed("iter1", "func(func(int) bool)"),
+	typed("iter2", "func(func(int, string) bool)"),
+	typed("Seq", "Seq"),
+	typed("funcnoiter", "func(func(int))"),
+	// `inst` is the type argument `main` instantiates the kind with.
+	{ ...tparam("Tslice", "~[]int"), inst: "[]int" },
+	{ ...tparam("Tstr", "~string"), inst: "string" },
+	{ ...tparam("Tint", "~int"), inst: "int" },
+	{ ...tparam("Tfloat", "~float64"), inst: "float64" },
+	{ ...tparam("Tmixed", "~[]int | ~string"), inst: "string" },
+	{
+		...tparam("Titer1", "~func(func(int) bool)"),
+		inst: "func(func(int) bool)",
+	},
+	{ ...tparam("Tfuncnoiter", "~func(func(int))"), inst: "func(func(int))" },
+	untyped("1<<63", "1 << 63"),
+];
+
+const RANGE_FORMS = [
+	["none", (x) => [`for range ${x} {`, "}"]],
+	["key", (x) => [`for i := range ${x} {`, "\t_ = i", "}"]],
+	["kv", (x) => [`for i, v := range ${x} {`, "\t_, _ = i, v", "}"]],
+	["assign", (x) => ["var i any", `for i = range ${x} {`, "}", "_ = i"]],
+];
+
+function* rangeCases() {
+	for (const [form, body] of RANGE_FORMS)
+		for (const k of [...ALL, ...RANGE_KINDS]) {
+			const a = operand(k, "a");
+			yield {
+				key: `range:${form}:${k.id}`,
+				src: render({
+					...a,
+					decls: ITER_DECLS,
+					targs: k.constraint ? [k.inst ?? "int"] : undefined,
+					body: body(a.expr),
+				}),
+			};
+		}
+}
+
 // ── Names: what an identifier refers to ──────────────────────
 
 // A name is a variable, constant, type, function, package or builtin, and
@@ -491,6 +542,7 @@ const SECTIONS = {
 	conv: convCases,
 	recv: receiverCases,
 	switch: switchCases,
+	range: rangeCases,
 	names: nameCases,
 };
 

@@ -273,7 +273,7 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
 - [ ] Task 4.4: A constant `range` operand must be representable as `int` (O4.11)
   - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`), `src/typechecker/statements.js` (`_checkForCond`)
   - Test: reject fixture `range_const_overflow.go` (`… as int value in range clause (overflows)`); `range 1 << 62` and the O4.11 controls unchanged
-  - Done when: Go's message on all targets; both paths call `_checkConstOverflow`
+  - Done when: Go's message on all targets; both paths call `_checkConstOverflow`; the three `range:*:1<<63` keys (`# O4`) of `npm run fuzz:check` are gone
 
 ### Phase 5: Assignability and conversions (roots `nested-assignability`, `dual-conversion-check`)
 - [ ] Task 5.1: Pointer and array element types must be identical; composite mismatches use Go's message (O5.1–O5.4)
