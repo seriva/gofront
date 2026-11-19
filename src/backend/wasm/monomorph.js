@@ -261,6 +261,25 @@ function rebindNamedResults(node) {
 /**
  * Replaces references to type parameters in AST nodes with concrete types.
  */
+// The pointer type node a callee spelled `(*T)` or `(**T)` stands for when
+// `T` is a type parameter in `typeSubstMap`, else null.
+function pointerTypeOfParams(callee, typeSubstMap) {
+	let n = callee;
+	let stars = 0;
+	for (;;) {
+		if (n?.kind === "ParenExpr") n = n.expr;
+		else if (n?.kind === "UnaryExpr" && n.op === "*") {
+			stars++;
+			n = n.operand;
+		} else break;
+	}
+	if (stars === 0 || n?.kind !== "Ident" || !typeSubstMap.has(n.name))
+		return null;
+	let type = cloneAst(typeSubstMap.get(n.name));
+	for (let i = 0; i < stars; i++) type = { kind: "PointerType", base: type };
+	return type;
+}
+
 function substituteTypesInAst(
 	node,
 	typeSubstMap,
@@ -369,6 +388,26 @@ function substituteTypesInAst(
 
 	// 4. CallExpr
 	if (node.kind === "CallExpr") {
+		// `(*T)(x)` with T a type parameter: the parser read the callee as a
+		// dereference, so it becomes the conversion `(*int8)(x)`.
+		const ptrTarget =
+			node.args?.length === 1
+				? pointerTypeOfParams(node.func, typeSubstMap)
+				: null;
+		if (ptrTarget) {
+			return {
+				kind: "TypeConversion",
+				targetType: ptrTarget,
+				expr: substituteTypesInAst(
+					node.args[0],
+					typeSubstMap,
+					onGenericUsage,
+					genericTypes,
+					genericFuncs,
+				),
+				_line: node._line,
+			};
+		}
 		// `T(x)` with T a type parameter becomes the conversion `int8(x)`.
 		const conv =
 			node.func?.kind === "Ident" ? typeSubstMap.get(node.func.name) : null;

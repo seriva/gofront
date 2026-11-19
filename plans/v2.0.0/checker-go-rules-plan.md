@@ -695,15 +695,15 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 22: Values of type-parameter type (root `type-param-value`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Values of other types assigned to a type parameter* and *Type parameter source assignability*. Gate: `npm run fuzz:check` loses every `# type-param-value` key and adds none.*
-- [ ] Task 22.1: A value is assignable to a type parameter only if identical, an untyped constant representable in every term, or `nil` with every term nilable (R17.1, R17.3, R17.4)
+- [x] Task 22.1: A value is assignable to a type parameter only if identical, an untyped constant representable in every term, or `nil` with every term nilable (R17.1, R17.3, R17.4)
   - Files: `src/typechecker/assignability.js` (`_assertAssignableEarlyReturn`, `assertAssignable`)
   - Test: reject fixtures `generic_assign_int_to_param.go`, `generic_assign_param_to_param.go`, `generic_return_const_to_any_param.go`, `generic_arg_const_to_any_param.go`; R17 controls in `test/unit/types/generics.test.js`
   - Done when: Go's messages on all targets; `_assertAssignableEarlyReturn` has no `target?.kind === "typeParam"` early return
-- [ ] Task 22.2: A type-parameter value is assignable only to an identical type or an interface its type set implements (R17.2, R17.5)
+- [x] Task 22.2: A type-parameter value is assignable only to an identical type or an interface its type set implements (R17.2, R17.5)
   - Files: `src/typechecker/assignability.js`
   - Test: reject fixtures `generic_assign_param_to_int.go`, `generic_forwarded_param_to_int.go`; `any(t)` and `fmt.Println(t)` still compile
   - Done when: Go's messages on all targets; no `source?.kind === "typeParam"` early return
-- [ ] Task 22.3: Conversions from and to a type parameter hold for every term of the type set (R17.6, R17 controls)
+- [x] Task 22.3: Conversions from and to a type parameter hold for every term of the type set (R17.6, R17 controls)
   - Files: `src/typechecker/expressions.js` (`_checkConversionValidity`, the `typeParam` branch at the core-type call)
   - Test: reject fixture `generic_conv_any_param_to_string.go`; `T(1)` with `T ~int | ~float64` and `string(t)` with `T ~string | ~[]byte` stay valid
   - Done when: Go's messages on all targets; the fuzz gate holds

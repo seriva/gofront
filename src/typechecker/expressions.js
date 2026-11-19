@@ -18,6 +18,7 @@ import {
 	compositeLitMaxIndex,
 	copyType,
 	DECLARED_ANY,
+	defaultType,
 	displayTypeName,
 	ERROR,
 	embeddedFieldName,
@@ -193,6 +194,23 @@ const CHECK_EXPR_DELEGATE = {
 	RangeExpr: "_checkRangeExpr",
 	InstantiationExpr: "_checkInstantiationExpr",
 };
+
+// Whether `t` is, or is built from, a type parameter.
+function mentionsTypeParam(t) {
+	switch (t?.kind) {
+		case "typeParam":
+			return true;
+		case "pointer":
+			return mentionsTypeParam(t.base);
+		case "slice":
+		case "array":
+			return mentionsTypeParam(t.elem);
+		case "map":
+			return mentionsTypeParam(t.key) || mentionsTypeParam(t.value);
+		default:
+			return false;
+	}
+}
 
 /** @type {ThisType<TypeChecker>} */
 export const expressionCheckMethods = {
@@ -1485,7 +1503,7 @@ export const expressionCheckMethods = {
 			targetType &&
 			!isAny(srcType) &&
 			!isAny(targetType) &&
-			this._checkIfaceTargetConversion(srcType, targetType, expr.expr)
+			this._checkConvTarget(srcType, targetType, expr, expr.expr, scope)
 		)
 			return targetType;
 		const srcResolved = this._deepUnderlying(srcType);
@@ -1529,6 +1547,25 @@ export const expressionCheckMethods = {
 		return targetType;
 	},
 
+	// Composite types convert only when identical, and a type parameter inside
+	// one is identical to itself alone. Reports and returns true on a mismatch.
+	_rejectTypeParamComposite(srcType, targetType, expr, operand) {
+		const src = this._deepUnderlying(srcType);
+		const tgt = this._deepUnderlying(targetType);
+		if (
+			src?.kind !== tgt?.kind ||
+			!["slice", "map", "array"].includes(src?.kind) ||
+			identical(src, tgt) ||
+			!(mentionsTypeParam(src) || mentionsTypeParam(tgt))
+		)
+			return false;
+		this.err(
+			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}`,
+			expr,
+		);
+		return true;
+	},
+
 	// `int(nil)`: only a type with a nil value converts from `nil`.
 	_rejectNilConversion(srcType, targetType, expr) {
 		if (!isNil(srcType) || !targetType || isAny(targetType)) return;
@@ -1557,6 +1594,16 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
+	// Conversions whose target or operand type is settled by its type set or
+	// method set: an interface target or a type parameter on either side.
+	_checkConvTarget(srcType, targetType, expr, operand, scope) {
+		return (
+			this._checkIfaceTargetConversion(srcType, targetType, operand) ||
+			this._checkTypeParamConv(srcType, targetType, expr, operand, scope) ||
+			this._rejectTypeParamComposite(srcType, targetType, expr, operand)
+		);
+	},
+
 	// `I(x)` with I an interface type converts exactly when x is assignable to
 	// I, so the method-set check (and its wording) is the assignment one.
 	_checkIfaceTargetConversion(srcType, targetType, operand) {
@@ -1572,7 +1619,7 @@ export const expressionCheckMethods = {
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
-		if (this._checkIfaceTargetConversion(srcType, targetType, expr.args?.[0]))
+		if (this._checkConvTarget(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		const srcResolved = this._deepUnderlying(srcType);
 		const tgtResolved = this._deepUnderlying(targetType);
@@ -2069,37 +2116,128 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
-		// A constraint with a core type (`~[]E`) converts as that type does.
-		const core = this._coreType(tp, scope);
-		if (core) {
-			const src = argTypes[0];
-			const nilOk = ["slice", "map", "pointer", "func", "chan", "interface"];
-			if (src === NIL || (src?.kind === "basic" && src.name === "nil")) {
-				if (!nilOk.includes(core.kind))
-					this.err(`cannot convert nil to ${typeStr(tp)}`, expr);
-			} else if (src?.kind !== "typeParam") {
-				this._checkConversionValidity(src, core, expr);
-			}
-			return tp;
-		}
-		if (
-			isNumeric(argTypes[0]) &&
-			!this._constraintHasTypeSet(tp.constraint, scope)
-		)
-			return this.err(
-				`cannot convert ${typeStr(argTypes[0])} to type ${typeStr(tp)}: ${typeStr(tp)} is not constrained to a set of convertible types`,
-				expr,
-			);
-		if (
-			!isNumeric(argTypes[0]) &&
-			!isAny(argTypes[0]) &&
-			argTypes[0]?.kind !== "typeParam"
-		)
-			this.err(
-				`cannot convert ${typeStr(argTypes[0])} to ${typeStr(tp)}`,
-				expr,
-			);
+		this._checkTypeParamConv(argTypes[0], tp, expr, expr.args[0], scope);
 		return tp;
+	},
+
+	// A conversion with a type parameter on either side holds when the value
+	// of every type in the source's type set converts to every type in the
+	// target's (a plain type is its own set; a constraint without a type set
+	// has none). Reports and returns true when either side is a type
+	// parameter, whether or not the conversion is valid.
+	_checkTypeParamConv(src, tgt, expr, operand, scope = this.globals) {
+		if (src?.kind !== "typeParam" && tgt?.kind !== "typeParam") return false;
+		if (!this._needsTypeParamConvCheck(src, tgt)) return true;
+		const text = operand
+			? `${exprText(operand)} (${this._convOperandKind(operand, src)})`
+			: typeStr(src);
+		const head = `cannot convert ${text} to type ${typeStr(tgt)}`;
+		if (isNil(src)) {
+			if (this._isNilless(tgt))
+				this.err(`cannot convert nil to type ${typeStr(tgt)}`, expr);
+			return true;
+		}
+		if (anyKind(src) === "go" && tgt.kind === "typeParam") {
+			this.err(`${head}: need type assertion`, expr);
+			return true;
+		}
+		const sTerms = this._convTerms(src, scope);
+		const tTerms = this._convTerms(tgt, scope);
+		if (!sTerms.length || !tTerms.length) {
+			const noSet = tTerms.length ? src : tgt;
+			this.err(
+				`${head}: ${typeStr(noSet)} is not constrained to a set of convertible types`,
+				expr,
+			);
+			return true;
+		}
+		const bad = this._firstUnconvertible(sTerms, tTerms, expr, operand);
+		if (bad) this.err(`${head}: ${this._termConvText(src, tgt, bad)}`, expr);
+		return true;
+	},
+
+	// `cannot convert int (in T) to type bool`: the pair of set members that
+	// does not convert, tagged with the type parameter each belongs to.
+	_termConvText(src, tgt, [s, t]) {
+		const inTp = (side) =>
+			side.kind === "typeParam" ? ` (in ${typeStr(side)})` : "";
+		return `cannot convert ${typeStr(s)}${inTp(src)} to type ${typeStr(t)}${inTp(tgt)}`;
+	},
+
+	// False when the conversion needs no judging: identical types, a JS-dynamic
+	// or recovered operand, or a target of `any`.
+	_needsTypeParamConvCheck(src, tgt) {
+		if (!src || !tgt || identical(src, tgt) || isAny(tgt)) return false;
+		if (src._tainted || tgt._tainted) return false;
+		const kind = anyKind(src);
+		return kind !== "dynamic" && kind !== "tainted";
+	},
+
+	// The first (source type, target type) pair of two type sets that does not
+	// convert, or null.
+	_firstUnconvertible(sTerms, tTerms, expr, operand) {
+		for (const s of sTerms)
+			for (const t of tTerms)
+				if (!this._termConvertible(s, t, expr, operand)) return [s, t];
+		return null;
+	},
+
+	_convOperandKind(operand, src) {
+		if (src.kind === "untyped") return operandKind(operand, src.base, true);
+		return src.kind === "typeParam"
+			? operandKind(
+					operand,
+					`${typeStr(src)} constrained by ${this._constraintText(src)}`,
+				)
+			: operandKind(operand, typeStr(src));
+	},
+
+	// The types a conversion operand or target ranges over.
+	_convTerms(t, scope) {
+		if (t.kind !== "typeParam") return [t];
+		return this._constraintTerms(t.constraint, new Set(), scope) ?? [];
+	},
+
+	// Whether a value of type `s` (or the untyped constant `operand`) converts
+	// to `t`, judged without reporting.
+	_termConvertible(s, t, expr, operand) {
+		if (s.kind === "untyped") {
+			const u = this._deepUnderlying(t) ?? t;
+			if (
+				this._isRealNumberType(u) &&
+				(s.base === "int" || s.base === "float64")
+			)
+				return this._untypedFitsTerm(s, operand, t);
+			s = defaultType(s);
+		} else if (this._isComplexMismatch(s, t)) return false;
+		if (this._isNonIntegerToString(s, t)) return false;
+		const saved = this.errors;
+		this.errors = [];
+		this._checkConversionValidity(s, t, expr);
+		const ok = this.errors.length === 0;
+		this.errors = saved;
+		return ok;
+	},
+
+	_isRealNumberType(u) {
+		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
+	},
+
+	// Only a complex value converts to a complex type.
+	_isComplexMismatch(s, t) {
+		return (
+			isComplex(this._deepUnderlying(t)) && !isComplex(this._deepUnderlying(s))
+		);
+	},
+
+	// Only an integer converts to a string type.
+	_isNonIntegerToString(s, t) {
+		const su = this._deepUnderlying(s);
+		return (
+			isString(this._deepUnderlying(t)) &&
+			isComplexOrNumeric(su) &&
+			!isInteger(su)
+		);
 	},
 
 	// A conversion to a type parameter needs a constraint that lists types

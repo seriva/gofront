@@ -3175,6 +3175,140 @@ func main() {
 	});
 }
 
+// ═════════════════════════════════════════════════════════════
+// Values of type-parameter type
+// ═════════════════════════════════════════════════════════════
+
+section("Generics — values of type-parameter type");
+
+const TYPE_PARAM_VALUE_REJECTS = [
+	[
+		"an int variable assigned to a type parameter",
+		`func f[T any]() { var b int; var t T = b; _ = t }
+func main() { f[int]() }`,
+		"cannot use b (variable of type int) as T value in variable declaration",
+	],
+	[
+		"a type parameter assigned to another",
+		`func f[T, U any](t T) { var u U = t; _ = u }
+func main() { f[int, int](1) }`,
+		"cannot use t (variable of type T constrained by any) as U value in variable declaration",
+	],
+	[
+		"an untyped constant returned as a type parameter of any constraint",
+		`func f[T any]() T { return 1 }
+func main() { f[int]() }`,
+		"cannot use 1 (untyped int constant) as T value in return statement",
+	],
+	[
+		"an untyped constant passed to a type parameter of any constraint",
+		`func g[T any](t T) {}
+func f[T any]() { g[T](1) }
+func main() { f[int]() }`,
+		"cannot use 1 (untyped int constant) as T value in argument",
+	],
+	[
+		"a constant no type of the set represents",
+		`func f[T ~int | ~float64]() { var t T = 1.5; _ = t }
+func main() { f[int]() }`,
+		"cannot use 1.5 (untyped float constant) as T value in variable declaration",
+	],
+	[
+		"a type parameter assigned to a concrete type",
+		`func f[T any](t T) { var b int = t; _ = b }
+func main() { f(1) }`,
+		"cannot use t (variable of type T constrained by any) as int value in variable declaration",
+	],
+	[
+		"a forwarded call result of type-parameter type",
+		`func g(a, b int) {}
+func h[T any](f func() (T, int)) { g(f()) }
+func main() { h(func() (int, int) { return 1, 2 }) }`,
+		"as int value in argument to g",
+	],
+	[
+		"a pointer to a type parameter used as a pointer to an interface",
+		`func f[T any](xs *T) { var p *any = xs; _ = p }
+func main() { x := 1; f(&x) }`,
+		"Cannot assign T to any",
+	],
+	[
+		"a type parameter converted to a type outside its set",
+		`func f[T any](t T) string { return string(t) }
+func main() { f(1) }`,
+		"cannot convert t (variable of type T constrained by any) to type string",
+	],
+	[
+		"a type parameter with a numeric set converted to bool",
+		`func f[T ~int | ~float64](t T) bool { return bool(t) }
+func main() { f(1) }`,
+		"cannot convert int (in T) to type bool",
+	],
+	[
+		"an interface value converted to a type parameter",
+		`func f[T any](a any) T { return T(a) }
+func main() { f[int](1) }`,
+		"need type assertion",
+	],
+	[
+		"a slice of a type parameter converted to a slice of another type",
+		`func f[T any](xs []T) []uint { return []uint(xs) }
+func main() { f([]int{1}) }`,
+		"cannot convert xs (variable of type []T) to type []uint",
+	],
+	[
+		"a constant truncated by a type of the set",
+		`func f[T ~int | ~float64]() T { return T(1.5) }
+func main() { f[int]() }`,
+		"cannot convert 1.5 (untyped float constant) to type T",
+	],
+];
+
+for (const [name, body, msg] of TYPE_PARAM_VALUE_REJECTS) {
+	test(`${name} is rejected on every target`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\n${body}`, { target });
+			assertErrorContains(errors, msg);
+		}
+	});
+}
+
+test("values of type-parameter type that Go accepts still compile", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num interface{ ~int | ~float64 }
+type Str interface{ ~string | ~[]byte }
+type Namer interface{ Name() string }
+type N struct{}
+
+func (N) Name() string { return "n" }
+
+func same[T any](t T) T { var u T = t; return u }
+func zero[T any]() (z T) { return z }
+func one[T Num]() T { return 1 }
+func conv[T Num](n int) T { return T(n) }
+func str[T Str](t T) string { return string(t) }
+func box[T any](t T) any { return t }
+func name[T Namer](t T) Namer { return t }
+func slice[S ~[]int](s S) []int { return s }
+func fromSlice[S ~[]int]() S { var s S = []int{1, 2}; return s }
+func ptr[T any](p *T) *T { return (*T)(p) }
+func nilOf[P ~*int]() P { return nil }
+
+func main() {
+	x := 4
+	fmt.Println(same(3), zero[int](), one[float64](), conv[float64](2))
+	fmt.Println(str("ab"), box(3), name(N{}).Name())
+	fmt.Println(slice([]int{1}), fromSlice[[]int](), *ptr(&x), nilOf[*int]() == nil)
+}
+`,
+		"3 0 1 2\nab 3 n\n[1] [1 2] 4 true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
