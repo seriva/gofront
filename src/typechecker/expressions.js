@@ -2286,13 +2286,14 @@ export const expressionCheckMethods = {
 			}
 			const targetParam = fnType.params[paramIdx];
 			const node = expr._multiForward ? null : expr.args[i];
-			// A forwarded call carries no per-argument node: report at the call.
-			this._forwardedCall = expr._multiForward ? expr : null;
+			// A forwarded call carries no per-argument node: report at the call
+			// that yields the results (`f()` in `g(f())`).
+			this._forwardedCall = expr._multiForward ? expr.args[0] : null;
 			this.assertAssignable(
 				targetParam,
 				argTypes[i],
 				node,
-				"argument",
+				expr._multiForward ? `argument to ${exprText(expr.func)}` : "argument",
 				undefined,
 				!expr._isDeferCall,
 			);

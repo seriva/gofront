@@ -518,25 +518,30 @@ export const statementCheckMethods = {
 		) {
 			this.err("Missing return value", stmt);
 		}
-		if (isVoid(returnType) && this._reportReturnCount(stmt, types.length, 0))
-			return;
+		// `return f()` forwards every result of a multi-value call.
+		const forwarded = types.length === 1 && types[0]?.kind === "tuple";
+		if (isVoid(returnType)) {
+			const shown = forwarded ? { have: typeStr(types[0]), want: "()" } : null;
+			const have = forwarded ? types[0].types.length : types.length;
+			if (this._reportReturnCount(stmt, have, 0, shown)) return;
+		}
 		// Check each returned value is assignable to its declared type
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
 				returnType.kind === "tuple" ? returnType.types : [returnType];
-			// `return f()` forwards every result of a multi-value call.
-			if (types.length === 1 && types[0]?.kind === "tuple") {
-				const forwarded = types[0].types;
-				if (forwarded.length !== expected.length) {
-					this.err(
-						`return count mismatch: have ${forwarded.length} values, want ${expected.length}`,
-						stmt,
-					);
+			if (forwarded) {
+				const results = types[0].types;
+				const shown = {
+					have: typeStr(types[0]),
+					want: `(${expected.map(typeStr).join(", ")})`,
+				};
+				if (
+					this._reportReturnCount(stmt, results.length, expected.length, shown)
+				)
 					return;
-				}
 				this._checkForwardedValues(
 					expected,
-					forwarded,
+					results,
 					stmt.values[0],
 					"return statement",
 				);
@@ -558,12 +563,14 @@ export const statementCheckMethods = {
 	},
 
 	// `return 1, 2` in a one-result func, `return 1` in a two-result one.
-	_reportReturnCount(stmt, have, want) {
+	// A forwarded call (`return f()`) has no per-value expressions, so its
+	// message lists the types (`shown`) and it reports at the call.
+	_reportReturnCount(stmt, have, want, shown = null) {
 		if (have === want || have === 0) return false;
 		const many = have > want;
 		this.err(
-			`${many ? "too many" : "not enough"} return values (have ${have}, want ${want})`,
-			many ? (stmt.values[want] ?? stmt) : stmt,
+			`${many ? "too many" : "not enough"} return values (have ${shown?.have ?? have}, want ${shown?.want ?? want})`,
+			many ? (stmt.values[shown ? 0 : want] ?? stmt) : stmt,
 		);
 		return true;
 	},
