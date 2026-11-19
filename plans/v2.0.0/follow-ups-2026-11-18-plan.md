@@ -3,7 +3,7 @@
 **Version:** v2.0.0  
 **Status:** Draft  
 **Base branch:** main  
-**Related:** Scheduled from `plans/follow-ups.md` on 2026-11-19 (`/bs-plan follow-ups`): the one-off entries that share no root with an open plan, logged by checker-strictness Phase 6 and checker-go-rules Phases 3, 4, 8, 10 and the 2026-11-18 checker fuzzer. The rest of that sweep went to [`checker-go-rules-plan.md`](checker-go-rules-plan.md) (Phases 22–27, R8.12), [`checker-operand-rules-plan.md`](checker-operand-rules-plan.md) (O4.11, O5.8, Phase 9), [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) (Phase 5) and [`diagnostic-text-plan.md`](diagnostic-text-plan.md). The shadowed-builtin entry is split: its all-target `len` form is checker-go-rules R8.12.  
+**Related:** Scheduled from `plans/follow-ups.md` on 2026-11-19 (`/bs-plan follow-ups`): the one-off entries that share no root with an open plan, logged by checker-strictness Phase 6 and checker-go-rules Phases 3, 4, 8, 10 and the 2026-11-18 checker fuzzer. The rest of that sweep went to [`checker-go-rules-plan.md`](checker-go-rules-plan.md) (Phases 22–28), [`checker-operand-rules-plan.md`](checker-operand-rules-plan.md) (O4.11, O5.8, Phase 9), [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) (Phase 5) and [`diagnostic-text-plan.md`](diagnostic-text-plan.md). The shadowed-builtin entry is split: its all-target `len` form is checker-go-rules Phase 28.  
 **Release note:** **Breaking:** passing `xs...` to a function that is not variadic is now a compile error, as in Go; call it with the slice itself. Also fixes code that failed or misbehaved: `_ = map[...]...{...}` on JS, counting the runes of a string with `for range` on JS, and on WebAssembly comparing a value with an interface, type switches on `interface{}` and defined empty interfaces, defined pointer types such as `type P *int`, and user functions named `append` or `new` next to generic standard library code.
 
 ---
@@ -27,7 +27,7 @@ Fix the follow-ups whose root is a single mechanism no open plan owns: two JS st
 | **In scope: core** | Root `spread-non-variadic`: `f(xs...)` requires a variadic `f` and no extra arguments beyond its fixed parameters | F2.1–F2.4 | |
 | **In scope: target-specific** | Roots `wasm-iface-equality`, `wasm-typeswitch-empty-iface`, `wasm-defined-pointer`, `wasm-flat-mono-scope`: `wasm` codegen of `==` with an interface on either side, type tests against every empty-interface spelling, defined pointer types, and monomorphisation scopes | F3–F6 | |
 | **Excluded: runtime / platform** | String offsets in UTF-16 code units | `for i := range "aéb"` prints `0 1 2` (Go `0 1 3`) on every target | Documented (`docs/go-compatibility.md`, *String semantics*): strings are JS strings on both backends |
-| **Excluded: deferred** | A package function named `len` (or another builtin) breaking generated Go on every target | `func len(x string) int`; `fmt.Println(s)` → `internal error in the generated Go` | Root `predeclared-scope` (generated Go), checker-go-rules R8.12 / Task 14.1 |
+| **Excluded: deferred** | A package function named `len` (or another builtin) breaking generated Go on every target | `func len(x string) int`; `fmt.Println(s)` → `internal error in the generated Go` | Root `predeclared-scope` (generated Go), checker-go-rules R8.12–R8.14, Phase 28 |
 
 ---
 
@@ -177,5 +177,5 @@ Root: `src/backend/wasm/monomorph.js:monomorphisePrograms` checks user and stdli
   - Done when: no ICE; a stdlib body never resolves a user package name
 - [ ] Task 6.2: Every builtin the stdlib generics call can be shadowed by a user function (F6.2)
   - Files: `src/backend/wasm/monomorph.js`
-  - Test: table over user functions named `append`, `new`, `copy`, `make`, `cap`, `panic`, `min`, `max` beside `slices.Sort`/`maps.Keys` (`len` excluded: R8.12), each printing Go's output on `wasm`
+  - Test: table over user functions named `append`, `new`, `copy`, `make`, `cap`, `panic`, `min`, `max` beside `slices.Sort`/`maps.Keys` (`len` excluded: checker-go-rules Phase 28), each printing Go's output on `wasm`
   - Done when: all rows pass

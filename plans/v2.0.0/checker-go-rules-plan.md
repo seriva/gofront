@@ -364,11 +364,14 @@ Root: `expressions.js:_checkExpr` (`Ident` case) marks a type name `_isTypeRef` 
 | R22.5 *sibling* | `fmt.Println(int)`; `_ = int + 1` | `int (type) is not an expression` | `Undefined: 'int'` (rejected; message only) |
 
 #### R8.12 `predeclared-scope` (generated Go, builtins) *sibling*
-Root: as R8.11: `src/lower/fmt-formatters.js` writes `len(x)` (and the other generators write builtin calls) into `gofront_gen.go`, where a package function named after the builtin resolves first. From ledger *Shadowed builtins in wasm stdlib generics* (its `wasm`-only `append`/`new` part has a different root, scheduled in [`follow-ups-2026-11-18-plan.md`](follow-ups-2026-11-18-plan.md)).
+Root: as R8.11, for builtins instead of `error`: `src/lower/fmt-formatters.js` writes `len(x)` and `make(…)`, and `src/lower/json-codecs.js` writes `len` and `append`, into `gofront_gen.go`, where a package function named after the builtin resolves first. Re-probed 2026-11-19 at `ea84ff8d` (Task 14.1 done, which pins only `error`): still failing. From ledger *Shadowed builtins in wasm stdlib generics* (its `wasm`-only `append`/`new` part has a different root, scheduled in [`follow-ups-2026-11-18-plan.md`](follow-ups-2026-11-18-plan.md)).
 
 | ID | Program | Go | GoFront |
 |---|---|---|---|
 | R8.12 | `func len(x string) int { return 9 }; func main() { s := []int{3, 1}; slices.Sort(s); fmt.Println(len("a"), s) }` | `9 [1 3]` | `internal error in the generated Go … Cannot assign []int to string` on all targets |
+| R8.13 *sibling* | `func len…`; `fmt.Println(map[string]int{"a": 1})`; `func make(x int) int`, same print | `map[a:1] 9`; `map[a:1] 2` | `internal error in the generated Go` (`Cannot assign map[string]int to string`; `Too many arguments: expected 1, got 3`) on all targets |
+| R8.14 *sibling* | `func len…` with `json.Marshal(T{[]int{1}})`; `func append(x int) int` with `json.Unmarshal` into `T{ A []int }` | `{"A":[1]} 9`; `[1 2] 3` | `internal error in the generated Go` on all targets |
+| control | `func append(x int) int` with `fmt.Println([]int{1})` | `[1] 2` | correct (must stay) |
 
 ---
 
@@ -557,8 +560,8 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
 Last behavior phase: carries the docs update for Phases 1–14.
 - [ ] Task 14.1: Generated Go does not spell a shadowed universe name (R8.11, `fmt.Println` form)
   - Files: `src/lower/fmt-formatters.js`, `src/lower/json-codecs.js`, `src/lower/gen-types.js`
-  - Test: `test/unit/types/shadowing.test.js` R8.11 `fmt.Println(e)` prints `3` on all targets; R8.12 (a package `func len`, `fmt.Println` of a slice) prints `9 [1 3]` on all targets
-  - Done when: passes; generated Go spells no builtin or universe type the package shadows; `gofront_gen.go` for programs without the shadow is byte-identical
+  - Test: `test/unit/types/shadowing.test.js` R8.11 `fmt.Println(e)` prints `3` on all targets
+  - Done when: passes; `gofront_gen.go` for programs without the shadow is byte-identical
 - [ ] Task 14.2: `wasm` identifies universe `error` by identity (R8.11, `fmt.Print` form)
   - Files: `src/backend/wasm/index.js`, `src/backend/wasm/types.js`, `src/backend/wasm/boundary.js`
   - Test: `shadowing.test.js` R8.11 `_ = e; fmt.Print("")` compiles to a valid module on `wasm`; an `error`-returning stdlib call still works next to the shadow
@@ -731,3 +734,14 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `docs/go-compatibility.md`
   - Test: none (docs)
   - Done when: the doc describes the rejections of Phases 16–27 (type-parameter operands, values and ranges, `comparable`, constraint sets, builtin arity, local types, names as values) and the fixed miscompiles (R11.4, R18.4)
+
+### Phase 28: Generated Go spells no shadowed builtin (root `predeclared-scope`, generated Go)
+*Scheduled from review follow-ups (2026-11-19): ledger *Shadowed builtins in wasm stdlib generics* (all-target `len` form). Follows Task 14.1, which pinned universe `error` in generated Go; this phase does the same for builtins. No docs change: these programs are valid Go and now compile.*
+- [ ] Task 28.1: `fmt` formatters reach builtins through a name the package cannot shadow (R8.12, R8.13)
+  - Files: `src/lower/fmt-formatters.js`, `src/lower/gen-types.js` (one helper naming the builtin, e.g. an unexported alias declared in `gofront_gen.go` when the package shadows it)
+  - Test: `test/unit/types/shadowing.test.js` R8.12 → `9 [1 3]`, R8.13 → `map[a:1] 9`, `map[a:1] 2` on all targets; the `append` control
+  - Done when: passes; `gofront_gen.go` for programs without the shadow is byte-identical
+- [ ] Task 28.2: JSON codecs use the same helper (R8.14)
+  - Files: `src/lower/json-codecs.js`
+  - Test: `shadowing.test.js` R8.14 → `{"A":[1]} 9`, `[1 2] 3` on all targets; a table over user functions named `len`, `cap`, `append`, `make`, `copy`, `new` with `fmt.Println` and `json.Marshal`/`Unmarshal` of a struct with slice and map fields
+  - Done when: every row prints Go's output; no `internal error in the generated Go`
