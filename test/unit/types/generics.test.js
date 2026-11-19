@@ -3142,6 +3142,14 @@ const R12_BUILTINS = [
 	["cap(v)", "_ = cap(v)", "for cap"],
 	["clear(v)", "clear(v)", "cannot clear v"],
 	["delete(v, 1)", "delete(v, 1)", "is not a map"],
+	[
+		"append(v, 1)",
+		"_ = append(v, 1)",
+		"invalid append: argument must be a slice",
+	],
+	["copy(v, v)", "copy(v, v)", "invalid copy: argument must be a slice"],
+	["min(v, v)", "_ = min(v, v)", "cannot be ordered"],
+	["max(v, v)", "_ = max(v, v)", "cannot be ordered"],
 ];
 
 for (const [name, stmt, msg] of R12_BUILTINS) {

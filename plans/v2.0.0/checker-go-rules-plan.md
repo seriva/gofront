@@ -643,7 +643,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/typechecker/expressions.js` (`_lenOperandOk`, `_checkClearOperand`, `_checkDeleteOperand`)
   - Test: reject fixtures `generic_len_any.go`, `generic_clear_any.go`, `generic_delete_any.go`; accept `len` with `T ~[]int | ~string`
   - Done when: one `CompileError` per definition on all targets, no ICE
-- [ ] Task 17.2: `append`, `copy`, `min` and `max` check the type set (R12.2)
+- [x] Task 17.2: `append`, `copy`, `min` and `max` check the type set (R12.2)
   - Files: `src/typechecker/expressions.js` (`_appendOperandOk`, `_orderedOperandOk`)
   - Test: reject fixtures `generic_append_any.go`, `generic_min_any.go`; accept `min` with `T cmp.Ordered`
   - Done when: as Task 17.1

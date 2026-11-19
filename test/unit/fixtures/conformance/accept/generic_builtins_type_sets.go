@@ -19,6 +19,8 @@ func Append[S ~[]E, E any](s S, e E) S { return append(s, e) }
 
 func Copy[S ~[]int](dst, src S) int { return copy(dst, src) }
 
+func CopyString[B ~[]byte](b B) int { return copy(b, "abc") }
+
 func Min[T cmp.Ordered](a, b T) T { return min(a, b) }
 
 func Max[T ~int | ~float64 | ~string](a, b T) T { return max(a, b) }
@@ -34,6 +36,8 @@ func main() {
 	fmt.Println(Append(Names{"x"}, "y"))
 	dst := make([]int, 2)
 	fmt.Println(Copy(dst, []int{7, 8, 9}), dst)
+	bs := make([]byte, 2)
+	fmt.Println(CopyString(bs), string(bs))
 	fmt.Println(Min(3, 2), Min("b", "a"), Max(1.5, 2.5), Max("a", "b"))
 }
 
@@ -44,4 +48,5 @@ func main() {
 // 1
 // [x y]
 // 2 [7 8]
+// 2 ab
 // 2 a 2.5 b

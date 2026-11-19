@@ -99,6 +99,7 @@ const BUILTIN_CHECK = {
 			);
 			return st;
 		}
+		if (s._reportSliceElemMismatch("append", e.args[0], st, e)) return st;
 		const sb = s._deepUnderlying(st);
 		if (sb?.kind === "slice") s._checkAppendArgs(sb, e, at);
 		return st;
@@ -1053,15 +1054,18 @@ export const expressionCheckMethods = {
 	},
 
 	// `min` and `max` take ordered operands: numbers and strings.
+	// A type parameter needs every type in its type set to be ordered.
 	_orderedOperandOk(t) {
 		if (!t || t._tainted) return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => this._orderedOperandOk(u));
 		if (t.kind === "untyped")
 			return (
 				t.base !== "bool" && t.base !== "nil" && !t.base.startsWith("complex")
 			);
 		if (anyKind(t) === "go") return false;
 		const u = this._deepUnderlying(t);
-		if (!u || u.kind === "typeParam" || isAny(u)) return true;
+		if (!u || isAny(u)) return true;
 		return u.kind === "basic" && !/^(bool|complex(64|128))$/.test(u.name);
 	},
 
@@ -1180,26 +1184,49 @@ export const expressionCheckMethods = {
 	// `copy` takes slices; a string may be the source.
 	// Element type of a copy destination slice or shared buffer.
 	_copyElem(t) {
-		const u = this._deepUnderlying(t);
+		const u = this._coreUnderlying(t);
 		return u?.kind === "slice" || u?.kind === "shared"
 			? this.resolveType(u.elem)
 			: null;
 	},
 
 	_checkCopyOperands(e, dt, st) {
-		const bad = (t, i) => {
-			if (i === 1 && this._isStringIntoBytes(this._copyElem(dt), t))
-				return false;
-			return !this._appendOperandOk(t);
-		};
-		for (const [i, t] of [dt, st].entries()) {
-			if (!bad(t, i)) continue;
-			this.err(
-				`invalid copy: argument must be a slice; have ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], t)})`,
-				e,
+		// A string source (or a type parameter whose type set holds strings and
+		// byte slices) copies into a `[]byte`.
+		const ok = (t, i) =>
+			this._typeSetOk(
+				t,
+				(u) =>
+					(i === 1 && this._isStringIntoBytes(this._copyElem(dt), u)) ||
+					this._appendOperandOk(u),
 			);
-			return false;
+		for (const [i, t] of [dt, st].entries()) {
+			if (!ok(t, i)) {
+				this.err(
+					`invalid copy: argument must be a slice; have ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], t)})`,
+					e,
+				);
+				return false;
+			}
+			if (this._reportSliceElemMismatch("copy", e.args[i], t, e)) return false;
 		}
+		return true;
+	},
+
+	// `append` and `copy` on a type parameter need one element type across
+	// the slices in its type set; reports and returns true when they differ.
+	_reportSliceElemMismatch(builtin, operand, t, e) {
+		if (t?.kind !== "typeParam") return false;
+		const elems = (this._constraintTerms(t.constraint, new Set()) ?? [])
+			.map((u) => this._deepUnderlying(u))
+			.filter((u) => u?.kind === "slice")
+			.map((u) => this.resolveType(u.elem));
+		const other = elems.find((el) => !identical(el, elems[0]));
+		if (!other) return false;
+		this.err(
+			`invalid ${builtin}: mismatched slice element types ${typeStr(elems[0])} and ${typeStr(other)} in ${exprText(operand)} (${this._capOperandKind(operand, t)})`,
+			e,
+		);
 		return true;
 	},
 
@@ -2457,14 +2484,17 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	// `append` takes a slice; a type parameter and a JS-dynamic value are not
-	// judged, and arrays and shared buffers have their own messages.
+	// `append` takes a slice (every type in a type parameter's type set); a
+	// JS-dynamic value is not judged, and arrays and shared buffers have their
+	// own messages.
 	_appendOperandOk(t) {
-		if (!t || t._tainted || t.kind === "typeParam") return true;
+		if (!t || t._tainted) return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => this._appendOperandOk(u));
 		if (anyKind(t) === "go") return false;
 		const u = this._deepUnderlying(t);
 		if (!u || isAny(u)) return true;
-		return u.kind === "slice" || u.kind === "shared" || u.kind === "typeParam";
+		return u.kind === "slice" || u.kind === "shared";
 	},
 
 	// Each appended element must be assignable to the slice's element type;
