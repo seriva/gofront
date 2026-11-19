@@ -38,6 +38,7 @@ Close the checker gaps the checker-strictness reviews found, by fixing the mecha
 | **In scope: core** | Roots `forwarded-tuple`, `node-positions`, `error-classification`: diagnostics only (count, position, error class); no change to accepted programs | R10.1–R10.8 | |
 | **In scope: core** | Roots `type-param-value`, `type-param-core-type`, `constraint-type-sets`: a value of type-parameter type is assignable and convertible only as its type set allows; a type parameter has no fields and ranges only through its core type; a constraint's type set is the intersection of its elements, and `~T` and approximation terms are validated | R17–R19 | |
 | **In scope: core** | Root `builtin-operands` (arity, `min`/`max`): every builtin checks its argument count before its operands, and `min`/`max` unify their arguments to one type | R20 | |
+| **In scope: core** | Roots `forwarded-tuple` (builtins, return position), `typeswitch-binding`: a multi-value call forwarded to a builtin supplies its values as the arguments; a type-switch binding is a new, used-or-reported variable | R23, R24 | |
 | **In scope: core** | Roots `local-type-scope`, `type-as-value`: a type declared in a function or block is bound in that block only; a type, builtin or package name used as a value, and a value used as a type, is reported with Go's message | R21, R22 | |
 | **Excluded: deferred** | Entries that no longer reproduce against real Go | *Duplicate bool cases* (`switch b { case 1 == 1: case true: }`), *Impossible assertions* (`i.(J)` with conflicting `M`): `go run` (1.26.10) accepts both | Not defects: Go accepts them. Deleted |
 | **Excluded: deferred** | `wasm` struct layout | *WASM map keys* (`map[struct{ X int }]int` lookup → `0`, want `10`), *WASM struct conversion* (`struct{ E }(a)` → invalid wasm), sibling `append(s, A{5})` into `[]struct{ X int }` → invalid wasm (Go: `1`) | Root `wasm-struct-field-list`, scheduled in [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Phase 1 (W1.6–W1.8) |
@@ -373,6 +374,39 @@ Root: as R8.11, for builtins instead of `error`: `src/lower/fmt-formatters.js` w
 | R8.14 *sibling* | `func len…` with `json.Marshal(T{[]int{1}})`; `func append(x int) int` with `json.Unmarshal` into `T{ A []int }` | `{"A":[1]} 9`; `[1 2] 3` | `internal error in the generated Go` on all targets |
 | control | `func append(x int) int` with `fmt.Println([]int{1})` | `[1] 2` | correct (must stay) |
 
+### Review follow-ups (2026-11-19, second sweep)
+
+Scheduled from `plans/follow-ups.md` (entries from PRs #244, #245 and Phase 14) by `/bs-plan follow-ups`. Same driver and method as the first 2026-11-19 sweep, at `a37a1def`. Entry *Forwarded struct literal to identical defined struct* (`g(f())` with `f() (struct{ X int }, int)` and `g(a S, b int)`) is the documented restriction (`docs/go-compatibility.md`: multi-value calls need an explicit conversion; GoFront says `here: convert it explicitly with S(v)`); deleted, not scheduled. Entry *Unparenthesized `const A = iota`* was fixed in `a37a1def`.
+
+#### R23 `forwarded-tuple` (builtins, return position)
+Root: the builtin checks (`expressions.js:checkBuiltin` and the `BUILTIN_CHECK` entries) read `expr.args` as written, so a single multi-value call argument is one operand of tuple type; `_multiForward` (set at `expressions.js:1912`) only unpacks for ordinary calls. `statements.js:_reportReturnCount` reports a too-few forwarded `return f()` at the statement (`stmt`) but a too-many one at `stmt.values[0]`.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R23.1 (ledger) | `func f() (int, int) { return 1, 2 }; fmt.Println(min(f()))` | `1` | `invalid argument: f() (value of type (int, int)) cannot be ordered` (all targets) |
+| R23.2 *sibling* | `max(f())`; `complex(f())` with `(float64, float64)`; `copy(f())` with `([]int, []int)`; `delete(f())` with `(map[string]int, string)` | `2`; `(1+2i)`; `2`; ok | rejected (`cannot be ordered`, `complex() requires exactly 2 arguments`, `invalid copy`, `is not a map`) |
+| R23.3 *sibling* | `func f() ([]int, int) { return []int{1}, 2 }; fmt.Println(append(f()))` | `[1 2]` | `invalid append: argument must be a slice; have f() (value of type ([]int, int))` |
+| R23.4 *sibling* | `func f() (string, string); _ = len(f())` | `too many arguments for len(f()) (expected 1, found 2)` | `invalid argument: f() (value of type (string, string)) for built-in len` (rejected; message only) |
+| R23.5 (ledger) | `func three() (int, string, bool) {\n\treturn pair()\n}` with `pair() (int, string)` | `not enough return values` at `pair()` (col 9) | same message at `return` (col 2) |
+| control | `return pair()` from a one-result function (too many) | reported at `pair()` | correct (must stay) |
+
+#### R18.7 `type-param-core-type` sibling: range assignment cascade
+Root: `statements.js:_checkForStmt` (`:671`) runs `checkStmt(stmt.init)` when `_checkRangeIterStmt` returns `null`, which it also does after rejecting a non-iterator func, so the range assignment is checked a second time as `x = fn`.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R18.7 (ledger, PR #245) | `func fn(int) {}; var x int; for x = range fn { _ = x }`; also `for x, y = range fn` | one error: `cannot range over fn …` | that error plus `Cannot assign func(int) void to int` |
+| control | `for x := range fn`; `var x int; for x = range 1.5` | one error | correct (must stay) |
+
+#### R24 `typeswitch-binding`
+Root: `src/parser/statements.js:_parseTypeSwitchBody` and `statements.js:_checkTypeSwitchStmt` (`:825`) accept `_` as the binding, and `_checkTypeSwitchStmt` calls `caseScope.lookup(stmt.assign)` (`:857`) in every clause, which marks the binding used.
+
+| ID | Program | Go | GoFront |
+|---|---|---|---|
+| R24.1 (ledger) | `switch _ := v.(type) { case int: }` | `no new variable on left side of :=` | accepted (all targets) |
+| R24.2 (ledger) | `switch x := v.(type) { case int: }`; *sibling* two cases, neither using `x` | `x declared and not used` | accepted (all targets) |
+| control | `x` used in one case only; used only in `default` | `1` | correct (must stay) |
+
 ---
 
 ## Approach
@@ -683,6 +717,10 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/typechecker/resolve.js` (`fieldType`)
   - Test: reject fixtures `param_field_read.go`, `param_field_write.go`, `param_ptr_core_field.go`; methods of the constraint (`t.M()`) still resolve
   - Done when: Go's `t.X undefined (type T has no field or method X)` on all targets
+- [ ] Task 23.3: A rejected range operand is not checked again as an assignment (R18.7)
+  - Files: `src/typechecker/statements.js` (`_checkForStmt`, `_checkRangeIterStmt` return value)
+  - Test: reject fixtures `range_assign_non_iterator_func.go`, `range_assign2_non_iterator_func.go` with one `// ERROR` each; `test/unit/types/checks.test.js` asserts exactly one error for both; R18.7 controls
+  - Done when: one error per statement on all targets
 
 ### Phase 24: Constraint type sets (root `constraint-type-sets`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Constraint set elements* and *Approximation of composite types*.*
@@ -746,3 +784,25 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/lower/json-codecs.js`
   - Test: `shadowing.test.js` R8.14 → `{"A":[1]} 9`, `[1 2] 3` on all targets; a table over user functions named `len`, `cap`, `append`, `make`, `copy`, `new` with `fmt.Println` and `json.Marshal`/`Unmarshal` of a struct with slice and map fields
   - Done when: every row prints Go's output; no `internal error in the generated Go`
+
+### Phase 29: Forwarded tuples into builtins and returns (root `forwarded-tuple`)
+*Scheduled from review follow-ups (2026-11-19, second sweep): ledger *Builtins on forwarded tuples* and *Too-few forwarded return values position*. Lands after Phase 25: the arity table counts the forwarded values.*
+- [ ] Task 29.1: A multi-value call that is a builtin's only argument supplies its values as the arguments (R23.1–R23.4)
+  - Files: `src/typechecker/expressions.js` (`checkBuiltin`: unpack before the arity and operand checks), `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js` (spread the tuple into the builtin's operands)
+  - Test: `test/unit/builtins/core.test.js` R23.1 → `1`, R23.2 → `2`, `(1+2i)`, `2`, `0`, R23.3 → `[1 2]` with `assertAllTargetsOutput`; reject fixture `len_forwarded_tuple.go` (`too many arguments for len(f()) (expected 1, found 2)`)
+  - Done when: Go's result on all targets, valid `wasm`
+- [ ] Task 29.2: A too-few forwarded `return` reports at the call (R23.5)
+  - Files: `src/typechecker/statements.js` (`_reportReturnCount`)
+  - Test: `test/unit/types/checks.test.js` asserts line:col `4:9` for R23.5; the too-many control keeps its column
+  - Done when: both branches report at `stmt.values[0]` for a forwarded call
+
+### Phase 30: Type switch bindings (root `typeswitch-binding`)
+*Scheduled from review follow-ups (2026-11-19, second sweep): ledger *Type switch blank binding* and *Unused type switch binding*.*
+- [ ] Task 30.1: `_` cannot be a type-switch binding (R24.1)
+  - Files: `src/typechecker/statements.js` (`_checkTypeSwitchStmt`), `src/parser/statements.js` (`_parseTypeSwitchBody` keeps the binding's position)
+  - Test: reject fixture `typeswitch_blank_binding.go` (`no new variable on left side of :=`)
+  - Done when: Go's message on all targets
+- [ ] Task 30.2: A type-switch binding used in no clause is reported (R24.2)
+  - Files: `src/typechecker/statements.js` (`_checkTypeSwitchStmt`: drop the marking `lookup`, report once if no clause's symbol was used)
+  - Test: reject fixtures `typeswitch_unused_binding.go`, `typeswitch_unused_binding_two_cases.go` (`x declared and not used`); R24 controls in `test/unit/types/switch-cases.test.js`
+  - Done when: Go's message on all targets; `example/` and `stdlib/` still compile (`npm run check`, stdlib build)

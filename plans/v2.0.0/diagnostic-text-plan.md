@@ -28,7 +28,7 @@ GoFront's diagnostics name the right line and reject the right programs (the che
 |---|---|---|---|
 | **In scope: core** | Tooling: a Go-backed audit of every reject marker (`npm run conformance:go`, manual, Go needed) with a baseline | `test/fuzz/conformance-go.js`, `test/fuzz/gocheck/` all-errors mode | |
 | **In scope: core** | Root `operand-text`: one printer of an operand's source text (composite literals, index, selector, assertion, conversion and call operands) and one description of its kind (`variable of type T`, `constant 2 of type float64`, `untyped float constant 1000`) | D1.1–D1.6 | |
-| **In scope: core** | Roots `type-text-elided`, `const-key-text`: types print in full (`interface{}`, `struct{X int}`); duplicate keys and cases print the constant value | D2.1–D2.4 | |
+| **In scope: core** | Roots `type-text-elided`, `const-key-text`, `constraint-text`: types and constraints print in full (`interface{}`, `struct{X int}`, `~int \| ~float64`); duplicate keys and cases print the constant value | D2.1–D2.5 | |
 | **In scope: core** | Root `assign-message-text`: every assignability failure reports `cannot use x (… of type X) as Y value in <context>` with Go's context names | D3.1–D3.4 | |
 | **In scope: core** | Root `operator-message-text`: operator failures report Go's `mismatched types X and Y` / `operator op not defined on x (…)` | D4.1–D4.2 | |
 | **Excluded: deferred** | Wrong verdicts (Go rejects, GoFront accepts, or the reverse) | everything in the checker fuzzer baseline | Owned by checker-go-rules and checker-operand-rules |
@@ -63,6 +63,7 @@ Root: `src/typechecker/types.js:typeStr` returns `t.name || "struct{...}"` / `"i
 | D2.1 (`incdec_empty_interface`) | `var v interface{}; v++` | `invalid operation: v++ (non-numeric type interface{})` | `… (non-numeric type interface{...})` |
 | D2.2 *sibling* (`append_elem_struct`, `convert_embedded_vs_named_field`) | any message naming an unnamed struct type | `struct{Y string}`, `struct{E}` | `struct{...}` |
 | D2.3 (`duplicate_map_key_forms`) | `map[string]int{"a": 1, k: 2}` with `const k = "a"`; `0x1`, `1.0` keys | `duplicate key "a" in map literal`; `duplicate key 1 …` | `duplicate key k …`; `0x1`, `1.0` |
+| D2.5 (ledger *Inline union constraint text*, 2026-11-19) | `func M[T ~int \| ~float64](a, b T) T { return a % b }`; *sibling* `T int \| float64`; `T interface{ ~int \| ~float64 }` | `… (variable of type T constrained by ~int \| ~float64)` / `int \| float64` / `interface{~int \| ~float64}` | `constrained by ?` / `?` / `interface{...}`; root `assignability.js:_constraintText` falls through to `typeStr`, which has no spelling for an inline union; control: a named constraint prints `Num` |
 | D2.4 *sibling* (`duplicate_case_other_forms`) | `case 1: case 0x1:` | `duplicate case 0x1 (constant 1 of type int) in expression switch` | `duplicate case 0x1 in expression switch` (headline prefix matches; the constant description is missing) |
 
 ### D3 `assign-message-text`
@@ -133,6 +134,10 @@ Root: `src/typechecker/assignability.js:302` falls back to `Invalid operation: $
   - Files: `src/typechecker/expressions.js` (duplicate map key), `src/typechecker/statements.js` (duplicate case)
   - Test: remove `// pending: const-key-text` from `duplicate_map_key_forms`; `duplicate_case_other_forms` markers extended to Go's `(constant 1 of type int)`
   - Done when: Go's headline on all targets
+- [ ] Task 2.3: Inline union constraints print their terms (D2.5)
+  - Files: `src/typechecker/types.js` (`typeStr` for union constraints), `src/typechecker/assignability.js` (`_constraintText`)
+  - Test: reject fixtures `generic_mod_inline_union.go`, `generic_mod_inline_union_no_tilde.go`, `generic_mod_inline_iface.go` with Go's `constrained by …` text
+  - Done when: no `constrained by ?` on any target; the named-constraint control unchanged
 
 ### Phase 3: Assignment wording (root `assign-message-text`)
 - [ ] Task 3.1: One `_assignError` with operand, kind and context (D3.1–D3.3)

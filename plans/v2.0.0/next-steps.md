@@ -17,13 +17,14 @@ Everything is uncommitted on `feat/checker-go-rules`. It splits into four commit
 
 The fuzzer goes after the two source commits because its baseline was written with both applied: on an earlier commit `npm run fuzz:check` fails, and so does the baseline sample in `checkfuzz.test.js` when Go is on `PATH`.
 
-## 2. Finish checker Go rules (Phases 16–28)
+## 2. Finish checker Go rules (Phases 16–30)
 
 Plan: [`checker-go-rules-plan.md`](checker-go-rules-plan.md). Phases 1–15 are done (Phase 9 took `R9` from 2,079 baseline entries to 370). Run each remaining phase as before, plus the fuzzer gate below after each one.
 
 - [ ] **Phases 16–21** (review follow-ups of 2026-11-18): type-parameter operands, builtins on type parameters, `comparable`, generic types over a struct, non-boolean condition wording, redeclaring `true`/`false`/`nil`. Phase 16 should remove most of the remaining 370 `R9` entries.
 - [ ] **Phases 22–28** (sweep of 2026-11-19): type-parameter values (Phase 22 should remove the 889 `type-param-value` entries), core types, constraint type sets, builtin arity, local type scope, names used as values (Phase 27 removes the 21 `type-as-value` entries and carries the docs update), generated Go and shadowed builtins.
-- [ ] **Route the ledger's remaining entries** (8 `unrouted` in [`follow-ups.md`](../follow-ups.md), from Phases 11–14) with `/bs-plan follow-ups` before the epic merges.
+- [ ] **Phases 29–30** (second sweep of 2026-11-19): builtins and returns with forwarded multi-value calls (`min(f())` and siblings are wrongly rejected today), type-switch bindings.
+- [x] **Route the ledger's remaining entries** (2026-11-19): the ledger is empty; `const A = iota` was fixed in `a37a1def`.
 
 ### Fuzzer gate, after each phase
 
