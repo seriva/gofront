@@ -751,11 +751,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 26: Block-scoped type declarations (root `local-type-scope`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Function-local types leak*.*
-- [ ] Task 26.1: A local type is bound only in its block (R21.1, R21.2)
+- [x] Task 26.1: A local type is bound only in its block (R21.1, R21.2)
   - Files: `src/typechecker/index.js` (`_defineTypeBinding`, `_registerLocalTypePlaceholder`), `src/typechecker/resolve.js` (`resolveTypeNode` finds local types through the scope chain)
   - Test: reject fixtures `local_type_used_outside.go`, `block_type_used_outside.go`; R21 controls in `test/unit/types/shadowing.test.js`
   - Done when: Go's `undefined: Q` on all targets; `this.globals` holds no local type
-- [ ] Task 26.2: A local type does not change a package or dot-imported value of the same name (R21.3)
+- [x] Task 26.2: A local type does not change a package or dot-imported value of the same name (R21.3)
   - Files: `src/typechecker/index.js`
   - Test: accept fixture `local_type_shadows_dot_import/` (dot-imported `var Q int`, local `type Q`)
   - Done when: compiles and prints Go's output on all targets

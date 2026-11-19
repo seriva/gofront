@@ -255,7 +255,7 @@ export const resolveMethods = {
 					if (fromScope?.kind === "typeParam") return fromScope;
 					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
-				const named = this.types.get(node.name);
+				const named = this._visibleType(node.name, scope);
 				if (named) {
 					this._useQualifiedTypeName(node, named);
 					return this._checkConstraintUse(named, node);
@@ -681,10 +681,23 @@ export const resolveMethods = {
 		return fn;
 	},
 
+	// The type `name` names where `scope` is checked: a type declared in a
+	// function or block is not visible outside of it.
+	_visibleType(name, scope) {
+		if (
+			!this._localTypesVisible &&
+			this._localTypes.has(name) &&
+			scope &&
+			scope.lookupObject(name)?.kind !== "type"
+		)
+			return undefined;
+		return this.types.get(name);
+	},
+
 	resolveTypeNodeName(node, scope) {
 		if (!node) return ANY;
 		if (node.kind === "TypeName" || node.kind === "GenericTypeName") {
-			const named = this.types.get(node.name);
+			const named = this._visibleType(node.name, scope);
 			if (named) return named;
 		}
 		return this.resolveTypeNode(node, scope);

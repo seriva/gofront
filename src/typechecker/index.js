@@ -141,6 +141,8 @@ export class TypeChecker {
 		this._importedConsts = new Map(); // dot-imported const name -> value
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._untypedImports = new Set(); // names bound by npm imports without types
+		this._localTypes = new Set(); // names of types declared in a function or block
+		this._localTypesVisible = false; // checking the generated Go, which names any local type
 		this._importedTypes = new WeakSet(); // named types reached through an imported package
 		this._pendingConstraintUses = []; // constraint-interface checks waiting on a type declaration
 		this._setupGlobals();
@@ -367,6 +369,9 @@ export class TypeChecker {
 	_setCurrentFile(p) {
 		this._currentFile = p._filename ?? null;
 		this._currentSource = p._source ?? null;
+		// The generated Go sits at package level and names any local type; they
+		// are unique by then (`renameLocalTypes`).
+		this._localTypesVisible = !!p._generated;
 	}
 
 	check(program) {
@@ -1014,7 +1019,7 @@ export class TypeChecker {
 		// A type declared inside a function is registered before its fields
 		// resolve so `next *L` finds it; package-level types already are.
 		this._registerLocalTypePlaceholder(decl, scope);
-		let underlying = this.resolveTypeNode(decl.type, this.globals);
+		let underlying = this.resolveTypeNode(decl.type, scope ?? this.globals);
 		// `type W V` with V a defined type: W's underlying type is V's.
 		if (!decl.isAlias && underlying.kind === "named")
 			underlying = this._underlyingOver(underlying, decl);
@@ -1077,21 +1082,13 @@ export class TypeChecker {
 		return { kind: "interface", methods: new Map() };
 	}
 
-	// Binds a declared type's name.  A type declared in a function binds the
-	// name in that function's scope; the package scope still receives the type
-	// (types resolve through it) but keeps what its binding of that name is, so
-	// a package-level variable of the same name stays a value.
+	// Binds a declared type's name.  A type declared in a function or block
+	// binds the name in that block's scope only (`_localTypes` lets type
+	// resolution tell it from a package-level type); the package scope is never
+	// touched, so a package-level name of any kind stays what it is.
 	_defineTypeBinding(name, type, scope) {
-		if (!scope || scope === this.globals) {
-			this.globals.defineType(name, type);
-			return;
-		}
-		scope.defineType(name, type);
-		const g = this.globals;
-		// A package-level value of the same name stays a value.
-		const bound = g.object(name);
-		if (bound && bound.kind !== "type") bound.type = type;
-		else g.defineType(name, type);
+		if (scope && scope !== this.globals) this._localTypes.add(name);
+		(scope ?? this.globals).defineType(name, type);
 	}
 
 	_registerLocalTypePlaceholder(decl, scope) {
