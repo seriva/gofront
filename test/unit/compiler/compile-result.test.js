@@ -7,6 +7,7 @@ import {
 	CompileError,
 	compileDir,
 	compileFiles,
+	compileWasm,
 } from "../../../src/compiler.js";
 import {
 	assert,
@@ -103,4 +104,14 @@ test("compileFiles returns warnings", () => {
 			);
 		},
 	);
+});
+
+section("compileWasm validation");
+
+test("compileWasm still returns a valid module", () => {
+	const res = compileWasm(`package main
+func main() { println(1 + 2) }
+`);
+	assert(WebAssembly.validate(res.wasm), "module validates");
+	assertEqual(res.errors.length, 0);
 });

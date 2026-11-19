@@ -2,6 +2,8 @@
 // Mounts an HTML/expression tree onto a parent DOM node by emitting plain
 // document.createElement / appendChild / setAttribute calls.
 
+import { UnsupportedError } from "../../typechecker/types.js";
+
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
 /** @type {ThisType<CodeGen>} */
@@ -34,7 +36,7 @@ export const templGenMethods = {
 
 	genCssDecl(decl) {
 		if (decl.params && decl.params.length > 0) {
-			throw new Error(
+			throw new UnsupportedError(
 				`css ${decl.name}: parameterized css declarations are not yet supported`,
 			);
 		}

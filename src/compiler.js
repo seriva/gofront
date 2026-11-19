@@ -833,5 +833,6 @@ export function compileWasm(source, options = {}) {
 		return { wasm: null, errors: checker.errors };
 	}
 
+	if (res?.wasm) validateWasm(res.wasm);
 	return { ...res, errors: [] };
 }
