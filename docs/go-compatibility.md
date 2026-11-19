@@ -96,8 +96,10 @@ half(float64(n)) // ok
 
 - **Arithmetic** (`+ - * /`, including `complex64` and `complex128`) needs two operands of identical type. A defined type such as `type Celsius float64` only mixes with itself, so `Celsius + Fahrenheit` and `Celsius + float64` are errors.
 - **Comparison** (`== != < <= > >=`) needs one operand assignable to the other, which for numbers and strings means identical types: `float64 == int` and `Celsius == Fahrenheit` are errors.
-- **Untyped constants** adapt to the other operand: `x + 1.5` and `x * 2` are fine for a `float64` `x`, and `1 << n` takes its type from the context. The shift count of `<<` and `>>` may have any integer type.
+- **Untyped constants** adapt to the other operand: `x + 1.5` and `x * 2` are fine for a `float64` `x`, and `1 << n` takes its type from the context. The shift count of `<<` and `>>` may have any integer type, and a float constant that is a whole number counts as an integer (`x << 1.0`). A constant of the wrong kind is an error: `s == 'a'` with a string `s` is `mismatched types string and untyped rune`, and `f + 1i` with a `float64` `f` is an error too.
+- **Strings and complex numbers** follow the same rule: `a + b` needs identical string types, and the result keeps a defined type such as `type Name string`.
 - **Integer-only operators**: `%`, `&`, `|`, `^` and `&^` (and their compound forms) need integer operands; `f % 2` on a `float64` is `operator % not defined on f (variable of type float64)`.
+- **Compound assignment and `++`/`--`** apply the operator's rule: `f <<= 1` on a `float64`, `s++` on a string (`non-numeric type string`), `b += true`, and `a += t` with two different defined string types are errors. `s += "x"` on a defined string type is fine.
 - **Assignment contexts** (variable declarations, assignments, call arguments, returns, struct fields, composite literal elements) follow the same rule: an `int` is not a `float64` value.
 - **Conversions** between numeric types, from a number to a string, and between a string and `[]byte` or `[]rune` are always explicit. Converting a struct to another struct type ignores field tags when the field names, types and order match.
 
@@ -136,13 +138,15 @@ _ = v.(int) * 2 // ok
 if s, ok := v.(string); ok { ... }
 ```
 
+A defined empty interface such as `type MyAny any` behaves like `any` here, but it is its own type: a `*MyAny` is not assignable to `*any`. A Go `any` is not a boolean, so it cannot be a `templ` `if` condition either.
+
 A value is a Go `any` when your code declares it so (a variable, parameter, result, map or slice element of type `any`), or when it comes from `recover()`, `any(x)`, `x.(any)` or the `default:` clause of a type switch on an `any`.
 
 Values that come from JavaScript stay dynamic: browser globals and their members (`document`, `window`, `console`), ECMAScript built-ins (`Math`, `JSON`) and values declared `any` in a `.d.ts` file. Typed Web APIs such as `WebGL2RenderingContext`, `GPUDevice`, `ArrayBuffer` and TypedArrays are checked statically. The checker lets you do arithmetic on dynamic values, call them, index them, read members and assign them to a typed variable (`width := window.innerWidth * 2`) without an assertion. A dynamic value you store in a variable you declared as `any` is a Go `any` from then on.
 
 #### nil
 
-`nil` is a value of pointer, slice, map, func and interface types. `var n int = nil` and `var s string = nil` are errors, as is any other assignment of `nil` to a number, string, bool or array. Dynamic JavaScript values (see above) accept `nil`.
+`nil` is a value of pointer, slice, map, func and interface types. `var n int = nil` and `var s string = nil` are errors, as is any other assignment of `nil` to a number, string, bool, struct or array, and comparing such a value with `nil` (`n == nil` is `mismatched types int and untyped nil`). `nil` has no type of its own: `x := nil` (`use of untyped nil in assignment`), `var x = nil`, `const c = nil` and `nil == nil` are errors. In a generic function, `nil` is a value of type `T` only when every type in `T`'s constraint is nilable (`T *int | []int`). Dynamic JavaScript values (see above) accept `nil`.
 
 #### Statements and assignments
 
@@ -180,13 +184,37 @@ _ = i.(S) // impossible type assertion: i.(S)
 
 Asserting to an interface type, and asserting on an empty interface or `any`, is always allowed.
 
+#### Generic function bodies
+
+A generic function body is checked once, where it is defined, against every type its constraint allows, even if the function is never called. An operator must work for each of those types: `+` for numbers and strings, `-`, `*` and `/` for numbers, `%`, `&`, `|`, `^`, `&^` and shifts for integers, and `<`, `<=`, `>`, `>=` for ordered types. A constraint without type terms (`any`, `comparable`, or one that only lists methods) allows only `==` and `!=`, and only when the type is comparable:
+
+```go
+func Mod[T ~int | ~float64](a, b T) T { return a % b }
+// invalid operation: operator % not defined on a (variable of type T constrained by ...)
+
+func Sum[T ~int | ~float64](a, b T) T { return a + b } // ok
+func Add[T any](a, b T) T { return a + b }             // invalid operation: operator + not defined on a
+```
+
+Narrow the constraint (an integer-only set for `%`, `cmp.Ordered` for `<`) to fix these.
+
 #### Generic functions as values
 
 A generic function is called with inferred type arguments (`Id(3)`) or instantiated explicitly before it is used as a value (`f := Id[int]`, `slices.SortFunc(xs, cmp.Compare[int])`). Using it without either, as in `f := Id` or `fmt.Println(slices.Reverse)`, is `cannot use generic function Id without instantiation`. GoFront does not infer the type arguments from the target of an assignment or from a parameter type, so `var f func(int) int = Id` and `slices.SortFunc(xs, cmp.Compare)` need the explicit `[int]`.
 
 #### Names that shadow predeclared types
 
-A type declared inside a function may reuse a predeclared basic type name or `any`, as in Go (`type int32 = string`, `type float64 struct{ X int }`). The name means the local type from its declaration to the end of the block and means the predeclared type everywhere else; declaring the same name again in a nested block, or reusing `error` or `comparable`, is not supported.
+As in Go, your own declarations may reuse a predeclared name: a type named like a basic type, `any`, `error` or `comparable` (`type int32 = string`, `type error int`), a function or variable named like a builtin (`func len() int`, `max := 3`), and a local type named like an import. The name means your declaration in its scope, at package level or from a local declaration to the end of its block, nested blocks included, and keeps its predeclared meaning everywhere else: the standard library's `error` results, `errors.New` and `fmt` still use the built-in `error` interface next to a package's own `type error`.
+
+```go
+type error int
+
+func main() {
+	var e error = 3
+	_, err := strconv.Atoi("x") // err is the built-in error interface
+	fmt.Println(e, err != nil)  // 3 true
+}
+```
 
 #### Internal compiler errors
 
