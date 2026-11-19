@@ -745,7 +745,7 @@ export class CodeGen {
 	// `type S Base` with Base a struct declared in this package: the struct
 	// AST S inherits its fields from, or null.  A generic `type W[T any] S[T]`
 	// takes its fields from the checked type, so W's class has W's own type
-	// parameters.
+	// parameters; so does `type W sub.S` over another package's struct.
 	_definedStructAst(decl) {
 		if (decl.isAlias) return null;
 		if (this.checker?.types.get(decl.name)?.underlying?.kind !== "struct")
@@ -758,7 +758,7 @@ export class CodeGen {
 				return { kind: "StructType", fields: [] };
 			if (t.kind !== "TypeName" && t.kind !== "Ident") return null;
 			const next = this._typeDeclsByName?.get(t.name);
-			if (!next) return null;
+			if (!next) return { kind: "StructType", fields: [] };
 			t = next.type;
 		}
 		return null;

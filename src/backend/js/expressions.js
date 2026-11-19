@@ -2087,7 +2087,9 @@ export const expressionGenMethods = {
 
 	// Converting a struct to a different defined struct type builds a copy in
 	// the target's class (so its methods exist); null when not applicable.
-	_genStructClassConversion(targetName, srcType, inner) {
+	// An instance of a generic target keeps its own type arguments, not the
+	// source's.
+	_genStructClassConversion(targetName, srcType, inner, targetType) {
 		if (!targetName || targetName.includes("[")) return null;
 		const target = this.checker?.types.get(targetName);
 		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
@@ -2096,7 +2098,15 @@ export const expressionGenMethods = {
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
 		const cls = this._dequalify(targetName);
-		return `Object.assign(new ${jsClassName(cls)}(), ${this._cloneJs(srcType, inner)})`;
+		const clone = this._cloneJs(srcType, inner);
+		const typed = targetType?.typeArgs?.length
+			? this._genericStructNew(targetName, targetType.typeArgs)
+			: null;
+		if (typed) {
+			this.useHelper("generics");
+			return `((s, o) => Object.assign(o, s, { [__tz]: o[__tz] }))(${clone}, ${typed})`;
+		}
+		return `Object.assign(new ${jsClassName(cls)}(), ${clone})`;
 	},
 
 	// Conversion to an anonymous struct type: the result is a plain object
@@ -2119,6 +2129,7 @@ export const expressionGenMethods = {
 			targetType?.kind === "named" ? targetType.name : undefined,
 			expr.args[0]?._type,
 			arg,
+			targetType,
 		);
 		if (structConv) return structConv;
 		const base =
@@ -3763,6 +3774,7 @@ export const expressionGenMethods = {
 			target,
 			expr.expr._type,
 			inner,
+			expr._type,
 		);
 		if (structConv) return structConv;
 		if (target === "error") {

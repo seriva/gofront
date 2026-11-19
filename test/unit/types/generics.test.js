@@ -12,6 +12,7 @@ import {
 	compile,
 	compileDir,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	Lexer,
 	runJs,
@@ -3008,6 +3009,88 @@ func main() {
 }
 `,
 		"9 9\n1 2 2\nfalse true\ntrue true\n2\n",
+	);
+});
+
+test("defined types over another package's struct get a class", async () => {
+	for (const target of ["js", "both", "wasm"]) {
+		const directive = target === "js" ? "" : `//gofront:target ${target}\n`;
+		const { lines } = await compileHybridProject({
+			"sub/sub.go": `${target === "js" ? "" : "//gofront:target both\n"}package sub
+
+type S struct{ X int }
+`,
+			"main.go": `${directive}package main
+
+import (
+	"fmt"
+	"./sub"
+)
+
+type W[T any] sub.S
+type V sub.S
+
+func (w W[T]) Get() int { return w.X }
+func (v V) Get() int    { return v.X }
+
+func main() {
+	w := W[int]{X: 5}
+	w.X++
+	v := V(sub.S{X: 2})
+	var a any = W[string](sub.S{X: 3})
+	_, ok1 := a.(W[string])
+	_, ok2 := a.(W[int])
+	fmt.Println(w.X, w, w.Get(), v, v.Get(), ok1, ok2)
+}
+`,
+		});
+		assertEqual(lines.join("\n"), "6 {6} 6 {2} 2 true false", target);
+	}
+});
+
+test("converting a struct to a generic defined type tags the target's instantiation", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[A, B any] struct {
+	X A
+	Y B
+}
+type W[A, B any] S[B, A]
+type V[A, B any] S[A, int]
+type P struct{ X string }
+type Q[T any] P
+
+func conv[T any](s S[string, T]) any { return W[T, string](s) }
+
+func main() {
+	var a any = W[int, string](S[string, int]{X: "a", Y: 1})
+	_, ok1 := a.(W[int, string])
+	_, ok2 := a.(W[string, int])
+	fmt.Println(ok1, ok2)
+	var b any = V[string, bool](S[string, int]{X: "b"})
+	_, ok3 := b.(V[string, bool])
+	_, ok4 := b.(V[string, int])
+	fmt.Println(ok3, ok4)
+	var c any = Q[string](P{X: "c"})
+	_, ok5 := c.(Q[string])
+	_, ok6 := c.(Q[int])
+	fmt.Println(ok5, ok6)
+	w := W[int, string](S[string, int]{X: "d", Y: 2})
+	var d any = S[string, int](w)
+	_, ok7 := d.(S[string, int])
+	_, ok8 := d.(S[int, string])
+	fmt.Println(ok7, ok8)
+	e := conv[bool](S[string, bool]{X: "e", Y: true})
+	_, ok9 := e.(W[bool, string])
+	_, ok10 := e.(W[string, bool])
+	fmt.Println(ok9, ok10)
+	fmt.Println(a, b, c, d, e)
+}
+`,
+		"true false\ntrue false\ntrue false\ntrue false\ntrue false\n{a 1} {b 0} {c} {d 2} {e true}\n",
 	);
 });
 
