@@ -3516,6 +3516,8 @@ export const expressionGenMethods = {
 	},
 
 	_tconvBinaryOperands(expr, l, r) {
+		// A shift's operand never takes the type of its count.
+		if (expr.op === "<<" || expr.op === ">>") return [l, r];
 		if (
 			expr.left._type?.kind === "typeParam" &&
 			expr.right._type?.kind === "untyped"
@@ -3539,6 +3541,7 @@ export const expressionGenMethods = {
 	},
 
 	_coerceUntyped64(expr, l, r, isLeft64, isRight64) {
+		if (expr.op === "<<" || expr.op === ">>") return [l, r];
 		if (isLeft64 && expr.right?._type?.kind === "untyped") {
 			if (!r.endsWith("n") && /^-?\d+$/.test(r)) return [l, `${r}n`];
 		} else if (isRight64 && expr.left?._type?.kind === "untyped") {
@@ -3551,7 +3554,7 @@ export const expressionGenMethods = {
 		const isShift = expr.op === "<<" || expr.op === ">>";
 		if (isLeft64 && !isRight64 && !isShift) r = `BigInt(${r})`;
 		else if (isRight64 && !isLeft64 && !isShift) l = `BigInt(${l})`;
-		if (isShift && isRight64) r = `Number(${r})`;
+		if (isShift) r = this._looseShiftCount(r, expr.right?._type);
 		return [l, r];
 	},
 
@@ -4045,14 +4048,37 @@ export const expressionGenMethods = {
 		return true;
 	},
 
-	// A non-constant signed shift count on a narrow integer is checked for a
-	// negative value (Go panics); 64-bit counts arrive as BigInt.
+	// A non-constant shift count as a JS number: a 64-bit count, or a type
+	// parameter whose type set holds one, arrives as BigInt.
+	_shiftCountNumber(r, countType) {
+		return this._mayBeBigInt(countType) ? `Number(${r})` : r;
+	},
+
+	// A non-constant signed shift count (a signed integer, or a type parameter
+	// whose type set holds one) is checked for a negative value (Go panics).
+	// `r` is already a JS number (`_shiftCountNumber`).
 	_guardShiftCount(r, countType) {
 		if (!countType || countType.kind === "untyped") return r;
-		const name = this._typeName(countType);
-		if (!name || name.startsWith("u")) return r;
+		const terms =
+			countType.kind === "typeParam"
+				? this.checker?._constraintTerms(countType.constraint, new Set())
+				: [countType];
+		if (!terms?.some((t) => this._isSignedName(this._typeName(t)))) return r;
 		this.useHelper("shift");
-		return `__shc(${this._is64BitInt(countType) ? `Number(${r})` : r})`;
+		return `__shc(${r})`;
+	},
+
+	_isSignedName(name) {
+		return !!name && !name.startsWith("u");
+	},
+
+	// The count of a shift emitted as the plain JS operator (`<<`, `<<=`): a
+	// number, and checked for a negative value when it is a type parameter.
+	_looseShiftCount(r, countType) {
+		const n = this._shiftCountNumber(r, countType);
+		return countType?.kind === "typeParam"
+			? this._guardShiftCount(n, countType)
+			: n;
 	},
 
 	// `/`, `%`, `<<` and `>>` on a narrow integer paste an operand into the
@@ -4084,6 +4110,7 @@ export const expressionGenMethods = {
 		}
 		const tName = this._typeName(type);
 		const isShift = op === "<<" || op === ">>";
+		if (isShift) r = this._shiftCountNumber(r, countType);
 		const rc = isShift ? this._guardShiftCount(r, countType) : r;
 		if (tName === "float32") {
 			return `Math.fround(${l} ${op} ${r})`;

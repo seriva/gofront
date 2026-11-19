@@ -2860,6 +2860,86 @@ func main() {
 	);
 });
 
+test("R11.4 a shift by a 64-bit type-parameter count runs on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func A[T ~uint64](s T) {
+	x := 1 << s
+	fmt.Println(x+1, x == 1024, 1<<s == 1024)
+}
+
+func B[T ~uint64](s T) int { return 1 << s }
+
+func C[T ~uint64](s T) int {
+	var x int = 1 << s
+	return (1 << s) + x
+}
+
+func D[T ~uint | ~uint64](s T) int { return 1 << s }
+
+func E[T ~uint64](s T) int {
+	a := 1
+	b := a << s
+	a <<= s
+	return a + b
+}
+
+func F[T ~uint64](s T) int32 {
+	var x int32 = 1 << s
+	return x
+}
+
+func main() {
+	A(uint64(10))
+	fmt.Println(B(uint64(10)), C(uint64(10)), D(uint64(10)), D(uint(10)), E(uint64(10)), F(uint64(10)))
+	var a int32 = 1
+	var c int64 = 3
+	var u uint64 = 4
+	fmt.Println(a<<c, 1<<u)
+}
+`,
+		"1025 true true\n1024 2048 1024 1024 2048 1024\n8 16\n",
+	);
+});
+
+test("R11.4 a negative type-parameter shift count panics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover()) }()
+	f()
+}
+
+func G[T ~int32](s T) int32 {
+	var x int32 = 1 << s
+	return x
+}
+
+func H[T ~int](s T) int { return 1 << s }
+
+func L[T ~int](s T) int {
+	a := 1
+	a <<= s
+	return a
+}
+
+func main() {
+	fmt.Println(G(int32(10)), H(10), L(10))
+	try("G", func() { G(int32(-1)) })
+	try("H", func() { H(-1) })
+	try("L", func() { L(-1) })
+}
+`,
+		"1024 1024 1024\nG runtime error: negative shift amount\nH runtime error: negative shift amount\nL runtime error: negative shift amount\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
