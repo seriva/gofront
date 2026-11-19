@@ -1144,7 +1144,11 @@ export const resolveMethods = {
 
 	checkConstraint(typeArg, constraint, node) {
 		if (!constraint || isAny(constraint)) return;
-		if (constraint.kind === "basic" && constraint.name === "comparable") return;
+		if (constraint.kind === "basic" && constraint.name === "comparable") {
+			if (!this._isComparable(typeArg))
+				this.err(`${typeStr(typeArg)} does not satisfy comparable`, node);
+			return;
+		}
 		if (constraint.kind === "UnionConstraint") {
 			this._checkUnionConstraint(typeArg, constraint, node);
 			return;
