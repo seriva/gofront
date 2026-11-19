@@ -650,11 +650,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 18: `comparable` is a constraint (root `comparable-constraint`)
 *Scheduled from review follow-ups (2026-11-18): *Bare comparable constraint* (routed here: same mechanism as the inferred-argument entry).*
-- [ ] Task 18.1: `checkConstraint` tests `comparable` on explicit, call-inferred and partially instantiated type arguments (R13.1, R13.2, R13.4)
+- [x] Task 18.1: `checkConstraint` tests `comparable` on explicit, call-inferred and partially instantiated type arguments (R13.1, R13.2, R13.4)
   - Files: `src/typechecker/resolve.js` (`checkConstraint`)
   - Test: reject fixtures `comparable_struct_slice.go`, `comparable_map.go`, `comparable_func_inferred.go`, `comparable_index_value.go`; accept `error`, structs of comparable fields, pointers, channels, arrays
   - Done when: Go's message on all targets; no wasm ICE for `slices.Index[[]func()]`
-- [ ] Task 18.2: A type parameter satisfies `comparable` only through its constraint (R13.3)
+- [x] Task 18.2: A type parameter satisfies `comparable` only through its constraint (R13.3)
   - Files: `src/typechecker/resolve.js`
   - Test: reject `generic_any_to_comparable.go`; accept `T comparable` and `T cmp.Ordered` forwarded to `comparable`
   - Done when: as Task 18.1

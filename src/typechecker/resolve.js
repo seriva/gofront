@@ -1101,12 +1101,15 @@ export const resolveMethods = {
 	},
 
 	// Go's comparability: slices, maps and funcs are not comparable, nor are
-	// arrays and structs that contain them.
+	// arrays and structs that contain them. A type parameter is comparable
+	// only when every type in its constraint's type set is.
 	_isComparable(t, seen = new Set()) {
 		const base = this._deepUnderlying(t);
 		if (!base || seen.has(base)) return true;
 		seen.add(base);
 		switch (base.kind) {
+			case "typeParam":
+				return this._typeParamComparable(base);
 			case "slice":
 			case "map":
 			case "func":
@@ -1114,9 +1117,13 @@ export const resolveMethods = {
 			case "array":
 				return this._isComparable(base.elem, seen);
 			case "struct":
-				return [...(base.fields?.values() ?? [])].every((f) =>
-					this._isComparable(f, seen),
-				);
+				// Declared fields only: base.fields also holds promoted fields and
+				// collapses repeated blank names.
+				return (
+					base._structFields
+						? base._structFields.map((f) => f.type)
+						: [...(base.fields?.values() ?? [])]
+				).every((f) => this._isComparable(f, seen));
 			default:
 				return true;
 		}
@@ -1144,7 +1151,11 @@ export const resolveMethods = {
 
 	checkConstraint(typeArg, constraint, node) {
 		if (!constraint || isAny(constraint)) return;
-		if (constraint.kind === "basic" && constraint.name === "comparable") return;
+		if (constraint.kind === "basic" && constraint.name === "comparable") {
+			if (!this._isComparable(typeArg))
+				this.err(`${typeStr(typeArg)} does not satisfy comparable`, node);
+			return;
+		}
 		if (constraint.kind === "UnionConstraint") {
 			this._checkUnionConstraint(typeArg, constraint, node);
 			return;
