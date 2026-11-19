@@ -2940,6 +2940,77 @@ func main() {
 	);
 });
 
+test("R14.1 fields of a generic type declared over a struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[T any] struct{ X T }
+type W[T any] S[T]
+
+func main() {
+	var w W[int]
+	w.X = 42
+	fmt.Println(w.X)
+	p := &w
+	p.X = 7
+	fmt.Println(w.X)
+	v := W[int]{X: 3}
+	v.X++
+	fmt.Println(v.X, v)
+	ws := []W[int]{{X: 1}}
+	ws[0].X = 5
+	fmt.Println(ws[0].X)
+}
+`,
+		"42\n7\n4 {4}\n5\n",
+	);
+});
+
+test("R14.1 methods of a generic type declared over a struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[T any] struct{ X T }
+
+func (s S[T]) SM() T { return s.X }
+
+type W[T any] S[T]
+
+func (w W[T]) Get() T { return w.X }
+func (w *W[T]) Set(v T) { w.X = v }
+func (w *W[T]) IsNil() bool { return w == nil }
+
+type Getter interface{ Get() int }
+type Niler interface{ IsNil() bool }
+
+func main() {
+	w := W[int]{X: 3}
+	w.Set(9)
+	var g Getter = w
+	fmt.Println(w.Get(), g.Get())
+	s := S[int]{X: 1}
+	w2 := W[int](s)
+	w2.X = 2
+	fmt.Println(s.X, w2.Get(), S[int](w2).SM())
+	var a any = w2
+	_, ok := a.(S[int])
+	_, ok2 := a.(W[int])
+	fmt.Println(ok, ok2)
+	var p *W[int]
+	var n Niler = p
+	fmt.Println(n != nil, n.IsNil())
+	var b any = []W[int]{{X: 1}, {X: 2}}
+	fmt.Println(b.([]W[int])[1].X)
+}
+`,
+		"9 9\n1 2 2\nfalse true\ntrue true\n2\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -743,9 +743,11 @@ export class CodeGen {
 	// ── Type declarations ────────────────────────────────────────
 
 	// `type S Base` with Base a struct declared in this package: the struct
-	// AST S inherits its fields from, or null.
+	// AST S inherits its fields from, or null.  A generic `type W[T any] S[T]`
+	// takes its fields from the checked type, so W's class has W's own type
+	// parameters.
 	_definedStructAst(decl) {
-		if (decl.isAlias || decl.typeParams) return null;
+		if (decl.isAlias) return null;
 		if (this.checker?.types.get(decl.name)?.underlying?.kind !== "struct")
 			return null;
 		let t = decl.type;

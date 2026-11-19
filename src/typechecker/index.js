@@ -999,7 +999,7 @@ export class TypeChecker {
 			let underlying = this.resolveTypeNode(decl.type, typeScope);
 			// `type W[T any] V[T]`: W's underlying type is V[T]'s.
 			if (underlying.kind === "named")
-				underlying = this._genericUnderlyingOver(underlying, decl);
+				underlying = this._underlyingOver(underlying, decl);
 			underlying = this._definedEmptyInterface(underlying, decl);
 			named.underlying = underlying;
 			named._target = this.target;
@@ -1051,8 +1051,7 @@ export class TypeChecker {
 	// The underlying type of a type declared over the defined type `base`
 	// (`type W V`): V's underlying type, followed through every defined type V
 	// is itself declared over, so the underlying type of a defined type is
-	// not a defined type again (but see `_genericUnderlyingOver`). A struct or
-	// interface type carries the name of its declaration, so W gets its own
+	// not a defined type again. A struct or interface type carries the name of its declaration, so W gets its own
 	// copy (and none of V's methods). `base` is returned as it is while a type
 	// on the way is not collected yet, which only an invalid cycle
 	// (`type A B; type B A`) leaves behind.
@@ -1065,15 +1064,6 @@ export class TypeChecker {
 			return { ...inner, name: decl.name, methods: new Map() };
 		if (inner.kind === "interface") return { ...inner, name: decl.name };
 		return inner;
-	}
-
-	// `_underlyingOver` for a generic declaration (`type W[T any] V[T]`) or one
-	// of its instances. A generic type declared over a struct type stays
-	// declared over it: JS output has no class of its own for such a type and
-	// constructs V's.
-	_genericUnderlyingOver(base, decl) {
-		const over = this._underlyingOver(base, decl);
-		return over.kind === "struct" ? base : over;
 	}
 
 	// `type MyAny any` is a defined empty interface, like `type B interface{}`.
