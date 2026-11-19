@@ -72,7 +72,17 @@ const NILABLE_KINDS = new Set([
 function minMaxType(at) {
 	const typed = at.find((t) => t && t.kind !== "untyped");
 	if (typed) return typed;
-	return at.find((t) => t?.base === "float64") ?? at[0] ?? ANY;
+	return (
+		at.find((t) => t?.base === "float64") ??
+		at.find((t) => t?.rune) ??
+		at[0] ??
+		ANY
+	);
+}
+
+// The kind rank of an untyped constant: int < rune < float64.
+function untypedRank(t) {
+	return t?.base === "float64" ? 2 : t?.rune ? 1 : 0;
 }
 
 // Argument counts per builtin: [min, max] (max Infinity when variadic).
@@ -142,6 +152,7 @@ const BUILTIN_CHECK = {
 		// `make(S, n)` with S a type parameter makes its core type.
 		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
 		if (core) ta._coreType = core;
+		s._checkMakeArity(e, core ?? made);
 		for (const size of e.args.slice(1, 3))
 			s._checkIntegerConstOperand(size, "size", sc);
 		return made;
@@ -1129,16 +1140,18 @@ export const expressionCheckMethods = {
 		if (anyKind(t) === "go") return false;
 		const u = this._deepUnderlying(t);
 		if (!u || isAny(u)) return true;
-		return u.kind === "basic" && !/^(bool|complex(64|128))$/.test(u.name);
+		return (
+			u.kind === "basic" && !/^(bool|nil|void|complex(64|128))$/.test(u.name)
+		);
 	},
 
 	_checkMinMax(e, at) {
 		for (let i = 0; i < e.args.length; i++) {
 			if (this._orderedOperandOk(at[i])) continue;
-			this.err(
-				`invalid argument: ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], at[i])}) cannot be ordered`,
-				e,
-			);
+			const what = isNil(at[i])
+				? "nil"
+				: `${exprText(e.args[i])} (${this._capOperandKind(e.args[i], at[i])})`;
+			this.err(`invalid argument: ${what} cannot be ordered`, e);
 			return ANY;
 		}
 		if (!this._unifyMinMaxArgs(e, at)) return ANY;
@@ -1152,37 +1165,52 @@ export const expressionCheckMethods = {
 	// do: typed arguments are identical, an untyped constant converts to the
 	// typed type, and untyped constants share a kind class. Returns false
 	// after reporting a mismatch.
+	// The untyped constant argument `j` meets the typed type `tt` (argument
+	// `i` is the later of the two and names the mismatch).
+	_fitMinMaxConst(e, ut, j, tt, tNode, i, untypedFirst) {
+		const uNode = e.args[j];
+		const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
+		const node = untypedFirst
+			? { op: e.func?.name, left: uNode, right: tNode }
+			: { op: e.func?.name, left: tNode, right: uNode };
+		if (tt.kind === "typeParam")
+			return this._convertUntypedToTypeParam(tt, ut, uNode, node, report);
+		const [lt, rt] = untypedFirst ? [ut, tt] : [tt, ut];
+		if (!this.convertUntyped(lt, rt, node, report)) return false;
+		return !this._checkConstOverflow(tt, ut, uNode);
+	},
+
 	_unifyMinMaxArgs(e, at) {
-		let acc = at[0];
-		let accNode = e.args[0];
-		for (let i = 1; i < e.args.length; i++) {
+		let typed = null;
+		let typedNode = null;
+		let acc = null; // the untyped constants seen so far, as one type
+		const pending = []; // untyped arguments before the first typed one
+		for (let i = 0; i < e.args.length; i++) {
 			const cur = at[i];
-			const node = { op: e.func?.name, left: accNode, right: e.args[i] };
 			const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
-			const accTyped = acc?.kind !== "untyped";
-			const curTyped = cur?.kind !== "untyped";
-			if (accTyped && curTyped) {
-				if (!this._minMaxIdentical(acc, cur)) {
-					report(acc, cur);
+			if (cur?.kind !== "untyped") {
+				if (typed && !this._minMaxIdentical(typed, cur)) {
+					report(typed, cur);
 					return false;
+				}
+				if (!typed) {
+					typed = cur;
+					typedNode = e.args[i];
+					for (const j of pending)
+						if (!this._fitMinMaxConst(e, at[j], j, typed, typedNode, i, true))
+							return false;
 				}
 				continue;
 			}
-			if (!this.convertUntyped(acc, cur, node, report)) return false;
-			const untypedNode = accTyped ? e.args[i] : accNode;
-			if (accTyped !== curTyped) {
-				const typed = accTyped ? acc : cur;
-				if (this._checkConstOverflow(typed, accTyped ? cur : acc, untypedNode))
+			if (typed) {
+				if (!this._fitMinMaxConst(e, cur, i, typed, typedNode, i, false))
 					return false;
+				continue;
 			}
-			if (accTyped) continue;
-			if (curTyped) {
-				acc = cur;
-				accNode = e.args[i];
-			} else if (cur.base !== "int" && cur.base !== "rune") {
-				acc = cur;
-				accNode = e.args[i];
-			}
+			const node = { op: e.func?.name, left: e.args[0], right: e.args[i] };
+			if (acc && !this.convertUntyped(acc, cur, node, report)) return false;
+			if (!acc || untypedRank(cur) > untypedRank(acc)) acc = cur;
+			pending.push(i);
 		}
 		return true;
 	},
@@ -2718,6 +2746,19 @@ export const expressionCheckMethods = {
 			t?.name === "Mask32x4" ||
 			t?.underlying?.kind === "simd" ||
 			t?.kind === "simd"
+		);
+	},
+
+	// `make` takes a size (and a capacity) for a slice, an optional size for
+	// a map or channel.
+	_checkMakeArity(e, t) {
+		const kind = this._deepUnderlying(t)?.kind;
+		const [lo, hi] = kind === "slice" ? [2, 3] : [1, 2];
+		if (!["slice", "map", "chan"].includes(kind)) return;
+		if (e.args.length >= lo && e.args.length <= hi) return;
+		this.err(
+			`invalid operation: make(${[typeStr(t), ...e.args.slice(1).map(exprText)].join(", ")}) expects ${lo} or ${hi} arguments; found ${e.args.length}`,
+			e,
 		);
 	},
 

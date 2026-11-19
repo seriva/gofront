@@ -216,7 +216,13 @@ export const assignabilityMethods = {
 	// converts it only when its kind (number, bool, string) is the kind of
 	// every type in the type set, else the types are mismatched; the constant
 	// must then be representable in every type of the set.
-	_convertUntypedToTypeParam(tp, c, cNode, node) {
+	_convertUntypedToTypeParam(
+		tp,
+		c,
+		cNode,
+		node,
+		report = this._reportMismatch,
+	) {
 		const [lt, rt] = node.left === cNode ? [c, tp] : [tp, c];
 		const cls = untypedClass(c);
 		const all = (pred) =>
@@ -226,7 +232,7 @@ export const assignabilityMethods = {
 			all(isBool) !== (cls === "bool") ||
 			all(isString) !== (cls === "string")
 		) {
-			this._reportMismatch(lt, rt, node);
+			report.call(this, lt, rt, node);
 			return false;
 		}
 		const terms = this._constraintTerms(tp.constraint, new Set()) ?? [];
