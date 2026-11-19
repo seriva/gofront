@@ -3447,6 +3447,18 @@ func main() {
 	);
 });
 
+test("dereferencing a value whose type parameter has a pointer core type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type S struct{ X int }
+func (s S) M() int { return s.X }
+func f[T ~*S](t T) int { return (*t).X + (*t).M() }
+func main() { s := S{42}; fmt.Println(f(&s)) }`,
+		"84\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -31,6 +31,7 @@ import {
 	isVoid,
 	iteratorYieldParams,
 	Scope,
+	TAINTED_ANY,
 	typeStr,
 } from "./types.js";
 
@@ -635,6 +636,7 @@ export const statementCheckMethods = {
 				stmt.cond,
 				"expr",
 				this.checkExpr(stmt.cond.expr, inner),
+				inner,
 			);
 			const ct = this._rangeCore(operand, stmt.cond.expr, inner);
 			if (operand?._declared || this._notRangeable(ct))
@@ -1020,8 +1022,14 @@ export const statementCheckMethods = {
 				rangeExpr.expr,
 			);
 			// A rejected operand is not checked again as an assignment source.
-			if (rejected && initStmt.kind !== "DefineStmt") {
-				this._checkRangeIterAssignVars(initStmt.lhs, scope);
+			if (rejected) {
+				if (initStmt.kind === "DefineStmt")
+					this._bindRangeIterDefineVars(
+						initStmt.lhs,
+						{ yieldParams: initStmt.lhs.map(() => TAINTED_ANY) },
+						scope,
+					);
+				else this._checkRangeIterAssignVars(initStmt.lhs, scope);
 				return { yieldParams: [], rejected };
 			}
 			return null;

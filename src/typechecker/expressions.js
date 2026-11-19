@@ -301,7 +301,11 @@ export const expressionCheckMethods = {
 					}
 					return this.err(`Undefined: '${expr.name}'`, expr);
 				}
-				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
+				// A value whose type is a type parameter is not the type parameter.
+				if (
+					this._namesType(expr.name, t, scope) ||
+					(t.kind === "typeParam" && scope.bindsType(expr.name))
+				)
 					expr._isTypeRef = true;
 				// JS output keeps the Go name of what names a type: a type is a
 				// class under that name, and a type parameter is looked up by it.
@@ -383,12 +387,16 @@ export const expressionCheckMethods = {
 		return this.err(`${typeStr(t)} (type) is not an expression`, expr);
 	},
 
-	_checkDeref(ot, expr) {
+	_checkDeref(ot, expr, scope) {
 		// JS-dynamic values dereference freely; an error-recovery type has
 		// already been reported.
 		if (anyKind(ot) === "dynamic") return ANY;
 		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
+		if (ot.kind === "typeParam") {
+			const core = this._coreType(ot, scope);
+			if (core?.kind === "pointer") return core.base;
+		}
 		const ou = this._deepUnderlying(ot);
 		if (ou?.kind === "pointer") return ou.base;
 		this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
@@ -738,7 +746,7 @@ export const expressionCheckMethods = {
 				expr._isTypeRef = true;
 				return this._typeRefOperand(expr, { kind: "pointer", base: ot });
 			}
-			return this._checkDeref(ot, expr);
+			return this._checkDeref(ot, expr, scope);
 		}
 		return ot;
 	},
@@ -1328,7 +1336,17 @@ export const expressionCheckMethods = {
 	// Go's shorthand for pointers to arrays: `p[i]`, `p[lo:hi]`, `len(p)` and
 	// `range p` mean `(*p)[i]` and so on.  The operand is rewritten to an
 	// explicit dereference so every backend sees the array.
-	_derefArrayPtr(holder, key, t) {
+	// With `scope`, a type parameter whose core type is such a pointer counts.
+	_derefArrayPtr(holder, key, t, scope) {
+		if (scope && t?.kind === "typeParam") {
+			const core = this._coreType(t, scope);
+			if (core?.kind !== "pointer") return t;
+			const under = this._deepUnderlying(core.base);
+			if (under?.kind !== "array") return t;
+			holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
+			holder[key]._type = core.base;
+			return core.base;
+		}
 		if (t?.kind !== "pointer") return t;
 		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
 		const under = this._deepUnderlying(base);
@@ -1833,6 +1851,7 @@ export const expressionCheckMethods = {
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
+			scope,
 		);
 		const core = this._rangeCore(collType, expr.expr, scope);
 		if (collType?._declared || this._notRangeable(core)) {
