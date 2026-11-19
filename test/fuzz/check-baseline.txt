@@ -2725,14 +2725,6 @@ builtins:real:1.5:go-accept/gf-reject # builtin-complex-operands
 builtins:real:1:go-accept/gf-reject # builtin-complex-operands
 builtins:real:1e40:go-accept/gf-reject # O4
 builtins:real:rune:go-accept/gf-reject # builtin-complex-operands
-comparable:constraint:PS:go-reject/gf-accept # R13
-comparable:constraint:SAS:go-reject/gf-accept # R13
-comparable:constraint:Tany:go-reject/gf-accept # R13
-comparable:constraint:arrfunc:go-reject/gf-accept # R13
-comparable:constraint:arrslice:go-reject/gf-accept # R13
-comparable:constraint:func:go-reject/gf-accept # R13
-comparable:constraint:map:go-reject/gf-accept # R13
-comparable:constraint:slice:go-reject/gf-accept # R13
 comparable:mapkey:PS:go-reject/gf-accept # map-key-comparability
 comparable:mapkey:SAS:go-reject/gf-accept # map-key-comparability
 comparable:mapkey:Tany:go-reject/gf-accept # map-key-comparability
