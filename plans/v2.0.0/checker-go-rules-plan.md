@@ -475,7 +475,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Files: `src/lower/fmt-formatters.js`, `src/lower/json-codecs.js`, `src/lower/gen-types.js`
   - Test: `test/unit/types/shadowing.test.js` R8.11 `fmt.Println(e)` prints `3` on all targets
   - Done when: passes; `gofront_gen.go` for programs without the shadow is byte-identical
-- [ ] Task 14.2: `wasm` identifies universe `error` by identity (R8.11, `fmt.Print` form)
+- [x] Task 14.2: `wasm` identifies universe `error` by identity (R8.11, `fmt.Print` form)
   - Files: `src/backend/wasm/index.js`, `src/backend/wasm/types.js`, `src/backend/wasm/boundary.js`
   - Test: `shadowing.test.js` R8.11 `_ = e; fmt.Print("")` compiles to a valid module on `wasm`; an `error`-returning stdlib call still works next to the shadow
   - Done when: passes; no `types.get("error")` or `name === "error"` test remains in `src/backend/wasm/` without a comment saying why the name is safe

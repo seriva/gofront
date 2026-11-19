@@ -114,6 +114,7 @@ function classifyType(goType, mod) {
 	if (!goType) return { k: "void" };
 
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		// `error` is the universe interface by name (see `isErrorType`).
 		if (goType.name === "error") return { k: "error", wType: "anyref" };
 		const info = mod.getStructType(goType.name);
 		if (info) return structDesc(info, false);
@@ -226,6 +227,7 @@ function classifyNamed(t, mod) {
 	) {
 		return classifySimd(t.underlying ?? t, mod, t.name);
 	}
+	// `error` is the universe interface by name (see `isErrorType`).
 	if (t.name === "error") return { k: "error", wType: "anyref" };
 	const info = mod.getStructType(t.name);
 	if (info) return structDesc(info, false);
@@ -426,6 +428,7 @@ function classifyFunc(t, mod) {
 }
 
 function classifyInterface(t, mod) {
+	// `error` is the universe interface by name (see `isErrorType`).
 	if (t.name === "error") return { k: "error", wType: "anyref" };
 	const mList = getInterfaceMethodList(t);
 	if (mList.length === 0) return { k: "any", wType: "anyref" };

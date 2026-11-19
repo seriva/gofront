@@ -158,6 +158,7 @@ export class ExprsEmitter {
 		} else {
 			this._pushStringConst(this._assertSrcName(expr.expr?._type));
 		}
+		// `error` is the universe interface by name (see `isErrorType`).
 		this._pushStringConst(
 			target.name === "error" ? "error" : goTypeName(target),
 		);
@@ -173,6 +174,7 @@ export class ExprsEmitter {
 	_assertSrcName(srcType) {
 		if (!srcType || !isNonEmptyInterface(srcType, this.mod.checker))
 			return "interface {}";
+		// `error` is the universe interface by name (see `isErrorType`).
 		return srcType.name === "error" ? "error" : goTypeName(srcType);
 	}
 

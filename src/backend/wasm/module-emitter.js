@@ -1519,6 +1519,7 @@ export class ModuleEmitter {
 		let t = goType;
 		for (let i = 0; i < 8 && t; i++) {
 			if (t.kind === "TypeName" || t.kind === "Ident") {
+				// `error` is the universe interface by name (see `isErrorType`).
 				const named = this.checker?.types?.get(t.name);
 				if (!named) return t.name === "error" && methodName === "Error";
 				t = named;
