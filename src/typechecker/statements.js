@@ -647,7 +647,10 @@ export const statementCheckMethods = {
 				stmt.cond._isIterator = true;
 				stmt.cond._yieldParams = info.yieldParams;
 			} else if (this._deepUnderlying(ct)?.kind === "func") {
-				this.err("cannot range over func: not an iterator function", stmt);
+				this.err(
+					"cannot range over func: not an iterator function",
+					stmt.cond.expr,
+				);
 			}
 		}
 	},
@@ -847,7 +850,7 @@ export const statementCheckMethods = {
 					: only
 						? this.resolveTypeNode(only, inner)
 						: (stmt.expr._type ?? ANY);
-				caseScope.defineLocal(stmt.assign, bindType);
+				caseScope.defineLocal(stmt.assign, bindType, stmt._assignNode);
 				// The capture variable is always considered used — it's the whole
 				// point of the switch-with-assign form. Each case body uses its own
 				// typed copy of the variable.
@@ -920,9 +923,10 @@ export const statementCheckMethods = {
 			this.err("cannot fallthrough in type switch", stmt);
 	},
 
-	_checkRangeIterInvalidFunc(iterType, initStmt) {
+	// Reported at the range operand, as Go does.
+	_checkRangeIterInvalidFunc(iterType, operand) {
 		if (this._deepUnderlying(iterType)?.kind === "func")
-			this.err("cannot range over func: not an iterator function", initStmt);
+			this.err("cannot range over func: not an iterator function", operand);
 	},
 
 	_bindRangeIterDefineVars(lhs, info, scope) {
@@ -989,7 +993,7 @@ export const statementCheckMethods = {
 		const info = iteratorYieldParams(iterType);
 		if (!info) {
 			this._checkRangeIntVars(initStmt.lhs, rangeExpr.expr, iterType, scope);
-			this._checkRangeIterInvalidFunc(iterType, initStmt);
+			this._checkRangeIterInvalidFunc(iterType, rangeExpr.expr);
 			return null;
 		}
 

@@ -1,6 +1,8 @@
 // GoFront test suite — type errors and type assertions
 
 import { fileURLToPath } from "node:url";
+import { Lexer } from "../../../src/lexer/lexer.js";
+import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assertContains,
@@ -1037,6 +1039,90 @@ func main() { f() }`);
 		"too many return values (have (int, string), want ())",
 	);
 	assertEqual(errors[0].line, 4);
+});
+
+section("Type errors — positions of bindings and range operands");
+
+test("ranging over a non-iterator func reports the range operand's position", () => {
+	const { errors } = compile(`package main
+
+func fn(int) {}
+
+func main() {
+	for _ = range fn {
+	}
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot range over func: not an iterator function",
+	);
+	assertErrorContains(errors, "at line 6:16");
+});
+
+test("a := range over a non-iterator func reports the range operand's position", () => {
+	const { errors } = compile(`package main
+
+func fn(int) {}
+
+func main() {
+	for x := range fn {
+		_ = x
+	}
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot range over func: not an iterator function",
+	);
+	assertErrorContains(errors, "at line 6:17");
+});
+
+test("a bare range over a non-iterator func reports the range operand's position", () => {
+	const { errors } = compile(`package main
+
+func fn(int) {}
+
+func main() {
+	for range fn {
+	}
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "at line 6:12");
+});
+
+test("a type-switch binding records its declaring identifier in each clause", () => {
+	const source = `package main
+
+func f(v any) {
+	switch x := v.(type) {
+	case int:
+		_ = x
+	default:
+		_ = x
+	}
+}
+
+func main() { f(1) }`;
+	const ast = new Parser(
+		new Lexer(source, "t.go").tokenize(),
+		"t.go",
+		source,
+	).parse();
+	const checker = new TypeChecker();
+	const seen = [];
+	const report = checker._reportUnused.bind(checker);
+	checker._reportUnused = (scope, node) => {
+		if (node?.kind === "TypeSwitchStmt") seen.push(scope.localNode("x"));
+		return report(scope, node);
+	};
+	checker.check(ast);
+	assertEqual(checker.errors.length, 0);
+	assertEqual(seen.length, 2);
+	for (const n of seen) {
+		assertEqual(n?.kind, "Ident");
+		assertEqual(`${n._line}:${n._col}`, "4:9");
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

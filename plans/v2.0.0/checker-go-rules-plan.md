@@ -449,11 +449,11 @@ Checker only; the backend sites are Phase 10. The phase spans 8 files because Ta
   - Done when: Go's text on all targets
 
 ### Phase 12: Node positions (root `node-positions`)
-- [ ] Task 12.1: `iota`-substituted literals carry positions (R10.3)
+- [x] Task 12.1: `iota`-substituted literals carry positions (R10.3)
   - Files: `src/parser/declarations.js` (`parseConstDecl`)
   - Test: `test/unit/parser/positions.test.js` walking `example/gom/src/types.go` const literals
   - Done when: no missing positions in the walk
-- [ ] Task 12.2: Type-switch bindings and invalid range functions carry positions (R10.4, R10.5)
+- [x] Task 12.2: Type-switch bindings and invalid range functions carry positions (R10.4, R10.5)
   - Files: `src/typechecker/statements.js`
   - Test: `test/unit/types/errors.test.js` R10.5 has `at line 8:16`; type-switch `caseScope.localNode("x")` unit test returns the `Ident`
   - Done when: both pass

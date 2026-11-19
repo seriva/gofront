@@ -337,6 +337,7 @@ export const statementParserMethods = {
 			return this._parseTypeSwitchBody(
 				tag.lhs[0]?.name ?? null,
 				tag.rhs[0].expr,
+				tag.lhs[0],
 			);
 		}
 
@@ -368,7 +369,7 @@ export const statementParserMethods = {
 		return stmts;
 	},
 
-	_parseTypeSwitchBody(assign, expr) {
+	_parseTypeSwitchBody(assign, expr, assignNode = null) {
 		this.expect(T.LBRACE);
 		const cases = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
@@ -381,7 +382,14 @@ export const statementParserMethods = {
 			cases.push({ types, stmts: this._parseCaseBody() });
 		}
 		this.expect(T.RBRACE);
-		return { kind: "TypeSwitchStmt", assign, expr, cases };
+		// The declaring identifier of `assign`, for diagnostics.
+		return {
+			kind: "TypeSwitchStmt",
+			assign,
+			expr,
+			cases,
+			_assignNode: assignNode,
+		};
 	},
 
 	_parseTypeSwitchTypeList() {
