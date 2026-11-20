@@ -29,6 +29,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Compiler errors point at the offending expression**: errors on operators, calls, field selections, indexing, literals and type assertions report a line and column, and `declared and not used` points at the variable. A failure inside the compiler, or a WebAssembly module that would be invalid, stops the build with an `internal compiler error` that links to the issue tracker instead of writing a broken `app.wasm` ([details](docs/go-compatibility.md#internal-compiler-errors)).
 
 ### Fixed
+- **Type switch bindings follow Go:** `switch x := v.(type)` is now rejected when no clause uses `x`, and `switch _ := v.(type)` is rejected as having no new variable.
 - **Multi-value calls as builtin arguments:** `min(f())`, `max(f())`, `complex(f())`, `append(f())`, `copy(f())` and `delete(f())` now accept a call returning several values, as in Go, and a too-few `return f()` is reported at the call.
 - **Partly instantiated generic functions with inferable constraints work as values**: `f := slices.Sort[[]int]`, `f := slices.Index[[]int]`, and user generics whose remaining type parameters can be inferred from constraints (such as `S ~[]E`) now compile and run with the inferred element type.
 - **`gofront check` reports every package and its test files**: `gofront check <dir>/...` now lists the errors of all failing packages in one run, covers `_test.go` files, marks dependents of a failed package as skipped, and exits 1 when anything failed ([details](docs/usage.md#checking-packages)).

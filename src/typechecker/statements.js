@@ -847,42 +847,61 @@ export const statementCheckMethods = {
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
+		const at = stmt._assignNode ?? stmt;
+		if (stmt.assign === "_") this.err("no new variable on left side of :=", at);
 		this._switchDepth++;
 		this._typeSwitchDepth++;
+		// Each clause declares its own copy of the binding; Go reports it when
+		// no clause uses it, once, at the binding.
+		let bindingUsed = false;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
-			// Resolve instantiated generic case types so backends can tell
-			// `*Stack[int]` from `*Stack[string]`.
-			for (const t of c.types ?? []) {
-				const base = t?.kind === "PointerType" ? t.base : t;
-				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
-				this._markInterfaceCaseType(t, inner);
-				if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
-					this._markDynamicType(t, this.resolveTypeNode(t, inner));
-				this._checkTypeSwitchCase(stmt.expr, t, inner);
-			}
-			if (stmt.assign) {
-				// Bind the variable to the single case type, or the switch operand's type
-				// for multi-type and default clauses, as Go does.
-				// `case nil` binds the switch expression's own type, as in Go.
-				const only = c.types?.length === 1 ? c.types[0] : null;
-				const isNilCase = this._isUniverseNil(only, inner);
-				const bindType = isNilCase
-					? (stmt.expr._type ?? ANY)
-					: only
-						? this.resolveTypeNode(only, inner)
-						: (stmt.expr._type ?? ANY);
-				caseScope.defineLocal(stmt.assign, bindType, stmt._assignNode);
-				// The capture variable is always considered used — it's the whole
-				// point of the switch-with-assign form. Each case body uses its own
-				// typed copy of the variable.
-				caseScope.lookup(stmt.assign);
-			}
+			this._checkTypeSwitchClauseTypes(stmt, c, inner);
+			if (stmt.assign) this._bindTypeSwitchClause(stmt, c, caseScope, inner);
 			for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+			if (this._takeTypeSwitchBindingUse(stmt, caseScope)) bindingUsed = true;
 			this._reportUnused(caseScope, stmt);
 		}
+		if (stmt.assign && stmt.assign !== "_" && !bindingUsed)
+			this.err(`'${stmt.assign}' declared and not used`, at);
 		this._typeSwitchDepth--;
 		this._switchDepth--;
+	},
+
+	// Resolve instantiated generic case types so backends can tell
+	// `*Stack[int]` from `*Stack[string]`.
+	_checkTypeSwitchClauseTypes(stmt, clause, inner) {
+		for (const t of clause.types ?? []) {
+			const base = t?.kind === "PointerType" ? t.base : t;
+			if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+			this._markInterfaceCaseType(t, inner);
+			if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
+				this._markDynamicType(t, this.resolveTypeNode(t, inner));
+			this._checkTypeSwitchCase(stmt.expr, t, inner);
+		}
+	},
+
+	// Whether the clause's body used the binding; an unused one is marked used
+	// so the clause does not report it (the switch judges all clauses together).
+	_takeTypeSwitchBindingUse(stmt, caseScope) {
+		if (!stmt.assign || stmt.assign === "_") return false;
+		if (!caseScope.unusedLocals().includes(stmt.assign)) return true;
+		caseScope.lookup(stmt.assign);
+		return false;
+	},
+
+	// Binds the variable to the single case type, or the switch operand's type
+	// for multi-type and default clauses, as Go does.
+	// `case nil` binds the switch expression's own type, as in Go.
+	_bindTypeSwitchClause(stmt, clause, caseScope, inner) {
+		const only = clause.types?.length === 1 ? clause.types[0] : null;
+		const isNilCase = this._isUniverseNil(only, inner);
+		const bindType = isNilCase
+			? (stmt.expr._type ?? ANY)
+			: only
+				? this.resolveTypeNode(only, inner)
+				: (stmt.expr._type ?? ANY);
+		caseScope.defineLocal(stmt.assign, bindType, stmt._assignNode);
 	},
 
 	// `case T:` in a switch on an interface value `x` needs a T that can be
