@@ -340,7 +340,6 @@ binary:<<:int8,1+0i:go-accept/gf-reject # O4
 binary:<<:rune,1+0i:go-accept/gf-reject # O4
 binary:<<:rune,rune:go-reject/gf-accept # O4
 binary:<<:uint,1+0i:go-accept/gf-reject # O4
-binary:==:1+0i,1:invalid-wasm # O4
 binary:==:1+0i,E:invalid-wasm # O4
 binary:==:1+0i,MI2:go-accept/gf-reject # O4
 binary:==:1+0i,MI:go-accept/gf-reject # O4
@@ -350,9 +349,7 @@ binary:==:1+0i,float32:go-accept/gf-reject # O4
 binary:==:1+0i,float64:go-accept/gf-reject # O4
 binary:==:1+0i,int8:go-accept/gf-reject # O4
 binary:==:1+0i,int:go-accept/gf-reject # O4
-binary:==:1+0i,rune:invalid-wasm # O4
 binary:==:1+0i,uint:go-accept/gf-reject # O4
-binary:==:1,1+0i:invalid-wasm # O4
 binary:==:1,1e400:invalid-wasm # O4
 binary:==:1e40,complex64:go-reject/gf-accept # O4
 binary:==:1e40,float32:go-reject/gf-accept # O4
@@ -450,7 +447,6 @@ binary:==:int8,E:invalid-wasm # wasm-iface-equality
 binary:==:int8,any:invalid-wasm # wasm-iface-equality
 binary:==:ptr,E:invalid-wasm # wasm-iface-equality
 binary:==:ptr,any:invalid-wasm # wasm-iface-equality
-binary:==:rune,1+0i:invalid-wasm # O4
 binary:==:rune,1e400:invalid-wasm # O4
 binary:==:string,E:invalid-wasm # wasm-iface-equality
 binary:==:string,any:invalid-wasm # wasm-iface-equality

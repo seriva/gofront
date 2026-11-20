@@ -843,23 +843,29 @@ export const assignabilityMethods = {
 			this._checkShiftContext(target, valueNode);
 			return;
 		}
-		this._retypeShiftTree(valueNode, target);
+		// Only a tree holding a non-constant shift is retyped; `_constValue` does
+		// not fold complex constants (`1+0i`), so they must not be mistaken for one.
+		if (this._untypedShiftOperand(valueNode))
+			this._retypeShiftTree(valueNode, target);
 	},
 
 	// The untyped operand of a non-constant shift takes its context's type,
 	// which must be an integer (`var f float64 = 1 << s`). An interface or
 	// other non-numeric context keeps the `int` default.
 	_checkShiftContext(target, e) {
+		if (target?.kind === "untyped") return;
 		const tp = target?.kind === "typeParam";
 		const r = tp ? target : this._deepUnderlying(target);
 		if (!tp && !isFloat(r) && !isComplex(r)) return;
-		if (
-			tp &&
-			this._typeParamAllows(target, (t) =>
-				isInteger(this._deepUnderlying(t) ?? t),
+		if (tp) {
+			// A constraint without a type set is left to the assignability error.
+			const terms = this._constraintTerms(target.constraint, new Set());
+			if (
+				!terms?.length ||
+				terms.every((t) => isInteger(this._deepUnderlying(t) ?? t))
 			)
-		)
-			return;
+				return;
+		}
 		const left = this._untypedShiftOperand(e);
 		if (!left) return;
 		const where = tp ? ` constrained by ${this._constraintText(target)}` : "";

@@ -703,6 +703,12 @@ export const statementCheckMethods = {
 			if (c.list) {
 				for (const e of c.list) {
 					this.checkExpr(e, caseScope);
+					if (stmt.tag && !isUntyped(stmt.tag._type))
+						this._retypeUntypedShift(
+							this.resolveType(stmt.tag._type),
+							e._type,
+							e,
+						);
 					this._checkCaseValue(stmt.tag, e);
 					if (this._isDuplicateConst(seenCases, e, stmt.tag?._type, false))
 						this.err(`duplicate case ${exprText(e)} in expression switch`, e);
