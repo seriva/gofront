@@ -930,7 +930,7 @@ export function isUnhashableGoType(goType, checker = null, seen = new Set()) {
 		return true;
 	}
 	if (isArrayType(goType, checker)) {
-		const elem = goType.elem ?? goType.underlying?.elem;
+		const elem = goType.elem ?? namedUnderlying(goType, checker)?.elem;
 		return isUnhashableGoType(elem, checker, seen);
 	}
 	if (goType.kind === "struct" || goType.kind === "StructType") {

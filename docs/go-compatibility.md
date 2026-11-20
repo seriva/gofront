@@ -168,6 +168,7 @@ GoFront applies Go's operator rules to every kind of operand, with Go's messages
 - **Constants** are exact: `1 + 0i` converts to an integer, `float32(0.1)` rounds, and a constant too large for `float32`, `float64` or `int` (including a `range` operand) is `constant ... overflows`. Complex constants fold by value.
 - **Conversions** follow Go's rules in every form: slices of different element types, floats to `string` and `int(1.5)` are errors.
 - **Methods and `switch`**: receivers must be a defined type (not an interface, pointer or predeclared type), a `switch` tag must be comparable, and tagless `case` expressions must be booleans.
+- **Comparable types**: a map key type and the operands of `==` and `!=` must be comparable. `map[[]int]int`, a key struct with a slice, map or func field, and an unconstrained type parameter as key (`map[K]int` with `K any`) are `invalid map key type ...`; comparing structs or arrays that contain a slice, map or func is `struct containing []int cannot be compared`, including against an interface (`i == p`).
 - **Complex `++` and `--`** add or subtract one on every target, for variables, fields, map elements and `for` post statements.
 
 #### Builtin operands

@@ -250,6 +250,28 @@ func main() {
 	);
 });
 
+section("WASM map keys — defined key chains");
+
+test("defined array and struct key chains behave like Go", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+type P struct{ X int }
+type K [2]P
+type K2 K
+
+func main() {
+	m := map[K2]string{}
+	m[K2{{1}, {2}}] = "a"
+	m[K2{{1}, {2}}] += "b"
+	m[K2{{2}, {1}}] = "c"
+	println(len(m), m[K2{{1}, {2}}], m[K2{{2}, {1}}])
+}
+`,
+		"2 ab c\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

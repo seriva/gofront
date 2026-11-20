@@ -10,7 +10,6 @@ import {
 	anyKind,
 	BOOL,
 	CMP_OPS,
-	COMPARABLE,
 	defaultType,
 	FLOAT64,
 	identical,
@@ -412,7 +411,7 @@ export const assignabilityMethods = {
 			[lt, node.left],
 			[rt, node.right],
 		]) {
-			if (t?.kind !== "typeParam" || this._typeParamComparable(t)) continue;
+			if (t?.kind !== "typeParam" || this._isComparable(t)) continue;
 			const empty =
 				this._constraintTerms(t.constraint, new Set())?.length === 0;
 			this.err(
@@ -421,20 +420,6 @@ export const assignabilityMethods = {
 			);
 			return;
 		}
-	},
-
-	_typeParamComparable(tp) {
-		const terms = this._constraintTerms(tp.constraint, new Set());
-		if (terms?.length)
-			return terms.every(
-				(t) => t.name === "comparable" || this._isComparable(t),
-			);
-		if (terms) return false;
-		let c = tp.constraint;
-		if (c?.kind === "TypeName" || c?.kind === "InterfaceType")
-			c = this.resolveTypeNode(c, this.globals);
-		while (c?.kind === "named") c = c.underlying;
-		return c === COMPARABLE || Boolean(c?._comparable);
 	},
 
 	_constraintText(tp) {
@@ -663,6 +648,34 @@ export const assignabilityMethods = {
 		for (const t of this._comparedTypes(lt, rt)) {
 			if (this._operatorDefined(op, t)) continue;
 			this._reportCmpUndefined(op, t, node, isEquality);
+			return false;
+		}
+		return !isEquality || this._comparableOperands(lt, rt, node);
+	},
+
+	// `==` on a struct or array needs comparable fields or elements: Go names
+	// the first field type that is not comparable, or the array type itself.
+	_comparableOperands(lt, rt, node) {
+		for (const [t, operand] of [
+			[lt, node.left],
+			[rt, node.right],
+		]) {
+			if (!t || t._tainted || t.kind === "untyped") continue;
+			const u = this._deepUnderlying(t);
+			if (!["struct", "array"].includes(u?.kind) || this._isComparable(t))
+				continue;
+			const bad =
+				u.kind === "struct"
+					? [
+							...(u._structFields
+								? u._structFields.map((f) => f.type)
+								: (u.fields?.values() ?? [])),
+						].find((f) => !this._isComparable(f))
+					: null;
+			this.err(
+				`invalid operation: ${exprText(node)} (${bad ? `struct containing ${typeStr(bad)}` : typeStr(t)} cannot be compared)`,
+				operand,
+			);
 			return false;
 		}
 		return true;

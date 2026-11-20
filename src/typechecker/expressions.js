@@ -585,7 +585,13 @@ export const expressionCheckMethods = {
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
 				this._checkAnyEquality(expr, lt, rt) ??
 				this.binaryResultType(expr.op, ANY, ANY, expr);
-			if (!res?._tainted) this._markComparedAggregate(expr.op, lt, rt, expr);
+			if (res?._tainted) return res;
+			if (
+				(expr.op === "==" || expr.op === "!=") &&
+				!this._comparableOperands(lt, rt, expr)
+			)
+				return TAINTED_ANY;
+			this._markComparedAggregate(expr.op, lt, rt, expr);
 			return res;
 		}
 		// A defined empty interface (`type MyAny any`, `interface{}`) is a Go

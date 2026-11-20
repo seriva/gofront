@@ -661,23 +661,23 @@ async function expectCompileError(files, expected) {
 test("maps with unsupported keys are rejected at the boundary", () =>
 	expectBoundaryError(
 		`func Touch() {}
-func Lookup(m map[[]int]int) {}`,
-		"map with unsupported key type 'slice'",
+func Lookup(m map[struct{ X int }]int) {}`,
+		"map with unsupported key type 'anon_struct'",
 	));
 
 test("interface methods with unsupported signatures are rejected at the boundary", () =>
 	expectBoundaryError(
-		`type BadIface interface { Bad() map[[]int]int }
+		`type BadIface interface { Bad() map[struct{ X int }]int }
 func Touch() {}
 func Use(b BadIface) {}`,
-		"map with unsupported key type 'slice' (in method BadIface.Bad)",
+		"map with unsupported key type 'anon_struct' (in method BadIface.Bad)",
 	));
 
 test("exported struct fields with unsupported types are rejected at the boundary", () =>
 	expectBoundaryError(
-		`type Cfg struct { Bad map[[]int]int }
+		`type Cfg struct { Bad map[struct{ X int }]int }
 func Touch() {}`,
-		"map with unsupported key type 'slice'",
+		"map with unsupported key type 'anon_struct'",
 	));
 
 section("WASM Boundary v2 — Phase 2 types (Task H6.2)");

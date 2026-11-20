@@ -822,7 +822,7 @@ export const statementCheckMethods = {
 		const isParam = t.kind === "typeParam";
 		const kind = isParam ? null : this._deepUnderlying(t)?.kind;
 		if (isParam) {
-			if (this._typeParamComparable(t)) return;
+			if (this._isComparable(t)) return;
 		} else if (!["struct", "array"].includes(kind) || this._isComparable(t))
 			return;
 		const what = isParam
