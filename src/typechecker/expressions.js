@@ -1739,7 +1739,12 @@ export const expressionCheckMethods = {
 			return this._untypedConvertible(srcType, t, operand);
 		if (identical(s, t, { ignoreTags: true })) return true;
 		if (s.kind === "pointer" && t.kind === "pointer")
-			return this._pointerConversionOk(s, t, srcType, targetType, expr);
+			return (
+				// Only unnamed pointer types convert by their base types.
+				this.resolveType(srcType)?.kind === "pointer" &&
+				this.resolveType(targetType)?.kind === "pointer" &&
+				this._pointerConversionOk(s, t, srcType, targetType, expr)
+			);
 		if (s.kind === "basic" && t.kind === "basic")
 			return this._basicConvertible(s, t);
 		if (t.kind === "basic" && isString(t) && s.kind === "slice")

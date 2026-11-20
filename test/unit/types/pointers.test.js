@@ -415,3 +415,21 @@ func main() {
 		"héllo [104 105] A 1 a 0.1\nB hi\n",
 	);
 });
+
+test("named pointer types convert only when identical underneath", () => {
+	const decl = `package main
+type MyInt int
+type P1 *int
+type P2 *MyInt
+type P3 *int
+func main() { var p P1; `;
+	assertErrorContains(
+		compile(`${decl}_ = P2(p) }`).errors,
+		"cannot convert p (variable of type P1) to type P2",
+	);
+	assertErrorContains(
+		compile(`${decl}_ = (*MyInt)(p) }`).errors,
+		"cannot convert p (variable of type P1) to type *MyInt",
+	);
+	assertEqual(compile(`${decl}_ = P3(p) }`).errors.length, 0);
+});

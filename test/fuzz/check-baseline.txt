@@ -134,9 +134,7 @@ conv:func:string,string:go-accept/gf-reject # parser-conversion-type
 conv:func:struct,struct:go-accept/gf-reject # parser-conversion-type
 conv:func:uint,uint:go-accept/gf-reject # parser-conversion-type
 conv:map:func,func:go-accept/gf-reject # parser-conversion-type
-conv:ptr:E,any:go-accept/gf-reject # O5
 conv:ptr:P,struct:wasm-reject # excluded: wasm converts no struct pointers
-conv:ptr:any,E:go-accept/gf-reject # O5
 conv:ptr:array,array:go-accept/gf-reject # parser-conversion-type
 conv:ptr:error,error:go-accept/gf-reject # parser-conversion-type
 conv:ptr:func,func:go-accept/gf-reject # parser-conversion-type
