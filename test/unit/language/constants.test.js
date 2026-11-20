@@ -624,6 +624,29 @@ func main() {
 	);
 });
 
+section("Constants — range operand (Task 4.4)");
+
+test("a constant range operand that fits an int still ranges", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	for i := range 3 {
+		n += i
+	}
+	for range 1 << 62 {
+		break
+	}
+	fmt.Println(n)
+}
+`,
+		"3\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

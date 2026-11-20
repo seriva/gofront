@@ -2568,9 +2568,6 @@ names:conv:shadow-type-defined:go-reject/gf-accept # R8
 names:conv:shadow-type-local:go-reject/gf-accept # R8
 names:conv:shadow-type-var:go-reject/gf-accept # R8
 names:type:shadow-type-var:go-reject/gf-accept # R8
-range:assign:1<<63:go-reject/gf-accept # O4
-range:key:1<<63:go-reject/gf-accept # O4
-range:none:1<<63:go-reject/gf-accept # O4
 recv:decl:alias-unnamed:go-reject/gf-accept # O6
 recv:decl:any:go-reject/gf-accept # O6
 recv:decl:empty-iface:go-reject/gf-accept # O6

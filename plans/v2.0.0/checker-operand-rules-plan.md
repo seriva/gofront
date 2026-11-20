@@ -273,7 +273,7 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Files: `src/typechecker/constants.js`, `src/typechecker/assignability.js` (`_untypedFitsTerm`), `src/typechecker/expressions.js`, `src/typechecker/statements.js` (blank assignment and untyped `switch` tag `_checkConstDefault`), `test/fuzz/check-baseline.txt` (retag non-O4 entries tagged `# O4` by operand name: `conv:value:{bool,string,MS,MS2},*` → `# O5`, `builtins:{real,imag}:1e40` → `# builtin-complex-operands`, and non-comparable `switch:tag:*` → `# O7`)
   - Test: reject fixtures `float32_cmp_overflow.go`, `float32_var_overflow.go`, `float32_const_overflow.go`, `float32_conv_overflow.go`, `float64_overflow.go`, `complex64_overflow.go`, plus `func F[T ~complex64](a T) T { return a + 1e40 }`, `_ = 1 << 'a'`, `_ = +1e400`, `switch 1e400 {}`; `test/unit/language/float32-consts.test.js` max finite `float32` still compiles
   - Done when: Go's messages on all targets; `# O4` keys (except the three `range:*:1<<63` keys for Task 4.4) removed
-- [ ] Task 4.4: A constant `range` operand must be representable as `int` (O4.11)
+- [x] Task 4.4: A constant `range` operand must be representable as `int` (O4.11)
   - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`), `src/typechecker/statements.js` (`_checkForCond`)
   - Test: reject fixture `range_const_overflow.go` (`… as int value in range clause (overflows)`); `range 1 << 62` and the O4.11 controls unchanged
   - Done when: Go's message on all targets; both paths call `_checkConstOverflow`; the remaining `# O4` keys (`range:*:1<<63`) are gone

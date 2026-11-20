@@ -2022,11 +2022,19 @@ export const expressionCheckMethods = {
 		return core.kind === "pointer" ? { ...core, _viaCore: true } : core;
 	},
 
+	// The operand of a `range` clause; a constant takes its default type, so
+	// `range 1 << 63` must fit an `int`.
+	_checkRangeOperand(operand, scope) {
+		const t = this.checkExpr(operand, scope);
+		this._checkConstDefault(t, operand, "range clause");
+		return t;
+	},
+
 	_checkRangeExpr(expr, scope) {
 		const collType = this._derefArrayPtr(
 			expr,
 			"expr",
-			this.checkExpr(expr.expr, scope),
+			this._checkRangeOperand(expr.expr, scope),
 			scope,
 		);
 		const core = this._rangeCore(collType, expr.expr, scope);

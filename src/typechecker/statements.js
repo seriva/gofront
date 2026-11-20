@@ -651,7 +651,7 @@ export const statementCheckMethods = {
 			const operand = this._derefArrayPtr(
 				stmt.cond,
 				"expr",
-				this.checkExpr(stmt.cond.expr, inner),
+				this._checkRangeOperand(stmt.cond.expr, inner),
 				inner,
 			);
 			const ct = this._rangeCore(operand, stmt.cond.expr, inner);
