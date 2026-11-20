@@ -1684,6 +1684,20 @@ export const expressionCheckMethods = {
 		return tgt?.kind === "array" && src?.kind !== "array" && !isAny(srcType);
 	},
 
+	// A complex operand converts to a real type only as an untyped constant
+	// with no imaginary part (`int(1 + 0i)`, reported when it does not fit);
+	// any other complex value needs `real()` or `imag()`.
+	_rejectComplexToReal(srcType, targetType, expr, node) {
+		if (srcType?.kind === "untyped" && node?._cconst) {
+			this._complexConstUnfit(targetType, node, null, true);
+			return;
+		}
+		this.err(
+			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
+			expr,
+		);
+	},
+
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
@@ -1703,12 +1717,8 @@ export const expressionCheckMethods = {
 			return targetType;
 		const srcResolved = this._deepUnderlying(srcType);
 		const tgtResolved = this._deepUnderlying(targetType);
-		if (isNumeric(targetType) && isComplex(srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
-				expr,
-			);
-		}
+		if (isNumeric(targetType) && isComplex(srcType))
+			this._rejectComplexToReal(srcType, targetType, expr, expr.expr);
 		if (
 			isComplex(targetType) &&
 			!isComplexOrNumeric(srcType) &&
@@ -1824,10 +1834,7 @@ export const expressionCheckMethods = {
 		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
 
 		if (isNumeric(targetType) && isComplex(srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
-				expr,
-			);
+			this._rejectComplexToReal(srcType, targetType, expr, expr.args?.[0]);
 			return;
 		}
 		if (isComplex(targetType) && !isComplexOrNumeric(srcType)) {

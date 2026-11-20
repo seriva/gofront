@@ -634,7 +634,7 @@ function complexConstParts(e, depth = 0) {
 function complexConstNeg(e, depth) {
 	if (e.op !== "-" && e.op !== "+") return null;
 	const c = complexConstParts(e.operand, depth + 1);
-	return c && e.op === "-" ? [-c[0], -c[1]] : c;
+	return c && e.op === "-" ? [0 - c[0], 0 - c[1]] : c;
 }
 
 export const expressionGenMethods = {

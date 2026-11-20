@@ -740,7 +740,10 @@ export const statementCheckMethods = {
 			return;
 		}
 		if (isUntyped(caseType)) {
-			if (this._isUntypedAssignable(tagType, caseType)) return;
+			if (this._isUntypedAssignable(tagType, caseType)) {
+				this._checkConstOverflow(tagType, caseType, e, null);
+				return;
+			}
 			this.err(
 				`cannot convert ${exprText(e)} (${operandKind(e, caseType.base, true)}) to type ${typeStr(tagType)}`,
 				e,

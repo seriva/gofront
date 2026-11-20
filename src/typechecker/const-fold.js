@@ -192,7 +192,8 @@ function negateFloat(x) {
 export function foldUnary(op, x) {
 	if (x.k === COMPLEX) {
 		if (op === "+") return x;
-		return op === "-" ? complexConst(-x.v.re, -x.v.im) : null;
+		// Constants have no negative zero: `-(2 + 0i)` is `-2 + 0i`.
+		return op === "-" ? complexConst(0 - x.v.re, 0 - x.v.im) : null;
 	}
 	if (op === "+" && (x.k === INT || x.k === FLOAT)) return x;
 	if (op === "!" && x.k === BOOL) return { ...x, v: !x.v };
@@ -329,43 +330,37 @@ function foldStrings(op, a, b) {
 	return r === null ? null : { k: BOOL, v: r };
 }
 
+// `x op y` of complex components for + - * /, as `[re, im]` (null for any
+// other operator).
+function complexArith(op, x, y) {
+	switch (op) {
+		case "+":
+			return [x.re + y.re, x.im + y.im];
+		case "-":
+			return [x.re - y.re, x.im - y.im];
+		case "*":
+			return [x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re];
+		default: {
+			if (op !== "/") return null;
+			const d = y.re * y.re + y.im * y.im;
+			if (d === 0) throw new Error("invalid operation: division by zero");
+			return [(x.re * y.re + x.im * y.im) / d, (x.im * y.re - x.re * y.im) / d];
+		}
+	}
+}
+
 // `a op b` for untyped complex constants (an INT or FLOAT operand is its
 // real part): + - * / == !=.
 function foldComplex(op, a, b) {
 	if (a.t || b.t) return null;
 	const x = a.k === COMPLEX ? a.v : { re: asFloat(a), im: 0 };
 	const y = b.k === COMPLEX ? b.v : { re: asFloat(b), im: 0 };
-	let re;
-	let im;
-	switch (op) {
-		case "+":
-			[re, im] = [x.re + y.re, x.im + y.im];
-			break;
-		case "-":
-			[re, im] = [x.re - y.re, x.im - y.im];
-			break;
-		case "*":
-			[re, im] = [x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re];
-			break;
-		case "/": {
-			const d = y.re * y.re + y.im * y.im;
-			if (d === 0) throw new Error("invalid operation: division by zero");
-			[re, im] = [
-				(x.re * y.re + x.im * y.im) / d,
-				(x.im * y.re - x.re * y.im) / d,
-			];
-			break;
-		}
-		case "==":
-			return { k: BOOL, v: x.re === y.re && x.im === y.im };
-		case "!=":
-			return { k: BOOL, v: x.re !== y.re || x.im !== y.im };
-		default:
-			return null;
+	if (op === "==" || op === "!=") {
+		const same = x.re === y.re && x.im === y.im;
+		return { k: BOOL, v: op === "==" ? same : !same };
 	}
-	return Number.isFinite(re) && Number.isFinite(im)
-		? complexConst(re, im)
-		: null;
+	const r = complexArith(op, x, y);
+	return r && r.every(Number.isFinite) ? complexConst(r[0], r[1]) : null;
 }
 
 export function foldBinary(op, a, b) {
