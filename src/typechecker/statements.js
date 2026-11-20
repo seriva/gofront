@@ -18,6 +18,7 @@ const CHECK_STMT_DELEGATE = {
 import { exprText, operandKind } from "./operand-text.js";
 import {
 	ANY,
+	anyKind,
 	BOOL,
 	defaultType,
 	is64BitInt,
@@ -701,6 +702,7 @@ export const statementCheckMethods = {
 			this.checkExpr(stmt.tag, inner);
 			this._rejectUntypedNil(stmt.tag._type, stmt.tag, "switch expression");
 			this._checkConstDefault(stmt.tag._type, stmt.tag, "switch expression");
+			this._checkSwitchTag(stmt.tag);
 		}
 		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
 		const seenCases = [];
@@ -745,6 +747,10 @@ export const statementCheckMethods = {
 		// `switch "foo" {` compares as the constant's default type.
 		if (isUntyped(tagType) && !isNil(tagType)) tagType = defaultType(tagType);
 		if (this._caseValueUnchecked(tagType, caseType)) return;
+		if (this._isComparedByOperator(tagType, caseType)) {
+			this._checkCaseComparison(tag, e, tagType, caseType);
+			return;
+		}
 		if (isNil(caseType)) {
 			this.err(`cannot convert nil to type ${typeStr(tagType)}`, e);
 			return;
@@ -771,34 +777,113 @@ export const statementCheckMethods = {
 		);
 	},
 
-	// A tagless `switch` is `switch true`, so every case must be boolean.
+	// A tagless `switch` is `switch true`: each case is the comparison
+	// `true == e` against typed `bool`, so `e` is `bool` or an interface that
+	// `bool` implements. A defined bool or a type parameter is not.
 	_checkTaglessCase(e, caseType) {
-		if (!caseType || caseType._tainted || caseType.kind === "typeParam") return;
+		if (!caseType || caseType._tainted) return;
 		if (isNil(caseType)) {
 			this.err(`cannot convert nil to type bool`, e);
 			return;
 		}
-		if ((isAny(caseType) && !caseType._declared) || isBool(caseType)) return;
 		if (isUntyped(caseType) && caseType.base === "bool") return;
-		const under = this.resolveType(caseType.underlying ?? caseType);
-		if (isBool(under)) return;
+		if (caseType.kind === "basic" && caseType.name === "bool") return;
+		if (this._isInterfaceType(caseType)) {
+			const u = this._deepUnderlying(caseType);
+			if (anyKind(caseType) === "dynamic" || !(u?.methods?.size > 0)) return;
+		}
 		this.err(
-			`invalid case ${exprText(e)} in switch (mismatched types ${typeStr(caseType)} and bool)`,
+			`invalid case ${exprText(e)} in switch on true (mismatched types ${typeStr(caseType)} and bool)`,
 			e,
 		);
 	},
 
+	// The tag of `switch x {` is compared with each case, so it must be
+	// comparable: a type parameter needs a comparable type set, a struct or
+	// array no slice, map or func inside. A bare slice, map or func tag
+	// compares with `nil`, which the case checks judge.
+	_checkSwitchTag(tag) {
+		const t = tag._type;
+		if (!t || t._tainted || isUntyped(t)) return;
+		const isParam = t.kind === "typeParam";
+		const kind = isParam ? null : this._deepUnderlying(t)?.kind;
+		if (isParam) {
+			if (this._typeParamComparable(t)) return;
+		} else if (!["struct", "array"].includes(kind) || this._isComparable(t))
+			return;
+		const what = isParam
+			? `type ${typeStr(t)} constrained by ${this._constraintText(t)}`
+			: t.kind === "named"
+				? `${kind} type ${typeStr(t)}`
+				: `type ${typeStr(t)}`;
+		this.err(
+			`cannot switch on ${exprText(tag)} (${tag.kind === "Ident" ? "variable" : "value"} of ${what}) (${typeStr(t)} is not comparable)`,
+			tag,
+		);
+	},
+
 	// Operands whose comparison the checker cannot (or need not) judge: unknown
-	// or recovered types, `any`/interface tags, nil cases, type parameters.
+	// or recovered types, JS-dynamic `any`, untyped tags, and `nil` cases whose
+	// tag has a nil value.
 	_caseValueUnchecked(tagType, caseType) {
 		if (!tagType || !caseType || tagType._tainted || caseType._tainted)
 			return true;
-		if (isAny(tagType) || isAny(caseType)) return true;
-		if (isUntyped(tagType) || tagType.kind === "typeParam") return true;
+		if (anyKind(tagType) === "dynamic" || anyKind(caseType) === "dynamic")
+			return true;
+		if (isUntyped(tagType)) return true;
+		if (isNil(caseType) && this._isInterfaceType(tagType)) return true;
+		if (tagType.kind === "typeParam")
+			return isNil(caseType) && !this._isNilless(tagType);
 		if (isNil(caseType)) return this._nilCaseOk(tagType);
-		return (
-			this.resolveType(tagType.underlying ?? tagType)?.kind === "interface"
-		);
+		return false;
+	},
+
+	// Cases the operator rule judges: every typed case, and an untyped
+	// constant against a type parameter or interface tag. An untyped constant
+	// against another tag keeps the constant-fit check.
+	_isComparedByOperator(tagType, caseType) {
+		if (isNil(caseType)) return false;
+		if (!isUntyped(caseType)) return true;
+		return tagType.kind === "typeParam" || this._isInterfaceType(tagType);
+	},
+
+	// `case e:` is `tag == e`: run the operator rule and report its verdict as
+	// Go's `invalid case`.
+	_checkCaseComparison(tag, e, tagType, caseType) {
+		const reports = [];
+		const realErr = this.err;
+		const outer = this.errors;
+		// Only the rule's own reports are taken: a quiet probe inside it swaps
+		// `errors` and keeps reporting to its own list.
+		this.err = (msg, node, hint) => {
+			if (this.errors !== outer) return realErr.call(this, msg, node, hint);
+			reports.push(msg);
+			return TAINTED_ANY;
+		};
+		try {
+			const node = { kind: "BinaryExpr", op: "==", left: tag, right: e };
+			this.binaryResultType("==", tagType, caseType, node);
+		} finally {
+			this.err = realErr;
+		}
+		for (const msg of reports) {
+			const reason = /^invalid operation: .* \((.*)\)$/s.exec(msg)?.[1];
+			if (isUntyped(caseType) && /^mismatched types/.test(reason ?? ""))
+				this.err(
+					`cannot convert ${exprText(e)} (${operandKind(e, caseType.base, true)}) to type ${typeStr(tagType)}`,
+					e,
+				);
+			else if (reason)
+				this.err(
+					`invalid case ${exprText(e)} in switch on ${exprText(tag)} (${
+						/^mismatched types/.test(reason)
+							? `mismatched types ${this._operandTypeStr(caseType)} and ${this._operandTypeStr(tagType)}`
+							: reason
+					})`,
+					e,
+				);
+			else this.err(msg, e);
+		}
 	},
 
 	// `case nil` needs a tag with a nil value (pointer, slice, map, func,

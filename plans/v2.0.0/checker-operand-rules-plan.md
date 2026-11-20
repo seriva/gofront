@@ -299,11 +299,11 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's message on all targets; `# O6` keys removed
 
 ### Phase 7: Switch tags and cases (root `switch-tag-comparison`)
-- [ ] Task 7.1: Tags must be comparable; type-parameter tags are checked (O7.1–O7.3)
+- [x] Task 7.1: Tags must be comparable; type-parameter tags are checked (O7.1–O7.3)
   - Files: `src/typechecker/statements.js` (new `_checkSwitchTag` using `_isComparable` and `_typeParamComparable`)
   - Test: reject fixtures `switch_typeparam_any.go`, `switch_typeparam_nil_case.go`, `switch_noncomparable_struct.go`; O7 controls in `test/unit/types/switch-cases.test.js`
   - Done when: Go's messages on all targets, no wasm ICE
-- [ ] Task 7.2: Tagless cases are comparisons with typed `bool` (O7.4, O7.5)
+- [x] Task 7.2: Tagless cases are comparisons with typed `bool` (O7.4, O7.5)
   - Files: `src/typechecker/statements.js`
   - Test: accept fixtures `tagless_case_any.go`, `tagless_case_defined_iface.go` (prints `hit`); reject fixtures `tagless_case_defined_bool.go` (`type MB bool`), `tagless_case_typeparam.go` (`T any`); existing tagless rejections (`case 1:`) keep their messages
   - Done when: Go's result on all targets; `# O7` keys removed
