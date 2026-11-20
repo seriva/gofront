@@ -611,7 +611,11 @@ export const expressionCheckMethods = {
 			this._checkTypeParamComparable(expr.op, lt, rt, expr);
 			return null;
 		}
-		const other = anyKind(lt) === "go" ? rt : lt;
+		// Only a Go `any` beside a typed value is checked; a JS-dynamic operand
+		// beside a typed one stays dynamic.
+		const ltGo = anyKind(lt) === "go";
+		if (ltGo === (anyKind(rt) === "go")) return null;
+		const other = ltGo ? rt : lt;
 		if (!other || other.kind === "untyped" || isNil(other) || isAny(other))
 			return null;
 		if (this._operatorDefined(expr.op, other)) return null;

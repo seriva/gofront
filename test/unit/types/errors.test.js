@@ -1196,6 +1196,9 @@ test("an operator an operand's kind lacks is reported once, as Go words it", () 
 		["_ = c < c", "c < c (operator < not defined on complex128)"],
 		["_ = b - b", "operator - not defined on b (variable of type bool)"],
 		["_ = x && x", "operator && not defined on x (variable of type int)"],
+		["_ = x && x && x", "operator && not defined on x (variable of type int)"],
+		["_ = x || x || x", "operator || not defined on x (variable of type int)"],
+		["_ = f % 2 + s", "operator % not defined on f (variable of type float64)"],
 		["_ = ^f", "operator ^ not defined on f (variable of type float64)"],
 		["_ = !x", "operator ! not defined on x (variable of type int)"],
 		["_ = -b", "operator - not defined on b (variable of type bool)"],
@@ -1214,6 +1217,25 @@ func main() {
 }`);
 		assertErrorContains(errors, msg);
 		assertEqual(errors.length, 1);
+	}
+});
+
+test("a slice, map or func compared with a JS-dynamic value is accepted in both operand orders", () => {
+	for (const dyn of ["document.foo", "document.foo.bar", 'JSON.parse("1")']) {
+		for (const v of ["s", "m", "f"]) {
+			for (const expr of [`${v} == ${dyn}`, `${dyn} == ${v}`]) {
+				const { errors } = compile(`package main
+
+func main() {
+	var s []int
+	var m map[string]int
+	var f func()
+	_, _, _ = s, m, f
+	_ = ${expr}
+}`);
+				assertEqual(errors.length, 0);
+			}
+		}
 	}
 });
 

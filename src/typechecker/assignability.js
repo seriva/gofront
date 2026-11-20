@@ -133,7 +133,7 @@ export const assignabilityMethods = {
 		}
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) {
-			this._checkLogicalOperands(lt, rt, node);
+			if (!this._checkLogicalOperands(lt, rt, node)) return TAINTED_ANY;
 			return logicalResultType(lt, rt);
 		}
 		return this._binaryResultTypeNonComplex(op, lt, rt, node);
@@ -141,11 +141,12 @@ export const assignabilityMethods = {
 
 	// `&&` and `||` need boolean operands of one type: `B && bool` mixes two
 	// distinct bool types, `1 && 2` and `x || x` with an `int` have no boolean.
+	// Returns false after reporting.
 	_checkLogicalOperands(lt, rt, node) {
-		if (!node) return;
-		if (!this.convertUntyped(lt, rt, node)) return;
-		if (!this._checkIdenticalOperands(lt, rt, node)) return;
-		this._checkOperatorDefined(node.op, lt, rt, node);
+		if (!node) return true;
+		if (!this.convertUntyped(lt, rt, node)) return false;
+		if (!this._checkIdenticalOperands(lt, rt, node)) return false;
+		return this._checkOperatorDefined(node.op, lt, rt, node);
 	},
 
 	_binaryResultTypeTypeParam(op, lt, rt, node) {
@@ -536,7 +537,7 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeNumeric(op, lt, rt, node) {
 		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
-		this._checkOperatorDefined(op, lt, rt, node);
+		if (!this._checkOperatorDefined(op, lt, rt, node)) return TAINTED_ANY;
 		const lName = lt.kind === "untyped" ? lt.base : lt.name;
 		const rName = rt.kind === "untyped" ? rt.base : rt.name;
 		const lFloat = lName === "float32" || lName === "float64";
