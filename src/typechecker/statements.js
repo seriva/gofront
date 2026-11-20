@@ -583,7 +583,7 @@ export const statementCheckMethods = {
 		const many = have > want;
 		this.err(
 			`${many ? "too many" : "not enough"} return values (have ${shown?.have ?? have}, want ${shown?.want ?? want})`,
-			many ? (stmt.values[shown ? 0 : want] ?? stmt) : stmt,
+			many || shown ? (stmt.values[shown ? 0 : want] ?? stmt) : stmt,
 		);
 		return true;
 	},

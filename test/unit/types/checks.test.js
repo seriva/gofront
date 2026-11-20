@@ -1252,6 +1252,25 @@ func main() { _, _, _ = f() }`);
 	);
 });
 
+test("a forwarded return reports its count error at the call", () => {
+	const few = compile(`package main
+func pair() (int, string) { return 1, "a" }
+func three() (int, string, bool) {
+	return pair()
+}
+func main() { _, _, _ = three() }`);
+	assertErrorContains(few.errors, "not enough return values");
+	assertEqual(`${few.errors[0].line}:${few.errors[0].col}`, "4:9");
+	const many = compile(`package main
+func pair() (int, string) { return 1, "a" }
+func one() int {
+	return pair()
+}
+func main() { _ = one() }`);
+	assertErrorContains(many.errors, "too many return values");
+	assertEqual(`${many.errors[0].line}:${many.errors[0].col}`, "4:9");
+});
+
 test("grouped named results (r, theta float64)", async () => {
 	await assertProgramOutput(
 		`package main

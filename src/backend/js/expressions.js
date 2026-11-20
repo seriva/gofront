@@ -2176,6 +2176,21 @@ export const expressionGenMethods = {
 		return { ...expr, func, args };
 	},
 
+	// `min(f())`, `append(f())`: the builtin was checked against one operand
+	// node per result of f (`expr._fwdArgs`); an arrow function takes f's
+	// results as those operands.
+	_genForwardedBuiltin(expr) {
+		this._fwdBuiltinCounter = (this._fwdBuiltinCounter ?? 0) + 1;
+		const args = expr._fwdArgs.map((o, i) => ({
+			...o,
+			kind: "Ident",
+			name: `__fwdbi$${this._fwdBuiltinCounter}$${i}`,
+		}));
+		const body = this.genCall({ ...expr, args, _multiForward: false });
+		const names = args.map((a) => a.name).join(", ");
+		return `((${names}) => (${body}))(...${this.genExpr(expr.args[0])})`;
+	},
+
 	genCall(expr) {
 		if (expr.func._genEntry) return this.genCall(this._jsonEntryCall(expr));
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
@@ -2499,6 +2514,8 @@ export const expressionGenMethods = {
 	},
 
 	_genBuiltinIdent(name, expr) {
+		if (expr._fwdArgs && expr._multiForward)
+			return this._genForwardedBuiltin(expr);
 		const gen = BUILTIN_GEN[name];
 		return gen ? gen(this, expr) : undefined;
 	},

@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assert,
+	assertAllTargetsOutput,
 	assertContains,
 	assertEqual,
 	assertProgramOutput,
@@ -922,6 +923,40 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "5 [0 0 0 0 0]\n[1 0 0 0]");
 	await assertProgramOutput(src, "5 [0 0 0 0 0]\n[1 0 0 0]\n");
+});
+
+test("a multi-value call as a builtin's only argument supplies its operands", async () => {
+	const prog = (body) => `package main
+
+import "fmt"
+
+func f() (int, int)             { return 1, 2 }
+func c() (float64, float64)     { return 1, 2 }
+func a() ([]int, int)           { return []int{1}, 2 }
+func cp() ([]int, []int)        { return make([]int, 3), []int{7, 8} }
+var shared = map[string]int{"a": 1, "b": 2}
+
+func m() (map[string]int, string) { return shared, "a" }
+
+func main() {
+${body}
+}
+`;
+	await assertAllTargetsOutput(
+		prog("\tfmt.Println(min(f()))\n\tfmt.Println(max(f()))"),
+		"1\n2\n",
+	);
+	await assertAllTargetsOutput(prog("\tfmt.Println(complex(c()))"), "(1+2i)\n");
+	await assertAllTargetsOutput(prog("\tfmt.Println(copy(cp()))"), "2\n");
+	await assertAllTargetsOutput(
+		prog("\td, _ := m()\n\tdelete(m())\n\tfmt.Println(len(d))"),
+		"1\n",
+	);
+	await assertAllTargetsOutput(prog("\tfmt.Println(append(a()))"), "[1 2]\n");
+	await assertAllTargetsOutput(
+		prog("\tfmt.Println(max(f()) + min(f()))"),
+		"3\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
