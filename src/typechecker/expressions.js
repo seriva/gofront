@@ -297,6 +297,9 @@ export const expressionCheckMethods = {
 				const t = expr._universe
 					? this.universe.lookup(expr.name)
 					: scope.lookup(expr.name);
+				// Generated and stdlib Go resolves every property of the name
+				// from the universe, never from the user's scope.
+				if (expr._universe) scope = this.universe;
 				// `true`, `false` and `nil` are universe constants: with no
 				// declaration in scope the identifier is the literal.
 				if (!t && Object.hasOwn(UNIVERSE_LITERALS, expr.name)) {

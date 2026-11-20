@@ -2712,3 +2712,26 @@ func main() {
 		);
 	});
 }
+
+for (const name of ["copy", "panic"]) {
+	test(`a package type named ${name} leaves stdlib Go alone`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type ${name} int
+
+func main() {
+	s := []int{2, 1}
+	slices.Sort(s)
+	fmt.Println(s, ${name}(3))
+}
+`,
+			"[1 2] 3\n",
+		);
+	});
+}
