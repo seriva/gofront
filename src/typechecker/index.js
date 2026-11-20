@@ -1217,7 +1217,42 @@ export class TypeChecker {
 		}
 	}
 
+	// A receiver's base type is a defined, non-pointer, non-interface type
+	// declared in this package.
+	_checkReceiverType(decl) {
+		const node = decl.recvType;
+		const isName = node.kind === "TypeName" || node.kind === "GenericTypeName";
+		if (!isName) {
+			const t = this.resolveTypeNode(node, this.globals);
+			const stars = node.kind === "PointerType" && decl.recvPointer ? "*" : "";
+			return this.err(`invalid receiver type ${stars}${typeStr(t)}`, decl);
+		}
+		const t = this.resolveTypeNodeName(node, this.globals);
+		if (t.kind === "basic" && t.name === "any")
+			return this.err(`invalid receiver type ${node.name}`, decl);
+		if (
+			t.kind === "basic" ||
+			t === ERROR ||
+			node.name.includes(".") ||
+			this._importedTypes.has(t)
+		)
+			return this.err(
+				`cannot define new methods on non-local type ${node.name}`,
+				decl,
+			);
+		if (t.kind !== "named") {
+			return this.err(`invalid receiver type ${node.name}`, decl);
+		}
+		const u = t.underlying;
+		if (u?.kind === "pointer" || u?.kind === "interface")
+			this.err(
+				`invalid receiver type ${node.name} (pointer or interface type)`,
+				decl,
+			);
+	}
+
 	_attachMethod(decl, funcType) {
+		this._checkReceiverType(decl);
 		funcType._ptrRecv = Boolean(decl.recvPointer);
 		funcType._decl = decl;
 		const recvNamedType = this.types.get(decl.recvType.name);

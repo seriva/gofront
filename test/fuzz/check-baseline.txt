@@ -160,16 +160,6 @@ names:addr:pkg-var:wasm-reject # excluded: wasm takes no address of a scalar var
 names:addr:shadow-builtin-pkg-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:conv:shadow-type-var:go-reject/gf-accept # R8
 names:type:shadow-type-var:go-reject/gf-accept # R8
-recv:decl:alias-unnamed:go-reject/gf-accept # O6
-recv:decl:any:go-reject/gf-accept # O6
-recv:decl:empty-iface:go-reject/gf-accept # O6
-recv:decl:error:go-reject/gf-accept # O6
-recv:decl:iface:go-reject/gf-accept # O6
-recv:decl:int:go-reject/gf-accept # O6
-recv:decl:ptr-iface:go-reject/gf-accept # O6
-recv:decl:ptr-int:go-reject/gf-accept # O6
-recv:decl:ptr-ptr-type:go-reject/gf-accept # O6
-recv:decl:ptr-type:go-reject/gf-accept # O6
 switch:empty:PS:go-reject/gf-accept # O7
 switch:empty:Tany:go-reject/gf-accept # O7
 switch:tag:1+0i,E:invalid-wasm # wasm-iface-equality
