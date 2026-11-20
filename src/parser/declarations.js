@@ -30,7 +30,9 @@ export const declarationParseMethods = {
 					? this.advance().value
 					: "_";
 			const recvPointer = Boolean(this.match(T.STAR));
-			const recvType = this.parseTypeName();
+			// Read as a type so `**T` and `[]int` reach the checker, which reports
+			// them as invalid receivers.
+			const recvType = this.parseType();
 			this.expect(T.RPAREN);
 			const name = this.expect(T.IDENT).value;
 			const { params, returnType } = this.parseSignature();

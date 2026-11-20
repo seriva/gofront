@@ -91,7 +91,7 @@ if (HAS_GO) {
 			(dir) => {
 				const r = fuzz(
 					"--section",
-					"recv",
+					"recv,names",
 					"--baseline",
 					join(dir, "baseline.txt"),
 				);
@@ -101,7 +101,7 @@ if (HAS_GO) {
 					"baseline entry no longer occurs, remove it: recv:decl:struct:go-reject/gf-accept",
 				);
 				assert(
-					/new disagreement, not in the baseline: recv:decl:\S+/.test(r.stderr),
+					/new disagreement, not in the baseline: names:\S+/.test(r.stderr),
 					r.stderr,
 				);
 			},

@@ -289,11 +289,11 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: both conversion paths call `_convertible`; `# O5` keys removed
 
 ### Phase 6: Method receivers (root `receiver-base-type`)
-- [ ] Task 6.1: Receiver base type checks (O6.1–O6.5)
+- [x] Task 6.1: Receiver base type checks (O6.1–O6.5)
   - Files: `src/typechecker/index.js`
   - Test: reject fixtures `receiver_interface.go`, `receiver_ptr_to_interface.go`, `receiver_pointer_type.go`, `receiver_predeclared.go`, `receiver_alias_unnamed.go`; `test/unit/language/named-type-methods.test.js` and generic receiver tests pass
   - Done when: Go's messages on all targets
-- [ ] Task 6.2: Receiver types parse as types (O6.6)
+- [x] Task 6.2: Receiver types parse as types (O6.6)
   - Files: `src/parser/declarations.js`, `src/typechecker/index.js`, `test/fuzz/checkfuzz.js` (remove the `recv:decl` pattern from `UNPARSED`)
   - Test: reject fixture `receiver_double_pointer.go` (`invalid receiver type **T`)
   - Done when: Go's message on all targets; `# O6` keys removed
