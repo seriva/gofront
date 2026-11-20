@@ -53,6 +53,10 @@ const TYPE_LITERAL_KINDS = new Set([
 
 // Basic types that are not number, string or bool types: JS-dynamic `any`,
 // the types of `nil` and `void`, and the `comparable` constraint.
+// Types assignable only when identical (or one side is unnamed over the
+// other's underlying type): their mismatch reads as Go's `cannot use`.
+const COMPOSITE_KINDS = new Set(["pointer", "array", "slice", "map", "func"]);
+
 const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
 // Composite kinds that no untyped constant converts to.
 const CONST_REJECTING_KINDS = new Set([
@@ -1034,72 +1038,45 @@ export const assignabilityMethods = {
 			return;
 		if (this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx))
 			return;
-		if (isPointer(target) && isPointer(source)) {
-			this._assertNestedAssignable(
-				target.base ?? target.underlying?.base,
-				source.base ?? source.underlying?.base,
-				at,
-			);
-			return;
-		}
-		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-		if (this._checkNumericCoercion(target, source, at, ctx, operand ?? at))
-			return;
-		if (this._checkArrayAssignable(target, source, at)) return;
-		if (this._checkTypedArrayAssignable(target, source, at)) return;
-		if (this._checkFuncAssignable(target, source, at)) return;
-		if (!identical(target, source))
+		const mismatch = () =>
 			this._assertAssignableTypeMismatch(
 				target,
 				source,
 				at,
 				operand ?? node,
 				structCopy,
+				ctx,
 			);
+		if (isPointer(target) && isPointer(source)) {
+			this._assertNestedAssignable(
+				target.base ?? target.underlying?.base,
+				source.base ?? source.underlying?.base,
+				mismatch,
+			);
+			return;
+		}
+		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
+		if (this._checkNumericCoercion(target, source, at, ctx, operand ?? at))
+			return;
+		if (this._checkArrayAssignable(target, source, at, mismatch)) return;
+		if (this._checkTypedArrayAssignable(target, source, at)) return;
+		if (this._checkFuncAssignable(target, source, mismatch)) return;
+		if (!identical(target, source)) mismatch();
 	},
 
-	// The element of an array or the base of a pointer: a struct type and a
-	// defined type over an identical struct are not interchangeable there,
-	// since the two do not share a representation.
-	_assertNestedAssignable(target, source, node) {
+	// The element of an array or the base of a pointer must be identical to
+	// the target's (spec *Assignability*: the two types are identical, or
+	// share an underlying type with one of them unnamed, which is a property
+	// of the whole type). A struct type and a defined type over an identical
+	// struct are not interchangeable there either, since the two do not share
+	// a representation. `mismatch` reports the whole-type mismatch.
+	_assertNestedAssignable(target, source, mismatch) {
 		const t = this.resolveType(target);
 		const s = this.resolveType(source);
-		if (
-			t &&
-			s &&
-			(t.kind === "struct") !== (s.kind === "struct") &&
-			this._deepUnderlying(t)?.kind === "struct" &&
-			this._deepUnderlying(s)?.kind === "struct" &&
-			!identical(t, s)
-		) {
-			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
-			return;
-		}
-		// An element or base mentioning a type parameter must be identical.
-		if (this._isTypeParamMismatch(t, s)) {
-			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
-			return;
-		}
-		if (this._distinctEmptyInterfaces(t, s)) {
-			this.err(`cannot use ${typeStr(s)} as ${typeStr(t)} value`, node);
-			return;
-		}
-		this.assertAssignable(target, source, node);
-	},
-
-	_isTypeParamMismatch(t, s) {
-		if (t?.kind !== "typeParam" && s?.kind !== "typeParam") return false;
-		return !identical(t, s) && !t?._tainted && !s?._tainted;
-	},
-
-	// `*B` and `*any` differ when `B` is a defined empty interface.
-	_distinctEmptyInterfaces(t, s) {
-		return (
-			anyKind(t) === "go" &&
-			anyKind(s) === "go" &&
-			(t.kind === "named" || s.kind === "named") &&
-			!identical(t, s)
-		);
+		if (!t || !s || t._tainted || s._tainted) return;
+		// JS-dynamic `any` stays unchecked.
+		if (anyKind(t) === "dynamic" || anyKind(s) === "dynamic") return;
+		if (!identical(t, s)) mismatch();
 	},
 
 	// Tags struct values / struct pointers flowing into an interface so codegen can
@@ -1405,6 +1382,7 @@ export const assignabilityMethods = {
 		node,
 		operand = node,
 		structCopy = false,
+		ctx = "assignment",
 	) {
 		let tBase = this._deepUnderlying(target);
 		tBase = this.resolveType(tBase);
@@ -1440,6 +1418,14 @@ export const assignabilityMethods = {
 			this.err(
 				`Cannot assign ${typeStr(source)} to ${typeStr(target)} here: convert it explicitly with ${typeStr(target)}(v)`,
 				node,
+			);
+			return;
+		}
+		if (COMPOSITE_KINDS.has(tBase?.kind) && COMPOSITE_KINDS.has(sBase?.kind)) {
+			this.err(
+				`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source), false)}) as ${typeStr(target)} value in ${ctx}`,
+				node,
+				this._seqToSliceHint(source, tBase, node),
 			);
 			return;
 		}
@@ -1643,25 +1629,22 @@ export const assignabilityMethods = {
 		);
 	},
 
-	_checkArrayAssignable(target, source, node) {
+	_checkArrayAssignable(target, source, node, mismatch) {
 		if (target.kind === "array" && source.kind === "array") {
 			if (
 				target.size != null &&
 				source.size != null &&
 				target.size !== source.size
 			)
-				this.err(
-					`Cannot assign ${typeStr(source)} to ${typeStr(target)} (different array lengths)`,
-					node,
-				);
-			else this._assertNestedAssignable(target.elem, source.elem, node);
+				mismatch();
+			else this._assertNestedAssignable(target.elem, source.elem, mismatch);
 			return true;
 		}
 		if (
 			(target.kind === "array" && source.kind === "slice") ||
 			(target.kind === "slice" && source.kind === "array")
 		) {
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			mismatch();
 			return true;
 		}
 		return false;
@@ -1702,16 +1685,11 @@ export const assignabilityMethods = {
 		return false;
 	},
 
-	_checkFuncAssignable(target, source, node) {
+	_checkFuncAssignable(target, source, mismatch) {
 		const tFunc = this._deepUnderlying(target);
 		const sFunc = this._deepUnderlying(source);
 		if (tFunc?.kind === "func" && sFunc?.kind === "func") {
-			if (!this._implementsMethod(tFunc, sFunc)) {
-				this.err(
-					`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
-					node,
-				);
-			}
+			if (!this._implementsMethod(tFunc, sFunc)) mismatch();
 			return true;
 		}
 		return false;

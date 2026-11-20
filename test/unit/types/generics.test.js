@@ -2188,7 +2188,10 @@ func main() {
 		);
 	};
 	test(`an array of the wrong length is rejected (${target})`, () => {
-		assertErrorContains(errs("[3]int{}"), "different array lengths");
+		assertErrorContains(
+			errs("[3]int{}"),
+			"(value of type [3]int) as [2]int value in argument",
+		);
 	});
 	test(`a slice for an array parameter is rejected (${target})`, () => {
 		assertErrorContains(errs("[]int{1, 2}"), "Cannot infer type arguments");
@@ -3230,7 +3233,7 @@ func main() { h(func() (int, int) { return 1, 2 }) }`,
 		"a pointer to a type parameter used as a pointer to an interface",
 		`func f[T any](xs *T) { var p *any = xs; _ = p }
 func main() { x := 1; f(&x) }`,
-		"Cannot assign T to any",
+		"cannot use xs (variable of type *T) as *any value in variable declaration",
 	],
 	[
 		"a type parameter converted to a type outside its set",

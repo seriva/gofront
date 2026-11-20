@@ -279,7 +279,7 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's message on all targets; both paths call `_checkConstOverflow`; the remaining `# O4` keys (`range:*:1<<63`) are gone
 
 ### Phase 5: Assignability and conversions (roots `nested-assignability`, `dual-conversion-check`)
-- [ ] Task 5.1: Pointer and array element types must be identical; composite mismatches use Go's message (O5.1–O5.4)
+- [x] Task 5.1: Pointer and array element types must be identical; composite mismatches use Go's message (O5.1–O5.4)
   - Files: `src/typechecker/assignability.js`
   - Test: reject fixtures `assign_ptr_int_to_ptr_any.go`, `assign_array_int_to_array_any.go`, `assign_ptr_int_to_ptr_named.go`, `assign_slice_int_to_slice_any.go`; existing `structCopy` tests in `test/unit/types/identity.test.js` pass
   - Done when: Go's messages on all targets, no wasm ICE
