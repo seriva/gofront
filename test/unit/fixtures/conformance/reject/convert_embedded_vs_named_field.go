@@ -1,4 +1,3 @@
-// pending: operand-text
 package main
 
 type E struct{ V int }

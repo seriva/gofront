@@ -459,16 +459,28 @@ func main() {
 	assertErrorContains(errors, "cannot convert");
 });
 
-test("array to slice conversion works", () => {
-	const { js, errors } = compile(`
+test("array to slice conversion is rejected, slicing works", () => {
+	const { errors } = compile(`
 package main
 func main() {
 	a := [3]int{1, 2, 3}
 	s := []int(a)
+	println(s[0])
+}
+`);
+	assertErrorContains(
+		errors,
+		"cannot convert a (variable of type [3]int) to type []int",
+	);
+	const { js, errors: ok } = compile(`
+package main
+func main() {
+	a := [3]int{1, 2, 3}
+	s := a[:]
 	println(s[0], s[1], s[2])
 }
 `);
-	assertEqual(errors.length, 0);
+	assertEqual(ok.length, 0);
 	assertEqual(runJs(js), "1 2 3");
 });
 

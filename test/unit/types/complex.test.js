@@ -318,11 +318,20 @@ func main() {
 
 section("Complex: Conversions");
 
-test("complex128(intVal) wraps as complex", () => {
-	const { js, errors } = compile(`package main
+test("complex128(intVal) is rejected, complex(float64(x), 0) works", () => {
+	assertErrorContains(
+		compile(`package main
 func main() {
 	x := 5
 	z := complex128(x)
+	println(real(z), imag(z))
+}`).errors,
+		"cannot convert x (variable of type int) to type complex128",
+	);
+	const { js, errors } = compile(`package main
+func main() {
+	x := 5
+	z := complex(float64(x), 0)
 	println(real(z), imag(z))
 }`);
 	assertEqual(errors.length, 0);
