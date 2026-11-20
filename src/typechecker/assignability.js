@@ -6,9 +6,10 @@ import { exprText, operandKind } from "./operand-text.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	anyKind,
 	BOOL,
 	CMP_OPS,
-	COMPLEX128,
+	COMPARABLE,
 	FLOAT64,
 	identical,
 	is64BitInt,
@@ -28,7 +29,7 @@ import {
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
 	SIZED_INT_NAMES,
-	STRING,
+	TAINTED_ANY,
 	typeStr,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
@@ -51,6 +52,16 @@ const TYPE_LITERAL_KINDS = new Set([
 // Basic types that are not number, string or bool types: JS-dynamic `any`,
 // the types of `nil` and `void`, and the `comparable` constraint.
 const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
+// Composite kinds that no untyped constant converts to.
+const CONST_REJECTING_KINDS = new Set([
+	"struct",
+	"array",
+	"slice",
+	"map",
+	"pointer",
+	"func",
+	"chan",
+]);
 
 const INTEGER_ONLY_OPS = new Set(["%", "&", "|", "^", "&^"]);
 
@@ -92,13 +103,38 @@ function untypedIntegerKind(isFloat, lt, rt) {
 	return lt.rune || rt.rune ? UNTYPED_RUNE : UNTYPED_INT;
 }
 
+// The kind class of an untyped constant: only constants of one class
+// (bool, string or number) meet in an operator.
+function untypedClass(t) {
+	return t.base === "bool" || t.base === "string" ? t.base : "number";
+}
+
+// Which operand types an operator accepts, by operator class.
+function opClass(op) {
+	if (INTEGER_ONLY_OPS.has(op)) return "int";
+	if (op === "+") return "add";
+	if (op === "-" || op === "*" || op === "/") return "num";
+	return "ord";
+}
+
+const TYPE_PARAM_OP_PREDICATES = {
+	int: (t) => isInteger(t),
+	add: (t) => isComplexOrNumeric(t) || isString(t),
+	num: (t) => isComplexOrNumeric(t),
+	ord: (t) => isNumeric(t) || isString(t),
+};
+
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
 
 	binaryResultType(op, lt, rt, node) {
-		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
-			return this._binaryResultTypeTypeParam(op, lt, rt);
+		if (lt?.kind === "typeParam" || rt?.kind === "typeParam") {
+			// `x == nil` with a type parameter takes the same nil rule.
+			if (node && CMP_OPS.has(op) && !this.convertUntyped(lt, rt, node))
+				return UNTYPED_BOOL;
+			return this._binaryResultTypeTypeParam(op, lt, rt, node);
+		}
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) {
 			this._checkLogicalOperands(lt, rt, node);
@@ -109,7 +145,11 @@ export const assignabilityMethods = {
 
 	// `B && bool` mixes two distinct bool types, which Go rejects.
 	_checkLogicalOperands(lt, rt, node) {
-		if (!node || lt?.kind === "untyped" || rt?.kind === "untyped") return;
+		if (!node) return;
+		if (lt?.kind === "untyped" || rt?.kind === "untyped") {
+			this.convertUntyped(lt, rt, node);
+			return;
+		}
 		if (!isBool(lt) || !isBool(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
@@ -117,10 +157,226 @@ export const assignabilityMethods = {
 		);
 	},
 
-	_binaryResultTypeTypeParam(op, lt, rt) {
-		if (CMP_OPS.has(op)) return UNTYPED_BOOL;
-		if (LOG_OPS.has(op)) return BOOL;
+	_binaryResultTypeTypeParam(op, lt, rt, node) {
+		const isShift = op === "<<" || op === ">>";
+		if (!isShift && !this._matchTypeParamOperands(op, lt, rt, node))
+			return CMP_OPS.has(op)
+				? UNTYPED_BOOL
+				: lt?.kind === "typeParam"
+					? lt
+					: rt;
+		if (CMP_OPS.has(op)) {
+			this._checkTypeParamOperator(op, lt, rt, node);
+			return UNTYPED_BOOL;
+		}
+		if (LOG_OPS.has(op)) {
+			this._checkTypeParamOperator(op, lt, rt, node);
+			return lt?.kind === "typeParam"
+				? lt
+				: rt?.kind === "typeParam" && lt?.kind === "untyped"
+					? rt
+					: BOOL;
+		}
+		this._checkTypeParamOperator(op, lt, rt, node);
+		// A shift has its left operand's type: `1 << s` stays an untyped
+		// integer that its context types, never the count's type.
+		if (isShift)
+			return !node || this._isShiftableUntyped(lt, node.left)
+				? lt
+				: TAINTED_ANY;
 		return lt?.kind === "typeParam" ? lt : rt;
+	},
+
+	// The operands of a non-shift operator on a type parameter get one type
+	// first, as in Go: an untyped constant converts to the type parameter and
+	// a typed operand must be identical to it (`a + b` with `b int` is a
+	// mismatch). A comparison with an interface or `nil` operand follows the
+	// comparison rules instead. Reports and returns false on a mismatch.
+	_matchTypeParamOperands(op, lt, rt, node) {
+		if (!node) return true;
+		if (isNil(lt) || isNil(rt)) {
+			if (CMP_OPS.has(op)) return true;
+			this._reportMismatch(lt, rt, node);
+			return false;
+		}
+		if (lt?.kind === "untyped")
+			return this._convertUntypedToTypeParam(rt, lt, node.left, node);
+		if (rt?.kind === "untyped")
+			return this._convertUntypedToTypeParam(lt, rt, node.right, node);
+		if (identical(lt, rt)) return true;
+		const other = lt?.kind === "typeParam" ? rt : lt;
+		if (!other || other._tainted || isAny(other)) return true;
+		if (CMP_OPS.has(op) && this._deepUnderlying(other)?.kind === "interface")
+			return true;
+		this._reportMismatch(lt, rt, node);
+		return false;
+	},
+
+	// An untyped constant `c` (operand `cNode`) meets type parameter `tp`. Go
+	// converts it only when its kind (number, bool, string) is the kind of
+	// every type in the type set, else the types are mismatched; the constant
+	// must then be representable in every type of the set.
+	_convertUntypedToTypeParam(
+		tp,
+		c,
+		cNode,
+		node,
+		report = this._reportMismatch,
+	) {
+		const [lt, rt] = node.left === cNode ? [c, tp] : [tp, c];
+		const cls = untypedClass(c);
+		const all = (pred) =>
+			this._typeParamAllows(tp, (t) => pred(this._deepUnderlying(t) ?? t));
+		if (
+			all(isComplexOrNumeric) !== (cls === "number") ||
+			all(isBool) !== (cls === "bool") ||
+			all(isString) !== (cls === "string")
+		) {
+			report.call(this, lt, rt, node);
+			return false;
+		}
+		const terms = this._constraintTerms(tp.constraint, new Set()) ?? [];
+		if (terms.every((t) => this._untypedFitsTerm(c, cNode, t))) return true;
+		this.err(
+			`cannot convert ${this._untypedConstText(c, cNode)} to type ${typeStr(tp)}`,
+			cNode,
+		);
+		return false;
+	},
+
+	// Whether untyped constant `c` converts to `term` of a type set: a complex
+	// constant needs a complex type and a known value must be representable.
+	_untypedFitsTerm(c, cNode, term) {
+		const u = this._deepUnderlying(term) ?? term;
+		if (c.base === "complex128") return isComplex(u);
+		const v = cNode?._const;
+		if (!v || isComplex(u) || u?.kind !== "basic") return true;
+		const r = this._convertConstTo(v, u);
+		return !!r && !r.overflow;
+	},
+
+	// `1.5 (untyped float constant)`, `half (untyped float constant 0.5)`: Go
+	// adds the value when the operand's text is not the value itself.
+	_untypedConstText(c, cNode) {
+		const base = c.rune ? "rune" : c.base === "complex128" ? "complex" : c.base;
+		const kind = operandKind(cNode, base, true);
+		const text = exprText(cNode);
+		const v = cNode?._const;
+		const value = v && (v.k === "INT" || v.k === "FLOAT") ? String(v.v) : null;
+		return value === null || value === text
+			? `${text} (${kind})`
+			: `${text} (${kind} ${value})`;
+	},
+
+	// An operator on a type parameter needs every type in its constraint's
+	// type set to support it; a constraint without a type set supports none.
+	// A shifted operand is the left one and a shift count any integer.
+	_checkTypeParamOperator(op, lt, rt, node) {
+		if (!node) return;
+		if (op === "==" || op === "!=") {
+			this._checkTypeParamComparable(op, lt, rt, node);
+			return;
+		}
+		const isShift = op === "<<" || op === ">>";
+		if (isShift) this._checkTypeParamShiftCount(rt, node);
+		const left = lt?.kind === "typeParam";
+		if (isShift && !left) {
+			this._checkShiftedOperand(lt, node.left);
+			return;
+		}
+		const tp = left ? lt : rt;
+		const operand = left ? node.left : node.right;
+		const isLog = LOG_OPS.has(op);
+		const pred = isLog
+			? (t) => isBool(t)
+			: TYPE_PARAM_OP_PREDICATES[isShift ? "int" : opClass(op)];
+		if (this._typeParamAllows(tp, (t) => pred(this._deepUnderlying(t) ?? t)))
+			return;
+		const kind = `${operandKind(operand, typeStr(tp), false)} constrained by ${this._constraintText(tp)}`;
+		if (CMP_OPS.has(op))
+			this.err(
+				`invalid operation: ${exprText(node)} (type parameter ${typeStr(tp)} cannot use operator ${op})`,
+				node,
+			);
+		else if (isShift)
+			this.err(
+				`invalid operation: shifted operand ${exprText(operand)} (${kind}) must be integer`,
+				operand,
+			);
+		else
+			this.err(
+				`invalid operation: operator ${op} not defined on ${exprText(operand)} (${kind})`,
+				operand,
+			);
+	},
+
+	// The count of a shift whose operand involves a type parameter: an integer
+	// constant or a value whose every type is an integer.
+	_checkTypeParamShiftCount(rt, node) {
+		if (rt?.kind !== "typeParam") {
+			this.checkShiftCount(rt, node.right);
+			return;
+		}
+		if (
+			!this._typeParamAllows(rt, (t) => isInteger(this._deepUnderlying(t) ?? t))
+		)
+			this.err(
+				`invalid operation: shift count ${exprText(node.right)} (${operandKind(node.right, typeStr(rt), false)} constrained by ${this._constraintText(rt)}) must be integer`,
+				node.right,
+			);
+	},
+
+	// `==` and `!=` need every type in the type set to be comparable; a
+	// constraint without a type set must itself be `comparable`. A comparison
+	// with `nil` follows the nil rule instead.
+	_checkTypeParamComparable(op, lt, rt, node) {
+		if (isNil(lt) || isNil(rt)) return;
+		for (const [t, operand] of [
+			[lt, node.left],
+			[rt, node.right],
+		]) {
+			if (t?.kind !== "typeParam" || this._typeParamComparable(t)) continue;
+			const empty =
+				this._constraintTerms(t.constraint, new Set())?.length === 0;
+			this.err(
+				`invalid operation: ${exprText(node)} (${empty ? "empty type set" : "incomparable types in type set"})`,
+				operand,
+			);
+			return;
+		}
+	},
+
+	_typeParamComparable(tp) {
+		const terms = this._constraintTerms(tp.constraint, new Set());
+		if (terms?.length)
+			return terms.every(
+				(t) => t.name === "comparable" || this._isComparable(t),
+			);
+		if (terms) return false;
+		let c = tp.constraint;
+		if (c?.kind === "TypeName" || c?.kind === "InterfaceType")
+			c = this.resolveTypeNode(c, this.globals);
+		while (c?.kind === "named") c = c.underlying;
+		return c === COMPARABLE || Boolean(c?._comparable);
+	},
+
+	_constraintText(tp) {
+		const c = tp.constraint;
+		if (!c || isAny(c)) return "any";
+		if (c.kind === "TypeName") return c.name;
+		try {
+			// An inline union (`[T ~bool | ~int]`) keeps its terms as AST nodes.
+			if (c.kind === "UnionConstraint")
+				return c.terms
+					.map(
+						(t) =>
+							`${t.approx ? "~" : ""}${typeStr(t.resolved ?? this.resolveTypeNode(t.type, c._scope ?? this.globals))}`,
+					)
+					.join(" | ");
+			return typeStr(c);
+		} catch {
+			return "its constraint";
+		}
 	},
 
 	_binaryResultTypeNonComplex(op, lt, rt, node) {
@@ -132,8 +388,15 @@ export const assignabilityMethods = {
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt) && op === "+")
-			return this._binaryResultTypeString(lt, rt);
-		if (node)
+			return this._binaryResultTypeString(lt, rt, node);
+		if (node && lt.kind !== "untyped" && identical(lt, rt)) {
+			// `b + b` on bool: the operator is not defined for the type.
+			const left = node.left;
+			this.err(
+				`invalid operation: operator ${op} not defined on ${exprText(left)} (${operandKind(left, typeStr(lt), false)})`,
+				left,
+			);
+		} else if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
 	},
@@ -142,9 +405,40 @@ export const assignabilityMethods = {
 	// type or an untyped constant representable as uint.
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
-		if (node && lt.kind !== "untyped" && !isInteger(lt))
-			this.err(`shifted operand ${typeStr(lt)} must be integer`, node.left);
-		return lt;
+		if (!node) return lt;
+		this._checkShiftedOperand(lt, node.left);
+		// `"a" << s` was reported: the result has no type to check further.
+		return this._isShiftableUntyped(lt, node.left) ? lt : TAINTED_ANY;
+	},
+
+	// The shifted operand of a shift whose operand is not a type parameter: an
+	// integer, or an untyped constant representable as an integer (`1.0 << s`
+	// is valid, `1.5 << s` and `"a" << s` are not). An imaginary constant has
+	// no tracked value and is left alone.
+	_checkShiftedOperand(lt, left) {
+		if (lt?.kind !== "untyped") {
+			if (!isInteger(lt))
+				this.err(
+					`invalid operation: shifted operand ${exprText(left)} (${operandKind(left, typeStr(lt), false)}) must be integer`,
+					left,
+				);
+			return;
+		}
+		if (!this._isShiftableUntyped(lt, left))
+			this.err(
+				`invalid operation: shifted operand ${this._untypedConstText(lt, left)} must be integer`,
+				left,
+			);
+	},
+
+	_isShiftableUntyped(lt, left) {
+		if (lt?.kind !== "untyped" || lt.base === "complex128" || isNil(lt))
+			return true;
+		const v = left?._const;
+		return (
+			lt.base === "int" ||
+			(lt.base === "float64" && (!v || constIntValue(v) !== null))
+		);
 	},
 
 	// Reports a shift count that is not an integer or is a negative constant.
@@ -152,13 +446,26 @@ export const assignabilityMethods = {
 		const v = this._constValue(countExpr);
 		if (v) {
 			const n = constIntValue(v);
-			if (n === null) {
+			if (rt && rt.kind !== "untyped" && !isInteger(rt)) {
+				this.err(
+					`invalid shift count: ${typeStr(rt)} is not an integer type`,
+					countExpr,
+				);
+			} else if (n === null) {
 				this.err(
 					`invalid shift count ${typeStr(rt)} constant: not an integer`,
 					countExpr,
 				);
 			} else if (n < 0n) {
 				this.err(`invalid shift count: ${n} is negative`, countExpr);
+			} else if (n > 0xffffffffffffffffn) {
+				this.err(
+					`${exprText(countExpr)} (${this._operandTypeStr(rt)} constant) overflows uint`,
+					countExpr,
+				);
+			} else if (rt?.kind === "untyped" && rt.base === "float64") {
+				// `x << 1.0`: the count is converted to an integer constant.
+				countExpr._type = UNTYPED_INT;
 			}
 			return;
 		}
@@ -169,11 +476,14 @@ export const assignabilityMethods = {
 			);
 	},
 
-	_binaryResultTypeString(lt, rt) {
+	// The result keeps the defined type of the typed operand (`S + S` is `S`);
+	// two typed operands must have identical types.
+	_binaryResultTypeString(lt, rt, node) {
 		if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
-		return STRING;
+		this._checkIdenticalOperands(lt, rt, node);
+		return lt;
 	},
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
@@ -194,11 +504,11 @@ export const assignabilityMethods = {
 			return ANY;
 		}
 		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
+		if (node && !this.convertUntyped(lt, rt, node)) return ANY;
 		if (lt.kind === "untyped") return rt;
 		if (rt.kind === "untyped") return lt;
 		this._checkIdenticalOperands(lt, rt, node);
-		if (isComplex64(lt) && isComplex64(rt)) return lt;
-		return COMPLEX128;
+		return lt;
 	},
 
 	_binaryResultTypeNumeric(op, lt, rt, node) {
@@ -247,9 +557,9 @@ export const assignabilityMethods = {
 
 	// A Go `any` (written in source) has no operators besides `==` and `!=`:
 	// the value needs a type assertion first. JS-dynamic and recovered `any`
-	// types are not `_declared` and stay permissive.
+	// types are not Go `any` and stay permissive.
 	_checkDeclaredAnyOperator(op, type, operand) {
-		if (!type?._declared || !operand) return null;
+		if (anyKind(type) !== "go" || !operand) return null;
 		return this.err(
 			`invalid operation: operator ${op} not defined on ${exprText(operand)} (${operandKind(operand, typeStr(type))})`,
 			operand,
@@ -263,15 +573,6 @@ export const assignabilityMethods = {
 			this._checkDeclaredAnyOperator(op, lt, node.left) ??
 			this._checkDeclaredAnyOperator(op, rt, node.right)
 		);
-	},
-
-	// `f %= 2.0` with a non-integer `f`: the same rule as the binary form.
-	_checkCompoundIntegerOnly(stmtOp, lhsType, lhsExpr) {
-		const op = stmtOp.slice(0, -1);
-		if (!INTEGER_ONLY_OPS.has(op)) return;
-		const t = lhsType && this.resolveType(lhsType);
-		if (!this._isTypedBasicOperand(t) || isInteger(t)) return;
-		this._reportIntegerOnly(op, t, lhsExpr);
 	},
 
 	_reportIntegerOnly(op, type, operand) {
@@ -289,14 +590,130 @@ export const assignabilityMethods = {
 
 	// Comparing two typed operands of basic types needs identical types
 	// (`float64 == int`, `Celsius == Fahrenheit`, `S == string`): neither is
-	// assignable to the other. Untyped constants, nil and interface or
+	// assignable to the other. An untyped constant or `nil` is converted to
+	// the other operand's type first (`convertUntyped`); interface and
 	// JS-dynamic operands adapt to either side.
 	_checkCmpOperandTypes(lt, rt, node) {
-		if (!node || !this._isTypedBasicOperand(lt)) return;
+		if (!node) return;
+		if (!this.convertUntyped(lt, rt, node)) return;
+		if (!this._isTypedBasicOperand(lt)) return;
 		if (!this._isTypedBasicOperand(rt) || identical(lt, rt)) return;
 		this.err(
 			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
 			node,
+		);
+	},
+
+	// The one conversion step for an untyped constant or `nil` operand of the
+	// binary expression `node`: it takes the other operand's type, and the
+	// kind must fit (`string == 'a'`, `int == nil`, `float64 + 1i`). Reports
+	// and returns false on a mismatch; true when nothing is wrong or there is
+	// nothing to convert.
+	convertUntyped(lt, rt, node, report = this._reportMismatch) {
+		const ln = isNil(lt);
+		const rn = isNil(rt);
+		if (ln && rn) {
+			this.err(
+				`invalid operation: ${exprText(node)} (operator ${node.op} not defined on untyped nil)`,
+				node,
+			);
+			return false;
+		}
+		let fits = true;
+		if (lt?.kind === "untyped" && rt?.kind === "untyped" && !ln && !rn)
+			fits = untypedClass(lt) === untypedClass(rt);
+		else if (ln || rn) fits = !this._nilMismatch(ln ? rt : lt);
+		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
+			return this._convertUntypedConst(rt, lt, node.left, lt, rt, node, report);
+		else if (rt?.kind === "untyped" && lt?.kind !== "untyped")
+			return this._convertUntypedConst(
+				lt,
+				rt,
+				node.right,
+				lt,
+				rt,
+				node,
+				report,
+			);
+		if (!fits) report.call(this, lt, rt, node);
+		return fits;
+	},
+
+	_nilMismatch(other) {
+		return !!other && !other._tainted && this._isNilless(other);
+	},
+
+	_reportMismatch(lt, rt, node) {
+		this.err(
+			`invalid operation: ${exprText(node)} (mismatched types ${this._operandTypeStr(lt)} and ${this._operandTypeStr(rt)})`,
+			node,
+		);
+	},
+
+	_operandTypeStr(t) {
+		if (isNil(t)) return "untyped nil";
+		if (t?.kind === "untyped" && t.base === "float64") return "untyped float";
+		if (t?.kind === "untyped" && t.base === "complex128")
+			return "untyped complex";
+		return typeStr(t);
+	},
+
+	// An untyped constant `untyped` (operand `untypedNode`) meets the typed
+	// operand `typed`: its kind must be one the type can hold.
+	_convertUntypedConst(
+		typed,
+		untyped,
+		untypedNode,
+		lt,
+		rt,
+		node,
+		report = this._reportMismatch,
+	) {
+		const u = this._deepUnderlying(typed);
+		if (!u || typed._tainted || typed.kind === "typeParam") return true;
+		let fits = !CONST_REJECTING_KINDS.has(u.kind);
+		if (u.kind === "basic") {
+			if (NIL_LOOSE_BASICS.has(u.name)) return true;
+			if (u.name === "string") fits = untyped.base === "string";
+			else if (u.name === "bool") fits = untyped.base === "bool";
+			else fits = untyped.base !== "string" && untyped.base !== "bool";
+			// Imaginary constants are not tracked by value: any non-complex
+			// target is reported as an overflow.
+			if (fits && untyped.base === "complex128" && !isComplex(u)) {
+				this.err(
+					`${exprText(untypedNode)} (untyped complex constant) overflows ${typeStr(typed)}`,
+					untypedNode,
+				);
+				return false;
+			}
+		}
+		if (!fits) report.call(this, lt, rt, node);
+		return fits;
+	},
+
+	// `x := nil`, `var x = nil`: untyped `nil` has no default type, so it
+	// cannot give a variable its type. Reports and returns true for `nil`.
+	_rejectUntypedNil(t, node, ctx) {
+		if (!isNil(t)) return false;
+		this.err(`use of untyped nil in ${ctx}`, node);
+		return true;
+	},
+
+	// Whether `nil` has no value in `t`: a struct, array, number, string or
+	// bool, or a type parameter whose constraint admits such a type or has no
+	// type set. JS-dynamic `any` and the loosely modelled kinds keep `nil`.
+	_isNilless(t) {
+		if (!t) return false;
+		if (t.kind === "typeParam")
+			return !this._typeParamAllows(
+				t,
+				(term) => term.name !== "comparable" && !this._isNilless(term),
+			);
+		const u = this._deepUnderlying(t);
+		return (
+			u?.kind === "struct" ||
+			u?.kind === "array" ||
+			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name))
 		);
 	},
 
@@ -321,7 +738,7 @@ export const assignabilityMethods = {
 	},
 
 	_isNonComparableKind(t) {
-		const base = t?.kind === "named" ? t.underlying : t;
+		const base = this._deepUnderlying(t);
 		return (
 			base?.kind === "slice" || base?.kind === "map" || base?.kind === "func"
 		);
@@ -358,7 +775,7 @@ export const assignabilityMethods = {
 	},
 
 	_float32Base(t) {
-		const r = t?.kind === "named" ? t.underlying : t;
+		const r = this._deepUnderlying(t);
 		return r?.kind === "basic" || r?.kind === "untyped" ? r.name : null;
 	},
 
@@ -434,27 +851,34 @@ export const assignabilityMethods = {
 		this._tagComplexConst(target, source, operand ?? node);
 		this._markIfaceBox(target, source, node);
 		this._checkWasmIfaceProvider(target, source, node);
-		if (this._checkIfaceToConcrete(target, source, node, ctx, operand)) return;
-		if (this._assertAssignableEarlyReturn(target, source, operand ?? node, ctx))
+		// The results of a forwarded call (`g(f())`) have no node of their own:
+		// errors report at the call that yields them, as Go does. The rewrites
+		// above and `_markStructCopy` never see it, since they would tag or
+		// rewrite that one call once per result.
+		const at = node ?? this._forwardedCall;
+		if (this._checkIfaceToConcrete(target, source, at, ctx, operand ?? at))
+			return;
+		if (this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx))
 			return;
 		if (isPointer(target) && isPointer(source)) {
 			this._assertNestedAssignable(
 				target.base ?? target.underlying?.base,
 				source.base ?? source.underlying?.base,
-				node,
+				at,
 			);
 			return;
 		}
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-		if (this._checkNumericCoercion(target, source, node, ctx, operand)) return;
-		if (this._checkArrayAssignable(target, source, node)) return;
-		if (this._checkTypedArrayAssignable(target, source, node)) return;
-		if (this._checkFuncAssignable(target, source, node)) return;
+		if (this._checkNumericCoercion(target, source, at, ctx, operand ?? at))
+			return;
+		if (this._checkArrayAssignable(target, source, at)) return;
+		if (this._checkTypedArrayAssignable(target, source, at)) return;
+		if (this._checkFuncAssignable(target, source, at)) return;
 		if (!identical(target, source))
 			this._assertAssignableTypeMismatch(
 				target,
 				source,
-				node,
+				at,
 				operand ?? node,
 				structCopy,
 			);
@@ -477,7 +901,31 @@ export const assignabilityMethods = {
 			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
 			return;
 		}
+		// An element or base mentioning a type parameter must be identical.
+		if (this._isTypeParamMismatch(t, s)) {
+			this.err(`Cannot assign ${typeStr(s)} to ${typeStr(t)}`, node);
+			return;
+		}
+		if (this._distinctEmptyInterfaces(t, s)) {
+			this.err(`cannot use ${typeStr(s)} as ${typeStr(t)} value`, node);
+			return;
+		}
 		this.assertAssignable(target, source, node);
+	},
+
+	_isTypeParamMismatch(t, s) {
+		if (t?.kind !== "typeParam" && s?.kind !== "typeParam") return false;
+		return !identical(t, s) && !t?._tainted && !s?._tainted;
+	},
+
+	// `*B` and `*any` differ when `B` is a defined empty interface.
+	_distinctEmptyInterfaces(t, s) {
+		return (
+			anyKind(t) === "go" &&
+			anyKind(s) === "go" &&
+			(t.kind === "named" || s.kind === "named") &&
+			!identical(t, s)
+		);
 	},
 
 	// Tags struct values / struct pointers flowing into an interface so codegen can
@@ -493,7 +941,7 @@ export const assignabilityMethods = {
 			return;
 		if (target.kind === "typeParam") return;
 		let tBase = this.resolveType(target);
-		if (tBase?.kind === "named") tBase = this.resolveType(tBase.underlying);
+		tBase = this._deepUnderlying(tBase);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
 		// The static type behind the interface value: codegen derives the
 		// fmt metadata (Stringer elements of slices and maps) from it.
@@ -512,9 +960,7 @@ export const assignabilityMethods = {
 		const named = this._namedMethodBoxSource(source);
 		if (named)
 			return { box: named.ptr ? "named_ptr" : "named", type: named.type };
-		const sBase = this.resolveType(
-			source.kind === "named" ? source.underlying : source,
-		);
+		const sBase = this.resolveType(this._deepUnderlying(source));
 		const info = this._classifyIfaceBox(sBase);
 		if (!info) return null;
 		return { box: info.box, ptrFields: info.ptrFields };
@@ -528,7 +974,7 @@ export const assignabilityMethods = {
 		let t = isPtr ? source.base : source;
 		if (t?.kind === "TypeName" || t?.kind === "Ident") t = this.resolveType(t);
 		if (t?.kind !== "named") return null;
-		const u = this.resolveType(t.underlying);
+		const u = this._deepUnderlying(t);
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		const methods = t.methods ?? t._generic?.methods;
 		// A user-declared named basic type without methods is boxed as well, so
@@ -559,7 +1005,7 @@ export const assignabilityMethods = {
 		for (const [fname, ftype] of st.fields.entries()) {
 			const full = prefix ? `${prefix}.${fname}` : fname;
 			const rf = this.resolveType(ftype);
-			const bf = rf?.kind === "named" ? this.resolveType(rf.underlying) : rf;
+			const bf = this._deepUnderlying(rf);
 			if (isPointer(bf)) {
 				ptrs.push(full);
 			} else if (bf?.kind === "struct") {
@@ -575,9 +1021,7 @@ export const assignabilityMethods = {
 			return { box: "value", ptrFields: pf.length > 0 ? pf : null };
 		}
 		if (sBase?.kind === "pointer") {
-			const st = this.resolveType(
-				sBase.base?.kind === "named" ? sBase.base.underlying : sBase.base,
-			);
+			const st = this.resolveType(this._deepUnderlying(sBase.base));
 			if (st?.kind === "struct") {
 				const pf = this._getStructPtrFields(st);
 				return { box: "ptr", ptrFields: pf.length > 0 ? pf : null };
@@ -627,7 +1071,7 @@ export const assignabilityMethods = {
 	// flow into a concrete (non-interface) type, or into an interface with
 	// methods (`var e error = b` with `b any`).
 	_checkIfaceToConcrete(target, source, node, ctx, operand) {
-		if (!source?._declared || !operand || typeof operand !== "object")
+		if (anyKind(source) !== "go" || !operand || typeof operand !== "object")
 			return false;
 		if (!this._isConcreteTarget(target) && !this._isMethodIfaceTarget(target))
 			return false;
@@ -641,7 +1085,7 @@ export const assignabilityMethods = {
 	// `int(x)`, `(*T)(x)` and `I(x)` (I with methods) with a source-written
 	// `any` operand need an assertion.
 	_checkIfaceConversion(srcType, targetType, expr, operand) {
-		if (!srcType?._declared || !operand) return false;
+		if (anyKind(srcType) !== "go" || !operand) return false;
 		if (
 			!this._isConcreteTarget(targetType) &&
 			!this._isMethodIfaceTarget(targetType)
@@ -657,18 +1101,14 @@ export const assignabilityMethods = {
 	// An interface type (named or literal) with at least one method.
 	_isMethodIfaceTarget(target) {
 		if (!target || isAny(target)) return false;
-		const base = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		const base = this.resolveType(this._deepUnderlying(target));
 		return base?.kind === "interface" && base.methods?.size > 0;
 	},
 
 	_isConcreteTarget(target) {
 		if (!target || target.kind === "typeParam" || isAny(target)) return false;
 		if (isNil(target) || isUntyped(target)) return false;
-		const base = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		const base = this.resolveType(this._deepUnderlying(target));
 		return !!base && base.kind !== "interface" && base.kind !== "typeParam";
 	},
 
@@ -676,23 +1116,109 @@ export const assignabilityMethods = {
 	// type-parameter type. JS-dynamic `any` and the other kinds the checker
 	// models loosely (`shared`, `simd`) keep accepting it.
 	_checkNilTarget(target, node, ctx) {
-		const u = this._deepUnderlying(target);
-		const nilless =
-			u?.kind === "struct" ||
-			u?.kind === "array" ||
-			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name));
-		if (nilless)
+		if (this._isNilless(target))
 			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, node);
 	},
 
 	_assertAssignableEarlyReturn(target, source, node, ctx) {
 		if (isNil(source)) this._checkNilTarget(target, node, ctx);
-		return (
-			target?.kind === "typeParam" ||
-			source?.kind === "typeParam" ||
-			isAny(target) ||
-			isAny(source) ||
-			isNil(source)
+		if (target?.kind === "typeParam" || source?.kind === "typeParam") {
+			if (!isNil(source) && !this._typeParamAssignable(target, source, node))
+				this._reportTypeParamAssign(target, source, node, ctx);
+			return true;
+		}
+		return isAny(target) || isAny(source) || isNil(source);
+	},
+
+	// Whether a value of `source` is assignable where `target` is wanted, one
+	// of them being a type parameter (Go's assignability: identical types, an
+	// untyped constant every type of the type set represents, a value of a
+	// type parameter to an unnamed type or an interface its type set
+	// satisfies, or a value to a type parameter every type of whose set takes
+	// it). JS-dynamic `any` stays unchecked.
+	_typeParamAssignable(target, source, node) {
+		if (identical(target, source)) return true;
+		if (anyKind(source) !== "go" && isAny(source)) return true;
+		if (source._tainted || target._tainted) return true;
+		if (target.kind === "typeParam")
+			return this._toTypeParamOk(target, source, node);
+		return this._fromTypeParamOk(target, source);
+	},
+
+	_toTypeParamOk(target, source, node) {
+		const terms = this._constraintTerms(target.constraint, new Set());
+		if (!terms || terms.length === 0) return false;
+		if (source.kind === "untyped")
+			return terms.every((t) => this._untypedFitsKind(source, node, t));
+		if (source.kind === "typeParam" || this._isNamedType(source)) return false;
+		return terms.every((t) => this._assignableQuietly(t, source));
+	},
+
+	// Whether untyped constant `source` converts to `term`: same kind (number,
+	// bool, string) and, for a known value, representable.
+	_untypedFitsKind(source, node, term) {
+		const u = this._deepUnderlying(term) ?? term;
+		const cls = untypedClass(source);
+		const kindOk =
+			cls === "number"
+				? isComplexOrNumeric(u)
+				: cls === "bool"
+					? isBool(u)
+					: isString(u);
+		return kindOk && this._untypedFitsTerm(source, node, term);
+	},
+
+	_fromTypeParamOk(target, source) {
+		if (isAny(target)) return true;
+		const base = this.resolveType(this._deepUnderlying(target));
+		if (base?.kind === "interface") {
+			if (base.methods.size === 0) return true;
+			const c = this._typeParamConstraintIface(source);
+			return !!c && this.implements(c, base, null);
+		}
+		if (this._isNamedType(target)) return false;
+		const terms = this._constraintTerms(source.constraint, new Set());
+		if (!terms || terms.length === 0) return false;
+		return terms.every((t) => this._assignableQuietly(target, t));
+	},
+
+	// Whether `t` is a defined type: a named type or a predeclared basic type.
+	// A type parameter is not (it is checked on its own).
+	_isNamedType(t) {
+		return t.kind === "named" || t.kind === "basic" || isAny(t);
+	},
+
+	// The interface a type parameter's constraint spells, or null.
+	_typeParamConstraintIface(tp) {
+		let c = tp.constraint;
+		if (c && !c.kind) return null;
+		if (
+			c?.kind === "TypeName" ||
+			c?.kind === "InterfaceType" ||
+			c?.kind === "GenericTypeName" ||
+			c?.kind === "InstantiationExpr" ||
+			c?.kind === "IndexExpr"
+		)
+			c = this.resolveTypeNode(c, this.globals);
+		const u = this.resolveType(this._deepUnderlying(c));
+		return u?.kind === "interface" ? u : null;
+	},
+
+	_reportTypeParamAssign(target, source, node, ctx) {
+		let what;
+		if (source.kind === "untyped") {
+			const cmp = node?.kind === "BinaryExpr" && CMP_OPS.has(node.op);
+			what = cmp ? "untyped bool value" : operandKind(node, source.base, true);
+		} else {
+			const named =
+				source.kind === "typeParam"
+					? `${typeStr(source)} constrained by ${this._constraintText(source)}`
+					: typeStr(source);
+			what = operandKind(node, named, false);
+		}
+		this.err(
+			`cannot use ${exprText(node)} (${what}) as ${typeStr(target)} value in ${ctx}`,
+			node,
 		);
 	},
 
@@ -703,7 +1229,7 @@ export const assignabilityMethods = {
 		operand = node,
 		structCopy = false,
 	) {
-		let tBase = target.kind === "named" ? target.underlying : target;
+		let tBase = this._deepUnderlying(target);
 		tBase = this.resolveType(tBase);
 		if (tBase?.kind === "interface") {
 			if (tBase.methods.size === 0) return;
@@ -714,9 +1240,7 @@ export const assignabilityMethods = {
 				);
 			return;
 		}
-		const sBase = this.resolveType(
-			source.kind === "named" ? source.underlying : source,
-		);
+		const sBase = this.resolveType(this._deepUnderlying(source));
 		if (sharedInfo(source) && tBase?.kind === "slice") {
 			this.err(
 				`cannot use ${typeStr(source)} as ${typeStr(target)}: a linear-memory buffer cannot be passed as a GC slice without an explicit copy`,
@@ -738,7 +1262,7 @@ export const assignabilityMethods = {
 				return;
 			this.err(
 				`Cannot assign ${typeStr(source)} to ${typeStr(target)} here: convert it explicitly with ${typeStr(target)}(v)`,
-				node ?? this._forwardedCall,
+				node,
 			);
 			return;
 		}
@@ -899,7 +1423,7 @@ export const assignabilityMethods = {
 		if (isUntyped(target)) return true;
 		// Named types with a basic underlying type (`type Mode string`) accept
 		// untyped constants of that kind, as in Go.
-		if (target.kind === "named") target = this.resolveType(target.underlying);
+		target = this._deepUnderlying(target);
 		if (target?.kind !== "basic") return false;
 		return (
 			(UNTYPED_COMPAT[source.base]?.has(target.name) ?? false) ||
@@ -1002,8 +1526,8 @@ export const assignabilityMethods = {
 	},
 
 	_checkFuncAssignable(target, source, node) {
-		const tFunc = target.kind === "named" ? target.underlying : target;
-		const sFunc = source.kind === "named" ? source.underlying : source;
+		const tFunc = this._deepUnderlying(target);
+		const sFunc = this._deepUnderlying(source);
 		if (tFunc?.kind === "func" && sFunc?.kind === "func") {
 			if (!this._implementsMethod(tFunc, sFunc)) {
 				this.err(
@@ -1052,7 +1576,7 @@ export const assignabilityMethods = {
 		const isPtr = srcType?.kind === "pointer";
 		// *T has the full method set of T (value + pointer receivers).
 		if (srcType?.kind === "pointer") srcType = this.resolveType(srcType.base);
-		let base = srcType.kind === "named" ? srcType.underlying : srcType;
+		let base = this._deepUnderlying(srcType);
 		base = this.resolveType(base);
 		// Interface → interface: the source's method set must cover the target's.
 		if (base?.kind === "interface") {

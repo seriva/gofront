@@ -27,6 +27,8 @@ const PRINTERS = {
 };
 
 export function exprText(node) {
+	// A synthetic node (`x += y`, `x++`) carries its statement's spelling.
+	if (node?._spelling) return node._spelling;
 	const print = node && PRINTERS[node.kind];
 	return print ? print(node) : "expression";
 }

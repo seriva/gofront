@@ -1,6 +1,8 @@
 // GoFront test suite — type errors and type assertions
 
 import { fileURLToPath } from "node:url";
+import { Lexer } from "../../../src/lexer/lexer.js";
+import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assertContains,
@@ -895,7 +897,7 @@ func main() {
 	v, ok = m["k"]
 	_ = v
 }`);
-	assertErrorContains(c2.errors, "cannot assign to const 'ok'");
+	assertErrorContains(c2.errors, "cannot assign to ok (neither addressable");
 
 	const c3 = compile(`package main
 func main() {
@@ -942,6 +944,222 @@ test("a bare checker reports an undefined identifier", () => {
 	const tc = new TypeChecker();
 	tc.checkExpr({ kind: "Ident", name: "foo" }, tc.globals);
 	assertErrorContains(tc.errors, "Undefined: 'foo'");
+});
+
+test("i += f reports one mismatched-types error", () => {
+	const { errors } = compile(`package main
+func main() {
+	i := 1
+	f := 2.0
+	i += f
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"invalid operation: i += f (mismatched types int and float64)",
+	);
+});
+
+test("dereferencing an undefined name reports only the undefined name", () => {
+	const { errors } = compile(`package main
+func main() {
+	v := missingVar
+	_ = *v
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "missingVar");
+});
+
+test("a forwarded call argument of the wrong type reports the call and its position", () => {
+	const { errors } = compile(`package main
+func f() (float64, float64) { return 1, 2 }
+func g(a int, b float64) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot use f() (value of type float64) as int value in argument to g",
+	);
+	assertEqual(errors[0].line, 5);
+	assertEqual(errors[0].col, 4);
+});
+
+test("a forwarded call yielding an any needs an assertion for a concrete parameter", () => {
+	const { errors } = compile(`package main
+func f() (any, int) { return "oops", 2 }
+func g(a int, b int) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot use f() (value of type any) as int value in argument to g: need type assertion",
+	);
+	assertEqual(errors[0].line, 5);
+});
+
+test("a forwarded call yielding an any needs an assertion for a method interface", () => {
+	const { errors } = compile(`package main
+type I interface{ M() }
+func f() (any, int) { return nil, 1 }
+func g(a I, b int) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot use f() (value of type any) as I value in argument to g: need type assertion",
+	);
+});
+
+test("a forwarded call yielding an any is accepted for any parameters", () => {
+	const { errors } = compile(`package main
+func f() (any, int) { return "ok", 2 }
+func g(a any, b int) {}
+func main() {
+	g(f())
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a forwarded call returned from a func with no results reports the tuple", () => {
+	const { errors } = compile(`package main
+func g() (int, string) { return 1, "a" }
+func f() {
+	return g()
+}
+func main() { f() }`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"too many return values (have (int, string), want ())",
+	);
+	assertEqual(errors[0].line, 4);
+});
+
+section("Type errors — positions of bindings and range operands");
+
+test("ranging over a non-iterator func reports the range operand's position", () => {
+	const { errors } = compile(`package main
+
+func fn(int) {}
+
+func main() {
+	for _ = range fn {
+	}
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot range over func: not an iterator function",
+	);
+	assertErrorContains(errors, "at line 6:16");
+});
+
+test("a := range over a non-iterator func reports the range operand's position", () => {
+	const { errors } = compile(`package main
+
+func fn(int) {}
+
+func main() {
+	for x := range fn {
+		_ = x
+	}
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(
+		errors,
+		"cannot range over func: not an iterator function",
+	);
+	assertErrorContains(errors, "at line 6:17");
+});
+
+test("a bare range over a non-iterator func reports the range operand's position", () => {
+	const { errors } = compile(`package main
+
+func fn(int) {}
+
+func main() {
+	for range fn {
+	}
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "at line 6:12");
+});
+
+test("a type-switch binding records its declaring identifier in each clause", () => {
+	const source = `package main
+
+func f(v any) {
+	switch x := v.(type) {
+	case int:
+		_ = x
+	default:
+		_ = x
+	}
+}
+
+func main() { f(1) }`;
+	const ast = new Parser(
+		new Lexer(source, "t.go").tokenize(),
+		"t.go",
+		source,
+	).parse();
+	const checker = new TypeChecker();
+	const seen = [];
+	const report = checker._reportUnused.bind(checker);
+	checker._reportUnused = (scope, node) => {
+		if (node?.kind === "TypeSwitchStmt") seen.push(scope.localNode("x"));
+		return report(scope, node);
+	};
+	checker.check(ast);
+	assertEqual(checker.errors.length, 0);
+	assertEqual(seen.length, 2);
+	for (const n of seen) {
+		assertEqual(n?.kind, "Ident");
+		assertEqual(`${n._line}:${n._col}`, "4:9");
+	}
+});
+
+test("too many range-over-iterator variables are reported at the extra variable", () => {
+	for (const [head, at] of [
+		["a, b := range iter", "at line 5:9"],
+		["a, b = range iter", "at line 5:9"],
+	]) {
+		const { errors } = compile(`package main
+
+func main() {
+	iter := func(yield func(int) bool) { yield(1) }
+	for ${head} {
+	}
+}`);
+		assertErrorContains(errors, "range over iterator: too many loop variables");
+		assertErrorContains(errors, at);
+	}
+});
+
+test("an assignment mismatch in a for, if or switch header is positioned", () => {
+	for (const [head, at] of [
+		["for a := f(); false; {\n\t}", "at line 6:6"],
+		["if a := f(); false {\n\t}", "at line 6:5"],
+		["switch a := f(); a {\n\t}", "at line 6:9"],
+		["for a, b := 1; false; {\n\t}", "at line 6:6"],
+		["for a := 0; false; a, b = 1 {\n\t}", "at line 6:21"],
+	]) {
+		const { errors } = compile(`package main
+
+func f() (int, int) { return 1, 2 }
+
+func main() {
+	${head}
+}`);
+		assertErrorContains(errors, "assignment mismatch");
+		assertErrorContains(errors, at);
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

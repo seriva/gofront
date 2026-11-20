@@ -1128,7 +1128,10 @@ func conv[T num](s string) T {
 }
 
 func main() {}`);
-	assertErrorContains(errors, "cannot convert string to T");
+	assertErrorContains(
+		errors,
+		"cannot convert s (variable of type string) to type T",
+	);
 });
 
 section("Generics — nested instances and named results");

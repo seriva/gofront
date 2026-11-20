@@ -18,7 +18,15 @@
 // runner then requires the case to still fail, so removing the marker is the
 // failing test of the change that fixes it.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import {
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CompileError, compileFiles } from "../../../src/compiler.js";
 import {
@@ -96,6 +104,17 @@ function compileCase(c, target) {
 		: compileFiles([c.path], options);
 }
 
+// A diagnostic without the code frame the lexer, parser and checker append
+// (`  <line> | <source>` and the caret line under it). The frame repeats the
+// source line, `// ERROR "..."` marker included, so matching against it would
+// let any marker text pass.
+function diagnosticText(message) {
+	return message
+		.split("\n")
+		.filter((l) => !/^ {2}\d+ \| /.test(l) && !/^ +\^$/.test(l))
+		.join("\n");
+}
+
 // What is wrong with a reject case, or [] when it behaves as marked.
 function rejectProblems(c) {
 	const wants = expectedErrors(c.source);
@@ -118,7 +137,8 @@ function rejectProblems(c) {
 		}
 		for (const want of wants) {
 			const hit = errors.some(
-				(e) => e.line === want.line && e.message.includes(want.text),
+				(e) =>
+					e.line === want.line && diagnosticText(e.message).includes(want.text),
 			);
 			if (!hit) {
 				const got = errors
@@ -152,6 +172,30 @@ async function acceptProblems(c) {
 async function check(kind, c) {
 	return kind === "reject" ? rejectProblems(c) : acceptProblems(c);
 }
+
+section("Conformance — harness");
+
+test("an // ERROR marker does not match the source line echoed in the message", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-conformance-"));
+	try {
+		const source =
+			'package main\n\nfunc main() {\n\tvar x int = "a" // ERROR "zzz-not-in-any-message"\n\t_ = x\n}\n';
+		const path = join(dir, "self-match.go");
+		writeFileSync(path, source);
+		const problems = rejectProblems({
+			name: "self-match",
+			path,
+			isDir: false,
+			source,
+		});
+		if (problems.length !== TARGETS.length)
+			throw new Error(
+				`want one miss per target, got: ${JSON.stringify(problems)}`,
+			);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 for (const kind of ["reject", "accept"]) {
 	section(`Conformance — ${kind}`);

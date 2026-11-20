@@ -685,6 +685,36 @@ templ Bad() {
 
 section("templ — css declarations");
 
+test("parameterized css declaration is a CompileError, not an internal error", () => {
+	let err = null;
+	try {
+		compilePkg({
+			"main.go": `package main
+func main() {
+	gom.Mount("#app", Card())
+}`,
+			"card.templ": `package main
+
+css bad(x string) {
+	color: red;
+}
+
+templ Card() {
+	<div class={ bad("a") }>hi</div>
+}
+`,
+		});
+	} catch (e) {
+		err = e;
+	}
+	assert(err !== null, "expected an error");
+	assertEqual(err.name, "CompileError");
+	assertContains(
+		err.message,
+		"parameterized css declarations are not yet supported",
+	);
+});
+
 test("basic css declaration generates scoped class and function", () => {
 	const { js } = compilePkg({
 		"main.go": `package main
@@ -1173,6 +1203,16 @@ test("an undefined name in a templ expression is a type error", () => {
 	}
 });
 
+test("a Go any is not a boolean templ condition", () => {
+	for (const body of ["if v {\n\t\t<p>x</p>\n\t}", "<p hidden?={ v }>x</p>"]) {
+		const { build, check } = checkTempl(body, "v any");
+		for (const r of [build, check]) {
+			assertEqual(r.code, 1);
+			assertContains(r.stderr, "non-boolean condition");
+		}
+	}
+});
+
 test("mismatched operand types in a templ expression are a type error", () => {
 	const { build, check } = checkTempl("<p>{ name + 5 }</p>");
 	for (const r of [build, check]) {
@@ -1218,7 +1258,7 @@ test("a non-bool if condition is a type error", () => {
 	const { build, check } = checkTempl("if name {\n\t\t<p>x</p>\n\t}");
 	for (const r of [build, check]) {
 		assertEqual(r.code, 1);
-		assertContains(r.stderr, "If condition must be bool");
+		assertContains(r.stderr, "non-boolean condition in if statement");
 	}
 });
 

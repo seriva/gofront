@@ -479,7 +479,7 @@ export class StmtsEmitter {
 	}
 
 	_independentIdent(node, roots) {
-		if (node._const || node.name === "nil") return true;
+		if (node._const) return true;
 		if (roots.has(node.name)) return false;
 		const local = this.resolveLocal(node.name);
 		return !!local && !local.isBoxed;
@@ -3321,8 +3321,7 @@ export class StmtsEmitter {
 				const right = cond.right;
 				if (
 					right?.kind === "CallExpr" &&
-					right.func?.kind === "Ident" &&
-					(right.func.name === "len" || right.func.name === "cap")
+					(right._builtinName === "len" || right._builtinName === "cap")
 				) {
 					return right;
 				}

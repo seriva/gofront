@@ -12,6 +12,7 @@ import {
 	compile,
 	compileDir,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	Lexer,
 	runJs,
@@ -2496,6 +2497,1137 @@ func main() {
 }
 `,
 		"0\n",
+	);
+});
+
+section(
+	"Generics — instantiated function values infer constraint type parameters",
+);
+
+test("R9.3 slices.Sort[[]int] as a value sorts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func main() {
+	xs := []int{2, 1}
+	f := slices.Sort[[]int]
+	f(xs)
+	fmt.Println(xs)
+}
+`,
+		"[1 2]\n",
+	);
+});
+
+test("R9.9 partially instantiated user generic keeps the inferred element type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Z[S ~[]E, E any](s S) E {
+	var z E
+	return z
+}
+
+func main() {
+	f := Z[[]int]
+	fmt.Println(f([]int{3}))
+}
+`,
+		"0\n",
+	);
+});
+
+test("R9.10 slices.Index[[]int] as a value finds the element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func main() {
+	f := slices.Index[[]int]
+	fmt.Println(f([]int{4, 5}, 5))
+}
+`,
+		"1\n",
+	);
+});
+
+test("fully instantiated slices.Sort[[]int, int] and partial First[[]int] still work", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func First[S ~[]E, E any](s S) E { return s[0] }
+
+func main() {
+	xs := []int{2, 1}
+	g := slices.Sort[[]int, int]
+	g(xs)
+	f := First[[]int]
+	fmt.Println(xs, f(xs))
+}
+`,
+		"[1 2] 1\n",
+	);
+});
+
+section("Generics — review fixes: func values, operators on type parameters");
+
+test("generic func value over an enclosing type parameter infers its element", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Outer[S ~[]E, E int | string](xs S) {
+	f := slices.Sort[S]
+	f(xs)
+}
+
+func Z[S ~[]E, E any](s S) E {
+	var z E
+	return z
+}
+
+func Outer2[S ~[]E, E any](xs S) E {
+	f := Z[S]
+	return f(xs)
+}
+
+func main() {
+	xs := []int{2, 1}
+	Outer(xs)
+	fmt.Println(xs, Outer2([]int{5}))
+}
+`,
+		"[1 2] 0\n",
+	);
+});
+
+test("inferred type argument that fails its constraint is rejected", () => {
+	const { errors } = compile(`package main
+
+import "slices"
+
+func main() {
+	_ = slices.Sort[[]func()]
+}
+`);
+	assertErrorContains(errors, "does not satisfy");
+});
+
+test("partial instantiation with an uninferable type parameter is rejected as a value", () => {
+	const { errors } = compile(`package main
+
+func G[A, B any](a A) B {
+	var b B
+	return b
+}
+
+func main() {
+	f := G[int]
+	_ = f
+}
+`);
+	assertErrorContains(errors, "cannot infer B");
+});
+
+test("string type parameter cannot be incremented", () => {
+	const { errors } = compile(`package main
+
+func F[T ~string](a T) T {
+	a++
+	return a
+}
+`);
+	assertErrorContains(errors, "non-numeric type");
+});
+
+test("mixed string/int type parameter cannot be incremented", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int | ~string](a T) T {
+	a++
+	return a
+}
+`);
+	assertErrorContains(errors, "non-numeric type");
+});
+
+test("&& on an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](a, b T) bool {
+	return a && b
+}
+`);
+	assertErrorContains(errors, "operator && not defined on a");
+});
+
+test("|| on an int type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int](a, b T) bool {
+	return a || b
+}
+`);
+	assertErrorContains(errors, "operator || not defined on a");
+});
+
+test("&& on a ~bool type parameter has the type parameter's type", () => {
+	const { errors } = compile(`package main
+
+func F[T ~bool](a, b T) T {
+	return a && b
+}
+
+func main() {
+	_ = F(true, false)
+}
+`);
+	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
+});
+
+test("shift count of an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](x int, s T) int {
+	return x << s
+}
+`);
+	assertErrorContains(errors, "shift count");
+});
+
+test("compound shift count of an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](x int, s T) int {
+	x <<= s
+	return x
+}
+`);
+	assertErrorContains(errors, "shift count");
+});
+
+test("shift count type parameter that is not integer is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int, U any](a T, b U) T {
+	return a << b
+}
+`);
+	assertErrorContains(errors, "shift count");
+});
+
+test("shift of a type parameter by a fractional constant is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int](a T) T {
+	return a << 1.5
+}
+`);
+	assertErrorContains(errors, "not an integer");
+});
+
+test("shift of a type parameter by a negative constant is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int](a T) T {
+	return a << -1
+}
+`);
+	assertErrorContains(errors, "negative");
+});
+
+test("shift of a concrete operand by an integer type parameter is valid", () => {
+	const { errors } = compile(`package main
+
+func F[T ~uint](x int, s T) int {
+	return x << s
+}
+
+func main() {
+	_ = F(1, uint(2))
+}
+`);
+	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
+});
+
+test("== on an any type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T any](a, b T) bool {
+	return a == b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("== on a slice-constrained type parameter is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~[]int](a, b T) bool {
+	return a == b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("!= on a mixed type set with a slice is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T ~int | ~[]int](a, b T) bool {
+	return a != b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("== on a method-only constraint is rejected", () => {
+	const { errors } = compile(`package main
+
+func F[T interface{ M() }](a, b T) bool {
+	return a == b
+}
+`);
+	assertErrorContains(errors, "incomparable types in type set");
+});
+
+test("== on comparable, ordered and nil-comparable type parameters stays valid", () => {
+	const { errors } = compile(`package main
+
+import "cmp"
+
+func A[T comparable](a, b T) bool { return a == b }
+func B[T cmp.Ordered](a, b T) bool { return a != b }
+func C[T ~[]int](a T) bool { return a == nil }
+func D[T interface {
+	comparable
+	M()
+}](a, b T) bool {
+	return a == b
+}
+
+func main() {
+	_ = A(1, 2)
+	_ = B(1, 2)
+	_ = C([]int{})
+}
+`);
+	assert(errors.length === 0, errors.map((e) => e.message ?? e).join("\n"));
+});
+
+section("Generics — operands of type-parameter operators");
+
+test("R11.4 an untyped constant shifted by a type parameter keeps its untyped type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func F[T ~uint8](s T) int { return 1 << s }
+
+func G[T ~uint](s T) {
+	x := 1 << s
+	fmt.Printf("%T %v\\n", x, x)
+}
+
+func H[T ~uint](s T) int { return 1.0 << s }
+
+func main() {
+	fmt.Println(F(uint8(10)))
+	G(uint(4))
+	fmt.Println(H(uint(3)))
+}
+`,
+		"1024\nint 16\n8\n",
+	);
+});
+
+test("R11.4 a shift by a 64-bit type-parameter count runs on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func A[T ~uint64](s T) {
+	x := 1 << s
+	fmt.Println(x+1, x == 1024, 1<<s == 1024)
+}
+
+func B[T ~uint64](s T) int { return 1 << s }
+
+func C[T ~uint64](s T) int {
+	var x int = 1 << s
+	return (1 << s) + x
+}
+
+func D[T ~uint | ~uint64](s T) int { return 1 << s }
+
+func E[T ~uint64](s T) int {
+	a := 1
+	b := a << s
+	a <<= s
+	return a + b
+}
+
+func F[T ~uint64](s T) int32 {
+	var x int32 = 1 << s
+	return x
+}
+
+func main() {
+	A(uint64(10))
+	fmt.Println(B(uint64(10)), C(uint64(10)), D(uint64(10)), D(uint(10)), E(uint64(10)), F(uint64(10)))
+	var a int32 = 1
+	var c int64 = 3
+	var u uint64 = 4
+	fmt.Println(a<<c, 1<<u)
+}
+`,
+		"1025 true true\n1024 2048 1024 1024 2048 1024\n8 16\n",
+	);
+});
+
+test("R11.4 a negative type-parameter shift count panics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover()) }()
+	f()
+}
+
+func G[T ~int32](s T) int32 {
+	var x int32 = 1 << s
+	return x
+}
+
+func H[T ~int](s T) int { return 1 << s }
+
+func L[T ~int](s T) int {
+	a := 1
+	a <<= s
+	return a
+}
+
+func main() {
+	fmt.Println(G(int32(10)), H(10), L(10))
+	try("G", func() { G(int32(-1)) })
+	try("H", func() { H(-1) })
+	try("L", func() { L(-1) })
+}
+`,
+		"1024 1024 1024\nG runtime error: negative shift amount\nH runtime error: negative shift amount\nL runtime error: negative shift amount\n",
+	);
+});
+
+test("R14.1 fields of a generic type declared over a struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[T any] struct{ X T }
+type W[T any] S[T]
+
+func main() {
+	var w W[int]
+	w.X = 42
+	fmt.Println(w.X)
+	p := &w
+	p.X = 7
+	fmt.Println(w.X)
+	v := W[int]{X: 3}
+	v.X++
+	fmt.Println(v.X, v)
+	ws := []W[int]{{X: 1}}
+	ws[0].X = 5
+	fmt.Println(ws[0].X)
+}
+`,
+		"42\n7\n4 {4}\n5\n",
+	);
+});
+
+test("R14.1 methods of a generic type declared over a struct type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[T any] struct{ X T }
+
+func (s S[T]) SM() T { return s.X }
+
+type W[T any] S[T]
+
+func (w W[T]) Get() T { return w.X }
+func (w *W[T]) Set(v T) { w.X = v }
+func (w *W[T]) IsNil() bool { return w == nil }
+
+type Getter interface{ Get() int }
+type Niler interface{ IsNil() bool }
+
+func main() {
+	w := W[int]{X: 3}
+	w.Set(9)
+	var g Getter = w
+	fmt.Println(w.Get(), g.Get())
+	s := S[int]{X: 1}
+	w2 := W[int](s)
+	w2.X = 2
+	fmt.Println(s.X, w2.Get(), S[int](w2).SM())
+	var a any = w2
+	_, ok := a.(S[int])
+	_, ok2 := a.(W[int])
+	fmt.Println(ok, ok2)
+	var p *W[int]
+	var n Niler = p
+	fmt.Println(n != nil, n.IsNil())
+	var b any = []W[int]{{X: 1}, {X: 2}}
+	fmt.Println(b.([]W[int])[1].X)
+}
+`,
+		"9 9\n1 2 2\nfalse true\ntrue true\n2\n",
+	);
+});
+
+test("defined types over another package's struct get a class", async () => {
+	for (const target of ["js", "both", "wasm"]) {
+		const directive = target === "js" ? "" : `//gofront:target ${target}\n`;
+		const { lines } = await compileHybridProject({
+			"sub/sub.go": `${target === "js" ? "" : "//gofront:target both\n"}package sub
+
+type S struct{ X int }
+`,
+			"main.go": `${directive}package main
+
+import (
+	"fmt"
+	"./sub"
+)
+
+type W[T any] sub.S
+type V sub.S
+
+func (w W[T]) Get() int { return w.X }
+func (v V) Get() int    { return v.X }
+
+func main() {
+	w := W[int]{X: 5}
+	w.X++
+	v := V(sub.S{X: 2})
+	var a any = W[string](sub.S{X: 3})
+	_, ok1 := a.(W[string])
+	_, ok2 := a.(W[int])
+	fmt.Println(w.X, w, w.Get(), v, v.Get(), ok1, ok2)
+}
+`,
+		});
+		assertEqual(lines.join("\n"), "6 {6} 6 {2} 2 true false", target);
+	}
+});
+
+test("converting a struct to a generic defined type tags the target's instantiation", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S[A, B any] struct {
+	X A
+	Y B
+}
+type W[A, B any] S[B, A]
+type V[A, B any] S[A, int]
+type P struct{ X string }
+type Q[T any] P
+
+func conv[T any](s S[string, T]) any { return W[T, string](s) }
+
+func main() {
+	var a any = W[int, string](S[string, int]{X: "a", Y: 1})
+	_, ok1 := a.(W[int, string])
+	_, ok2 := a.(W[string, int])
+	fmt.Println(ok1, ok2)
+	var b any = V[string, bool](S[string, int]{X: "b"})
+	_, ok3 := b.(V[string, bool])
+	_, ok4 := b.(V[string, int])
+	fmt.Println(ok3, ok4)
+	var c any = Q[string](P{X: "c"})
+	_, ok5 := c.(Q[string])
+	_, ok6 := c.(Q[int])
+	fmt.Println(ok5, ok6)
+	w := W[int, string](S[string, int]{X: "d", Y: 2})
+	var d any = S[string, int](w)
+	_, ok7 := d.(S[string, int])
+	_, ok8 := d.(S[int, string])
+	fmt.Println(ok7, ok8)
+	e := conv[bool](S[string, bool]{X: "e", Y: true})
+	_, ok9 := e.(W[bool, string])
+	_, ok10 := e.(W[string, bool])
+	fmt.Println(ok9, ok10)
+	fmt.Println(a, b, c, d, e)
+}
+`,
+		"true false\ntrue false\ntrue false\ntrue false\ntrue false\n{a 1} {b 0} {c} {d 2} {e true}\n",
+	);
+});
+
+test("converting between instantiations of one generic type tags the target's", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Phantom[T any] struct{ X int }
+type P struct{ X string }
+type Q[T any] P
+type SameUnder[A, B any] struct {
+	X int
+	Y string
+}
+
+func conv[T any](p Phantom[int]) any { return Phantom[T](p) }
+
+func main() {
+	var a any = Phantom[string](Phantom[int]{X: 42})
+	_, ok1 := a.(Phantom[string])
+	_, ok2 := a.(Phantom[int])
+	fmt.Println(ok1, ok2)
+	var b any = Q[int](Q[string]{X: "c"})
+	_, ok3 := b.(Q[int])
+	_, ok4 := b.(Q[string])
+	fmt.Println(ok3, ok4)
+	var c any = SameUnder[bool, float64](SameUnder[int, string]{X: 1, Y: "hi"})
+	_, ok5 := c.(SameUnder[bool, float64])
+	_, ok6 := c.(SameUnder[int, string])
+	fmt.Println(ok5, ok6)
+	d := conv[bool](Phantom[int]{X: 7})
+	_, ok7 := d.(Phantom[bool])
+	_, ok8 := d.(Phantom[int])
+	fmt.Println(ok7, ok8)
+	fmt.Println(a, b, c, d)
+}
+`,
+		"true false\ntrue false\ntrue false\ntrue false\n{42} {c} {1 hi} {7}\n",
+	);
+});
+
+// R12: a builtin's operand in a generic body is checked against the type
+// set once, at the definition; instantiating the function (wasm
+// monomorphisation) adds no second error and no internal compiler error.
+const R12_BUILTINS = [
+	["len(v)", "_ = len(v)", "for built-in len"],
+	["cap(v)", "_ = cap(v)", "for cap"],
+	["clear(v)", "clear(v)", "cannot clear v"],
+	["delete(v, 1)", "delete(v, 1)", "is not a map"],
+	[
+		"append(v, 1)",
+		"_ = append(v, 1)",
+		"invalid append: argument must be a slice",
+	],
+	["copy(v, v)", "copy(v, v)", "invalid copy: argument must be a slice"],
+	["min(v, v)", "_ = min(v, v)", "cannot be ordered"],
+	["max(v, v)", "_ = max(v, v)", "cannot be ordered"],
+];
+
+for (const [name, stmt, msg] of R12_BUILTINS) {
+	test(`R12 ${name} with T any is one error per definition on every target`, () => {
+		const src = `package main
+
+func F[T any](v T) {
+	${stmt}
+}
+
+func main() {
+	F(map[int]int{})
+	F([]int{})
+}
+`;
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(src, { target });
+			assertEqual(errors.length, 1);
+			assertEqual(errors[0].line, 4);
+			assertErrorContains(errors, `v (variable of type T constrained by any)`);
+			assertErrorContains(errors, msg);
+		}
+	});
+}
+
+// ═════════════════════════════════════════════════════════════
+// Values of type-parameter type
+// ═════════════════════════════════════════════════════════════
+
+section("Generics — values of type-parameter type");
+
+const TYPE_PARAM_VALUE_REJECTS = [
+	[
+		"an int variable assigned to a type parameter",
+		`func f[T any]() { var b int; var t T = b; _ = t }
+func main() { f[int]() }`,
+		"cannot use b (variable of type int) as T value in variable declaration",
+	],
+	[
+		"a type parameter assigned to another",
+		`func f[T, U any](t T) { var u U = t; _ = u }
+func main() { f[int, int](1) }`,
+		"cannot use t (variable of type T constrained by any) as U value in variable declaration",
+	],
+	[
+		"an untyped constant returned as a type parameter of any constraint",
+		`func f[T any]() T { return 1 }
+func main() { f[int]() }`,
+		"cannot use 1 (untyped int constant) as T value in return statement",
+	],
+	[
+		"an untyped constant passed to a type parameter of any constraint",
+		`func g[T any](t T) {}
+func f[T any]() { g[T](1) }
+func main() { f[int]() }`,
+		"cannot use 1 (untyped int constant) as T value in argument",
+	],
+	[
+		"a constant no type of the set represents",
+		`func f[T ~int | ~float64]() { var t T = 1.5; _ = t }
+func main() { f[int]() }`,
+		"cannot use 1.5 (untyped float constant) as T value in variable declaration",
+	],
+	[
+		"a type parameter assigned to a concrete type",
+		`func f[T any](t T) { var b int = t; _ = b }
+func main() { f(1) }`,
+		"cannot use t (variable of type T constrained by any) as int value in variable declaration",
+	],
+	[
+		"a forwarded call result of type-parameter type",
+		`func g(a, b int) {}
+func h[T any](f func() (T, int)) { g(f()) }
+func main() { h(func() (int, int) { return 1, 2 }) }`,
+		"cannot use f() (value of type T constrained by any) as int value in argument to g",
+	],
+	[
+		"a pointer to a type parameter used as a pointer to an interface",
+		`func f[T any](xs *T) { var p *any = xs; _ = p }
+func main() { x := 1; f(&x) }`,
+		"Cannot assign T to any",
+	],
+	[
+		"a type parameter converted to a type outside its set",
+		`func f[T any](t T) string { return string(t) }
+func main() { f(1) }`,
+		"cannot convert t (variable of type T constrained by any) to type string",
+	],
+	[
+		"a type parameter with a numeric set converted to bool",
+		`func f[T ~int | ~float64](t T) bool { return bool(t) }
+func main() { f(1) }`,
+		"cannot convert int (in T) to type bool",
+	],
+	[
+		"an interface value converted to a type parameter",
+		`func f[T any](a any) T { return T(a) }
+func main() { f[int](1) }`,
+		"need type assertion",
+	],
+	[
+		"a slice of a type parameter converted to a slice of another type",
+		`func f[T any](xs []T) []uint { return []uint(xs) }
+func main() { f([]int{1}) }`,
+		"cannot convert xs (variable of type []T) to type []uint",
+	],
+	[
+		"a slice of a generic struct converted to another instantiation",
+		`type S[T any] struct{ X T }
+func f[T any](s []S[T]) []S[int] { return []S[int](s) }
+func main() { _ = f([]S[string]{{X: "a"}}) }`,
+		"cannot convert s (variable of type []S[T]) to type []S[int]",
+	],
+	[
+		"an array of a generic struct converted to another instantiation",
+		`type S[T any] struct{ X T }
+func f[T any](a [2]S[T]) [2]S[int] { return [2]S[int](a) }
+func main() { _ = f([2]S[string]{}) }`,
+		"cannot convert a (variable of type [2]S[T]) to type [2]S[int]",
+	],
+	[
+		"a map of a generic struct converted to another instantiation",
+		`type S[T any] struct{ X T }
+func f[T any](m map[string]S[T]) map[string]S[int] { return map[string]S[int](m) }
+func main() { _ = f(map[string]S[string]{}) }`,
+		"cannot convert m (variable of type map[string]S[T]) to type map[string]S[int]",
+	],
+	[
+		"a slice of an anonymous struct with a type parameter converted to a concrete one",
+		`func f[T any](s []struct{ X T }) []struct{ X int } { return []struct{ X int }(s) }
+func main() { _ = f([]struct{ X string }{}) }`,
+		"cannot convert s (variable of type []struct",
+	],
+	[
+		"an array of an anonymous struct with a type parameter converted to a concrete one",
+		`func f[T any](a [2]struct{ X T }) [2]struct{ X int } { return [2]struct{ X int }(a) }
+func main() { _ = f([2]struct{ X string }{}) }`,
+		"cannot convert a (variable of type [2]struct",
+	],
+	[
+		"a constant truncated by a type of the set",
+		`func f[T ~int | ~float64]() T { return T(1.5) }
+func main() { f[int]() }`,
+		"cannot convert 1.5 (untyped float constant) to type T",
+	],
+];
+
+for (const [name, body, msg] of TYPE_PARAM_VALUE_REJECTS) {
+	test(`${name} is rejected on every target`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\n${body}`, { target });
+			assertErrorContains(errors, msg);
+			if (msg.startsWith("cannot use f()"))
+				assert(!errors.some((e) => String(e).includes("?:?")), "has position");
+		}
+	});
+}
+
+test("values of type-parameter type that Go accepts still compile", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num interface{ ~int | ~float64 }
+type Str interface{ ~string | ~[]byte }
+type Namer interface{ Name() string }
+type N struct{}
+
+func (N) Name() string { return "n" }
+
+func same[T any](t T) T { var u T = t; return u }
+func zero[T any]() (z T) { return z }
+func one[T Num]() T { return 1 }
+func conv[T Num](n int) T { return T(n) }
+func str[T Str](t T) string { return string(t) }
+func box[T any](t T) any { return t }
+func name[T Namer](t T) Namer { return t }
+func slice[S ~[]int](s S) []int { return s }
+func fromSlice[S ~[]int]() S { var s S = []int{1, 2}; return s }
+func ptr[T any](p *T) *T { return (*T)(p) }
+func nilOf[P ~*int]() P { return nil }
+
+func main() {
+	x := 4
+	fmt.Println(same(3), zero[int](), one[float64](), conv[float64](2))
+	fmt.Println(str("ab"), box(3), name(N{}).Name())
+	fmt.Println(slice([]int{1}), fromSlice[[]int](), *ptr(&x), nilOf[*int]() == nil)
+}
+`,
+		"3 0 1 2\nab 3 n\n[1] [1 2] 4 true\n",
+	);
+});
+
+// ═════════════════════════════════════════════════════════════
+// Type parameters through their core type
+// ═════════════════════════════════════════════════════════════
+
+section("Generics — core type of a type parameter");
+
+const CORE_TYPE_REJECTS = [
+	[
+		"range over a float type parameter",
+		`func f[T ~float64](x T) { for i := range x { _ = i } }
+func main() { f(2.0) }`,
+		"cannot range over x (variable of type T constrained by ~float64)",
+	],
+	[
+		"range over a bool type parameter",
+		`func f[T ~bool](x T) { for range x {} }
+func main() { f(true) }`,
+		"cannot range over x (variable of type T constrained by ~bool)",
+	],
+	[
+		"range over a type parameter of any constraint",
+		`func f[T any](x T) { for range x {} }
+func main() { f(1) }`,
+		"cannot range over x (variable of type T constrained by any)",
+	],
+	[
+		"range over a type parameter with a mixed union",
+		`func f[T ~[]int | ~string](x T) { for range x {} }
+func main() { f("a") }`,
+		"cannot range over x (variable of type T constrained by ~[]int | ~string)",
+	],
+	[
+		"range over a type parameter whose core type is not an iterator",
+		`func run[F ~func(int)](fn F) { for range fn {} }
+func main() { run(func(int) {}) }`,
+		"cannot range over func",
+	],
+	[
+		"two iteration variables over a one-value iterator type parameter",
+		`func f[A ~func(func(int) bool)](a A) { for i, v := range a { _, _ = i, v } }
+func main() {}`,
+		"too many loop variables (got 2, max 1)",
+	],
+	[
+		"a field read of a type parameter with a struct core type",
+		`func f[T ~struct{ X int }](t T) int { return t.X }
+func main() { _ = f(struct{ X int }{1}) }`,
+		"t.X undefined (type T has no field or method X)",
+	],
+	[
+		"a field write through a type parameter with a struct core type",
+		`func f[T ~struct{ X int }](mk func() T) { mk().X = 1 }
+func main() {}`,
+		"mk().X undefined (type T has no field or method X)",
+	],
+	[
+		"a field read of a type parameter with a pointer core type",
+		`type S struct{ X int }
+func f[T interface{ *S }](t T) int { return t.X }
+func main() {}`,
+		"t.X undefined (type T has no field or method X)",
+	],
+	[
+		"a method the constraint does not declare",
+		`type N interface{ M() int }
+func f[T N](t T) int { return t.Other() }
+func main() {}`,
+		"t.Other undefined (type T has no field or method Other)",
+	],
+];
+
+for (const [name, body, msg] of CORE_TYPE_REJECTS) {
+	test(`${name} is rejected on every target`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\n${body}`, { target });
+			assertErrorContains(errors, msg);
+		}
+	});
+}
+
+test("a type parameter ranges and calls methods through its constraint", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type N interface{ M() int }
+type A struct{}
+
+func (A) M() int { return 3 }
+
+func call[T N](t T) int { return t.M() }
+func sum[S ~[]int](s S) int { t := 0; for _, v := range s { t += v }; return t }
+func cnt[T ~int](n T) { for i := range n { fmt.Print(i, " ") }; fmt.Println() }
+
+func main() {
+	fmt.Println(call(A{}), sum([]int{2, 3}))
+	cnt(3)
+}`,
+		"3 5\n0 1 2 \n",
+	);
+});
+
+test("dereferencing a value whose type parameter has a pointer core type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type S struct{ X int }
+func (s S) M() int { return s.X }
+func f[T ~*S](t T) int { return (*t).X + (*t).M() }
+func main() { s := S{42}; fmt.Println(f(&s)) }`,
+		"84\n",
+	);
+});
+
+// ═════════════════════════════════════════════════════════════
+// Constraint type sets
+// ═════════════════════════════════════════════════════════════
+
+section("Generics — constraint type sets");
+
+const TYPE_SET_REJECTS = [
+	[
+		"disjoint union elements leave an empty type set",
+		`func F[T interface{ ~int; ~string }](a, b T) bool { return a < b }
+func main() {}`,
+		"type parameter T cannot use operator <",
+	],
+	[
+		"~ over a defined type",
+		`type MyInt int
+func F[T ~MyInt](a T) T { return -a }
+func main() {}`,
+		"invalid use of ~ (underlying type of MyInt is int)",
+	],
+	[
+		"~ over an interface",
+		`func F[T ~error](a T) {}
+func main() {}`,
+		"invalid use of ~ (error is an interface)",
+	],
+	[
+		"a type argument that is not a map for ~map[K]V",
+		`func F[M ~map[K]V, K comparable, V any](m M) {}
+func main() { F[int, int, int](1) }`,
+		"int does not satisfy ~map[int]int",
+	],
+	[
+		"an explicit non-slice argument for ~[]E",
+		`func F[S ~[]E, E any](s S) {}
+func main() { _ = F[int] }`,
+		"S (type int) does not satisfy ~[]E",
+	],
+	[
+		"an empty type set rejects an inferred argument",
+		`func F[T interface{ ~int; ~string }](x T) {}
+func main() { F(1) }`,
+		"does not satisfy",
+	],
+	[
+		"an empty type set rejects an explicit argument",
+		`func F[T interface{ ~int; ~string }](x T) {}
+func main() { _ = F[int] }`,
+		"does not satisfy",
+	],
+	[
+		"a further union element narrows the first",
+		`func F[T interface{ ~int | ~string; ~int }](x T) T { return x }
+func main() { _ = F("a") }`,
+		"does not satisfy",
+	],
+	[
+		"embedded constraint interfaces intersect",
+		`type A interface{ ~int }
+type B interface{ ~string }
+func F[T interface{ A; B }](x T) {}
+func main() { F(1) }`,
+		"does not satisfy",
+	],
+	[
+		"methods alongside a union are still required",
+		`func F[T interface{ ~int; M() }](x T) {}
+func main() { F(1) }`,
+		"does not satisfy constraint",
+	],
+	[
+		"a named composite constraint rejects a non-matching argument",
+		`type C interface{ ~[]int }
+func F[T C](x T) {}
+func main() { F(1) }`,
+		"does not satisfy",
+	],
+	[
+		"a substituted composite term rejects a non-matching argument",
+		`type Slice[E any] interface{ ~[]E }
+func F[S Slice[E], E any](s S) {}
+func main() { F[int, int](1) }`,
+		"does not satisfy",
+	],
+	[
+		"an array term of another length",
+		`func F[A ~[2]E, E any](a A) E { var z E; return z }
+func main() { _ = F[[3]int] }`,
+		"does not satisfy ~[2]E",
+	],
+	[
+		"== on a type parameter with an empty type set",
+		`func F[T interface{ ~int; ~string }](a, b T) bool { return a == b }
+func main() {}`,
+		"empty type set",
+	],
+	[
+		"~comparable",
+		`func F[T ~comparable](a T) {}
+func main() {}`,
+		"invalid use of ~",
+	],
+	[
+		"~ over a type parameter",
+		`func F[E any, T ~E](a T) {}
+func main() {}`,
+		"cannot be a type parameter",
+	],
+	[
+		"~ over an instantiated generic type",
+		`type Box[E any] struct{ v E }
+func F[T ~Box[int]](a T) {}
+func main() {}`,
+		"invalid use of ~",
+	],
+	[
+		"a generic alias checks its constraint with the other arguments",
+		`type A[S ~[]E, E any] = []S
+func main() { var x A[int, int]; _ = x }`,
+		"does not satisfy",
+	],
+];
+
+for (const [name, body, msg] of TYPE_SET_REJECTS) {
+	test(`${name} is rejected on every target`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\n${body}`, { target });
+			assertErrorContains(errors, msg);
+		}
+	});
+}
+
+test("struct approximation patterns and generic aliases of ~ terms compile", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MySt struct{ X int }
+type Slice[E any] = []E
+
+func F[S ~struct{ X E }, E any](s S) E { var z E; return z }
+func G[T ~Slice[int]](t T) int { return len(t) }
+
+func main() {
+	f := F[MySt]
+	fmt.Println(f(MySt{1}), G([]int{1}))
+}`,
+		"0 1\n",
+	);
+});
+
+test("valid approximation terms and intersected unions still compile", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func F[T interface{ ~int | ~string; ~int }](a, b T) T { return a + b }
+func G[X ~[]E, E any](x X) int { return len(x) }
+func H[M ~map[K]V, K comparable, V any](m M) int { return len(m) }
+func P[T ~struct{ A int }](t T) int { return 1 }
+
+func main() {
+	fmt.Println(F(1, 2), G([]int{1, 2}), H(map[string]int{"a": 1}), P(S{1}))
+}`,
+		"3 2 1 1\n",
 	);
 });
 

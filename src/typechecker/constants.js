@@ -71,6 +71,24 @@ function nonIntegerConstKind(v) {
 	return `${v.k.toLowerCase()} constant`;
 }
 
+// An unshadowed universe `true` / `false` that no checkExpr has turned into a
+// literal yet (package-level array lengths), or null for any other name.
+function universeBool(name) {
+	return name === "true" || name === "false"
+		? { k: "BOOL", v: name === "true" }
+		: null;
+}
+
+// The identifier `nil` with no declaration of that name in scope.
+function isUnshadowedNil(e, scope) {
+	return (
+		e?.kind === "Ident" &&
+		e.name === "nil" &&
+		!scope.lookupScope("nil") &&
+		!scope.lookupConstExpr("nil")
+	);
+}
+
 const NEGATIVE_SHIFT_ERROR = "invalid shift count: negative shift count";
 
 /** @type {ThisType<import('./index.js').TypeChecker>} */
@@ -90,6 +108,7 @@ export const constantCheckMethods = {
 		while (e?.kind === "ParenExpr") e = e.expr;
 		if (e?.kind === "ImagLit") return "untyped complex constant";
 		if (e?.kind === "BasicLit" && e.litKind === "NIL") return "untyped nil";
+		if (isUnshadowedNil(e, scope ?? this.globals)) return "untyped nil";
 		let v = null;
 		try {
 			v = this._constValue(expr, scope);
@@ -118,7 +137,7 @@ export const constantCheckMethods = {
 		const typed64 = !isUntyped(expr._type) && isComplex64(expr._type);
 		if (!typed64 && !(isUntyped(expr._type) && isComplex(expr._type))) return;
 		const owner = scope.lookupScope(expr.name);
-		if (!owner?._consts.has(expr.name)) return;
+		if (!owner?.isConst(expr.name)) return;
 		const init = owner.lookupConstExpr(expr.name);
 		if (!init) return;
 		expr._complexInit = init;
@@ -138,7 +157,7 @@ export const constantCheckMethods = {
 		// Go does not compare complex constants.
 		if (!type || isComplex(this._deepUnderlying(type) ?? type)) return false;
 		const whole = constIntValue(v);
-		const key = whole !== null ? `i${whole}` : `${v.k}${String(v.v)}`;
+		const key = whole !== null ? `i${whole}` : this._constKey(v, type);
 		let bucket = seen.find((b) => identical(b.type, type));
 		if (!bucket) {
 			bucket = { type, keys: new Set() };
@@ -147,6 +166,15 @@ export const constantCheckMethods = {
 		if (bucket.keys.has(key)) return true;
 		bucket.keys.add(key);
 		return false;
+	},
+
+	// Key of a non-integral constant after conversion to `type`: a float32
+	// constant is rounded to float32 precision first.
+	_constKey(v, type) {
+		const u = this._deepUnderlying(type) ?? type;
+		if (v.k !== "FLOAT" || u?.name !== "float32") return `${v.k}${String(v.v)}`;
+		const r = Math.fround(v.v);
+		return Number.isInteger(r) ? `i${BigInt(r)}` : `FLOAT${r}`;
 	},
 
 	_constIdentityType(e, targetType) {
@@ -238,15 +266,15 @@ export const constantCheckMethods = {
 		// no symbol yet, but its initializer is registered.
 		if (!owner) {
 			const early = scope.lookupConstExpr(expr.name);
-			return early ? this._constValue(early, scope) : null;
+			return early ? this._constValue(early, scope) : universeBool(expr.name);
 		}
-		if (!owner._consts.has(expr.name)) return null;
+		if (!owner.isConst(expr.name)) return null;
 		const init = owner.lookupConstExpr(expr.name);
 		const v = init
 			? this._constValue(init, owner)
 			: (this._importedConsts?.get(expr.name) ?? null);
 		if (!v) return null;
-		const declared = owner.symbols.get(expr.name);
+		const declared = owner.get(expr.name);
 		if (!declared || declared.kind === "untyped" || declared.kind === "any")
 			return v;
 		const typed = this._convertConstTo(v, declared);
@@ -325,7 +353,7 @@ export const constantCheckMethods = {
 		}
 		t = this.resolveType(t);
 		if (t?.kind === "pointer") t = this.resolveType(t.base);
-		if (t?.kind === "named") t = this.resolveType(t.underlying);
+		t = this._deepUnderlying(t);
 		return t?.kind === "array" && Number.isInteger(t.size) ? t.size : null;
 	},
 
@@ -343,7 +371,7 @@ export const constantCheckMethods = {
 
 	// Converts a constant to Go type `t` (basic or named over a basic type).
 	_convertConstTo(v, t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+		const u = this.resolveType(this._deepUnderlying(t));
 		if (u?.kind !== "basic") return null;
 		const r = convertConst(v, u.name);
 		return r?.overflow ? { ...r, typeName: typeStr(t) } : r;
@@ -354,9 +382,7 @@ export const constantCheckMethods = {
 	// A null `ctx` reports an operand converted to the other operand's type.
 	_checkConstOverflow(target, source, node, ctx) {
 		if (source?.kind !== "untyped" || !node?._const) return false;
-		const base = this.resolveType(
-			target?.kind === "named" ? target.underlying : target,
-		);
+		const base = this.resolveType(this._deepUnderlying(target));
 		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
 		const i = constIntValue(node._const);
 		const range = this._intRange(target);
@@ -365,9 +391,7 @@ export const constantCheckMethods = {
 		// A float or complex target holds the constant as a Number: Go rounds
 		// the same way, so the JS backend has nothing to warn about.
 		if (!range && node.kind) {
-			const u = this.resolveType(
-				target?.kind === "named" ? target.underlying : target,
-			);
+			const u = this.resolveType(this._deepUnderlying(target));
 			if (u?.kind === "basic" && /^(float|complex)/.test(u.name))
 				node._floatConst = true;
 		}
@@ -417,12 +441,21 @@ export const constantCheckMethods = {
 
 	// print/println arguments take their default type.
 	_checkPrintArgs(name, expr, argTypes) {
-		for (let i = 0; i < expr.args.length; i++)
+		for (let i = 0; i < expr.args.length; i++) {
+			if (
+				this._rejectUntypedNil(
+					argTypes[i],
+					expr.args[i],
+					`argument to built-in ${name}`,
+				)
+			)
+				continue;
 			this._checkConstDefault(
 				argTypes[i],
 				expr.args[i],
 				`argument to built-in ${name}`,
 			);
+		}
 		return VOID;
 	},
 
@@ -430,14 +463,17 @@ export const constantCheckMethods = {
 	// operand's type.
 	_checkConstOperands(op, lt, rt, expr) {
 		if (op === "<<" || op === ">>" || op === "&&" || op === "||") return;
-		if (rt?.kind === "untyped" && lt?.kind !== "untyped")
-			this._checkConstOverflow(lt, rt, expr.right, null);
-		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
-			this._checkConstOverflow(rt, lt, expr.left, null);
+		// An interface operand has no constant range: the operator error covers it.
+		const isIface = (t) => this.resolveType(t)?.kind === "interface";
+		if (rt?.kind === "untyped" && lt?.kind !== "untyped") {
+			if (!isIface(lt)) this._checkConstOverflow(lt, rt, expr.right, null);
+		} else if (lt?.kind === "untyped" && rt?.kind !== "untyped") {
+			if (!isIface(rt)) this._checkConstOverflow(rt, lt, expr.left, null);
+		}
 	},
 
 	_intRange(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+		const u = this.resolveType(this._deepUnderlying(t));
 		return u?.kind === "basic" ? (INT_RANGES[u.name] ?? null) : null;
 	},
 };

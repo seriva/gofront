@@ -4,6 +4,7 @@
 
 import { hasCallOrReceive } from "../../lower/walk.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { namedBase } from "../shared/named-underlying.js";
 import {
 	anonIfaceName,
 	ERROR_STRUCT,
@@ -89,11 +90,11 @@ export class BuiltinsEmitter {
 	_getSliceElemType(t) {
 		if (!t) return null;
 		if (t.elem) return t.elem;
-		if (t.underlying?.elem) return t.underlying.elem;
+		if (t.kind === "named")
+			return this._getSliceElemType(namedBase(t, this.mod.checker));
 		if (t.kind === "SliceType") return t.elem;
-		if (t.name && this.mod.checker?.types?.has(t.name)) {
-			const resolved = this.mod.checker.types.get(t.name);
-			return this._getSliceElemType(resolved);
+		if (t.kind === "TypeName" && this.mod.checker?.types?.has(t.name)) {
+			return this._getSliceElemType(this.mod.checker.types.get(t.name));
 		}
 		return null;
 	}
@@ -775,7 +776,7 @@ export class BuiltinsEmitter {
 
 	_emitBuiltinPrint(call) {
 		const { func, args } = call;
-		const isPrintln = func.name === "println";
+		const isPrintln = call._builtinName === "println";
 		if (args.length === 0 && isPrintln) {
 			const logIdx = this.mod.getPrintlnEmptyIndex();
 			this.pushInstruction({ op: "call", funcIndex: logIdx });
@@ -1027,7 +1028,7 @@ export class BuiltinsEmitter {
 	// propagates, -0 < +0), integers `select` on lt/gt, strings compare via the
 	// string import.  A single operand is the result itself.
 	_emitBuiltinMinMax(call, targetWasmType) {
-		const isMin = call.func.name === "min";
+		const isMin = call._builtinName === "min";
 		const goType = call._type ?? this._resolveExprGoType(call.args[0]);
 		const wType =
 			goType?.kind === "untyped" && typeof targetWasmType === "string"
@@ -1080,7 +1081,12 @@ export class BuiltinsEmitter {
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
-		switch (func.name) {
+		const split = this._splitForwardedBuiltin(call);
+		if (split) return this._emitBuiltinCall(split, targetWasmType);
+		// The checker names a call to the predeclared builtin; a user
+		// declaration spelled `len` or `max` is an ordinary call.
+		const name = func.name === "string" ? "string" : call._builtinName;
+		switch (name) {
 			case "len":
 				this._emitBuiltinLen(call, targetWasmType);
 				return true;
@@ -1445,21 +1451,48 @@ export class BuiltinsEmitter {
 			call.func.expr?._type?.kind !== "namespace";
 		if (!holders && !isMethod) return null;
 		if (hasCallOrReceive(call.func)) return null;
+		const args = this._spillForwardedResults(
+			inner,
+			types,
+			holders ?? [],
+			"__fwdarg",
+		);
+		return { ...call, args, _multiForward: false };
+	}
+
+	// `min(f())`, `append(f())`: the builtin was checked against one operand
+	// node per result (`call._fwdArgs`); f's results go into locals and the
+	// builtin is emitted over those operands.
+	_splitForwardedBuiltin(call) {
+		const operands = call._fwdArgs;
+		if (!call._multiForward || !operands) return null;
+		const types = operands.map((o) => o._type);
+		const args = this._spillForwardedResults(
+			call.args[0],
+			types,
+			operands,
+			"__fwdbi",
+		);
+		return { ...call, args, _multiForward: false };
+	}
+
+	// Evaluates the multi-value call `inner` into fresh locals and returns one
+	// ident per result, each carrying that element's checker marks (`marks`).
+	_spillForwardedResults(inner, types, marks, prefix) {
 		this.emitExpr(inner, null);
 		this._fwdArgCounter = (this._fwdArgCounter ?? 0) + 1;
-		const names = types.map((_, i) => `__fwdarg$${this._fwdArgCounter}$${i}`);
+		const names = types.map((_, i) => `${prefix}$${this._fwdArgCounter}$${i}`);
 		const locals = types.map((t, i) =>
 			this.allocLocal(names[i], this.toWasmType(t), t, true),
 		);
 		for (let i = locals.length - 1; i >= 0; i--)
 			this.pushInstruction({ op: "local.set", index: locals[i] });
-		const args = names.map((name, i) => ({
+		return names.map((name, i) => ({
+			...(marks[i] ?? {}),
 			kind: "Ident",
 			name,
 			_type: types[i],
-			...(holders?.[i] ?? {}),
 		}));
-		return { ...call, args, _multiForward: false };
 	}
 
 	emitCallExpr(call, targetWasmType = null) {

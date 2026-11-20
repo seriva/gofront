@@ -11,7 +11,7 @@
 //     js:              string,          // generated JS bundle (may include dep preamble)
 //     exportedSymbols: Map<name, type>, // for importers to build a namespace
 //     exportedTypes:   Map<name, type>,
-//     exportedTypeNames: Set<name>,     // names declared as types, for dot imports
+//     exportedKinds:   Map<name, kind>, // what each name is declared as (see Scope)
 //   }
 //
 // Local imports (`import "./subpkg"`) are compiled recursively and bundled inline.
@@ -57,7 +57,11 @@ import {
 	resolveGwDir,
 	resolveStdlibSource,
 } from "./resolver.js";
-import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
+import {
+	EXCLUDED_STDLIB_PACKAGES,
+	TypeChecker,
+	universeTypeNames,
+} from "./typechecker/index.js";
 import {
 	BASIC_TYPES,
 	JS_BUILTIN_CLASSES,
@@ -442,7 +446,7 @@ function resolveImports(
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
 						external: false,
 						consts: dep.exportedConsts,
-						typeNames: dep.exportedTypeNames,
+						kinds: dep.exportedKinds,
 					});
 					continue;
 				}
@@ -454,6 +458,7 @@ function resolveImports(
 					dep.exportedTypes,
 					dep.target,
 					dep.exportedConsts,
+					dep.exportedKinds,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -726,7 +731,7 @@ export function compileFiles(files, options = {}) {
 			renamedTypes,
 		),
 		exportedConsts: checker.getExportedConsts(),
-		exportedTypeNames: checker.getExportedTypeNames(),
+		exportedKinds: checker.getExportedKinds(),
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
@@ -752,17 +757,50 @@ function testDriverProgram(options, programs, pkgTarget, fromDir) {
 	return ast;
 }
 
+// The names the programs' imports can bind: the alias, or the last path
+// element (the one before a `/v2` suffix).
+function importedNames(programs) {
+	const names = new Set();
+	for (const p of programs)
+		for (const decl of p.imports ?? [])
+			for (const imp of decl.imports ?? []) {
+				if (imp.alias && imp.alias !== ".") names.add(imp.alias);
+				const parts = String(imp.path).split("/");
+				names.add(parts.at(-1));
+				if (/^v\d+$/.test(parts.at(-1)) && parts.length > 1)
+					names.add(parts.at(-2));
+			}
+	return names;
+}
+
+// Predeclared names besides the basic types that a declared type may shadow.
+const PREDECLARED_NAMES = ["error", "comparable", "true", "false", "nil"];
+
 // The renamed ASTs must not be reused from the parse cache by a later build.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
-	const renamed = mangleCollidingTypes(programs, pkgKey, pkgName, owners);
+	const predeclared = new Set([
+		...Object.keys(BASIC_TYPES),
+		...PREDECLARED_NAMES,
+	]);
+	const renamed = mangleCollidingTypes(
+		programs,
+		pkgKey,
+		pkgName,
+		owners,
+		predeclared,
+	);
 	// A local type named after a JS built-in would shadow it in the bundle.
-	const foreign = new Set(JS_BUILTIN_CLASSES);
+	// A local type named after a universe type (`GPUDevice`) must not reuse it.
+	const foreign = new Set([...JS_BUILTIN_CLASSES, ...universeTypeNames()]);
 	// A local type that shadows a predeclared type (`type int32 = string`)
 	// gets its own name, so `int32` keeps meaning the predeclared type
 	// everywhere else.
-	for (const name of Object.keys(BASIC_TYPES)) foreign.add(name);
+	for (const name of predeclared) foreign.add(name);
 	for (const [name, owner] of owners ?? [])
 		if (owner !== pkgKey) foreign.add(name);
+	// A local type spelled like an import would hide the package in the other
+	// functions of the file.
+	for (const name of importedNames(programs)) foreign.add(name);
 	// A local type spelled like a package-level var, const or func would take
 	// over that value inside its function.
 	for (const p of programs)
@@ -805,5 +843,6 @@ export function compileWasm(source, options = {}) {
 		return { wasm: null, errors: checker.errors };
 	}
 
+	if (res?.wasm) validateWasm(res.wasm);
 	return { ...res, errors: [] };
 }

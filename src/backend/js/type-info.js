@@ -128,8 +128,16 @@ export const typeInfoGenMethods = {
 
 	_callUsesTypeInfo(call, names) {
 		if (this._isTypeParamMethodCall(call, names)) return true;
-		if (call._isTypeConversion)
-			return call._conversionTargetType?.kind === "typeParam";
+		// A conversion to a generic instance such as `W[T](s)` tags the result
+		// with its instantiation, as a composite literal does.
+		if (call._isTypeConversion) {
+			const target = call._conversionTargetType;
+			return (
+				target?.kind === "typeParam" ||
+				(target?.kind === "named" &&
+					Boolean(target.typeArgs?.some((t) => mentionsTypeParam(t))))
+			);
+		}
 		// A fmt operand of a type parameter type is formatted by its instantiated
 		// type (a Stringer type argument), see _fmtArgJs.
 		if (

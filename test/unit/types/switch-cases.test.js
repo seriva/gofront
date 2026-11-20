@@ -4,6 +4,7 @@
 
 import {
 	assertAllTargetsOutput,
+	assertEqual,
 	assertErrorContains,
 	compile,
 	compileWasm,
@@ -140,4 +141,28 @@ func main() {
 `,
 		"m nil\nnon-nil\nmm nil\n",
 	);
+});
+
+// R24: a type-switch binding is used when any clause uses it.
+for (const [name, body] of [
+	["one clause", "case int:\n\t\t_ = x\n\tcase string:"],
+	["default clause", "case int:\n\tdefault:\n\t\t_ = x"],
+	["a closure", "case int:\n\t\tfunc() { _ = x }()"],
+	[
+		"a nested block shadow",
+		"case int:\n\t\t{\n\t\t\tx := 2\n\t\t\t_ = x\n\t\t}\n\tcase string:\n\t\t_ = x",
+	],
+]) {
+	test(`R24 type switch binding used in ${name}`, () => {
+		const src = `package main\nfunc main() {\n\tvar v any = 1\n\tswitch x := v.(type) {\n\t${body}\n\t}\n}`;
+		for (const target of ["js", "both", "wasm"])
+			assertEqual(errorsOn(target, src).length, 0);
+	});
+}
+
+test("R24 unused type switch binding without clauses", () => {
+	const src =
+		"package main\nfunc main() {\n\tvar v any = 1\n\tswitch x := v.(type) {\n\t}\n}";
+	for (const target of ["js", "both", "wasm"])
+		assertErrorContains(errorsOn(target, src), "'x' declared and not used");
 });

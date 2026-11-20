@@ -1,6 +1,5 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
-import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
 import { newLabelScope } from "./statements.js";
 import {
@@ -10,6 +9,7 @@ import {
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	anyKind,
 	BASIC_TYPES,
 	BOOL,
 	BROWSER_GLOBALS,
@@ -18,6 +18,7 @@ import {
 	compositeLitMaxIndex,
 	copyType,
 	DECLARED_ANY,
+	defaultType,
 	displayTypeName,
 	ERROR,
 	embeddedFieldName,
@@ -55,8 +56,6 @@ import {
 	VOID,
 } from "./types.js";
 
-const TEMPORARY_KINDS = new Set(["CallExpr", "CompositeLit", "TypeAssertExpr"]);
-
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -73,15 +72,44 @@ const NILABLE_KINDS = new Set([
 function minMaxType(at) {
 	const typed = at.find((t) => t && t.kind !== "untyped");
 	if (typed) return typed;
-	return at.find((t) => t?.base === "float64") ?? at[0] ?? ANY;
+	return (
+		at.find((t) => t?.base === "float64") ??
+		at.find((t) => t?.rune) ??
+		at[0] ??
+		ANY
+	);
 }
+
+// The kind rank of an untyped constant: int < rune < float64.
+function untypedRank(t) {
+	return t?.base === "float64" ? 2 : t?.rune ? 1 : 0;
+}
+
+// Argument counts per builtin: [min, max] (max Infinity when variadic).
+const BUILTIN_ARITY = {
+	len: [1, 1],
+	cap: [1, 1],
+	append: [1, Infinity],
+	copy: [2, 2],
+	delete: [2, 2],
+	make: [1, Infinity],
+	new: [1, 1],
+	panic: [1, 1],
+	recover: [0, 0],
+	min: [1, Infinity],
+	max: [1, Infinity],
+	clear: [1, 1],
+	complex: [2, 2],
+	real: [1, 1],
+	imag: [1, 1],
+};
 
 // Dispatch table for builtin function type checking.
 // Each value is (self, name, expr, argTypes, scope) => returnType.
 const BUILTIN_CHECK = {
 	len: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
-	cap: (s, n, e, at, sc) => s._checkBuiltinLen(n, e, at, sc),
-	append: (s, _n, e, at) => {
+	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
+	append: (s, _n, e, at, sc) => {
 		const st = at[0] ?? ANY;
 		if (isArray(st)) {
 			s.err(`cannot append to array (type ${typeStr(st)})`, e);
@@ -94,32 +122,21 @@ const BUILTIN_CHECK = {
 			);
 			return st;
 		}
-		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
-		if (sb?.kind === "slice") {
-			const is64 = is64BitInt(sb.elem);
-			for (let i = 1; i < e.args.length; i++) {
-				if (e.args[i]._spread)
-					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
-				if (!e.args[i]._spread && at[i]) {
-					if (is64) e.args[i]._is64Bit = true;
-					s._tagComplexConst(
-						s.resolveType(sb.elem),
-						s.resolveType(at[i]),
-						e.args[i],
-					);
-					s._markIfaceBox(
-						s.resolveType(sb.elem),
-						s.resolveType(at[i]),
-						e.args[i],
-					);
-				}
-			}
+		if (!s._appendOperandOk(st)) {
+			s.err(
+				`invalid append: argument must be a slice; have ${exprText(e.args[0])} (${s._capOperandKind(e.args[0], st)})`,
+				e,
+			);
+			return st;
 		}
+		if (s._reportSliceElemMismatch("append", e.args[0], st, e)) return st;
+		const sb = s._builtinSliceType(st, sc);
+		if (sb?.kind === "slice") s._checkAppendArgs(sb, e, at);
 		return st;
 	},
-	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
-	delete: (s, _n, e, at) => {
-		const mt = s._deepUnderlying(at[0]);
+	copy: (s, _n, e, at, sc) => s._checkBuiltinCopy(e, at, sc),
+	delete: (s, _n, e, at, sc) => {
+		const mt = s._checkDeleteOperand(e, at[0], sc);
 		if (mt?.kind === "map" && e.args[1]) {
 			s.assertAssignable(mt.key, at[1], e.args[1]);
 			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
@@ -135,6 +152,7 @@ const BUILTIN_CHECK = {
 		// `make(S, n)` with S a type parameter makes its core type.
 		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
 		if (core) ta._coreType = core;
+		s._checkMakeArity(e, core ?? made);
 		for (const size of e.args.slice(1, 3))
 			s._checkIntegerConstOperand(size, "size", sc);
 		return made;
@@ -156,7 +174,10 @@ const BUILTIN_CHECK = {
 	error: () => ERROR,
 	min: (s, _n, e, at) => s._checkMinMax(e, at),
 	max: (s, _n, e, at) => s._checkMinMax(e, at),
-	clear: () => VOID,
+	clear: (s, _n, e, at) => {
+		s._checkClearOperand(e, at[0]);
+		return VOID;
+	},
 	complex: (s, _n, e, at) => s._checkBuiltinComplex(e, at),
 	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
 	imag: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
@@ -182,8 +203,12 @@ const NON_INTEGER_BASICS = new Set([
 	"complex128",
 	"bool",
 	"string",
-	"any",
 ]);
+
+// JS-dynamic `any` indexes anything; a Go `any` needs a type assertion.
+function nonIntegerBasic(u) {
+	return isAny(u) ? anyKind(u) === "go" : NON_INTEGER_BASICS.has(u.name);
+}
 
 // Method-name dispatch for _checkExpr — string values add no static call edges.
 const CHECK_EXPR_DELEGATE = {
@@ -199,6 +224,34 @@ const CHECK_EXPR_DELEGATE = {
 	RangeExpr: "_checkRangeExpr",
 	InstantiationExpr: "_checkInstantiationExpr",
 };
+
+// Whether `t` is, or is built from, a type parameter.
+function mentionsTypeParam(t, seen = new Set()) {
+	if (!t || typeof t !== "object" || seen.has(t)) return false;
+	if (t.kind === "typeParam") return true;
+	seen.add(t);
+	const any = (list) =>
+		[...(list ?? [])].some((x) => mentionsTypeParam(x, seen));
+	switch (t.kind) {
+		case "pointer":
+			return mentionsTypeParam(t.base, seen);
+		case "slice":
+		case "array":
+			return mentionsTypeParam(t.elem, seen);
+		case "map":
+			return mentionsTypeParam(t.key, seen) || mentionsTypeParam(t.value, seen);
+		case "named":
+			return any(t.typeArgs);
+		case "struct":
+			return any(t.typeArgs) || any(t.fields?.values());
+		case "func":
+			return any(t.params) || any(t.returns);
+		case "interface":
+			return any(t.methods?.values());
+		default:
+			return false;
+	}
+}
 
 /** @type {ThisType<TypeChecker>} */
 export const expressionCheckMethods = {
@@ -241,11 +294,23 @@ export const expressionCheckMethods = {
 			case "ImagLit":
 				return UNTYPED_COMPLEX;
 			case "Ident": {
-				const t = scope.lookup(expr.name);
+				const t = expr._universe
+					? this.universe.lookup(expr.name)
+					: scope.lookup(expr.name);
+				// Generated and stdlib Go resolves every property of the name
+				// from the universe, never from the user's scope.
+				if (expr._universe) scope = this.universe;
+				// `true`, `false` and `nil` are universe constants: with no
+				// declaration in scope the identifier is the literal.
+				if (!t && Object.hasOwn(UNIVERSE_LITERALS, expr.name)) {
+					const { litKind, value } = UNIVERSE_LITERALS[expr.name];
+					delete expr.name;
+					Object.assign(expr, { kind: "BasicLit", litKind, value });
+					return this._checkExpr(expr, scope);
+				}
 				// `(*int)(nil)`: a predeclared type named where a type may stand.
-				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
-					expr._isTypeRef = true;
-					return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
+				if (!t && Object.hasOwn(BASIC_TYPES, expr.name)) {
+					return this._basicTypeName(expr);
 				}
 				if (!t) {
 					// The import of an excluded package already reported; its
@@ -270,8 +335,14 @@ export const expressionCheckMethods = {
 					}
 					return this.err(`Undefined: '${expr.name}'`, expr);
 				}
-				if (this._namesType(expr.name, t, scope) || t.kind === "typeParam")
+				// A value whose type is a type parameter is not the type parameter.
+				if (
+					this._namesType(expr.name, t, scope) ||
+					(t.kind === "typeParam" && scope.bindsType(expr.name))
+				)
 					expr._isTypeRef = true;
+				const notValue = this._notAValue(expr, scope);
+				if (notValue) return this.err(notValue, expr);
 				// JS output keeps the Go name of what names a type: a type is a
 				// class under that name, and a type parameter is looked up by it.
 				// Decided from the binding the name resolves to, so a variable,
@@ -317,28 +388,7 @@ export const expressionCheckMethods = {
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
 				const rt = this.checkExpr(expr.right, scope);
-				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
-				if (isAny(lt) || isAny(rt))
-					return (
-						this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
-						this.binaryResultType(expr.op, ANY, ANY, expr)
-					);
-				this._checkConstOperands(expr.op, lt, rt, expr);
-				this._markTypeParamMapNil(expr, lt, rt, scope);
-				const res = this.binaryResultType(expr.op, lt, rt, expr);
-				if (expr.op !== "<<" && expr.op !== ">>") {
-					this._retypeUntypedShift(lt, rt, expr.right);
-					this._retypeUntypedShift(rt, lt, expr.left);
-				}
-				this._tagFloat32Const(lt, rt, expr.right);
-				this._tagFloat32Const(rt, lt, expr.left);
-				this._tagComplex64Const(lt, rt, expr.right);
-				this._tagComplex64Const(rt, lt, expr.left);
-				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
-					expr.right._is64Bit = true;
-				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
-					expr.left._is64Bit = true;
-				return res;
+				return this._typeBinaryOperands(expr, lt, rt, scope);
 			}
 			case "AwaitExpr": {
 				if (this.target === "wasm" || this.target === "both") {
@@ -373,16 +423,35 @@ export const expressionCheckMethods = {
 		return this.err(`${typeStr(t)} (type) is not an expression`, expr);
 	},
 
-	_checkDeref(ot, expr) {
-		if (ot === ANY) return ANY;
+	_checkDeref(ot, expr, scope) {
+		// JS-dynamic values dereference freely; an error-recovery type has
+		// already been reported.
+		if (anyKind(ot) === "dynamic") return ANY;
+		if (anyKind(ot) === "tainted") return TAINTED_ANY;
 		if (ot.kind === "pointer") return ot.base;
-		if (ot.kind === "named" && ot.underlying?.kind === "pointer")
-			return ot.underlying.base;
+		if (ot.kind === "typeParam") {
+			const core = this._coreType(ot, scope);
+			if (core?.kind === "pointer") return core.base;
+		}
+		const ou = this._deepUnderlying(ot);
+		if (ou?.kind === "pointer") return ou.base;
 		this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
 		return ANY;
 	},
 
 	_checkBoolUnaryOp(ot, expr) {
+		// `!a` on a type parameter needs every type in its type set to be a
+		// bool type, and keeps the type parameter's type.
+		if (ot?.kind === "typeParam") {
+			if (
+				!this._typeParamAllows(ot, (t) => isBool(this._deepUnderlying(t) ?? t))
+			)
+				this.err(
+					`invalid operation: operator ! not defined on ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot), false)} constrained by ${this._constraintText(ot)})`,
+					expr.operand,
+				);
+			return ot;
+		}
 		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
 		// `!` keeps an untyped or defined bool type.
 		return isBool(ot) ? ot : BOOL;
@@ -415,6 +484,12 @@ export const expressionCheckMethods = {
 		return terms !== null && terms.length > 0 && terms.every(pred);
 	},
 
+	// Whether `pred` holds for `t`, or for every type in its type set when `t`
+	// is a type parameter (the builtins' operand rule).
+	_typeSetOk(t, pred) {
+		return t?.kind === "typeParam" ? this._typeParamAllows(t, pred) : pred(t);
+	},
+
 	// `scope` resolves the type parameters a term mentions (`~[]E`); it
 	// defaults to the package scope.
 	_constraintTerms(c, seen, scope = this.globals) {
@@ -435,11 +510,12 @@ export const expressionCheckMethods = {
 		if (c.kind === "typeParam")
 			return this._constraintTerms(c.constraint, seen, scope);
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
+		scope = c._scope ?? scope;
 		const out = [];
 		for (const term of c.terms) {
 			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
 			const inner =
-				t?.kind === "named" && t.underlying?.kind === "interface"
+				this._deepUnderlying(t)?.kind === "interface"
 					? this._constraintTerms(t, seen, scope)
 					: [t];
 			if (inner === null) return null;
@@ -450,7 +526,9 @@ export const expressionCheckMethods = {
 
 	// An interface's type set is the intersection of its own union and the
 	// type sets of the interfaces it embeds; null when it has none.
-	_interfaceTerms(iface, seen, scope) {
+	_interfaceTerms(iface, seen, outer) {
+		// Terms such as `~[]E` resolve in the scope that declared `E`.
+		const scope = iface._unionScope ?? outer;
 		const sets = [iface.unionConstraint, ...(iface._typeSetEmbeds ?? [])]
 			.filter(Boolean)
 			.map((s) => this._constraintTerms(s, new Set(seen), scope));
@@ -466,7 +544,7 @@ export const expressionCheckMethods = {
 	// vectors) lives inline in its parent struct, array or global, so wasm has
 	// no stable address for it.  Type parameters are checked per instantiation.
 	_isScalarStorageType(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t) ?? t;
+		const u = this.resolveType(this._deepUnderlying(t)) ?? t;
 		const k = u?.kind;
 		if (!k || u._tainted) return false;
 		return k !== "struct" && k !== "array" && k !== "typeParam";
@@ -482,7 +560,7 @@ export const expressionCheckMethods = {
 		if (node.kind === "Ident") {
 			if (scope.lookupScope(node.name) !== this.globals) return false;
 			if (scope.isConst?.(node.name)) return false;
-			const sym = this.globals.symbols.get(node.name);
+			const sym = this.globals.get(node.name);
 			if (sym?.kind === "func" || sym?.kind === "namespace") return false;
 		} else if (node.kind !== "SelectorExpr" && node.kind !== "IndexExpr") {
 			return false;
@@ -508,15 +586,54 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// One operator typing path for `x op y`, `x op= y` and `x++` (the latter two
+	// pass a synthetic BinaryExpr): operand checks, result type and the
+	// constant retyping codegen reads.
+	_typeBinaryOperands(expr, lt, rt, scope) {
+		if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
+		if (isAny(lt) || isAny(rt))
+			return (
+				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
+				this.binaryResultType(expr.op, ANY, ANY, expr)
+			);
+		// A defined empty interface (`type MyAny any`, `interface{}`) is a Go
+		// `any` too.
+		const goAnyError = this._checkDeclaredAnyBinary(expr.op, lt, rt, expr);
+		if (goAnyError) return goAnyError;
+		this._checkConstOperands(expr.op, lt, rt, expr);
+		this._markTypeParamMapNil(expr, lt, rt, scope);
+		const res = this.binaryResultType(expr.op, lt, rt, expr);
+		if (expr.op !== "<<" && expr.op !== ">>") {
+			this._retypeUntypedShift(lt, rt, expr.right);
+			this._retypeUntypedShift(rt, lt, expr.left);
+		}
+		this._tagFloat32Const(lt, rt, expr.right);
+		this._tagFloat32Const(rt, lt, expr.left);
+		this._tagComplex64Const(lt, rt, expr.right);
+		this._tagComplex64Const(rt, lt, expr.left);
+		this._markUntyped64Operands(expr, lt, rt);
+		return res;
+	},
+
+	// An untyped operand beside a 64-bit integer is emitted as a BigInt on
+	// JS.  A shift's operand never takes the type of its count.
+	_markUntyped64Operands(expr, lt, rt) {
+		if (expr.op === "<<" || expr.op === ">>") return;
+		if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
+			expr.right._is64Bit = true;
+		if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
+			expr.left._is64Bit = true;
+	},
+
 	// Go: map elements are not addressable, nor are fields and array elements
 	// reached from one by value (`&m[k]`, `&m[k].f`, `&m[k][i]` on an array).
-	_isMapElementOperand(operand) {
+	_isMapElementOperand(operand, scope) {
 		let node = operand;
 		while (node?.kind === "ParenExpr") node = node.expr;
 		if (node?.kind !== "SelectorExpr" && node?.kind !== "IndexExpr")
 			return false;
 		const bt = node.expr?._type;
-		const b = this._deepUnderlying(bt) ?? bt;
+		const b = this._coreUnderlying(bt, scope) ?? bt;
 		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
 		if (b?.kind === "pointer" || b?.kind === "slice") return false;
 		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
@@ -525,7 +642,17 @@ export const expressionCheckMethods = {
 			this._promotedThroughPointer(bt, node.field)
 		)
 			return false;
-		return this._isMapElementOperand(node.expr);
+		return this._isMapElementOperand(node.expr, scope);
+	},
+
+	// An identifier is addressable when it names a variable: not a constant,
+	// type, declared function, package or builtin (see Scope). A variable
+	// typed with a namespace-shaped declaration (`var Widget Widget`) is still
+	// a variable, and shadowing any other name with a variable makes it one.
+	_isAddressableIdent(n, scope) {
+		const obj = scope?.lookupObject(n.name);
+		if (!obj) return !BUILTIN_IDENTS.has(n.name);
+		return obj.kind === "var";
 	},
 
 	// Whether field or method `name` of struct type `t` is promoted through an
@@ -539,7 +666,7 @@ export const expressionCheckMethods = {
 	_selectorPath(t, name, depth) {
 		if (!t || depth > 8) return null;
 		if (t.kind === "named" && t.methods?.has(name)) return "value";
-		const st = this.resolveType(t.kind === "named" ? t.underlying : t) ?? t;
+		const st = this.resolveType(this._deepUnderlying(t)) ?? t;
 		if (st?.kind !== "struct") return null;
 		for (const f of st._structFields ?? [])
 			if (!f.embedded && f.names?.includes(name)) return "value";
@@ -566,7 +693,7 @@ export const expressionCheckMethods = {
 	},
 
 	_isFuncType(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t) ?? t;
+		const u = this.resolveType(this._deepUnderlying(t)) ?? t;
 		return u?.kind === "func";
 	},
 
@@ -579,9 +706,32 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `&x` needs an addressable operand, or a composite literal (`&T{}`).
+	_errUnaddressableOperand(expr, ot) {
+		const o = expr.operand;
+		const u = this._deepUnderlying(ot);
+		const kind =
+			o.kind !== "Ident" && u?.kind === "struct" && ot?.kind === "named"
+				? `value of struct type ${typeStr(ot)}`
+				: operandKind(o, typeStr(ot));
+		return this.err(
+			`invalid operation: cannot take address of ${exprText(o)} (${kind})`,
+			this._positioned(expr),
+		);
+	},
+
 	_checkAddressOfExpr(expr, scope, ot) {
-		if (this._isMapElementOperand(expr.operand)) {
+		if (this._isMapElementOperand(expr.operand, scope)) {
 			this._errMapElementAddress(expr);
+			return { kind: "pointer", base: ot };
+		}
+		let target = expr.operand;
+		while (target?.kind === "ParenExpr") target = target.expr;
+		if (
+			target?.kind !== "CompositeLit" &&
+			!this._isAddressable(target, scope)
+		) {
+			this._errUnaddressableOperand(expr, ot);
 			return { kind: "pointer", base: ot };
 		}
 		if (this._isScalarInteriorOperand(expr.operand, ot, scope)) {
@@ -609,16 +759,22 @@ export const expressionCheckMethods = {
 		if (Number(String(o.value).replaceAll("_", "")) === 0) expr.op = "+";
 	},
 
+	// `*T` may name a type; `&P` is reported by the addressability check.
+	_markUnaryOperand(expr) {
+		if (expr.op === "*") expr.operand._typeRefOk = true;
+		if (expr.op === "&") this._targetOperand(expr.operand);
+	},
+
 	_checkUnaryExpr(expr, scope) {
 		this._foldNegativeZeroLiteral(expr);
-		if (expr.op === "*") expr.operand._typeRefOk = true;
+		this._markUnaryOperand(expr);
 		const ot = this.checkExpr(expr.operand, scope);
-		if (expr.op === "*" && ot?._declared && !expr.operand._isTypeRef)
+		if (expr.op === "*" && anyKind(ot) === "go" && !expr.operand._isTypeRef)
 			return this.err(
 				`invalid operation: cannot indirect ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot))})`,
 				expr.operand,
 			);
-		if (expr.op !== "&" && expr.op !== "*" && ot?._declared)
+		if (expr.op !== "&" && expr.op !== "*" && anyKind(ot) === "go")
 			return this._checkDeclaredAnyOperator(expr.op, ot, expr.operand);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
@@ -632,7 +788,7 @@ export const expressionCheckMethods = {
 				expr._isTypeRef = true;
 				return this._typeRefOperand(expr, { kind: "pointer", base: ot });
 			}
-			return this._checkDeref(ot, expr);
+			return this._checkDeref(ot, expr, scope);
 		}
 		return ot;
 	},
@@ -664,15 +820,15 @@ export const expressionCheckMethods = {
 	// A pointer-receiver method needs `&recv`: a map element or the result of
 	// a call, conversion, literal or assertion has no address. A receiver that
 	// reaches the method through an embedded pointer needs none.
-	_reportUnaddressableRecv(expr) {
+	_reportUnaddressableRecv(expr, scope) {
 		if (this.receiversChecked) return false;
 		const recv = expr.expr;
 		if (this._promotedThroughPointer(recv._type, expr.field)) return false;
-		if (this._isMapElementOperand(recv)) {
+		if (this._isMapElementOperand(recv, scope)) {
 			this._errMapElementAddress(recv);
 			return true;
 		}
-		if (!this._isTemporaryOperand(recv)) return false;
+		if (this._isAddressable(recv, scope)) return false;
 		this.err(
 			`cannot call pointer method ${expr.field} on ${typeStr(recv._type)}`,
 			this._positioned(expr),
@@ -680,27 +836,57 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
-	// A value that exists only for the current expression: the result of a
-	// call, a literal or a type assertion, or a field or array element of one.
-	_isTemporaryOperand(node) {
-		if (node?.kind === "ParenExpr") return this._isTemporaryOperand(node.expr);
-		if (TEMPORARY_KINDS.has(node?.kind)) return true;
-		if (node?.kind === "BinaryExpr") return true;
-		if (node?.kind === "UnaryExpr" && node.op !== "*") return true;
-		const bt = node?.expr?._type;
-		if (node?.kind === "SelectorExpr" && bt?.kind !== "pointer")
-			return this._isTemporaryOperand(node.expr);
-		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt);
-		return node?.kind === "IndexExpr" && b?.kind === "array"
-			? this._isTemporaryOperand(node.expr)
-			: false;
+	// Go's addressability rule: a variable, a pointer indirection, a slice
+	// element, a field of an addressable struct (or of any pointer), or an
+	// element of an addressable array (or of any pointer to an array).
+	// Constants, call results, literals, assertions, string and map elements,
+	// and fields or array elements of those are not. Operands whose type the
+	// checker does not model (JavaScript values, type parameters) count as
+	// addressable.
+	_isAddressable(node, scope) {
+		let n = node;
+		while (n?.kind === "ParenExpr") n = n.expr;
+		if (!n) return false;
+		if (n.kind === "Ident") return this._isAddressableIdent(n, scope);
+		if (n.kind === "UnaryExpr") return n.op === "*";
+		if (n.kind === "IndexExpr") return this._isAddressableIndex(n, scope);
+		if (n.kind === "SelectorExpr") return this._isAddressableSelector(n, scope);
+		return false;
+	},
+
+	_isAddressableIndex(n, scope) {
+		const b = this._coreUnderlying(n.expr?._type, scope) ?? n.expr?._type;
+		if (b?.kind === "slice" || b?.kind === "pointer") return true;
+		if (b?.kind === "map" || isString(b)) return false;
+		return b?.kind === "array" ? this._isAddressable(n.expr, scope) : true;
+	},
+
+	_isAddressableSelector(n, scope) {
+		// Method values and method expressions are values, not variables.
+		if (n._isMethodValue || n._isMethodExpr) return false;
+		const bt = n.expr?._type;
+		if (bt?.kind === "namespace") return this._isNamespaceVariable(bt, n.field);
+		const b = this._coreUnderlying(bt, scope) ?? bt;
+		if (b?.kind !== "struct") return true;
+		if (this._promotedThroughPointer(bt, n.field)) return true;
+		return this._isAddressable(n.expr, scope);
+	},
+
+	// Whether member `field` of namespace `ns` is a variable. A package says
+	// what each member is (`_kinds`, see Scope): only its variables are. A
+	// member a JavaScript declaration does not classify is a property, which
+	// may be assigned unless it is a constant.
+	_isNamespaceVariable(ns, field) {
+		const kind = ns._kinds?.get(field);
+		if (kind) return kind === "var";
+		return !ns._consts?.has(field);
 	},
 
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
 		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
-		if (this._reportUnaddressableRecv(expr)) return;
+		if (this._reportUnaddressableRecv(expr, scope)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
@@ -754,9 +940,7 @@ export const expressionCheckMethods = {
 
 	_checkMethodExprSelector(expr, baseType) {
 		const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
-		const base = this.resolveType(
-			recvBase.kind === "named" ? recvBase.underlying : recvBase,
-		);
+		const base = this.resolveType(this._deepUnderlying(recvBase));
 		const methodType = this._resolveMethodExprType(recvBase, base, expr.field);
 		if (
 			this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
@@ -784,9 +968,7 @@ export const expressionCheckMethods = {
 			baseType.kind === "pointer"
 				? (this.resolveType(baseType.base) ?? baseType.base)
 				: baseType;
-		const base = this.resolveType(
-			recvT?.kind === "named" ? recvT.underlying : recvT,
-		);
+		const base = this.resolveType(this._deepUnderlying(recvT));
 		if (base?.kind === "interface" && base.methods?.has(expr.field)) {
 			// `i.M` binds the interface value; the call dispatches when it runs.
 			expr._isMethodValue = true;
@@ -805,12 +987,34 @@ export const expressionCheckMethods = {
 	_namesType(name, t, scope) {
 		if (!this.types.has(name)) return false;
 		const owner = scope.lookupScope(name);
-		if (owner?._typeNames.has(name)) return true;
+		if (owner?.object(name).kind === "type") return true;
 		// A binding the source declared as a variable, constant, function,
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
 			return false;
 		return owner === this.globals || this.types.get(name) === t;
+	},
+
+	// What a name that is no value says when it stands where a value does:
+	// a type, a builtin or a package is allowed only as the callee of a call
+	// or conversion, the operand of `*` or the base of a selector, which set
+	// `_typeRefOk` on it.
+	_notAValue(expr, scope) {
+		// A predeclared type is no value even as an assignment target.
+		if (expr._typeRefOk || (expr._nameOk && scope)) return null;
+		const kind = scope?.lookupObject(expr.name)?.kind;
+		if (kind === "builtin") return `${expr.name} (built-in) must be called`;
+		if (kind === "pkg") return `use of package ${expr.name} not in selector`;
+		if (expr._isTypeRef) return `${expr.name} (type) is not an expression`;
+		return null;
+	},
+
+	// A predeclared type named where a type may stand, or by mistake as a value.
+	_basicTypeName(expr) {
+		expr._isTypeRef = true;
+		const notValue = this._notAValue(expr, null);
+		if (notValue) return this.err(notValue, expr);
+		return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
 	},
 
 	_checkSelectorExpr(expr, scope) {
@@ -819,21 +1023,44 @@ export const expressionCheckMethods = {
 		if (baseType?._tainted) return TAINTED_ANY;
 		const exclErr = this._checkExcludedSelectorExpr(expr, baseType);
 		if (exclErr) return exclErr;
+		if (
+			expr.expr.kind === "Ident" &&
+			scope?.lookupObject(expr.expr.name)?.kind === "builtin"
+		)
+			return this.err(
+				`invalid use of ${expr.expr.name} (built-in) in selector expression`,
+				expr,
+			);
 		if (expr.expr._isTypeRef) {
 			const mExpr = this._checkMethodExprSelector(expr, baseType);
 			if (mExpr) return mExpr;
+			if (
+				baseType?.kind !== "namespace" &&
+				this._isFieldOfType(baseType, expr.field)
+			)
+				return this.err(
+					`${exprText(expr)} undefined (type ${typeStr(baseType)} has no method ${expr.field})`,
+					expr,
+				);
 		}
 		const ft = this.fieldType(baseType, expr.field, expr);
 		if (ft?.kind === "func")
 			this._markMethodValueSelector(expr, baseType, ft, scope);
 		if (
 			baseType?.kind === "namespace" &&
-			this.types.has(`${baseType.name}.${expr.field}`) &&
-			baseType.name !== "binary"
+			this.types.has(`${baseType.name}.${expr.field}`)
 		) {
 			expr._isTypeRef = true;
+			if (!expr._typeRefOk && !expr._nameOk)
+				return this.err(`${exprText(expr)} (type) is not an expression`, expr);
 		}
 		return ft;
+	},
+
+	// `S.X` where X is a struct field: a type has methods, not fields.
+	_isFieldOfType(t, field) {
+		const u = this._deepUnderlying(t?.kind === "pointer" ? t.base : t);
+		return u?.kind === "struct" && !!u.fields?.has(field);
 	},
 
 	_checkArrayBoundsExpr(btu, bt, expr, scope) {
@@ -922,7 +1149,7 @@ export const expressionCheckMethods = {
 	// One step of underlying type, or the core type for a type parameter.
 	_underlyingOrCore(t, scope) {
 		if (t?.kind === "typeParam") return this._coreType(t, scope) ?? t;
-		return t?.kind === "named" ? t.underlying : t;
+		return this._deepUnderlying(t);
 	},
 
 	_markCompositeKey(key, kb, node, srcType) {
@@ -942,16 +1169,126 @@ export const expressionCheckMethods = {
 	// conversion; other values are keyed as they are.
 	// Untyped constant operands take the result type, so a float32 result
 	// rounds them like the typed operands.
+	// `clear` takes a map or a slice (every type in a type parameter's type
+	// set).
+	_checkClearOperand(e, t) {
+		if (!t || t._tainted || anyKind(t) === "dynamic") return;
+		const ok = (u) => {
+			const kind = this._deepUnderlying(u)?.kind;
+			return kind === "map" || kind === "slice";
+		};
+		if (this._typeSetOk(t, ok)) return;
+		this.err(
+			`invalid argument: cannot clear ${exprText(e.args[0])} (${this._capOperandKind(e.args[0], t)}): argument must be (or constrained by) map or slice`,
+			e,
+		);
+	},
+
+	// `min` and `max` take ordered operands: numbers and strings.
+	// A type parameter needs every type in its type set to be ordered.
+	_orderedOperandOk(t) {
+		if (!t || t._tainted) return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => this._orderedOperandOk(u));
+		if (t.kind === "untyped")
+			return (
+				t.base !== "bool" && t.base !== "nil" && !t.base.startsWith("complex")
+			);
+		if (anyKind(t) === "go") return false;
+		const u = this._deepUnderlying(t);
+		if (!u || isAny(u)) return true;
+		return (
+			u.kind === "basic" && !/^(bool|nil|void|complex(64|128))$/.test(u.name)
+		);
+	},
+
 	_checkMinMax(e, at) {
+		for (let i = 0; i < e.args.length; i++) {
+			if (this._orderedOperandOk(at[i])) continue;
+			const what = isNil(at[i])
+				? "nil"
+				: `${exprText(e.args[i])} (${this._capOperandKind(e.args[i], at[i])})`;
+			this.err(`invalid argument: ${what} cannot be ordered`, e);
+			return ANY;
+		}
+		if (!this._unifyMinMaxArgs(e, at)) return ANY;
 		const rt = minMaxType(at);
 		for (let i = 0; i < e.args.length; i++)
 			this._tagFloat32Const(rt, at[i], e.args[i]);
 		return rt;
 	},
 
+	// The arguments meet one at a time, as the operands of a binary operator
+	// do: typed arguments are identical, an untyped constant converts to the
+	// typed type, and untyped constants share a kind class. Returns false
+	// after reporting a mismatch.
+	// The untyped constant argument `j` meets the typed type `tt` (argument
+	// `i` is the later of the two and names the mismatch).
+	_fitMinMaxConst(e, ut, j, tt, tNode, i, untypedFirst) {
+		const uNode = e.args[j];
+		const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
+		const node = untypedFirst
+			? { op: e.func?.name, left: uNode, right: tNode }
+			: { op: e.func?.name, left: tNode, right: uNode };
+		if (tt.kind === "typeParam")
+			return this._convertUntypedToTypeParam(tt, ut, uNode, node, report);
+		const [lt, rt] = untypedFirst ? [ut, tt] : [tt, ut];
+		if (!this.convertUntyped(lt, rt, node, report)) return false;
+		return !this._checkConstOverflow(tt, ut, uNode);
+	},
+
+	_unifyMinMaxArgs(e, at) {
+		let typed = null;
+		let typedNode = null;
+		let acc = null; // the untyped constants seen so far, as one type
+		const pending = []; // untyped arguments before the first typed one
+		for (let i = 0; i < e.args.length; i++) {
+			const cur = at[i];
+			const report = (lt, rt) => this._reportMinMaxMismatch(lt, rt, e.args[i]);
+			if (cur?.kind !== "untyped") {
+				if (typed && !this._minMaxIdentical(typed, cur)) {
+					report(typed, cur);
+					return false;
+				}
+				if (!typed) {
+					typed = cur;
+					typedNode = e.args[i];
+					for (const j of pending)
+						if (!this._fitMinMaxConst(e, at[j], j, typed, typedNode, i, true))
+							return false;
+				}
+				continue;
+			}
+			if (typed) {
+				if (!this._fitMinMaxConst(e, cur, i, typed, typedNode, i, false))
+					return false;
+				continue;
+			}
+			const node = { op: e.func?.name, left: e.args[0], right: e.args[i] };
+			if (acc && !this.convertUntyped(acc, cur, node, report)) return false;
+			if (!acc || untypedRank(cur) > untypedRank(acc)) acc = cur;
+			pending.push(i);
+		}
+		return true;
+	},
+
+	_minMaxIdentical(lt, rt) {
+		if (lt?._tainted || rt?._tainted || isAny(lt) || isAny(rt)) return true;
+		if (lt.kind !== "typeParam" && !this._isTypedBasicOperand(lt)) return true;
+		if (rt.kind !== "typeParam" && !this._isTypedBasicOperand(rt)) return true;
+		return identical(lt, rt);
+	},
+
+	_reportMinMaxMismatch(lt, rt, arg) {
+		this.err(
+			`invalid argument: mismatched types ${this._operandTypeStr(lt)} (previous argument) and ${this._operandTypeStr(rt)} (type of ${exprText(arg)})`,
+			arg,
+		);
+	},
+
 	_markIfaceKey(mapType, node, srcType) {
 		const key = this.resolveType(mapType.key);
-		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		const kb = this._deepUnderlying(key);
 		const src = srcType && this.resolveType(srcType);
 		if (node && src?.kind === "typeParam") {
 			// Generic code: whether the key is boxed depends on the type argument,
@@ -1046,18 +1383,96 @@ export const expressionCheckMethods = {
 
 	// copy(dst, src): element types must be identical when either side is a
 	// shared buffer (the wasm emitter uses one element type for both sides).
-	_checkBuiltinCopy(e, at) {
-		const elemOf = (t) => {
-			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
-			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
+	// `copy` takes slices; a string may be the source.
+	// Element type of a copy destination slice or shared buffer.
+	_copyElem(t) {
+		const u = this._coreUnderlying(t);
+		return u?.kind === "slice" || u?.kind === "shared"
+			? this.resolveType(u.elem)
+			: null;
+	},
+
+	_checkCopyOperands(e, dt, st) {
+		// A string source (or a type parameter whose type set holds strings and
+		// byte slices) copies into a `[]byte`; strings mixed with other slices
+		// leave no single source element type.
+		const ok = (t, i) => {
+			const tpElem =
+				t?.kind === "typeParam" ? this._typeSetPart(t, "slice", "elem") : null;
+			const strOk =
+				!tpElem?.type ||
+				(tpElem.type.kind === "basic" && tpElem.type.name === "uint8");
+			return this._typeSetOk(
+				t,
+				(u) =>
+					(i === 1 &&
+						strOk &&
+						this._isStringIntoBytes(this._copyElem(dt), u)) ||
+					this._appendOperandOk(u),
+			);
 		};
+		for (const [i, t] of [dt, st].entries()) {
+			if (!ok(t, i)) {
+				this.err(
+					`invalid copy: argument must be a slice; have ${exprText(e.args[i])} (${this._capOperandKind(e.args[i], t)})`,
+					e,
+				);
+				return false;
+			}
+			if (this._reportSliceElemMismatch("copy", e.args[i], t, e)) return false;
+		}
+		return true;
+	},
+
+	// `append` and `copy` on a type parameter need one element type across
+	// the slices in its type set; reports and returns true when they differ.
+	_reportSliceElemMismatch(builtin, operand, t, e) {
+		if (t?.kind !== "typeParam") return false;
+		const { type, other } = this._typeSetPart(t, "slice", "elem");
+		if (!other) return false;
+		this.err(
+			`invalid ${builtin}: mismatched slice element types ${typeStr(type)} and ${typeStr(other)} in ${exprText(operand)} (${this._capOperandKind(operand, t)})`,
+			e,
+		);
+		return true;
+	},
+
+	// The `part` ("elem" or "key") that the `kind` ("slice" or "map") types in
+	// type parameter `t`'s type set share: `{ type, other }`, where `other` is
+	// the first one that differs from `type` (undefined when they all agree).
+	_typeSetPart(t, kind, part, scope) {
+		const parts = (this._constraintTerms(t.constraint, new Set(), scope) ?? [])
+			.map((u) => this._deepUnderlying(this.resolveType(u)))
+			.filter((u) => u?.kind === kind)
+			.map((u) => this.resolveType(u[part]));
+		return {
+			type: parts[0],
+			other: parts.find((p) => !identical(p, parts[0])),
+		};
+	},
+
+	// The slice (or shared buffer) type `append` and `copy` check an operand
+	// against; a type parameter stands for a slice of the element type its
+	// type set shares.
+	_builtinSliceType(t, scope) {
+		if (t?.kind === "typeParam") {
+			const { type, other } = this._typeSetPart(t, "slice", "elem", scope);
+			return type && !other ? { kind: "slice", elem: type } : null;
+		}
+		const u = this.resolveType(this._deepUnderlying(t));
+		return u?.kind === "slice" || u?.kind === "shared" ? u : null;
+	},
+
+	_checkBuiltinCopy(e, at, scope) {
+		const elemOf = (t) => this._builtinSliceType(t, scope)?.elem ?? null;
 		const [dt, st] = at;
+		if (!this._checkCopyOperands(e, dt, st)) return INT;
 		const de = elemOf(dt);
 		const se = elemOf(st);
 		if (!sharedInfo(dt) && !sharedInfo(st)) {
 			if (de && se && !isAny(de) && !isAny(se) && !identical(de, se))
 				this.err(
-					`arguments to copy ${exprText(e.args[0])} and ${exprText(e.args[1])} have different element types (${typeStr(dt)} vs ${typeStr(st)})`,
+					`invalid copy: arguments ${exprText(e.args[0])} (${this._capOperandKind(e.args[0], dt)}) and ${exprText(e.args[1])} (${this._capOperandKind(e.args[1], st)}) have different element types ${typeStr(this.resolveType(de))} and ${typeStr(this.resolveType(se))}`,
 					e,
 				);
 			return INT;
@@ -1079,10 +1494,20 @@ export const expressionCheckMethods = {
 	// Go's shorthand for pointers to arrays: `p[i]`, `p[lo:hi]`, `len(p)` and
 	// `range p` mean `(*p)[i]` and so on.  The operand is rewritten to an
 	// explicit dereference so every backend sees the array.
-	_derefArrayPtr(holder, key, t) {
+	// With `scope`, a type parameter whose core type is such a pointer counts.
+	_derefArrayPtr(holder, key, t, scope) {
+		if (scope && t?.kind === "typeParam") {
+			const core = this._coreType(t, scope);
+			if (core?.kind !== "pointer") return t;
+			const under = this._deepUnderlying(core.base);
+			if (under?.kind !== "array") return t;
+			holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
+			holder[key]._type = core.base;
+			return core.base;
+		}
 		if (t?.kind !== "pointer") return t;
 		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
-		const under = base?.kind === "named" ? base.underlying : base;
+		const under = this._deepUnderlying(base);
 		if (under?.kind !== "array") return t;
 		holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
 		holder[key]._type = t.base;
@@ -1129,7 +1554,7 @@ export const expressionCheckMethods = {
 				t.base === "bool" || t.base === "string" || t.base === "complex128"
 			);
 		const u = this._deepUnderlying(t);
-		if (u?.kind === "basic") return NON_INTEGER_BASICS.has(u.name);
+		if (u?.kind === "basic") return nonIntegerBasic(u);
 		return NON_INTEGER_KINDS.has(u?.kind);
 	},
 
@@ -1234,14 +1659,18 @@ export const expressionCheckMethods = {
 	// Struct types with identical field names and types convert to each other.
 	_sameStructFields(a, b) {
 		if (a?.kind !== "struct" || b?.kind !== "struct") return false;
-		if (a.fields.size !== b.fields.size) return false;
-		const bf = [...b.fields];
-		let i = 0;
-		for (const [name, type] of a.fields) {
-			const [bn, bt] = bf[i++];
-			if (name !== bn || !identical(type, bt)) return false;
-		}
-		return true;
+		return identical(a, b, { ignoreTags: true });
+	},
+
+	// Conversion to a type literal that Go rejects: a non-array to an array,
+	// or a struct to a struct whose fields differ.
+	_isInvalidLitConv(tgt, src, srcType) {
+		return (
+			this._isInvalidArrayConv(tgt, src, srcType) ||
+			(tgt?.kind === "struct" &&
+				src?.kind === "struct" &&
+				!this._sameStructFields(src, tgt))
+		);
 	},
 
 	_isInvalidArrayConv(tgt, src, srcType) {
@@ -1261,13 +1690,11 @@ export const expressionCheckMethods = {
 			targetType &&
 			!isAny(srcType) &&
 			!isAny(targetType) &&
-			this._checkIfaceTargetConversion(srcType, targetType, expr.expr)
+			this._checkConvTarget(srcType, targetType, expr, expr.expr, scope)
 		)
 			return targetType;
-		const srcResolved =
-			srcType?.kind === "named" ? srcType.underlying : srcType;
-		const tgtResolved =
-			targetType?.kind === "named" ? targetType.underlying : targetType;
+		const srcResolved = this._deepUnderlying(srcType);
+		const tgtResolved = this._deepUnderlying(targetType);
 		if (isNumeric(targetType) && isComplex(srcType)) {
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
@@ -1298,13 +1725,32 @@ export const expressionCheckMethods = {
 			);
 			return targetType;
 		}
-		if (this._isInvalidArrayConv(tgtResolved, srcResolved, srcType)) {
+		if (this._isInvalidLitConv(tgtResolved, srcResolved, srcType)) {
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
 				expr,
 			);
 		}
 		return targetType;
+	},
+
+	// Composite types convert only when identical, and a type parameter inside
+	// one is identical to itself alone. Reports and returns true on a mismatch.
+	_rejectTypeParamComposite(srcType, targetType, expr, operand) {
+		const src = this._deepUnderlying(srcType);
+		const tgt = this._deepUnderlying(targetType);
+		if (
+			src?.kind !== tgt?.kind ||
+			!["slice", "map", "array"].includes(src?.kind) ||
+			identical(src, tgt) ||
+			!(mentionsTypeParam(src) || mentionsTypeParam(tgt))
+		)
+			return false;
+		this.err(
+			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}`,
+			expr,
+		);
+		return true;
 	},
 
 	// `int(nil)`: only a type with a nil value converts from `nil`.
@@ -1335,14 +1781,22 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
+	// Conversions whose target or operand type is settled by its type set or
+	// method set: an interface target or a type parameter on either side.
+	_checkConvTarget(srcType, targetType, expr, operand, scope) {
+		return (
+			this._checkIfaceTargetConversion(srcType, targetType, operand) ||
+			this._checkTypeParamConv(srcType, targetType, expr, operand, scope) ||
+			this._rejectTypeParamComposite(srcType, targetType, expr, operand)
+		);
+	},
+
 	// `I(x)` with I an interface type converts exactly when x is assignable to
 	// I, so the method-set check (and its wording) is the assignment one.
 	_checkIfaceTargetConversion(srcType, targetType, operand) {
 		// `error("msg")` builds an error value (GoFront extension).
 		if (targetType === ERROR && isString(srcType)) return false;
-		const base = this.resolveType(
-			targetType.kind === "named" ? targetType.underlying : targetType,
-		);
+		const base = this.resolveType(this._deepUnderlying(targetType));
 		if (base?.kind !== "interface" || !operand) return false;
 		this.assertAssignable(targetType, srcType, operand, "conversion");
 		return true;
@@ -1352,11 +1806,10 @@ export const expressionCheckMethods = {
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
-		if (this._checkIfaceTargetConversion(srcType, targetType, expr.args?.[0]))
+		if (this._checkConvTarget(srcType, targetType, expr, expr.args?.[0]))
 			return;
-		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
-		const tgtResolved =
-			targetType.kind === "named" ? targetType.underlying : targetType;
+		const srcResolved = this._deepUnderlying(srcType);
+		const tgtResolved = this._deepUnderlying(targetType);
 
 		// `nil` converts to any type that has a nil value.
 		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
@@ -1449,7 +1902,7 @@ export const expressionCheckMethods = {
 		// In Go, the source of a type assertion must be an interface type.
 		// We allow `any` (which is GoFront's basic any) and interface types.
 		if (srcType && !isAny(srcType)) {
-			let underlying = srcType.kind === "named" ? srcType.underlying : srcType;
+			let underlying = this._deepUnderlying(srcType);
 			underlying = this.resolveType(underlying);
 			if (underlying?.kind !== "interface") {
 				this.err(
@@ -1472,9 +1925,7 @@ export const expressionCheckMethods = {
 	// and JS-dynamic or unresolved types are never judged.
 	_isImpossibleAssertion(ifaceType, targetType) {
 		if (!targetType || targetType._tainted || isAny(targetType)) return false;
-		const iface = this.resolveType(
-			ifaceType.kind === "named" ? ifaceType.underlying : ifaceType,
-		);
+		const iface = this.resolveType(this._deepUnderlying(ifaceType));
 		if (iface?.kind !== "interface" || !iface.methods?.size) return false;
 		const target = this.resolveType(targetType);
 		if (!target || target.kind === "typeParam" || target.kind === "interface")
@@ -1510,29 +1961,47 @@ export const expressionCheckMethods = {
 
 	_rangeOperandError(node, type) {
 		const untyped = type?.kind === "untyped";
+		const via =
+			type?.kind === "typeParam"
+				? ` constrained by ${this._constraintText(type)}`
+				: "";
 		return this.err(
-			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)})`,
+			`cannot range over ${exprText(node)} (${operandKind(node, untyped ? type.base : typeStr(type), untyped)}${via})`,
 			node,
 		);
 	},
 
 	// A range operand of a kind Go rejects: bool, float or complex values,
-	// structs, interfaces, non-array pointers, nil. JS-dynamic `any`, type
-	// parameters and kinds the checker models loosely are left alone.
-	_notRangeable(node, type) {
+	// structs, interfaces, non-array pointers, nil, and a type parameter with no
+	// core type (`_rangeCore` resolves one that has it first). JS-dynamic `any`
+	// and kinds the checker models loosely are left alone.
+	_notRangeable(type) {
 		if (!type || type._tainted || isAny(type)) return false;
+		if (type.kind === "typeParam") return true;
 		if (type.kind === "untyped")
 			return !(
 				type.base === "string" ||
 				type.base === "int" ||
-				(type.base === "float64" &&
-					constIntValue(this._constValue(node)) !== null)
+				type.base === "rune"
 			);
 		const u = this._deepUnderlying(type);
 		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
+		if (u?.kind === "pointer" && type._viaCore)
+			return this._deepUnderlying(u.base)?.kind !== "array";
 		return (
 			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
 		);
+	},
+
+	// The type a `range` operand is read as: a type parameter stands for its
+	// core type, which is recorded on the operand for the backends. A type
+	// parameter without one stays as it is, and `_notRangeable` rejects it.
+	_rangeCore(type, operand, scope) {
+		if (type?.kind !== "typeParam") return type;
+		const core = this._coreType(type, scope);
+		if (!core) return type;
+		operand._coreType = core;
+		return core.kind === "pointer" ? { ...core, _viaCore: true } : core;
 	},
 
 	_checkRangeExpr(expr, scope) {
@@ -1540,16 +2009,17 @@ export const expressionCheckMethods = {
 			expr,
 			"expr",
 			this.checkExpr(expr.expr, scope),
+			scope,
 		);
-		if (collType?._declared || this._notRangeable(expr.expr, collType)) {
+		const core = this._rangeCore(collType, expr.expr, scope);
+		if (collType?._declared || this._notRangeable(core)) {
 			const bad = this._rangeOperandError(expr.expr, collType);
 			return { kind: "tuple", types: [bad, bad] };
 		}
-		const resolved = this._underlyingOrCore(collType, scope);
-		// Backends range over the core type of a type parameter.
-		if (collType?.kind === "typeParam" && resolved !== collType)
-			expr.expr._coreType = resolved;
-		return this._rangeCollTypeTuple(resolved, collType);
+		return this._rangeCollTypeTuple(
+			this._underlyingOrCore(core, scope),
+			collType,
+		);
 	},
 
 	_checkInstantiationExpr(expr, scope) {
@@ -1568,25 +2038,29 @@ export const expressionCheckMethods = {
 					expr,
 				);
 			}
-			// Check constraints
-			for (
-				let i = 0;
-				i < baseType.typeParams.length && i < typeArgs.length;
-				i++
-			) {
-				const tp = baseType.typeParams[i];
-				const constraint = tp.constraint
-					? this.resolveTypeNode(
-							tp.constraint,
-							this._typeArgScope(baseType.typeParams, typeArgs, scope),
-						)
-					: null;
-				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+			const errorsBefore = this.errors.length;
+			this._checkTypeArgConstraints(baseType, typeArgs, scope, expr);
+			// A rejected explicit argument already explains the call.
+			if (this.errors.length > errorsBefore) return TAINTED_ANY;
+			const allArgs = this._inferRemainingTypeArgs(baseType, typeArgs, scope);
+			// As a value (not a callee) every type parameter must be known.
+			if (allArgs.length < baseType.typeParams.length && !expr._genericOk) {
+				return this.err(
+					`cannot infer ${baseType.typeParams[allArgs.length].name} in ${exprText(expr)}`,
+					expr,
+				);
 			}
-			expr._typeArgs = typeArgs;
-			if (expr.expr) expr.expr._typeArgs = typeArgs;
+			this._checkTypeArgConstraints(
+				baseType,
+				allArgs,
+				scope,
+				expr,
+				typeArgs.length,
+			);
+			expr._typeArgs = allArgs;
+			if (expr.expr) expr.expr._typeArgs = allArgs;
 			expr._genericFnType = baseType;
-			return this.instantiateGenericFunc(baseType, typeArgs);
+			return this.instantiateGenericFunc(baseType, allArgs);
 		}
 		// The parser's type-arg heuristic mistakes `xs[d.Field]` (uppercase field
 		// selector as index) for a generic instantiation. When the base is an
@@ -1600,6 +2074,59 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		return baseType;
+	},
+
+	// `slices.Sort[[]int]` as a value: the type parameters the explicit
+	// arguments leave out, when a constraint determines them (`S ~[]E`), are
+	// inferred like in a call. The result is the longest inferable prefix.
+	// `scope` resolves the calling function's type parameters, so an explicit
+	// argument `S ~[]E` unifies through its core type.
+	_inferRemainingTypeArgs(fnType, typeArgs, scope) {
+		const params = fnType.typeParams;
+		if (typeArgs.length >= params.length) return typeArgs;
+		const map = new Map();
+		typeArgs.forEach((t, i) => {
+			map.set(params[i].name, t);
+		});
+		const saved = this._inferScope;
+		this._inferScope = scope;
+		try {
+			this._inferFromCoreTypes(params, map);
+		} finally {
+			this._inferScope = saved;
+		}
+		const out = [...typeArgs];
+		for (let i = typeArgs.length; i < params.length; i++) {
+			const t = map.get(params[i].name);
+			if (!t) break;
+			out.push(t);
+		}
+		return out;
+	},
+
+	// Checks `typeArgs[from..]` against the constraints of `fnType`'s type
+	// parameters.
+	_checkTypeArgConstraints(fnType, typeArgs, scope, node, from = 0) {
+		for (
+			let i = from;
+			i < fnType.typeParams.length && i < typeArgs.length;
+			i++
+		) {
+			const tp = fnType.typeParams[i];
+			const constraint = tp.constraint
+				? this.resolveTypeNode(
+						tp.constraint,
+						this._typeArgScope(fnType.typeParams, typeArgs, scope),
+					)
+				: null;
+			if (constraint)
+				this.checkConstraint(typeArgs[i], constraint, node, {
+					typeParams: fnType.typeParams,
+					typeArgs,
+					name: tp.name,
+					scope,
+				});
+		}
 	},
 
 	// Emitter-backed stdlib helpers (`slices.Sort`, `maps.Keys`) take `any`
@@ -1645,7 +2172,7 @@ export const expressionCheckMethods = {
 		if (expr.args?.length !== 1) return false;
 		const target = expr._conversionTargetType;
 		if (expr._isTypeConversion && target)
-			return isInteger(target.kind === "named" ? target.underlying : target);
+			return isInteger(this._deepUnderlying(target));
 		return (
 			expr.func?.kind === "Ident" && SIZED_INT_NAMES.includes(expr.func.name)
 		);
@@ -1706,9 +2233,7 @@ export const expressionCheckMethods = {
 					this._isConstExpr(e.left, scope) && this._isConstExpr(e.right, scope)
 				);
 			case "Ident":
-				return !!(scope ?? this.globals)
-					.lookupScope(e.name)
-					?._consts.has(e.name);
+				return (scope ?? this.globals).lookupObject(e.name)?.kind === "const";
 			case "SelectorExpr": {
 				// Package members: constant unless the package says otherwise.
 				const ns =
@@ -1742,12 +2267,26 @@ export const expressionCheckMethods = {
 			}
 			return [argType];
 		}
-		return expr.args.map((a) => this.checkExpr(a, scope));
+		return expr.args.map((a) => this._checkSingleValueArg(a, scope));
+	},
+
+	// An argument next to others is one value: a multi-value call there is
+	// an error, as in Go (only a sole call argument forwards its results).
+	_checkSingleValueArg(arg, scope) {
+		const type = this.checkExpr(arg, scope);
+		if (type?.kind !== "tuple") return type;
+		return this.err(
+			`multiple-value ${exprText(arg)} (${operandKind(arg, typeStr(type))}) in single-value context`,
+			arg,
+		);
 	},
 
 	_resolveCallFnType(fnType, argTypes, expr, scope) {
-		if (fnType.kind === "named" && fnType.underlying?.kind === "func")
-			fnType = fnType.underlying;
+		if (
+			fnType.kind === "named" &&
+			this._deepUnderlying(fnType)?.kind === "func"
+		)
+			fnType = this._deepUnderlying(fnType);
 		if (fnType.kind === "generic") {
 			const resolved = this._resolveGenericFnType(
 				fnType,
@@ -1781,6 +2320,13 @@ export const expressionCheckMethods = {
 			);
 			return null;
 		}
+		this._checkTypeArgConstraints(
+			generic,
+			typeArgs,
+			scope,
+			expr,
+			inst._typeArgs.length,
+		);
 		inst._typeArgs = typeArgs;
 		if (inst.expr) inst.expr._typeArgs = typeArgs;
 		return this.instantiateGenericFunc(generic, typeArgs);
@@ -1797,37 +2343,128 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
-		// A constraint with a core type (`~[]E`) converts as that type does.
-		const core = this._coreType(tp, scope);
-		if (core) {
-			const src = argTypes[0];
-			const nilOk = ["slice", "map", "pointer", "func", "chan", "interface"];
-			if (src === NIL || (src?.kind === "basic" && src.name === "nil")) {
-				if (!nilOk.includes(core.kind))
-					this.err(`cannot convert nil to ${typeStr(tp)}`, expr);
-			} else if (src?.kind !== "typeParam") {
-				this._checkConversionValidity(src, core, expr);
-			}
-			return tp;
-		}
-		if (
-			isNumeric(argTypes[0]) &&
-			!this._constraintHasTypeSet(tp.constraint, scope)
-		)
-			return this.err(
-				`cannot convert ${typeStr(argTypes[0])} to type ${typeStr(tp)}: ${typeStr(tp)} is not constrained to a set of convertible types`,
-				expr,
-			);
-		if (
-			!isNumeric(argTypes[0]) &&
-			!isAny(argTypes[0]) &&
-			argTypes[0]?.kind !== "typeParam"
-		)
-			this.err(
-				`cannot convert ${typeStr(argTypes[0])} to ${typeStr(tp)}`,
-				expr,
-			);
+		this._checkTypeParamConv(argTypes[0], tp, expr, expr.args[0], scope);
 		return tp;
+	},
+
+	// A conversion with a type parameter on either side holds when the value
+	// of every type in the source's type set converts to every type in the
+	// target's (a plain type is its own set; a constraint without a type set
+	// has none). Reports and returns true when either side is a type
+	// parameter, whether or not the conversion is valid.
+	_checkTypeParamConv(src, tgt, expr, operand, scope = this.globals) {
+		if (src?.kind !== "typeParam" && tgt?.kind !== "typeParam") return false;
+		if (!this._needsTypeParamConvCheck(src, tgt)) return true;
+		const text = operand
+			? `${exprText(operand)} (${this._convOperandKind(operand, src)})`
+			: typeStr(src);
+		const head = `cannot convert ${text} to type ${typeStr(tgt)}`;
+		if (isNil(src)) {
+			if (this._isNilless(tgt))
+				this.err(`cannot convert nil to type ${typeStr(tgt)}`, expr);
+			return true;
+		}
+		if (anyKind(src) === "go" && tgt.kind === "typeParam") {
+			this.err(`${head}: need type assertion`, expr);
+			return true;
+		}
+		const sTerms = this._convTerms(src, scope);
+		const tTerms = this._convTerms(tgt, scope);
+		if (!sTerms.length || !tTerms.length) {
+			const noSet = tTerms.length ? src : tgt;
+			this.err(
+				`${head}: ${typeStr(noSet)} is not constrained to a set of convertible types`,
+				expr,
+			);
+			return true;
+		}
+		const bad = this._firstUnconvertible(sTerms, tTerms, expr, operand);
+		if (bad) this.err(`${head}: ${this._termConvText(src, tgt, bad)}`, expr);
+		return true;
+	},
+
+	// `cannot convert int (in T) to type bool`: the pair of set members that
+	// does not convert, tagged with the type parameter each belongs to.
+	_termConvText(src, tgt, [s, t]) {
+		const inTp = (side) =>
+			side.kind === "typeParam" ? ` (in ${typeStr(side)})` : "";
+		return `cannot convert ${typeStr(s)}${inTp(src)} to type ${typeStr(t)}${inTp(tgt)}`;
+	},
+
+	// False when the conversion needs no judging: identical types, a JS-dynamic
+	// or recovered operand, or a target of `any`.
+	_needsTypeParamConvCheck(src, tgt) {
+		if (!src || !tgt || identical(src, tgt) || isAny(tgt)) return false;
+		if (src._tainted || tgt._tainted) return false;
+		const kind = anyKind(src);
+		return kind !== "dynamic" && kind !== "tainted";
+	},
+
+	// The first (source type, target type) pair of two type sets that does not
+	// convert, or null.
+	_firstUnconvertible(sTerms, tTerms, expr, operand) {
+		for (const s of sTerms)
+			for (const t of tTerms)
+				if (!this._termConvertible(s, t, expr, operand)) return [s, t];
+		return null;
+	},
+
+	_convOperandKind(operand, src) {
+		if (src.kind === "untyped") return operandKind(operand, src.base, true);
+		return src.kind === "typeParam"
+			? operandKind(
+					operand,
+					`${typeStr(src)} constrained by ${this._constraintText(src)}`,
+				)
+			: operandKind(operand, typeStr(src));
+	},
+
+	// The types a conversion operand or target ranges over.
+	_convTerms(t, scope) {
+		if (t.kind !== "typeParam") return [t];
+		return this._constraintTerms(t.constraint, new Set(), scope) ?? [];
+	},
+
+	// Whether a value of type `s` (or the untyped constant `operand`) converts
+	// to `t`, judged without reporting.
+	_termConvertible(s, t, expr, operand) {
+		if (s.kind === "untyped") {
+			const u = this._deepUnderlying(t) ?? t;
+			if (
+				this._isRealNumberType(u) &&
+				(s.base === "int" || s.base === "float64")
+			)
+				return this._untypedFitsTerm(s, operand, t);
+			s = defaultType(s);
+		} else if (this._isComplexMismatch(s, t)) return false;
+		if (this._isNonIntegerToString(s, t)) return false;
+		const saved = this.errors;
+		this.errors = [];
+		this._checkConversionValidity(s, t, expr);
+		const ok = this.errors.length === 0;
+		this.errors = saved;
+		return ok;
+	},
+
+	_isRealNumberType(u) {
+		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
+	},
+
+	// Only a complex value converts to a complex type.
+	_isComplexMismatch(s, t) {
+		return (
+			isComplex(this._deepUnderlying(t)) && !isComplex(this._deepUnderlying(s))
+		);
+	},
+
+	// Only an integer converts to a string type.
+	_isNonIntegerToString(s, t) {
+		const su = this._deepUnderlying(s);
+		return (
+			isString(this._deepUnderlying(t)) &&
+			isComplexOrNumeric(su) &&
+			!isInteger(su)
+		);
 	},
 
 	// A conversion to a type parameter needs a constraint that lists types
@@ -1842,7 +2479,7 @@ export const expressionCheckMethods = {
 				? this.resolveTypeNode(constraint, scope)
 				: constraint,
 		);
-		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
+		const base = this._deepUnderlying(c);
 		if (base?.kind !== "interface") return false;
 		if (base.unionConstraint) return true;
 		return (base._typeSetEmbeds ?? []).some((e) =>
@@ -1860,12 +2497,57 @@ export const expressionCheckMethods = {
 		const direct =
 			callee.kind === "Ident"
 				? scope.lookupScope(callee.name) === this.globals &&
-					Boolean(this._funcDeclNames?.has(callee.name))
+					this.globals.object(callee.name).kind === "func"
 				: callee.kind === "SelectorExpr" && Boolean(callee._stdName);
 		expr._native = native && direct ? native : null;
 	},
 
+	// The operand types of a builtin call.  A multi-value call that is the only
+	// argument (`min(f())`) supplies its results as the operands: the builtin
+	// is checked against one operand node per result (`expr._fwdArgs`), which
+	// the backends read to emit it.
+	_resolveBuiltinArgTypes(name, expr, scope) {
+		const only = expr.args[0];
+		if (
+			expr.args.length === 1 &&
+			only.kind === "CallExpr" &&
+			name !== "make" &&
+			name !== "new"
+		) {
+			const type = this.checkExpr(only, scope);
+			if (type?.kind !== "tuple") return [type];
+			expr._multiForward = true;
+			const text = exprText(only);
+			expr._fwdArgs = type.types.map((t) => ({
+				kind: "Ident",
+				name: text,
+				line: only.line,
+				col: only.col,
+				_type: t,
+			}));
+			return type.types;
+		}
+		return expr.args.map((a, i) => this._checkBuiltinArg(name, a, i, scope));
+	},
+
+	_checkBuiltinArg(name, arg, i, scope) {
+		// new(T) — first arg is a type name, not a value expression
+		if (name === "new" && i === 0) return ANY;
+		// make(T, ...) names the type to make.
+		if (name === "make" && i === 0) arg._typeRefOk = true;
+		return this._checkSingleValueArg(arg, scope);
+	},
+
 	checkCall(expr, scope) {
+		// The generated Go and the stdlib's Go source call the builtins `len`,
+		// `append`, `make`, ...: a function of that name in the user's package
+		// must not capture them.
+		if (
+			this._builtinsFromUniverse &&
+			expr.func.kind === "Ident" &&
+			this.universe.lookup(expr.func.name)?.kind === "builtin"
+		)
+			expr.func._universe = true;
 		expr.func._typeRefOk = true;
 		expr.func._genericOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
@@ -1882,11 +2564,7 @@ export const expressionCheckMethods = {
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
 			expr._builtinName = fnType.name;
-			const argTypes = expr.args.map((a, i) => {
-				// new(T) — first arg is a type name, not a value expression
-				if (fnType.name === "new" && i === 0) return ANY;
-				return this.checkExpr(a, scope);
-			});
+			const argTypes = this._resolveBuiltinArgTypes(fnType.name, expr, scope);
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
@@ -1897,7 +2575,7 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
 		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
 			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
-		if (fnType?._declared && !expr.func._isTypeRef)
+		if (anyKind(fnType) === "go" && !expr.func._isTypeRef)
 			return this.err(
 				`invalid operation: cannot call non-function ${exprText(expr.func)} (${operandKind(expr.func, typeStr(fnType))})`,
 				expr,
@@ -1993,7 +2671,7 @@ export const expressionCheckMethods = {
 	_inferArgTypes(expr, argTypes) {
 		return argTypes.map((t, i) => {
 			if (!expr.args?.[i]?._spread) return t;
-			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			const u = this.resolveType(this._deepUnderlying(t));
 			return u?.kind === "slice" ? u.elem : t;
 		});
 	},
@@ -2032,7 +2710,13 @@ export const expressionCheckMethods = {
 						this._typeArgScope(fnType.typeParams, typeArgs, scope),
 					)
 				: null;
-			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+			if (constraint)
+				this.checkConstraint(typeArgs[i], constraint, expr, {
+					typeParams: fnType.typeParams,
+					typeArgs,
+					name: tp.name,
+					scope,
+				});
 		}
 		expr._typeArgs = typeArgs;
 		if (expr.func) expr.func._typeArgs = typeArgs;
@@ -2092,17 +2776,26 @@ export const expressionCheckMethods = {
 					: i;
 			if (expr.args[i]?._spread) {
 				this._rejectSeqAsSlice(argTypes[i], expr.args[i], "a spread argument");
+				// `f(xs...)` passes xs as the whole variadic slice.
+				if (fnType.variadic && paramIdx === fnType.params.length - 1)
+					this.assertAssignable(
+						{ kind: "slice", elem: fnType.params[paramIdx] },
+						this._deepUnderlying(argTypes[i]),
+						expr.args[i],
+						"argument",
+					);
 				continue;
 			}
 			const targetParam = fnType.params[paramIdx];
 			const node = expr._multiForward ? null : expr.args[i];
-			// A forwarded call carries no per-argument node: report at the call.
-			this._forwardedCall = expr._multiForward ? expr : null;
+			// A forwarded call carries no per-argument node: report at the call
+			// that yields the results (`f()` in `g(f())`).
+			this._forwardedCall = expr._multiForward ? expr.args[0] : null;
 			this.assertAssignable(
 				targetParam,
 				argTypes[i],
 				node,
-				"argument",
+				expr._multiForward ? `argument to ${exprText(expr.func)}` : "argument",
 				undefined,
 				!expr._isDeferCall,
 			);
@@ -2165,9 +2858,48 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `make` takes a size (and a capacity) for a slice, an optional size for
+	// a map or channel.
+	_checkMakeArity(e, t) {
+		const kind = this._deepUnderlying(t)?.kind;
+		const [lo, hi] = kind === "slice" ? [2, 3] : [1, 2];
+		if (!["slice", "map", "chan"].includes(kind)) {
+			if (t && t !== ANY && !t._tainted)
+				this.err(
+					`invalid argument: cannot make ${typeStr(t)}: type must be slice, map, or channel`,
+					e,
+				);
+			return;
+		}
+		if (e.args.length >= lo && e.args.length <= hi) return;
+		this.err(
+			`invalid operation: make(${[typeStr(t), ...e.args.slice(1).map(exprText)].join(", ")}) expects ${lo} or ${hi} arguments; found ${e.args.length}`,
+			e,
+		);
+	},
+
+	// Go reports a wrong argument count before looking at any operand.
+	_checkBuiltinArity(name, expr) {
+		const range = BUILTIN_ARITY[name];
+		if (!range) return true;
+		const found = expr._fwdArgs?.length ?? expr.args.length;
+		const [min, max] = range;
+		if (found >= min && found <= max) return true;
+		const [what, expected] =
+			found < min ? ["not enough", min] : ["too many", max];
+		this.err(
+			`${what} arguments for ${exprText(expr)} (expected ${expected}, found ${found})`,
+			expr,
+		);
+		return false;
+	},
+
 	checkBuiltin(name, expr, argTypes, scope) {
+		if (!this._checkBuiltinArity(name, expr)) return ANY;
 		const gen = BUILTIN_CHECK[name];
-		return gen ? gen(this, name, expr, argTypes, scope) : ANY;
+		// The checks read `args` as written: show them one node per result.
+		const view = expr._fwdArgs ? { ...expr, args: expr._fwdArgs } : expr;
+		return gen ? gen(this, name, view, argTypes, scope) : ANY;
 	},
 
 	_constLenFromType(arg0) {
@@ -2183,27 +2915,129 @@ export const expressionCheckMethods = {
 
 	_capOperandKind(operand, type) {
 		const untypedConst = type?.kind === "untyped" && type.base !== "nil";
-		return untypedConst
-			? operandKind(operand, type.base, true)
-			: operandKind(operand, typeStr(type), false);
+		if (untypedConst) return operandKind(operand, type.base, true);
+		const kind = operandKind(operand, typeStr(type), false);
+		return type?.kind === "typeParam"
+			? `${kind} constrained by ${this._constraintText(type)}`
+			: kind;
 	},
 
 	// `cap` takes a slice or an array (a pointer to an array is dereferenced
-	// before this check). A type parameter needs a slice or array core type;
-	// one with no single core type is left to instantiation. Unknown and
-	// `any` operands (JS interop) are not judged.
-	_capOperandOk(t, scope) {
-		if (!t || t._tainted || isAny(t)) return true;
-		if (t.kind === "typeParam") {
-			const core = this._coreType(t, scope);
-			return !core || core.kind === "slice" || core.kind === "array";
-		}
+	// before this check); a type parameter needs one for every type in its
+	// type set, where `~*[N]E` also counts. Unknown and `any` operands (JS
+	// interop) are not judged.
+	_capOperandOk(t) {
+		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => {
+				const b = this._deepUnderlying(u);
+				if (b?.kind === "pointer")
+					return this._deepUnderlying(b.base)?.kind === "array";
+				return b?.kind === "slice" || b?.kind === "array";
+			});
 		const kind = this._deepUnderlying(t)?.kind;
 		return kind === "slice" || kind === "array";
 	},
 
-	_checkBuiltinLen(name, expr, argTypes, scope) {
+	// `len` takes a string, array (or pointer to one), slice or map, for every
+	// type in a type parameter's type set; a Go `any` needs a type assertion
+	// first, while a JS-dynamic value is not judged.
+	_lenOperandOk(t) {
+		if (!t || t._tainted || anyKind(t) === "dynamic") return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => this._lenOperandOk(u));
+		if (t.kind === "untyped") return t.base === "string";
+		if (anyKind(t) === "go") return false;
+		const u = this._deepUnderlying(t);
+		// A pointer counts only when it points to an array.
+		if (u?.kind === "pointer")
+			return this._deepUnderlying(u.base)?.kind === "array";
+		if (u?.kind === "basic") return u.name === "string";
+		return (
+			u?.kind === "array" ||
+			u?.kind === "slice" ||
+			u?.kind === "map" ||
+			u?.kind === "shared"
+		);
+	},
+
+	// `delete` takes a map (every type in a type parameter's type set, all
+	// with one key type); a JS-dynamic value is not judged. Returns the map
+	// type the key is checked against (for a type parameter, a map of the
+	// shared key type), or null.
+	_checkDeleteOperand(expr, t, scope) {
+		if (!t || t._tainted || anyKind(t) === "dynamic")
+			return this._deepUnderlying(t);
+		const arg = expr.args[0];
+		if (!this._typeSetOk(t, (u) => this._deepUnderlying(u)?.kind === "map")) {
+			this.err(
+				`invalid argument: ${exprText(arg)} (${this._capOperandKind(arg, t)}) is not a map`,
+				expr,
+			);
+			return null;
+		}
+		if (t.kind !== "typeParam") return this._deepUnderlying(t);
+		const { type, other } = this._typeSetPart(t, "map", "key", scope);
+		if (!other) return { kind: "map", key: type };
+		this.err(
+			`invalid argument: maps of ${exprText(arg)} (${this._capOperandKind(arg, t)}) must have identical key types`,
+			expr,
+		);
+		return null;
+	},
+
+	// `append` takes a slice (every type in a type parameter's type set); a
+	// JS-dynamic value is not judged, and arrays and shared buffers have their
+	// own messages.
+	_appendOperandOk(t) {
+		if (!t || t._tainted) return true;
+		if (t.kind === "typeParam")
+			return this._typeParamAllows(t, (u) => this._appendOperandOk(u));
+		if (anyKind(t) === "go") return false;
+		const u = this._deepUnderlying(t);
+		if (!u || isAny(u)) return true;
+		return u.kind === "slice" || u.kind === "shared";
+	},
+
+	// Each appended element must be assignable to the slice's element type;
+	// `xs...` must be assignable to the slice type, except that a string
+	// spreads into a `[]byte`.
+	_checkAppendArgs(sliceType, e, at) {
+		const elem = this.resolveType(sliceType.elem);
+		const is64 = is64BitInt(sliceType.elem);
+		for (let i = 1; i < e.args.length; i++) {
+			const arg = e.args[i];
+			if (!at[i]) continue;
+			if (arg._spread) {
+				this._rejectSeqAsSlice(at[i], arg, "a spread argument");
+				if (!this._isStringIntoBytes(elem, at[i]))
+					this.assertAssignable(
+						{ kind: "slice", elem: sliceType.elem },
+						this._deepUnderlying(at[i]),
+						arg,
+						"argument to append",
+					);
+				continue;
+			}
+			if (is64) arg._is64Bit = true;
+			this.assertAssignable(elem, at[i], arg, "argument to append", arg, true);
+		}
+	},
+
+	_isStringIntoBytes(elem, t) {
+		const u = this._deepUnderlying(t);
+		const isString =
+			t?.kind === "untyped" ? t.base === "string" : u?.name === "string";
+		return isString && elem?.kind === "basic" && elem.name === "uint8";
+	},
+
+	_checkBuiltinLen(name, expr, argTypes) {
 		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
+		if (name === "len" && !this._lenOperandOk(argTypes[0]))
+			this.err(
+				`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for built-in len`,
+				expr,
+			);
 		const operand = expr.args?.[0];
 		if (expr.args?.length === 1)
 			argTypes[0] = this._derefArrayPtr(expr.args, 0, argTypes[0]);
@@ -2220,7 +3054,7 @@ export const expressionCheckMethods = {
 					`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
 					expr,
 				);
-			} else if (!this._capOperandOk(argTypes[0], scope)) {
+			} else if (!this._capOperandOk(argTypes[0])) {
 				this.err(
 					`invalid argument: ${exprText(expr.args?.[0])} (${this._capOperandKind(expr.args?.[0], argTypes[0])}) for cap`,
 					expr,
@@ -2231,10 +3065,6 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinComplex(expr, argTypes) {
-		if (expr.args.length !== 2) {
-			this.err("complex() requires exactly 2 arguments", expr);
-			return ANY;
-		}
 		const crt = argTypes[0];
 		const cit = argTypes[1];
 		if (!isNumeric(crt)) {
@@ -2265,10 +3095,6 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinRealImag(name, expr, argTypes) {
-		if (expr.args.length !== 1) {
-			this.err(`${name}() requires exactly 1 argument`, expr);
-			return ANY;
-		}
 		const zt = argTypes[0];
 		if (!isComplex(zt)) {
 			this.err(`cannot use ${typeStr(zt)} as complex in ${name}()`, expr);
@@ -2300,14 +3126,27 @@ export const expressionCheckMethods = {
 		return t ?? ANY;
 	},
 
+	// `int{}`, `T{}` for a type parameter without a core type.
+	_isInvalidLiteralType(expr, t, base, scope) {
+		if (!expr.typeExpr) return false;
+		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
+		return !["struct", "array", "slice", "map", "simd", "namespace"].includes(
+			core?.kind,
+		);
+	},
+
 	checkCompositeLit(expr, scope, hintType = null) {
 		const t =
 			expr.typeExpr === null
 				? (hintType ?? ANY)
 				: this.resolveTypeNode(expr.typeExpr, scope);
-		const base = t.kind === "named" ? t.underlying : t;
+		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
 		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
+			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
+			return t;
+		}
+		if (this._isInvalidLiteralType(expr, t, base, scope)) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
 		}
@@ -2505,6 +3344,22 @@ export const expressionCheckMethods = {
 		return t;
 	},
 };
+
+// The universe constants, as the literal each stands for.
+const UNIVERSE_LITERALS = {
+	true: { litKind: "BOOL", value: "true" },
+	false: { litKind: "BOOL", value: "false" },
+	nil: { litKind: "NIL", value: "null" },
+};
+
+// Predeclared identifiers that are not variables.
+const BUILTIN_IDENTS = new Set([
+	...Object.keys(BUILTIN_CHECK),
+	"nil",
+	"true",
+	"false",
+	"iota",
+]);
 
 // Builtins whose calls may be constant expressions (`len("abc")`).
 const CONST_BUILTINS = new Set([

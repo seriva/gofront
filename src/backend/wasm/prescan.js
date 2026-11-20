@@ -22,6 +22,7 @@ export function hasErrorUsage(programs) {
 				for (const x of n) scan(x);
 				return;
 			}
+			// `error` is the universe interface by name (see `isErrorType`).
 			if (
 				(n.kind === "Ident" ||
 					n.kind === "TypeName" ||
@@ -85,9 +86,9 @@ export function _scanImportsInBody(node, mod) {
 		prepareWasmNative(mod, node);
 		if (
 			func.kind === "Ident" &&
-			(func.name === "print" || func.name === "println")
+			(node._builtinName === "print" || node._builtinName === "println")
 		) {
-			const isPrintln = func.name === "println";
+			const isPrintln = node._builtinName === "println";
 			if (args.length === 0 && isPrintln) {
 				mod.getPrintlnEmptyIndex();
 			}

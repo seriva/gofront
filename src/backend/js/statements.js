@@ -17,7 +17,7 @@ import {
 	isComplex64,
 	isTypedArraySlice,
 } from "../../typechecker/types.js";
-import { jsMemberName } from "./names.js";
+import { jsMemberName, jsSafeName } from "./names.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -60,8 +60,7 @@ const isStableIndex = (e, assigned) => {
 			);
 		case "CallExpr":
 			return (
-				e.func?.kind === "Ident" &&
-				(e.func.name === "len" || e.func.name === "cap") &&
+				(e._builtinName === "len" || e._builtinName === "cap") &&
 				e.args.every((a) => isStableIndex(a, assigned))
 			);
 		default:
@@ -71,8 +70,7 @@ const isStableIndex = (e, assigned) => {
 
 const isLenCap = (e) =>
 	e.kind === "CallExpr" &&
-	e.func?.kind === "Ident" &&
-	(e.func.name === "len" || e.func.name === "cap");
+	(e._builtinName === "len" || e._builtinName === "cap");
 
 // A call (other than `len`/`cap`), receive or await in `n` (not inside a
 // function literal): it may change variables and fields.
@@ -447,7 +445,7 @@ export const statementGenMethods = {
 					body.labels = labels;
 				}
 				const hoisted = this._hoistForInit(body);
-				for (const label of labels) this.line(`${label}:`);
+				for (const label of labels) this.line(`${jsSafeName(label)}:`);
 				// Labels in scope of the JS function being emitted (see
 				// `_emitIterTargetDispatch`).
 				const prevLabels = this._jsLabels ?? [];
@@ -965,6 +963,7 @@ export const statementGenMethods = {
 				active[0].l.startsWith("{") && !active[0].l.startsWith("({")
 					? `(${active[0].l})`
 					: active[0].l;
+			rhsVal = this._compoundShiftCount(stmt, rhsVal);
 			if (stmt.op === "&^=") this.line(`${targetL} &= ~(${rhsVal});`);
 			else this.line(`${targetL} ${stmt.op} ${rhsVal};`);
 		} else if (hoisted) {
@@ -1353,7 +1352,7 @@ export const statementGenMethods = {
 		}
 		if (this._innerLoopLabels?.has(stmt.label)) {
 			if (stmt.keyword !== "fallthrough")
-				this.line(`${stmt.keyword} ${stmt.label};`);
+				this.line(`${stmt.keyword} ${jsSafeName(stmt.label)};`);
 			return;
 		}
 		if (this._currentIterLoopLabels?.includes(stmt.label)) {
@@ -1374,7 +1373,9 @@ export const statementGenMethods = {
 		}
 		if (stmt.keyword !== "fallthrough")
 			this.line(
-				stmt.label ? `${stmt.keyword} ${stmt.label};` : `${stmt.keyword};`,
+				stmt.label
+					? `${stmt.keyword} ${jsSafeName(stmt.label)};`
+					: `${stmt.keyword};`,
 			);
 		// fallthrough: omit — JS switch falls through naturally without a break
 	},
@@ -1955,10 +1956,12 @@ export const statementGenMethods = {
 		this.line(`if (${targetFlag}) {`);
 		this.indented(() => {
 			for (const { name, loop } of labels) {
-				this.line(`if (${targetFlag} === "break$${name}") break ${name};`);
+				this.line(
+					`if (${targetFlag} === "break$${name}") break ${jsSafeName(name)};`,
+				);
 				if (loop)
 					this.line(
-						`if (${targetFlag} === "continue$${name}") continue ${name};`,
+						`if (${targetFlag} === "continue$${name}") continue ${jsSafeName(name)};`,
 					);
 			}
 			if (!inIter) return;
@@ -2203,6 +2206,13 @@ export const statementGenMethods = {
 		);
 	},
 
+	// The right operand of a compound assignment emitted as the JS operator:
+	// the count of `<<=` / `>>=` as a JS number (`_looseShiftCount`).
+	_compoundShiftCount(stmt, rhsJs) {
+		if (stmt.op !== "<<=" && stmt.op !== ">>=") return rhsJs;
+		return this._looseShiftCount(rhsJs, stmt.rhs[0]?._type);
+	},
+
 	// The single-expression form of `_genStrictCompound` for `for` post
 	// statements: the emitted statement is lifted back out of the output.
 	_inlineStrictCompound(stmt, rhsJs) {
@@ -2245,7 +2255,7 @@ export const statementGenMethods = {
 			}
 			if (stmt.op === "&^=")
 				return `${this.genExpr(stmt.lhs[0])} &= ~(${rhs[0]})`;
-			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
+			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${this._compoundShiftCount(stmt, rhs[0])}`;
 		}
 		// Target operands that must run first (calls, or a variable the
 		// statement assigns) and `*p` struct targets need statements: lift them

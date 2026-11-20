@@ -393,10 +393,12 @@ export class DtsParser {
 
 	// Parse the interior of a namespace/class/interface/module block.
 	// Returns a plain object: { memberName: GoFrontType }
-	parseBody() {
+	// `kinds` (a namespace body) receives the members that name a type or a
+	// nested namespace; values and functions stay JavaScript properties.
+	parseBody(kinds = null) {
 		const members = {};
 		while (!this.eof() && this.peek() !== "}") {
-			this._parseMember(members);
+			this._parseMember(members, kinds);
 		}
 		return members;
 	}
@@ -499,10 +501,14 @@ export class DtsParser {
 		const name = this.readIdent() || this._readStringLit();
 		this.skip();
 		this.consume("{");
-		const body = this.parseBody();
+		const kinds = new Map();
+		const body = this.parseBody(kinds);
 		this.consume("}");
 		this.consume(";");
-		return { name, ns: { kind: "namespace", name, members: body } };
+		return {
+			name,
+			ns: { kind: "namespace", name, members: body, _kinds: kinds },
+		};
 	}
 
 	_parseVarDecl() {
@@ -523,7 +529,15 @@ export class DtsParser {
 		return { name, type };
 	}
 
-	_parseMember(out) {
+	// Stores a member that names a type or a nested namespace and, in a
+	// namespace body, records which of the two it is.
+	_setTypeMember(out, kinds, name, type, kind) {
+		if (!name) return;
+		out[name] = type;
+		kinds?.set(name, kind);
+	}
+
+	_parseMember(out, kinds = null) {
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
 		this._skipModifiers();
@@ -546,19 +560,19 @@ export class DtsParser {
 				break;
 			case "type": {
 				const { name, type } = this._parseTypeDecl();
-				if (name) out[name] = type;
+				this._setTypeMember(out, kinds, name, type, "type");
 				break;
 			}
 			case "interface":
 			case "class": {
 				const { name, ns } = this._parseClassDecl();
-				if (name) out[name] = ns;
+				this._setTypeMember(out, kinds, name, ns, "type");
 				break;
 			}
 			case "namespace":
 			case "module": {
 				const { name, ns } = this._parseNamespaceDecl();
-				if (name) out[name] = ns;
+				this._setTypeMember(out, kinds, name, ns, "pkg");
 				break;
 			}
 			case "enum": {

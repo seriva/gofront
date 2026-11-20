@@ -23,6 +23,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { namedUnderlying } from "../shared/named-underlying.js";
 import { jsBindingName, jsClassName, jsMemberName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
@@ -33,6 +34,7 @@ export function comparesToNil(node, name) {
 	if (!node || typeof node !== "object") return false;
 	if (node.kind === "BinaryExpr" && (node.op === "==" || node.op === "!=")) {
 		const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+		// Receivers are scanned before the checker has turned `nil` into a literal.
 		const isNil = (e) =>
 			(e?.kind === "Ident" && e.name === "nil") ||
 			(e?.kind === "BasicLit" && e.litKind === "NIL");
@@ -90,7 +92,8 @@ const RECEIVER_STEP = {
 	ReturnStmt: (s, reads) => branches(reads, s.values),
 	ExprStmt: (s, reads) => {
 		if (reads(s.expr)) return "deref";
-		const panics = s.expr?.kind === "CallExpr" && s.expr.func?.name === "panic";
+		const panics =
+			s.expr?.kind === "CallExpr" && s.expr._builtinName === "panic";
 		return panics ? "stop" : "next";
 	},
 	DefineStmt: (s, reads, name) => {
@@ -961,30 +964,21 @@ export const expressionGenMethods = {
 	_isStructType(t) {
 		if (!t) return false;
 		if (t.name && this.structNames.has(t.name)) return true;
-		const base =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const base = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		if (base?.name && this.structNames.has(base.name)) return true;
 		return base?.kind === "struct";
 	},
 
 	_isStructPointerType(t) {
 		if (!t) return false;
-		const pt =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const pt = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		if (pt?.kind !== "pointer") return false;
 		return this._isStructType(pt.base);
 	},
 
 	_isScalarPointerType(t) {
 		if (!t) return false;
-		const pt =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const pt = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		if (pt?.kind !== "pointer") return false;
 		return !this._isStructType(pt.base);
 	},
@@ -1015,10 +1009,7 @@ export const expressionGenMethods = {
 
 	_aggregateBase(t) {
 		if (!t) return null;
-		const b =
-			t.kind === "named"
-				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
-				: t;
+		const b = t.kind === "named" ? namedUnderlying(t, this.checker) : t;
 		return b?.kind === "struct" || b?.kind === "array" ? b : null;
 	},
 
@@ -2097,16 +2088,29 @@ export const expressionGenMethods = {
 
 	// Converting a struct to a different defined struct type builds a copy in
 	// the target's class (so its methods exist); null when not applicable.
-	_genStructClassConversion(targetName, srcType, inner) {
+	// An instance of a generic target keeps its own type arguments, not the
+	// source's.
+	_genStructClassConversion(targetName, srcType, inner, targetType) {
 		if (!targetName || targetName.includes("[")) return null;
 		const target = this.checker?.types.get(targetName);
 		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
 			return null;
-		if (srcType?.name === targetName) return null;
+		// Two instances of one generic type share a name but not their type
+		// arguments, so only a non-generic same-type conversion is a no-op.
+		if (srcType?.name === targetName && !targetType?.typeArgs?.length)
+			return null;
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
 		const cls = this._dequalify(targetName);
-		return `Object.assign(new ${jsClassName(cls)}(), ${this._cloneJs(srcType, inner)})`;
+		const clone = this._cloneJs(srcType, inner);
+		const typed = targetType?.typeArgs?.length
+			? this._genericStructNew(targetName, targetType.typeArgs)
+			: null;
+		if (typed) {
+			this.useHelper("generics");
+			return `((s, o) => Object.assign(o, s, { [__tz]: o[__tz] }))(${clone}, ${typed})`;
+		}
+		return `Object.assign(new ${jsClassName(cls)}(), ${clone})`;
 	},
 
 	// Conversion to an anonymous struct type: the result is a plain object
@@ -2129,6 +2133,7 @@ export const expressionGenMethods = {
 			targetType?.kind === "named" ? targetType.name : undefined,
 			expr.args[0]?._type,
 			arg,
+			targetType,
 		);
 		if (structConv) return structConv;
 		const base =
@@ -2171,6 +2176,21 @@ export const expressionGenMethods = {
 		return { ...expr, func, args };
 	},
 
+	// `min(f())`, `append(f())`: the builtin was checked against one operand
+	// node per result of f (`expr._fwdArgs`); an arrow function takes f's
+	// results as those operands.
+	_genForwardedBuiltin(expr) {
+		this._fwdBuiltinCounter = (this._fwdBuiltinCounter ?? 0) + 1;
+		const args = expr._fwdArgs.map((o, i) => ({
+			...o,
+			kind: "Ident",
+			name: `__fwdbi$${this._fwdBuiltinCounter}$${i}`,
+		}));
+		const body = this.genCall({ ...expr, args, _multiForward: false });
+		const names = args.map((a) => a.name).join(", ");
+		return `((${names}) => (${body}))(...${this.genExpr(expr.args[0])})`;
+	},
+
 	genCall(expr) {
 		if (expr.func._genEntry) return this.genCall(this._jsonEntryCall(expr));
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
@@ -2181,7 +2201,7 @@ export const expressionGenMethods = {
 		const funcExpr =
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
 		if (funcExpr.kind === "Ident") {
-			const builtin = this._genBuiltinIdent(funcExpr.name, expr);
+			const builtin = this._genBuiltinIdent(expr._builtinName, expr);
 			if (builtin !== undefined) return builtin;
 		}
 
@@ -2494,6 +2514,8 @@ export const expressionGenMethods = {
 	},
 
 	_genBuiltinIdent(name, expr) {
+		if (expr._fwdArgs && expr._multiForward)
+			return this._genForwardedBuiltin(expr);
 		const gen = BUILTIN_GEN[name];
 		return gen ? gen(this, expr) : undefined;
 	},
@@ -3526,6 +3548,8 @@ export const expressionGenMethods = {
 	},
 
 	_tconvBinaryOperands(expr, l, r) {
+		// A shift's operand never takes the type of its count.
+		if (expr.op === "<<" || expr.op === ">>") return [l, r];
 		if (
 			expr.left._type?.kind === "typeParam" &&
 			expr.right._type?.kind === "untyped"
@@ -3549,6 +3573,7 @@ export const expressionGenMethods = {
 	},
 
 	_coerceUntyped64(expr, l, r, isLeft64, isRight64) {
+		if (expr.op === "<<" || expr.op === ">>") return [l, r];
 		if (isLeft64 && expr.right?._type?.kind === "untyped") {
 			if (!r.endsWith("n") && /^-?\d+$/.test(r)) return [l, `${r}n`];
 		} else if (isRight64 && expr.left?._type?.kind === "untyped") {
@@ -3561,7 +3586,7 @@ export const expressionGenMethods = {
 		const isShift = expr.op === "<<" || expr.op === ">>";
 		if (isLeft64 && !isRight64 && !isShift) r = `BigInt(${r})`;
 		else if (isRight64 && !isLeft64 && !isShift) l = `BigInt(${l})`;
-		if (isShift && isRight64) r = `Number(${r})`;
+		if (isShift) r = this._looseShiftCount(r, expr.right?._type);
 		return [l, r];
 	},
 
@@ -3708,10 +3733,7 @@ export const expressionGenMethods = {
 	},
 
 	_isNilLiteral(expr) {
-		return (
-			(expr.kind === "Ident" && expr.name === "nil") ||
-			(expr.kind === "BasicLit" && expr.litKind === "NIL")
-		);
+		return expr.kind === "BasicLit" && expr.litKind === "NIL";
 	},
 
 	// Top-level JS operator a BinaryExpr compiles to, or null when the output is atomic.
@@ -3770,6 +3792,7 @@ export const expressionGenMethods = {
 			target,
 			expr.expr._type,
 			inner,
+			expr._type,
 		);
 		if (structConv) return structConv;
 		if (target === "error") {
@@ -4055,14 +4078,37 @@ export const expressionGenMethods = {
 		return true;
 	},
 
-	// A non-constant signed shift count on a narrow integer is checked for a
-	// negative value (Go panics); 64-bit counts arrive as BigInt.
+	// A non-constant shift count as a JS number: a 64-bit count, or a type
+	// parameter whose type set holds one, arrives as BigInt.
+	_shiftCountNumber(r, countType) {
+		return this._mayBeBigInt(countType) ? `Number(${r})` : r;
+	},
+
+	// A non-constant signed shift count (a signed integer, or a type parameter
+	// whose type set holds one) is checked for a negative value (Go panics).
+	// `r` is already a JS number (`_shiftCountNumber`).
 	_guardShiftCount(r, countType) {
 		if (!countType || countType.kind === "untyped") return r;
-		const name = this._typeName(countType);
-		if (!name || name.startsWith("u")) return r;
+		const terms =
+			countType.kind === "typeParam"
+				? this.checker?._constraintTerms(countType.constraint, new Set())
+				: [countType];
+		if (!terms?.some((t) => this._isSignedName(this._typeName(t)))) return r;
 		this.useHelper("shift");
-		return `__shc(${this._is64BitInt(countType) ? `Number(${r})` : r})`;
+		return `__shc(${r})`;
+	},
+
+	_isSignedName(name) {
+		return !!name && !name.startsWith("u");
+	},
+
+	// The count of a shift emitted as the plain JS operator (`<<`, `<<=`): a
+	// number, and checked for a negative value when it is a type parameter.
+	_looseShiftCount(r, countType) {
+		const n = this._shiftCountNumber(r, countType);
+		return countType?.kind === "typeParam"
+			? this._guardShiftCount(n, countType)
+			: n;
 	},
 
 	// `/`, `%`, `<<` and `>>` on a narrow integer paste an operand into the
@@ -4094,6 +4140,7 @@ export const expressionGenMethods = {
 		}
 		const tName = this._typeName(type);
 		const isShift = op === "<<" || op === ">>";
+		if (isShift) r = this._shiftCountNumber(r, countType);
 		const rc = isShift ? this._guardShiftCount(r, countType) : r;
 		if (tName === "float32") {
 			return `Math.fround(${l} ${op} ${r})`;

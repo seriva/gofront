@@ -60,6 +60,10 @@ const PRINT_FUNCS = new Map([
 // The functions that take a format string after the prefix.
 const isFormatted = (fn) => fn.endsWith("f");
 
+// The generated Go spells `error` (here and for interface types below) and
+// means the universe interface: a package's own `type error` is renamed to
+// `error__L<n>` before checking (`mangleCollidingTypes`), so it never shadows
+// the name in `gofront_gen.go`.
 const RESULT = {
 	Sprint: "string",
 	Sprintln: "string",
@@ -223,6 +227,7 @@ class FmtGen extends TypeSpeller {
 			case "map":
 				return `map[${n(t.key)}]${n(t.value)}`;
 			case "interface":
+				// `error` is the universe interface; see RESULT.
 				return t.name === "error" || t.name ? t.name : "interface {}";
 			case "func":
 				return this.funcString(t, n).replace(/^func\(/, "func(");
@@ -267,6 +272,7 @@ class FmtGen extends TypeSpeller {
 	}
 
 	spellableInterface(t) {
+		// `error` is the universe interface; see RESULT.
 		return t.name === "error" || isEmptyIface(t);
 	}
 
@@ -676,6 +682,8 @@ class FmtGen extends TypeSpeller {
 				`func ${name}(v any) (fmtrt.Arg, bool) {`,
 				"\tswitch x := v.(type) {",
 				...cases,
+				"\tdefault:",
+				"\t\t_ = x",
 				"\t}",
 				"\treturn fmtrt.Arg{}, false",
 				"}",

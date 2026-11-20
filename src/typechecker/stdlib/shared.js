@@ -29,6 +29,7 @@ export const SHARED_KINDS = {
 
 export function setupSharedGlobals(globals, types) {
 	const members = {};
+	const kinds = new Map();
 	for (const [name, info] of Object.entries(SHARED_KINDS)) {
 		const t = {
 			kind: "named",
@@ -40,13 +41,21 @@ export function setupSharedGlobals(globals, types) {
 		]);
 		types.set(t.name, t);
 		members[name] = t;
+		kinds.set(name, "type");
 		members[`New${name}`] = { kind: "func", params: [INT], returns: [t] };
+		kinds.set(`New${name}`, "func");
 	}
-	globals.define("shared", { kind: "namespace", name: "shared", members });
+	globals.definePackage("shared", {
+		kind: "namespace",
+		name: "shared",
+		members,
+		_kinds: kinds,
+	});
 }
 
 // Returns the SHARED_KINDS entry for a (possibly named) shared type, or null.
 export function sharedInfo(t) {
+	// One level is enough: a defined type's underlying type is never itself a defined type.
 	const u = t?.kind === "named" ? t.underlying : t;
 	if (u?.kind !== "shared") return null;
 	return { name: u.shared, ...SHARED_KINDS[u.shared] };

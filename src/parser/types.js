@@ -40,6 +40,7 @@ export const typeParserMethods = {
 
 	parseTypeName() {
 		const t = this.advance();
+		const at = { _line: t.line, _col: t.col };
 		let name = t.value;
 		// qualified: pkg.Type
 		if (this.check(T.DOT)) {
@@ -52,9 +53,9 @@ export const typeParserMethods = {
 			const typeArgs = [this.parseType()];
 			while (this.match(T.COMMA)) typeArgs.push(this.parseType());
 			this.expect(T.RBRACKET);
-			return { kind: "GenericTypeName", name, typeArgs };
+			return { kind: "GenericTypeName", name, typeArgs, ...at };
 		}
-		return { kind: "TypeName", name };
+		return { kind: "TypeName", name, ...at };
 	},
 
 	// Lookahead to distinguish Type[int] (generic) from [n]T (array) in type context.
@@ -137,11 +138,17 @@ export const typeParserMethods = {
 	_parseUnionConstraint() {
 		const terms = [];
 		do {
-			const approx = this.match(T.TILDE);
-			const type = this.parseType();
-			terms.push({ approx, type });
+			terms.push(this._parseUnionTerm());
 		} while (this.match(T.PIPE));
 		return { kind: "UnionConstraint", terms };
+	},
+
+	// One `~T` or `T` term; the position lets a check report at the term.
+	_parseUnionTerm() {
+		const tok = this.peek();
+		const approx = this.match(T.TILDE);
+		const type = this.parseType();
+		return { approx, type, _line: tok.line, _col: tok.col };
 	},
 
 	parseSliceOrArrayType() {
@@ -322,21 +329,24 @@ export const typeParserMethods = {
 		const methods = [];
 		const embeds = [];
 		let unionConstraint = null;
+		// Each union element is its own type set; they intersect.
+		const extraUnions = [];
+		const addUnion = (u) => {
+			if (unionConstraint) extraUnions.push(u);
+			else unionConstraint = u;
+		};
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
 			// Union constraint element: ~int | ~string
 			if (this.check(T.TILDE)) {
-				unionConstraint = this._parseUnionConstraint();
+				addUnion(this._parseUnionConstraint());
 				this.semi();
 				continue;
 			}
 			// Type-set element that is not a bare name: *T, []int, map[K]V, ...
 			if (!this.check(T.IDENT)) {
 				const terms = [{ approx: false, type: this.parseType() }];
-				while (this.match(T.PIPE)) {
-					const approx = this.match(T.TILDE);
-					terms.push({ approx, type: this.parseType() });
-				}
-				unionConstraint = { kind: "UnionConstraint", terms };
+				while (this.match(T.PIPE)) terms.push(this._parseUnionTerm());
+				addUnion({ kind: "UnionConstraint", terms });
 				this.semi();
 				continue;
 			}
@@ -350,12 +360,8 @@ export const typeParserMethods = {
 				// Union constraint starting with a type name: int | string
 				// We already consumed the first ident, build the union
 				const terms = [{ approx: false, type: { kind: "TypeName", name } }];
-				while (this.match(T.PIPE)) {
-					const approx = this.match(T.TILDE);
-					const type = this.parseType();
-					terms.push({ approx, type });
-				}
-				unionConstraint = { kind: "UnionConstraint", terms };
+				while (this.match(T.PIPE)) terms.push(this._parseUnionTerm());
+				addUnion({ kind: "UnionConstraint", terms });
 			} else {
 				// Embedded interface: TypeName or pkg.TypeName
 				let typeName = name;
@@ -370,6 +376,7 @@ export const typeParserMethods = {
 		this.expect(T.RBRACE);
 		const node = { kind: "InterfaceType", methods, embeds };
 		if (unionConstraint) node.unionConstraint = unionConstraint;
+		if (extraUnions.length > 0) node.extraUnions = extraUnions;
 		return node;
 	},
 };

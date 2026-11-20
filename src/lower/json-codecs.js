@@ -219,6 +219,8 @@ export class JsonCodecGen extends TypeSpeller {
 			case "map":
 				return `map[${this.refl(t.key)}]${this.refl(t.value)}`;
 			case "interface":
+				// A package's own `type error` is renamed before checking, so the
+				// name is the universe interface and the spelling cannot be shadowed.
 				return t.name === "error" ? "error" : "interface {}";
 			case "namespace":
 				return t.name;
@@ -1333,8 +1335,7 @@ function buildsValue(node) {
 	if (node.kind === "UnaryExpr") return node.op === "&";
 	return (
 		node.kind === "CallExpr" &&
-		node.func?.kind === "Ident" &&
-		(node.func.name === "make" || node.func.name === "new")
+		(node._builtinName === "make" || node._builtinName === "new")
 	);
 }
 

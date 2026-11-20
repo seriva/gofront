@@ -23,12 +23,15 @@ import {
 	is64BitInt,
 	isAny,
 	isBool,
+	isComplexOrNumeric,
+	isInteger,
 	isNil,
 	isString,
 	isUntyped,
 	isVoid,
 	iteratorYieldParams,
 	Scope,
+	TAINTED_ANY,
 	typeStr,
 } from "./types.js";
 
@@ -176,11 +179,19 @@ export const statementCheckMethods = {
 	_declareDefineVars(stmt, rhsFlat, scope) {
 		for (let i = 0; i < stmt.lhs.length; i++) {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
+			if (name === "_" || !scope.has(name)) {
+				if (
+					stmt.rhs.length === stmt.lhs.length &&
+					this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment")
+				)
+					rhsFlat[i] = ANY;
+			}
 			if (name === "_") continue;
-			if (scope.symbols.has(name)) {
+			if (scope.has(name)) {
 				stmt.lhs[i]._redecl = true;
-				// Redeclared variables keep their type; the value must be assignable.
-				this._checkRedeclAssign(scope.symbols.get(name), rhsFlat[i], stmt, i);
+				// Redeclared variables keep their type; the value must be assignable
+				// (so nil is fine for nilable types, as in plain assignment).
+				this._checkRedeclAssign(scope.get(name), rhsFlat[i], stmt, i);
 				continue;
 			}
 			if (stmt.rhs.length === stmt.lhs.length)
@@ -271,16 +282,6 @@ export const statementCheckMethods = {
 		return [resolvedBase.value, BOOL];
 	},
 
-	_checkConstAssignment(stmt, scope) {
-		for (const lhs of stmt.lhs) {
-			if (lhs.kind === "Ident" && lhs.name !== "_") {
-				const ownerScope = scope.lookupScope(lhs.name);
-				if (ownerScope?.isConst(lhs.name))
-					this.err(`cannot assign to const '${lhs.name}'`, lhs);
-			}
-		}
-	},
-
 	_isCommaOkTypeAssertAssign(stmt) {
 		return (
 			stmt.lhs.length === 2 &&
@@ -291,36 +292,41 @@ export const statementCheckMethods = {
 
 	_checkAssignLhsType(e, scope) {
 		if (e.kind === "Ident" && e.name === "_") return ANY;
+		this._targetOperand(e);
 		const t = this.checkExpr(e, scope);
-		this._checkAssignTarget(e);
+		this._checkAssignTarget(e, scope);
 		return t;
 	},
 
 	// The left side of `=`, `op=`, `++` and `--` must be addressable or a map
-	// index: not a string element, nor a field or array element of a map entry.
-	_checkAssignTarget(e) {
+	// index: not a string element, a constant, the result of a call, literal
+	// or assertion, nor a field or array element of a map entry.
+	// An assignment target or address operand that names no value is reported
+	// by the addressability check, not as a name used as a value.
+	_targetOperand(e) {
 		let node = e;
 		while (node.kind === "ParenExpr") node = node.expr;
+		node._nameOk = true;
+	},
+
+	_checkAssignTarget(e, scope) {
+		let node = e;
+		while (node.kind === "ParenExpr") node = node.expr;
+		if (node.kind === "Ident" && node.name === "_") return;
+		// A target that already failed to check has been reported.
+		if (node._type?._tainted) return;
 		const bt = node.expr?._type;
-		const b = this._deepUnderlying(bt);
-		if (node.kind === "IndexExpr" && isString(b))
-			this.err(
-				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
-				node,
-			);
-		else if (node.kind === "SelectorExpr" && this._isMapElementOperand(node))
+		const b = this._coreUnderlying(bt, scope);
+		if (node.kind === "IndexExpr" && b?.kind === "map") return;
+		if (node.kind === "SelectorExpr" && this._isMapElementOperand(node, scope))
 			this.err(
 				`cannot assign to struct field ${exprText(node)} in map`,
 				this._positioned(node),
 			);
-		else if (
-			node.kind === "IndexExpr" &&
-			b?.kind === "array" &&
-			this._isMapElementOperand(node.expr)
-		)
+		else if (!this._isAddressable(node, scope))
 			this.err(
 				`cannot assign to ${exprText(node)} (neither addressable nor a map index expression)`,
-				node,
+				this._positioned(node),
 			);
 	},
 
@@ -350,15 +356,84 @@ export const statementCheckMethods = {
 		if (holder._ifaceBox) node._rangeBox = holder;
 	},
 
-	_checkIncDecStmt(stmt, scope) {
-		const t = this.checkExpr(stmt.expr, scope);
-		this._checkAssignTarget(stmt.expr);
-		this._checkDeclaredAnyOperator(stmt.op, t, stmt.expr);
+	// `x++` is `x + 1` and `x op= y` is `x op y`: both type through the same
+	// path as a binary expression, on a synthetic node spelled as the statement.
+	_operatorStmtNode(stmt, op, left, right, spelling) {
+		return {
+			kind: "BinaryExpr",
+			op,
+			left,
+			right,
+			_spelling: spelling,
+			_line: stmt._line,
+			_col: stmt._col,
+			line: stmt.line,
+			col: stmt.col,
+		};
 	},
 
-	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
+	_checkIncDecStmt(stmt, scope) {
+		this._targetOperand(stmt.expr);
+		const t = this.checkExpr(stmt.expr, scope);
+		this._checkAssignTarget(stmt.expr, scope);
+		const lt = t && this.resolveType(t);
+		if (!lt || lt._tainted) return;
+		const numeric =
+			lt.kind === "typeParam"
+				? this._typeParamAllows(lt, (t) =>
+						isComplexOrNumeric(this._deepUnderlying(t) ?? t),
+					)
+				: isAny(lt)
+					? !lt._declared
+					: isComplexOrNumeric(lt);
+		if (!numeric) {
+			this.err(
+				`invalid operation: ${exprText(stmt.expr)}${stmt.op} (non-numeric type ${typeStr(lt)})`,
+				stmt.expr,
+			);
+			return;
+		}
+		const one = { kind: "BasicLit", litKind: "INT", value: "1" };
+		this._positionLike(one, stmt);
+		const node = this._operatorStmtNode(
+			stmt,
+			stmt.op === "++" ? "+" : "-",
+			stmt.expr,
+			one,
+			`${exprText(stmt.expr)}${stmt.op}`,
+		);
+		this._typeBinaryOperands(node, lt, this.checkExpr(one, scope), scope);
+	},
+
+	_positionLike(node, at) {
+		node._line = at._line;
+		node._col = at._col;
+		node.line = at.line;
+		node.col = at.col;
+	},
+
+	// `x op= y`: the operands type as `x op y`, so one statement reports one
+	// error and a shift count is not converted to the left operand's type.
+	_checkCompoundOperands(stmt, i, lhsType, r, scope) {
+		const lt = lhsType && this.resolveType(lhsType);
+		const op = stmt.op.slice(0, -1);
+		const node = this._operatorStmtNode(
+			stmt,
+			op,
+			stmt.lhs[i],
+			stmt.rhs[i],
+			`${exprText(stmt.lhs[i])} ${stmt.op} ${exprText(stmt.rhs[i])}`,
+		);
+		this._typeBinaryOperands(node, lt, r, scope);
+	},
+
+	_checkAssignTypes(stmt, rhsFlat, lhsTypes, scope) {
 		for (let i = 0; i < lhsTypes.length; i++) {
-			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
+			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") {
+				if (stmt.op === "=" && stmt.rhs.length === lhsTypes.length)
+					this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment");
+				continue;
+			}
 			const r = rhsFlat[i] ?? ANY;
 			this._markRangeAssignBox(stmt, i, lhsTypes[i], r);
 			if (stmt.rhs.length === lhsTypes.length && lhsTypes[i] && r)
@@ -368,23 +443,7 @@ export const statementCheckMethods = {
 					stmt.rhs[i],
 				);
 			if (stmt.op !== "=" && stmt.op !== ":=") {
-				if (
-					this._checkDeclaredAnyOperator(
-						stmt.op.slice(0, -1),
-						lhsTypes[i],
-						stmt.lhs[i],
-					)
-				)
-					continue;
-				this._checkCompoundIntegerOnly(stmt.op, lhsTypes[i], stmt.lhs[i]);
-			}
-			// A shift count is not converted to the left operand's type.
-			if (stmt.op === "<<=" || stmt.op === ">>=") {
-				if (
-					this._checkDeclaredAnyOperator(stmt.op.slice(0, -1), r, stmt.rhs[i])
-				)
-					continue;
-				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);
+				this._checkCompoundOperands(stmt, i, lhsTypes[i], r, scope);
 				continue;
 			}
 			if (
@@ -410,7 +469,6 @@ export const statementCheckMethods = {
 	_checkAssignStmt(stmt, scope) {
 		const commaOkMapTypes = this._checkAssignCommaOkMap(stmt, scope);
 		if (this._isCommaOkTypeAssertAssign(stmt)) stmt.rhs[0]._commaOk = true;
-		this._checkConstAssignment(stmt, scope);
 		let rhsFlat;
 		if (commaOkMapTypes) {
 			rhsFlat = commaOkMapTypes;
@@ -441,7 +499,7 @@ export const statementCheckMethods = {
 		// A rejected range index is not checked again as an ordinary value.
 		if (this._checkRangeIndexAssign(stmt, lhsTypes))
 			rhsFlat = [ANY, ...rhsFlat.slice(1)];
-		this._checkAssignTypes(stmt, rhsFlat, lhsTypes);
+		this._checkAssignTypes(stmt, rhsFlat, lhsTypes, scope);
 	},
 
 	// The index of a string, slice or array range is a typed `int`: Go assigns
@@ -454,13 +512,10 @@ export const statementCheckMethods = {
 		const target = lhsTypes[0];
 		if (!target || isAny(target) || typeStr(target) === "int") return false;
 		const coll = this.resolveType(range.expr._coreType ?? range.expr._type);
-		const cu =
-			coll?.kind === "named" ? this.resolveType(coll.underlying) : coll;
+		const cu = this._deepUnderlying(coll);
 		if (!isString(cu) && cu?.kind !== "slice" && cu?.kind !== "array")
 			return false;
-		const tu = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		const tu = this.resolveType(this._deepUnderlying(target));
 		if (tu?.kind === "interface") return false;
 		this.err(`Cannot assign int to ${typeStr(target)}`, lhs);
 		return true;
@@ -476,25 +531,30 @@ export const statementCheckMethods = {
 		) {
 			this.err("Missing return value", stmt);
 		}
-		if (isVoid(returnType) && this._reportReturnCount(stmt, types.length, 0))
-			return;
+		// `return f()` forwards every result of a multi-value call.
+		const forwarded = types.length === 1 && types[0]?.kind === "tuple";
+		if (isVoid(returnType)) {
+			const shown = forwarded ? { have: typeStr(types[0]), want: "()" } : null;
+			const have = forwarded ? types[0].types.length : types.length;
+			if (this._reportReturnCount(stmt, have, 0, shown)) return;
+		}
 		// Check each returned value is assignable to its declared type
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
 				returnType.kind === "tuple" ? returnType.types : [returnType];
-			// `return f()` forwards every result of a multi-value call.
-			if (types.length === 1 && types[0]?.kind === "tuple") {
-				const forwarded = types[0].types;
-				if (forwarded.length !== expected.length) {
-					this.err(
-						`return count mismatch: have ${forwarded.length} values, want ${expected.length}`,
-						stmt,
-					);
+			if (forwarded) {
+				const results = types[0].types;
+				const shown = {
+					have: typeStr(types[0]),
+					want: `(${expected.map(typeStr).join(", ")})`,
+				};
+				if (
+					this._reportReturnCount(stmt, results.length, expected.length, shown)
+				)
 					return;
-				}
 				this._checkForwardedValues(
 					expected,
-					forwarded,
+					results,
 					stmt.values[0],
 					"return statement",
 				);
@@ -516,12 +576,14 @@ export const statementCheckMethods = {
 	},
 
 	// `return 1, 2` in a one-result func, `return 1` in a two-result one.
-	_reportReturnCount(stmt, have, want) {
+	// A forwarded call (`return f()`) has no per-value expressions, so its
+	// message lists the types (`shown`) and it reports at the call.
+	_reportReturnCount(stmt, have, want, shown = null) {
 		if (have === want || have === 0) return false;
 		const many = have > want;
 		this.err(
-			`${many ? "too many" : "not enough"} return values (have ${have}, want ${want})`,
-			many ? (stmt.values[want] ?? stmt) : stmt,
+			`${many ? "too many" : "not enough"} return values (have ${shown?.have ?? have}, want ${shown?.want ?? want})`,
+			many || shown ? (stmt.values[shown ? 0 : want] ?? stmt) : stmt,
 		);
 		return true;
 	},
@@ -559,10 +621,8 @@ export const statementCheckMethods = {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		const ct = this.checkExpr(stmt.cond, inner);
-		if (ct?._declared)
+		if (ct?._declared || (!isBool(ct) && !isAny(ct)))
 			this.err("non-boolean condition in if statement", stmt.cond);
-		else if (!isBool(ct) && !isAny(ct))
-			this.err("If condition must be bool", stmt);
 		const bodyScope = new Scope(inner);
 		this.checkBlock(stmt.body, bodyScope, returnType);
 		this._reportUnused(bodyScope, stmt);
@@ -579,26 +639,27 @@ export const statementCheckMethods = {
 	_checkForCond(stmt, inner) {
 		if (stmt.cond.kind !== "RangeExpr") {
 			const ct = this.checkExpr(stmt.cond, inner);
-			if (ct?._declared)
+			if (ct?._declared || (!isBool(ct) && !isAny(ct)))
 				this.err("non-boolean condition in for statement", stmt.cond);
-			else if (!isBool(ct) && !isAny(ct))
-				this.err("For condition must be bool", stmt);
 		} else {
-			const ct = this._derefArrayPtr(
+			const operand = this._derefArrayPtr(
 				stmt.cond,
 				"expr",
 				this.checkExpr(stmt.cond.expr, inner),
+				inner,
 			);
-			if (ct?._declared || this._notRangeable(stmt.cond.expr, ct))
-				this._rangeOperandError(stmt.cond.expr, ct);
-			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
-			if (core) stmt.cond.expr._coreType = core;
+			const ct = this._rangeCore(operand, stmt.cond.expr, inner);
+			if (operand?._declared || this._notRangeable(ct))
+				this._rangeOperandError(stmt.cond.expr, operand);
 			const info = iteratorYieldParams(ct);
 			if (info) {
 				stmt.cond._isIterator = true;
 				stmt.cond._yieldParams = info.yieldParams;
-			} else if (ct?.kind === "func") {
-				this.err("cannot range over func: not an iterator function", stmt);
+			} else if (this._deepUnderlying(ct)?.kind === "func") {
+				this.err(
+					"cannot range over func: not an iterator function",
+					stmt.cond.expr,
+				);
 			}
 		}
 	},
@@ -630,7 +691,10 @@ export const statementCheckMethods = {
 	_checkSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
-		if (stmt.tag) this.checkExpr(stmt.tag, inner);
+		if (stmt.tag) {
+			this.checkExpr(stmt.tag, inner);
+			this._rejectUntypedNil(stmt.tag._type, stmt.tag, "switch expression");
+		}
 		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
 		const seenCases = [];
 		this._switchDepth++;
@@ -743,13 +807,24 @@ export const statementCheckMethods = {
 	// type so backends test its method set.
 	_markInterfaceCaseType(t, scope) {
 		if (!t || (t.kind !== "InterfaceType" && t.kind !== "TypeName")) return;
-		if (t.kind === "TypeName" && (t.name === "nil" || t.name === "error"))
+		if (
+			t.kind === "TypeName" &&
+			(this._isUniverseNil(t, scope) || t.name === "error")
+		)
 			return;
 		const resolved = this.resolveTypeNode(t, scope);
-		const u = this.resolveType(
-			resolved?.kind === "named" ? resolved.underlying : resolved,
-		);
+		const u = this.resolveType(this._deepUnderlying(resolved));
 		if (u?.kind === "interface") t._type = resolved;
+	},
+
+	// `nil` named in a type position (`case nil:`) with no declaration of that
+	// name in scope.
+	_isUniverseNil(node, scope) {
+		return (
+			node?.kind === "TypeName" &&
+			node.name === "nil" &&
+			!scope.lookupScope("nil")
+		);
 	},
 
 	// Records the resolved type of a composite type node used as an assertion
@@ -772,42 +847,61 @@ export const statementCheckMethods = {
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
+		const at = stmt._assignNode ?? stmt;
+		if (stmt.assign === "_") this.err("no new variable on left side of :=", at);
 		this._switchDepth++;
 		this._typeSwitchDepth++;
+		// Each clause declares its own copy of the binding; Go reports it when
+		// no clause uses it, once, at the binding.
+		let bindingUsed = false;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
-			// Resolve instantiated generic case types so backends can tell
-			// `*Stack[int]` from `*Stack[string]`.
-			for (const t of c.types ?? []) {
-				const base = t?.kind === "PointerType" ? t.base : t;
-				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
-				this._markInterfaceCaseType(t, inner);
-				if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
-					this._markDynamicType(t, this.resolveTypeNode(t, inner));
-				this._checkTypeSwitchCase(stmt.expr, t, inner);
-			}
-			if (stmt.assign) {
-				// Bind the variable to the single case type, or the switch operand's type
-				// for multi-type and default clauses, as Go does.
-				// `case nil` binds the switch expression's own type, as in Go.
-				const only = c.types?.length === 1 ? c.types[0] : null;
-				const isNilCase = only?.kind === "TypeName" && only.name === "nil";
-				const bindType = isNilCase
-					? (stmt.expr._type ?? ANY)
-					: only
-						? this.resolveTypeNode(only, inner)
-						: (stmt.expr._type ?? ANY);
-				caseScope.defineLocal(stmt.assign, bindType);
-				// The capture variable is always considered used — it's the whole
-				// point of the switch-with-assign form. Each case body uses its own
-				// typed copy of the variable.
-				caseScope.lookup(stmt.assign);
-			}
+			this._checkTypeSwitchClauseTypes(stmt, c, inner);
+			if (stmt.assign) this._bindTypeSwitchClause(stmt, c, caseScope, inner);
 			for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+			if (this._takeTypeSwitchBindingUse(stmt, caseScope)) bindingUsed = true;
 			this._reportUnused(caseScope, stmt);
 		}
+		if (stmt.assign && stmt.assign !== "_" && !bindingUsed)
+			this.err(`'${stmt.assign}' declared and not used`, at);
 		this._typeSwitchDepth--;
 		this._switchDepth--;
+	},
+
+	// Resolve instantiated generic case types so backends can tell
+	// `*Stack[int]` from `*Stack[string]`.
+	_checkTypeSwitchClauseTypes(stmt, clause, inner) {
+		for (const t of clause.types ?? []) {
+			const base = t?.kind === "PointerType" ? t.base : t;
+			if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+			this._markInterfaceCaseType(t, inner);
+			if (t && t.kind !== "TypeName" && t.kind !== "InterfaceType")
+				this._markDynamicType(t, this.resolveTypeNode(t, inner));
+			this._checkTypeSwitchCase(stmt.expr, t, inner);
+		}
+	},
+
+	// Whether the clause's body used the binding; an unused one is marked used
+	// so the clause does not report it (the switch judges all clauses together).
+	_takeTypeSwitchBindingUse(stmt, caseScope) {
+		if (!stmt.assign || stmt.assign === "_") return false;
+		if (!caseScope.unusedLocals().includes(stmt.assign)) return true;
+		caseScope.lookup(stmt.assign);
+		return false;
+	},
+
+	// Binds the variable to the single case type, or the switch operand's type
+	// for multi-type and default clauses, as Go does.
+	// `case nil` binds the switch expression's own type, as in Go.
+	_bindTypeSwitchClause(stmt, clause, caseScope, inner) {
+		const only = clause.types?.length === 1 ? clause.types[0] : null;
+		const isNilCase = this._isUniverseNil(only, inner);
+		const bindType = isNilCase
+			? (stmt.expr._type ?? ANY)
+			: only
+				? this.resolveTypeNode(only, inner)
+				: (stmt.expr._type ?? ANY);
+		caseScope.defineLocal(stmt.assign, bindType, stmt._assignNode);
 	},
 
 	// `case T:` in a switch on an interface value `x` needs a T that can be
@@ -815,7 +909,7 @@ export const statementCheckMethods = {
 	_checkTypeSwitchCase(operand, typeNode, scope) {
 		const srcType = operand._type;
 		if (!typeNode || !srcType || isAny(srcType) || srcType._tainted) return;
-		if (typeNode.kind === "TypeName" && typeNode.name === "nil") return;
+		if (this._isUniverseNil(typeNode, scope)) return;
 		const target = this.resolveTypeNode(typeNode, scope);
 		if (this._isImpossibleAssertion(srcType, target))
 			this.err(
@@ -870,11 +964,11 @@ export const statementCheckMethods = {
 			this.err("cannot fallthrough in type switch", stmt);
 	},
 
-	_checkRangeIterInvalidFunc(iterType, initStmt) {
-		const underlying =
-			iterType?.kind === "named" ? iterType.underlying : iterType;
-		if (underlying?.kind === "func")
-			this.err("cannot range over func: not an iterator function", initStmt);
+	// Reported at the range operand, as Go does.
+	_checkRangeIterInvalidFunc(iterType, operand) {
+		if (this._deepUnderlying(iterType)?.kind !== "func") return false;
+		this.err("cannot range over func: not an iterator function", operand);
+		return true;
 	},
 
 	_bindRangeIterDefineVars(lhs, info, scope) {
@@ -891,7 +985,9 @@ export const statementCheckMethods = {
 	_checkRangeIterAssignVars(lhs, scope, yieldParams = []) {
 		lhs.forEach((e, i) => {
 			if (e.kind === "Ident" && e.name === "_") return;
+			this._targetOperand(e);
 			const target = this.checkExpr(e, scope);
+			this._checkAssignTarget(e, scope);
 			this._markRangeTargetBox(e, target, yieldParams[i]);
 			this._checkRangeIterAssignable(e, target, yieldParams[i]);
 		});
@@ -918,12 +1014,54 @@ export const statementCheckMethods = {
 		}
 	},
 
+	// Ranging over an integer yields only the count: `for i, v := range n`
+	// has no second value to bind.
+	_checkRangeIntVars(lhs, operand, type, scope, written = type) {
+		if (lhs.length < 2 || !type || type._tainted) return;
+		const untyped = type.kind === "untyped";
+		const u = untyped ? null : this._coreUnderlying(type, scope);
+		const isInt = untyped
+			? type.base === "int" || type.base === "rune"
+			: u?.kind === "basic" && isInteger(u);
+		if (!isInt) return;
+		const via =
+			written?.kind === "typeParam"
+				? ` constrained by ${this._constraintText(written)}`
+				: "";
+		this.err(
+			`range over ${exprText(operand)} (${operandKind(operand, untyped ? type.base : typeStr(written), untyped)}${via}) permits only one iteration variable`,
+			lhs[1],
+		);
+	},
+
 	_checkRangeIterStmt(initStmt, scope, _returnType) {
 		const rangeExpr = initStmt.rhs[0];
-		const iterType = this.checkExpr(rangeExpr.expr, scope);
+		const operand = this.checkExpr(rangeExpr.expr, scope);
+		const iterType = this._rangeCore(operand, rangeExpr.expr, scope);
 		const info = iteratorYieldParams(iterType);
 		if (!info) {
-			this._checkRangeIterInvalidFunc(iterType, initStmt);
+			this._checkRangeIntVars(
+				initStmt.lhs,
+				rangeExpr.expr,
+				iterType,
+				scope,
+				operand,
+			);
+			const rejected = this._checkRangeIterInvalidFunc(
+				iterType,
+				rangeExpr.expr,
+			);
+			// A rejected operand is not checked again as an assignment source.
+			if (rejected) {
+				if (initStmt.kind === "DefineStmt")
+					this._bindRangeIterDefineVars(
+						initStmt.lhs,
+						{ yieldParams: initStmt.lhs.map(() => TAINTED_ANY) },
+						scope,
+					);
+				else this._checkRangeIterAssignVars(initStmt.lhs, scope);
+				return { yieldParams: [], rejected };
+			}
 			return null;
 		}
 
@@ -931,7 +1069,7 @@ export const statementCheckMethods = {
 		if (lhs.length > info.yieldParams.length) {
 			this.err(
 				`range over iterator: too many loop variables (got ${lhs.length}, max ${info.yieldParams.length})`,
-				initStmt,
+				lhs[info.yieldParams.length],
 			);
 		}
 

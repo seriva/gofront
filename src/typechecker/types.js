@@ -523,6 +523,15 @@ export function is64BitUnsigned(t) {
 	return cur?.kind === "basic" && cur.name === "uint64";
 }
 
+// Underlying type with chains of defined types followed through. A declared
+// type's `underlying` is never a defined type; only a type whose declaration
+// is still being collected (or an invalid cycle) leaves one in place.
+export function underlyingOf(t) {
+	let u = t;
+	for (let i = 0; u?.kind === "named" && i < 32; i++) u = u.underlying;
+	return u;
+}
+
 // ── TypedArray mappings ──────────────────────────────────────
 // []float64 deliberately stays a plain Array for JSON / JS-library interop.
 const TYPED_ARRAY_CONSTRUCTORS = {
@@ -571,7 +580,7 @@ export function typedArrayConstructorForElem(elemType) {
 
 export function isTypedArraySlice(type) {
 	if (!type) return false;
-	const base = type.kind === "named" ? type.underlying : type;
+	const base = underlyingOf(type);
 	if (base?.kind !== "slice") return false;
 	return typedArrayConstructorForElem(base.elem) !== null;
 }
@@ -606,6 +615,31 @@ export function isComplexOrNumeric(t) {
 export function isAny(t) {
 	return t?.kind === "basic" && t.name === "any";
 }
+// How an empty interface behaves.  "dynamic": a JS-dynamic value (browser
+// global, ECMAScript built-in, `.d.ts` value) that every operation accepts;
+// "go": a Go `any` (written as `any`, `interface{}`, or a defined type over
+// either) that needs a type assertion first; "tainted": the error-recovery
+// type that hides follow-up diagnostics; null: anything else.
+export function anyKind(t) {
+	let named = false;
+	for (let depth = 0; t && depth < 32; depth++) {
+		if (t.kind === "interface") return emptyInterfaceKind(t, named);
+		if (t.kind === "basic" && t.name === "any")
+			return t._tainted ? "tainted" : t._declared ? "go" : "dynamic";
+		if (t.kind !== "named") return null;
+		named = true;
+		t = t.underlying;
+	}
+	return null;
+}
+
+// A defined interface carries its own name; a literal has none.
+function emptyInterfaceKind(t, viaNamed) {
+	if (!viaNamed && t.name) return null;
+	const empty = t.methods.size === 0 && !t.unionConstraint;
+	return empty && !t._typeSetEmbeds && !t._comparable ? "go" : null;
+}
+
 export function isNil(t) {
 	return t?.kind === "basic" && t.name === "nil";
 }
@@ -781,6 +815,11 @@ function identicalNamed(a, b, seen) {
 	return sameList(a.typeArgs ?? [], b.typeArgs ?? [], seen);
 }
 
+// Struct tags matter for identity but not for conversions (`ignoreTags`).
+function sameTag(x, y, seen) {
+	return seen.ignoreTags || (x.tag ?? null) === (y.tag ?? null);
+}
+
 function identicalStruct(a, b, seen) {
 	const xs = structFieldList(a);
 	const ys = structFieldList(b);
@@ -791,7 +830,7 @@ function identicalStruct(a, b, seen) {
 			return (
 				x.name === y.name &&
 				x.embedded === y.embedded &&
-				(x.tag ?? null) === (y.tag ?? null) &&
+				sameTag(x, y, seen) &&
 				identicalIn(x.type, y.type, seen)
 			);
 		})
@@ -891,8 +930,11 @@ export function copyType(t, extra = {}) {
 // type only matches itself (or an instance of the same generic declaration
 // with identical type arguments); composite types match element by element;
 // the three kinds of `any` match each other.
-export function identical(a, b) {
-	return identicalIn(a, b, new Map());
+// With `ignoreTags`, struct tags are not compared (the rule for conversions).
+export function identical(a, b, { ignoreTags = false } = {}) {
+	const seen = new Map();
+	seen.ignoreTags = ignoreTags;
+	return identicalIn(a, b, seen);
 }
 
 // The field an embedded type declares is named after the type as written, so
@@ -944,7 +986,7 @@ function promotedFieldDepth(struct, name, path = new Set()) {
 	let best = null;
 	for (const e of struct._embeds ?? []) {
 		const inner = e?.kind === "pointer" ? e.base : e;
-		const st = inner?.kind === "named" ? inner.underlying : inner;
+		const st = underlyingOf(inner);
 		if (st?.kind !== "struct" || !st._structFields) continue;
 		const sub = declaresField(st, name)
 			? { depth: 0, count: 1 }
@@ -1011,11 +1053,10 @@ export function displayTypeName(name) {
  * func returning bool with 0-2 params.
  */
 export function iteratorYieldParams(t) {
-	const fn = t?.kind === "named" ? t.underlying : t;
+	const fn = underlyingOf(t);
 	if (fn?.kind !== "func") return null;
 	if (fn.params.length !== 1) return null;
-	const yieldFn =
-		fn.params[0]?.kind === "named" ? fn.params[0].underlying : fn.params[0];
+	const yieldFn = underlyingOf(fn.params[0]);
 	if (yieldFn?.kind !== "func") return null;
 	if (yieldFn.returns.length !== 1 || !isBool(yieldFn.returns[0])) return null;
 	if (yieldFn.params.length > 2) return null;
@@ -1024,47 +1065,62 @@ export function iteratorYieldParams(t) {
 
 // ── Scope / environment ──────────────────────────────────────
 
+// What a name is bound to, as in Go: a variable (also a parameter or
+// result), a constant, a type, a declared function, an imported package or a
+// builtin. A scope maps each name it declares to one object
+// `{ kind, type, node, local }`: `kind` is "var", "const", "type", "func",
+// "pkg" or "builtin"; `type` is the type of the value, or the type itself for
+// a type name; `node` the declaring node, when one was given; `local` marks a
+// `var` or `:=` declaration, which must be used.
 export class Scope {
 	constructor(parent = null) {
 		this.parent = parent;
-		this.symbols = new Map();
-		this._consts = new Set(); // names declared as const in this scope
+		this.objects = new Map(); // name -> object declared in this scope
 		this._constExprs = new Map(); // name -> AST initializer expr
-		this._locals = new Set(); // names declared as local variables (var / :=)
-		this._localNodes = new Map(); // local name -> node carrying its declaring position
 		this._used = new Set(); // names referenced in this scope
-		this._typeNames = new Set(); // names whose binding here is a type declaration
 	}
+	_bind(name, kind, type, node = null, local = false) {
+		this.objects.set(name, { kind, type, node, local });
+	}
+	// Binds `name` to a value: a variable, parameter or result.
 	define(name, type) {
-		this.symbols.set(name, type);
-		this._typeNames.delete(name);
+		this._bind(name, "var", type);
+	}
+	// Binds `name` to a predeclared function such as `len`.
+	defineBuiltin(name, type) {
+		this._bind(name, "builtin", type);
+	}
+	// Binds `name` to a declared function (`func name(...)`), which is a value
+	// but not a variable.
+	defineFunc(name, type, node = null) {
+		this._bind(name, "func", type, node);
+	}
+	// Binds `name` to an imported package's namespace (not a variable).
+	definePackage(name, ns) {
+		this._bind(name, "pkg", ns);
 	}
 	// Binds `name` to a type declaration (`type T ...`, `type T = ...`): a
 	// reference to it names a type, whatever other bindings share its name.
 	defineType(name, type) {
-		this.symbols.set(name, type);
-		this._typeNames.add(name);
+		this._bind(name, "type", type);
 	}
 	// True when the binding `name` resolves to is a type declaration, not a
 	// variable, constant, function, parameter or package that shares the name.
 	bindsType(name) {
-		return this.lookupScope(name)?._typeNames.has(name) ?? false;
+		return this.lookupObject(name)?.kind === "type";
 	}
 	// `node` (optional) carries the position of the declaring identifier.
 	defineLocal(name, type, node = null) {
-		this.symbols.set(name, type);
-		this._typeNames.delete(name);
-		if (name !== "_") this._locals.add(name);
-		if (node && typeof node === "object") this._localNodes.set(name, node);
+		const at = node && typeof node === "object" ? node : null;
+		this._bind(name, "var", type, at, name !== "_");
 	}
 	// The node a local was declared at, or null when none was recorded.
 	localNode(name) {
-		return this._localNodes.get(name) ?? null;
+		const obj = this.objects.get(name);
+		return obj?.local ? obj.node : null;
 	}
 	defineConst(name, type, expr = null) {
-		this.symbols.set(name, type);
-		this._typeNames.delete(name);
-		this._consts.add(name);
+		this._bind(name, "const", type);
 		if (expr) this._constExprs.set(name, expr);
 	}
 	lookupConstExpr(name) {
@@ -1073,29 +1129,50 @@ export class Scope {
 		return null;
 	}
 	isConst(name) {
-		if (this._consts.has(name)) return true;
 		// Don't walk parent — shadowing a const with a var in a child scope is valid
-		return false;
+		return this.objects.get(name)?.kind === "const";
+	}
+	// Whether this scope itself declares `name`.
+	has(name) {
+		return this.objects.has(name);
+	}
+	// The type `name` is bound to in this scope itself, if it declares it.
+	get(name) {
+		return this.objects.get(name)?.type;
+	}
+	// The object `name` is bound to in this scope itself, if it declares it.
+	object(name) {
+		return this.objects.get(name);
+	}
+	// Names this scope declares as `kind`.
+	*names(kind) {
+		for (const [name, obj] of this.objects) if (obj.kind === kind) yield name;
 	}
 	lookup(name) {
-		if (this.symbols.has(name)) {
+		const obj = this.objects.get(name);
+		if (obj) {
 			this._used.add(name);
-			return this.symbols.get(name);
+			return obj.type;
 		}
 		if (this.parent) return this.parent.lookup(name);
 		return null;
 	}
+	// The object `name` resolves to from this scope, or null. Unlike `lookup`
+	// this does not count as a use of the name.
+	lookupObject(name) {
+		return this.lookupScope(name)?.objects.get(name) ?? null;
+	}
 	// Lookup which scope owns the name (to check const flag)
 	lookupScope(name) {
-		if (this.symbols.has(name)) return this;
+		if (this.objects.has(name)) return this;
 		if (this.parent) return this.parent.lookupScope(name);
 		return null;
 	}
 	// Returns local variable names that were never referenced
 	unusedLocals() {
 		const unused = [];
-		for (const name of this._locals) {
-			if (!this._used.has(name)) unused.push(name);
+		for (const [name, obj] of this.objects) {
+			if (obj.local && !this._used.has(name)) unused.push(name);
 		}
 		return unused;
 	}

@@ -14,7 +14,7 @@ import {
 	identical,
 	TAINTED_ANY,
 } from "../../../src/typechecker/types.js";
-import { assert, section, summarize, test } from "../helpers.js";
+import { assert, assertEqual, section, summarize, test } from "../helpers.js";
 
 function check(source) {
 	const tokens = new Lexer(source, "test.go").tokenize();
@@ -32,7 +32,7 @@ function pair(decls, ta, tb) {
 	const { checker } = check(
 		`package main\n${decls}\nvar a ${ta}\nvar b ${tb}\nfunc main() {}\n`,
 	);
-	return [checker.globals.symbols.get("a"), checker.globals.symbols.get("b")];
+	return [checker.globals.get("a"), checker.globals.get("b")];
 }
 
 function differs(name, decls, ta, tb) {
@@ -158,8 +158,8 @@ test("identical: the same type name in two packages differs", () => {
 	const decl = "type P struct{ X int }\nvar a P\n";
 	const one = check(`package main\n${decl}func main() {}\n`);
 	const two = check(`package main\n${decl}func main() {}\n`);
-	const p1 = one.checker.globals.symbols.get("a");
-	const p2 = two.checker.globals.symbols.get("a");
+	const p1 = one.checker.globals.get("a");
+	const p2 = two.checker.globals.get("a");
 	assert(!identical(p1, p2), "two packages' P differ");
 });
 
@@ -175,7 +175,7 @@ test("identical: one declaration checked twice gives identical types", () => {
 	one.check(ast);
 	const two = new TypeChecker();
 	two.check(ast);
-	const of = (c, n) => c.globals.symbols.get(n);
+	const of = (c, n) => c.globals.get(n);
 	assert(of(one, "a") !== of(two, "a"), "two checks build two objects");
 	assert(identical(of(one, "a"), of(two, "a")), "P is one declaration");
 	assert(identical(of(one, "g"), of(two, "g")), "G[int] is one instance");
@@ -234,6 +234,62 @@ test("identical: a type is identical to itself and untyped nothing is void", () 
 	assert(identical(a, a));
 	assert(identical(undefined, undefined));
 	assert(!identical(a, undefined));
+});
+
+test("a chain of defined types type-checks in len, range, index, conversion and append", () => {
+	check(`package main
+type A B
+type B C
+type C []int
+func main() {
+	s := A{1, 2}
+	_ = len(s)
+	for range s {
+	}
+	_ = s[0]
+	_ = []int(s)
+	s = append(s, 3)
+}
+`);
+});
+
+// The interface boxing the checker records on each initializer of `var a any
+// = …`, by variable name.
+function ifaceBoxes(source) {
+	const { ast } = check(source);
+	const boxes = new Map();
+	for (const d of ast.decls) {
+		if (d.kind !== "VarDecl") continue;
+		for (const spec of d.decls) {
+			const v = spec.value?.[0];
+			if (v?._ifaceBox) boxes.set(spec.names[0], v);
+		}
+	}
+	return boxes;
+}
+
+test("R14.2 a generic type declared over a struct type boxes like the struct", () => {
+	const boxes = ifaceBoxes(`package main
+type S[T any] struct{ P *T }
+type W[T any] S[T]
+var s []S[int]
+var w []W[int]
+var a any = s
+var b any = w
+func main() {}
+`);
+	const a = boxes.get("a");
+	const b = boxes.get("b");
+	assert(a && b, `boxed initializers: ${[...boxes.keys()]}`);
+	assertEqual(b._ifaceBox, a._ifaceBox);
+	assertEqual(JSON.stringify(b._ifacePtrFields), JSON.stringify(["P"]));
+	const t = check(`package main
+type S[T any] struct{ P *T }
+type W[T any] S[T]
+var w W[int]
+func main() {}
+`).checker.globals.get("w");
+	assertEqual(t.underlying?.kind, "struct");
 });
 
 summarize();

@@ -22,6 +22,7 @@ import {
 	TAINTED_ANY,
 	typedArrayConstructorForElem,
 	typeStr,
+	underlyingOf,
 	VOID,
 	WASM_STDLIB_MEMBERS,
 } from "./types.js";
@@ -254,7 +255,7 @@ export const resolveMethods = {
 					if (fromScope?.kind === "typeParam") return fromScope;
 					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
-				const named = this.types.get(node.name);
+				const named = this._visibleType(node.name, scope);
 				if (named) {
 					this._useQualifiedTypeName(node, named);
 					return this._checkConstraintUse(named, node);
@@ -281,6 +282,9 @@ export const resolveMethods = {
 				return { kind: "typeParam", name: node.name, constraint };
 			}
 			case "UnionConstraint":
+				// Terms such as `~[]E` resolve later in the scope that declares `E`.
+				node._scope ??= scope;
+				this._checkApproxTerms(node, scope);
 				return node;
 			case "SliceType":
 				return { kind: "slice", elem: this.resolveTypeNode(node.elem, scope) };
@@ -334,7 +338,8 @@ export const resolveMethods = {
 						return resolved;
 					}
 				}
-				return ANY;
+				// `pv.X{}`: a field or method value stands where a type must.
+				return this._notATypeSelector(node, scope);
 			case "ArrayType":
 				return this._resolveArrayTypeNode(node, scope);
 			case "FuncType":
@@ -373,6 +378,43 @@ export const resolveMethods = {
 	_markInterfaceElements(node) {
 		for (const embed of node.embeds ?? []) this._markConstraintPos(embed);
 		this._markConstraintPos(node.unionConstraint);
+		for (const union of node.extraUnions ?? []) this._markConstraintPos(union);
+	},
+
+	// `~T` needs a `T` that is its own underlying type and not an interface.
+	// Composite terms (`~[]E`) are their own underlying type and may mention
+	// type parameters that are not in `scope`, so only a type name is checked.
+	_checkApproxTerms(union, scope) {
+		for (const term of union.terms)
+			if (term.approx) this._checkApproxTerm(term, scope);
+	},
+
+	_checkApproxTerm(term, scope) {
+		if (term.type?.kind === "GenericTypeName") {
+			// `~Box[int]` names a defined type; a generic alias is its target.
+			const g = this.types.get(term.type.name)?._generic;
+			if (g && !g.isAlias)
+				this.err("invalid use of ~ (an instantiated generic type)", term);
+			return;
+		}
+		if (term.type?.kind !== "TypeName") return;
+		const t = this.resolveTypeNode(term.type, scope);
+		const base = this._deepUnderlying(t);
+		if (!base || t._tainted || base._tainted) return;
+		if (t.kind === "typeParam")
+			this.err(
+				`invalid use of ~ (type in term ~${typeStr(t)} cannot be a type parameter)`,
+				term,
+			);
+		else if (base === COMPARABLE)
+			this.err("invalid use of ~ (comparable is an interface)", term);
+		else if (base.kind === "interface")
+			this.err(`invalid use of ~ (${typeStr(t)} is an interface)`, term);
+		else if (t.kind === "named" && !identical(base, t))
+			this.err(
+				`invalid use of ~ (underlying type of ${typeStr(t)} is ${typeStr(base)})`,
+				term,
+			);
 	},
 
 	// Marks the constraint positions of top-level declarations before any
@@ -577,14 +619,25 @@ export const resolveMethods = {
 	_tagDeclTypeIdent(node, scope) {
 		if (BASIC_TYPES[node.name] || node.name === "comparable") return;
 		const owner = scope?.lookupScope(node.name);
-		const bound = owner?.symbols.get(node.name);
+		const bound = owner?.get(node.name);
 		if (bound?.kind === "typeParam") node._namesTypeParam = true;
 		else if (bound?.kind === "aliasArg") return;
 		// Dot-imported and predeclared types are known by the type table only.
 		else if (
-			owner ? owner._typeNames.has(node.name) : this.types.has(node.name)
+			owner
+				? owner.object(node.name).kind === "type"
+				: this.types.has(node.name)
 		)
 			node._namesDeclType = true;
+	},
+
+	_notATypeSelector(node, scope) {
+		if (!scope) return ANY;
+		const before = this.errors.length;
+		this.checkExpr(node, scope);
+		if (this.errors.length === before)
+			this.err(`${exprText(node)} is not a type`, this._positioned(node));
+		return ANY;
 	},
 
 	_resolveGenericTypeName(node, scope) {
@@ -597,7 +650,7 @@ export const resolveMethods = {
 			qualified;
 		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
 		const base = name
-			? this.types.get(name)
+			? this._visibleType(name, scope)
 			: node.expr
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
@@ -638,10 +691,23 @@ export const resolveMethods = {
 		return fn;
 	},
 
+	// The type `name` names where `scope` is checked: a type declared in a
+	// function or block is not visible outside of it.
+	_visibleType(name, scope) {
+		if (
+			!this._localTypesVisible &&
+			this._localTypes.has(name) &&
+			scope &&
+			scope.lookupObject(name)?.kind !== "type"
+		)
+			return undefined;
+		return this.types.get(name);
+	},
+
 	resolveTypeNodeName(node, scope) {
 		if (!node) return ANY;
 		if (node.kind === "TypeName" || node.kind === "GenericTypeName") {
-			const named = this.types.get(node.name);
+			const named = this._visibleType(node.name, scope);
 			if (named) return named;
 		}
 		return this.resolveTypeNode(node, scope);
@@ -672,7 +738,7 @@ export const resolveMethods = {
 					.split(".")
 					.pop();
 				if (embedName) fields.set(embedName, ft);
-				const base = inner.kind === "named" ? inner.underlying : inner;
+				const base = this._deepUnderlying(inner);
 				if (base?.kind === "struct") {
 					for (const [k, v] of base.fields.entries()) fields.set(k, v);
 				}
@@ -715,9 +781,20 @@ export const resolveMethods = {
 				comparable = true;
 		}
 		const result = { kind: "interface", methods };
+		for (const union of [node.unionConstraint, ...(node.extraUnions ?? [])])
+			if (union) this._checkApproxTerms(union, scope);
 		if (node.unionConstraint) {
 			result.unionConstraint = node.unionConstraint;
 			result._unionScope = scope;
+		}
+		// A further union element is its own type set, intersected with the rest.
+		for (const union of node.extraUnions ?? []) {
+			typeSetEmbeds.push({
+				kind: "interface",
+				methods: new Map(),
+				unionConstraint: union,
+				_unionScope: scope,
+			});
 		}
 		if (typeSetEmbeds.length > 0) result._typeSetEmbeds = typeSetEmbeds;
 		if (comparable) result._comparable = true;
@@ -728,7 +805,7 @@ export const resolveMethods = {
 	// `typeSetEmbeds`; returns true when it makes the interface comparable-only.
 	_mergeInterfaceEmbed(embed, scope, methods, typeSetEmbeds) {
 		const resolved = this.resolveTypeNode(embed, scope);
-		const base = resolved?.kind === "named" ? resolved.underlying : resolved;
+		const base = this._deepUnderlying(resolved);
 		if (base === COMPARABLE) return true;
 		if (base?.kind !== "interface") {
 			if (!isAny(resolved))
@@ -820,13 +897,20 @@ export const resolveMethods = {
 		// Resolve the declaration with its type params in scope (as typeParams,
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
-		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
+		for (const tp of generic.typeParams) typeScope.defineType(tp.name, tp);
 		building.push(key);
 		generic._buildSizes.push(size);
 		let instantiated;
 		try {
 			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
 			instantiated = this.substituteType(underlying, map);
+			// `type W[T any] V[T]`: W[int]'s underlying type is V[int]'s.
+			if (instantiated.kind === "named")
+				instantiated = this._underlyingOver(instantiated, generic.declNode);
+			instantiated = this._definedEmptyInterface(
+				instantiated,
+				generic.declNode,
+			);
 		} finally {
 			building.pop();
 			generic._buildSizes.pop();
@@ -881,7 +965,12 @@ export const resolveMethods = {
 			const tp = typeParams[i];
 			if (tp.constraint) {
 				const constraint = this.resolveTypeNode(tp.constraint, this.globals);
-				this.checkConstraint(typeArgs[i], constraint, declNode);
+				this.checkConstraint(typeArgs[i], constraint, declNode, {
+					typeParams,
+					typeArgs,
+					name: tp.name,
+					scope: this.globals,
+				});
 			}
 			aliasScope.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
 		}
@@ -920,7 +1009,7 @@ export const resolveMethods = {
 	// whose argument is known unifies `E` with that argument's element type.
 	_inferFromCoreTypes(typeParams, map) {
 		const scope = new Scope(this.globals);
-		for (const tp of typeParams) scope.define(tp.name, tp);
+		for (const tp of typeParams) scope.defineType(tp.name, tp);
 		for (let round = 0; round < typeParams.length; round++) {
 			const before = map.size;
 			for (const tp of typeParams) {
@@ -988,6 +1077,10 @@ export const resolveMethods = {
 		}
 		if (paramType.kind === "func" && argType.kind === "func")
 			this._inferFromFuncPair(paramType, argType, map);
+		this._inferFromAggregatePair(paramType, argType, map);
+	},
+
+	_inferFromAggregatePair(paramType, argType, map) {
 		if (paramType.kind === "tuple" && argType.kind === "tuple") {
 			for (
 				let i = 0;
@@ -995,6 +1088,12 @@ export const resolveMethods = {
 				i++
 			)
 				this._inferFromPair(paramType.types[i], argType.types[i], map);
+		}
+		if (paramType.kind === "struct" && argType.kind === "struct") {
+			const [pf, af] = [paramType._structFields, argType._structFields];
+			if (pf && af && pf.length === af.length)
+				for (const [i, f] of pf.entries())
+					this._inferFromPair(f.type, af[i].type, map);
 		}
 	},
 
@@ -1035,7 +1134,104 @@ export const resolveMethods = {
 	_checkUnionConstraint(typeArg, constraint, node) {
 		if (typeArg?._tainted || this._unionAccepts(typeArg, constraint, new Set()))
 			return;
+		const pattern = this._lonePatternTerm(constraint);
+		if (pattern) {
+			const { name } = this._approxCtx;
+			const text = `~${typeStr(pattern)}`;
+			this.err(
+				this._mentionsTypeParam(pattern)
+					? `${name} (type ${typeStr(typeArg)}) does not satisfy ${text}`
+					: `${typeStr(typeArg)} does not satisfy ${text}`,
+				node,
+			);
+			return;
+		}
 		this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
+	},
+
+	// The one approximation term over a composite type that a constraint
+	// consists of (`~[]E`), with the bound type arguments substituted; null for
+	// any other constraint.
+	_lonePatternTerm(union) {
+		const ctx = this._approxCtx;
+		const term = union.terms.length === 1 ? union.terms[0] : null;
+		if (!ctx || !term?.approx || term.type?.kind === "TypeName") return null;
+		return this._approxPattern(term, ctx);
+	},
+
+	_approxPattern(term, ctx) {
+		const scope = new Scope(ctx.scope);
+		for (const tp of ctx.typeParams) scope.defineType(tp.name, tp);
+		return this.substituteType(
+			this.resolveTypeNode(term.type, scope),
+			ctx.bindings,
+		);
+	},
+
+	_mentionsTypeParam(t) {
+		if (!t || typeof t !== "object") return false;
+		if (t.kind === "typeParam") return true;
+		return [
+			t.elem,
+			t.key,
+			t.value,
+			t.base,
+			...(t._structFields?.map((f) => f.type) ?? []),
+			...(t.params ?? []),
+			...(t.returns ?? []),
+		].some((c) => this._mentionsTypeParam(c));
+	},
+
+	// Whether `arg` has the structure of `pattern`, where a type parameter in
+	// the pattern that no type argument binds matches any type.
+	_structMatches(arg, pattern) {
+		if (!pattern || pattern.kind === "typeParam") return true;
+		if (!this._mentionsTypeParam(pattern)) return identical(arg, pattern);
+		return arg?.kind === pattern.kind && this._shapeMatches(arg, pattern);
+	},
+
+	_shapeMatches(arg, pattern) {
+		const m = (a, p) => this._structMatches(a, p);
+		switch (pattern.kind) {
+			case "slice":
+			case "pointer":
+				return m(arg.elem ?? arg.base, pattern.elem ?? pattern.base);
+			case "array":
+				return arg.size === pattern.size && m(arg.elem, pattern.elem);
+			case "chan":
+				return arg.dir === pattern.dir && m(arg.elem, pattern.elem);
+			case "map":
+				return m(arg.key, pattern.key) && m(arg.value, pattern.value);
+			case "func":
+				return this._funcMatches(arg, pattern);
+			case "struct":
+				return this._structFieldsMatch(arg, pattern);
+			default:
+				return true;
+		}
+	},
+
+	_funcMatches(arg, pattern) {
+		const all = (xs, ys) =>
+			xs.length === ys.length &&
+			xs.every((x, i) => this._structMatches(x, ys[i]));
+		return (
+			Boolean(arg.variadic) === Boolean(pattern.variadic) &&
+			all(arg.params, pattern.params) &&
+			all(arg.returns, pattern.returns)
+		);
+	},
+
+	_structFieldsMatch(arg, pattern) {
+		const [af, pf] = [arg._structFields, pattern._structFields];
+		if (!af || !pf || af.length !== pf.length) return false;
+		const names = (f) => (f.names ?? []).join("|");
+		return pf.every(
+			(f, i) =>
+				Boolean(f.embedded) === Boolean(af[i].embedded) &&
+				names(f) === names(af[i]) &&
+				this._structMatches(af[i].type, f.type),
+		);
 	},
 
 	// Whether `typeArg` is in the type set of a union: some term holds it.
@@ -1045,8 +1241,12 @@ export const resolveMethods = {
 			// `~[]E` may mention a type parameter that is not in `scope`, so an
 			// approximation term is resolved (and compared) only when it names
 			// a type.
-			if (!term.resolved && term.approx && term.type?.kind !== "TypeName")
-				return true;
+			if (!term.resolved && term.approx && term.type?.kind !== "TypeName") {
+				const ctx = this._approxCtx;
+				if (!ctx || typeArg?.kind === "typeParam") return true;
+				const under = this._deepUnderlying(typeArg);
+				return this._structMatches(under, this._approxPattern(term, ctx));
+			}
 			const t = term.resolved ?? this.resolveTypeNode(term.type, scope);
 			return this._termAccepts(typeArg, t, term.approx, active);
 		});
@@ -1064,8 +1264,11 @@ export const resolveMethods = {
 			return this._interfaceAccepts(typeArg, base, active);
 		if (!approx) return identical(typeArg, t);
 		const want = this._deepUnderlying(t);
-		if (typeArg?.kind === "typeParam" || want?.kind !== "basic") return true;
-		return identical(this._deepUnderlying(typeArg), want);
+		if (typeArg?.kind === "typeParam") return true;
+		const under = this._deepUnderlying(typeArg);
+		return want?.kind === "basic"
+			? identical(under, want)
+			: this._structMatches(under, want);
 	},
 
 	// An interface's type set is the intersection of its own union and the
@@ -1089,12 +1292,15 @@ export const resolveMethods = {
 	},
 
 	// Go's comparability: slices, maps and funcs are not comparable, nor are
-	// arrays and structs that contain them.
+	// arrays and structs that contain them. A type parameter is comparable
+	// only when every type in its constraint's type set is.
 	_isComparable(t, seen = new Set()) {
-		const base = t?.kind === "named" ? t.underlying : t;
+		const base = this._deepUnderlying(t);
 		if (!base || seen.has(base)) return true;
 		seen.add(base);
 		switch (base.kind) {
+			case "typeParam":
+				return this._typeParamComparable(base);
 			case "slice":
 			case "map":
 			case "func":
@@ -1102,9 +1308,13 @@ export const resolveMethods = {
 			case "array":
 				return this._isComparable(base.elem, seen);
 			case "struct":
-				return [...(base.fields?.values() ?? [])].every((f) =>
-					this._isComparable(f, seen),
-				);
+				// Declared fields only: base.fields also holds promoted fields and
+				// collapses repeated blank names.
+				return (
+					base._structFields
+						? base._structFields.map((f) => f.type)
+						: [...(base.fields?.values() ?? [])]
+				).every((f) => this._isComparable(f, seen));
 			default:
 				return true;
 		}
@@ -1118,27 +1328,61 @@ export const resolveMethods = {
 			);
 			return;
 		}
-		if (base.methods.size === 0 && !base.unionConstraint) return;
-		if (base.unionConstraint) {
-			this.checkConstraint(typeArg, base.unionConstraint, node);
-			return;
-		}
-		if (!this.implements(typeArg, base, node))
+		if (this._unsatisfiedInterface(typeArg, base, node))
 			this.err(
 				`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
 				node,
 			);
 	},
 
-	checkConstraint(typeArg, constraint, node) {
+	// Whether `typeArg` is outside the type set of `base` or lacks its methods.
+	// A lone union reports its own, more precise, error and counts as satisfied.
+	_unsatisfiedInterface(typeArg, base, node) {
+		const embeds = base._typeSetEmbeds?.length ?? 0;
+		const hasMethods = base.methods.size > 0;
+		if (base.unionConstraint && !embeds && !hasMethods) {
+			this._checkUnionConstraint(typeArg, base.unionConstraint, node);
+			return false;
+		}
+		const inSet =
+			!(base.unionConstraint || embeds) ||
+			typeArg?._tainted ||
+			this._interfaceAccepts(typeArg, base, new Set());
+		return !inSet || (hasMethods && !this.implements(typeArg, base, node));
+	},
+
+	// `ctx` (`{ typeParams, typeArgs, name, scope }`) names the generic
+	// function being instantiated, so a term such as `~[]E` is compared with
+	// the type arguments substituted.
+	checkConstraint(typeArg, constraint, node, ctx = null) {
+		const saved = this._approxCtx;
+		this._approxCtx = ctx && {
+			...ctx,
+			bindings: new Map(
+				ctx.typeParams.flatMap((tp, i) =>
+					ctx.typeArgs[i] ? [[tp.name, ctx.typeArgs[i]]] : [],
+				),
+			),
+		};
+		try {
+			this._checkConstraint(typeArg, constraint, node);
+		} finally {
+			this._approxCtx = saved;
+		}
+	},
+
+	_checkConstraint(typeArg, constraint, node) {
 		if (!constraint || isAny(constraint)) return;
-		if (constraint.kind === "basic" && constraint.name === "comparable") return;
+		if (constraint.kind === "basic" && constraint.name === "comparable") {
+			if (!this._isComparable(typeArg))
+				this.err(`${typeStr(typeArg)} does not satisfy comparable`, node);
+			return;
+		}
 		if (constraint.kind === "UnionConstraint") {
 			this._checkUnionConstraint(typeArg, constraint, node);
 			return;
 		}
-		const base =
-			constraint.kind === "named" ? constraint.underlying : constraint;
+		const base = this._deepUnderlying(constraint);
 		if (base?.kind === "interface")
 			this._checkInterfaceConstraint(typeArg, base, constraint, node);
 	},
@@ -1194,11 +1438,34 @@ export const resolveMethods = {
 			return baseType?._tainted ? TAINTED_ANY : ANY;
 		if (this._isTransparentPointerField(baseType, field))
 			baseType = this.resolveType(baseType.base);
+		const param = this._typeParamOperand(baseType, field);
+		if (param) return this._fieldTypeTypeParam(param, baseType, field, node);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
 			return baseType.methods.get(field);
-		let base = baseType.kind === "named" ? baseType.underlying : baseType;
-		base = this.resolveType(base);
+		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
+	},
+
+	// The type parameter a selector reads through: `t` or `*t`. Its fields
+	// are never reachable, even when its core type is a struct.
+	_typeParamOperand(baseType, field) {
+		if (baseType.kind === "typeParam") return baseType;
+		if (baseType.kind !== "pointer" || field === "value") return null;
+		const base = this.resolveType(baseType.base);
+		return base?.kind === "typeParam" ? base : null;
+	},
+
+	// A type parameter has the methods of its constraint and nothing else.
+	_fieldTypeTypeParam(param, baseType, field, node) {
+		const c = this._deepUnderlying(this.resolveType(param.constraint));
+		if (c?._tainted || c?._isOpen) return ANY;
+		if (baseType === param && c?.kind === "interface") {
+			if (c.methods?.has(field)) return c.methods.get(field);
+		}
+		return this.err(
+			`${exprText(node?.expr)}.${field} undefined (type ${typeStr(baseType)} has no field or method ${field})`,
+			node,
+		);
 	},
 
 	_isTransparentPointerField(baseType, field) {
@@ -1320,7 +1587,7 @@ export const resolveMethods = {
 		if (taName) {
 			const taType = this.types.get(taName);
 			if (taType) {
-				const underlying = taType.kind === "named" ? taType.underlying : taType;
+				const underlying = this._deepUnderlying(taType);
 				if (underlying?.fields?.has(field)) return underlying.fields.get(field);
 				if (underlying?.methods?.has(field)) {
 					const m = underlying.methods.get(field);
@@ -1435,7 +1702,7 @@ function _processJsonField(
 	if (f.embedded) {
 		const isPtr = f.type.kind === "pointer" || f.type.kind === "PointerType";
 		const inner = isPtr ? f.type.base : f.type;
-		const embedStruct = inner.kind === "named" ? inner.underlying : inner;
+		const embedStruct = underlyingOf(inner);
 		const embedName = (
 			f.astType?.name ??
 			f.astType?.base?.name ??
@@ -1528,8 +1795,7 @@ function compareIndex(a, b) {
 
 export function resolveJsonFields(structType) {
 	if (!structType) return [];
-	const underlying =
-		structType.kind === "named" ? structType.underlying : structType;
+	const underlying = underlyingOf(structType);
 	if (underlying?.kind !== "struct") return [];
 	if (underlying._jsonFields) return underlying._jsonFields;
 

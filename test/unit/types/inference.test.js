@@ -14,16 +14,16 @@ import {
 
 section("Type errors — condition and operator checks");
 
-test("if condition must be bool — non-bool raises error", () => {
+test("non-boolean if condition raises error", () => {
 	const { errors } = compile(`package main
 func main() {
 	x := 42
 	if x { console.log("bad") }
 }`);
-	assertErrorContains(errors, "bool");
+	assertErrorContains(errors, "non-boolean condition in if statement");
 });
 
-test("for condition must be bool — non-bool raises error", () => {
+test("non-boolean for condition raises error", () => {
 	const { errors } = compile(`package main
 func main() {
 	x := 1
@@ -31,7 +31,7 @@ func main() {
 		break
 	}
 }`);
-	assertErrorContains(errors, "bool");
+	assertErrorContains(errors, "non-boolean condition in for statement");
 });
 
 test("invalid binary op — string minus string is an error", () => {

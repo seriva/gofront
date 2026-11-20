@@ -6,6 +6,7 @@ import {
 	getOrCreateIteratorFuncLit,
 	isIteratorRangeFor,
 } from "../../lower/range.js";
+import { ERROR } from "../../typechecker/types.js";
 import {
 	addBoundaryHelpers,
 	collectBoundaryMeta,
@@ -1079,10 +1080,7 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 	if (mod.hasErrorType && !interfaceCalls.has("error.Error")) {
 		interfaceCalls.set("error.Error", {
 			ifaceName: "error",
-			ifaceType: checker?.types?.get("error") ?? {
-				kind: "interface",
-				name: "error",
-			},
+			ifaceType: ERROR,
 			methodName: "Error",
 			methodSig: {
 				kind: "func",

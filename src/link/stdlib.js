@@ -51,6 +51,7 @@ function parseStdlibFiles(dir, deps, variant = "js", target = "both") {
 			const ast = new Parser(tokens, filename, source).parse();
 			ast._source = source;
 			ast._path = resolve(f);
+			ast._stdlib = true;
 			ast._fileTarget = tokens.target ?? "both";
 			return ast;
 		})
@@ -277,13 +278,15 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, jsOnly) {
 	const members = {};
 	const mangle = new Map();
 	const consts = new Map();
+	const kinds = new Map();
 	for (const name of [...values, ...types]) {
-		const t = checker.globals.symbols.get(name + suffix);
-		if (!/^[A-Z]/.test(name) || t === undefined) continue;
-		members[name] = t;
+		const obj = checker.globals.object(name + suffix);
+		if (!/^[A-Z]/.test(name) || obj?.type === undefined) continue;
+		members[name] = obj.type;
+		kinds.set(name, obj.kind);
 		mangle.set(name, name + suffix);
 		// An exported constant's folded value, so importers fold `pkg.Name`.
-		if (checker.globals._consts.has(name + suffix)) {
+		if (obj.kind === "const") {
 			const v = checker._constValue(
 				{ kind: "Ident", name: name + suffix },
 				checker.globals,
@@ -300,6 +303,7 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, jsOnly) {
 		_jsOnly: jsOnly,
 		_mangle: mangle,
 		_consts: consts,
+		_kinds: kinds,
 	};
 }
 
@@ -545,7 +549,7 @@ function bindStdlibImport(checker, p, spec, pkg) {
 	}
 	const name = alias ?? pkg.pkgName;
 	const ns = { ...pkg.namespace, name };
-	checker.globals.define(name, ns);
+	checker.globals.definePackage(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);

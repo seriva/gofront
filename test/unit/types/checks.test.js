@@ -47,12 +47,12 @@ const controlFlowErrorCases = [
 	[
 		"reassigning a const is an error",
 		"package main\nconst MaxSize = 10\nfunc main() {\n  MaxSize = 20\n}",
-		"const",
+		"cannot assign to MaxSize (neither addressable",
 	],
 	[
 		"reassigning a local const is an error",
 		"package main\nfunc main() {\n  const x = 5\n  x = 10\n}",
-		"const",
+		"cannot assign to x (neither addressable",
 	],
 ];
 
@@ -851,6 +851,7 @@ func describe(x any) string {
   case string:
     return "string"
   default:
+    _ = v
     return "other"
   }
 }
@@ -1246,7 +1247,55 @@ test("return forwarding a call with the wrong result count still errors", () => 
 func two() (int, int) { return 1, 2 }
 func f() (int, int, int) { return two() }
 func main() { _, _, _ = f() }`);
-	assertErrorContains(errors, "return count mismatch");
+	assertErrorContains(
+		errors,
+		"not enough return values (have (int, int), want (int, int, int))",
+	);
+});
+
+test("a forwarded return reports its count error at the call", () => {
+	const few = compile(`package main
+func pair() (int, string) { return 1, "a" }
+func three() (int, string, bool) {
+	return pair()
+}
+func main() { _, _, _ = three() }`);
+	assertErrorContains(few.errors, "not enough return values");
+	assertEqual(`${few.errors[0].line}:${few.errors[0].col}`, "4:9");
+	const many = compile(`package main
+func pair() (int, string) { return 1, "a" }
+func one() int {
+	return pair()
+}
+func main() { _ = one() }`);
+	assertErrorContains(many.errors, "too many return values");
+	assertEqual(`${many.errors[0].line}:${many.errors[0].col}`, "4:9");
+});
+
+test("a multi-value call next to other arguments is a single-value error", () => {
+	for (const call of [
+		"print(1, f2())",
+		"println(f2(), 1)",
+		"fmt.Println(f2(), 1)",
+		"fmt.Println(1, f2())",
+		"_ = min(1, f2())",
+		"_ = append([]int{}, f2())",
+	]) {
+		const src = `package main
+import "fmt"
+func f2() (int, int) { return 1, 2 }
+func main() { fmt.Print(); ${call} }`;
+		const js = compile(src);
+		assertErrorContains(
+			js.errors,
+			"multiple-value f2() (value of type (int, int)) in single-value context",
+		);
+		assertErrorContains(
+			compile(src, { target: "both" }).errors,
+			"in single-value context",
+		);
+		assertErrorContains(compileWasm(src).errors, "in single-value context");
+	}
 });
 
 test("grouped named results (r, theta float64)", async () => {
@@ -1953,6 +2002,28 @@ func main() {
 `,
 		"hello true\nhello true\n",
 	);
+});
+
+section("A rejected range operand");
+
+test("a range assignment over a non-iterator func reports once", () => {
+	for (const lhs of ["x", "x, y"]) {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(
+				`package main
+func fn(int) {}
+func main() {
+	var x, y int
+	for ${lhs} = range fn {
+		_, _ = x, y
+	}
+}`,
+				{ target },
+			);
+			assertErrorContains(errors, "cannot range over func");
+			assertEqual(errors.length, 1);
+		}
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

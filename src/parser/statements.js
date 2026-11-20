@@ -337,6 +337,7 @@ export const statementParserMethods = {
 			return this._parseTypeSwitchBody(
 				tag.lhs[0]?.name ?? null,
 				tag.rhs[0].expr,
+				tag.lhs[0],
 			);
 		}
 
@@ -368,7 +369,7 @@ export const statementParserMethods = {
 		return stmts;
 	},
 
-	_parseTypeSwitchBody(assign, expr) {
+	_parseTypeSwitchBody(assign, expr, assignNode = null) {
 		this.expect(T.LBRACE);
 		const cases = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
@@ -381,22 +382,19 @@ export const statementParserMethods = {
 			cases.push({ types, stmts: this._parseCaseBody() });
 		}
 		this.expect(T.RBRACE);
-		return { kind: "TypeSwitchStmt", assign, expr, cases };
+		// The declaring identifier of `assign`, for diagnostics.
+		return {
+			kind: "TypeSwitchStmt",
+			assign,
+			expr,
+			cases,
+			_assignNode: assignNode,
+		};
 	},
 
 	_parseTypeSwitchTypeList() {
 		const parseOne = () => {
 			const tok = this.peek();
-			// nil is a keyword, not a type name, so handle it explicitly
-			if (this.check(T.NIL)) {
-				this.advance();
-				return {
-					kind: "TypeName",
-					name: "nil",
-					_line: tok.line,
-					_col: tok.col,
-				};
-			}
 			const node = this.parseType();
 			// The case type is where a diagnostic about the case points.
 			if (node._line === undefined) {
@@ -417,7 +415,17 @@ export const statementParserMethods = {
 		return s;
 	},
 
+	// Records the position of the statement's first token, so header statements
+	// (`for`/`if`/`switch` init and post) that bypass parseStmt carry one too.
 	parseSimpleStmtRaw(noCompLit = false) {
+		const start = this.peek();
+		const stmt = this._parseSimpleStmtBody(noCompLit);
+		stmt._line = start.line;
+		stmt._col = start.col;
+		return stmt;
+	},
+
+	_parseSimpleStmtBody(noCompLit) {
 		// Parse left-hand side (could be expr list for multi-assign)
 		const first = this.parseExpr(0, noCompLit);
 		const t = this.peek();
