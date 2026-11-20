@@ -1,7 +1,7 @@
 # Checker: Go Rules Applied Everywhere — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-20)  
 **Base branch:** main  
 **Related:** Schedules the review follow-ups that [`checker-strictness-plan.md`](checker-strictness-plan.md) deferred at completion (its *Review follow-ups found while executing this plan* row, 41 entries), re-probed 2026-11-17 on `main` at `4eb69a6` and grouped by root cause. Entries whose root belongs to another plan are routed in `plans/follow-ups.md` (see *Excluded*). L4 from the former `followup-fixes-plan.md` joined R8 on 2026-11-17 (same root). Independent of [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md); `mangleLocalTypes` (Task 8.1) is also changed by its Task 1.3, so whichever lands second rebases; merges before [`typed-web-platform-plan.md`](typed-web-platform-plan.md) Phase 1, which extends assignability; that plan's Phase 4 reuses this plan's Phase 3 `anyKind` when it types the browser globals.  
 **Release note:** **Breaking:** the compiler rejects more programs that Go rejects, so fix each reported line as Go would: comparing a value with a constant or `nil` of the wrong kind, `nil` without a type, builtins such as `append`, `len`, `copy` and `min` with the wrong arguments, assigning to a field of a function result, two-variable `range` over an integer or `range` over a float constant, and invalid operators inside generic functions. Defined string, complex, function and interface types (also when defined over another defined type), `type MyAny any`, and functions or types that reuse a predeclared name such as `len`, `max` or `error` now work as in Go.  
