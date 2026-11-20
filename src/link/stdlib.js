@@ -51,6 +51,7 @@ function parseStdlibFiles(dir, deps, variant = "js", target = "both") {
 			const ast = new Parser(tokens, filename, source).parse();
 			ast._source = source;
 			ast._path = resolve(f);
+			ast._stdlib = true;
 			ast._fileTarget = tokens.target ?? "both";
 			return ast;
 		})

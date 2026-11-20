@@ -372,6 +372,8 @@ export class TypeChecker {
 		// The generated Go sits at package level and names any local type; they
 		// are unique by then (`renameLocalTypes`).
 		this._localTypesVisible = !!p._generated;
+		// Their builtin calls reach the universe, not a user's shadow of it.
+		this._builtinsFromUniverse = !!(p._generated || p._stdlib);
 	}
 
 	check(program) {
