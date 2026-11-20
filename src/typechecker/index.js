@@ -1171,7 +1171,22 @@ export class TypeChecker {
 		}
 	}
 
+	// `type C = *P; func (c C) M()` declares M on P with a pointer receiver:
+	// rewrite the receiver to `*P` before anything keys off its name.
+	_unwrapPointerAliasReceiver(decl) {
+		const node = decl.recvType;
+		if (decl.recvPointer || node.kind !== "TypeName") return;
+		if (node.name.includes(".")) return;
+		const t = this.resolveTypeNodeName(node, this.globals);
+		const base = t?.kind === "pointer" ? t.base : null;
+		if (base?.kind !== "named" || this.types.get(base.name) !== base) return;
+		if (this._importedTypes.has(base)) return;
+		decl.recvType = { ...node, name: base.name };
+		decl.recvPointer = true;
+	}
+
 	collectFunc(decl) {
+		if (decl.kind === "MethodDecl") this._unwrapPointerAliasReceiver(decl);
 		const { resolveScope, typeParamTypes } = this._buildCollectFuncScope(decl);
 		const paramTypes = decl.params.map((p) =>
 			this.resolveTypeNode(p.type, resolveScope),
