@@ -2307,7 +2307,13 @@ export const statementGenMethods = {
 			this.line(`const ${tmp} = ${tag};`);
 			return {
 				tag: "true",
-				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
+				caseExpr: (e) => {
+					if (!this._isIfaceType(e._type))
+						return `__equal(${tmp}, ${this.genExpr(e)})`;
+					// An interface case compares by dynamic type, not structure.
+					this.useHelper("ifeq");
+					return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
+				},
 			};
 		}
 		if (stmt.tag && isComplex(stmt.tag._type)) {

@@ -1444,3 +1444,36 @@ func main() {
 		"true true false true\ntrue true\ntrue true false false\ntrue true\none\n",
 	);
 });
+
+test("a struct switch tag compares against interface cases by dynamic type on the JS targets", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X int }
+type Q struct{ X int }
+
+func main() {
+	var a1 any = &P{1}
+	var a2 any = Q{1}
+	var a3 any = P{1}
+	switch (P{1}) {
+	case a1:
+		fmt.Println("a1")
+	case a2:
+		fmt.Println("a2")
+	default:
+		fmt.Println("none")
+	}
+	switch (P{1}) {
+	case a3:
+		fmt.Println("a3")
+	default:
+		fmt.Println("none")
+	}
+}
+`,
+		"none\na3\n",
+	);
+});
