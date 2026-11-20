@@ -19,6 +19,7 @@ import {
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
+	isFloat,
 	isInteger,
 	isNil,
 	isNumeric,
@@ -270,24 +271,32 @@ export const assignabilityMethods = {
 			return;
 		}
 		const isShift = op === "<<" || op === ">>";
-		if (isShift) this._checkTypeParamShiftCount(rt, node);
 		const left = lt?.kind === "typeParam";
 		if (isShift && !left) {
-			this._checkShiftedOperand(lt, node.left);
+			if (this._checkShiftedOperand(lt, node.left))
+				this._checkTypeParamShiftCount(rt, node);
 			return;
 		}
 		const tp = left ? lt : rt;
 		const operand = left ? node.left : node.right;
+		if (isShift) {
+			// The shifted operand first: a bad operand with a bad count
+			// reports once.
+			if (!this._operatorDefined(op, tp)) {
+				this.err(
+					`invalid operation: shifted operand ${exprText(operand)} (${operandKind(operand, typeStr(tp), false)} constrained by ${this._constraintText(tp)}) must be integer`,
+					operand,
+				);
+				return;
+			}
+			this._checkTypeParamShiftCount(rt, node);
+			return;
+		}
 		if (this._operatorDefined(op, tp)) return;
 		if (CMP_OPS.has(op))
 			this.err(
 				`invalid operation: ${exprText(node)} (type parameter ${typeStr(tp)} cannot use operator ${op})`,
 				node,
-			);
-		else if (isShift)
-			this.err(
-				`invalid operation: shifted operand ${exprText(operand)} (${operandKind(operand, typeStr(tp), false)} constrained by ${this._constraintText(tp)}) must be integer`,
-				operand,
 			);
 		else this._reportOperatorUndefined(op, tp, operand);
 	},
@@ -410,7 +419,7 @@ export const assignabilityMethods = {
 		if (isAny(lt) || isAny(rt)) return ANY;
 		if (isComplex(lt) || isComplex(rt))
 			return this._binaryResultTypeComplex(op, lt, rt, node);
-		if ((op === "<<" || op === ">>") && isNumeric(lt) && isNumeric(rt))
+		if (op === "<<" || op === ">>")
 			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
@@ -434,9 +443,10 @@ export const assignabilityMethods = {
 	// A shift has the type of its left operand; the count may be any integer
 	// type or an untyped constant representable as uint.
 	_binaryResultTypeShift(_op, lt, rt, node) {
-		if (node) this.checkShiftCount(rt, node.right);
 		if (!node) return lt;
-		this._checkShiftedOperand(lt, node.left);
+		// The operand first: a bad operand with a bad count reports once.
+		const operandOk = this._checkShiftedOperand(lt, node.left);
+		if (operandOk) this.checkShiftCount(rt, node.right);
 		// `"a" << s` was reported: the result has no type to check further.
 		return this._isShiftableUntyped(lt, node.left) ? lt : TAINTED_ANY;
 	},
@@ -445,20 +455,22 @@ export const assignabilityMethods = {
 	// integer, or an untyped constant representable as an integer (`1.0 << s`
 	// is valid, `1.5 << s` and `"a" << s` are not). An imaginary constant has
 	// no tracked value and is left alone.
+	// Returns whether the operand is valid.
 	_checkShiftedOperand(lt, left) {
 		if (lt?.kind !== "untyped") {
-			if (!isInteger(lt))
-				this.err(
-					`invalid operation: shifted operand ${exprText(left)} (${operandKind(left, typeStr(lt), false)}) must be integer`,
-					left,
-				);
-			return;
-		}
-		if (!this._isShiftableUntyped(lt, left))
+			if (isInteger(lt)) return true;
 			this.err(
-				`invalid operation: shifted operand ${this._untypedConstText(lt, left)} must be integer`,
+				`invalid operation: shifted operand ${exprText(left)} (${operandKind(left, typeStr(lt), false)}) must be integer`,
 				left,
 			);
+			return false;
+		}
+		if (this._isShiftableUntyped(lt, left)) return true;
+		this.err(
+			`invalid operation: shifted operand ${this._untypedConstText(lt, left)} must be integer`,
+			left,
+		);
+		return false;
 	},
 
 	_isShiftableUntyped(lt, left) {
@@ -826,8 +838,48 @@ export const assignabilityMethods = {
 	// an untyped constant takes the type its context gives it, so codegen
 	// computes it in that type (BigInt for 64-bit integers).
 	_retypeUntypedShift(target, source, valueNode) {
-		if (!isUntyped(source) || !isInteger(target)) return;
+		if (!isUntyped(source)) return;
+		if (!isInteger(target)) {
+			this._checkShiftContext(target, valueNode);
+			return;
+		}
 		this._retypeShiftTree(valueNode, target);
+	},
+
+	// The untyped operand of a non-constant shift takes its context's type,
+	// which must be an integer (`var f float64 = 1 << s`). An interface or
+	// other non-numeric context keeps the `int` default.
+	_checkShiftContext(target, e) {
+		const tp = target?.kind === "typeParam";
+		const r = tp ? target : this._deepUnderlying(target);
+		if (!tp && !isFloat(r) && !isComplex(r)) return;
+		if (
+			tp &&
+			this._typeParamAllows(target, (t) =>
+				isInteger(this._deepUnderlying(t) ?? t),
+			)
+		)
+			return;
+		const left = this._untypedShiftOperand(e);
+		if (!left) return;
+		const where = tp ? ` constrained by ${this._constraintText(target)}` : "";
+		this.err(
+			`invalid operation: shifted operand ${exprText(left)} (type ${typeStr(target)}${where}) must be integer`,
+			left,
+		);
+	},
+
+	// The first untyped left operand of a non-constant shift in `e`.
+	_untypedShiftOperand(e) {
+		if (!e || typeof e !== "object" || e._type?.kind !== "untyped") return null;
+		if (e.kind === "ParenExpr") return this._untypedShiftOperand(e.expr);
+		if (e.kind === "UnaryExpr") return this._untypedShiftOperand(e.operand);
+		if (e.kind !== "BinaryExpr" || this._constValue(e)) return null;
+		if (e.op === "<<" || e.op === ">>")
+			return e.left._type?.kind === "untyped" ? e.left : null;
+		return (
+			this._untypedShiftOperand(e.left) ?? this._untypedShiftOperand(e.right)
+		);
 	},
 
 	_retypeShiftTree(e, target) {

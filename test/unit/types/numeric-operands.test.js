@@ -420,6 +420,34 @@ test("compound assignment on any reports only the operator", () => {
 	);
 });
 
+test("a constant shift of 1.0 folds to an integer on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	fmt.Println(1.0 << 2)
+}`,
+		"4\n",
+	);
+});
+
+test("a non-constant shift in an interface context keeps the int default", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := uint(1)
+	var v any = 1 << s
+	fmt.Println(v)
+}`,
+		"2\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

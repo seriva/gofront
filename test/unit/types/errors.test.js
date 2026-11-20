@@ -1239,6 +1239,20 @@ func main() {
 	}
 });
 
+test("a compound shift of a float with a bad count reports one error", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var f float64 = 1.0
+	f <<= 1.5
+}`);
+	assertErrorContains(
+		errors,
+		"shifted operand f (variable of type float64) must be integer",
+	);
+	assertEqual(errors.length, 1);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
