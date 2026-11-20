@@ -703,7 +703,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Done when: Go's messages on all targets; `_assertAssignableEarlyReturn` has no `target?.kind === "typeParam"` early return
 - [x] Task 22.2: A type-parameter value is assignable only to an identical type or an interface its type set implements (R17.2, R17.5)
   - Files: `src/typechecker/assignability.js`
-  - Test: inline reject tests in `test/unit/types/generics.test.js` (`T` to `int`, forwarded `T` result to an `int` parameter); `any(t)` and `fmt.Println(t)` still compile
+  - Test: inline reject tests in `test/unit/types/generics.test.js` (`T` to `int`, forwarded `T` result to an `int` parameter); an accept test in the same file keeps the implicit conversion of a `T any` value to `any` valid
   - Done when: Go's messages on all targets; no `source?.kind === "typeParam"` early return
 - [x] Task 22.3: Conversions from and to a type parameter hold for every term of the type set (R17.6, R17 controls)
   - Files: `src/typechecker/expressions.js` (`_checkConversionValidity`, the `typeParam` branch at the core-type call)
@@ -722,7 +722,7 @@ Last behavior phase: carries the docs update for Phases 1–14.
   - Done when: Go's `t.X undefined (type T has no field or method X)` on all targets
 - [x] Task 23.3: A rejected range operand is not checked again as an assignment (R18.7)
   - Files: `src/typechecker/statements.js` (`_checkForStmt`, `_checkRangeIterStmt` return value)
-  - Test: inline tests in `test/unit/types/generics.test.js` and `test/unit/types/checks.test.js` assert exactly one error for a range assignment over a non-iterator func (one and two variables); R18.7 controls
+  - Test: inline tests in `test/unit/types/checks.test.js` assert exactly one error for a range assignment over a non-iterator func (one and two variables, three assignment targets)
   - Done when: one error per statement on all targets
 
 ### Phase 24: Constraint type sets (root `constraint-type-sets`)
