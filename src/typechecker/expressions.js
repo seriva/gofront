@@ -2267,7 +2267,18 @@ export const expressionCheckMethods = {
 			}
 			return [argType];
 		}
-		return expr.args.map((a) => this.checkExpr(a, scope));
+		return expr.args.map((a) => this._checkSingleValueArg(a, scope));
+	},
+
+	// An argument next to others is one value: a multi-value call there is
+	// an error, as in Go (only a sole call argument forwards its results).
+	_checkSingleValueArg(arg, scope) {
+		const type = this.checkExpr(arg, scope);
+		if (type?.kind !== "tuple") return type;
+		return this.err(
+			`multiple-value ${exprText(arg)} (${operandKind(arg, typeStr(type))}) in single-value context`,
+			arg,
+		);
 	},
 
 	_resolveCallFnType(fnType, argTypes, expr, scope) {
@@ -2491,12 +2502,40 @@ export const expressionCheckMethods = {
 		expr._native = native && direct ? native : null;
 	},
 
+	// The operand types of a builtin call.  A multi-value call that is the only
+	// argument (`min(f())`) supplies its results as the operands: the builtin
+	// is checked against one operand node per result (`expr._fwdArgs`), which
+	// the backends read to emit it.
+	_resolveBuiltinArgTypes(name, expr, scope) {
+		const only = expr.args[0];
+		if (
+			expr.args.length === 1 &&
+			only.kind === "CallExpr" &&
+			name !== "make" &&
+			name !== "new"
+		) {
+			const type = this.checkExpr(only, scope);
+			if (type?.kind !== "tuple") return [type];
+			expr._multiForward = true;
+			const text = exprText(only);
+			expr._fwdArgs = type.types.map((t) => ({
+				kind: "Ident",
+				name: text,
+				line: only.line,
+				col: only.col,
+				_type: t,
+			}));
+			return type.types;
+		}
+		return expr.args.map((a, i) => this._checkBuiltinArg(name, a, i, scope));
+	},
+
 	_checkBuiltinArg(name, arg, i, scope) {
 		// new(T) — first arg is a type name, not a value expression
 		if (name === "new" && i === 0) return ANY;
 		// make(T, ...) names the type to make.
 		if (name === "make" && i === 0) arg._typeRefOk = true;
-		return this.checkExpr(arg, scope);
+		return this._checkSingleValueArg(arg, scope);
 	},
 
 	checkCall(expr, scope) {
@@ -2525,9 +2564,7 @@ export const expressionCheckMethods = {
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
 			expr._builtinName = fnType.name;
-			const argTypes = expr.args.map((a, i) =>
-				this._checkBuiltinArg(fnType.name, a, i, scope),
-			);
+			const argTypes = this._resolveBuiltinArgTypes(fnType.name, expr, scope);
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
@@ -2845,7 +2882,7 @@ export const expressionCheckMethods = {
 	_checkBuiltinArity(name, expr) {
 		const range = BUILTIN_ARITY[name];
 		if (!range) return true;
-		const found = expr.args.length;
+		const found = expr._fwdArgs?.length ?? expr.args.length;
 		const [min, max] = range;
 		if (found >= min && found <= max) return true;
 		const [what, expected] =
@@ -2860,7 +2897,9 @@ export const expressionCheckMethods = {
 	checkBuiltin(name, expr, argTypes, scope) {
 		if (!this._checkBuiltinArity(name, expr)) return ANY;
 		const gen = BUILTIN_CHECK[name];
-		return gen ? gen(this, name, expr, argTypes, scope) : ANY;
+		// The checks read `args` as written: show them one node per result.
+		const view = expr._fwdArgs ? { ...expr, args: expr._fwdArgs } : expr;
+		return gen ? gen(this, name, view, argTypes, scope) : ANY;
 	},
 
 	_constLenFromType(arg0) {

@@ -1081,6 +1081,8 @@ export class BuiltinsEmitter {
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
+		const split = this._splitForwardedBuiltin(call);
+		if (split) return this._emitBuiltinCall(split, targetWasmType);
 		// The checker names a call to the predeclared builtin; a user
 		// declaration spelled `len` or `max` is an ordinary call.
 		const name = func.name === "string" ? "string" : call._builtinName;
@@ -1449,21 +1451,48 @@ export class BuiltinsEmitter {
 			call.func.expr?._type?.kind !== "namespace";
 		if (!holders && !isMethod) return null;
 		if (hasCallOrReceive(call.func)) return null;
+		const args = this._spillForwardedResults(
+			inner,
+			types,
+			holders ?? [],
+			"__fwdarg",
+		);
+		return { ...call, args, _multiForward: false };
+	}
+
+	// `min(f())`, `append(f())`: the builtin was checked against one operand
+	// node per result (`call._fwdArgs`); f's results go into locals and the
+	// builtin is emitted over those operands.
+	_splitForwardedBuiltin(call) {
+		const operands = call._fwdArgs;
+		if (!call._multiForward || !operands) return null;
+		const types = operands.map((o) => o._type);
+		const args = this._spillForwardedResults(
+			call.args[0],
+			types,
+			operands,
+			"__fwdbi",
+		);
+		return { ...call, args, _multiForward: false };
+	}
+
+	// Evaluates the multi-value call `inner` into fresh locals and returns one
+	// ident per result, each carrying that element's checker marks (`marks`).
+	_spillForwardedResults(inner, types, marks, prefix) {
 		this.emitExpr(inner, null);
 		this._fwdArgCounter = (this._fwdArgCounter ?? 0) + 1;
-		const names = types.map((_, i) => `__fwdarg$${this._fwdArgCounter}$${i}`);
+		const names = types.map((_, i) => `${prefix}$${this._fwdArgCounter}$${i}`);
 		const locals = types.map((t, i) =>
 			this.allocLocal(names[i], this.toWasmType(t), t, true),
 		);
 		for (let i = locals.length - 1; i >= 0; i--)
 			this.pushInstruction({ op: "local.set", index: locals[i] });
-		const args = names.map((name, i) => ({
+		return names.map((name, i) => ({
+			...(marks[i] ?? {}),
 			kind: "Ident",
 			name,
 			_type: types[i],
-			...(holders?.[i] ?? {}),
 		}));
-		return { ...call, args, _multiForward: false };
 	}
 
 	emitCallExpr(call, targetWasmType = null) {

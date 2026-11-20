@@ -788,11 +788,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 29: Forwarded tuples into builtins and returns (root `forwarded-tuple`)
 *Scheduled from review follow-ups (2026-11-19, second sweep): ledger *Builtins on forwarded tuples* and *Too-few forwarded return values position*. Lands after Phase 25: the arity table counts the forwarded values.*
-- [ ] Task 29.1: A multi-value call that is a builtin's only argument supplies its values as the arguments (R23.1–R23.4)
+- [x] Task 29.1: A multi-value call that is a builtin's only argument supplies its values as the arguments (R23.1–R23.4)
   - Files: `src/typechecker/expressions.js` (`checkBuiltin`: unpack before the arity and operand checks), `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js` (spread the tuple into the builtin's operands)
   - Test: `test/unit/builtins/core.test.js` R23.1 → `1`, R23.2 → `2`, `(1+2i)`, `2`, `0`, R23.3 → `[1 2]` with `assertAllTargetsOutput`; reject fixture `len_forwarded_tuple.go` (`too many arguments for len(f()) (expected 1, found 2)`)
   - Done when: Go's result on all targets, valid `wasm`
-- [ ] Task 29.2: A too-few forwarded `return` reports at the call (R23.5)
+- [x] Task 29.2: A too-few forwarded `return` reports at the call (R23.5)
   - Files: `src/typechecker/statements.js` (`_reportReturnCount`)
   - Test: `test/unit/types/checks.test.js` asserts line:col `4:9` for R23.5; the too-many control keeps its column
   - Done when: both branches report at `stmt.values[0]` for a forwarded call
