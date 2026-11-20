@@ -1687,6 +1687,7 @@ export const expressionCheckMethods = {
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
+		this._retypeUntypedShift(targetType, srcType, expr.expr);
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
@@ -1810,6 +1811,7 @@ export const expressionCheckMethods = {
 	},
 
 	_checkConversionValidity(srcType, targetType, expr) {
+		this._retypeUntypedShift(targetType, srcType, expr.args?.[0]);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
@@ -2350,6 +2352,7 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		this._retypeUntypedShift(tp, argTypes[0], expr.args[0]);
 		this._checkTypeParamConv(argTypes[0], tp, expr, expr.args[0], scope);
 		return tp;
 	},

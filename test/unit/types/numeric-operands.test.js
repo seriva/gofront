@@ -420,6 +420,74 @@ test("compound assignment on any reports only the operator", () => {
 	);
 });
 
+test("a constant shift of 1.0 folds to an integer on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	fmt.Println(1.0 << 2)
+}`,
+		"4\n",
+	);
+});
+
+test("a non-constant shift in an interface context keeps the int default", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := uint(1)
+	var v any = 1 << s
+	fmt.Println(v)
+}`,
+		"2\n",
+	);
+});
+
+test("a non-constant shift converted to uint64 is computed in 64 bits", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := uint(60)
+	fmt.Println(uint64(1 << s))
+}`,
+		"1152921504606846976\n",
+	);
+});
+
+test("an unconstrained type parameter context reports one error for a shift", () => {
+	const { errors } = compile(`package main
+
+func G[T any](s uint) {
+	var x T = 1 << s
+	_ = x
+}`);
+	assertErrorContains(errors, "cannot use 1 << s");
+	assertEqual(errors.length, 1);
+});
+
+test("an untyped sum with a shift reports the shift once as float64", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	s := uint(1)
+	var f float64 = 1.5 + (1 << s)
+	_ = f
+}`);
+	assertErrorContains(
+		errors,
+		"shifted operand 1 (type float64) must be integer",
+	);
+	assertEqual(errors.length, 1);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

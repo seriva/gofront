@@ -251,11 +251,11 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's messages on all targets; `# O2` keys removed
 
 ### Phase 3: Shifts (root `shift-operand-type`)
-- [ ] Task 3.1: Dispatch all shifts through `_binaryResultTypeShift` and check operand before count (O3.1 control, O3.4, O3.5)
+- [x] Task 3.1: Dispatch all shifts through `_binaryResultTypeShift` and check operand before count (O3.1 control, O3.4, O3.5)
   - Files: `src/typechecker/assignability.js` (`_binaryResultTypeNonComplex`, `_binaryResultTypeShift`, `_checkTypeParamOperator`)
   - Test: reject fixtures `shift_untyped_float.go` (O3.1 regression), `shift_untyped_string.go`; `test/unit/types/errors.test.js` asserts `f <<= 1.5` reports exactly one error; `1.0 << 2` prints `4` on all targets
   - Done when: Go's messages on all targets, no wasm ICE
-- [ ] Task 3.2: Non-constant shifts take their context type, which must be an integer (O3.2, O3.3)
+- [x] Task 3.2: Non-constant shifts take their context type, which must be an integer (O3.2, O3.3)
   - Files: `src/typechecker/assignability.js`, `test/fuzz/check-baseline.txt` (retag the two `binary:<<:*,rune` overflow entries from `# O3` to `# O4`)
   - Test: reject fixtures `shift_nonconst_float_ctx.go`, `shift_nonconst_complex_ctx.go`, plus `var x T = 1 << s` (`T ~int | ~float64`); `test/unit/types/numeric-operands.test.js` `var v any = 1 << s` prints `2` and the `uint64` retyping test still passes
   - Done when: Go's messages on all targets, no wasm ICE; `# O3` keys removed
