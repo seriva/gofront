@@ -439,41 +439,28 @@ export const expressionCheckMethods = {
 		return ANY;
 	},
 
+	// A unary operator needs an operand its operand-kind table entry accepts
+	// (`!` booleans, `+`/`-` numbers, `^` integers). A type parameter needs
+	// every type in its type set to accept it. Returns whether it is defined,
+	// after reporting when it is not.
+	_checkUnaryDefined(ot, expr) {
+		if (this._operatorDefined(expr.op, ot, true)) return true;
+		this._reportOperatorUndefined(expr.op, ot, expr.operand);
+		return false;
+	},
+
+	// `!` keeps the operand's untyped or defined bool type.
 	_checkBoolUnaryOp(ot, expr) {
-		// `!a` on a type parameter needs every type in its type set to be a
-		// bool type, and keeps the type parameter's type.
-		if (ot?.kind === "typeParam") {
-			if (
-				!this._typeParamAllows(ot, (t) => isBool(this._deepUnderlying(t) ?? t))
-			)
-				this.err(
-					`invalid operation: operator ! not defined on ${exprText(expr.operand)} (${operandKind(expr.operand, typeStr(ot), false)} constrained by ${this._constraintText(ot)})`,
-					expr.operand,
-				);
-			return ot;
-		}
-		if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
-		// `!` keeps an untyped or defined bool type.
-		return isBool(ot) ? ot : BOOL;
+		if (!this._checkUnaryDefined(ot, expr)) return TAINTED_ANY;
+		return ot?.kind === "typeParam" || isBool(ot) ? ot : BOOL;
 	},
 
 	_checkNumericUnaryOp(ot, expr) {
-		if (ot?.kind === "typeParam") {
-			if (!this._typeParamAllows(ot, isComplexOrNumeric))
-				this.err(`${expr.op} requires numeric`, expr);
-			return ot;
-		}
-		if (!isNumeric(ot) && !isComplex(ot) && !isAny(ot))
-			this.err(`${expr.op} requires numeric`, expr);
-		return ot;
+		return this._checkUnaryDefined(ot, expr) ? ot : TAINTED_ANY;
 	},
 
-	// `^x` on a type parameter needs every type in its constraint to be an
-	// integer.  Other operands keep the existing (unchecked) behaviour.
 	_checkComplementUnaryOp(ot, expr) {
-		if (ot?.kind === "typeParam" && !this._typeParamAllows(ot, isInteger))
-			this.err("^ requires integer", expr);
-		return ot;
+		return this._checkUnaryDefined(ot, expr) ? ot : TAINTED_ANY;
 	},
 
 	// Whether every type in the type set of type parameter `tp`'s constraint
@@ -594,6 +581,7 @@ export const expressionCheckMethods = {
 		if (isAny(lt) || isAny(rt))
 			return (
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
+				this._checkAnyEquality(expr, lt, rt) ??
 				this.binaryResultType(expr.op, ANY, ANY, expr)
 			);
 		// A defined empty interface (`type MyAny any`, `interface{}`) is a Go
@@ -613,6 +601,25 @@ export const expressionCheckMethods = {
 		this._tagComplex64Const(rt, lt, expr.left);
 		this._markUntyped64Operands(expr, lt, rt);
 		return res;
+	},
+
+	// `any == x` needs a comparable `x` (a slice, map or func is comparable
+	// only to `nil`). The operands are otherwise treated as `any` pairs.
+	_checkAnyEquality(expr, lt, rt) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		if (lt?.kind === "typeParam" || rt?.kind === "typeParam") {
+			this._checkTypeParamComparable(expr.op, lt, rt, expr);
+			return null;
+		}
+		// Only a Go `any` beside a typed value is checked; a JS-dynamic operand
+		// beside a typed one stays dynamic.
+		const ltGo = anyKind(lt) === "go";
+		if (ltGo === (anyKind(rt) === "go")) return null;
+		const other = ltGo ? rt : lt;
+		if (!other || other.kind === "untyped" || isNil(other) || isAny(other))
+			return null;
+		if (this._operatorDefined(expr.op, other)) return null;
+		return this._reportCmpUndefined(expr.op, other, expr, true);
 	},
 
 	// An untyped operand beside a 64-bit integer is emitted as a BigInt on

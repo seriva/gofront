@@ -913,7 +913,10 @@ package main
 
 func Neg[T ~string](x T) T { return -x }
 `);
-	assertErrorContains(errors, "- requires numeric");
+	assertErrorContains(
+		errors,
+		"operator - not defined on x (variable of type T constrained by ~string)",
+	);
 });
 
 test("unary ^ on a float type parameter is rejected", () => {
@@ -926,7 +929,10 @@ type Float interface {
 
 func Flip[T Float](x T) T { return ^x }
 `);
-	assertErrorContains(errors, "^ requires integer");
+	assertErrorContains(
+		errors,
+		"operator ^ not defined on x (variable of type T constrained by Float)",
+	);
 });
 
 test("unary ^, - and + on a type parameter whose constraint embeds a type set", () => {
@@ -968,13 +974,25 @@ func Main() {
 
 test("unary operators on type parameters reject constraints outside their type set", () => {
 	const cases = [
-		["func F[T ~int | ~string](x T) T { return -x }", "- requires numeric"],
-		["func F[T ~float64 | ~int](x T) T { return ^x }", "^ requires integer"],
-		["func F[T any](x T) T { return +x }", "+ requires numeric"],
-		["func F[T comparable](x T) T { return ^x }", "^ requires integer"],
+		[
+			"func F[T ~int | ~string](x T) T { return -x }",
+			"operator - not defined on x (variable of type T constrained by ~int | ~string)",
+		],
+		[
+			"func F[T ~float64 | ~int](x T) T { return ^x }",
+			"operator ^ not defined on x (variable of type T constrained by ~float64 | ~int)",
+		],
+		[
+			"func F[T any](x T) T { return +x }",
+			"operator + not defined on x (variable of type T constrained by any)",
+		],
+		[
+			"func F[T comparable](x T) T { return ^x }",
+			"operator ^ not defined on x (variable of type T constrained by comparable)",
+		],
 		[
 			"type Mixed interface{ ~int | ~string }\ntype Wrap interface{ Mixed }\nfunc F[T Wrap](x T) T { return -x }",
-			"- requires numeric",
+			"operator - not defined on x (variable of type T constrained by Wrap)",
 		],
 	];
 	for (const [decl, msg] of cases) {

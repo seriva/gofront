@@ -625,7 +625,7 @@ func main() {
   b := []int{1, 2}
   println(a == b)
 }`);
-	assertErrorContains(errors, "not defined on");
+	assertErrorContains(errors, "slice can only be compared to nil");
 });
 
 // ── Method expressions (T.Method) ────────────────────────────

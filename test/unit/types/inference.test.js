@@ -40,7 +40,10 @@ func main() {
 	s := "hello" - "world"
 	console.log(s)
 }`);
-	assertErrorContains(errors, "Invalid operation");
+	assertErrorContains(
+		errors,
+		'operator - not defined on "hello" (untyped string constant)',
+	);
 });
 
 test("no new variables on left side of := is an error", () => {
