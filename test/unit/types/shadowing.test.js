@@ -2577,3 +2577,161 @@ func main() { var d GPUDevice; _ = d.queue }
 	);
 	assertEqual((errors ?? []).map((e) => e.message).join("\n"), "");
 });
+
+test("a package function named len leaves the generated Go's len alone (R8.12, R8.13)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func len(x string) int { return 9 }
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	fmt.Println(len("a"), s)
+}
+`,
+		"9 [1 3]\n",
+	);
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func len(x string) int { return 9 }
+
+func main() {
+	fmt.Println(map[string]int{"a": 1}, len("a"))
+}
+`,
+		"map[a:1] 9\n",
+	);
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func make(x int) int { return x + 1 }
+
+func main() {
+	fmt.Println(map[string]int{"a": 1}, make(1))
+}
+`,
+		"map[a:1] 2\n",
+	);
+});
+
+test("a package function named append leaves the generated Go's append alone", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func append(x int) int { return x + 1 }
+
+func main() {
+	fmt.Println(map[string]int{"a": 1}, []int{1}, append(2))
+}
+`,
+		"map[a:1] [1] 3\n",
+	);
+});
+
+test("builtin-named package functions leave the json codecs alone (R8.14)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A []int }
+
+func len(x int) int { return 9 }
+
+func main() {
+	b, _ := json.Marshal(T{[]int{1}})
+	fmt.Println(string(b), len(1))
+}
+`,
+		'{"A":[1]} 9\n',
+	);
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A []int }
+
+func append(x int) int { return x + 2 }
+
+func main() {
+	var t T
+	_ = json.Unmarshal([]byte(\`{"A":[1,2]}\`), &t)
+	fmt.Println(t.A, append(1))
+}
+`,
+		"[1 2] 3\n",
+	);
+});
+
+for (const name of ["len", "cap", "append", "make", "copy", "new"]) {
+	test(`a package function named ${name} leaves fmt and json alone`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct {
+	A []int
+	M map[string]int
+}
+
+func ${name}(x ...int) int { return 7 }
+
+func main() {
+	t := T{[]int{1, 2}, map[string]int{"a": 1}}
+	b, _ := json.Marshal(t)
+	var u T
+	_ = json.Unmarshal(b, &u)
+	fmt.Println(t, string(b), u, ${name}(1))
+}
+`,
+			'{[1 2] map[a:1]} {"A":[1,2],"M":{"a":1}} {[1 2] map[a:1]} 7\n',
+		);
+	});
+}
+
+for (const name of ["copy", "panic"]) {
+	test(`a package type named ${name} leaves stdlib Go alone`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type ${name} int
+
+func main() {
+	s := []int{2, 1}
+	slices.Sort(s)
+	fmt.Println(s, ${name}(3))
+}
+`,
+			"[1 2] 3\n",
+		);
+	});
+}

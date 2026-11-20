@@ -777,11 +777,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 28: Generated Go spells no shadowed builtin (root `predeclared-scope`, generated Go)
 *Scheduled from review follow-ups (2026-11-19): ledger *Shadowed builtins in wasm stdlib generics* (all-target `len` form). Follows Task 14.1, which pinned universe `error` in generated Go; this phase does the same for builtins. No docs change: these programs are valid Go and now compile.*
-- [ ] Task 28.1: `fmt` formatters reach builtins through a name the package cannot shadow (R8.12, R8.13)
+- [x] Task 28.1: `fmt` formatters reach builtins through a name the package cannot shadow (R8.12, R8.13)
   - Files: `src/lower/fmt-formatters.js`, `src/lower/gen-types.js` (one helper naming the builtin, e.g. an unexported alias declared in `gofront_gen.go` when the package shadows it)
   - Test: `test/unit/types/shadowing.test.js` R8.12 → `9 [1 3]`, R8.13 → `map[a:1] 9`, `map[a:1] 2` on all targets; the `append` control
   - Done when: passes; `gofront_gen.go` for programs without the shadow is byte-identical
-- [ ] Task 28.2: JSON codecs use the same helper (R8.14)
+- [x] Task 28.2: JSON codecs use the same helper (R8.14)
   - Files: `src/lower/json-codecs.js`
   - Test: `shadowing.test.js` R8.14 → `{"A":[1]} 9`, `[1 2] 3` on all targets; a table over user functions named `len`, `cap`, `append`, `make`, `copy`, `new` with `fmt.Println` and `json.Marshal`/`Unmarshal` of a struct with slice and map fields
   - Done when: every row prints Go's output; no `internal error in the generated Go`

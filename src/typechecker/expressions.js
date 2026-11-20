@@ -294,7 +294,12 @@ export const expressionCheckMethods = {
 			case "ImagLit":
 				return UNTYPED_COMPLEX;
 			case "Ident": {
-				const t = scope.lookup(expr.name);
+				const t = expr._universe
+					? this.universe.lookup(expr.name)
+					: scope.lookup(expr.name);
+				// Generated and stdlib Go resolves every property of the name
+				// from the universe, never from the user's scope.
+				if (expr._universe) scope = this.universe;
 				// `true`, `false` and `nil` are universe constants: with no
 				// declaration in scope the identifier is the literal.
 				if (!t && Object.hasOwn(UNIVERSE_LITERALS, expr.name)) {
@@ -2495,6 +2500,15 @@ export const expressionCheckMethods = {
 	},
 
 	checkCall(expr, scope) {
+		// The generated Go and the stdlib's Go source call the builtins `len`,
+		// `append`, `make`, ...: a function of that name in the user's package
+		// must not capture them.
+		if (
+			this._builtinsFromUniverse &&
+			expr.func.kind === "Ident" &&
+			this.universe.lookup(expr.func.name)?.kind === "builtin"
+		)
+			expr.func._universe = true;
 		expr.func._typeRefOk = true;
 		expr.func._genericOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
