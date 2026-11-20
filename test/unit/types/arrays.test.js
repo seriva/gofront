@@ -274,7 +274,10 @@ func main() {
 	_ = a
 }
 `);
-	assertErrorContains(errors, "different array lengths");
+	assertErrorContains(
+		errors,
+		"cannot use b (variable of type [4]int) as [3]int value in assignment",
+	);
 });
 
 test("error: assign []int to [3]int", () => {
@@ -287,7 +290,10 @@ func main() {
 	_ = a
 }
 `);
-	assertErrorContains(errors, "Cannot assign []int to [3]int");
+	assertErrorContains(
+		errors,
+		"(variable of type []int) as [3]int value in assignment",
+	);
 });
 
 test("error: assign [3]int to []int", () => {
@@ -300,7 +306,10 @@ func main() {
 	_ = s
 }
 `);
-	assertErrorContains(errors, "Cannot assign [3]int to []int");
+	assertErrorContains(
+		errors,
+		"(variable of type [3]int) as []int value in assignment",
+	);
 });
 
 test("no error: assign [3]int to [3]int", () => {
@@ -450,16 +459,28 @@ func main() {
 	assertErrorContains(errors, "cannot convert");
 });
 
-test("array to slice conversion works", () => {
-	const { js, errors } = compile(`
+test("array to slice conversion is rejected, slicing works", () => {
+	const { errors } = compile(`
 package main
 func main() {
 	a := [3]int{1, 2, 3}
 	s := []int(a)
+	println(s[0])
+}
+`);
+	assertErrorContains(
+		errors,
+		"cannot convert a (variable of type [3]int) to type []int",
+	);
+	const { js, errors: ok } = compile(`
+package main
+func main() {
+	a := [3]int{1, 2, 3}
+	s := a[:]
 	println(s[0], s[1], s[2])
 }
 `);
-	assertEqual(errors.length, 0);
+	assertEqual(ok.length, 0);
 	assertEqual(runJs(js), "1 2 3");
 });
 

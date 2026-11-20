@@ -15,7 +15,7 @@ func A3[S ~[]int](s S) S {
 }
 
 func A4[S ~[]int](s S) S {
-	return append(s, []string{"a"}...) // ERROR "Cannot assign []string to []int"
+	return append(s, []string{"a"}...) // ERROR "(value of type []string) as []int value in argument to append"
 }
 
 func A5[S interface{ []int | MySlice }](s S) S {

@@ -1647,48 +1647,6 @@ export const expressionCheckMethods = {
 		};
 	},
 
-	_checkElemTypeCompatible(tgtElem, srcElem, srcType, targetType, expr) {
-		if (
-			tgtElem &&
-			srcElem &&
-			!isAny(tgtElem) &&
-			!isAny(srcElem) &&
-			!identical(tgtElem, srcElem)
-		)
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-				expr,
-			);
-	},
-
-	_isMutualArraySlice(tgt, src) {
-		return (
-			(tgt?.kind === "array" && src?.kind === "slice") ||
-			(tgt?.kind === "slice" && src?.kind === "array")
-		);
-	},
-
-	// Struct types with identical field names and types convert to each other.
-	_sameStructFields(a, b) {
-		if (a?.kind !== "struct" || b?.kind !== "struct") return false;
-		return identical(a, b, { ignoreTags: true });
-	},
-
-	// Conversion to a type literal that Go rejects: a non-array to an array,
-	// or a struct to a struct whose fields differ.
-	_isInvalidLitConv(tgt, src, srcType) {
-		return (
-			this._isInvalidArrayConv(tgt, src, srcType) ||
-			(tgt?.kind === "struct" &&
-				src?.kind === "struct" &&
-				!this._sameStructFields(src, tgt))
-		);
-	},
-
-	_isInvalidArrayConv(tgt, src, srcType) {
-		return tgt?.kind === "array" && src?.kind !== "array" && !isAny(srcType);
-	},
-
 	// A complex operand converts to a real type only as an untyped constant
 	// with no imaginary part (`int(1 + 0i)`, reported when it does not fit);
 	// any other complex value needs `real()` or `imag()`.
@@ -1721,41 +1679,117 @@ export const expressionCheckMethods = {
 			this._checkConvTarget(srcType, targetType, expr, expr.expr, scope)
 		)
 			return targetType;
-		const srcResolved = this._deepUnderlying(srcType);
-		const tgtResolved = this._deepUnderlying(targetType);
-		if (isNumeric(targetType) && isComplex(srcType))
-			this._rejectComplexToReal(srcType, targetType, expr, expr.expr);
-		if (
-			isComplex(targetType) &&
-			!isComplexOrNumeric(srcType) &&
-			!isAny(srcType)
-		) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-				expr,
-			);
-		}
 		// `complex64(1 + 0.01i)`: the constant's components round to float32.
 		this._tagComplex64Const(targetType, srcType, expr.expr);
-		if (tgtResolved?.kind === "slice")
-			this._rejectSeqAsSlice(srcType, expr.expr, "a slice conversion");
-		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
-			this._checkElemTypeCompatible(
-				tgtResolved.elem,
-				srcResolved.elem,
-				srcType,
-				targetType,
-				expr,
-			);
-			return targetType;
-		}
-		if (this._isInvalidLitConv(tgtResolved, srcResolved, srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-				expr,
-			);
-		}
+		this._checkConversionForm(srcType, targetType, expr, expr.expr);
 		return targetType;
+	},
+
+	// The rules both conversion forms (`T(x)` as a type conversion node and as
+	// a call of a type name) share: a complex operand reaching a real type, a
+	// slice target the operand may not feed, then `_convertible`.
+	_checkConversionForm(srcType, targetType, expr, operand) {
+		// `nil` converts to any type that has a nil value.
+		if (
+			isNil(srcType) &&
+			NILABLE_KINDS.has(this._deepUnderlying(targetType)?.kind)
+		)
+			return;
+		if (isNumeric(targetType) && isComplex(srcType)) {
+			this._rejectComplexToReal(srcType, targetType, expr, operand);
+			return;
+		}
+		if (this._deepUnderlying(targetType)?.kind === "slice")
+			this._rejectSeqAsSlice(srcType, operand, "a slice conversion");
+		if (this._convertible(srcType, targetType, expr, operand)) return;
+		const what =
+			srcType?.kind === "untyped"
+				? this._untypedConstText(srcType, operand)
+				: `${exprText(operand)} (${operandKind(operand, typeStr(srcType), false)})`;
+		const fraction = this._truncatesToInteger(srcType, targetType, operand);
+		this.err(
+			`cannot convert ${what} to type ${typeStr(targetType)}${fraction ? " (truncated)" : ""}`,
+			expr,
+		);
+	},
+
+	// An untyped constant with a fractional part converting to an integer type.
+	_truncatesToInteger(srcType, targetType, operand) {
+		const v = operand?._const;
+		return (
+			srcType?.kind === "untyped" &&
+			v != null &&
+			isInteger(this._deepUnderlying(targetType)) &&
+			constIntValue(v) === null
+		);
+	},
+
+	// Spec *Conversions*: whether a value of `srcType` (or the untyped constant
+	// `operand`) converts to `targetType`. A JS-dynamic or unresolved type on
+	// either side, and an interface target (settled by its method set), pass here.
+	_convertible(srcType, targetType, expr, operand) {
+		if (!srcType || !targetType || isAny(srcType) || isAny(targetType))
+			return true;
+		const s = this.resolveType(this._deepUnderlying(srcType));
+		const t = this.resolveType(this._deepUnderlying(targetType));
+		if (!s || !t || s._tainted || t._tainted) return true;
+		if (t.kind === "interface") return true;
+		if (s.kind === "interface") return false;
+		if (srcType.kind === "untyped")
+			return this._untypedConvertible(srcType, t, operand);
+		if (identical(s, t, { ignoreTags: true })) return true;
+		if (s.kind === "pointer" && t.kind === "pointer")
+			return (
+				// Only unnamed pointer types convert by their base types.
+				this.resolveType(srcType)?.kind === "pointer" &&
+				this.resolveType(targetType)?.kind === "pointer" &&
+				this._pointerConversionOk(s, t, srcType, targetType, expr)
+			);
+		if (s.kind === "basic" && t.kind === "basic")
+			return this._basicConvertible(s, t);
+		if (t.kind === "basic" && isString(t) && s.kind === "slice")
+			return this._isByteOrRune(s.elem);
+		if (s.kind === "basic" && isString(s) && t.kind === "slice")
+			return this._isByteOrRune(t.elem);
+		if (s.kind === "slice" && t.kind === "array")
+			return identical(s.elem, t.elem);
+		if (s.kind === "slice" && t.kind === "pointer") {
+			const arr = this.resolveType(this._deepUnderlying(t.base));
+			return arr?.kind === "array" && identical(s.elem, arr.elem);
+		}
+		return false;
+	},
+
+	_isByteOrRune(elem) {
+		const u = this.resolveType(this._deepUnderlying(elem));
+		return (
+			u?.kind === "basic" && ["uint8", "byte", "int32", "rune"].includes(u.name)
+		);
+	},
+
+	// Between two basic types: numeric to numeric, complex to complex, string
+	// to string, bool to bool, and an integer to a string.
+	_basicConvertible(s, t) {
+		if (isNumeric(s) && isNumeric(t)) return true;
+		if (isComplex(s) && isComplex(t)) return true;
+		if (isString(s) && isString(t)) return true;
+		if (isBool(s) && isBool(t)) return true;
+		return isInteger(s) && isString(t);
+	},
+
+	// A constant converts by its class: a number to a number (a fractional
+	// value not to an integer type), an integer to a string, a string to a
+	// string or byte/rune slice, a bool to a bool.
+	_untypedConvertible(src, t, operand) {
+		const rune = src.base === "int";
+		if (src.base === "string")
+			return isString(t) || (t.kind === "slice" && this._isByteOrRune(t.elem));
+		if (src.base === "bool") return isBool(t);
+		if (t.kind !== "basic") return false;
+		if (isString(t)) return rune;
+		if (isBool(t)) return false;
+		if (isComplex(t)) return true;
+		return !this._truncatesToInteger(src, t, operand);
 	},
 
 	// Composite types convert only when identical, and a type parameter inside
@@ -1786,13 +1820,22 @@ export const expressionCheckMethods = {
 		this.err(`cannot convert nil to ${typeStr(targetType)}`, expr);
 	},
 
-	// Pointers convert when their base types share an underlying type.
+	// Unnamed pointers convert when their base types share an underlying type
+	// (ignoring struct tags).
 	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr) {
 		const sBase = this._deepUnderlying(srcPtr.base);
 		const tBase = this._deepUnderlying(tgtPtr.base);
+		// `interface{}` and `any` are one type, whatever declares them.
+		const emptyIfaces =
+			anyKind(srcPtr.base) === "go" && anyKind(tgtPtr.base) === "go";
+		if (!emptyIfaces && !identical(sBase, tBase, { ignoreTags: true }))
+			return false;
 		// Two struct types are one wasm type only when they are one declaration.
-		if (identical(sBase, tBase) && sBase?.name === tBase?.name) return true;
-		if (!this._sameStructFields(sBase, tBase)) return false;
+		if (
+			sBase?.kind !== "struct" ||
+			(identical(sBase, tBase) && sBase?.name === tBase?.name)
+		)
+			return true;
 		// WebAssembly struct types are nominal: the two pointers could not
 		// share one object.
 		if (this.target === "wasm" || this.target === "both") {
@@ -1834,87 +1877,7 @@ export const expressionCheckMethods = {
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
 		if (this._checkConvTarget(srcType, targetType, expr, expr.args?.[0]))
 			return;
-		const srcResolved = this._deepUnderlying(srcType);
-		const tgtResolved = this._deepUnderlying(targetType);
-
-		// `nil` converts to any type that has a nil value.
-		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
-
-		if (isNumeric(targetType) && isComplex(srcType)) {
-			this._rejectComplexToReal(srcType, targetType, expr, expr.args?.[0]);
-			return;
-		}
-		if (isComplex(targetType) && !isComplexOrNumeric(srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-				expr,
-			);
-			return;
-		}
-		if (tgtResolved?.kind === "slice")
-			this._rejectSeqAsSlice(srcType, expr.args?.[0], "a slice conversion");
-		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
-			this._checkElemTypeCompatible(
-				tgtResolved.elem,
-				srcResolved.elem,
-				srcType,
-				targetType,
-				expr,
-			);
-			return;
-		}
-		if (this._isInvalidArrayConv(tgtResolved, srcResolved, srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-				expr,
-			);
-			return;
-		}
-		if (identical(srcResolved, tgtResolved)) return;
-		if (this._sameStructFields(srcResolved, tgtResolved)) return;
-		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
-		if (isString(srcResolved) && isString(tgtResolved)) return;
-		if (isBool(srcResolved) && isBool(tgtResolved)) return;
-		if (
-			(isComplex(srcResolved) || isNumeric(srcResolved)) &&
-			isComplex(tgtResolved)
-		)
-			return;
-		if (
-			isString(srcResolved) &&
-			tgtResolved?.kind === "slice" &&
-			(tgtResolved.elem?.name === "byte" ||
-				tgtResolved.elem?.name === "rune" ||
-				tgtResolved.elem?.name === "uint8" ||
-				tgtResolved.elem?.name === "int32")
-		)
-			return;
-		if (
-			isString(tgtResolved) &&
-			(isNumeric(srcResolved) ||
-				(srcResolved?.kind === "slice" &&
-					(srcResolved.elem?.name === "byte" ||
-						srcResolved.elem?.name === "rune" ||
-						srcResolved.elem?.name === "uint8" ||
-						srcResolved.elem?.name === "int32")))
-		)
-			return;
-		if (
-			srcResolved?.kind === "pointer" &&
-			tgtResolved?.kind === "pointer" &&
-			this._pointerConversionOk(
-				srcResolved,
-				tgtResolved,
-				srcType,
-				targetType,
-				expr,
-			)
-		)
-			return;
-		this.err(
-			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-			expr,
-		);
+		this._checkConversionForm(srcType, targetType, expr, expr.args?.[0]);
 	},
 
 	_checkTypeAssertExpr(expr, scope) {
@@ -2466,8 +2429,7 @@ export const expressionCheckMethods = {
 			if (this._isRealNumberType(u) && s.base !== "string" && s.base !== "bool")
 				return this._untypedFitsTerm(s, operand, t);
 			s = defaultType(s);
-		} else if (this._isComplexMismatch(s, t)) return false;
-		if (this._isNonIntegerToString(s, t)) return false;
+		}
 		const saved = this.errors;
 		this.errors = [];
 		this._checkConversionValidity(s, t, expr);
@@ -2478,23 +2440,6 @@ export const expressionCheckMethods = {
 
 	_isRealNumberType(u) {
 		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
-	},
-
-	// Only a complex value converts to a complex type.
-	_isComplexMismatch(s, t) {
-		return (
-			isComplex(this._deepUnderlying(t)) && !isComplex(this._deepUnderlying(s))
-		);
-	},
-
-	// Only an integer converts to a string type.
-	_isNonIntegerToString(s, t) {
-		const su = this._deepUnderlying(s);
-		return (
-			isString(this._deepUnderlying(t)) &&
-			isComplexOrNumeric(su) &&
-			!isInteger(su)
-		);
 	},
 
 	// A conversion to a type parameter needs a constraint that lists types

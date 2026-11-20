@@ -16,7 +16,7 @@ func takeInt(a int, b int)      {}
 func main() {
 	takeInts(floats()) // ERROR "cannot use floats() (value of type float64) as int value in argument to takeInts"
 	takeStr(mixed())   // ERROR "Cannot assign string to int"
-	takeSlice(slices()) // ERROR "Cannot assign []int to []string"
+	takeSlice(slices()) // ERROR "(value of type []int) as []string value in argument to takeSlice"
 	takeIface(mixed())  // ERROR "string does not implement I"
 	takeInt(anyInt())   // ERROR "cannot use anyInt() (value of type any) as int value in argument to takeInt: need type assertion"
 	takeIface(anyInt()) // ERROR "cannot use anyInt() (value of type any) as I value in argument to takeIface: need type assertion"

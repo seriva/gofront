@@ -279,11 +279,11 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's message on all targets; both paths call `_checkConstOverflow`; the remaining `# O4` keys (`range:*:1<<63`) are gone
 
 ### Phase 5: Assignability and conversions (roots `nested-assignability`, `dual-conversion-check`)
-- [ ] Task 5.1: Pointer and array element types must be identical; composite mismatches use Go's message (O5.1–O5.4)
+- [x] Task 5.1: Pointer and array element types must be identical; composite mismatches use Go's message (O5.1–O5.4)
   - Files: `src/typechecker/assignability.js`
   - Test: reject fixtures `assign_ptr_int_to_ptr_any.go`, `assign_array_int_to_array_any.go`, `assign_ptr_int_to_ptr_named.go`, `assign_slice_int_to_slice_any.go`; existing `structCopy` tests in `test/unit/types/identity.test.js` pass
   - Done when: Go's messages on all targets, no wasm ICE
-- [ ] Task 5.2: One `_convertible` for every conversion form (O5.5–O5.8)
+- [x] Task 5.2: One `_convertible` for every conversion form (O5.5–O5.8)
   - Files: `src/typechecker/expressions.js`
   - Test: accept fixture `ptr_conv_defined_empty_iface.go`; reject fixtures `slice_conv_elem_mismatch.go`, `conv_untyped_to_struct_literal.go`, `conv_untyped_to_slice_literal.go`, `conv_untyped_to_map_literal.go`, `conv_int_to_bool.go`, `conv_float_to_string.go`, `conv_untyped_float_to_named_int.go` (O5.8); O5.7 and O5.8 controls in `test/unit/types/pointers.test.js`
   - Done when: both conversion paths call `_convertible`; `# O5` keys removed

@@ -292,7 +292,10 @@ func main() {
 	b := Base{1}
 	_ = (*S)(&b)
 }`);
-	assertErrorContains(errors, "cannot convert *Base to *S");
+	assertErrorContains(
+		errors,
+		"cannot convert &b (value of type *Base) to type *S",
+	);
 });
 
 test("(*T)(nil), NS(nil), F(nil), (*int)(nil) and M(nil) run on every target", async () => {
@@ -350,4 +353,83 @@ test("int(nil) and string(nil) stay conversion errors", () => {
 		compile("package main\nfunc main() { _ = (*int)(1) }").errors,
 		"cannot convert",
 	);
+});
+
+test("pointer conversions keep their valid forms and reject a different base", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyInt int
+type B interface{}
+
+func main() {
+	x := 7
+	p := (*MyInt)(&x)
+	*p = 9
+	var a any = 1
+	var b B = a
+	q := (*any)(&b)
+	fmt.Println(x, *q)
+}
+`,
+		"9 1\n",
+	);
+	assertErrorContains(
+		compile(`package main
+func main() { x := 1; _ = (*float64)(&x) }`).errors,
+		"cannot convert &x (value of type *int) to type *float64",
+	);
+});
+
+test("pointers to structs differing only in tags convert in a js package", () => {
+	const { errors } = compile(`package main
+type A struct{ N int }
+type B struct{ N int \`json:"n"\` }
+func main() {
+	a := A{1}
+	p := (*B)(&a)
+	println(p.N)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("conversions between byte, rune, string and integer forms stay valid", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MI int
+type MS string
+
+func main() {
+	s := "hi"
+	r := []rune("héllo")
+	fmt.Println(string(r), []byte(s), string(rune(65)), MI(1), MS("a"), float32(0.1))
+	var n MI = 66
+	fmt.Println(string(rune(n)), string(MS(s)))
+}
+`,
+		"héllo [104 105] A 1 a 0.1\nB hi\n",
+	);
+});
+
+test("named pointer types convert only when identical underneath", () => {
+	const decl = `package main
+type MyInt int
+type P1 *int
+type P2 *MyInt
+type P3 *int
+func main() { var p P1; `;
+	assertErrorContains(
+		compile(`${decl}_ = P2(p) }`).errors,
+		"cannot convert p (variable of type P1) to type P2",
+	);
+	assertErrorContains(
+		compile(`${decl}_ = (*MyInt)(p) }`).errors,
+		"cannot convert p (variable of type P1) to type *MyInt",
+	);
+	assertEqual(compile(`${decl}_ = P3(p) }`).errors.length, 0);
 });

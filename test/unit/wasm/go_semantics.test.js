@@ -481,12 +481,12 @@ func Main() string {
 	s := ""
 	if Big { s = Greeting }
 	return s + string(rune('0'+Derived/10)) + string(rune('0'+Later)) +
-		string(rune('0'+Len)) + string(rune('A'+Shift/4)) + string(rune('0'+int(Ratio)))
+		string(rune('0'+Len)) + string(rune('A'+Shift/4)) + string(rune('0'+int(Ratio*2)))
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
-	assertEqual(wasmRes, "hi, there256E3");
+	assertEqual(wasmRes, "hi, there256E7");
 });
 
 test("folded string constants are not start-function globals", () => {
@@ -512,7 +512,9 @@ import "math"
 const Tau = math.Pi * 2
 const Half = Tau / 2
 
-func Main() int { return int(Half * 100) }
+var scale = 100.0
+
+func Main() int { return int(Half * scale) }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);

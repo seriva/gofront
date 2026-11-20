@@ -1103,7 +1103,10 @@ func main() {
   }
 }`);
 	assertEqual(errors.length, 1);
-	assertErrorContains(errors, "Cannot assign func(string) bool to FilterFunc");
+	assertErrorContains(
+		errors,
+		"(value of type func(string) bool) as FilterFunc value in assignment",
+	);
 });
 
 // ═════════════════════════════════════════════════════════════
