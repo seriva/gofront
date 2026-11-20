@@ -17,7 +17,7 @@ import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
 import { newLabelScope, statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
-import { setupGlobals } from "./stdlib/index.js";
+import { setupGlobals, universeTypeNames } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
@@ -62,7 +62,7 @@ function rootIdentName(e) {
 }
 
 // Re-export for consumers that import from typechecker.js
-export { EXCLUDED_STDLIB_PACKAGES, TypeCheckError, typeStr };
+export { EXCLUDED_STDLIB_PACKAGES, TypeCheckError, typeStr, universeTypeNames };
 
 // The promoted-method entry for candidate `cand`, reusing `prev` when
 // nothing changed so the method keeps its identity across passes. A pointer

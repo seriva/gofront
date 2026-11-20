@@ -2556,3 +2556,24 @@ func main() {
 		"{1}\n2.5\npkg\n",
 	);
 });
+
+test("a generic use of an out-of-scope local type is an unknown type", () => {
+	for (const body of [
+		"func f() { type Q int; _ = Q(1) }\nfunc main() { var q Q[int]; _ = q }",
+		"func f() { type Q int; _ = Q(1) }\nfunc main() { _ = Q[int]{} }",
+	]) {
+		const { errors } = compile(`package main\n${body}\n`, { target: "js" });
+		assertErrorContains(errors, "Unknown type 'Q'");
+	}
+});
+
+test("a local type named like a browser type leaves that type alone elsewhere", () => {
+	const { errors } = compile(
+		`package main
+func f() { type GPUDevice struct{ X int }; _ = GPUDevice{X: 1} }
+func main() { var d GPUDevice; _ = d.queue }
+`,
+		{ target: "js" },
+	);
+	assertEqual((errors ?? []).map((e) => e.message).join("\n"), "");
+});

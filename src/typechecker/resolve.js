@@ -640,7 +640,7 @@ export const resolveMethods = {
 			qualified;
 		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
 		const base = name
-			? this.types.get(name)
+			? this._visibleType(name, scope)
 			: node.expr
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
