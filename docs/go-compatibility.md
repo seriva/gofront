@@ -211,6 +211,37 @@ Narrow the constraint (an integer-only set for `%`, `cmp.Ordered` for `<` and `m
 
 A generic function is called with inferred type arguments (`Id(3)`) or instantiated explicitly before it is used as a value (`f := Id[int]`, `slices.SortFunc(xs, cmp.Compare[int])`). Using it without either, as in `f := Id` or `fmt.Println(slices.Reverse)`, is `cannot use generic function Id without instantiation`. GoFront does not infer the type arguments from the target of an assignment or from a parameter type, so `var f func(int) int = Id` and `slices.SortFunc(xs, cmp.Compare)` need the explicit `[int]`.
 
+#### Values and type parameters
+
+A value whose type is a type parameter converts or assigns only as its type set allows: `var t T = n` with `n int`, `var n int = t`, `string(t)` with `T any` and `T(a)` with `a any` are errors, and `any(t)` always works. `range` over a type parameter works through its core type only (`T ~[]int` is fine, `T any` or `T ~float64` is not), and a type parameter has no fields even when its core type is a struct. An untyped constant on the left of a shift takes the type of the context, so `1 << s` in a generic function over `~uint8` yields `1024` when `s` is `uint8(10)` and the result is `int`, and ranging over a value of a `~func(func(V) bool)` type parameter yields each value.
+
+#### Constraints
+
+A constraint with several union elements or embedded constraints intersects them: `interface{ ~int; ~string }` is empty, and `==` on it is rejected. `~T` needs a `T` that is a plain type, not an interface or a type parameter, and `comparable` as a map key or type argument must be satisfied by a type that is comparable. Constraint interfaces such as `comparable` and `interface{ ~int }` can only be used as constraints, not as variable types.
+
+#### Builtin argument counts
+
+Every builtin checks how many arguments it gets, on every target: `len()` is `not enough arguments for len() (expected 1, found 0)` and `len(a, b)` is `too many arguments for len() (expected 1, found 2)`. `min` and `max` unify their arguments, so `max(1, 2.5)` is `2.5` while `max(i, 2.5)` with an `int` `i` is an error.
+
+#### Scope of local types
+
+A type declared inside a function or block exists only there. Using it in another function, or after the block that declares it, is an error: the name is unknown there. A local type never changes what a package-level or dot-imported name of the same spelling means elsewhere.
+
+#### Names used as values
+
+A type, a builtin or a package is not a value. It may stand only where Go allows it: as the callee of a conversion or call, the operand of `*` in a type, or the left side of a selector. Elsewhere each is an error with Go's message:
+
+```go
+_ = P           // P (type) is not an expression
+fmt.Println(int) // int (type) is not an expression
+_ = len         // len (built-in) must be called
+_ = strings     // use of package strings not in selector
+_ = strings.Builder // strings.Builder (type) is not an expression
+var pv P
+_ = pv.X{}      // pv.X is not a type
+_ = int{}       // invalid composite literal type int
+```
+
 #### Names that shadow predeclared types
 
 As in Go, your own declarations may reuse a predeclared name: a type named like a basic type, `any`, `error` or `comparable` (`type int32 = string`, `type error int`), a function or variable named like a builtin (`func len() int`, `max := 3`), and a local type named like an import. The name means your declaration in its scope, at package level or from a local declaration to the end of its block, nested blocks included, and keeps its predeclared meaning everywhere else: the standard library's `error` results, `errors.New` and `fmt` still use the built-in `error` interface next to a package's own `type error`.

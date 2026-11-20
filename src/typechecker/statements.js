@@ -292,6 +292,7 @@ export const statementCheckMethods = {
 
 	_checkAssignLhsType(e, scope) {
 		if (e.kind === "Ident" && e.name === "_") return ANY;
+		this._targetOperand(e);
 		const t = this.checkExpr(e, scope);
 		this._checkAssignTarget(e, scope);
 		return t;
@@ -300,6 +301,14 @@ export const statementCheckMethods = {
 	// The left side of `=`, `op=`, `++` and `--` must be addressable or a map
 	// index: not a string element, a constant, the result of a call, literal
 	// or assertion, nor a field or array element of a map entry.
+	// An assignment target or address operand that names no value is reported
+	// by the addressability check, not as a name used as a value.
+	_targetOperand(e) {
+		let node = e;
+		while (node.kind === "ParenExpr") node = node.expr;
+		node._nameOk = true;
+	},
+
 	_checkAssignTarget(e, scope) {
 		let node = e;
 		while (node.kind === "ParenExpr") node = node.expr;
@@ -364,6 +373,7 @@ export const statementCheckMethods = {
 	},
 
 	_checkIncDecStmt(stmt, scope) {
+		this._targetOperand(stmt.expr);
 		const t = this.checkExpr(stmt.expr, scope);
 		this._checkAssignTarget(stmt.expr, scope);
 		const lt = t && this.resolveType(t);
@@ -956,6 +966,7 @@ export const statementCheckMethods = {
 	_checkRangeIterAssignVars(lhs, scope, yieldParams = []) {
 		lhs.forEach((e, i) => {
 			if (e.kind === "Ident" && e.name === "_") return;
+			this._targetOperand(e);
 			const target = this.checkExpr(e, scope);
 			this._checkAssignTarget(e, scope);
 			this._markRangeTargetBox(e, target, yieldParams[i]);
