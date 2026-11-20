@@ -338,7 +338,8 @@ export const resolveMethods = {
 						return resolved;
 					}
 				}
-				return ANY;
+				// `pv.X{}`: a field or method value stands where a type must.
+				return this._notATypeSelector(node, scope);
 			case "ArrayType":
 				return this._resolveArrayTypeNode(node, scope);
 			case "FuncType":
@@ -628,6 +629,15 @@ export const resolveMethods = {
 				: this.types.has(node.name)
 		)
 			node._namesDeclType = true;
+	},
+
+	_notATypeSelector(node, scope) {
+		if (!scope) return ANY;
+		const before = this.errors.length;
+		this.checkExpr(node, scope);
+		if (this.errors.length === before)
+			this.err(`${exprText(node)} is not a type`, this._positioned(node));
+		return ANY;
 	},
 
 	_resolveGenericTypeName(node, scope) {

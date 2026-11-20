@@ -762,15 +762,15 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 27: Names used as values (root `type-as-value`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Names used as values*. Last behavior phase: carries the docs update for Phases 16–27. Gate: `npm run fuzz:check` loses every `# type-as-value` key.*
-- [ ] Task 27.1: A type, builtin or package name outside a conversion, call or selector is an error (R22.1–R22.3, R22.5)
+- [x] Task 27.1: A type, builtin or package name outside a conversion, call or selector is an error (R22.1–R22.3, R22.5)
   - Files: `src/typechecker/expressions.js` (`Ident` case of `_checkExpr`, reading the object `kind`)
   - Test: reject fixtures `type_as_value.go`, `builtin_as_value.go`, `package_as_value.go`, `basic_type_as_value.go`
   - Done when: Go's messages on all targets, no wasm ICE, no run-time `ReferenceError`
-- [ ] Task 27.2: A value in a composite literal's type position is an error (R22.4)
+- [x] Task 27.2: A value in a composite literal's type position is an error (R22.4)
   - Files: `src/typechecker/expressions.js` (composite literal type resolution)
   - Test: reject fixture `value_as_literal_type.go` (`pv.X is not a type`)
   - Done when: Go's message on all targets
-- [ ] Task 27.3: Document the new rejections and fixed cases
+- [x] Task 27.3: Document the new rejections and fixed cases
   - Files: `docs/go-compatibility.md`
   - Test: none (docs)
   - Done when: the doc describes the rejections of Phases 16–27 (type-parameter operands, values and ranges, `comparable`, constraint sets, builtin arity, local types, names as values) and the fixed miscompiles (R11.4, R18.4)

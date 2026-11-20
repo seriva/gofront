@@ -304,9 +304,8 @@ export const expressionCheckMethods = {
 					return this._checkExpr(expr, scope);
 				}
 				// `(*int)(nil)`: a predeclared type named where a type may stand.
-				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
-					expr._isTypeRef = true;
-					return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
+				if (!t && Object.hasOwn(BASIC_TYPES, expr.name)) {
+					return this._basicTypeName(expr);
 				}
 				if (!t) {
 					// The import of an excluded package already reported; its
@@ -337,6 +336,8 @@ export const expressionCheckMethods = {
 					(t.kind === "typeParam" && scope.bindsType(expr.name))
 				)
 					expr._isTypeRef = true;
+				const notValue = this._notAValue(expr, scope);
+				if (notValue) return this.err(notValue, expr);
 				// JS output keeps the Go name of what names a type: a type is a
 				// class under that name, and a type parameter is looked up by it.
 				// Decided from the binding the name resolves to, so a variable,
@@ -753,9 +754,15 @@ export const expressionCheckMethods = {
 		if (Number(String(o.value).replaceAll("_", "")) === 0) expr.op = "+";
 	},
 
+	// `*T` may name a type; `&P` is reported by the addressability check.
+	_markUnaryOperand(expr) {
+		if (expr.op === "*") expr.operand._typeRefOk = true;
+		if (expr.op === "&") this._targetOperand(expr.operand);
+	},
+
 	_checkUnaryExpr(expr, scope) {
 		this._foldNegativeZeroLiteral(expr);
-		if (expr.op === "*") expr.operand._typeRefOk = true;
+		this._markUnaryOperand(expr);
 		const ot = this.checkExpr(expr.operand, scope);
 		if (expr.op === "*" && anyKind(ot) === "go" && !expr.operand._isTypeRef)
 			return this.err(
@@ -983,6 +990,28 @@ export const expressionCheckMethods = {
 		return owner === this.globals || this.types.get(name) === t;
 	},
 
+	// What a name that is no value says when it stands where a value does:
+	// a type, a builtin or a package is allowed only as the callee of a call
+	// or conversion, the operand of `*` or the base of a selector, which set
+	// `_typeRefOk` on it.
+	_notAValue(expr, scope) {
+		// A predeclared type is no value even as an assignment target.
+		if (expr._typeRefOk || (expr._nameOk && scope)) return null;
+		const kind = scope?.lookupObject(expr.name)?.kind;
+		if (kind === "builtin") return `${expr.name} (built-in) must be called`;
+		if (kind === "pkg") return `use of package ${expr.name} not in selector`;
+		if (expr._isTypeRef) return `${expr.name} (type) is not an expression`;
+		return null;
+	},
+
+	// A predeclared type named where a type may stand, or by mistake as a value.
+	_basicTypeName(expr) {
+		expr._isTypeRef = true;
+		const notValue = this._notAValue(expr, null);
+		if (notValue) return this.err(notValue, expr);
+		return expr.name === "any" ? DECLARED_ANY : BASIC_TYPES[expr.name];
+	},
+
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
@@ -1002,6 +1031,8 @@ export const expressionCheckMethods = {
 			baseType.name !== "binary"
 		) {
 			expr._isTypeRef = true;
+			if (!expr._typeRefOk && !expr._nameOk)
+				return this.err(`${exprText(expr)} (type) is not an expression`, expr);
 		}
 		return ft;
 	},
@@ -2434,6 +2465,14 @@ export const expressionCheckMethods = {
 		expr._native = native && direct ? native : null;
 	},
 
+	_checkBuiltinArg(name, arg, i, scope) {
+		// new(T) — first arg is a type name, not a value expression
+		if (name === "new" && i === 0) return ANY;
+		// make(T, ...) names the type to make.
+		if (name === "make" && i === 0) arg._typeRefOk = true;
+		return this.checkExpr(arg, scope);
+	},
+
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
 		expr.func._genericOk = true;
@@ -2451,11 +2490,9 @@ export const expressionCheckMethods = {
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
 			expr._builtinName = fnType.name;
-			const argTypes = expr.args.map((a, i) => {
-				// new(T) — first arg is a type name, not a value expression
-				if (fnType.name === "new" && i === 0) return ANY;
-				return this.checkExpr(a, scope);
-			});
+			const argTypes = expr.args.map((a, i) =>
+				this._checkBuiltinArg(fnType.name, a, i, scope),
+			);
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
@@ -3008,6 +3045,13 @@ export const expressionCheckMethods = {
 		return t ?? ANY;
 	},
 
+	// `int{}`, `T{}` for a type parameter without a core type.
+	_isInvalidLiteralType(expr, t, base, scope) {
+		if (!expr.typeExpr) return false;
+		if (base?.kind === "basic") return true;
+		return t?.kind === "typeParam" && !this._coreType(t, scope);
+	},
+
 	checkCompositeLit(expr, scope, hintType = null) {
 		const t =
 			expr.typeExpr === null
@@ -3016,6 +3060,10 @@ export const expressionCheckMethods = {
 		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
 		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
+			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
+			return t;
+		}
+		if (this._isInvalidLiteralType(expr, t, base, scope)) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
 		}
