@@ -853,6 +853,81 @@ func main() {
 	assertEqual(out, "0 5");
 });
 
+test("a defined array with methods compares with an interface structurally", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyArr [2]int
+
+func (MyArr) M() {}
+
+type I interface{ M() }
+
+func main() {
+	var ia I = MyArr{1, 2}
+	ma := MyArr{1, 2}
+	fmt.Println(ia == ma, ma == ia, ia != ma, ma != ia)
+	switch ma {
+	case ia:
+		fmt.Println("iface")
+	default:
+		fmt.Println("none")
+	}
+	var ia1 I = MyArr{3, 4}
+	switch ma {
+	case ia1:
+		fmt.Println("ia1")
+	case MyArr{1, 2}:
+		fmt.Println("concrete")
+	}
+}
+`,
+		"true true false false\niface\nconcrete\n",
+	);
+});
+
+test("a defined struct with methods and a plain array keep matching Go against interfaces", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A, B int }
+
+func (S) M() {}
+
+type I interface{ M() }
+
+func main() {
+	var i I = S{1, 2}
+	s := S{1, 2}
+	fmt.Println(i == s, s == i, i != s, s != i)
+	switch s {
+	case i:
+		fmt.Println("iface")
+	}
+	var j I = S{3, 4}
+	switch s {
+	case j:
+		fmt.Println("j")
+	case S{1, 2}:
+		fmt.Println("concrete")
+	}
+	var a any = [2]int{1, 2}
+	p := [2]int{1, 2}
+	fmt.Println(a == p, p == a)
+	switch p {
+	case a:
+		fmt.Println("any")
+	}
+}
+`,
+		"true true false false\niface\nconcrete\ntrue true\nany\n",
+	);
+});
+
 test("a generic copy of an anonymous struct clones its array field", async () => {
 	await assertJsTargetsOutput(
 		`package main

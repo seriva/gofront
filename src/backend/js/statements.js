@@ -2298,7 +2298,19 @@ export const statementGenMethods = {
 
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
-		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		const namedTag =
+			stmt.tag &&
+			this._isStructOrArrayType(stmt.tag._type) &&
+			this._isNamedBoxKind(stmt.tag);
+		// A struct or array tag stays unboxed: concrete cases compare it by
+		// value, and interface cases box the saved copy.
+		if (namedTag) stmt.tag._noNamedBox = true;
+		let tag;
+		try {
+			tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		} finally {
+			if (namedTag) delete stmt.tag._noNamedBox;
+		}
 		if (stmt.tag && this._isStructOrArrayType(stmt.tag._type)) {
 			// Struct and array tags compare by value, not by reference.
 			this.useHelper("equal");
@@ -2312,7 +2324,10 @@ export const statementGenMethods = {
 						return `__equal(${tmp}, ${this.genExpr(e)})`;
 					// An interface case compares by dynamic type, not structure.
 					this.useHelper("ifeq");
-					return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
+					const boxed = namedTag
+						? this._genNamedIfaceBox(tmp, stmt.tag._ifaceNamedType, false)
+						: tmp;
+					return `__ifeq(${boxed}, ${this._genIfaceOperand(e)})`;
 				},
 			};
 		}
