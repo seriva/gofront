@@ -2267,7 +2267,18 @@ export const expressionCheckMethods = {
 			}
 			return [argType];
 		}
-		return expr.args.map((a) => this.checkExpr(a, scope));
+		return expr.args.map((a) => this._checkSingleValueArg(a, scope));
+	},
+
+	// An argument next to others is one value: a multi-value call there is
+	// an error, as in Go (only a sole call argument forwards its results).
+	_checkSingleValueArg(arg, scope) {
+		const type = this.checkExpr(arg, scope);
+		if (type?.kind !== "tuple") return type;
+		return this.err(
+			`multiple-value ${exprText(arg)} (${operandKind(arg, typeStr(type))}) in single-value context`,
+			arg,
+		);
 	},
 
 	_resolveCallFnType(fnType, argTypes, expr, scope) {
@@ -2524,7 +2535,7 @@ export const expressionCheckMethods = {
 		if (name === "new" && i === 0) return ANY;
 		// make(T, ...) names the type to make.
 		if (name === "make" && i === 0) arg._typeRefOk = true;
-		return this.checkExpr(arg, scope);
+		return this._checkSingleValueArg(arg, scope);
 	},
 
 	checkCall(expr, scope) {
