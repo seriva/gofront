@@ -3,6 +3,7 @@
 
 import { constIntValue } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
+import { operandKindOf, operatorDefined } from "./operators.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
@@ -48,7 +49,6 @@ const TYPE_LITERAL_KINDS = new Set([
 	"struct",
 ]);
 
-// Operators defined on integer operands only.
 // Basic types that are not number, string or bool types: JS-dynamic `any`,
 // the types of `nil` and `void`, and the `comparable` constraint.
 const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
@@ -63,7 +63,18 @@ const CONST_REJECTING_KINDS = new Set([
 	"chan",
 ]);
 
-const INTEGER_ONLY_OPS = new Set(["%", "&", "|", "^", "&^"]);
+// Operand kinds Go names in a comparison error (`not defined on struct`);
+// any other operand is named by its type.
+const CMP_KIND_NAMES = new Set([
+	"pointer",
+	"struct",
+	"array",
+	"slice",
+	"map",
+	"func",
+	"chan",
+	"interface",
+]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
@@ -109,21 +120,6 @@ function untypedClass(t) {
 	return t.base === "bool" || t.base === "string" ? t.base : "number";
 }
 
-// Which operand types an operator accepts, by operator class.
-function opClass(op) {
-	if (INTEGER_ONLY_OPS.has(op)) return "int";
-	if (op === "+") return "add";
-	if (op === "-" || op === "*" || op === "/") return "num";
-	return "ord";
-}
-
-const TYPE_PARAM_OP_PREDICATES = {
-	int: (t) => isInteger(t),
-	add: (t) => isComplexOrNumeric(t) || isString(t),
-	num: (t) => isComplexOrNumeric(t),
-	ord: (t) => isNumeric(t) || isString(t),
-};
-
 /** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
@@ -143,18 +139,13 @@ export const assignabilityMethods = {
 		return this._binaryResultTypeNonComplex(op, lt, rt, node);
 	},
 
-	// `B && bool` mixes two distinct bool types, which Go rejects.
+	// `&&` and `||` need boolean operands of one type: `B && bool` mixes two
+	// distinct bool types, `1 && 2` and `x || x` with an `int` have no boolean.
 	_checkLogicalOperands(lt, rt, node) {
 		if (!node) return;
-		if (lt?.kind === "untyped" || rt?.kind === "untyped") {
-			this.convertUntyped(lt, rt, node);
-			return;
-		}
-		if (!isBool(lt) || !isBool(rt) || identical(lt, rt)) return;
-		this.err(
-			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
-			node,
-		);
+		if (!this.convertUntyped(lt, rt, node)) return;
+		if (!this._checkIdenticalOperands(lt, rt, node)) return;
+		this._checkOperatorDefined(node.op, lt, rt, node);
 	},
 
 	_binaryResultTypeTypeParam(op, lt, rt, node) {
@@ -286,13 +277,7 @@ export const assignabilityMethods = {
 		}
 		const tp = left ? lt : rt;
 		const operand = left ? node.left : node.right;
-		const isLog = LOG_OPS.has(op);
-		const pred = isLog
-			? (t) => isBool(t)
-			: TYPE_PARAM_OP_PREDICATES[isShift ? "int" : opClass(op)];
-		if (this._typeParamAllows(tp, (t) => pred(this._deepUnderlying(t) ?? t)))
-			return;
-		const kind = `${operandKind(operand, typeStr(tp), false)} constrained by ${this._constraintText(tp)}`;
+		if (this._operatorDefined(op, tp)) return;
 		if (CMP_OPS.has(op))
 			this.err(
 				`invalid operation: ${exprText(node)} (type parameter ${typeStr(tp)} cannot use operator ${op})`,
@@ -300,14 +285,55 @@ export const assignabilityMethods = {
 			);
 		else if (isShift)
 			this.err(
-				`invalid operation: shifted operand ${exprText(operand)} (${kind}) must be integer`,
+				`invalid operation: shifted operand ${exprText(operand)} (${operandKind(operand, typeStr(tp), false)} constrained by ${this._constraintText(tp)}) must be integer`,
 				operand,
 			);
+		else this._reportOperatorUndefined(op, tp, operand);
+	},
+
+	// Whether operator `op` (the one-operand form when `unary`) is defined on
+	// operands of type `t`: the operand-kind table of `operators.js`, with a
+	// type parameter's type set read from its constraint.
+	_operatorDefined(op, t, unary = false) {
+		return operatorDefined(op, t, {
+			unary,
+			under: (u) => this._deepUnderlying(u),
+			terms: (tp) => this._constraintTerms(tp.constraint, new Set()),
+		});
+	},
+
+	// Go's `operator OP not defined on X (KIND)`, the one report of an
+	// operator the operand's type does not have.
+	_reportOperatorUndefined(op, t, operand) {
+		let what;
+		if (isNil(t)) what = "nil";
+		else if (t?.kind === "untyped") what = this._untypedConstText(t, operand);
+		else if (t?.kind === "typeParam")
+			what = `${exprText(operand)} (${operandKind(operand, typeStr(t), false)} constrained by ${this._constraintText(t)})`;
 		else
-			this.err(
-				`invalid operation: operator ${op} not defined on ${exprText(operand)} (${kind})`,
-				operand,
-			);
+			what = `${exprText(operand)} (${operandKind(operand, typeStr(t), false)})`;
+		this.err(
+			`invalid operation: operator ${op} not defined on ${what}`,
+			operand,
+		);
+	},
+
+	// The binary operator `node.op` on operands that already match: the typed
+	// operand decides, two untyped constants the first operand the operator
+	// rejects (`5.5 % 2.0`, `true + true`). Reports and returns false.
+	_checkOperatorDefined(op, lt, rt, node) {
+		if (!node) return true;
+		const operands = [
+			[lt, node.left],
+			[rt, node.right],
+		];
+		const typed = operands.find(([t]) => t.kind !== "untyped");
+		const bad = (typed ? [typed] : operands).find(
+			([t]) => !this._operatorDefined(op, t),
+		);
+		if (!bad) return true;
+		this._reportOperatorUndefined(op, bad[0], bad[1]);
+		return false;
 	},
 
 	// The count of a shift whose operand involves a type parameter: an integer
@@ -387,17 +413,20 @@ export const assignabilityMethods = {
 			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
-		if (isString(lt) && isString(rt) && op === "+")
-			return this._binaryResultTypeString(lt, rt, node);
-		if (node && lt.kind !== "untyped" && identical(lt, rt)) {
-			// `b + b` on bool: the operator is not defined for the type.
-			const left = node.left;
-			this.err(
-				`invalid operation: operator ${op} not defined on ${exprText(left)} (${operandKind(left, typeStr(lt), false)})`,
-				left,
-			);
-		} else if (node)
-			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
+		if (isString(lt) && isString(rt))
+			return this._binaryResultTypeString(op, lt, rt, node);
+		return this._binaryResultTypeOther(op, lt, rt, node);
+	},
+
+	// Operands no arithmetic rule above takes (`b + b`, `p - p`, `1 + "a"`):
+	// the operands must still match before the operator is judged, so Go
+	// reports a mismatch where the types differ and the operator where they
+	// are one type it is not defined on.
+	_binaryResultTypeOther(op, lt, rt, node) {
+		if (!node) return ANY;
+		if (!this.convertUntyped(lt, rt, node)) return ANY;
+		if (!this._checkIdenticalOperands(lt, rt, node)) return ANY;
+		this._checkOperatorDefined(op, lt, rt, node);
 		return ANY;
 	},
 
@@ -478,42 +507,36 @@ export const assignabilityMethods = {
 
 	// The result keeps the defined type of the typed operand (`S + S` is `S`);
 	// two typed operands must have identical types.
-	_binaryResultTypeString(lt, rt, node) {
+	_binaryResultTypeString(op, lt, rt, node) {
+		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
+		if (!this._checkOperatorDefined(op, lt, rt, node)) return ANY;
 		if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
 		if (lt.kind === "untyped") return rt;
-		if (rt.kind === "untyped") return lt;
-		this._checkIdenticalOperands(lt, rt, node);
 		return lt;
 	},
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
-		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
-		this._checkCmpOperandTypes(lt, rt, node);
-		this._checkEqualityComparable(op, lt, rt, node);
+		if (node && !this._checkComparison(op, lt, rt, node)) return TAINTED_ANY;
 		// A comparison is an untyped bool: it also fits a defined bool type.
 		return UNTYPED_BOOL;
 	},
 
 	_binaryResultTypeComplex(op, lt, rt, node) {
 		if (!isComplexOrNumeric(lt) || !isComplexOrNumeric(rt)) {
-			this.err(`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
+			if (node) this._reportMismatch(lt, rt, node);
 			return ANY;
 		}
-		if (op !== "+" && op !== "-" && op !== "*" && op !== "/") {
-			this.err(`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
-			return ANY;
-		}
-		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
-		if (node && !this.convertUntyped(lt, rt, node)) return ANY;
-		if (lt.kind === "untyped") return rt;
-		if (rt.kind === "untyped") return lt;
-		this._checkIdenticalOperands(lt, rt, node);
-		return lt;
+		const bothUntyped = lt.kind === "untyped" && rt.kind === "untyped";
+		if (!bothUntyped && node && !this.convertUntyped(lt, rt, node)) return ANY;
+		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
+		if (!this._checkOperatorDefined(op, lt, rt, node)) return ANY;
+		if (bothUntyped) return UNTYPED_COMPLEX;
+		return lt.kind === "untyped" ? rt : lt;
 	},
 
 	_binaryResultTypeNumeric(op, lt, rt, node) {
 		if (!this._checkIdenticalOperands(lt, rt, node)) return lt;
-		this._checkIntegerOnlyOperator(op, lt, rt, node);
+		this._checkOperatorDefined(op, lt, rt, node);
 		const lName = lt.kind === "untyped" ? lt.base : lt.name;
 		const rName = rt.kind === "untyped" ? rt.base : rt.name;
 		const lFloat = lName === "float32" || lName === "float64";
@@ -541,20 +564,6 @@ export const assignabilityMethods = {
 		return false;
 	},
 
-	// `%`, `&`, `|`, `^` and `&^` are defined on integers only. The typed
-	// operand decides; two untyped constants are integers unless one is a
-	// float constant (`5.5 % 2.0`).
-	_checkIntegerOnlyOperator(op, lt, rt, node) {
-		if (!node || !INTEGER_ONLY_OPS.has(op)) return;
-		const operands = [
-			[lt, node.left],
-			[rt, node.right],
-		];
-		const typed = operands.find(([t]) => t.kind !== "untyped");
-		const bad = (typed ? [typed] : operands).find(([t]) => !isInteger(t));
-		if (bad) this._reportIntegerOnly(op, bad[0], bad[1]);
-	},
-
 	// A Go `any` (written in source) has no operators besides `==` and `!=`:
 	// the value needs a type assertion first. JS-dynamic and recovered `any`
 	// types are not Go `any` and stay permissive.
@@ -575,33 +584,53 @@ export const assignabilityMethods = {
 		);
 	},
 
-	_reportIntegerOnly(op, type, operand) {
-		const isConst = type.kind === "untyped";
-		const kind = operandKind(
-			operand,
-			isConst ? type.base : typeStr(type),
-			isConst,
-		);
-		this.err(
-			`invalid operation: operator ${op} not defined on ${exprText(operand)} (${kind})`,
-			operand,
-		);
+	// The comparison rule (spec *Comparison operators*) for every operand
+	// kind: an untyped constant or `nil` converts to the other operand's type
+	// (`convertUntyped`), then one operand must be assignable to the other's
+	// type (`float64 == int`, `Celsius == Fahrenheit` and `i == p` for a `p`
+	// that does not implement `i` are mismatches), and the operator must be
+	// defined on that type. Reports the first failure only and returns false;
+	// JS-dynamic and recovered operands adapt to either side.
+	_checkComparison(op, lt, rt, node) {
+		if (!this.convertUntyped(lt, rt, node)) return false;
+		if (!this._comparisonTypesMatch(lt, rt, node)) return false;
+		const isEquality = op === "==" || op === "!=";
+		// Any nil-able operand compares with `nil`.
+		if (isEquality && (isNil(lt) || isNil(rt))) return true;
+		for (const t of [lt, rt]) {
+			if (this._operatorDefined(op, t)) continue;
+			this._reportCmpUndefined(op, t, node, isEquality);
+			return false;
+		}
+		return true;
 	},
 
-	// Comparing two typed operands of basic types needs identical types
-	// (`float64 == int`, `Celsius == Fahrenheit`, `S == string`): neither is
-	// assignable to the other. An untyped constant or `nil` is converted to
-	// the other operand's type first (`convertUntyped`); interface and
-	// JS-dynamic operands adapt to either side.
-	_checkCmpOperandTypes(lt, rt, node) {
-		if (!node) return;
-		if (!this.convertUntyped(lt, rt, node)) return;
-		if (!this._isTypedBasicOperand(lt)) return;
-		if (!this._isTypedBasicOperand(rt) || identical(lt, rt)) return;
-		this.err(
-			`invalid operation: ${exprText(node)} (mismatched types ${typeStr(lt)} and ${typeStr(rt)})`,
-			node,
+	_comparisonTypesMatch(lt, rt, node) {
+		for (const t of [lt, rt])
+			if (!t || t.kind === "untyped" || isNil(t) || anyKind(t) === "dynamic")
+				return true;
+		if (lt._tainted || rt._tainted || identical(lt, rt)) return true;
+		if (this._assignableQuietly(lt, rt) || this._assignableQuietly(rt, lt))
+			return true;
+		// A defined type and a type literal of its underlying type are
+		// assignable in Go even where a value copy would need `T(v)`.
+		const [lu, ru] = [lt, rt].map((t) =>
+			this.resolveType(this._deepUnderlying(t)),
 		);
+		if (this._identicalUnderlyingLiteral(lt, rt, lu, ru)) return true;
+		this._reportMismatch(lt, rt, node);
+		return false;
+	},
+
+	// `invalid operation: a < b (operator < not defined on struct)`; a slice,
+	// map or func is comparable only to `nil`.
+	_reportCmpUndefined(op, t, node, isEquality) {
+		const kind = operandKindOf(t, (u) => this._deepUnderlying(u));
+		const what =
+			isEquality && (kind === "slice" || kind === "map" || kind === "func")
+				? `${kind} can only be compared to nil`
+				: `operator ${op} not defined on ${CMP_KIND_NAMES.has(kind) ? kind : this._operandTypeStr(t)}`;
+		return this.err(`invalid operation: ${exprText(node)} (${what})`, node);
 	},
 
 	// The one conversion step for an untyped constant or `nil` operand of the
@@ -639,7 +668,9 @@ export const assignabilityMethods = {
 		return fits;
 	},
 
+	// `nil` converts to no constant, and not to a type without a nil value.
 	_nilMismatch(other) {
+		if (other?.kind === "untyped") return true;
 		return !!other && !other._tainted && this._isNilless(other);
 	},
 
@@ -671,6 +702,14 @@ export const assignabilityMethods = {
 	) {
 		const u = this._deepUnderlying(typed);
 		if (!u || typed._tainted || typed.kind === "typeParam") return true;
+		if (u.kind === "interface" && u.methods?.size > 0)
+			return this._convertUntypedToInterface(
+				u,
+				untyped,
+				untypedNode,
+				[lt, rt, node],
+				report,
+			);
 		let fits = !CONST_REJECTING_KINDS.has(u.kind);
 		if (u.kind === "basic") {
 			if (NIL_LOOSE_BASICS.has(u.name)) return true;
@@ -689,6 +728,38 @@ export const assignabilityMethods = {
 		}
 		if (!fits) report.call(this, lt, rt, node);
 		return fits;
+	},
+
+	// An untyped constant meets an interface with methods: a basic value has
+	// none, so no constant converts. Go reports a number as a type mismatch
+	// and a string or bool as a failed conversion to the interface literal.
+	_convertUntypedToInterface(u, untyped, untypedNode, operands, report) {
+		if (untyped.base !== "string" && untyped.base !== "bool") {
+			report.call(this, ...operands);
+			return false;
+		}
+		this.err(
+			`cannot convert ${this._untypedConstText(untyped, untypedNode)} to type ${this._interfaceLiteralText(u)}`,
+			untypedNode,
+		);
+		return false;
+	},
+
+	// `interface{Error() string}`: an interface spelled as a literal.
+	_interfaceLiteralText(u) {
+		const methods = [...u.methods]
+			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+			.map(([name, m]) => {
+				const ret = m.returns ?? [];
+				const rets =
+					ret.length === 0
+						? ""
+						: ret.length === 1
+							? ` ${typeStr(ret[0])}`
+							: ` (${ret.map(typeStr).join(", ")})`;
+				return `${name}(${(m.params ?? []).map(typeStr).join(", ")})${rets}`;
+			});
+		return `interface{${methods.join("; ")}}`;
 	},
 
 	// `x := nil`, `var x = nil`: untyped `nil` has no default type, so it
@@ -722,35 +793,6 @@ export const assignabilityMethods = {
 		if (!t || t.kind === "untyped" || isAny(t) || isNil(t)) return false;
 		const u = this._deepUnderlying(t);
 		return u?.kind === "basic" && !isAny(u) && !isNil(u) && !isVoid(u);
-	},
-
-	_checkComplexCmpOp(op, lt, rt, node) {
-		if (isComplex(lt) || isComplex(rt)) {
-			if (op !== "==" && op !== "!=") {
-				this.err(
-					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
-					node,
-				);
-				return true;
-			}
-		}
-		return false;
-	},
-
-	_isNonComparableKind(t) {
-		const base = this._deepUnderlying(t);
-		return (
-			base?.kind === "slice" || base?.kind === "map" || base?.kind === "func"
-		);
-	},
-
-	_checkEqualityComparable(op, lt, rt, node) {
-		if (op !== "==" && op !== "!=") return;
-		if (isNil(lt) || isNil(rt)) return;
-		for (const t of [lt, rt]) {
-			if (this._isNonComparableKind(t))
-				this.err(`operator ${op} not defined on ${typeStr(t)}`, node);
-		}
 	},
 
 	// ── Assignability ─────────────────────────────────────────────────

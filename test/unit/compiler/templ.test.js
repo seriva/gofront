@@ -1217,7 +1217,10 @@ test("mismatched operand types in a templ expression are a type error", () => {
 	const { build, check } = checkTempl("<p>{ name + 5 }</p>");
 	for (const r of [build, check]) {
 		assertEqual(r.code, 1);
-		assertContains(r.stderr, "Invalid operation: string + untyped int");
+		assertContains(
+			r.stderr,
+			"name + 5 (mismatched types string and untyped int)",
+		);
 	}
 });
 
