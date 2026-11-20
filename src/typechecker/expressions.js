@@ -1018,23 +1018,44 @@ export const expressionCheckMethods = {
 		if (baseType?._tainted) return TAINTED_ANY;
 		const exclErr = this._checkExcludedSelectorExpr(expr, baseType);
 		if (exclErr) return exclErr;
+		if (
+			expr.expr.kind === "Ident" &&
+			scope?.lookupObject(expr.expr.name)?.kind === "builtin"
+		)
+			return this.err(
+				`invalid use of ${expr.expr.name} (built-in) in selector expression`,
+				expr,
+			);
 		if (expr.expr._isTypeRef) {
 			const mExpr = this._checkMethodExprSelector(expr, baseType);
 			if (mExpr) return mExpr;
+			if (
+				baseType?.kind !== "namespace" &&
+				this._isFieldOfType(baseType, expr.field)
+			)
+				return this.err(
+					`${exprText(expr)} undefined (type ${typeStr(baseType)} has no method ${expr.field})`,
+					expr,
+				);
 		}
 		const ft = this.fieldType(baseType, expr.field, expr);
 		if (ft?.kind === "func")
 			this._markMethodValueSelector(expr, baseType, ft, scope);
 		if (
 			baseType?.kind === "namespace" &&
-			this.types.has(`${baseType.name}.${expr.field}`) &&
-			baseType.name !== "binary"
+			this.types.has(`${baseType.name}.${expr.field}`)
 		) {
 			expr._isTypeRef = true;
 			if (!expr._typeRefOk && !expr._nameOk)
 				return this.err(`${exprText(expr)} (type) is not an expression`, expr);
 		}
 		return ft;
+	},
+
+	// `S.X` where X is a struct field: a type has methods, not fields.
+	_isFieldOfType(t, field) {
+		const u = this._deepUnderlying(t?.kind === "pointer" ? t.base : t);
+		return u?.kind === "struct" && !!u.fields?.has(field);
 	},
 
 	_checkArrayBoundsExpr(btu, bt, expr, scope) {
@@ -2791,7 +2812,14 @@ export const expressionCheckMethods = {
 	_checkMakeArity(e, t) {
 		const kind = this._deepUnderlying(t)?.kind;
 		const [lo, hi] = kind === "slice" ? [2, 3] : [1, 2];
-		if (!["slice", "map", "chan"].includes(kind)) return;
+		if (!["slice", "map", "chan"].includes(kind)) {
+			if (t && t !== ANY && !t._tainted)
+				this.err(
+					`invalid argument: cannot make ${typeStr(t)}: type must be slice, map, or channel`,
+					e,
+				);
+			return;
+		}
 		if (e.args.length >= lo && e.args.length <= hi) return;
 		this.err(
 			`invalid operation: make(${[typeStr(t), ...e.args.slice(1).map(exprText)].join(", ")}) expects ${lo} or ${hi} arguments; found ${e.args.length}`,
@@ -3048,8 +3076,10 @@ export const expressionCheckMethods = {
 	// `int{}`, `T{}` for a type parameter without a core type.
 	_isInvalidLiteralType(expr, t, base, scope) {
 		if (!expr.typeExpr) return false;
-		if (base?.kind === "basic") return true;
-		return t?.kind === "typeParam" && !this._coreType(t, scope);
+		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
+		return !["struct", "array", "slice", "map", "simd", "namespace"].includes(
+			core?.kind,
+		);
 	},
 
 	checkCompositeLit(expr, scope, hintType = null) {

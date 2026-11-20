@@ -225,7 +225,7 @@ Every builtin checks how many arguments it gets, on every target: `len()` is `no
 
 #### Scope of local types
 
-A type declared inside a function or block exists only there. Using it in another function, or after the block that declares it, is `undefined: Q`. A local type never changes what a package-level or dot-imported name of the same spelling means elsewhere.
+A type declared inside a function or block exists only there. Using it in another function, or after the block that declares it, is an error: the name is unknown there. A local type never changes what a package-level or dot-imported name of the same spelling means elsewhere.
 
 #### Names used as values
 
