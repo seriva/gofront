@@ -578,6 +578,7 @@ export const expressionCheckMethods = {
 	// constant retyping codegen reads.
 	_typeBinaryOperands(expr, lt, rt, scope) {
 		if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
+		this._checkConstOperands(expr.op, lt, rt, expr);
 		if (isAny(lt) || isAny(rt))
 			return (
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
@@ -588,7 +589,6 @@ export const expressionCheckMethods = {
 		// `any` too.
 		const goAnyError = this._checkDeclaredAnyBinary(expr.op, lt, rt, expr);
 		if (goAnyError) return goAnyError;
-		this._checkConstOperands(expr.op, lt, rt, expr);
 		this._markTypeParamMapNil(expr, lt, rt, scope);
 		const res = this.binaryResultType(expr.op, lt, rt, expr);
 		if (expr.op !== "<<" && expr.op !== ">>") {
@@ -1702,6 +1702,7 @@ export const expressionCheckMethods = {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
 		this._retypeUntypedShift(targetType, srcType, expr.expr);
+		this._checkConstConversion(srcType, targetType, expr.expr);
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
@@ -1822,6 +1823,7 @@ export const expressionCheckMethods = {
 
 	_checkConversionValidity(srcType, targetType, expr) {
 		this._retypeUntypedShift(targetType, srcType, expr.args?.[0]);
+		this._checkConstConversion(srcType, targetType, expr.args?.[0]);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
@@ -2397,6 +2399,7 @@ export const expressionCheckMethods = {
 		}
 		const bad = this._firstUnconvertible(sTerms, tTerms, expr, operand);
 		if (bad) this.err(`${head}: ${this._termConvText(src, tgt, bad)}`, expr);
+		else this._realizeForRealTerms(operand, tTerms);
 		return true;
 	},
 
@@ -2447,10 +2450,7 @@ export const expressionCheckMethods = {
 	_termConvertible(s, t, expr, operand) {
 		if (s.kind === "untyped") {
 			const u = this._deepUnderlying(t) ?? t;
-			if (
-				this._isRealNumberType(u) &&
-				(s.base === "int" || s.base === "float64")
-			)
+			if (this._isRealNumberType(u) && s.base !== "string" && s.base !== "bool")
 				return this._untypedFitsTerm(s, operand, t);
 			s = defaultType(s);
 		} else if (this._isComplexMismatch(s, t)) return false;
@@ -3082,8 +3082,14 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinComplex(expr, argTypes) {
-		const crt = argTypes[0];
-		const cit = argTypes[1];
+		// `complex(1 + 0i, 0)`: an integral complex constant is a real part.
+		const [crt, cit] = argTypes.map((t, i) =>
+			t?.kind === "untyped" &&
+			expr.args[i]?._cconst &&
+			!this._complexConstUnfit(FLOAT64, expr.args[i], null)
+				? expr.args[i]._type
+				: t,
+		);
 		if (!isNumeric(crt)) {
 			this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
 			return ANY;

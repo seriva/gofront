@@ -104,11 +104,13 @@ function decimalToFloat({ n, e }) {
 	return Number(`${n}e-${e}`);
 }
 
+// A literal beyond float64 (`1e400`) keeps `v = Infinity` and its exact form,
+// so a conversion to a float type can report the overflow.
 function floatConstFromText(s) {
 	const n = Number(s);
-	if (!Number.isFinite(n)) return null;
 	const i = exactIntOfFloatText(s);
 	const r = exactDecimalOfFloatText(s);
+	if (!Number.isFinite(n) && r === null) return null;
 	const out = i === null ? { k: FLOAT, v: n } : { k: FLOAT, v: n, i };
 	return r === null ? out : { ...out, r };
 }
@@ -183,6 +185,14 @@ function typedFloat(v, t) {
 }
 
 function negateFloat(x) {
+	// An untyped value beyond float64 keeps its exact form (`-1e400`).
+	if (!x.t && !Number.isFinite(x.v) && x.r)
+		return {
+			...x,
+			v: -x.v,
+			i: x.i === undefined ? undefined : -x.i,
+			r: { n: -x.r.n, e: x.r.e },
+		};
 	const r = typedFloat(-x.v, x.t);
 	if (r && x.i !== undefined) r.i = -x.i;
 	if (r && x.r && !x.t) r.r = { n: -x.r.n, e: x.r.e };
@@ -275,8 +285,8 @@ function foldExactDecimals(op, a, b) {
 	if (!x || !y) return null;
 	const r = combineDecimals(op, x, y);
 	if (r.e > MAX_DECIMAL_EXP) return null;
-	const v = decimalToFloat(r);
-	return Number.isFinite(v) ? { k: FLOAT, v, r } : null;
+	// A result beyond float64 keeps `v = Infinity` and its exact form.
+	return { k: FLOAT, v: decimalToFloat(r), r };
 }
 
 function foldFloats(op, a, b, t) {
@@ -360,7 +370,7 @@ function foldComplex(op, a, b) {
 		return { k: BOOL, v: op === "==" ? same : !same };
 	}
 	const r = complexArith(op, x, y);
-	return r && r.every(Number.isFinite) ? complexConst(r[0], r[1]) : null;
+	return r && !r.some(Number.isNaN) ? complexConst(r[0], r[1]) : null;
 }
 
 export function foldBinary(op, a, b) {

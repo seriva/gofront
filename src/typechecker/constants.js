@@ -19,6 +19,7 @@ import {
 	intConst,
 	realOfConst,
 } from "./const-fold.js";
+import { exprText } from "./operand-text.js";
 import {
 	compositeLitMaxIndex,
 	defaultType,
@@ -421,6 +422,7 @@ export const constantCheckMethods = {
 		const base = this.resolveType(this._deepUnderlying(target));
 		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
 		if (node._cconst && this._complexConstUnfit(target, node, ctx)) return true;
+		if (this._floatConstUnfit(target, source, node, ctx)) return true;
 		if (!node._const) return false;
 		const i = constIntValue(node._const);
 		const range = this._intRange(target);
@@ -435,6 +437,40 @@ export const constantCheckMethods = {
 			return false;
 		}
 		this._reportIntOverflow(target, node, ctx, i);
+		return true;
+	},
+
+	// Whether the untyped constant value `v` is representable in the basic
+	// numeric type `u`: in range for an integer, finite after rounding for a
+	// float, finite components for a complex.
+	_constFitsType(v, u) {
+		if (v.k === "STRING" || v.k === "BOOL") return true;
+		const range = INT_RANGES[u.name];
+		if (range) {
+			const i = constIntValue(v);
+			return i !== null && i >= range[0] && i <= range[1];
+		}
+		const c = v.k === "COMPLEX" ? v.v : { re: Number(v.v), im: 0 };
+		if (!isComplex(u) && c.im !== 0) return false;
+		const f32 = u.name === "float32" || u.name === "complex64";
+		const fit = (x) => Number.isFinite(f32 ? Math.fround(x) : x);
+		return fit(c.re) && fit(c.im);
+	},
+
+	// A float or complex target the untyped constant `node` does not fit
+	// (`var f float32 = 1e40`): reported, true.
+	_floatConstUnfit(target, source, node, ctx) {
+		const u = this.resolveType(this._deepUnderlying(target));
+		if (u?.kind !== "basic" || !/^(float|complex)/.test(u.name)) return false;
+		const v = node._cconst ?? node._const;
+		if (!v || this._constFitsType(v, u)) return false;
+		const shown = this._untypedConstText(source, node);
+		this.err(
+			ctx
+				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`
+				: `${shown} overflows ${typeStr(target)}`,
+			node,
+		);
 		return true;
 	},
 
@@ -455,7 +491,7 @@ export const constantCheckMethods = {
 		const shown =
 			node.kind === "BasicLit"
 				? `${node.value} (${what})`
-				: `${text} (${what} ${text})`;
+				: `${exprText(node)} (${what} ${text})`;
 		this.err(
 			ctx
 				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`
@@ -524,6 +560,25 @@ export const constantCheckMethods = {
 		return true;
 	},
 
+	// `float32(1e40)`: an untyped constant must fit the float or complex type
+	// it converts to (a complex constant meeting a real type is
+	// `_complexConstUnfit`'s).
+	_checkConstConversion(srcType, targetType, node) {
+		if (srcType?.kind !== "untyped" || !(node?._const || node?._cconst)) return;
+		if (this._isInterfaceType(targetType)) {
+			this._checkConstDefault(srcType, node, "conversion");
+			return;
+		}
+		const u = this.resolveType(this._deepUnderlying(targetType));
+		if (u?.kind !== "basic" || !/^(float|complex)/.test(u.name)) return;
+		if (node._cconst && !isComplex(u)) return;
+		if (this._constFitsType(node._cconst ?? node._const, u)) return;
+		this.err(
+			`cannot convert ${this._untypedConstText(srcType, node)} to type ${typeStr(targetType)}`,
+			node,
+		);
+	},
+
 	// `x := 1 << 63`, `println(1 << 64)`: the constant takes its default type.
 	_checkConstDefault(source, node, ctx) {
 		// `x := 1.0 << s` gives the shifted operand a non-integer default type.
@@ -556,13 +611,14 @@ export const constantCheckMethods = {
 	// operand's type.
 	_checkConstOperands(op, lt, rt, expr) {
 		if (op === "<<" || op === ">>" || op === "&&" || op === "||") return;
-		// An interface operand has no constant range: the operator error covers it.
-		const isIface = (t) => this.resolveType(t)?.kind === "interface";
-		if (rt?.kind === "untyped" && lt?.kind !== "untyped") {
-			if (!isIface(lt)) this._checkConstOverflow(lt, rt, expr.right, null);
-		} else if (lt?.kind === "untyped" && rt?.kind !== "untyped") {
-			if (!isIface(rt)) this._checkConstOverflow(rt, lt, expr.left, null);
-		}
+		// An interface operand holds the constant's default type, but only an
+		// equality is defined on it (`any + 1 << 64` is the operator's error).
+		const eq = op === "==" || op === "!=";
+		const fits = (t) => eq || !this._isInterfaceType(t);
+		if (rt?.kind === "untyped" && lt?.kind !== "untyped" && fits(lt))
+			this._checkConstOverflow(lt, rt, expr.right, null);
+		else if (lt?.kind === "untyped" && rt?.kind !== "untyped" && fits(rt))
+			this._checkConstOverflow(rt, lt, expr.left, null);
 	},
 
 	_intRange(t) {

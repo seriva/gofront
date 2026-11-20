@@ -586,6 +586,44 @@ func main() {
 	);
 });
 
+section("Constants — float, complex and default-type overflow (Task 4.3)");
+
+test("a non-constant shift of a float or complex constant needs an integer context", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var b uint = 1
+	_ = (1 + 0i) << b
+	x := 1.0 << b
+	var v any = 2.0 << b
+	_, _ = x, v
+}
+`);
+	assertErrorContains(errors, "1 + 0i (type complex128) must be integer");
+	assertErrorContains(
+		errors,
+		"shifted operand 1.0 (type float64) must be integer",
+	);
+	assertErrorContains(
+		errors,
+		"shifted operand 2.0 (type float64) must be integer",
+	);
+});
+
+test("an untyped constant compared with an interface must fit its default type", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var b any
+	_ = b == 1e400
+}
+`);
+	assertErrorContains(
+		errors,
+		"1e400 (untyped float constant 1e+400) overflows float64",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

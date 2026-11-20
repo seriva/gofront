@@ -149,6 +149,22 @@ func main() {
 	);
 });
 
+test("the largest finite float32 constant is accepted", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var f float32 = 3.4028234663852886e38
+	g := float32(3.4028234663852886e38)
+	fmt.Println(f == g, f > 1e38)
+}
+`,
+		"true true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
