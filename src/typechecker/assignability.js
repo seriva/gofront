@@ -579,6 +579,7 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeCmp(op, lt, rt, node) {
 		if (node && !this._checkComparison(op, lt, rt, node)) return TAINTED_ANY;
+		if (node) this._markComparedAggregate(op, lt, rt, node);
 		// A comparison is an untyped bool: it also fits a defined bool type.
 		return UNTYPED_BOOL;
 	},
@@ -665,6 +666,22 @@ export const assignabilityMethods = {
 			return false;
 		}
 		return true;
+	},
+
+	// A struct or array compared with an interface enters it as in an
+	// assignment, so codegen boxes it with its dynamic type.
+	_markComparedAggregate(op, lt, rt, node) {
+		if (op !== "==" && op !== "!=") return;
+		const isAgg = (t) =>
+			["struct", "array"].includes(
+				this.resolveType(this._deepUnderlying(t))?.kind,
+			);
+		const isIface = (t) =>
+			t?.kind !== "untyped" &&
+			(isAny(t) ||
+				this.resolveType(this._deepUnderlying(t))?.kind === "interface");
+		if (isIface(lt) && isAgg(rt)) this._markIfaceBox(lt, rt, node.right);
+		else if (isIface(rt) && isAgg(lt)) this._markIfaceBox(rt, lt, node.left);
 	},
 
 	// The types an operator is judged on: an untyped complex constant that

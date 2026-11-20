@@ -1410,3 +1410,37 @@ closureCase(
 	fmt.Println(*ps)`,
 	"{8}\n{1}\n",
 );
+
+test("an interface compares equal to a struct or array value on the JS targets (O8.1, O8.2)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{}
+type P struct{ X int }
+type Q struct{ X int }
+
+func main() {
+	var i I = P{1}
+	fmt.Println(i == P{1}, P{1} == i, i != P{1}, i != P{2})
+	var a any = [2]int{1, 2}
+	fmt.Println(a == [2]int{1, 2}, a != [2]int{1, 3})
+	var b any = P{1}
+	var a1 any = &P{1}
+	var a2 any = Q{1}
+	fmt.Println(b == P{1}, P{1} == b, P{1} == a1, P{1} == a2)
+	p := &P{1}
+	var ip any = p
+	fmt.Println(ip == p, p == ip)
+	switch b {
+	case P{2}:
+		fmt.Println("two")
+	case P{1}:
+		fmt.Println("one")
+	}
+}
+`,
+		"true true false true\ntrue true\ntrue true false false\ntrue true\none\n",
+	);
+});

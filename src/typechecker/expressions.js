@@ -580,12 +580,14 @@ export const expressionCheckMethods = {
 	_typeBinaryOperands(expr, lt, rt, scope) {
 		if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
 		this._checkConstOperands(expr.op, lt, rt, expr);
-		if (isAny(lt) || isAny(rt))
-			return (
+		if (isAny(lt) || isAny(rt)) {
+			const res =
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
 				this._checkAnyEquality(expr, lt, rt) ??
-				this.binaryResultType(expr.op, ANY, ANY, expr)
-			);
+				this.binaryResultType(expr.op, ANY, ANY, expr);
+			if (!res?._tainted) this._markComparedAggregate(expr.op, lt, rt, expr);
+			return res;
+		}
 		// A defined empty interface (`type MyAny any`, `interface{}`) is a Go
 		// `any` too.
 		const goAnyError = this._checkDeclaredAnyBinary(expr.op, lt, rt, expr);
