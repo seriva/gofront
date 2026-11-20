@@ -6,9 +6,11 @@
 // division by zero are reported here.
 
 import {
+	complexConst,
 	constFromLit,
 	constIntValue,
 	convertConst,
+	floatConstOf,
 	foldBinary,
 	foldMinMax,
 	foldUnary,
@@ -51,6 +53,7 @@ const BASIC_CONVERSIONS = new Set([
 // Node kinds that can be constant expressions.
 const CONST_KINDS = new Set([
 	"BasicLit",
+	"ImagLit",
 	"Ident",
 	"ParenExpr",
 	"UnaryExpr",
@@ -68,6 +71,8 @@ function nonIntegerConstKind(v) {
 		if (v.t) return `${v.t} constant`;
 		return constIntValue(v) === null ? "untyped float constant" : null;
 	}
+	if (v.k === "COMPLEX")
+		return constIntValue(v) === null ? "untyped complex constant" : null;
 	return `${v.k.toLowerCase()} constant`;
 }
 
@@ -89,6 +94,23 @@ function isUnshadowedNil(e, scope) {
 	);
 }
 
+// `real`, `imag` and `complex` of untyped constants (typed operands are not
+// folded): the folded value, null, or undefined for any other builtin.
+function foldComplexBuiltin(name, vals) {
+	const untyped = vals.every((v) => !v.t && v.k !== "STRING" && v.k !== "BOOL");
+	if (name === "complex" && vals.length === 2) {
+		if (!untyped || vals.some((v) => v.k === "COMPLEX")) return null;
+		return complexConst(Number(vals[0].v), Number(vals[1].v));
+	}
+	if ((name === "real" || name === "imag") && vals.length === 1) {
+		if (!untyped) return null;
+		const c =
+			vals[0].k === "COMPLEX" ? vals[0].v : { re: Number(vals[0].v), im: 0 };
+		return floatConstOf(name === "real" ? c.re : c.im);
+	}
+	return undefined;
+}
+
 const NEGATIVE_SHIFT_ERROR = "invalid shift count: negative shift count";
 
 /** @type {ThisType<import('./index.js').TypeChecker>} */
@@ -106,7 +128,6 @@ export const constantCheckMethods = {
 	_nonIntegerConst(expr, scope = null) {
 		let e = expr;
 		while (e?.kind === "ParenExpr") e = e.expr;
-		if (e?.kind === "ImagLit") return "untyped complex constant";
 		if (e?.kind === "BasicLit" && e.litKind === "NIL") return "untyped nil";
 		if (isUnshadowedNil(e, scope ?? this.globals)) return "untyped nil";
 		let v = null;
@@ -218,7 +239,12 @@ export const constantCheckMethods = {
 		if (!CONST_KINDS.has(expr.kind)) return;
 		this._noteComplexConstInit(expr, scope ?? this.globals);
 		const raw = this._constRaw(expr, scope);
-		expr._const = raw && !raw.overflow && !raw.error ? raw : null;
+		const val = raw && !raw.overflow && !raw.error ? raw : null;
+		// A complex value stays off `_const`, which the backends emit as a real
+		// number: `_realizeComplexConst` copies its real part there once the
+		// constant converts to a real type.
+		expr._const = val?.k === "COMPLEX" ? null : val;
+		expr._cconst = val?.k === "COMPLEX" ? val : null;
 		if (!raw || expr._constReported) return;
 		if (raw.error) {
 			expr._constReported = true;
@@ -235,6 +261,8 @@ export const constantCheckMethods = {
 		switch (expr.kind) {
 			case "BasicLit":
 				return constFromLit(expr);
+			case "ImagLit":
+				return complexConst(0, Number(String(expr.value).replaceAll("_", "")));
 			case "ParenExpr":
 				return this._constValue(expr.expr, scope);
 			case "UnaryExpr": {
@@ -303,6 +331,8 @@ export const constantCheckMethods = {
 		if (arrayLen !== null) return intConst(BigInt(arrayLen));
 		const vals = (expr.args ?? []).map((a) => this._constValue(a, scope));
 		if (vals.length === 0 || vals.some((v) => !v)) return null;
+		const complexVal = foldComplexBuiltin(fn.name, vals);
+		if (complexVal !== undefined) return complexVal;
 		if (fn.name === "min" || fn.name === "max")
 			return foldMinMax(fn.name === "min", vals);
 		// GoFront strings use UTF-16 code units on both backends.

@@ -261,7 +261,7 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's messages on all targets, no wasm ICE; `# O3` keys removed
 
 ### Phase 4: Constant representability (root `const-representability`)
-- [ ] Task 4.1: Complex constants folded by value
+- [x] Task 4.1: Complex constants folded by value
   - Files: `src/typechecker/const-fold.js`, `src/typechecker/constants.js`
   - Test: `test/unit/language/constants.test.js`: `const c = 3 + 4i; const r = real(c)` sizes an array of length `3` (O4.4); `(1 + 2i) * (3 - 1i)` folds to `(5+5i)` on all targets
   - Done when: both pass on all targets

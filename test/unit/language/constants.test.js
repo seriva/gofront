@@ -490,6 +490,44 @@ func main() {
 	);
 });
 
+section("Constants — complex values (Task 4.1)");
+
+test("real and imag of a complex constant are constants", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const c = 3 + 4i
+const r = real(c)
+
+func main() {
+	var a [int(r)]int
+	var b [int(imag(c))]int
+	fmt.Println(len(a), len(b))
+}
+`,
+		"3 4\n",
+	);
+});
+
+test("complex constants fold by value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const p = (1 + 2i) * (3 - 1i)
+const q = complex(1, 2) / (1 + 1i)
+
+func main() {
+	fmt.Println(p, q, p == 5+5i, -p)
+}
+`,
+		"(5+5i) (1.5+0.5i) true (-5-5i)\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
