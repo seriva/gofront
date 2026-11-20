@@ -84,8 +84,9 @@ const CMP_KIND_NAMES = new Set([
 // `{ n, e }` form (n * 10^-e).
 function hugeText(r) {
 	if (!r) return null;
-	const digits = r.n.toString().replace(/0+$/, "") || "0";
-	const exp = r.n.toString().length - 1 - r.e;
+	const abs = (r.n < 0n ? -r.n : r.n).toString();
+	const digits = abs.replace(/0+$/, "") || "0";
+	const exp = abs.length - 1 - r.e;
 	const mantissa =
 		digits.length > 1 ? `${digits[0]}.${digits.slice(1, 6)}` : digits;
 	return `${r.n < 0n ? "-" : ""}${mantissa}e+${exp}`;

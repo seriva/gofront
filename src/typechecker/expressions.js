@@ -1,5 +1,6 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue, realOfConst } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
 import { newLabelScope } from "./statements.js";
 import {
@@ -1525,6 +1526,10 @@ export const expressionCheckMethods = {
 	// integer (`s[1 == 1]`, `make([]int, "a")`).
 	// A typed operand must have an integer type too (`s[f]` with `f float64`).
 	_checkIntegerConstOperand(operand, what, scope) {
+		// An integral complex constant is its real part: the backends must see
+		// a real number.
+		if (operand?._cconst && constIntValue(operand._cconst) !== null)
+			this._realizeComplexNode(operand, realOfConst(operand._cconst));
 		const kind = this._nonIntegerConst(operand, scope);
 		if (kind) {
 			this.err(

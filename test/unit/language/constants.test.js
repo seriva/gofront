@@ -557,6 +557,38 @@ func main() {
 	);
 });
 
+test("an integral complex constant is a valid index and array length", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const two = 2 + 0i
+
+func main() {
+	s := []int{10, 20, 30}
+	var a [1 + 0i]int
+	var b [two]int
+	fmt.Println(s[1+0i], s[two], s[0+0i:two], len(a), len(b), len(make([]int, two)))
+}
+`,
+		"20 30 [10 20] 1 2 2\n",
+	);
+});
+
+test("negative huge float constants print the sign once", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var f float32 = -1e400
+	var g float32 = -1.25e400
+	_, _ = f, g
+}
+`);
+	assertErrorContains(errors, "(untyped float constant -1e+400)");
+	assertErrorContains(errors, "(untyped float constant -1.25e+400)");
+});
+
 test("a complex constant with an imaginary part is not a real number", () => {
 	const { errors } = compile(`package main
 

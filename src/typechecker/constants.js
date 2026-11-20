@@ -77,8 +77,9 @@ function nonIntegerConstKind(v) {
 		if (v.t) return `${v.t} constant`;
 		return constIntValue(v) === null ? "untyped float constant" : null;
 	}
-	// Go accepts `[1 + 0i]int`, but the backends emit a complex value for it.
-	if (v.k === "COMPLEX") return "untyped complex constant";
+	// An integral complex constant is its real part (`[1 + 0i]int`).
+	if (v.k === "COMPLEX")
+		return constIntValue(v) === null ? "untyped complex constant" : null;
 	return `${v.k.toLowerCase()} constant`;
 }
 
