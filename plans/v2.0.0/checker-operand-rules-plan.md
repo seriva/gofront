@@ -309,15 +309,15 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's result on all targets; `# O7` keys removed
 
 ### Phase 8: Operator codegen
-- [ ] Task 8.1: JS equality of an interface with a struct or array value (O8.1, O8.2)
+- [x] Task 8.1: JS equality of an interface with a struct or array value (O8.1, O8.2)
   - Files: `src/backend/js/expressions.js` (`_isStructEquality` after `_isIfaceEquality`; `_genIfaceOperand` boxes struct and array values)
   - Test: `test/unit/language/value-semantics.test.js` `assertOutput` for O8.1 (`i == P{1}`, `a == [2]int{1, 2}`), O8.2 (`a == P{1}`, `P{1} == a`, `P{1} == any(&P{1})`, `P{1} == any(Q{1})`), `!=`, and `switch a { case P{1}: }`; interface-pointer equality unchanged
   - Done when: Go's output on all targets
-- [ ] Task 8.2: Complex `++`/`--` through compound assignment (O8.3, O8.4)
+- [x] Task 8.2: Complex `++`/`--` through compound assignment (O8.3, O8.4)
   - Files: `src/backend/js/statements.js` (`genStmt` and `stmtInline`), `src/backend/wasm/emit-stmts.js`, `src/typechecker/statements.js`
   - Test: `test/unit/types/complex.test.js` `assertOutput` for O8.3 (`(1+1i)`) and O8.4 (`(-1+1i)`), including a map element `m[k]++`, a field `p.C++`, and a `for`-post `c++`
   - Done when: Go's output on all targets, valid `wasm`; `# O8` keys removed
-- [ ] Task 8.3: Document the new rejections and fixed cases
+- [x] Task 8.3: Document the new rejections and fixed cases
   - Files: `docs/go-compatibility.md`
   - Test: none (docs); `npm run fuzz:check` baseline holds no `# O1`–`# O8` keys
   - Done when: the doc lists the rules of Phases 2–8 that now match Go and no longer lists them as differences
