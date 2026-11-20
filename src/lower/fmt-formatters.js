@@ -682,6 +682,8 @@ class FmtGen extends TypeSpeller {
 				`func ${name}(v any) (fmtrt.Arg, bool) {`,
 				"\tswitch x := v.(type) {",
 				...cases,
+				"\tdefault:",
+				"\t\t_ = x",
 				"\t}",
 				"\treturn fmtrt.Arg{}, false",
 				"}",

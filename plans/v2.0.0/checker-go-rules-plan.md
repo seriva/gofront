@@ -799,11 +799,11 @@ Last behavior phase: carries the docs update for Phases 1–14.
 
 ### Phase 30: Type switch bindings (root `typeswitch-binding`)
 *Scheduled from review follow-ups (2026-11-19, second sweep): ledger *Type switch blank binding* and *Unused type switch binding*.*
-- [ ] Task 30.1: `_` cannot be a type-switch binding (R24.1)
+- [x] Task 30.1: `_` cannot be a type-switch binding (R24.1)
   - Files: `src/typechecker/statements.js` (`_checkTypeSwitchStmt`), `src/parser/statements.js` (`_parseTypeSwitchBody` keeps the binding's position)
   - Test: reject fixture `typeswitch_blank_binding.go` (`no new variable on left side of :=`)
   - Done when: Go's message on all targets
-- [ ] Task 30.2: A type-switch binding used in no clause is reported (R24.2)
+- [x] Task 30.2: A type-switch binding used in no clause is reported (R24.2)
   - Files: `src/typechecker/statements.js` (`_checkTypeSwitchStmt`: drop the marking `lookup`, report once if no clause's symbol was used)
   - Test: reject fixtures `typeswitch_unused_binding.go`, `typeswitch_unused_binding_two_cases.go` (`x declared and not used`); R24 controls in `test/unit/types/switch-cases.test.js`
   - Done when: Go's message on all targets; `example/` and `stdlib/` still compile (`npm run check`, stdlib build)

@@ -851,6 +851,7 @@ func describe(x any) string {
   case string:
     return "string"
   default:
+    _ = v
     return "other"
   }
 }
