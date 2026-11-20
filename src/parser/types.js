@@ -40,6 +40,7 @@ export const typeParserMethods = {
 
 	parseTypeName() {
 		const t = this.advance();
+		const at = { _line: t.line, _col: t.col };
 		let name = t.value;
 		// qualified: pkg.Type
 		if (this.check(T.DOT)) {
@@ -52,9 +53,9 @@ export const typeParserMethods = {
 			const typeArgs = [this.parseType()];
 			while (this.match(T.COMMA)) typeArgs.push(this.parseType());
 			this.expect(T.RBRACKET);
-			return { kind: "GenericTypeName", name, typeArgs };
+			return { kind: "GenericTypeName", name, typeArgs, ...at };
 		}
-		return { kind: "TypeName", name };
+		return { kind: "TypeName", name, ...at };
 	},
 
 	// Lookahead to distinguish Type[int] (generic) from [n]T (array) in type context.

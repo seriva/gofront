@@ -2497,3 +2497,83 @@ false:
 		"ok\n",
 	);
 });
+
+for (const target of ["js", "wasm"]) {
+	test(`a local type does not change a dot-imported variable of the same name (${target})`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"dot/d.go": `//gofront:target ${target}
+package dot
+
+var Q int = 4
+`,
+				"main.go": `package main
+
+import . "./dot"
+
+func Main() int {
+	type Q struct{ X int }
+	q := Q{X: 3}
+	return q.X
+}
+
+func Outer() int { return Q + 1 }
+`,
+			},
+			{ exports: ["Main", "Outer"] },
+		);
+		assertEqual(mod.Main(), 3);
+		assertEqual(mod.Outer(), 5);
+	});
+}
+
+test("a block-scoped type is unknown outside its block, a function-local one outside its function", () => {
+	for (const body of [
+		"func f() { type Q struct{ X int }; _ = Q{} }\nfunc main() { var q Q; _ = q }",
+		"func main() { { type Q int; _ = Q(1) }; var q Q; _ = q }",
+	]) {
+		const { errors } = compile(`package main\n${body}\n`, { target: "js" });
+		assertErrorContains(errors, "Unknown type 'Q'");
+	}
+});
+
+test("each block and function keeps its own type of the same name", async () => {
+	await assertAllTargetsOutput(
+		prog(`type Q string
+func a() {
+	type Q struct{ X int }
+	fmt.Println(Q{1})
+}
+func main() {
+	a()
+	{
+		type Q float64
+		fmt.Println(Q(2.5))
+	}
+	var q Q = "pkg"
+	fmt.Println(q)
+}`),
+		"{1}\n2.5\npkg\n",
+	);
+});
+
+test("a generic use of an out-of-scope local type is an unknown type", () => {
+	for (const body of [
+		"func f() { type Q int; _ = Q(1) }\nfunc main() { var q Q[int]; _ = q }",
+		"func f() { type Q int; _ = Q(1) }\nfunc main() { _ = Q[int]{} }",
+	]) {
+		const { errors } = compile(`package main\n${body}\n`, { target: "js" });
+		assertErrorContains(errors, "Unknown type 'Q'");
+	}
+});
+
+test("a local type named like a browser type leaves that type alone elsewhere", () => {
+	const { errors } = compile(
+		`package main
+func f() { type GPUDevice struct{ X int }; _ = GPUDevice{X: 1} }
+func main() { var d GPUDevice; _ = d.queue }
+`,
+		{ target: "js" },
+	);
+	assertEqual((errors ?? []).map((e) => e.message).join("\n"), "");
+});

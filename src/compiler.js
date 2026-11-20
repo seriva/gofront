@@ -57,7 +57,11 @@ import {
 	resolveGwDir,
 	resolveStdlibSource,
 } from "./resolver.js";
-import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
+import {
+	EXCLUDED_STDLIB_PACKAGES,
+	TypeChecker,
+	universeTypeNames,
+} from "./typechecker/index.js";
 import {
 	BASIC_TYPES,
 	JS_BUILTIN_CLASSES,
@@ -786,7 +790,8 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners) {
 		predeclared,
 	);
 	// A local type named after a JS built-in would shadow it in the bundle.
-	const foreign = new Set(JS_BUILTIN_CLASSES);
+	// A local type named after a universe type (`GPUDevice`) must not reuse it.
+	const foreign = new Set([...JS_BUILTIN_CLASSES, ...universeTypeNames()]);
 	// A local type that shadows a predeclared type (`type int32 = string`)
 	// gets its own name, so `int32` keeps meaning the predeclared type
 	// everywhere else.

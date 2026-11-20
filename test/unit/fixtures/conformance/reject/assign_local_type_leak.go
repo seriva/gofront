@@ -5,6 +5,6 @@ func f() {
 }
 
 func main() {
-	Q = Q{} // ERROR "cannot assign to Q"
-	_ = &Q // ERROR "cannot take address of Q"
+	Q = Q{} // ERROR "Undefined: 'Q'"
+	_ = &Q // ERROR "Undefined: 'Q'"
 }
