@@ -849,6 +849,35 @@ func main() {
 	);
 });
 
+test("complex ++ and -- add and subtract one on every target (O8.3, O8.4)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ C complex128 }
+
+func main() {
+	var c complex128 = 1i
+	c++
+	var d complex64 = 1i
+	d--
+	m := map[string]complex128{"a": 1i}
+	m["a"]++
+	p := P{1i}
+	p.C++
+	q := &p
+	q.C--
+	for e := 0i; real(e) < 2; e++ {
+		fmt.Println(e)
+	}
+	fmt.Println(c, d, m, p)
+}
+`,
+		"(0+0i)\n(1+0i)\n(1+1i) (-1+1i) map[a:(1+1i)] {(0+1i)}\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

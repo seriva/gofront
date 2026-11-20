@@ -351,6 +351,10 @@ export const statementGenMethods = {
 				}
 				break;
 			case "IncDecStmt": {
+				if (stmt._complexIncDec) {
+					this._genAssignStmt(stmt._complexIncDec);
+					break;
+				}
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
 				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
@@ -2144,6 +2148,8 @@ export const statementGenMethods = {
 					this._inlineAssign(stmt),
 				);
 			case "IncDecStmt": {
+				if (stmt._complexIncDec)
+					return this.stmtInline(stmt._complexIncDec, pre);
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
@@ -2236,7 +2242,10 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
-			if (this._isCompoundWithCall(stmt)) {
+			if (
+				this._isCompoundWithCall(stmt) ||
+				this._isComplexCompoundAssign(stmt)
+			) {
 				const mark = this.out.length;
 				this._genAssignStmt(stmt);
 				const body = this.out.splice(mark).map((l) => l.trim());
