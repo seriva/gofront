@@ -324,15 +324,15 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
 
 ### Phase 9: Comparable types (root `type-comparability`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Unhashable array chain in struct map key*. Lands after Phase 8; carries its own docs line since Task 8.3 documents Phases 2–8.*
-- [ ] Task 9.1: Unify `_isComparable` (including type parameters); map types reject non-comparable keys (O9.1–O9.3)
+- [x] Task 9.1: Unify `_isComparable` (including type parameters); map types reject non-comparable keys (O9.1–O9.3)
   - Files: `src/typechecker/resolve.js` (`_isComparable` + map type resolution), `src/typechecker/assignability.js` (`_typeParamComparable` unified into `_isComparable`), `src/typechecker/statements.js` (`_checkSwitchTag` uses `_isComparable`)
   - Test: reject fixtures `map_key_slice.go`, `map_key_func_chain.go`, `map_key_struct_slice_field.go`, `map_key_array_of_slice_in_struct.go`; `map[struct{ X int }]int`, `map[[2]int]int`, `map[any]int`, `map[*T]int` stay valid
   - Done when: Go's `invalid map key type …` on all targets; `comparable:mapkey:*` `# map-key-comparability` keys removed
-- [ ] Task 9.2: `==`/`!=` on a struct or array require comparable fields and elements (O9.4)
+- [x] Task 9.2: `==`/`!=` on a struct or array require comparable fields and elements (O9.4)
   - Files: `src/typechecker/assignability.js` (`_checkComparison`, equality branch)
   - Test: reject fixtures `struct_cmp_slice_field.go`, `struct_cmp_nested_slice_field.go`; comparisons of comparable structs and arrays unchanged
   - Done when: Go's `struct containing []int cannot be compared` on all targets; remaining `# map-key-comparability` keys (`binary:==:*PS*`) removed
-- [ ] Task 9.3: `wasm` map-key helpers read the full underlying type; docs
+- [x] Task 9.3: `wasm` map-key helpers read the full underlying type; docs
   - Files: `src/backend/wasm/types.js` (`isUnhashableGoType` unwraps named array types via `namedUnderlying`), `docs/go-compatibility.md`
   - Test: a `test/unit/wasm/map-keys.test.js` test over valid defined key chains (`type K [2]P; type P struct{ X int }`; `type K2 K`) prints Go's output (control: no failing repro was found once Task 9.1 rejects invalid keys, so this pins the helper to full unwrapping)
   - Done when: passes; `isUnhashableGoType` has no one-level `.underlying` read; the doc lists the map-key and struct-comparison rejections

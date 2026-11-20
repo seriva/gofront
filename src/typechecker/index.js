@@ -449,7 +449,9 @@ export class TypeChecker {
 		this._registerConstExprs(programs);
 		this._registerVarSpecs(programs);
 		this._markConstraintPositions(programs);
+		this._collectingTypes = true;
 		this._collectTypesPass(programs);
+		this._collectingTypes = false;
 		this._flushConstraintUses();
 		this._collectFuncsPass(programs);
 		this._checkGlobalTypeNamesPass(programs);

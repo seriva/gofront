@@ -172,7 +172,11 @@ export const typeParserMethods = {
 	parseMapType() {
 		this.expect(T.MAP);
 		this.expect(T.LBRACKET);
+		const keyTok = this.peek();
 		const key = this.parseType();
+		// The position lets the checker report an invalid key at the key.
+		key._line ??= keyTok.line;
+		key._col ??= keyTok.col;
 		this.expect(T.RBRACKET);
 		const value = this.parseType();
 		return { kind: "MapType", key, value };

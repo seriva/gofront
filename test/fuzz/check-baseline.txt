@@ -14,7 +14,6 @@ binary:==:1i,E:invalid-wasm # wasm-iface-equality
 binary:==:1i,any:invalid-wasm # wasm-iface-equality
 binary:==:E,1+0i:invalid-wasm # wasm-iface-equality
 binary:==:E,1i:invalid-wasm # wasm-iface-equality
-binary:==:E,PS:go-reject/gf-accept # map-key-comparability
 binary:==:E,complex128:invalid-wasm # wasm-iface-equality
 binary:==:E,complex64:invalid-wasm # wasm-iface-equality
 binary:==:I,Tcomparable:go-reject/gf-accept # R9
@@ -34,9 +33,6 @@ binary:==:MS2,any:invalid-wasm # wasm-iface-equality
 binary:==:P,E:invalid-wasm # wasm-iface-equality
 binary:==:P,any:invalid-wasm # wasm-iface-equality
 binary:==:P,struct:invalid-wasm # W1
-binary:==:PS,E:go-reject/gf-accept # map-key-comparability
-binary:==:PS,PS:go-reject/gf-accept # map-key-comparability
-binary:==:PS,any:go-reject/gf-accept # map-key-comparability
 binary:==:Tcomparable,E:invalid-wasm # wasm-iface-equality
 binary:==:Tcomparable,I2:go-reject/gf-accept # R9
 binary:==:Tcomparable,I:go-reject/gf-accept # R9
@@ -49,7 +45,6 @@ binary:==:Tnum,any:invalid-wasm # wasm-iface-equality
 binary:==:Tnum,error:go-reject/gf-accept # R9
 binary:==:any,1+0i:invalid-wasm # wasm-iface-equality
 binary:==:any,1i:invalid-wasm # wasm-iface-equality
-binary:==:any,PS:go-reject/gf-accept # map-key-comparability
 binary:==:any,complex128:invalid-wasm # wasm-iface-equality
 binary:==:any,complex64:invalid-wasm # wasm-iface-equality
 binary:==:array,E:invalid-wasm # wasm-iface-equality
@@ -94,14 +89,6 @@ builtins:real:1.5:go-accept/gf-reject # builtin-complex-operands
 builtins:real:1:go-accept/gf-reject # builtin-complex-operands
 builtins:real:1e40:go-accept/gf-reject # builtin-complex-operands
 builtins:real:rune:go-accept/gf-reject # builtin-complex-operands
-comparable:mapkey:PS:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:SAS:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:Tany:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:arrfunc:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:arrslice:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:func:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:map:go-reject/gf-accept # map-key-comparability
-comparable:mapkey:slice:go-reject/gf-accept # map-key-comparability
 conv:array:func,func:go-accept/gf-reject # parser-conversion-type
 conv:func:E,E:go-accept/gf-reject # parser-conversion-type
 conv:func:I,I:go-accept/gf-reject # parser-conversion-type
@@ -166,7 +153,6 @@ switch:tag:1e40,E:invalid-wasm # wasm-iface-equality
 switch:tag:1e40,any:invalid-wasm # wasm-iface-equality
 switch:tag:1i,E:invalid-wasm # wasm-iface-equality
 switch:tag:1i,any:invalid-wasm # wasm-iface-equality
-switch:tag:E,PS:go-reject/gf-accept # map-key-comparability
 switch:tag:I,Tcomparable:go-reject/gf-accept # R9
 switch:tag:I,Tnum:go-reject/gf-accept # R9
 switch:tag:I2,Tcomparable:go-reject/gf-accept # R9
@@ -194,7 +180,6 @@ switch:tag:Tnum,I2:go-reject/gf-accept # R9
 switch:tag:Tnum,I:go-reject/gf-accept # R9
 switch:tag:Tnum,any:invalid-wasm # wasm-iface-equality
 switch:tag:Tnum,error:go-reject/gf-accept # R9
-switch:tag:any,PS:go-reject/gf-accept # map-key-comparability
 switch:tag:array,E:invalid-wasm # wasm-iface-equality
 switch:tag:array,any:invalid-wasm # wasm-iface-equality
 switch:tag:bool,E:invalid-wasm # wasm-iface-equality
