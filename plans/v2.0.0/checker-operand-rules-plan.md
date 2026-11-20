@@ -261,19 +261,19 @@ Scheduled from `plans/follow-ups.md` (*Unhashable array chain in struct map key*
   - Done when: Go's messages on all targets, no wasm ICE; `# O3` keys removed
 
 ### Phase 4: Constant representability (root `const-representability`)
-- [ ] Task 4.1: Complex constants folded by value
+- [x] Task 4.1: Complex constants folded by value
   - Files: `src/typechecker/const-fold.js`, `src/typechecker/constants.js`
   - Test: `test/unit/language/constants.test.js`: `const c = 3 + 4i; const r = real(c)` sizes an array of length `3` (O4.4); `(1 + 2i) * (3 - 1i)` folds to `(5+5i)` on all targets
   - Done when: both pass on all targets
-- [ ] Task 4.2: Integral complex constants convert to real types and shifts (O4.1–O4.3, O4.5, O4.12 shift)
+- [x] Task 4.2: Integral complex constants convert to real types and shifts (O4.1–O4.3, O4.5, O4.12 shift)
   - Files: `src/typechecker/assignability.js`, `src/typechecker/expressions.js`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-exprs.js`
   - Test: accept fixtures `complex_const_to_int.go` (prints `1`), `complex_const_cmp_int.go` (prints `true`), `complex_const_plus_float.go`; reject fixtures `complex_const_to_float.go` (`2i … (overflows)`), `shift_untyped_complex.go` (`1i << s` with `T ~uint`)
   - Done when: Go's result on all targets
-- [ ] Task 4.3: Float, complex and default-type constant overflow (O4.6–O4.10, O4.12)
+- [x] Task 4.3: Float, complex and default-type constant overflow (O4.6–O4.10, O4.12)
   - Files: `src/typechecker/constants.js`, `src/typechecker/assignability.js` (`_untypedFitsTerm`), `src/typechecker/expressions.js`, `src/typechecker/statements.js` (blank assignment and untyped `switch` tag `_checkConstDefault`), `test/fuzz/check-baseline.txt` (retag non-O4 entries tagged `# O4` by operand name: `conv:value:{bool,string,MS,MS2},*` → `# O5`, `builtins:{real,imag}:1e40` → `# builtin-complex-operands`, and non-comparable `switch:tag:*` → `# O7`)
   - Test: reject fixtures `float32_cmp_overflow.go`, `float32_var_overflow.go`, `float32_const_overflow.go`, `float32_conv_overflow.go`, `float64_overflow.go`, `complex64_overflow.go`, plus `func F[T ~complex64](a T) T { return a + 1e40 }`, `_ = 1 << 'a'`, `_ = +1e400`, `switch 1e400 {}`; `test/unit/language/float32-consts.test.js` max finite `float32` still compiles
   - Done when: Go's messages on all targets; `# O4` keys (except the three `range:*:1<<63` keys for Task 4.4) removed
-- [ ] Task 4.4: A constant `range` operand must be representable as `int` (O4.11)
+- [x] Task 4.4: A constant `range` operand must be representable as `int` (O4.11)
   - Files: `src/typechecker/expressions.js` (`_checkRangeExpr`), `src/typechecker/statements.js` (`_checkForCond`)
   - Test: reject fixture `range_const_overflow.go` (`… as int value in range clause (overflows)`); `range 1 << 62` and the O4.11 controls unchanged
   - Done when: Go's message on all targets; both paths call `_checkConstOverflow`; the remaining `# O4` keys (`range:*:1<<63`) are gone

@@ -430,8 +430,14 @@ export const statementCheckMethods = {
 	_checkAssignTypes(stmt, rhsFlat, lhsTypes, scope) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") {
-				if (stmt.op === "=" && stmt.rhs.length === lhsTypes.length)
+				if (stmt.op === "=" && stmt.rhs.length === lhsTypes.length) {
 					this._rejectUntypedNil(rhsFlat[i], stmt.rhs[i], "assignment");
+					this._checkConstDefault(
+						rhsFlat[i],
+						stmt.rhs[i],
+						"assignment to _ identifier",
+					);
+				}
 				continue;
 			}
 			const r = rhsFlat[i] ?? ANY;
@@ -645,7 +651,7 @@ export const statementCheckMethods = {
 			const operand = this._derefArrayPtr(
 				stmt.cond,
 				"expr",
-				this.checkExpr(stmt.cond.expr, inner),
+				this._checkRangeOperand(stmt.cond.expr, inner),
 				inner,
 			);
 			const ct = this._rangeCore(operand, stmt.cond.expr, inner);
@@ -694,6 +700,7 @@ export const statementCheckMethods = {
 		if (stmt.tag) {
 			this.checkExpr(stmt.tag, inner);
 			this._rejectUntypedNil(stmt.tag._type, stmt.tag, "switch expression");
+			this._checkConstDefault(stmt.tag._type, stmt.tag, "switch expression");
 		}
 		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
 		const seenCases = [];
@@ -727,6 +734,9 @@ export const statementCheckMethods = {
 	// (or the other way round for typed values).
 	_checkCaseValue(tag, e) {
 		const caseType = this.resolveType(e._type);
+		// An interface tag compares the constant as its default type.
+		if (this._isInterfaceType(tag?._type))
+			this._checkConstDefault(caseType, e, "switch case");
 		if (!tag) {
 			this._checkTaglessCase(e, caseType);
 			return;
@@ -740,7 +750,10 @@ export const statementCheckMethods = {
 			return;
 		}
 		if (isUntyped(caseType)) {
-			if (this._isUntypedAssignable(tagType, caseType)) return;
+			if (this._isUntypedAssignable(tagType, caseType)) {
+				this._checkConstOverflow(tagType, caseType, e, null);
+				return;
+			}
 			this.err(
 				`cannot convert ${exprText(e)} (${operandKind(e, caseType.base, true)}) to type ${typeStr(tagType)}`,
 				e,

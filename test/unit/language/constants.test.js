@@ -490,6 +490,195 @@ func main() {
 	);
 });
 
+section("Constants — complex values (Task 4.1)");
+
+test("real and imag of a complex constant are constants", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const c = 3 + 4i
+const r = real(c)
+
+func main() {
+	var a [int(r)]int
+	var b [int(imag(c))]int
+	fmt.Println(len(a), len(b))
+}
+`,
+		"3 4\n",
+	);
+});
+
+test("complex constants fold by value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const p = (1 + 2i) * (3 - 1i)
+const q = complex(1, 2) / (1 + 1i)
+
+func main() {
+	fmt.Println(p, q, p == 5+5i, -p)
+}
+`,
+		"(5+5i) (1.5+0.5i) true (-5-5i)\n",
+	);
+});
+
+section("Constants — integral complex constants as real numbers (Task 4.2)");
+
+test("an integral complex constant works wherever its real part does", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const c = 2 + 0i
+const h = 0.5 + 0i
+
+func half(f float64) float64 { return f }
+
+func get() int { return c }
+
+func main() {
+	s := uint(3)
+	var x int = (1 + 0i) << s
+	var arr [4]int
+	fmt.Println(x, get(), half(h), half(c), arr[1:int(c)], int(c), float32(h))
+	var f float32 = 1.5
+	var n int8 = 3
+	fmt.Println(f*h, n+c, n == c+1, real(c))
+}
+`,
+		"8 2 0.5 2 [0] 2 0.5\n0.75 5 true 2\n",
+	);
+});
+
+test("an integral complex constant is a valid index and array length", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+const two = 2 + 0i
+
+func main() {
+	s := []int{10, 20, 30}
+	var a [1 + 0i]int
+	var b [two]int
+	fmt.Println(s[1+0i], s[two], s[0+0i:two], len(a), len(b), len(make([]int, two)))
+}
+`,
+		"20 30 [10 20] 1 2 2\n",
+	);
+});
+
+test("negative huge float constants print the sign once", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var f float32 = -1e400
+	var g float32 = -1.25e400
+	_, _ = f, g
+}
+`);
+	assertErrorContains(errors, "(untyped float constant -1e+400)");
+	assertErrorContains(errors, "(untyped float constant -1.25e+400)");
+});
+
+test("a complex constant with an imaginary part is not a real number", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var n int = 1
+	_ = n + 2i
+	_ = n + (1.5 + 0i)
+	_ = float64(2i)
+	_ = int(1.5 + 0i)
+}
+`);
+	assertErrorContains(
+		errors,
+		"2i (untyped complex constant (0 + 2i)) truncated to int",
+	);
+	assertErrorContains(
+		errors,
+		"(untyped complex constant (1.5 + 0i)) truncated to int",
+	);
+	assertErrorContains(
+		errors,
+		"cannot convert 2i (untyped complex constant (0 + 2i)) to type float64",
+	);
+	assertErrorContains(
+		errors,
+		"cannot convert 1.5 + 0i (untyped complex constant (1.5 + 0i)) to type int",
+	);
+});
+
+section("Constants — float, complex and default-type overflow (Task 4.3)");
+
+test("a non-constant shift of a float or complex constant needs an integer context", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var b uint = 1
+	_ = (1 + 0i) << b
+	x := 1.0 << b
+	var v any = 2.0 << b
+	_, _ = x, v
+}
+`);
+	assertErrorContains(errors, "1 + 0i (type complex128) must be integer");
+	assertErrorContains(
+		errors,
+		"shifted operand 1.0 (type float64) must be integer",
+	);
+	assertErrorContains(
+		errors,
+		"shifted operand 2.0 (type float64) must be integer",
+	);
+});
+
+test("an untyped constant compared with an interface must fit its default type", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var b any
+	_ = b == 1e400
+}
+`);
+	assertErrorContains(
+		errors,
+		"1e400 (untyped float constant 1e+400) overflows float64",
+	);
+});
+
+section("Constants — range operand (Task 4.4)");
+
+test("a constant range operand that fits an int still ranges", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := 0
+	for i := range 3 {
+		n += i
+	}
+	for range 1 << 62 {
+		break
+	}
+	fmt.Println(n)
+}
+`,
+		"3\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

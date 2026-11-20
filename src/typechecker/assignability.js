@@ -1,7 +1,7 @@
 // Assignability, binary result types, and interface satisfaction.
 // Installed as a mixin on TypeChecker.prototype.
 
-import { constIntValue } from "./const-fold.js";
+import { constIntValue, floatConstOf, realOfConst } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
 import { operandKindOf, operatorDefined } from "./operators.js";
 import { sharedInfo } from "./stdlib/shared.js";
@@ -11,6 +11,7 @@ import {
 	BOOL,
 	CMP_OPS,
 	COMPARABLE,
+	defaultType,
 	FLOAT64,
 	identical,
 	is64BitInt,
@@ -79,6 +80,26 @@ const CMP_KIND_NAMES = new Set([
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
+// A decimal beyond float64 the way Go prints it (`1e+400`), from its exact
+// `{ n, e }` form (n * 10^-e).
+function hugeText(r) {
+	if (!r) return null;
+	const abs = (r.n < 0n ? -r.n : r.n).toString();
+	const digits = abs.replace(/0+$/, "") || "0";
+	const exp = abs.length - 1 - r.e;
+	const mantissa =
+		digits.length > 1 ? `${digits[0]}.${digits.slice(1, 6)}` : digits;
+	return `${r.n < 0n ? "-" : ""}${mantissa}e+${exp}`;
+}
+
+// How Go prints the value of an untyped numeric constant after its text
+// (`0.5`, `(0 + 2i)`), or null when the value is not known.
+function constValueText(v) {
+	if (v?.k === "FLOAT" && !Number.isFinite(v.v)) return hugeText(v.r);
+	if (v?.k === "INT" || v?.k === "FLOAT") return String(v.v);
+	return v?.k === "COMPLEX" ? `(${v.v.re} + ${v.v.im}i)` : null;
+}
+
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
 const UNTYPED_COMPAT = {
 	int: new Set([
@@ -95,7 +116,12 @@ const UNTYPED_COMPAT = {
 	]),
 	string: new Set(["string"]),
 	bool: new Set(["bool"]),
-	complex128: new Set(["complex128", "complex64"]),
+	complex128: new Set([
+		...SIZED_INT_NAMES,
+		...SIZED_FLOAT_NAMES,
+		"complex128",
+		"complex64",
+	]),
 };
 
 // `&&` and `||` of two untyped bools stay untyped; a typed operand (including
@@ -229,7 +255,10 @@ export const assignabilityMethods = {
 			return false;
 		}
 		const terms = this._constraintTerms(tp.constraint, new Set()) ?? [];
-		if (terms.every((t) => this._untypedFitsTerm(c, cNode, t))) return true;
+		if (terms.every((t) => this._untypedFitsTerm(c, cNode, t))) {
+			this._realizeForRealTerms(cNode, terms);
+			return true;
+		}
 		this.err(
 			`cannot convert ${this._untypedConstText(c, cNode)} to type ${typeStr(tp)}`,
 			cNode,
@@ -239,13 +268,21 @@ export const assignabilityMethods = {
 
 	// Whether untyped constant `c` converts to `term` of a type set: a complex
 	// constant needs a complex type and a known value must be representable.
+	// An integral complex constant meeting a type set of real types is its
+	// real part (`T ~int | ~float64`, `a + (1 + 0i)`).
+	_realizeForRealTerms(cNode, terms) {
+		if (!cNode?._cconst) return;
+		if (terms.some((t) => isComplex(this._deepUnderlying(t) ?? t))) return;
+		const re = realOfConst(cNode._cconst);
+		if (re) this._realizeComplexNode(cNode, re);
+	},
+
 	_untypedFitsTerm(c, cNode, term) {
 		const u = this._deepUnderlying(term) ?? term;
-		if (c.base === "complex128") return isComplex(u);
-		const v = cNode?._const;
-		if (!v || isComplex(u) || u?.kind !== "basic") return true;
-		const r = this._convertConstTo(v, u);
-		return !!r && !r.overflow;
+		const v = cNode?._cconst ?? cNode?._const;
+		if (!v || u?.kind !== "basic")
+			return c.base !== "complex128" || isComplex(u);
+		return this._constFitsType(v, u);
 	},
 
 	// `1.5 (untyped float constant)`, `half (untyped float constant 0.5)`: Go
@@ -255,7 +292,7 @@ export const assignabilityMethods = {
 		const kind = operandKind(cNode, base, true);
 		const text = exprText(cNode);
 		const v = cNode?._const;
-		const value = v && (v.k === "INT" || v.k === "FLOAT") ? String(v.v) : null;
+		const value = constValueText(v ?? cNode?._cconst);
 		return value === null || value === text
 			? `${text} (${kind})`
 			: `${text} (${kind} ${value})`;
@@ -417,10 +454,10 @@ export const assignabilityMethods = {
 
 	_binaryResultTypeNonComplex(op, lt, rt, node) {
 		if (isAny(lt) || isAny(rt)) return ANY;
-		if (isComplex(lt) || isComplex(rt))
-			return this._binaryResultTypeComplex(op, lt, rt, node);
 		if (op === "<<" || op === ">>")
 			return this._binaryResultTypeShift(op, lt, rt, node);
+		if (isComplex(lt) || isComplex(rt))
+			return this._binaryResultTypeComplex(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(op, lt, rt, node);
 		if (isString(lt) && isString(rt))
@@ -448,7 +485,10 @@ export const assignabilityMethods = {
 		const operandOk = this._checkShiftedOperand(lt, node.left);
 		if (operandOk) this.checkShiftCount(rt, node.right);
 		// `"a" << s` was reported: the result has no type to check further.
-		return this._isShiftableUntyped(lt, node.left) ? lt : TAINTED_ANY;
+		if (!this._isShiftableUntyped(lt, node.left)) return TAINTED_ANY;
+		// A constant shift of an untyped constant is an untyped integer.
+		const nonInteger = lt?.base === "complex128" || lt?.base === "float64";
+		return nonInteger && this._constValue(node) ? UNTYPED_INT : lt;
 	},
 
 	// The shifted operand of a shift whose operand is not a type parameter: an
@@ -474,8 +514,10 @@ export const assignabilityMethods = {
 	},
 
 	_isShiftableUntyped(lt, left) {
-		if (lt?.kind !== "untyped" || lt.base === "complex128" || isNil(lt))
-			return true;
+		if (lt?.kind !== "untyped" || isNil(lt)) return true;
+		// An imaginary constant is shiftable when it is integral (`1 + 0i`).
+		if (lt.base === "complex128")
+			return constIntValue(left?._cconst ?? left?._const) !== null;
 		const v = left?._const;
 		return (
 			lt.base === "int" ||
@@ -505,8 +547,11 @@ export const assignabilityMethods = {
 					`${exprText(countExpr)} (${this._operandTypeStr(rt)} constant) overflows uint`,
 					countExpr,
 				);
-			} else if (rt?.kind === "untyped" && rt.base === "float64") {
-				// `x << 1.0`: the count is converted to an integer constant.
+			} else if (rt?.kind === "untyped" && rt.base !== "int") {
+				// `x << 1.0`, `x << (1 + 0i)`: the count is converted to an integer
+				// constant.
+				if (countExpr._cconst)
+					this._realizeComplexNode(countExpr, floatConstOf(Number(n)));
 				countExpr._type = UNTYPED_INT;
 			}
 			return;
@@ -610,12 +655,26 @@ export const assignabilityMethods = {
 		const isEquality = op === "==" || op === "!=";
 		// Any nil-able operand compares with `nil`.
 		if (isEquality && (isNil(lt) || isNil(rt))) return true;
-		for (const t of [lt, rt]) {
+		for (const t of this._comparedTypes(lt, rt)) {
 			if (this._operatorDefined(op, t)) continue;
 			this._reportCmpUndefined(op, t, node, isEquality);
 			return false;
 		}
 		return true;
+	},
+
+	// The types an operator is judged on: an untyped complex constant that
+	// converted to a real number type (`1 + 0i < n`) has that type.
+	_comparedTypes(lt, rt) {
+		const real = (t) => (this._isRealBasic(t) ? t : null);
+		const asReal = (t, other) =>
+			t?.kind === "untyped" && t.base === "complex128" ? (real(other) ?? t) : t;
+		return [asReal(lt, rt), asReal(rt, lt)];
+	},
+
+	_isRealBasic(t) {
+		const u = t?.kind === "untyped" ? null : this._deepUnderlying(t);
+		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
 	},
 
 	_comparisonTypesMatch(lt, rt, node) {
@@ -729,15 +788,6 @@ export const assignabilityMethods = {
 			if (u.name === "string") fits = untyped.base === "string";
 			else if (u.name === "bool") fits = untyped.base === "bool";
 			else fits = untyped.base !== "string" && untyped.base !== "bool";
-			// Imaginary constants are not tracked by value: any non-complex
-			// target is reported as an overflow.
-			if (fits && untyped.base === "complex128" && !isComplex(u)) {
-				this.err(
-					`${exprText(untypedNode)} (untyped complex constant) overflows ${typeStr(typed)}`,
-					untypedNode,
-				);
-				return false;
-			}
 		}
 		if (!fits) report.call(this, lt, rt, node);
 		return fits;
@@ -840,13 +890,23 @@ export const assignabilityMethods = {
 	_retypeUntypedShift(target, source, valueNode) {
 		if (!isUntyped(source)) return;
 		if (!isInteger(target)) {
-			this._checkShiftContext(target, valueNode);
+			this._checkShiftContext(this._shiftHeldType(target, source), valueNode);
 			return;
 		}
-		// Only a tree holding a non-constant shift is retyped; `_constValue` does
-		// not fold complex constants (`1+0i`), so they must not be mistaken for one.
+		// Only a tree holding a non-constant shift is retyped.
 		if (this._untypedShiftOperand(valueNode))
 			this._retypeShiftTree(valueNode, target);
+	},
+
+	// The type an untyped shift operand takes in a context of type `target`:
+	// an interface holds the operand's default type.
+	_shiftHeldType(target, source) {
+		return this._isInterfaceType(target) ? defaultType(source) : target;
+	},
+
+	_isInterfaceType(t) {
+		if (!t || t.kind === "typeParam") return false;
+		return isAny(t) || this._deepUnderlying(t)?.kind === "interface";
 	},
 
 	// The untyped operand of a non-constant shift takes its context's type,
@@ -896,13 +956,26 @@ export const assignabilityMethods = {
 			const isShift = e.op === "<<" || e.op === ">>";
 			this._retypeShiftTree(e.left, target);
 			if (isShift && e.left._type?.kind === "untyped") {
-				e.left._type = target;
-				if (is64BitInt(target)) e.left._is64Bit = true;
+				this._retypeShiftOperand(e.left, target);
 			} else if (!isShift) this._retypeShiftTree(e.right, target);
 		} else return;
 		if (this._constValue(e)) return;
 		e._type = target;
 		if (is64BitInt(target)) e._is64Bit = true;
+	},
+
+	// The untyped left operand of a non-constant shift takes `target`;
+	// `(1 + 0i) << s` shifts the integer 1.
+	_retypeShiftOperand(left, target) {
+		// `var x int = 1e40 << s`: the constant must be an integer of that type.
+		if (left._const) this._checkConstOverflow(target, left._type, left, null);
+		if (left._cconst)
+			this._realizeComplexNode(
+				left,
+				floatConstOf(Number(constIntValue(left._cconst))),
+			);
+		left._type = target;
+		if (is64BitInt(target)) left._is64Bit = true;
 	},
 
 	// An untyped real constant flowing into a complex type becomes a complex
@@ -1249,8 +1322,11 @@ export const assignabilityMethods = {
 	_toTypeParamOk(target, source, node) {
 		const terms = this._constraintTerms(target.constraint, new Set());
 		if (!terms || terms.length === 0) return false;
-		if (source.kind === "untyped")
-			return terms.every((t) => this._untypedFitsKind(source, node, t));
+		if (source.kind === "untyped") {
+			const fits = terms.every((t) => this._untypedFitsKind(source, node, t));
+			if (fits) this._realizeForRealTerms(node, terms);
+			return fits;
+		}
 		if (source.kind === "typeParam" || this._isNamedType(source)) return false;
 		return terms.every((t) => this._assignableQuietly(t, source));
 	},

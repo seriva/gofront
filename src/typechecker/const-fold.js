@@ -1,8 +1,9 @@
 // Backend-independent evaluation of Go constant expressions.
 //
 // A constant value is `{ k, v, t, i }`:
-//   k — "INT" | "FLOAT" | "STRING" | "BOOL"
-//   v — BigInt (INT), Number (FLOAT), string or boolean
+//   k — "INT" | "FLOAT" | "STRING" | "BOOL" | "COMPLEX"
+//   v — BigInt (INT), Number (FLOAT), string or boolean; `{ re, im }` of two
+//       Numbers for an untyped COMPLEX (typed complex constants are not folded)
 //   t — basic type name of a typed constant ("int8", "float64", …); absent
 //       for untyped constants, which are exact (BigInt) and may exceed every
 //       Go type until they are converted or assigned
@@ -20,6 +21,7 @@ const INT = "INT";
 const FLOAT = "FLOAT";
 const STRING = "STRING";
 const BOOL = "BOOL";
+const COMPLEX = "COMPLEX";
 
 // Shift counts beyond this are left to the runtime (Go allows larger shifts
 // of untyped constants, but no program needs a 4096-bit intermediate).
@@ -46,6 +48,22 @@ export const INT_RANGES = {
 const FLOAT_TYPES = new Set(["float32", "float64"]);
 
 export const intConst = (v) => ({ k: INT, v });
+
+export const complexConst = (re, im) => ({ k: COMPLEX, v: { re, im } });
+
+// An untyped float constant of the Number `n` (integral values stay exact).
+export function floatConstOf(n) {
+	return Number.isInteger(n)
+		? { k: FLOAT, v: n, i: BigInt(n) }
+		: { k: FLOAT, v: n };
+}
+
+// Real part of an untyped numeric constant as an untyped float, or null when
+// `val` is complex with an imaginary part (it is then not a real number).
+export function realOfConst(val) {
+	if (val?.k !== COMPLEX) return val;
+	return val.v.im === 0 ? floatConstOf(val.v.re) : null;
+}
 
 // Exact integer value of a decimal float literal (`1e18`, `2.50e1`), or null.
 function exactIntOfFloatText(text) {
@@ -86,11 +104,13 @@ function decimalToFloat({ n, e }) {
 	return Number(`${n}e-${e}`);
 }
 
+// A literal beyond float64 (`1e400`) keeps `v = Infinity` and its exact form,
+// so a conversion to a float type can report the overflow.
 function floatConstFromText(s) {
 	const n = Number(s);
-	if (!Number.isFinite(n)) return null;
 	const i = exactIntOfFloatText(s);
 	const r = exactDecimalOfFloatText(s);
+	if (!Number.isFinite(n) && r === null) return null;
 	const out = i === null ? { k: FLOAT, v: n } : { k: FLOAT, v: n, i };
 	return r === null ? out : { ...out, r };
 }
@@ -137,6 +157,10 @@ export function constToLit(val) {
 // Exact integer value of an INT or integral FLOAT, else null.
 export function constIntValue(val) {
 	if (val?.k === INT) return val.v;
+	if (val?.k === COMPLEX)
+		return val.v.im === 0 && Number.isInteger(val.v.re)
+			? BigInt(val.v.re)
+			: null;
 	if (val?.k !== FLOAT) return null;
 	if (val.i !== undefined) return val.i;
 	return Number.isInteger(val.v) ? BigInt(val.v) : null;
@@ -161,6 +185,14 @@ function typedFloat(v, t) {
 }
 
 function negateFloat(x) {
+	// An untyped value beyond float64 keeps its exact form (`-1e400`).
+	if (!x.t && !Number.isFinite(x.v) && x.r)
+		return {
+			...x,
+			v: -x.v,
+			i: x.i === undefined ? undefined : -x.i,
+			r: { n: -x.r.n, e: x.r.e },
+		};
 	const r = typedFloat(-x.v, x.t);
 	if (r && x.i !== undefined) r.i = -x.i;
 	if (r && x.r && !x.t) r.r = { n: -x.r.n, e: x.r.e };
@@ -168,6 +200,11 @@ function negateFloat(x) {
 }
 
 export function foldUnary(op, x) {
+	if (x.k === COMPLEX) {
+		if (op === "+") return x;
+		// Constants have no negative zero: `-(2 + 0i)` is `-2 + 0i`.
+		return op === "-" ? complexConst(0 - x.v.re, 0 - x.v.im) : null;
+	}
 	if (op === "+" && (x.k === INT || x.k === FLOAT)) return x;
 	if (op === "!" && x.k === BOOL) return { ...x, v: !x.v };
 	if (op === "-" && x.k === INT) return typedInt(-x.v, x.t);
@@ -248,8 +285,8 @@ function foldExactDecimals(op, a, b) {
 	if (!x || !y) return null;
 	const r = combineDecimals(op, x, y);
 	if (r.e > MAX_DECIMAL_EXP) return null;
-	const v = decimalToFloat(r);
-	return Number.isFinite(v) ? { k: FLOAT, v, r } : null;
+	// A result beyond float64 keeps `v = Infinity` and its exact form.
+	return { k: FLOAT, v: decimalToFloat(r), r };
 }
 
 function foldFloats(op, a, b, t) {
@@ -303,8 +340,45 @@ function foldStrings(op, a, b) {
 	return r === null ? null : { k: BOOL, v: r };
 }
 
+// `x op y` of complex components for + - * /, as `[re, im]` (null for any
+// other operator).
+function complexArith(op, x, y) {
+	switch (op) {
+		case "+":
+			return [x.re + y.re, x.im + y.im];
+		case "-":
+			return [x.re - y.re, x.im - y.im];
+		case "*":
+			return [x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re];
+		default: {
+			if (op !== "/") return null;
+			const d = y.re * y.re + y.im * y.im;
+			if (d === 0) throw new Error("invalid operation: division by zero");
+			return [(x.re * y.re + x.im * y.im) / d, (x.im * y.re - x.re * y.im) / d];
+		}
+	}
+}
+
+// `a op b` for untyped complex constants (an INT or FLOAT operand is its
+// real part): + - * / == !=.
+function foldComplex(op, a, b) {
+	if (a.t || b.t) return null;
+	const x = a.k === COMPLEX ? a.v : { re: asFloat(a), im: 0 };
+	const y = b.k === COMPLEX ? b.v : { re: asFloat(b), im: 0 };
+	if (op === "==" || op === "!=") {
+		const same = x.re === y.re && x.im === y.im;
+		return { k: BOOL, v: op === "==" ? same : !same };
+	}
+	const r = complexArith(op, x, y);
+	return r && !r.some(Number.isNaN) ? complexConst(r[0], r[1]) : null;
+}
+
 export function foldBinary(op, a, b) {
 	if (op === "<<" || op === ">>") return foldShift(op, a, b);
+	if (a.k === COMPLEX || b.k === COMPLEX) {
+		const numeric = (x) => x.k === INT || x.k === FLOAT || x.k === COMPLEX;
+		return numeric(a) && numeric(b) ? foldComplex(op, a, b) : null;
+	}
 	if (a.k === BOOL && b.k === BOOL) return foldBools(op, a, b);
 	if (a.k === STRING && b.k === STRING) return foldStrings(op, a, b);
 	const t = a.t ?? b.t;

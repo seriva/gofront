@@ -6,15 +6,20 @@
 // division by zero are reported here.
 
 import {
+	complexConst,
 	constFromLit,
 	constIntValue,
+	constToLit,
 	convertConst,
+	floatConstOf,
 	foldBinary,
 	foldMinMax,
 	foldUnary,
 	INT_RANGES,
 	intConst,
+	realOfConst,
 } from "./const-fold.js";
+import { exprText } from "./operand-text.js";
 import {
 	compositeLitMaxIndex,
 	defaultType,
@@ -22,8 +27,11 @@ import {
 	isAny,
 	isComplex,
 	isComplex64,
+	isNumeric,
 	isUntyped,
 	typeStr,
+	UNTYPED_COMPLEX,
+	UNTYPED_FLOAT,
 	VOID,
 } from "./types.js";
 
@@ -51,6 +59,7 @@ const BASIC_CONVERSIONS = new Set([
 // Node kinds that can be constant expressions.
 const CONST_KINDS = new Set([
 	"BasicLit",
+	"ImagLit",
 	"Ident",
 	"ParenExpr",
 	"UnaryExpr",
@@ -68,6 +77,9 @@ function nonIntegerConstKind(v) {
 		if (v.t) return `${v.t} constant`;
 		return constIntValue(v) === null ? "untyped float constant" : null;
 	}
+	// An integral complex constant is its real part (`[1 + 0i]int`).
+	if (v.k === "COMPLEX")
+		return constIntValue(v) === null ? "untyped complex constant" : null;
 	return `${v.k.toLowerCase()} constant`;
 }
 
@@ -89,6 +101,23 @@ function isUnshadowedNil(e, scope) {
 	);
 }
 
+// `real`, `imag` and `complex` of untyped constants (typed operands are not
+// folded): the folded value, null, or undefined for any other builtin.
+function foldComplexBuiltin(name, vals) {
+	const untyped = vals.every((v) => !v.t && v.k !== "STRING" && v.k !== "BOOL");
+	if (name === "complex" && vals.length === 2) {
+		if (!untyped || vals.some((v) => v.k === "COMPLEX")) return null;
+		return complexConst(Number(vals[0].v), Number(vals[1].v));
+	}
+	if ((name === "real" || name === "imag") && vals.length === 1) {
+		if (!untyped) return null;
+		const c =
+			vals[0].k === "COMPLEX" ? vals[0].v : { re: Number(vals[0].v), im: 0 };
+		return floatConstOf(name === "real" ? c.re : c.im);
+	}
+	return undefined;
+}
+
 const NEGATIVE_SHIFT_ERROR = "invalid shift count: negative shift count";
 
 /** @type {ThisType<import('./index.js').TypeChecker>} */
@@ -106,7 +135,6 @@ export const constantCheckMethods = {
 	_nonIntegerConst(expr, scope = null) {
 		let e = expr;
 		while (e?.kind === "ParenExpr") e = e.expr;
-		if (e?.kind === "ImagLit") return "untyped complex constant";
 		if (e?.kind === "BasicLit" && e.litKind === "NIL") return "untyped nil";
 		if (isUnshadowedNil(e, scope ?? this.globals)) return "untyped nil";
 		let v = null;
@@ -218,7 +246,12 @@ export const constantCheckMethods = {
 		if (!CONST_KINDS.has(expr.kind)) return;
 		this._noteComplexConstInit(expr, scope ?? this.globals);
 		const raw = this._constRaw(expr, scope);
-		expr._const = raw && !raw.overflow && !raw.error ? raw : null;
+		const val = raw && !raw.overflow && !raw.error ? raw : null;
+		// A complex value stays off `_const`, which the backends emit as a real
+		// number: `_realizeComplexConst` copies its real part there once the
+		// constant converts to a real type.
+		expr._const = val?.k === "COMPLEX" ? null : val;
+		expr._cconst = val?.k === "COMPLEX" ? val : null;
 		if (!raw || expr._constReported) return;
 		if (raw.error) {
 			expr._constReported = true;
@@ -235,6 +268,8 @@ export const constantCheckMethods = {
 		switch (expr.kind) {
 			case "BasicLit":
 				return constFromLit(expr);
+			case "ImagLit":
+				return complexConst(0, Number(String(expr.value).replaceAll("_", "")));
 			case "ParenExpr":
 				return this._constValue(expr.expr, scope);
 			case "UnaryExpr": {
@@ -303,6 +338,8 @@ export const constantCheckMethods = {
 		if (arrayLen !== null) return intConst(BigInt(arrayLen));
 		const vals = (expr.args ?? []).map((a) => this._constValue(a, scope));
 		if (vals.length === 0 || vals.some((v) => !v)) return null;
+		const complexVal = foldComplexBuiltin(fn.name, vals);
+		if (complexVal !== undefined) return complexVal;
 		if (fn.name === "min" || fn.name === "max")
 			return foldMinMax(fn.name === "min", vals);
 		// GoFront strings use UTF-16 code units on both backends.
@@ -381,38 +418,128 @@ export const constantCheckMethods = {
 	// interface target takes the constant's default type (`var v any = 1 << 64`).
 	// A null `ctx` reports an operand converted to the other operand's type.
 	_checkConstOverflow(target, source, node, ctx) {
-		if (source?.kind !== "untyped" || !node?._const) return false;
+		if (source?.kind !== "untyped" || !(node?._const || node?._cconst))
+			return false;
 		const base = this.resolveType(this._deepUnderlying(target));
 		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
+		if (node._cconst && this._complexConstUnfit(target, node, ctx)) return true;
+		if (this._floatConstUnfit(target, source, node, ctx)) return true;
+		if (!node._const) return false;
 		const i = constIntValue(node._const);
 		const range = this._intRange(target);
 		if (i === null && range)
 			return this._reportTruncatedConst(target, node, ctx);
-		// A float or complex target holds the constant as a Number: Go rounds
-		// the same way, so the JS backend has nothing to warn about.
-		if (!range && node.kind) {
-			const u = this.resolveType(this._deepUnderlying(target));
-			if (u?.kind === "basic" && /^(float|complex)/.test(u.name))
-				node._floatConst = true;
+		if (!range) {
+			this._markFloatTarget(target, node);
+			return false;
 		}
-		if (!range) return false;
 		if (i >= range[0] && i <= range[1]) {
 			node._intConst = true; // the JS backend's precision warning reads this
 			return false;
 		}
-		const isInt = node._const.k === "INT";
-		const text = isInt ? String(i) : String(node._const.v);
-		const what = `untyped ${isInt ? "int" : "float"} constant`;
-		const shown =
-			node.kind === "BasicLit"
-				? `${node.value} (${what})`
-				: `${text} (${what} ${text})`;
+		this._reportIntOverflow(target, node, ctx, i);
+		return true;
+	},
+
+	// Whether the untyped constant value `v` is representable in the basic
+	// numeric type `u`: in range for an integer, finite after rounding for a
+	// float, finite components for a complex.
+	_constFitsType(v, u) {
+		if (v.k === "STRING" || v.k === "BOOL") return true;
+		const range = INT_RANGES[u.name];
+		if (range) {
+			const i = constIntValue(v);
+			return i !== null && i >= range[0] && i <= range[1];
+		}
+		const c = v.k === "COMPLEX" ? v.v : { re: Number(v.v), im: 0 };
+		if (!isComplex(u) && c.im !== 0) return false;
+		const f32 = u.name === "float32" || u.name === "complex64";
+		const fit = (x) => Number.isFinite(f32 ? Math.fround(x) : x);
+		return fit(c.re) && fit(c.im);
+	},
+
+	// A float or complex target the untyped constant `node` does not fit
+	// (`var f float32 = 1e40`): reported, true.
+	_floatConstUnfit(target, source, node, ctx) {
+		const u = this.resolveType(this._deepUnderlying(target));
+		if (u?.kind !== "basic" || !/^(float|complex)/.test(u.name)) return false;
+		const v = node._cconst ?? node._const;
+		if (!v || this._constFitsType(v, u)) return false;
+		const shown = this._untypedConstText(source, node);
 		this.err(
 			ctx
 				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`
 				: `${shown} overflows ${typeStr(target)}`,
 			node,
 		);
+		return true;
+	},
+
+	// A float or complex target holds the constant as a Number: Go rounds the
+	// same way, so the JS backend has nothing to warn about.
+	_markFloatTarget(target, node) {
+		if (!node.kind) return;
+		const u = this.resolveType(this._deepUnderlying(target));
+		if (u?.kind === "basic" && /^(float|complex)/.test(u.name))
+			node._floatConst = true;
+	},
+
+	// The integer constant `i` of `node` does not fit the integer type `target`.
+	_reportIntOverflow(target, node, ctx, i) {
+		const isInt = node._const.k === "INT";
+		const text = isInt ? String(i) : String(node._const.v);
+		const what = `untyped ${isInt ? "int" : "float"} constant`;
+		const shown =
+			node.kind === "BasicLit"
+				? `${node.value} (${what})`
+				: `${exprText(node)} (${what} ${text})`;
+		this.err(
+			ctx
+				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`
+				: `${shown} overflows ${typeStr(target)}`,
+			node,
+		);
+	},
+
+	// Rewrites the untyped complex constant `node` into the literal of its
+	// real part `re` (an untyped float constant), so every backend path that
+	// reads the node (names, operators, calls) sees a real number.
+	_realizeComplexNode(node, re) {
+		const lit = constToLit(re);
+		node.kind = "BasicLit";
+		node.litKind = lit.litKind;
+		node.value = lit.value;
+		node._type = UNTYPED_FLOAT;
+		node._const = re;
+		node._cconst = null;
+		node._complexInit = undefined;
+		node._c64Const = undefined;
+	},
+
+	// An untyped complex constant meets a real numeric type: it must have no
+	// imaginary part (and no fraction for an integer type), else it is
+	// reported (`overflows` for a float, `truncated` for an integer). When it
+	// fits, its real part becomes the node's `_const`, which the backends emit.
+	// `conv` selects the conversion message. Returns true after reporting.
+	_complexConstUnfit(target, node, ctx, conv = false) {
+		const u = this.resolveType(this._deepUnderlying(target));
+		if (u?.kind !== "basic" || !isNumeric(u) || isComplex(u)) return false;
+		const c = node._cconst;
+		const re = realOfConst(c);
+		const integer = this._intRange(target) !== null;
+		if (re && !(integer && constIntValue(c) === null)) {
+			this._realizeComplexNode(node, re);
+			return false;
+		}
+		const shown = this._untypedConstText(UNTYPED_COMPLEX, node);
+		const to = typeStr(target);
+		const how = integer ? "truncated" : "overflows";
+		const msg = conv
+			? `cannot convert ${shown} to type ${to}`
+			: ctx
+				? `cannot use ${shown} as ${to} value in ${ctx} (${how})`
+				: `${shown} ${integer ? "truncated to" : "overflows"} ${to}`;
+		this.err(msg, node);
 		return true;
 	},
 
@@ -434,8 +561,30 @@ export const constantCheckMethods = {
 		return true;
 	},
 
+	// `float32(1e40)`: an untyped constant must fit the float or complex type
+	// it converts to (a complex constant meeting a real type is
+	// `_complexConstUnfit`'s).
+	_checkConstConversion(srcType, targetType, node) {
+		if (srcType?.kind !== "untyped" || !(node?._const || node?._cconst)) return;
+		if (this._isInterfaceType(targetType)) {
+			this._checkConstDefault(srcType, node, "conversion");
+			return;
+		}
+		const u = this.resolveType(this._deepUnderlying(targetType));
+		if (u?.kind !== "basic" || !/^(float|complex)/.test(u.name)) return;
+		if (node._cconst && !isComplex(u)) return;
+		if (this._constFitsType(node._cconst ?? node._const, u)) return;
+		this.err(
+			`cannot convert ${this._untypedConstText(srcType, node)} to type ${typeStr(targetType)}`,
+			node,
+		);
+	},
+
 	// `x := 1 << 63`, `println(1 << 64)`: the constant takes its default type.
 	_checkConstDefault(source, node, ctx) {
+		// `x := 1.0 << s` gives the shifted operand a non-integer default type.
+		if (source?.kind === "untyped")
+			this._checkShiftContext(defaultType(source), node);
 		return this._checkConstOverflow(defaultType(source), source, node, ctx);
 	},
 
@@ -463,13 +612,14 @@ export const constantCheckMethods = {
 	// operand's type.
 	_checkConstOperands(op, lt, rt, expr) {
 		if (op === "<<" || op === ">>" || op === "&&" || op === "||") return;
-		// An interface operand has no constant range: the operator error covers it.
-		const isIface = (t) => this.resolveType(t)?.kind === "interface";
-		if (rt?.kind === "untyped" && lt?.kind !== "untyped") {
-			if (!isIface(lt)) this._checkConstOverflow(lt, rt, expr.right, null);
-		} else if (lt?.kind === "untyped" && rt?.kind !== "untyped") {
-			if (!isIface(rt)) this._checkConstOverflow(rt, lt, expr.left, null);
-		}
+		// An interface operand holds the constant's default type, but only an
+		// equality is defined on it (`any + 1 << 64` is the operator's error).
+		const eq = op === "==" || op === "!=";
+		const fits = (t) => eq || !this._isInterfaceType(t);
+		if (rt?.kind === "untyped" && lt?.kind !== "untyped" && fits(lt))
+			this._checkConstOverflow(lt, rt, expr.right, null);
+		else if (lt?.kind === "untyped" && rt?.kind !== "untyped" && fits(rt))
+			this._checkConstOverflow(rt, lt, expr.left, null);
 	},
 
 	_intRange(t) {

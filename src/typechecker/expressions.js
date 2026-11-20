@@ -1,5 +1,6 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue, realOfConst } from "./const-fold.js";
 import { exprText, operandKind } from "./operand-text.js";
 import { newLabelScope } from "./statements.js";
 import {
@@ -578,6 +579,7 @@ export const expressionCheckMethods = {
 	// constant retyping codegen reads.
 	_typeBinaryOperands(expr, lt, rt, scope) {
 		if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
+		this._checkConstOperands(expr.op, lt, rt, expr);
 		if (isAny(lt) || isAny(rt))
 			return (
 				this._checkDeclaredAnyBinary(expr.op, lt, rt, expr) ??
@@ -588,7 +590,6 @@ export const expressionCheckMethods = {
 		// `any` too.
 		const goAnyError = this._checkDeclaredAnyBinary(expr.op, lt, rt, expr);
 		if (goAnyError) return goAnyError;
-		this._checkConstOperands(expr.op, lt, rt, expr);
 		this._markTypeParamMapNil(expr, lt, rt, scope);
 		const res = this.binaryResultType(expr.op, lt, rt, expr);
 		if (expr.op !== "<<" && expr.op !== ">>") {
@@ -1525,6 +1526,10 @@ export const expressionCheckMethods = {
 	// integer (`s[1 == 1]`, `make([]int, "a")`).
 	// A typed operand must have an integer type too (`s[f]` with `f float64`).
 	_checkIntegerConstOperand(operand, what, scope) {
+		// An integral complex constant is its real part: the backends must see
+		// a real number.
+		if (operand?._cconst && constIntValue(operand._cconst) !== null)
+			this._realizeComplexNode(operand, realOfConst(operand._cconst));
 		const kind = this._nonIntegerConst(operand, scope);
 		if (kind) {
 			this.err(
@@ -1684,10 +1689,25 @@ export const expressionCheckMethods = {
 		return tgt?.kind === "array" && src?.kind !== "array" && !isAny(srcType);
 	},
 
+	// A complex operand converts to a real type only as an untyped constant
+	// with no imaginary part (`int(1 + 0i)`, reported when it does not fit);
+	// any other complex value needs `real()` or `imag()`.
+	_rejectComplexToReal(srcType, targetType, expr, node) {
+		if (srcType?.kind === "untyped" && node?._cconst) {
+			this._complexConstUnfit(targetType, node, null, true);
+			return;
+		}
+		this.err(
+			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
+			expr,
+		);
+	},
+
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
 		this._retypeUntypedShift(targetType, srcType, expr.expr);
+		this._checkConstConversion(srcType, targetType, expr.expr);
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
@@ -1703,12 +1723,8 @@ export const expressionCheckMethods = {
 			return targetType;
 		const srcResolved = this._deepUnderlying(srcType);
 		const tgtResolved = this._deepUnderlying(targetType);
-		if (isNumeric(targetType) && isComplex(srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
-				expr,
-			);
-		}
+		if (isNumeric(targetType) && isComplex(srcType))
+			this._rejectComplexToReal(srcType, targetType, expr, expr.expr);
 		if (
 			isComplex(targetType) &&
 			!isComplexOrNumeric(srcType) &&
@@ -1812,6 +1828,7 @@ export const expressionCheckMethods = {
 
 	_checkConversionValidity(srcType, targetType, expr) {
 		this._retypeUntypedShift(targetType, srcType, expr.args?.[0]);
+		this._checkConstConversion(srcType, targetType, expr.args?.[0]);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.args?.[0]))
 			return;
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
@@ -1824,10 +1841,7 @@ export const expressionCheckMethods = {
 		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
 
 		if (isNumeric(targetType) && isComplex(srcType)) {
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
-				expr,
-			);
+			this._rejectComplexToReal(srcType, targetType, expr, expr.args?.[0]);
 			return;
 		}
 		if (isComplex(targetType) && !isComplexOrNumeric(srcType)) {
@@ -2013,11 +2027,19 @@ export const expressionCheckMethods = {
 		return core.kind === "pointer" ? { ...core, _viaCore: true } : core;
 	},
 
+	// The operand of a `range` clause; a constant takes its default type, so
+	// `range 1 << 63` must fit an `int`.
+	_checkRangeOperand(operand, scope) {
+		const t = this.checkExpr(operand, scope);
+		this._checkConstDefault(t, operand, "range clause");
+		return t;
+	},
+
 	_checkRangeExpr(expr, scope) {
 		const collType = this._derefArrayPtr(
 			expr,
 			"expr",
-			this.checkExpr(expr.expr, scope),
+			this._checkRangeOperand(expr.expr, scope),
 			scope,
 		);
 		const core = this._rangeCore(collType, expr.expr, scope);
@@ -2390,6 +2412,7 @@ export const expressionCheckMethods = {
 		}
 		const bad = this._firstUnconvertible(sTerms, tTerms, expr, operand);
 		if (bad) this.err(`${head}: ${this._termConvText(src, tgt, bad)}`, expr);
+		else this._realizeForRealTerms(operand, tTerms);
 		return true;
 	},
 
@@ -2440,10 +2463,7 @@ export const expressionCheckMethods = {
 	_termConvertible(s, t, expr, operand) {
 		if (s.kind === "untyped") {
 			const u = this._deepUnderlying(t) ?? t;
-			if (
-				this._isRealNumberType(u) &&
-				(s.base === "int" || s.base === "float64")
-			)
+			if (this._isRealNumberType(u) && s.base !== "string" && s.base !== "bool")
 				return this._untypedFitsTerm(s, operand, t);
 			s = defaultType(s);
 		} else if (this._isComplexMismatch(s, t)) return false;
@@ -3075,8 +3095,14 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinComplex(expr, argTypes) {
-		const crt = argTypes[0];
-		const cit = argTypes[1];
+		// `complex(1 + 0i, 0)`: an integral complex constant is a real part.
+		const [crt, cit] = argTypes.map((t, i) =>
+			t?.kind === "untyped" &&
+			expr.args[i]?._cconst &&
+			!this._complexConstUnfit(FLOAT64, expr.args[i], null)
+				? expr.args[i]._type
+				: t,
+		);
 		if (!isNumeric(crt)) {
 			this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
 			return ANY;
