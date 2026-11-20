@@ -24,6 +24,7 @@ import {
 	is64BitInt,
 	isAny,
 	isBool,
+	isComplex,
 	isComplexOrNumeric,
 	isInteger,
 	isNil,
@@ -404,6 +405,19 @@ export const statementCheckMethods = {
 			`${exprText(stmt.expr)}${stmt.op}`,
 		);
 		this._typeBinaryOperands(node, lt, this.checkExpr(one, scope), scope);
+		// Complex `x++` runs as `x += 1` in both backends, so complex64
+		// rounding and addressing live in the compound-assignment emitters.
+		if (isComplex(lt))
+			stmt._complexIncDec = {
+				kind: "AssignStmt",
+				op: stmt.op === "++" ? "+=" : "-=",
+				lhs: [stmt.expr],
+				rhs: [one],
+				line: stmt.line,
+				col: stmt.col,
+				_line: stmt._line,
+				_col: stmt._col,
+			};
 	},
 
 	_positionLike(node, at) {

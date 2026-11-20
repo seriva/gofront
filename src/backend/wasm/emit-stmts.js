@@ -2063,6 +2063,10 @@ export class StmtsEmitter {
 	}
 
 	emitIncDecStmt(stmt) {
+		if (stmt._complexIncDec) {
+			this.emitAssignStmt(stmt._complexIncDec);
+			return;
+		}
 		const { expr, op } = stmt;
 
 		if (

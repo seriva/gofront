@@ -853,6 +853,81 @@ func main() {
 	assertEqual(out, "0 5");
 });
 
+test("a defined array with methods compares with an interface structurally", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyArr [2]int
+
+func (MyArr) M() {}
+
+type I interface{ M() }
+
+func main() {
+	var ia I = MyArr{1, 2}
+	ma := MyArr{1, 2}
+	fmt.Println(ia == ma, ma == ia, ia != ma, ma != ia)
+	switch ma {
+	case ia:
+		fmt.Println("iface")
+	default:
+		fmt.Println("none")
+	}
+	var ia1 I = MyArr{3, 4}
+	switch ma {
+	case ia1:
+		fmt.Println("ia1")
+	case MyArr{1, 2}:
+		fmt.Println("concrete")
+	}
+}
+`,
+		"true true false false\niface\nconcrete\n",
+	);
+});
+
+test("a defined struct with methods and a plain array keep matching Go against interfaces", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A, B int }
+
+func (S) M() {}
+
+type I interface{ M() }
+
+func main() {
+	var i I = S{1, 2}
+	s := S{1, 2}
+	fmt.Println(i == s, s == i, i != s, s != i)
+	switch s {
+	case i:
+		fmt.Println("iface")
+	}
+	var j I = S{3, 4}
+	switch s {
+	case j:
+		fmt.Println("j")
+	case S{1, 2}:
+		fmt.Println("concrete")
+	}
+	var a any = [2]int{1, 2}
+	p := [2]int{1, 2}
+	fmt.Println(a == p, p == a)
+	switch p {
+	case a:
+		fmt.Println("any")
+	}
+}
+`,
+		"true true false false\niface\nconcrete\ntrue true\nany\n",
+	);
+});
+
 test("a generic copy of an anonymous struct clones its array field", async () => {
 	await assertJsTargetsOutput(
 		`package main
@@ -1410,3 +1485,70 @@ closureCase(
 	fmt.Println(*ps)`,
 	"{8}\n{1}\n",
 );
+
+test("an interface compares equal to a struct or array value on the JS targets (O8.1, O8.2)", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{}
+type P struct{ X int }
+type Q struct{ X int }
+
+func main() {
+	var i I = P{1}
+	fmt.Println(i == P{1}, P{1} == i, i != P{1}, i != P{2})
+	var a any = [2]int{1, 2}
+	fmt.Println(a == [2]int{1, 2}, a != [2]int{1, 3})
+	var b any = P{1}
+	var a1 any = &P{1}
+	var a2 any = Q{1}
+	fmt.Println(b == P{1}, P{1} == b, P{1} == a1, P{1} == a2)
+	p := &P{1}
+	var ip any = p
+	fmt.Println(ip == p, p == ip)
+	switch b {
+	case P{2}:
+		fmt.Println("two")
+	case P{1}:
+		fmt.Println("one")
+	}
+}
+`,
+		"true true false true\ntrue true\ntrue true false false\ntrue true\none\n",
+	);
+});
+
+test("a struct switch tag compares against interface cases by dynamic type on the JS targets", async () => {
+	await assertJsTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X int }
+type Q struct{ X int }
+
+func main() {
+	var a1 any = &P{1}
+	var a2 any = Q{1}
+	var a3 any = P{1}
+	switch (P{1}) {
+	case a1:
+		fmt.Println("a1")
+	case a2:
+		fmt.Println("a2")
+	default:
+		fmt.Println("none")
+	}
+	switch (P{1}) {
+	case a3:
+		fmt.Println("a3")
+	default:
+		fmt.Println("none")
+	}
+}
+`,
+		"none\na3\n",
+	);
+});

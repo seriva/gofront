@@ -3489,12 +3489,6 @@ export const expressionGenMethods = {
 		const simdEq = this._genSimdEquality(expr);
 		if (simdEq !== null) return simdEq;
 
-		if (this._isStructEquality(expr)) {
-			this.useHelper("equal");
-			const cmp = `__equal(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
-			return expr.op === "==" ? cmp : `!${cmp}`;
-		}
-
 		const nilMap = this._genNilMapCompare(expr);
 		if (nilMap) return nilMap;
 
@@ -3507,6 +3501,12 @@ export const expressionGenMethods = {
 		if (this._isIfaceEquality(expr)) {
 			this.useHelper("ifeq");
 			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
+			return expr.op === "==" ? cmp : `!${cmp}`;
+		}
+
+		if (this._isStructEquality(expr)) {
+			this.useHelper("equal");
+			const cmp = `__equal(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 

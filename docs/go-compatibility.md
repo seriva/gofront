@@ -158,6 +158,18 @@ Values that come from JavaScript stay dynamic: browser globals and their members
 - **Labels** belong to one function. `break L` needs `L` to label an enclosing `for` or `switch` statement and `continue L` an enclosing loop, a label that nothing uses is `label L defined and not used`, and a repeated label is an error.
 - **Unused values**: only calls and `await` expressions may stand alone as a statement. `x + 1`, `x == 2`, a function name, a conversion such as `float64(x)`, and builtins that only compute a value (`len`, `cap`, `append`, `make`, `new`, `min`, `max`, `complex`, `real`, `imag`) are `... is not used`. Calls to functions, methods, func values, `panic`, `recover`, `print`, `copy`, `delete` and `clear` are fine.
 
+#### Operators and comparisons
+
+GoFront applies Go's operator rules to every kind of operand, with Go's messages:
+
+- **Ordering and logic**: `<`, `<=`, `>` and `>=` work on integers, floats and strings (and defined types over them), not on booleans, pointers, structs or interfaces. `&&`, `||` and `!` need booleans, `^` and `&^` integers, and unary `-` and `+` numbers. An untyped rune counts as an integer for `%` and `^`.
+- **Equality**: `==` and `!=` need one operand assignable to the other. An interface compares with any value that implements it (`i == T{}`, `a == [2]int{1, 2}`), and with `nil`; comparing it with a value that does not implement it, such as `s == 1` for an `error` `s`, is an error. A slice, map or func compares only with `nil`.
+- **Shifts** need an integer left operand and a non-negative integer count. An untyped constant being shifted takes its type from the context, which must be an integer type: `var f float64 = 1 << s` is an error, while `var v any = 1 << s` is an `int`.
+- **Constants** are exact: `1 + 0i` converts to an integer, `float32(0.1)` rounds, and a constant too large for `float32`, `float64` or `int` (including a `range` operand) is `constant ... overflows`. Complex constants fold by value.
+- **Conversions** follow Go's rules in every form: slices of different element types, floats to `string` and `int(1.5)` are errors.
+- **Methods and `switch`**: receivers must be a defined type (not an interface, pointer or predeclared type), a `switch` tag must be comparable, and tagless `case` expressions must be booleans.
+- **Complex `++` and `--`** add or subtract one on every target, for variables, fields, map elements and `for` post statements.
+
 #### Builtin operands
 
 - **`len`** takes a string, array (or pointer to one), slice or map: `len(5)`, `len(p)` with `p` an `*int`, and `len(v)` with `v` a Go `any` are `invalid argument: ... for built-in len`. `delete` needs a map, `clear` a map or slice, `copy` and `append` slices (`copy` may take a string source into a `[]byte`), and `min` and `max` integers, floats or strings.

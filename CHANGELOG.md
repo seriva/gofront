@@ -29,6 +29,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 - **Complex constants with no imaginary part work as numbers**: `var n int = 1 + 0i`, `x + (2 + 0i)` with a `float64` `x`, and `real(c)` or `imag(c)` of a constant as an array length now compile, as in Go.
+- **Interface comparisons and complex `++` give Go's result**: comparing an interface with a struct or array value (`i == P{1}`, `a == [2]int{1, 2}`, or a `switch` case) is `true` when the dynamic type and value match in JavaScript, and `c++` or `c--` on a complex number works for variables, fields, map elements and `for` loops on every target.
 - **Tagless `switch` accepts interface cases**: `switch { case v: }` with an interface `v` holding a bool now compiles and runs on every target, as in Go.
 - **Multi-value calls as builtin arguments:** `min(f())`, `max(f())`, `append(f())` and similar accept a call returning several values, as in Go.
 - **Partly instantiated generic functions work as values**: `f := slices.Sort[[]int]` and user generics whose remaining type parameters follow from their constraints now compile and run.

@@ -149,10 +149,6 @@ conv:value:error,str:go-reject/gf-accept # excluded: error(s) turns a string int
 conv:value:error,string:go-reject/gf-accept # excluded: error(s) turns a string into an error value
 conv:value:func,func:go-accept/gf-reject # parser-conversion-type
 conv:value:func,nil:go-accept/gf-reject # parser-conversion-type
-incdec:++:complex128:invalid-wasm # O8
-incdec:++:complex64:invalid-wasm # O8
-incdec:--:complex128:invalid-wasm # O8
-incdec:--:complex64:invalid-wasm # O8
 names:addr:dot-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:field:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:func-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
