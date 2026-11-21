@@ -153,7 +153,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/lower/gen-types.js` (`spellNamed`), `src/lower/fmt-formatters.js` (`FmtGen.isNamedInScope`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `import u "./util"; fmt.Printf("%T", u.Make(5))` with a `$$`-renamed `Box` → `util.Box`; the same through a re-exporting package
   - Done when: passes (no `Unknown type 'util.Box'`)
-- [ ] Task 1.2: `pruneStdlibPrograms` keeps renamed user types (F30 prerequisite)
+- [x] Task 1.2: `pruneStdlibPrograms` keeps renamed user types (F30 prerequisite)
   - Files: `src/link/wasm.js` (`pruneStdlibPrograms`)
   - Test: `shadowing.test.js`: a `wasm` package and the js main both declare `Box`, the `wasm` package imports `fmt` and `errors`; `var m Box; m.N = 42`, `errors.As` into the type and a promoted method print Go's output
   - Done when: passes (fails first with the null deref from the PR #207 notes)

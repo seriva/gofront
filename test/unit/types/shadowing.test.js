@@ -2806,3 +2806,58 @@ func main() {
 	);
 	assertEqual(mod.__lines.join("\n"), "util.Box main.Box");
 });
+
+test("a wasm package keeps a renamed type through stdlib pruning", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+import (
+	"errors"
+	"fmt"
+)
+
+type Base struct{ ID int }
+
+func (b *Base) Get() int { return b.ID }
+
+type Box struct {
+	Base
+	N int
+}
+
+type BoxErr struct{ Code int }
+
+func (e *BoxErr) Error() string { return fmt.Sprint("box ", e.Code) }
+
+func Run() string {
+	var m Box
+	m.N = 42
+	m.ID = 7
+	var err error = &BoxErr{3}
+	var target *BoxErr
+	ok := errors.As(fmt.Errorf("wrap: %w", err), &target)
+	return fmt.Sprint(m.N, m.Get(), ok, target.Code)
+}
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+type Box struct{ M int }
+
+func main() {
+	var b Box
+	b.M = 1
+	fmt.Println(util.Run(), b.M)
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "42 7 true 3 1");
+});

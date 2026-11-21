@@ -140,13 +140,19 @@ function pruneStdlibPrograms(programs, stdlibPrograms) {
 		stdlibPrograms,
 	);
 	const types = new Set();
+	const dropped = new Set();
 	for (const p of stdlibPrograms) {
+		for (const d of p.decls)
+			if (d.kind === "TypeDecl" && !reached.has(d)) dropped.add(d.name);
 		p.decls = p.decls.filter((d) => reached.has(d));
 		for (const d of p.decls) if (d.kind === "TypeDecl") types.add(d.name);
 	}
+	// A user type renamed `Name$$pkg` (see `mangleCollidingTypes`) is not a
+	// stdlib type and stays.
 	return (t) => {
 		const name = typeof t?.name === "string" ? t.name : "";
-		return !name.includes("$$") || types.has(name.replace(/\[.*$/, ""));
+		const base = name.replace(/\[.*$/, "");
+		return !name.includes("$$") || types.has(base) || !dropped.has(base);
 	};
 }
 
