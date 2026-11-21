@@ -72,7 +72,6 @@ const UNPARSED = [
 	/^conv:(value:func,|func:)/, // `(func())(x)`, `(func(T))(x)`
 	/^conv:ptr:(slice|array|map|func|struct),/, // `(*[]int)(x)`
 	/^conv:(array|slice|map):func,/, // `([]func())(x)`, `(map[string]func())(x)`
-	/^recv:decl:(ptr-ptr-struct|slice-literal|struct-literal)$/, // `func (r **P)`
 	/^names:call:(predeclared-type|shadow-type-\w+|shadow-any)$/, // `int()`
 ];
 const unparsed = (key) => UNPARSED.some((re) => re.test(key));
@@ -146,11 +145,14 @@ const TAG_RULES = [
 	[/^builtins:arity:/, "R20"],
 	[/^builtins:\w+:T\w+:/, "R12"],
 	[/^comparable:constraint:/, "R13"],
-	[/^comparable:mapkey:/, "map-key-comparability"],
-	[/^binary:==:(struct,P|P,struct):invalid-wasm$/, "W1"],
-	[/[:,](1\+0i|1i|1e40|1e400)[,:]/, "O4"],
+	[/^(binary:==|switch:tag):(struct,P|P,struct):invalid-wasm$/, "W1"],
 	[/^builtins:(complex|real|imag):/, "builtin-complex-operands"],
 	[/^(binary:==|switch:tag):.*:invalid-wasm$/, "wasm-iface-equality"],
+	[/^switch:tag:((I|I2|error),T\w+|T\w+,(I|I2|error)):/, "R9"],
+	[(e) => TPARAM_KIND.test(e) && /^switch:/.test(e), "O7"],
+	[/^conv:value:/, "O5"],
+	[/^switch:tag:(I|I2|error),/, "switch-case-cmp"],
+	[/[:,](1\+0i|1i|1e40|1e400)[,:]/, "O4"],
 	[/^incdec:.*:invalid-wasm$/, "O8"],
 	[/^names:\w+:shadow-/, "R8"],
 	[/^names:(assign|addr|incdec):/, "R5"],

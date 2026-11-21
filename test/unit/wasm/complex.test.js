@@ -182,7 +182,7 @@ package main
 
 func Main() int {
 	x := 5
-	c := complex128(x)
+	c := complex(float64(x), 0)
 	var c64 complex64 = 7
 	if real(c) == 5.0 && imag(c) == 0.0 && real(c64) == 7.0 && imag(c64) == 0.0 {
 		return 1

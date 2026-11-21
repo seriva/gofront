@@ -318,11 +318,20 @@ func main() {
 
 section("Complex: Conversions");
 
-test("complex128(intVal) wraps as complex", () => {
-	const { js, errors } = compile(`package main
+test("complex128(intVal) is rejected, complex(float64(x), 0) works", () => {
+	assertErrorContains(
+		compile(`package main
 func main() {
 	x := 5
 	z := complex128(x)
+	println(real(z), imag(z))
+}`).errors,
+		"cannot convert x (variable of type int) to type complex128",
+	);
+	const { js, errors } = compile(`package main
+func main() {
+	x := 5
+	z := complex(float64(x), 0)
 	println(real(z), imag(z))
 }`);
 	assertEqual(errors.length, 0);
@@ -837,6 +846,35 @@ func main() {
 }
 `,
 		"true false false true true\n",
+	);
+});
+
+test("complex ++ and -- add and subtract one on every target (O8.3, O8.4)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ C complex128 }
+
+func main() {
+	var c complex128 = 1i
+	c++
+	var d complex64 = 1i
+	d--
+	m := map[string]complex128{"a": 1i}
+	m["a"]++
+	p := P{1i}
+	p.C++
+	q := &p
+	q.C--
+	for e := 0i; real(e) < 2; e++ {
+		fmt.Println(e)
+	}
+	fmt.Println(c, d, m, p)
+}
+`,
+		"(0+0i)\n(1+0i)\n(1+1i) (-1+1i) map[a:(1+1i)] {(0+1i)}\n",
 	);
 });
 

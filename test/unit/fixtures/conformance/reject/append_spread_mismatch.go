@@ -1,4 +1,3 @@
-// pending: assign-message-text
 package main
 
 func main() {

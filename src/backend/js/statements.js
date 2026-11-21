@@ -351,6 +351,10 @@ export const statementGenMethods = {
 				}
 				break;
 			case "IncDecStmt": {
+				if (stmt._complexIncDec) {
+					this._genAssignStmt(stmt._complexIncDec);
+					break;
+				}
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
 				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
@@ -2144,6 +2148,8 @@ export const statementGenMethods = {
 					this._inlineAssign(stmt),
 				);
 			case "IncDecStmt": {
+				if (stmt._complexIncDec)
+					return this.stmtInline(stmt._complexIncDec, pre);
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
@@ -2236,7 +2242,10 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
-			if (this._isCompoundWithCall(stmt)) {
+			if (
+				this._isCompoundWithCall(stmt) ||
+				this._isComplexCompoundAssign(stmt)
+			) {
 				const mark = this.out.length;
 				this._genAssignStmt(stmt);
 				const body = this.out.splice(mark).map((l) => l.trim());
@@ -2289,7 +2298,19 @@ export const statementGenMethods = {
 
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
-		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		const namedTag =
+			stmt.tag &&
+			this._isStructOrArrayType(stmt.tag._type) &&
+			this._isNamedBoxKind(stmt.tag);
+		// A struct or array tag stays unboxed: concrete cases compare it by
+		// value, and interface cases box the saved copy.
+		if (namedTag) stmt.tag._noNamedBox = true;
+		let tag;
+		try {
+			tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		} finally {
+			if (namedTag) delete stmt.tag._noNamedBox;
+		}
 		if (stmt.tag && this._isStructOrArrayType(stmt.tag._type)) {
 			// Struct and array tags compare by value, not by reference.
 			this.useHelper("equal");
@@ -2298,7 +2319,16 @@ export const statementGenMethods = {
 			this.line(`const ${tmp} = ${tag};`);
 			return {
 				tag: "true",
-				caseExpr: (e) => `__equal(${tmp}, ${this.genExpr(e)})`,
+				caseExpr: (e) => {
+					if (!this._isIfaceType(e._type))
+						return `__equal(${tmp}, ${this.genExpr(e)})`;
+					// An interface case compares by dynamic type, not structure.
+					this.useHelper("ifeq");
+					const boxed = namedTag
+						? this._genNamedIfaceBox(tmp, stmt.tag._ifaceNamedType, false)
+						: tmp;
+					return `__ifeq(${boxed}, ${this._genIfaceOperand(e)})`;
+				},
 			};
 		}
 		if (stmt.tag && isComplex(stmt.tag._type)) {

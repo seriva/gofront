@@ -288,12 +288,15 @@ export const resolveMethods = {
 				return node;
 			case "SliceType":
 				return { kind: "slice", elem: this.resolveTypeNode(node.elem, scope) };
-			case "MapType":
+			case "MapType": {
+				const key = this.resolveTypeNode(node.key, scope);
+				this._checkMapKey(key, node.key);
 				return {
 					kind: "map",
-					key: this.resolveTypeNode(node.key, scope),
+					key,
 					value: this.resolveTypeNode(node.value, scope),
 				};
+			}
 			case "PointerType":
 				return {
 					kind: "pointer",
@@ -474,7 +477,8 @@ export const resolveMethods = {
 		for (const u of pending) {
 			this._currentFile = u.file;
 			this._currentSource = u.source;
-			this._reportConstraintUse(u.type, u.node);
+			if (u.mapKey) this._checkMapKey(u.mapKey, u.node);
+			else this._reportConstraintUse(u.type, u.node);
 		}
 		this._currentFile = file;
 		this._currentSource = source;
@@ -1300,7 +1304,7 @@ export const resolveMethods = {
 		seen.add(base);
 		switch (base.kind) {
 			case "typeParam":
-				return this._typeParamComparable(base);
+				return this._typeSetComparable(base, seen);
 			case "slice":
 			case "map":
 			case "func":
@@ -1318,6 +1322,44 @@ export const resolveMethods = {
 			default:
 				return true;
 		}
+	},
+
+	// A type parameter is comparable when every type in its constraint's type
+	// set is; without a type set the constraint must be `comparable`.
+	_typeSetComparable(tp, seen) {
+		const terms = this._constraintTerms(tp.constraint, new Set());
+		if (terms?.length)
+			return terms.every(
+				(t) => t.name === "comparable" || this._isComparable(t, seen),
+			);
+		if (terms) return false;
+		let c = tp.constraint;
+		if (c?.kind === "TypeName" || c?.kind === "InterfaceType")
+			c = this.resolveTypeNode(c, this.globals);
+		while (c?.kind === "named") c = c.underlying;
+		return c === COMPARABLE || Boolean(c?._comparable);
+	},
+
+	// `map[K]V` needs a comparable key: Go reports the key type, and for a type
+	// parameter adds that it lacks the `comparable` constraint.
+	_checkMapKey(key, node) {
+		if (!key || key._tainted || key.kind === "untyped") return;
+		// While package types are collected a key's fields may not have
+		// resolved yet, so the check waits with the constraint-use checks.
+		if (this._collectingTypes) {
+			this._pendingConstraintUses.push({
+				mapKey: key,
+				node,
+				file: this._currentFile,
+				source: this._currentSource,
+			});
+			return;
+		}
+		if (this._isComparable(key)) return;
+		this.err(
+			`invalid map key type ${typeStr(key)}${key.kind === "typeParam" ? " (missing comparable constraint)" : ""}`,
+			node,
+		);
 	},
 
 	_checkInterfaceConstraint(typeArg, base, constraint, node) {

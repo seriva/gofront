@@ -634,7 +634,7 @@ function complexConstParts(e, depth = 0) {
 function complexConstNeg(e, depth) {
 	if (e.op !== "-" && e.op !== "+") return null;
 	const c = complexConstParts(e.operand, depth + 1);
-	return c && e.op === "-" ? [-c[0], -c[1]] : c;
+	return c && e.op === "-" ? [0 - c[0], 0 - c[1]] : c;
 }
 
 export const expressionGenMethods = {
@@ -3489,12 +3489,6 @@ export const expressionGenMethods = {
 		const simdEq = this._genSimdEquality(expr);
 		if (simdEq !== null) return simdEq;
 
-		if (this._isStructEquality(expr)) {
-			this.useHelper("equal");
-			const cmp = `__equal(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
-			return expr.op === "==" ? cmp : `!${cmp}`;
-		}
-
 		const nilMap = this._genNilMapCompare(expr);
 		if (nilMap) return nilMap;
 
@@ -3507,6 +3501,12 @@ export const expressionGenMethods = {
 		if (this._isIfaceEquality(expr)) {
 			this.useHelper("ifeq");
 			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
+			return expr.op === "==" ? cmp : `!${cmp}`;
+		}
+
+		if (this._isStructEquality(expr)) {
+			this.useHelper("equal");
+			const cmp = `__equal(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 

@@ -11,6 +11,7 @@ import {
 	isRangeFor,
 } from "../../lower/range.js";
 import { hasCallOrReceive, someChild } from "../../lower/walk.js";
+import { BOOL } from "../../typechecker/types.js";
 import {
 	getMapKeyValTypes,
 	isArrayType,
@@ -2062,6 +2063,10 @@ export class StmtsEmitter {
 	}
 
 	emitIncDecStmt(stmt) {
+		if (stmt._complexIncDec) {
+			this.emitAssignStmt(stmt._complexIncDec);
+			return;
+		}
 		const { expr, op } = stmt;
 
 		if (
@@ -3468,6 +3473,14 @@ export class StmtsEmitter {
 				this.pushInstruction({ op: "local.get", index: tagTmp });
 				this.emitExpr(vals[j], tagWType);
 				this._emitElemEq(tagGoType, tagWType);
+			} else if (isInterfaceType(vals[j]._type, this.mod.checker)) {
+				// `case v:` of a tagless switch is `true == v`.
+				this.emitExpr(
+					{ kind: "BasicLit", litKind: "BOOL", value: "true", _type: BOOL },
+					"anyref",
+				);
+				this.emitExpr(vals[j], "anyref");
+				this._emitAnyEq();
 			} else {
 				this.emitExpr(vals[j], "i32");
 			}

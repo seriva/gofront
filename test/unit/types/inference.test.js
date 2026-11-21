@@ -40,7 +40,10 @@ func main() {
 	s := "hello" - "world"
 	console.log(s)
 }`);
-	assertErrorContains(errors, "Invalid operation");
+	assertErrorContains(
+		errors,
+		'operator - not defined on "hello" (untyped string constant)',
+	);
 });
 
 test("no new variables on left side of := is an error", () => {
@@ -159,13 +162,21 @@ func main() {
 
 section("Type conversions");
 
-test("bool(x) converts non-zero int to true", () => {
-	const js = compile(`package main
+test("bool(x) of an integer is rejected, bool(b) of a bool is not", () => {
+	assertErrorContains(
+		compile(`package main
 func main() {
-	console.log(bool(1))
-	console.log(bool(0))
+	x := 1
+	console.log(bool(x))
+}`).errors,
+		"cannot convert x (variable of type int) to type bool",
+	);
+	const js = compile(`package main
+type B bool
+func main() {
+	console.log(bool(B(true)))
 }`).js;
-	assertEqual(runJs(js), "true\nfalse");
+	assertEqual(runJs(js), "true");
 });
 
 test("[]int(slice) generic slice conversion", () => {

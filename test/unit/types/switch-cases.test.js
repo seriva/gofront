@@ -40,6 +40,41 @@ const NEGATIVE = [
 		"package main\nfunc main() {\n\tn := 1\n\tswitch n {\n\tcase nil:\n\t}\n}",
 		"cannot convert nil to type int",
 	],
+	[
+		"switch x { case nil: } on T any",
+		"package main\nfunc f[T any](x T) {\n\tswitch x {\n\tcase nil:\n\t}\n}\nfunc main() { f(1) }",
+		"cannot switch on x (variable of type T constrained by any) (T is not comparable)",
+	],
+	[
+		"switch x { case nil: } on T comparable",
+		"package main\nfunc f[T comparable](x T) {\n\tswitch x {\n\tcase nil:\n\t}\n}\nfunc main() { f(1) }",
+		"cannot convert nil to type T",
+	],
+	[
+		"switch on a struct with a slice field",
+		"package main\ntype P struct{ S []int }\nfunc main() {\n\tvar p P\n\tswitch p {\n\t}\n}",
+		"cannot switch on p (variable of struct type P) (P is not comparable)",
+	],
+	[
+		"switch on an array of slices",
+		"package main\nfunc main() {\n\tvar a [2][]int\n\tswitch a {\n\t}\n}",
+		"is not comparable",
+	],
+	[
+		"tagless case of a defined bool",
+		"package main\ntype MB bool\nfunc main() {\n\tvar b MB\n\tswitch {\n\tcase b:\n\t}\n}",
+		"invalid case b in switch on true (mismatched types MB and bool)",
+	],
+	[
+		"tagless case of a type parameter",
+		"package main\nfunc f[T any](x T) {\n\tswitch {\n\tcase x:\n\t}\n}\nfunc main() { f(1) }",
+		"invalid case x in switch on true (mismatched types T and bool)",
+	],
+	[
+		"tagless case of a non-empty interface",
+		"package main\ntype S interface{ M() }\nfunc main() {\n\tvar s S\n\tswitch {\n\tcase s:\n\t}\n}",
+		"invalid case s in switch on true (mismatched types S and bool)",
+	],
 ];
 
 for (const [name, src, want] of NEGATIVE) {
@@ -165,4 +200,46 @@ test("R24 unused type switch binding without clauses", () => {
 		"package main\nfunc main() {\n\tvar v any = 1\n\tswitch x := v.(type) {\n\t}\n}";
 	for (const target of ["js", "both", "wasm"])
 		assertErrorContains(errorsOn(target, src), "'x' declared and not used");
+});
+
+test("switch tags Go accepts stay valid on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X int }
+
+func f[T comparable](x T, y T) {
+	switch x {
+	case y:
+		fmt.Println("same")
+	}
+}
+
+func main() {
+	var s []int
+	switch s {
+	}
+	var m map[string]int
+	switch m {
+	case nil:
+		fmt.Println("nil map")
+	}
+	switch (P{1}) {
+	case P{1}:
+		fmt.Println("p")
+	}
+	f(1, 1)
+	var v any = false
+	switch {
+	case v:
+		fmt.Println("no")
+	default:
+		fmt.Println("default")
+	}
+}
+`,
+		"nil map\np\nsame\ndefault\n",
+	);
 });

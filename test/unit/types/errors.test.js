@@ -1162,6 +1162,97 @@ func main() {
 	}
 });
 
+test("a comparison of mismatched operands reports one error", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var s []int
+	_ = s == 1
+}`);
+	assertErrorContains(errors, "mismatched types []int and untyped int");
+	assertEqual(errors.length, 1);
+});
+
+test("an interface compared with a slice type reports Go's comparable cause", () => {
+	const { errors } = compile(`package main
+
+type I interface{ M() }
+type S []int
+
+func (S) M() {}
+
+func main() {
+	var i I
+	var s S
+	_ = i == s
+}`);
+	assertErrorContains(errors, "i == s (slice can only be compared to nil)");
+	assertEqual(errors.length, 1);
+});
+
+test("an operator an operand's kind lacks is reported once, as Go words it", () => {
+	for (const [stmt, msg] of [
+		["_ = b < b", "b < b (operator < not defined on bool)"],
+		["_ = c < c", "c < c (operator < not defined on complex128)"],
+		["_ = b - b", "operator - not defined on b (variable of type bool)"],
+		["_ = x && x", "operator && not defined on x (variable of type int)"],
+		["_ = x && x && x", "operator && not defined on x (variable of type int)"],
+		["_ = x || x || x", "operator || not defined on x (variable of type int)"],
+		["_ = f % 2 + s", "operator % not defined on f (variable of type float64)"],
+		["_ = ^f", "operator ^ not defined on f (variable of type float64)"],
+		["_ = !x", "operator ! not defined on x (variable of type int)"],
+		["_ = -b", "operator - not defined on b (variable of type bool)"],
+		["_ = x + s", "x + s (mismatched types int and string)"],
+	]) {
+		const { errors } = compile(`package main
+
+func main() {
+	var b bool
+	var c complex128
+	var x int
+	var f float64
+	var s string
+	${stmt}
+	_, _, _, _, _ = b, c, x, f, s
+}`);
+		assertErrorContains(errors, msg);
+		assertEqual(errors.length, 1);
+	}
+});
+
+test("a slice, map or func compared with a JS-dynamic value is accepted in both operand orders", () => {
+	for (const dyn of ["document.foo", "document.foo.bar", 'JSON.parse("1")']) {
+		for (const v of ["s", "m", "f"]) {
+			for (const expr of [`${v} == ${dyn}`, `${dyn} == ${v}`]) {
+				const { errors } = compile(`package main
+
+func main() {
+	var s []int
+	var m map[string]int
+	var f func()
+	_, _, _ = s, m, f
+	_ = ${expr}
+}`);
+				assertEqual(errors.length, 0);
+			}
+		}
+	}
+});
+
+test("a compound shift of a float with a bad count reports one error", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	var f float64 = 1.0
+	f <<= 1.5
+}`);
+	assertErrorContains(
+		errors,
+		"shifted operand f (variable of type float64) must be integer",
+	);
+	assertEqual(errors.length, 1);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

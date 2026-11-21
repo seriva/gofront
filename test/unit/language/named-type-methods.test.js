@@ -1522,6 +1522,80 @@ func main() {
 	});
 }
 
+section("Receiver through a pointer alias");
+
+test("alias to *P is a pointer receiver of P on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+type C = *P
+
+func (c C) Inc() { c.n++ }
+
+func main() {
+	p := &P{n: 1}
+	p.Inc()
+	var v P
+	v.Inc()
+	fmt.Println(p.n, v.n)
+}
+`,
+		"2 1\n",
+	);
+});
+
+test("alias to a pointer to a non-local type is still rejected", () => {
+	const { errors } = compile(`package main
+type C = *int
+func (c C) M() {}
+func main() {}`);
+	assertErrorContains(errors, "invalid receiver type C");
+});
+
+test("alias to a pointer to a pointer is still rejected", () => {
+	const { errors } = compile(`package main
+type P struct{}
+type Q = **P
+func (q Q) M() {}
+func main() {}`);
+	assertErrorContains(errors, "invalid receiver type");
+});
+
+for (const [imp, alias, shown] of [
+	["bytes", "*bytes.Buffer", "bytes.Buffer"],
+	["bytes", "bytes.Buffer", "bytes.Buffer"],
+	["strings", "*strings.Builder", "strings.Builder"],
+	["sync", "*sync.Mutex", "sync.Mutex"],
+	["time", "*time.Time", "time.Time"],
+	["fmt", "*fmt.Stringer", "fmt.Stringer"],
+]) {
+	test(`method on alias ${alias} of ${shown} is rejected`, () => {
+		const { errors } = compile(`package main
+import "${imp}"
+type C = ${alias}
+func (c C) M() {}
+func main() { var _ C }`);
+		assertErrorContains(
+			errors,
+			`cannot define new methods on non-local type ${shown}`,
+		);
+	});
+}
+
+test("method declared directly on bytes.Buffer is rejected", () => {
+	const { errors } = compile(`package main
+import "bytes"
+func (b bytes.Buffer) M() {}
+func main() {}`);
+	assertErrorContains(
+		errors,
+		"cannot define new methods on non-local type bytes.Buffer",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -25,6 +25,7 @@ import {
 	BOOL,
 	copyType,
 	defaultType,
+	displayTypeName,
 	ERROR,
 	INTRINSICS,
 	isAny,
@@ -448,7 +449,9 @@ export class TypeChecker {
 		this._registerConstExprs(programs);
 		this._registerVarSpecs(programs);
 		this._markConstraintPositions(programs);
+		this._collectingTypes = true;
 		this._collectTypesPass(programs);
+		this._collectingTypes = false;
 		this._flushConstraintUses();
 		this._collectFuncsPass(programs);
 		this._checkGlobalTypeNamesPass(programs);
@@ -1171,7 +1174,31 @@ export class TypeChecker {
 		}
 	}
 
+	// A named type owned by another package: imported through a package
+	// object, or a linked Go-source stdlib type mangled `Name$$pkg`.
+	_isNonLocalNamed(t, spelled) {
+		if (this._importedTypes.has(t)) return true;
+		// A stdlib package names its own `Name$$pkg` types by that mangled
+		// name; any other spelling (an alias, say) reaches another package's.
+		return String(t.name).includes("$$") && spelled !== t.name;
+	}
+
+	// `type C = *P; func (c C) M()` declares M on P with a pointer receiver:
+	// rewrite the receiver to `*P` before anything keys off its name.
+	_unwrapPointerAliasReceiver(decl) {
+		const node = decl.recvType;
+		if (decl.recvPointer || node.kind !== "TypeName") return;
+		if (node.name.includes(".")) return;
+		const t = this.resolveTypeNodeName(node, this.globals);
+		const base = t?.kind === "pointer" ? t.base : null;
+		if (base?.kind !== "named" || this.types.get(base.name) !== base) return;
+		if (this._isNonLocalNamed(base, node.name)) return;
+		decl.recvType = { ...node, name: base.name };
+		decl.recvPointer = true;
+	}
+
 	collectFunc(decl) {
+		if (decl.kind === "MethodDecl") this._unwrapPointerAliasReceiver(decl);
 		const { resolveScope, typeParamTypes } = this._buildCollectFuncScope(decl);
 		const paramTypes = decl.params.map((p) =>
 			this.resolveTypeNode(p.type, resolveScope),
@@ -1217,7 +1244,49 @@ export class TypeChecker {
 		}
 	}
 
+	// A receiver's base type is a defined, non-pointer, non-interface type
+	// declared in this package.
+	_checkReceiverType(decl) {
+		const node = decl.recvType;
+		const isName = node.kind === "TypeName" || node.kind === "GenericTypeName";
+		if (!isName) {
+			const t = this.resolveTypeNode(node, this.globals);
+			const stars = node.kind === "PointerType" && decl.recvPointer ? "*" : "";
+			return this.err(`invalid receiver type ${stars}${typeStr(t)}`, decl);
+		}
+		const resolved = this.resolveTypeNodeName(node, this.globals);
+		if (resolved.kind === "basic" && resolved.name === "any")
+			return this.err(`invalid receiver type ${node.name}`, decl);
+		// `type C = *pkg.T` is a pointer to another package's type.
+		const t =
+			resolved.kind === "pointer" && resolved.base?.kind === "named"
+				? resolved.base
+				: resolved;
+		if (
+			t.kind === "basic" ||
+			t === ERROR ||
+			node.name.includes(".") ||
+			this._isNonLocalNamed(t, node.name)
+		)
+			return this.err(
+				`cannot define new methods on non-local type ${displayTypeName(
+					t.kind === "named" ? t.name : node.name,
+				)}`,
+				decl,
+			);
+		if (resolved.kind !== "named") {
+			return this.err(`invalid receiver type ${node.name}`, decl);
+		}
+		const u = t.underlying;
+		if (u?.kind === "pointer" || u?.kind === "interface")
+			this.err(
+				`invalid receiver type ${node.name} (pointer or interface type)`,
+				decl,
+			);
+	}
+
 	_attachMethod(decl, funcType) {
+		this._checkReceiverType(decl);
 		funcType._ptrRecv = Boolean(decl.recvPointer);
 		funcType._decl = decl;
 		const recvNamedType = this.types.get(decl.recvType.name);
