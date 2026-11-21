@@ -31,6 +31,25 @@ var __u8dec = __u8dec || function(b) {
   return (__u8d ??= new TextDecoder()).decode(ArrayBuffer.isView(b) ? b : new Uint8Array(b));
 };`;
 
+// base64 (unpadded) -> Uint8Array: a `//go:embed` []byte starts as a fresh copy
+// of the file's bytes, decoded without `atob` so it runs in any JS host.
+export const HELPER_B64 = `var __b64t = __b64t || null;
+var __b64 = __b64 || function(s) {
+  if (!__b64t) {
+    __b64t = new Uint8Array(128);
+    const a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (let i = 0; i < 64; i++) __b64t[a.charCodeAt(i)] = i;
+  }
+  const t = __b64t, n = s.length, out = new Uint8Array((n * 3) >> 2);
+  let acc = 0, bits = 0, o = 0;
+  for (let i = 0; i < n; i++) {
+    acc = (acc << 6) | t[s.charCodeAt(i)];
+    bits += 6;
+    if (bits >= 8) { bits -= 8; out[o++] = (acc >> bits) & 255; }
+  }
+  return out;
+};`;
+
 // Slice views (Go's `b[lo:hi:max]` shares the backing store).  A view of a
 // plain array is a Proxy over an empty `__SV` array that holds the backing
 // array `b`, offset `o`, length `n` and capacity `c`: Array.isArray, length,

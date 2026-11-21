@@ -499,6 +499,7 @@ export class TypeChecker {
 	// one file.
 	_checkEmbedSpec(spec, type) {
 		const directives = spec._embeds;
+		spec._embedKind = spec._embedType = undefined;
 		const malformed = directives.find((d) => d.error);
 		const at = malformed ?? directives[0];
 		const fail = (msg) => this.err(msg, at);
@@ -512,6 +513,9 @@ export class TypeChecker {
 		if (type?._tainted) return;
 		if (!kind)
 			return fail(`cannot embed into variable of type ${typeStr(type)}`);
+		// Read by `lowerEmbeds`, which has no scope to resolve the type node.
+		spec._embedKind = kind;
+		spec._embedType = type;
 		const paths = new Set(
 			directives.flatMap((d) => (d._embedFiles ?? []).map((f) => f.path)),
 		);

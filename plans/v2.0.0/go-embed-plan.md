@@ -89,19 +89,19 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Done when: `import _ "embed"` compiles on every target; `string` and `[]byte`/`[]uint8` variables (and aliases) with one matched file pass; `//go:embed is not supported yet` is gone; `npm run check:layers` covers `stdlib/embed/**` (in `stdlib-mid`)
 
 ### Phase 2: Embedded `string` and `[]byte` on every target
-- [ ] Task 2.1: Lower scalar embed directives into `EmbedData` side-table nodes (split from former 1.4)
+- [x] Task 2.1: Lower scalar embed directives into `EmbedData` side-table nodes (split from former 1.4)
   - Files: `src/lower/globals.js`, `src/lower/index.js`
   - Test: `test/unit/compiler/embed-lower.test.js`: `lowerEmbeds` attaches `spec._embedData = { kind: "EmbedData", as, _files, _type }` for `string` and `[]byte`/`[]uint8` without mutating `spec.value`, and recompiling a cached AST does not trigger `var with initializer`
   - Done when: `lower()` populates `spec._embedData` for `string` and `[]byte` directives (carrying `_type`) and `spec.value` remains `null`
-- [ ] Task 2.2: Emit embedded scalars in the JS backend (former 1.4)
+- [x] Task 2.2: Emit embedded scalars in the JS backend (former 1.4)
   - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js`, `src/backend/js/runtime.js`
   - Test: `test/unit/compiler/embed-js.test.js`: string content, `[]byte` with all 256 byte values, a non-UTF-8 `string` round-tripping through `[]byte(s)`, two `[]byte` vars embedding the same file store the base64 once but mutate independently, dependent `var n = len(data)` initialization order, `&data` and `var _ string`, identical results after `--minify --mangle`
   - Done when: `CodeGen.generate()` runs `lowerEmbeds`, embedded variables initialize at package load through `_emitVarBindings`, and the base64 decoder helper (in `HELPER_MAP`) is emitted only when a `[]byte` embed exists
-- [ ] Task 2.3: Data and DataCount sections in the wasm encoder (former 1.5)
+- [x] Task 2.3: Data and DataCount sections in the wasm encoder (former 1.5)
   - Files: `src/backend/wasm/encode.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/wat.js`
   - Test: `test/unit/wasm/data-section.test.js`: Section 12 before code (keeping `mod.codeOffsets` accurate for source maps), Section 11 after code, omitted when `mod.data` is empty, passive segment bytes, `array.new_data` (`0xfb 0x09` with `typeIndex` and `dataIndex` immediates) encoding and WAT formatting
   - Done when: `WebAssembly.validate` accepts modules with passive data segments and `--emit-wat` prints them
-- [ ] Task 2.4: Emit embedded scalars in the wasm backend (former 1.6)
+- [x] Task 2.4: Emit embedded scalars in the wasm backend (former 1.6)
   - Files: `src/backend/wasm/globals.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/module-emitter.js`
   - Test: `test/unit/compiler/embed-wasm.test.js`: `[]byte` via passive segment + `array.new_data` into `(array (mut i8))` unpacked to `(array (mut i32))` and `string` via the string table (including non-UTF-8 round-trip) in `wasm` and `both` packages, same bytes as JS, independent mutability for two `[]byte` vars on the same file, dependent `var n = len(data)` and blank `var _ string`; still valid after `--wasm-opt` when `binaryen` is installed
   - Done when: a `wasm` package reads an embedded `[]byte` with no linear-memory copy

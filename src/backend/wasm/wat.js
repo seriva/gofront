@@ -205,6 +205,8 @@ function formatInstruction(inst) {
 		case "array.get_u":
 		case "array.set":
 			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
+		case "array.new_data":
+			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0} $d${inst.dataIndex ?? 0}`;
 		case "array.new_fixed":
 			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0} ${inst.size ?? inst.count ?? 0}`;
 		case "array.copy":
@@ -233,6 +235,19 @@ function formatInstruction(inst) {
 		default:
 			return op;
 	}
+}
+
+// A data segment's bytes as a WAT string body: printable ASCII as written, every
+// other byte (and `"` and `\`) as a two-digit hex escape.
+function formatDataBytes(bytes) {
+	let out = "";
+	for (const b of bytes) {
+		out +=
+			b >= 0x20 && b < 0x7f && b !== 0x22 && b !== 0x5c
+				? String.fromCharCode(b)
+				: `\\${b.toString(16).padStart(2, "0")}`;
+	}
+	return out;
 }
 
 export function emitWat(mod) {
@@ -295,6 +310,11 @@ export function emitWat(mod) {
 		lines.push(
 			`  (elem declare func ${mod.elements.map((idx) => `$f${idx}`).join(" ")})`,
 		);
+	}
+
+	// 5b. Passive data segments
+	for (let i = 0; i < (mod.data ?? []).length; i++) {
+		lines.push(`  (data $d${i} "${formatDataBytes(mod.data[i].bytes)}")`);
 	}
 
 	// Map exports by kind & index

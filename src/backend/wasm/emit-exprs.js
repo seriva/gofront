@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-exprs.js
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
+import { decodeRawBytes } from "../../lexer/lexer.js";
 import {
 	constFromLit,
 	constIntValue,
@@ -373,6 +374,10 @@ export class ExprsEmitter {
 				this.emitFuncLit(expr, targetWasmType);
 				break;
 
+			case "EmbedData":
+				this.emitEmbedData(expr);
+				break;
+
 			case "TypeAssertExpr": {
 				const targetGoType = expr._type ?? expr.type;
 				const targetWType = targetWasmType ?? this.toWasmType(targetGoType);
@@ -396,6 +401,70 @@ export class ExprsEmitter {
 			default:
 				throw new Error(`Unsupported expression kind: ${expr.kind}`);
 		}
+	}
+
+	// `//go:embed` initialiser (see `lowerEmbeds`). A string is a string-table
+	// entry. A []byte is read from a passive data segment into a packed byte
+	// array (`array.new_data`, no linear memory) and copied into a fresh
+	// `(array (mut i32))`, so each variable owns its bytes.
+	emitEmbedData(node) {
+		const bytes = node._files[0]?.bytes ?? new Uint8Array(0);
+		if (node.as === "string") {
+			this.emitBasicLit({
+				kind: "BasicLit",
+				litKind: "STRING",
+				value: decodeRawBytes(bytes),
+			});
+			return;
+		}
+		const sliceInfo = this.mod.getSliceType(this._getSliceElemType(node._type));
+		const arrInfo = sliceInfo.arrInfo;
+		const packedIndex = this.mod.getByteArrayType().typeIndex;
+		const packedW = { kind: "ref", nullable: true, typeIndex: packedIndex };
+		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		const n = bytes.length;
+		const packedTmp = this.acquireTemp(packedW);
+		const arrTmp = this.acquireTemp(arrW);
+		const iTmp = this.acquireTemp("i32");
+		const nTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "i32.const", value: n });
+		this.pushInstruction({
+			op: "array.new_data",
+			typeIndex: packedIndex,
+			dataIndex: this.mod.internData(bytes),
+		});
+		this.pushInstruction({ op: "local.set", index: packedTmp });
+		this.pushInstruction({ op: "i32.const", value: n });
+		this.pushInstruction({ op: "local.tee", index: nTmp });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: arrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this._emitCountedLoop(iTmp, nTmp, () => {
+			this.pushInstruction({ op: "local.get", index: arrTmp });
+			this.pushInstruction({ op: "local.get", index: iTmp });
+			this.pushInstruction({ op: "local.get", index: packedTmp });
+			this.pushInstruction({ op: "local.get", index: iTmp });
+			this.pushInstruction({ op: "array.get_u", typeIndex: packedIndex });
+			this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction({ op: "local.get", index: iTmp });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: iTmp });
+		});
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: nTmp });
+		this.pushInstruction({ op: "local.get", index: nTmp });
+		this.pushInstruction({ op: "struct.new", typeIndex: sliceInfo.typeIndex });
+		this.releaseTemp(nTmp, "i32");
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(arrTmp, arrW);
+		this.releaseTemp(packedTmp, packedW);
 	}
 
 	emitFuncLit(funcLit) {
