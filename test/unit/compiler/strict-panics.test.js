@@ -10,6 +10,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -603,6 +604,160 @@ func main() {
 	assert(!js.includes("__sslice"), "js package must not use the checked form");
 	const strict = compile(src, { strict: true }).js;
 	assert(strict.includes("__sslice(s, lo, hi)"), "both package is unchecked");
+});
+
+section("wasm slice bounds, indexes and make sizes keep their Go width");
+
+test("a 64-bit slice bound of 2^32 or more panics with its full value", async () => {
+	await assertProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := []int{1, 2, 3}
+	var a [3]int
+	s := "abc"
+	n := 1 << 32
+	try("F19", func() { _ = xs[:n] })
+	try("F19a", func() { _ = a[:n] })
+	try("F19lo", func() { _ = xs[(1<<32)+1:] })
+	try("F19lo-var", func() { lo := (1 << 32) + 1; _ = xs[lo:2] })
+	try("F19s", func() { _ = s[:n] })
+	try("F19max", func() { _ = xs[:2:n] })
+	try("F19neg", func() { m := -(1 << 32); _ = xs[m:] })
+	try("index", func() { _ = xs[n] })
+	try("ok", func() { _ = xs[1:3]; _ = s[1:] })
+}
+`,
+		`F19 runtime error: slice bounds out of range [:4294967296] with capacity 3
+F19a runtime error: slice bounds out of range [:4294967296] with length 3
+F19lo runtime error: slice bounds out of range [4294967297:3]
+F19lo-var runtime error: slice bounds out of range [4294967297:2]
+F19s runtime error: slice bounds out of range [:4294967296] with length 3
+F19max runtime error: slice bounds out of range [::4294967296] with capacity 3
+F19neg runtime error: slice bounds out of range [-4294967296:]
+index runtime error: index out of range [4294967296] with length 3
+ok <nil>
+`,
+	);
+});
+
+test("a uint64 slice bound above 2^32 panics, and one above 2^63 prints unsigned", async () => {
+	await assertProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := []int{1, 2, 3}
+	var u uint64 = 1 << 40
+	try("u64", func() { _ = xs[:u] })
+}
+`,
+		"u64 runtime error: slice bounds out of range [:1099511627776] with capacity 3\n",
+	);
+	await assertWasmProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := make([]int, 3, 5)
+	u := uint64(1) << 63
+	try("hi", func() { _ = xs[:u] })
+	try("lo", func() { _ = xs[u:] })
+	try("max", func() { _ = xs[:1:u] })
+	try("index", func() { _ = xs[u] })
+	try("uint", func() { v := uint(1) << 63; _ = xs[v] })
+	try("neg", func() { i := -5; _ = xs[i] })
+}
+`,
+		`hi runtime error: slice bounds out of range [:9223372036854775808] with capacity 5
+lo runtime error: slice bounds out of range [9223372036854775808:3]
+max runtime error: slice bounds out of range [::9223372036854775808] with capacity 5
+index runtime error: index out of range [9223372036854775808] with length 3
+uint runtime error: index out of range [9223372036854775808] with length 3
+neg runtime error: index out of range [-5]
+`,
+	);
+});
+
+test("a uint32 index or bound of 2^31 or more prints unsigned", async () => {
+	await assertProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := make([]int, 3, 5)
+	s := "abc"
+	var u32 uint32 = 1 << 31
+	try("F22a", func() { _ = xs[:u32] })
+	try("F22b", func() { _ = xs[u32] })
+	try("F22s", func() { _ = s[u32] })
+	try("F22lo", func() { _ = s[u32:] })
+	try("F22max", func() { _ = xs[:1:u32] })
+	var arr [3]int
+	try("F22arr", func() { _ = arr[u32] })
+	try("F22set", func() { xs[u32] = 1 })
+	var u8 uint8 = 200
+	try("u8", func() { _ = xs[u8] })
+	try("ok", func() { var i uint32 = 2; _ = xs[i]; _ = xs[i:]; _ = s[i] })
+}
+`,
+		`F22a runtime error: slice bounds out of range [:2147483648] with capacity 5
+F22b runtime error: index out of range [2147483648] with length 3
+F22s runtime error: index out of range [2147483648] with length 3
+F22lo runtime error: slice bounds out of range [2147483648:3]
+F22max runtime error: slice bounds out of range [::2147483648] with capacity 5
+F22arr runtime error: index out of range [2147483648] with length 3
+F22set runtime error: index out of range [2147483648] with length 3
+u8 runtime error: index out of range [200] with length 3
+ok <nil>
+`,
+	);
+});
+
+test("make with a 64-bit size beyond 2^31 panics with Go's make text on wasm", async () => {
+	await assertWasmProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	n := 1 << 32
+	try("len", func() { xs := make([]int, n); fmt.Println(len(xs)) })
+	try("len-cap", func() { xs := make([]int, 0, n+1); fmt.Println(len(xs)) })
+	try("len-big", func() { xs := make([]int, n, 3); fmt.Println(len(xs)) })
+	try("neg", func() { m := -n; xs := make([]int, m); fmt.Println(len(xs)) })
+	try("map", func() { m := make(map[int]int, n); fmt.Println(len(m)) })
+	try("ok", func() { k := 3; xs := make([]int, k, k+1); fmt.Println(len(xs), cap(xs)) })
+}
+`,
+		`len runtime error: makeslice: len out of range
+len-cap runtime error: makeslice: cap out of range
+len-big runtime error: makeslice: cap out of range
+neg runtime error: makeslice: len out of range
+0
+map <nil>
+3 4
+ok <nil>
+`,
+	);
+});
+
+test("an int product or sum that overflows 32 bits is checked at its full value on wasm", async () => {
+	await assertWasmProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	a := make([]int, 70000)
+	b := make([]int, 10)
+	xs := []int{1, 2, 3}
+	try("make", func() { _ = make([]int, len(a)*len(a)) })
+	try("slice-hi", func() { _ = xs[:len(a)*len(a)] })
+	try("index", func() { _ = xs[len(a)*len(a)] })
+	try("slice-hi-sum", func() { _ = xs[:len(b)+2147483640] })
+	try("index-sum", func() { _ = xs[len(b)+2147483640] })
+	try("cmp", func() { fmt.Println(len(a)*len(a) > 5) })
+	try("small", func() { _ = xs[len(xs)-1]; _ = xs[len(b)-9]; _ = xs[1+1] })
+}
+`,
+		`make runtime error: makeslice: len out of range
+slice-hi runtime error: slice bounds out of range [:4900000000] with capacity 3
+index runtime error: index out of range [4900000000] with length 3
+slice-hi-sum runtime error: slice bounds out of range [:2147483650] with capacity 3
+index-sum runtime error: index out of range [2147483650] with length 3
+true
+cmp <nil>
+small <nil>
+`,
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -167,15 +167,15 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Done when: all pass and `js-globals.test.js` passes unmodified
 
 ### Phase 2: `wasm` integers at Go width (root `wasm-bounds-width`)
-- [ ] Task 2.1: Checked narrowing for slice bounds and `make` sizes (F19, F19a, F19lo, F19s, F19m)
+- [x] Task 2.1: Checked narrowing for slice bounds and `make` sizes (F19, F19a, F19lo, F19s, F19m)
   - Files: `src/backend/wasm/emit-exprs.js` (`_emitIndexExprToI32` `onOverflow`, `emitSliceExpr`), `src/backend/wasm/emit-builtins.js` (`make` length, capacity, map hint), `src/backend/wasm/index.js` (`__slice_bounds_panic` takes the unwrapped `i64`)
   - Test: `test/unit/compiler/strict-panics.test.js`: F19, F19a, F19lo, F19s → Go's messages; F19m → `makeslice: len out of range` and `makeslice: cap out of range` on `wasm`; the 64-bit index control still passes
   - Done when: all pass on `wasm` and `both`; `bce-mathx.js` and `zero-alloc.js` pass (proven-narrow operands emit the same code)
-- [ ] Task 2.2: Unsigned operands print unsigned (F22a, F22b, F22s, F22u)
+- [x] Task 2.2: Unsigned operands print unsigned (F22a, F22b, F22s, F22u)
   - Files: `src/backend/wasm/emit-exprs.js` (`_emitSliceBoundsPanic`, `_isI32IndexExpr`), `src/backend/wasm/emit.js` (`oob32`/`oob64` handlers), `src/backend/wasm/index.js` (`emitIndexPanicBody`, `emitSliceBoundsPanicBody` signedness flag), `src/backend/wasm/module-emitter.js` + `src/backend/wasm/boundary.js` (`str_from_u64`)
   - Test: `strict-panics.test.js`: F22a, F22b, F22s and F22u → Go's messages; a negative `int` index still prints negative
   - Done when: all pass on `wasm`; `both` JS side unchanged
-- [ ] Task 2.3: Integer `range` over an unproven 64-bit or unsigned count (F19r)
+- [x] Task 2.3: Integer `range` over an unproven 64-bit or unsigned count (F19r)
   - Files: `src/backend/wasm/emit-stmts.js` (`emitRangeForStmt`)
   - Test: `test/unit/language/loops.test.js`: F19r → `3` (and `uint64(1)<<63` / `uint32(1)<<31` broken after 3 iterations → `3`) with `assertAllTargetsOutput`; `for i := range len(xs)` and `range 10` keep the `i32` loop (checked through the emitted WAT or `zero-alloc.js`); `docs/go-compatibility.md` runtime-panics row (64-bit and unsigned bounds, `make` sizes)
   - Done when: all pass; `bce-mathx.js` passes

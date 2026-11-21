@@ -907,13 +907,13 @@ export function isSigned(goType) {
 export function printOperandKind(arg, checker) {
 	const isBool =
 		isBoolGoType(arg._type) ||
-		_namedBasic(arg._type) === "bool" ||
+		namedBasicName(arg._type) === "bool" ||
 		(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 	let wType = toWasmType(arg._type, checker);
 	let widen = false;
 	if (!isBool && (wType === "i32" || wType === "i64") && !isSigned(arg._type)) {
 		if (wType === "i64") wType = "u64";
-		else if (_namedBasic(arg._type) === "uint32") {
+		else if (namedBasicName(arg._type) === "uint32") {
 			wType = "i64";
 			widen = true;
 		}
@@ -921,7 +921,7 @@ export function printOperandKind(arg, checker) {
 	return { wType, isBool, widen };
 }
 
-function _namedBasic(t) {
+export function namedBasicName(t) {
 	while (t && (t.kind === "named" || t.kind === "TypeName") && t.underlying) {
 		t = t.underlying;
 	}

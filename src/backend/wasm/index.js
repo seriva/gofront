@@ -47,8 +47,9 @@ import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
 
-// Body of `__index_panic(i i64, n i32)`: builds Go's message with the string
-// imports and raises it like any other runtime panic.
+// Body of `__index_panic(i i64, n i32, unsigned i32)`: builds Go's message
+// with the string imports and raises it like any other runtime panic.  A
+// nonzero `unsigned` prints the index as an unsigned 64-bit number.
 function emitIndexPanicBody(mod, emitter) {
 	const str = (text) => {
 		emitter.pushInstruction({ op: "i32.const", value: mod.internString(text) });
@@ -64,14 +65,18 @@ function emitIndexPanicBody(mod, emitter) {
 		});
 	str("runtime error: index out of range [");
 	emitter.pushInstruction({ op: "local.get", index: 0 });
+	emitter.pushInstruction({ op: "local.get", index: 2 });
 	emitter.pushInstruction({
 		op: "call",
-		funcIndex: mod.getStrFromI64ImportIndex(),
+		funcIndex: mod.getFmtIntFuncIndex(),
 	});
 	concat();
 	emitter.pushInstruction({ op: "local.get", index: 0 });
 	emitter.pushInstruction({ op: "i64.const", value: 0n });
 	emitter.pushInstruction("i64.lt_s");
+	emitter.pushInstruction({ op: "local.get", index: 2 });
+	emitter.pushInstruction("i32.eqz");
+	emitter.pushInstruction("i32.and");
 	emitter.pushInstruction({ op: "if", blockType: "externref" });
 	str("]");
 	emitter.pushInstruction("else");
@@ -87,15 +92,58 @@ function emitIndexPanicBody(mod, emitter) {
 	emitter.emitRuntimePanicThrow();
 }
 
+// Body of `__narrow_bound(v i64) i32`: `v` as an i32 when it is in
+// 0..2^31-1, else a value no size or bounds check accepts (the i32 minimum
+// for a negative `v`, an unsigned one at or above 2^63 included, the maximum
+// otherwise).
+function emitNarrowBoundBody(emitter) {
+	const emit = (ins) => emitter.pushInstruction(ins);
+	emit({ op: "local.get", index: 0 });
+	emit({ op: "i64.const", value: 31n });
+	emit("i64.shr_u");
+	emit("i64.eqz");
+	emit({ op: "if", blockType: "i32" });
+	emit({ op: "local.get", index: 0 });
+	emit("i32.wrap_i64");
+	emit("else");
+	// The sign of `v` spread over the word, flipped, is the minimum or maximum.
+	emit({ op: "local.get", index: 0 });
+	emit({ op: "i64.const", value: 63n });
+	emit("i64.shr_s");
+	emit("i32.wrap_i64");
+	emit({ op: "i32.const", value: 0x7fffffff });
+	emit("i32.xor");
+	emit("end");
+	emit("return");
+}
+
+// Body of `__fmt_int(n i64, unsigned i32) string`: `n` as decimal text, the
+// unsigned 64-bit value when `unsigned` is nonzero.
+function emitFmtIntBody(mod, emitter) {
+	const emit = (ins) => emitter.pushInstruction(ins);
+	emit({ op: "local.get", index: 1 });
+	emit({ op: "if", blockType: "externref" });
+	emit({ op: "local.get", index: 0 });
+	emit({ op: "call", funcIndex: mod.getStrFromU64ImportIndex() });
+	emit("else");
+	emit({ op: "local.get", index: 0 });
+	emit({ op: "call", funcIndex: mod.getStrFromI64ImportIndex() });
+	emit("end");
+	emit("return");
+}
+
 // Body of `__slice_bounds_panic(lo, hi, max i64, cap, form i32)`: Go's
 // `slice bounds out of range` text for the first failing bound, checked in
 // Go's order (max, then hi, then lo; hi, then lo for a two-index slice).
+// `form` bit 0 is a three-index slice, bit 1 words the limit as a length, and
+// bits 2, 3 and 4 say `lo`, `hi` and `max` print as unsigned 64-bit numbers.
 function emitSliceBoundsPanicBody(mod, emitter) {
 	const LO = 0;
 	const HI = 1;
 	const MAX = 2;
 	const CAP = 3;
 	const FORM = 4;
+	const UNSIGNED_BIT = { [LO]: 4, [HI]: 8, [MAX]: 16 };
 	const emit = (ins) => emitter.pushInstruction(ins);
 	const str = (text) => {
 		emit({ op: "i32.const", value: mod.internString(text) });
@@ -103,10 +151,21 @@ function emitSliceBoundsPanicBody(mod, emitter) {
 	};
 	const concat = () =>
 		emit({ op: "call", funcIndex: mod.getStringConcatImportIndex() });
-	const num = (index) => {
-		emit({ op: "local.get", index });
-		emit({ op: "call", funcIndex: mod.getStrFromI64ImportIndex() });
+	// Pushes nonzero when `index` prints as unsigned.
+	const unsigned = (index) => {
+		emit({ op: "local.get", index: FORM });
+		emit({ op: "i32.const", value: UNSIGNED_BIT[index] });
+		emit("i32.and");
 	};
+	// The three bounds as text, in the locals `num` reads back.
+	const text = [LO, HI, MAX].map(() => emitter.allocLocal(null, "externref"));
+	for (const index of [LO, HI, MAX]) {
+		emit({ op: "local.get", index });
+		unsigned(index);
+		emit({ op: "call", funcIndex: mod.getFmtIntFuncIndex() });
+		emit({ op: "local.set", index: text[index] });
+	}
+	const num = (index) => emit({ op: "local.get", index: text[index] });
 	// `with length n` or `with capacity n`, by the form's wording bit.
 	const limit = () => {
 		emit({ op: "local.get", index: FORM });
@@ -137,6 +196,9 @@ function emitSliceBoundsPanicBody(mod, emitter) {
 		emit({ op: "local.get", index });
 		emit({ op: "i64.const", value: 0n });
 		emit("i64.lt_s");
+		unsigned(index);
+		emit("i32.eqz");
+		emit("i32.and");
 	};
 	// `index` is outside 0..bound, `bound` being a local or the capacity.
 	const outside = (index, bound) => {
@@ -495,13 +557,15 @@ export function compileWasmModule(
 	funcDecls.push(boundsPanicFn);
 
 	// Go's index panic: `index out of range [i] with length n`, or
-	// `index out of range [i]` for a negative index.
+	// `index out of range [i]` for a negative index; `unsigned` prints `i`
+	// as an unsigned 64-bit number.
 	funcDecls.push({
 		kind: "FuncDecl",
 		name: "__index_panic",
 		params: [
 			{ name: "i", type: { kind: "basic", name: "int64" } },
 			{ name: "n", type: { kind: "basic", name: "int32" } },
+			{ name: "unsigned", type: { kind: "basic", name: "int32" } },
 		],
 		returnType: null,
 		_isIndexPanic: true,
@@ -518,9 +582,31 @@ export function compileWasmModule(
 			"runtime error: invalid memory address or nil pointer dereference",
 	});
 
+	// An i64 as decimal text, signed or unsigned, for the panic messages.
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__fmt_int",
+		params: [
+			{ name: "n", type: { kind: "basic", name: "int64" } },
+			{ name: "unsigned", type: { kind: "basic", name: "int32" } },
+		],
+		returnType: { kind: "basic", name: "string" },
+		_isFmtInt: true,
+	});
+
+	// An i64 size or bound narrowed to the i32 the runtime indexes with.
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__narrow_bound",
+		params: [{ name: "v", type: { kind: "basic", name: "int64" } }],
+		returnType: { kind: "basic", name: "int32" },
+		_isNarrowBound: true,
+	});
+
 	// Go's slice-bounds panic from the failing bounds (`lo`, `hi`, `max` as
 	// signed values), the capacity (the length of an array or string) and
-	// `form`: bit 0 = three-index slice, bit 1 = limit worded as a length.
+	// `form`: bit 0 = three-index slice, bit 1 = limit worded as a length,
+	// bits 2-4 = `lo`, `hi`, `max` print unsigned.
 	funcDecls.push({
 		kind: "FuncDecl",
 		name: "__slice_bounds_panic",
@@ -916,6 +1002,8 @@ export function compileWasmModule(
 				!fn._isRuntimePanic &&
 				!fn._isIndexPanic &&
 				!fn._isSliceBoundsPanic &&
+				!fn._isNarrowBound &&
+				!fn._isFmtInt &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -951,6 +1039,10 @@ export function compileWasmModule(
 			emitIndexPanicBody(mod, emitter);
 		} else if (fn._isSliceBoundsPanic) {
 			emitSliceBoundsPanicBody(mod, emitter);
+		} else if (fn._isNarrowBound) {
+			emitNarrowBoundBody(emitter);
+		} else if (fn._isFmtInt) {
+			emitFmtIntBody(mod, emitter);
 		} else if (fn._isRuntimePanic) {
 			const strIdx = mod.internString(fn._panicMsg);
 			const funcIdx = mod.getStringImportIndex();

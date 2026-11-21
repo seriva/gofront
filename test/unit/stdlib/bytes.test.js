@@ -299,5 +299,5 @@ func main() {
 	_ = b.Len()
 }
 `);
-	assert(wasm.length <= 4500, `bytes.Buffer module is ${wasm.length} bytes`);
+	assert(wasm.length <= 4600, `bytes.Buffer module is ${wasm.length} bytes`);
 });

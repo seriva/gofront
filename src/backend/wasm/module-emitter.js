@@ -856,6 +856,7 @@ export class ModuleEmitter {
 		this.getStringCodePointAtImportIndex(); // env.str_code_point_at
 		this.getStringHashImportIndex(); // env.str_hash
 		this.getStrFromI64ImportIndex();
+		this.getStrFromU64ImportIndex();
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
 		this.getIsStringImportIndex(); // env.is_string
@@ -1066,6 +1067,14 @@ export class ModuleEmitter {
 		return this.resolveFuncIndex("__index_panic");
 	}
 
+	getFmtIntFuncIndex() {
+		return this.resolveFuncIndex("__fmt_int");
+	}
+
+	getNarrowBoundFuncIndex() {
+		return this.resolveFuncIndex("__narrow_bound");
+	}
+
 	getNilPanicFuncIndex() {
 		return this.resolveFuncIndex("__nil_panic");
 	}
@@ -1223,6 +1232,15 @@ export class ModuleEmitter {
 		return this.getOrAddFuncImport(
 			"env",
 			"str_from_i64",
+			["i64"],
+			["externref"],
+		);
+	}
+
+	getStrFromU64ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_from_u64",
 			["i64"],
 			["externref"],
 		);
