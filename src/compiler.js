@@ -18,8 +18,16 @@
 // Cross-package access uses the qualified form: `pkg.Foo`.  The codegen
 // de-qualifies it because the dependency is inlined.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+	basename,
+	dirname,
+	isAbsolute,
+	join,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 import { CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
@@ -157,6 +165,74 @@ export function evictParseCache(filePath) {
 
 export function parseCacheSize() {
 	return _parseCache.size;
+}
+
+// ── //go:embed ───────────────────────────────────────────────
+
+// Whether `pattern` is not a plain path below the package directory: Go
+// rejects absolute paths, `.` and `..` elements, leading or trailing
+// slashes and backslashes.
+function embedPatternEscapes(pattern) {
+	if (pattern === "" || pattern.includes("\\") || isAbsolute(pattern))
+		return true;
+	if (pattern.startsWith("/") || pattern.endsWith("/")) return true;
+	return pattern.split("/").some((e) => e === "" || e === "." || e === "..");
+}
+
+// The file `pattern` names below `realDir` (the real path of the package
+// directory): `{ path, bytes }`, or `{ error }`. Containment is checked on the
+// real path, so a symlink pointing out of the package is refused.
+function embedPatternFile(realDir, pattern) {
+	const escapes = { error: "embed pattern escapes package directory" };
+	if (embedPatternEscapes(pattern)) return escapes;
+	let real;
+	try {
+		real = realpathSync(join(realDir, pattern));
+	} catch {
+		return { error: `pattern ${pattern} matches no files` };
+	}
+	const rel = relative(realDir, real);
+	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+		return escapes;
+	if (!statSync(real).isFile())
+		return { error: `pattern ${pattern} matches no files` };
+	return { path: pattern, bytes: new Uint8Array(readFileSync(real)) };
+}
+
+// Resolves the patterns of every `//go:embed` directive attached to a var to
+// `_embedFiles: { path, bytes }[]`, relative to the directory of the file that
+// declares it. It runs on every compile, because a cached AST must not keep
+// the bytes of an earlier build. Returns the diagnostics for patterns that
+// escape the package directory or match nothing.
+export function resolveEmbedFiles(programs) {
+	const errors = [];
+	for (const p of programs) {
+		if (!p._path) continue;
+		let realDir = null;
+		for (const d of p.decls) {
+			if (d.kind !== "VarDecl") continue;
+			for (const spec of d.decls) {
+				for (const directive of spec._embeds ?? []) {
+					directive._embedFiles = undefined;
+					if (directive.error) continue;
+					realDir ??= realpathSync(dirname(p._path));
+					const files = new Map();
+					const before = errors.length;
+					for (const pattern of directive.patterns) {
+						const f = embedPatternFile(realDir, pattern);
+						if (f.error)
+							errors.push(
+								new TypeCheckError(f.error, directive, p._filename, p._source),
+							);
+						else files.set(f.path, f);
+					}
+					if (errors.length === before)
+						directive._embedFiles = [...files.values()];
+				}
+			}
+		}
+	}
+	return errors;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -617,6 +693,9 @@ export function compileFiles(files, options = {}) {
 	// parsed and checked with the package but never written next to it.
 	const driver = testDriverProgram(options, programs, pkgTarget, fromDir);
 	if (driver) programs.push(driver);
+
+	const embedErrors = resolveEmbedFiles(programs);
+	if (embedErrors.length > 0) throw new CompileError(embedErrors);
 
 	// ── 2. Resolve imports ────────────────────────────────────────
 	const checker = new TypeChecker();

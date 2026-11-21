@@ -46,7 +46,6 @@ const EXCLUDED_PACKAGE_GROUPS = {
 		"debug/macho",
 		"debug/pe",
 		"debug/plan9obj",
-		"embed",
 		"encoding",
 		"encoding/ascii85",
 		"encoding/asn1",

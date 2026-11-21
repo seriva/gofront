@@ -974,12 +974,28 @@ func main() {
 
 section("Excluded packages and //go:embed diagnostics");
 
-test("//go:embed reports targeted diagnostic", () => {
-	const { errors } = compile(`package main
+test("//go:embed without the embed import reports a targeted diagnostic", () => {
+	const errors = withTempDir(
+		{
+			"hello.txt": "hi",
+			"main.go": `package main
 //go:embed hello.txt
 var s string
-func main() {}`);
-	assertErrorContains(errors, "//go:embed is not supported yet");
+func main() {}`,
+		},
+		(dir) => {
+			try {
+				compileDir(dir);
+			} catch (e) {
+				return e.errors;
+			}
+			return [];
+		},
+	);
+	assertErrorContains(
+		errors,
+		'go:embed only allowed in Go files that import "embed"',
+	);
 });
 
 test("//go:embed inside raw strings and block comments is not a directive", () => {
