@@ -115,7 +115,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/embed-glob.test.js`: `shaders/*.wgsl`, a directory pattern (recursive, skipping `.`/`_` names), `all:assets`, `*` not crossing `/`, sorted results
   - Done when: globs and directory patterns populate `_embedFiles` with Go's semantics
-- [ ] Task 3.3: File-table codegen for JS and wasm; docs (former 2.3)
+- [x] Task 3.3: File-table codegen for JS and wasm; docs (former 2.3)
   - Files: `src/lower/globals.js`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-exprs.js` (plus `docs/go-compatibility.md`, `docs/language-support.md`)
   - Test: `test/unit/compiler/embed-manifest.test.js`: `ReadFile` hit returns a fresh copy (mutating the returned slice does not affect a second `ReadFile`), miss returns `open <name>: file does not exist`, lookup by path at run time on `js`, `wasm`, and `both`; a file embedded by two variables is stored once per module
   - Done when: `lowerEmbeds` lowers `embed.FS` (`as: "fs"`), `files.ReadFile("shaders/light.wgsl")` returns the contents on `js` and `wasm`, and `docs/go-compatibility.md` / `docs/language-support.md` document `//go:embed` and `embed.FS`

@@ -82,11 +82,13 @@ func main() {
 
 section("embed.FS: directive");
 
-test("embed-fs: a directive on an embed.FS variable type-checks", () => {
-	assertEqual(
-		check(prog("//go:embed a.txt b.txt\nvar files embed.FS\n"), "js").length,
-		0,
-	);
+test("embed-fs: a directive on an embed.FS variable compiles on every target", () => {
+	for (const target of ["js", "wasm", "both"])
+		assertEqual(
+			check(prog("//go:embed a.txt b.txt\nvar files embed.FS\n"), target)
+				.length,
+			0,
+		);
 });
 
 test("embed-fs: an aliased import and a type alias embed", () => {

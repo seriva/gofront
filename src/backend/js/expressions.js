@@ -837,10 +837,20 @@ export const expressionGenMethods = {
 
 	// `//go:embed` initialiser (see `lowerEmbeds`). A string is a literal; a
 	// []byte decodes a base64 constant into a fresh Uint8Array, and the constant
-	// of a file is declared once however many variables embed it.
+	// of a file is declared once however many variables embed it. An embed.FS
+	// holds its sorted names and one such array per file.
 	_genEmbedData(node) {
+		if (node.as === "fs") {
+			const names = node._files.map((f) => JSON.stringify(f.path));
+			const datas = node._files.map((f) => this._genEmbedBytes(f.bytes));
+			return `new ${jsClassName(node._type.name)}([${names}], [${datas}])`;
+		}
 		const bytes = node._files[0]?.bytes ?? new Uint8Array(0);
 		if (node.as === "string") return JSON.stringify(decodeRawBytes(bytes));
+		return this._genEmbedBytes(bytes);
+	},
+
+	_genEmbedBytes(bytes) {
 		this.useHelper("b64");
 		const key = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 		const name = `__emb_${key}`;
