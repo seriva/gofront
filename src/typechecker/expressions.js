@@ -1663,13 +1663,7 @@ export const expressionCheckMethods = {
 			this._complexConstUnfit(targetType, node, null, true);
 			return;
 		}
-		this._convertError(
-			expr,
-			node,
-			srcType,
-			targetType,
-			" (use real() or imag())",
-		);
+		this._convertError(expr, node, srcType, targetType);
 	},
 
 	// Go's `cannot convert x (variable of type S) to type T`, the one place

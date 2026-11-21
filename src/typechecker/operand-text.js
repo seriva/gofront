@@ -42,10 +42,9 @@ function resultText(returnType) {
 function structText(n) {
 	const fields = (n.fields ?? []).map((f) => {
 		const type = typeNodeText(f.type);
-		const tag = f.tag == null ? "" : ` \`${f.tag}\``;
 		return f.embedded || !f.names?.length
-			? `${type}${tag}`
-			: `${f.names.join(", ")} ${type}${tag}`;
+			? type
+			: `${f.names.join(", ")} ${type}`;
 	});
 	return `struct{${fields.join("; ")}}`;
 }
@@ -116,6 +115,15 @@ function compositeText(n) {
 	return `${type}{${n.elems?.length ? "…" : ""}}`;
 }
 
+// The parser drops the parentheses of a `(*T)(x)` conversion callee; print
+// them back so it does not read as `*T(x)`.
+function callText(n) {
+	const callee = exprText(n.func);
+	const fn =
+		n.func?.kind === "UnaryExpr" && n.func.op === "*" ? `(${callee})` : callee;
+	return `${fn}(${(n.args ?? []).map(exprText).join(", ")})`;
+}
+
 const PRINTERS = {
 	Ident: (n) => n.name,
 	BasicLit: litText,
@@ -124,8 +132,7 @@ const PRINTERS = {
 	SelectorExpr: (n) => `${exprText(n.expr)}.${n.field}`,
 	UnaryExpr: (n) => `${n.op}${exprText(n.operand)}`,
 	BinaryExpr: (n) => `${exprText(n.left)} ${n.op} ${exprText(n.right)}`,
-	CallExpr: (n) =>
-		`${exprText(n.func)}(${(n.args ?? []).map(exprText).join(", ")})`,
+	CallExpr: callText,
 	IndexExpr: (n) => `${exprText(n.expr)}[${exprText(n.index)}]`,
 	SliceExpr: sliceText,
 	CompositeLit: compositeText,
@@ -187,20 +194,20 @@ function valueSuffix(node, val) {
 // How Go describes an operand in parentheses after its text: "variable of
 // type float64", "value of type float64", "constant 2 of type float64",
 // "untyped float constant 1000", "untyped bool value". `node._const` (or
-// `_cconst`) carries a constant's value, so every caller prints constants the
+// `_cconst`, `_typedComplexConst`) carries a constant's value, so every caller prints constants the
 // same way. An untyped operand is recognised by `isUntypedConst` (the caller
 // then passes the base name as `typeName`) or, when it is omitted, by
 // `node._type`.
 export function operandKind(node, typeName, isUntypedConst) {
-	const val = node?._const ?? node?._cconst;
+	const val = node?._const ?? node?._cconst ?? node?._typedComplexConst;
 	const t = node?._type;
 	const untyped = isUntypedConst ?? t?.kind === "untyped";
 	if (untyped) {
 		const inferred = isUntypedConst === undefined;
 		if (inferred && t.base === "nil") return "untyped nil";
-		const word = inferred ? untypedWord(t.base, t.rune) : untypedWord(typeName);
+		const word = untypedWord(inferred ? t.base : typeName, t?.rune);
 		if (val) return `untyped ${word} constant${valueSuffix(node, val)}`;
-		return `untyped ${word} ${inferred ? "value" : "constant"}`;
+		return `untyped ${word} value`;
 	}
 	if (val) return `constant${valueSuffix(node, val)} of type ${typeName}`;
 	return node?.kind === "Ident"

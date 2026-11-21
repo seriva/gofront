@@ -252,6 +252,7 @@ export const constantCheckMethods = {
 		// constant converts to a real type.
 		expr._const = val?.k === "COMPLEX" ? null : val;
 		expr._cconst = val?.k === "COMPLEX" ? val : null;
+		expr._typedComplexConst = val ? null : this._typedComplexConst(expr, scope);
 		if (!raw || expr._constReported) return;
 		if (raw.error) {
 			expr._constReported = true;
@@ -262,6 +263,24 @@ export const constantCheckMethods = {
 			expr._constReported = true;
 			this.err(`constant ${raw.v} overflows ${raw.typeName ?? raw.t}`, expr);
 		}
+	},
+
+	// The value of a typed complex constant's name (`const c complex128 = 1 +
+	// 2i`), which is not folded and stays off `_const`; diagnostics read it to
+	// print `c (constant (1 + 2i) of type complex128)`. Null for any other node.
+	_typedComplexConst(expr, scope) {
+		if (expr.kind !== "Ident") return null;
+		const owner = (scope ?? this.globals).lookupScope(expr.name);
+		if (!owner?.isConst(expr.name)) return null;
+		const declared = owner.get(expr.name);
+		const u = declared && this.resolveType(this._deepUnderlying(declared));
+		if (u?.kind !== "basic" || !/^complex/.test(u.name)) return null;
+		const init = owner.lookupConstExpr(expr.name);
+		const v = init ? this._constValue(init, owner) : null;
+		if (!v || (v.k !== "COMPLEX" && v.k !== "INT" && v.k !== "FLOAT"))
+			return null;
+		const c = v.k === "COMPLEX" ? v.v : { re: Number(v.v), im: 0 };
+		return { k: "COMPLEX", v: c, t: u.name };
 	},
 
 	_evalConst(expr, scope) {

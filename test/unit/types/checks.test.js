@@ -2168,6 +2168,76 @@ const constantKindCases = [
 		"x := 1.5\nx",
 		"x (variable of type float64) is not used",
 	],
+	[
+		"a typed complex128 constant's address",
+		"const c complex128 = 1 + 2i\n_ = &c",
+		"cannot take address of c (constant (1 + 2i) of type complex128)",
+	],
+	[
+		"a typed complex64 constant's address",
+		"const c complex64 = 1 + 2i\n_ = &c",
+		"cannot take address of c (constant (1 + 2i) of type complex64)",
+	],
+	[
+		"a typed complex constant ranged over",
+		"const c complex128 = 1 + 2i\nfor range c {}",
+		"cannot range over c (constant (1 + 2i) of type complex128)",
+	],
+	[
+		"an untyped rune constant's length",
+		"const r = 'a'\n_ = len(r)",
+		"invalid argument: r (untyped rune constant 97) for built-in len",
+	],
+	[
+		"an untyped rune constant as a string case",
+		"const r = 'a'\nswitch \"a\" {\ncase r:\n}",
+		"cannot convert r (untyped rune constant 97) to type string",
+	],
+	[
+		"an untyped rune constant ranged over with two variables",
+		"const r = 'a'\nfor i, j := range r {\n_, _ = i, j\n}",
+		"range over r (untyped rune constant 97) permits only one iteration variable",
+	],
+	[
+		"a non-constant untyped bool converted",
+		"x := 1\n_ = int(x == 1)",
+		"cannot convert x == 1 (untyped bool value) to type int",
+	],
+	[
+		"a non-constant untyped bool ranged over",
+		"x := 1\nfor range x == 1 {}",
+		"cannot range over x == 1 (untyped bool value)",
+	],
+	[
+		"a non-constant shift as a len argument",
+		"s := uint(1)\n_ = len(1 << s)",
+		"invalid argument: 1 << s (untyped int value) for built-in len",
+	],
+	[
+		"a non-constant shift converted to bool",
+		"s := uint(1)\n_ = bool(1 << s)",
+		"cannot convert 1 << s (untyped int value) to type bool",
+	],
+	[
+		"a non-constant untyped bool as a switch case",
+		"x := 1\nswitch 1 {\ncase x == 1:\n}",
+		"(untyped bool value)",
+	],
+	[
+		"a parenthesized pointer conversion statement",
+		"var x int\n(*int)(&x)",
+		"(*int)(&x) (value of type *int) is not used",
+	],
+	[
+		"a struct conversion callee drops tags",
+		'var a struct{ X int }\nstruct{ X int `json:"x"` }(a)',
+		"struct{X int}(a)",
+	],
+	[
+		"a struct literal selector drops tags",
+		'_ = &struct{ X int `json:"x"` }{1}.X',
+		"cannot take address of struct{X int}{…}.X (value of type int)",
+	],
 ];
 
 for (const [name, body, want] of constantKindCases)
@@ -2193,7 +2263,12 @@ const convertErrorCases = [
 	[
 		"a complex variable to an integer",
 		"c := complex(1, 2)\n_ = int(c)",
-		"cannot convert c (variable of type complex128) to type int (use real() or imag())",
+		"cannot convert c (variable of type complex128) to type int",
+	],
+	[
+		"a typed complex constant to an integer",
+		"const c complex128 = 1 + 2i\n_ = int(c)",
+		"cannot convert c (constant (1 + 2i) of type complex128) to type int",
 	],
 	["nil to an integer", "_ = int(nil)", "cannot convert nil to type int"],
 	[
@@ -2222,6 +2297,17 @@ for (const [name, body, want] of convertErrorCases)
 			assertErrorContains(errors, want);
 		}
 	});
+
+test("a complex operand converted to an integer has no real() suffix", () => {
+	const { errors } = compile(
+		"package main\nfunc main() {\nc := complex(1, 2)\n_ = int(c)\n}",
+	);
+	assertErrorContains(errors, "to type int");
+	assertEqual(
+		errors.some((e) => String(e.message ?? e).includes("real() or imag()")),
+		false,
+	);
+});
 
 test("a conversion between pointers to distinct wasm structs names the operand", () => {
 	const { errors } = compile(
