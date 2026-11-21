@@ -749,7 +749,10 @@ func main() {
 `,
 		},
 		(dir) => {
-			assertThrows(() => compileDir(dir), "Cannot assign Box[b.Pt] to Box[Pt]");
+			assertThrows(
+				() => compileDir(dir),
+				"cannot use Box[b.Pt]{} (value of type Box[b.Pt]) as Box[Pt] value in assignment",
+			);
 		},
 	);
 });

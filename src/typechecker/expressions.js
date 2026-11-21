@@ -1,7 +1,7 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
 import { constIntValue, realOfConst } from "./const-fold.js";
-import { exprText, operandKind } from "./operand-text.js";
+import { constValueText, exprText, operandKind } from "./operand-text.js";
 import { newLabelScope } from "./statements.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
@@ -139,7 +139,7 @@ const BUILTIN_CHECK = {
 	delete: (s, _n, e, at, sc) => {
 		const mt = s._checkDeleteOperand(e, at[0], sc);
 		if (mt?.kind === "map" && e.args[1]) {
-			s.assertAssignable(mt.key, at[1], e.args[1]);
+			s.assertAssignable(mt.key, at[1], e.args[1], "argument to delete");
 			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
 			s._markIfaceKey(mt, e.args[1], at[1]);
 		}
@@ -1352,7 +1352,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
-			this.assertAssignable(btu.key, indexType, expr.index);
+			this.assertAssignable(btu.key, indexType, expr.index, "map index");
 			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
@@ -1663,8 +1663,25 @@ export const expressionCheckMethods = {
 			this._complexConstUnfit(targetType, node, null, true);
 			return;
 		}
-		this.err(
-			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
+		this._convertError(expr, node, srcType, targetType);
+	},
+
+	// Go's `cannot convert x (variable of type S) to type T`, the one place
+	// every conversion failure with an operand is worded. `suffix` carries a
+	// reason (`: need type assertion`, ` (truncated)`).
+	_convertText(operand, srcType, targetType, suffix = "") {
+		let what;
+		if (isNil(srcType)) what = "nil";
+		else if (srcType?.kind === "untyped")
+			what = this._untypedConstText(srcType, operand);
+		else
+			what = `${exprText(operand)} (${this._convOperandKind(operand, srcType)})`;
+		return `cannot convert ${what} to type ${typeStr(targetType)}${suffix}`;
+	},
+
+	_convertError(expr, operand, srcType, targetType, suffix = "") {
+		return this.err(
+			this._convertText(operand, srcType, targetType, suffix),
 			expr,
 		);
 	},
@@ -1710,14 +1727,13 @@ export const expressionCheckMethods = {
 		if (this._deepUnderlying(targetType)?.kind === "slice")
 			this._rejectSeqAsSlice(srcType, operand, "a slice conversion");
 		if (this._convertible(srcType, targetType, expr, operand)) return;
-		const what =
-			srcType?.kind === "untyped"
-				? this._untypedConstText(srcType, operand)
-				: `${exprText(operand)} (${operandKind(operand, typeStr(srcType), false)})`;
 		const fraction = this._truncatesToInteger(srcType, targetType, operand);
-		this.err(
-			`cannot convert ${what} to type ${typeStr(targetType)}${fraction ? " (truncated)" : ""}`,
+		this._convertError(
 			expr,
+			operand,
+			srcType,
+			targetType,
+			fraction ? " (truncated)" : "",
 		);
 	},
 
@@ -1751,7 +1767,7 @@ export const expressionCheckMethods = {
 				// Only unnamed pointer types convert by their base types.
 				this.resolveType(srcType)?.kind === "pointer" &&
 				this.resolveType(targetType)?.kind === "pointer" &&
-				this._pointerConversionOk(s, t, srcType, targetType, expr)
+				this._pointerConversionOk(s, t, srcType, targetType, expr, operand)
 			);
 		if (s.kind === "basic" && t.kind === "basic")
 			return this._basicConvertible(s, t);
@@ -1812,10 +1828,7 @@ export const expressionCheckMethods = {
 			!(mentionsTypeParam(src) || mentionsTypeParam(tgt))
 		)
 			return false;
-		this.err(
-			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}`,
-			expr,
-		);
+		this._convertError(expr, operand, srcType, targetType);
 		return true;
 	},
 
@@ -1825,12 +1838,12 @@ export const expressionCheckMethods = {
 		if (targetType.kind === "typeParam") return;
 		const kind = this._deepUnderlying(targetType)?.kind;
 		if (!kind || NILABLE_KINDS.has(kind)) return;
-		this.err(`cannot convert nil to ${typeStr(targetType)}`, expr);
+		this._convertError(expr, null, srcType, targetType);
 	},
 
 	// Unnamed pointers convert when their base types share an underlying type
 	// (ignoring struct tags).
-	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr) {
+	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr, operand) {
 		const sBase = this._deepUnderlying(srcPtr.base);
 		const tBase = this._deepUnderlying(tgtPtr.base);
 		// `interface{}` and `any` are one type, whatever declares them.
@@ -1848,9 +1861,12 @@ export const expressionCheckMethods = {
 		// share one object.
 		if (this.target === "wasm" || this.target === "both") {
 			this.recordBlocker("pointer conversion between struct types");
-			this.err(
-				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} in a wasm package: pointers to distinct struct types cannot share storage; keep this code in a js package`,
+			this._convertError(
 				expr,
+				operand,
+				srcType,
+				targetType,
+				" in a wasm package: pointers to distinct struct types cannot share storage; keep this code in a js package",
 			);
 		}
 		return true;
@@ -2358,10 +2374,9 @@ export const expressionCheckMethods = {
 	_checkTypeParamConv(src, tgt, expr, operand, scope = this.globals) {
 		if (src?.kind !== "typeParam" && tgt?.kind !== "typeParam") return false;
 		if (!this._needsTypeParamConvCheck(src, tgt)) return true;
-		const text = operand
-			? `${exprText(operand)} (${this._convOperandKind(operand, src)})`
-			: typeStr(src);
-		const head = `cannot convert ${text} to type ${typeStr(tgt)}`;
+		const head = operand
+			? this._convertText(operand, src, tgt)
+			: `cannot convert ${typeStr(src)} to type ${typeStr(tgt)}`;
 		if (isNil(src)) {
 			if (this._isNilless(tgt))
 				this.err(`cannot convert nil to type ${typeStr(tgt)}`, expr);
@@ -2765,7 +2780,7 @@ export const expressionCheckMethods = {
 						{ kind: "slice", elem: fnType.params[paramIdx] },
 						this._deepUnderlying(argTypes[i]),
 						expr.args[i],
-						"argument",
+						`argument to ${exprText(expr.func)}`,
 					);
 				continue;
 			}
@@ -2778,7 +2793,7 @@ export const expressionCheckMethods = {
 				targetParam,
 				argTypes[i],
 				node,
-				expr._multiForward ? `argument to ${exprText(expr.func)}` : "argument",
+				`argument to ${exprText(expr.func)}`,
 				undefined,
 				!expr._isDeferCall,
 			);
@@ -3188,7 +3203,7 @@ export const expressionCheckMethods = {
 					fieldType,
 					vt,
 					elem,
-					"assignment",
+					"struct literal",
 					undefined,
 					true,
 				);
@@ -3214,7 +3229,7 @@ export const expressionCheckMethods = {
 						fieldType,
 						vt,
 						elem.value,
-						"assignment",
+						"struct literal",
 						undefined,
 						true,
 					);
@@ -3259,7 +3274,7 @@ export const expressionCheckMethods = {
 						base.elem,
 						vt,
 						elem.value,
-						"assignment",
+						"array or slice literal",
 						undefined,
 						true,
 					);
@@ -3270,7 +3285,7 @@ export const expressionCheckMethods = {
 					base.elem,
 					et,
 					elem,
-					"assignment",
+					"array or slice literal",
 					undefined,
 					true,
 				);
@@ -3313,10 +3328,10 @@ export const expressionCheckMethods = {
 				} else {
 					vt = this.checkExpr(elem.value, scope);
 				}
-				this.assertAssignable(base.key, kt, elem.key);
+				this.assertAssignable(base.key, kt, elem.key, "map literal");
 				if (this._isDuplicateConst(seenKeys, elem.key, base.key, true))
 					this.err(
-						`duplicate key ${exprText(elem.key)} in map literal`,
+						`duplicate key ${constValueText(elem.key._const) ?? exprText(elem.key)} in map literal`,
 						elem.key,
 					);
 				this._markIfaceKey(base, elem.key, kt);
@@ -3324,7 +3339,7 @@ export const expressionCheckMethods = {
 					base.value,
 					vt,
 					elem.value,
-					"assignment",
+					"map literal",
 					undefined,
 					true,
 				);

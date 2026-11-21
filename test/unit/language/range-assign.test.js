@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assertAllTargetsOutput,
+	assertEqual,
 	assertErrorContains,
 	assertJsProgramOutput,
 	assertProgramOutput,
@@ -239,22 +240,22 @@ for (const [name, src, want] of [
 	[
 		"for i = range s with i int32 and s a string",
 		'package main\nfunc main() {\n\tvar i int32\n\tfor i = range "abc" {\n\t\t_ = i\n\t}\n}',
-		"Cannot assign int to int32",
+		"cannot use i (value of type int) as int32 value in assignment",
 	],
 	[
 		"for i = range s with i int32 and s a slice",
 		"package main\nfunc main() {\n\tvar i int32\n\tfor i = range []int{1, 2} {\n\t\t_ = i\n\t}\n}",
-		"Cannot assign int to int32",
+		"cannot use i (value of type int) as int32 value in assignment",
 	],
 	[
 		"for i = range a with i int32 and a an array pointer",
 		"package main\nfunc main() {\n\ta := [2]int{1, 2}\n\tvar i int32\n\tfor i = range &a {\n\t\t_ = i\n\t}\n}",
-		"Cannot assign int to int32",
+		"cannot use i (value of type int) as int32 value in assignment",
 	],
 	[
 		"for i, _ = range s with i a defined int type",
 		'package main\ntype MyInt int\nfunc main() {\n\tvar i MyInt\n\tfor i, _ = range []string{"a"} {\n\t\t_ = i\n\t}\n}',
-		"Cannot assign int to MyInt",
+		"cannot use i (value of type int) as MyInt value in assignment",
 	],
 ]) {
 	for (const target of ["js", "both", "wasm"]) {
@@ -848,17 +849,17 @@ for (const [name, body, want] of [
 	[
 		"string",
 		"var s string\n\tfor s = range seqI {\n\t}\n\t_ = s",
-		"Cannot assign int to string",
+		"cannot use s (value of type int) as string value in assignment",
 	],
 	[
 		"float64",
 		"var s float64\n\tfor s = range seqI {\n\t}\n\t_ = s",
-		"Cannot assign int to float64",
+		"cannot use s (value of type int) as float64 value in assignment",
 	],
 	[
 		"int64",
 		"var s int64\n\tfor s = range seqI {\n\t}\n\t_ = s",
-		"Cannot assign int to int64",
+		"cannot use s (value of type int) as int64 value in assignment",
 	],
 	[
 		"fmt.Stringer",
@@ -868,12 +869,12 @@ for (const [name, body, want] of [
 	[
 		"a string slice element",
 		'out := []string{""}\n\tfor out[0] = range seqI {\n\t}\n\t_ = out',
-		"Cannot assign int to string",
+		"cannot use out[0] (value of type int) as string value in assignment",
 	],
 	[
 		"the two-value form",
 		"var s string\n\tvar v int\n\tfor s, v = range seqII {\n\t}\n\t_, _ = s, v",
-		"Cannot assign int to string",
+		"cannot use s (value of type int) as string value in assignment",
 	],
 ]) {
 	for (const target of ["js", "both", "wasm"]) {
@@ -908,6 +909,25 @@ for (const [name, body, want] of [
 		);
 	});
 }
+
+test("ranging into a type-parameter target reports at the target", () => {
+	const { errors } = compile(`package main
+func f[T any](xs []string) {
+	var t T
+	for _, t = range xs {
+	}
+	_ = t
+}
+func main() { f[string](nil) }
+`);
+	assertErrorContains(
+		errors,
+		"cannot use t (value of type string) as T value in assignment",
+	);
+	const e = errors.find((x) => x.message.includes("as T value"));
+	assertEqual(e.line, 4);
+	assertEqual(e.col, 9);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

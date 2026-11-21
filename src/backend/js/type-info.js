@@ -393,7 +393,7 @@ export const typeInfoGenMethods = {
 			.replace(/\bbyte\b/g, "uint8")
 			.replace(/\brune\b/g, "int32")
 			.replace(/\bany\b/g, "interface {}")
-			.replace(/interface\{\.\.\.\}/g, "interface {}");
+			.replace(/interface\{\}/g, "interface {}");
 	},
 
 	// `typeStr`, but an unnamed struct lists its fields, so two anonymous
@@ -425,6 +425,9 @@ export const typeInfoGenMethods = {
 							: ` (${rs.map(s).join(", ")})`;
 				return `func(${ps.join(", ")})${res}`;
 			}
+			case "interface":
+				// Every unnamed interface shares one tag.
+				return t.name ? typeStr(t) : "interface {}";
 			case "struct":
 				if (t.name || !t._structFields) return typeStr(t);
 				return `struct{${t._structFields

@@ -1,4 +1,3 @@
-// pending: assign-message-text
 package main
 
 type Level int
@@ -17,7 +16,7 @@ func main() {
 	var arr [2]int = nil // ERROR "cannot use nil as [2]int value in variable declaration"
 	var b bool
 	b = nil // ERROR "cannot use nil as bool value in assignment"
-	take(nil) // ERROR "cannot use nil as int value in argument"
+	take(nil) // ERROR "cannot use nil as int value in argument to take"
 	f := Flags{on: nil} // ERROR "cannot use nil as bool value in struct literal"
 	_, _, _, _, _ = l, p, arr, b, f
 }

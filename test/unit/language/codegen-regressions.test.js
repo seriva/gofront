@@ -193,7 +193,10 @@ func main() {
 	var f Float64Array = []float64{1}
 	_ = f
 }`);
-	assertErrorContains(errors, "Cannot assign");
+	assertErrorContains(
+		errors,
+		"cannot use []float64{…} (value of type []float64) as Float64Array value in variable declaration",
+	);
 });
 
 test("sized integer conversions wrap", () => {

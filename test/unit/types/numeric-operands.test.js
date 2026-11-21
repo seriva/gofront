@@ -412,11 +412,14 @@ test("compound assignment reports one constant error", () => {
 	);
 });
 
-test("compound assignment on any reports only the operator", () => {
-	assertOneError("var v any = 2\nv += 1 << 64", "operator + not defined on v");
+test("compound assignment on any reports only the mismatch", () => {
+	assertOneError(
+		"var v any = 2\nv += 1 << 64",
+		"v += 1 << 64 (mismatched types any and untyped int)",
+	);
 	assertOneError(
 		"var v interface{} = 2\nv += 1 << 64",
-		"operator + not defined on v",
+		"v += 1 << 64 (mismatched types interface{} and untyped int)",
 	);
 });
 

@@ -97,7 +97,10 @@ func main() {
 	var fa Float32Array = s
 	_ = fa
 }`);
-	assertErrorContains(errors, "Cannot assign []float64 to Float32Array");
+	assertErrorContains(
+		errors,
+		"cannot use s (variable of type []float64) as Float32Array value in variable declaration",
+	);
 });
 
 test("WebGL constants are typed as int on context and global", () => {

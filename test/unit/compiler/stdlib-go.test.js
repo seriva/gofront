@@ -1382,7 +1382,7 @@ func main() { println(cmp.Compare(1, "a")) }
 		(dir) =>
 			assertThrows(
 				() => compileDir(dir),
-				`Type error in main.go at line 5:38: Cannot assign untyped string to int`,
+				`Type error in main.go at line 5:38: cannot use "a" (untyped string constant) as int value in argument to cmp.Compare`,
 			),
 	);
 });

@@ -176,7 +176,10 @@ import "bytes"
 func main() {
 	bytes.Contains("hello", "world")
 }`);
-	assertErrorContains(errors, "Cannot assign");
+	assertErrorContains(
+		errors,
+		'cannot use "hello" (untyped string constant) as []uint8 value in argument to bytes.Contains',
+	);
 });
 
 // ═════════════════════════════════════════════════════════════

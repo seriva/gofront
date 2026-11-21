@@ -335,7 +335,7 @@ func main() {
 }`);
 	assertErrorContains(
 		errors,
-		"cannot use x (variable of type int) as float64 value in variable declaration",
+		"cannot use x (constant 42 of type int) as float64 value in variable declaration",
 	);
 });
 
