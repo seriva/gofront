@@ -1689,3 +1689,100 @@ func main() { println(lib.Run(), len(util.Grow([]int{1}, 2))) }
 	});
 	assertEqual(res.lines.join("\n"), "44 2");
 });
+
+const PKG_SHADOWS = [
+	["func append(x int) int { return x + 1 }", "append(1)", "2"],
+	["func new(x int) int { return x + 1 }", "new(1)", "2"],
+	["func copy(x int) int { return x + 1 }", "copy(1)", "2"],
+	["func make(x int) int { return x + 1 }", "make(1)", "2"],
+	["func cap(x int) int { return x + 1 }", "cap(1)", "2"],
+	["func panic(x int) int { return x + 1 }", "panic(1)", "2"],
+	["func min(x int) int { return x + 1 }", "min(1)", "2"],
+	["func max(x int) int { return x + 1 }", "max(1)", "2"],
+	["var append = 42", "append", "42"],
+	["const copy = 42", "copy", "42"],
+	["var panic = 42", "panic", "42"],
+	["const min = 42", "min", "42"],
+];
+
+for (const [decl, use, want] of PKG_SHADOWS) {
+	test(`main \`${decl}\` beside a linked package calling the builtins`, async () => {
+		const res = await compileHybridProject({
+			"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T {
+	t := make([]T, len(s), cap(s)+1)
+	copy(t, s)
+	return append(t, v)
+}
+
+func Plain(a, b int) int { return min(a, b) + max(a, b) }
+
+func Fresh() int { p := new(int); *p = 5; return *p }
+
+func Check(ok bool) {
+	if !ok {
+		panic("bad")
+	}
+}
+`,
+			"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+${decl}
+
+func main() {
+	println(len(util.Grow([]int{1}, 2)), util.Plain(1, 2), util.Fresh(), ${use})
+}
+`,
+		});
+		assertEqual(res.lines.join("\n"), `2 3 5 ${want}`);
+	});
+}
+
+const SHADOWS = [
+	["func append(x int) int { return x + 1 }", "append(1)", "2"],
+	["func new(x int) int { return x + 1 }", "new(1)", "2"],
+	["func copy(x int) int { return x + 1 }", "copy(1)", "2"],
+	["func make(x int) int { return x + 1 }", "make(1)", "2"],
+	["func cap(x int) int { return x + 1 }", "cap(1)", "2"],
+	["func panic(x int) int { return x + 1 }", "panic(1)", "2"],
+	["func min(x int) int { return x + 1 }", "min(1)", "2"],
+	["func max(x int) int { return x + 1 }", "max(1)", "2"],
+	["var append = 42", "append", "42"],
+	["var new = 42", "new", "42"],
+	["const copy = 42", "copy", "42"],
+	["const make = 42", "make", "42"],
+	["const cap = 42", "cap", "42"],
+	["var panic = 42", "panic", "42"],
+	["var min = 42", "min", "42"],
+	["const max = 42", "max", "42"],
+];
+
+for (const [decl, use, want] of SHADOWS) {
+	test(`user \`${decl}\` beside slices.Sort and maps.Keys`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+${decl}
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	ks := slices.Sorted(maps.Keys(map[string]int{"b": 1, "a": 2}))
+	fmt.Println(${use}, s, ks)
+}
+`,
+			`${want} [1 3] [a b]\n`,
+		);
+	});
+}

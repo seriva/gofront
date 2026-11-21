@@ -177,7 +177,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Files: `src/backend/wasm/monomorph.js` (`monomorphise`)
   - Test: `test/unit/wasm/generics.test.js` F6.1 → `2 [1 3]` on all targets; multi-package user `wasm` generic call when `main` shadows `append`; existing monomorph tests pass
   - Done when: no ICE; a stdlib or imported package body never resolves another package's unexported declarations
-- [ ] Task 6.2: Every builtin the stdlib generics call can be shadowed by a user function, variable, or constant (F6.2)
+- [x] Task 6.2: Every builtin the stdlib generics call can be shadowed by a user function, variable, or constant (F6.2)
   - Files: `src/backend/wasm/monomorph.js`
   - Test: `test/unit/wasm/generics.test.js` table over user functions named `append`, `new`, `copy`, `make`, `cap`, `panic`, `min`, `max` and `var append = 42` beside `slices.Sort`/`maps.Keys` (`len` excluded: checker-go-rules Phase 28), each printing Go's output on `wasm`
   - Done when: all rows pass
