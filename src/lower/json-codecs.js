@@ -147,8 +147,7 @@ const isNamedOrPointer = (t) =>
 
 export class JsonCodecGen extends TypeSpeller {
 	constructor(checker, pkgName, qualifiers, programs = []) {
-		super(pkgName, qualifiers, programs);
-		this.checker = checker;
+		super(pkgName, qualifiers, programs, checker);
 		this.prefix = `gfj_${String(pkgName).replace(/[^A-Za-z0-9_]/g, "_")}_`;
 		this.enc = new Map(); // key -> { name, t, addr }
 		this.dec = new Map();

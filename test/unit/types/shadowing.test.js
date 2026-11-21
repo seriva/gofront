@@ -2735,3 +2735,74 @@ func main() {
 		);
 	});
 }
+
+section("Types named after JS built-ins and colliding type names");
+
+// A type another package also declares is renamed `Name$$pkg`; generated Go
+// and `%T` still spell it `pkg.Name`.
+for (const target of ["both", "wasm"]) {
+	test(`%T of a ${target} package type that collides with a main type is util.Box`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+type Box struct{ N int }
+
+func Make(n int) Box { return Box{n} }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	u "./util"
+)
+
+type Box struct{ M int }
+
+func main() {
+	fmt.Printf("%T %T\\n", u.Make(5), Box{1})
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "util.Box main.Box");
+	});
+}
+
+test("%T of a renamed type reaches through a re-exporting package", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target both
+package util
+
+type Box struct{ N int }
+
+func Make(n int) Box { return Box{n} }
+`,
+			"mid/m.go": `//gofront:target both
+package mid
+
+import "../util"
+
+func Wrap(n int) util.Box { return util.Make(n) }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./mid"
+)
+
+type Box struct{ M int }
+
+func main() {
+	fmt.Printf("%T %T\\n", mid.Wrap(5), Box{1})
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "util.Box main.Box");
+});

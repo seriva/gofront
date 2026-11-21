@@ -149,7 +149,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
 > Remaining review follow-ups after the 2026-11-17 split (re-probed that day). Phase numbers restart because no task of the earlier draft had started.
 
 ### Phase 1: One JS name-escaping rule (root `js-name-collision`)
-- [ ] Task 1.1: Generated Go resolves renamed types through same-package, aliased and indirect imports (F30 prerequisite)
+- [x] Task 1.1: Generated Go resolves renamed types through same-package, aliased and indirect imports (F30 prerequisite)
   - Files: `src/lower/gen-types.js` (`spellNamed`), `src/lower/fmt-formatters.js` (`FmtGen.isNamedInScope`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `import u "./util"; fmt.Printf("%T", u.Make(5))` with a `$$`-renamed `Box` → `util.Box`; the same through a re-exporting package
   - Done when: passes (no `Unknown type 'util.Box'`)
