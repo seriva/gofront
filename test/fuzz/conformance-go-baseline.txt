@@ -1,0 +1,132 @@
+# Reject markers that are not part of Go's message on their line.
+# Written by `npm run conformance:go -- --write-baseline`: a new line gets
+# the tag of its template (TAG_RULES), and a tag edited here is kept.
+# See test/fuzz/conformance-go.js for the format.
+addr_builtin_address:4 # type-as-value-text
+addr_builtin_assign:4 # type-as-value-text
+addr_dts_nested_type_name:7 # excluded: gofront-only
+addr_dts_nested_type_name:8 # excluded: gofront-only
+addr_dts_nested_type_name:9 # excluded: gofront-only
+addr_dts_nested_type_name:10 # excluded: gofront-only
+addr_dts_type_name:7 # excluded: gofront-only
+addr_dts_type_name:8 # excluded: gofront-only
+addr_type_name_assign:8 # type-as-value-text
+addr_type_name_assign:9 # type-as-value-text
+addr_type_name_assign:10 # type-as-value-text
+addr_type_name_assign:11 # type-as-value-text
+addr_type_name_assign:12 # type-as-value-text
+any_alias_conversion:6 # D4
+any_assertion_arithmetic:5 # D4
+any_call:5 # any-operand-kind
+any_compound_assign:5 # D4
+any_compound_shift_count:6 # D4
+any_conversion_arithmetic:4 # D4
+any_defined_operators:10 # D4
+any_defined_operators:11 # D4
+any_defined_operators:14 # D4
+any_func_result:6 # D4
+any_generic_result:6 # D4
+any_index:5 # any-operand-kind
+any_index_assign:5 # any-operand-kind
+any_indirect:5 # any-operand-kind
+any_interface_literal_arithmetic:5 # D4
+any_logical:5 # D4
+any_map_element:5 # D4
+any_multiply:5 # D4
+any_negation:5 # D4
+any_ordering:5 # D4
+any_parenthesized_conversion:4 # D4
+any_pointer_type_ref:5 # D4
+any_range:5 # any-operand-kind
+any_range_element:6 # D4
+any_range_variable:5 # any-operand-kind
+any_recover_arithmetic:5 # D4
+any_slice:5 # any-operand-kind
+any_type_switch_default_arithmetic:9 # D4
+any_unary_minus:5 # D4
+append_elem_string_to_int:5 # D3
+assign_dot_imported_names:8 # type-as-value-text
+assign_imported_members:8 # type-as-value-text
+assign_imported_members:9 # type-as-value-text
+assign_local_type_leak:8 # undefined-text
+assign_local_type_leak:9 # undefined-text
+assign_package_members:11 # type-as-value-text
+assign_package_members:12 # type-as-value-text
+assign_package_members:13 # excluded: gofront-only
+assign_package_members:14 # excluded: gofront-only
+assign_package_members:15 # excluded: gofront-only
+assign_package_members:16 # excluded: gofront-only
+assign_package_members:17 # excluded: gofront-only
+assign_package_members:18 # excluded: gofront-only
+assign_type_param_name:4 # type-as-value-text
+assign_type_param_name:5 # type-as-value-text
+assign_type_param_name:11 # type-as-value-text
+assign_unaddressable_names:22 # type-as-value-text
+assign_web_type_names:4 # excluded: gofront-only
+assign_web_type_names:5 # excluded: gofront-only
+assign_web_type_names:6 # excluded: gofront-only
+assign_web_type_names:7 # excluded: gofront-only
+block_type_used_outside:8 # undefined-text
+builtin_len_any:5 # any-operand-kind
+conv_untyped_float_to_named_int:6 # D1
+conv_untyped_float_to_named_int:7 # D1
+duplicate_switch_case:7 # D2
+forwarded_tuple_arg_type:18 # D3
+forwarded_tuple_arg_type:21 # any-operand-kind
+forwarded_tuple_arg_type:22 # any-operand-kind
+generic_append_elem_type:6 # D3
+generic_append_elem_type:22 # D3
+generic_delete_key_type:8 # D3
+generic_function_value_forms:15 # generic-value-text
+generic_stdlib_func_value:9 # generic-value-text
+identity_anon_struct_assign:6 # D3
+identity_anon_struct_field_type:6 # D3
+identity_comma_ok_assertion:9 # excluded: documented-restriction
+identity_comma_ok_assertion_redeclared:8 # excluded: documented-restriction
+identity_comma_ok_map_lookup:9 # excluded: documented-restriction
+identity_defer_argument:12 # excluded: documented-restriction
+identity_defer_argument:13 # excluded: documented-restriction
+identity_distinct_named_structs:8 # D3
+identity_embedded_struct_conversion:8 # excluded: documented-restriction
+identity_embedded_struct_conversion:9 # excluded: documented-restriction
+identity_forwarded_argument:10 # excluded: documented-restriction
+identity_forwarded_return:8 # excluded: documented-restriction
+identity_generic_instances_differ:8 # D3
+identity_map_key:8 # excluded: documented-restriction
+identity_map_key:9 # excluded: documented-restriction
+identity_map_key:10 # excluded: documented-restriction
+identity_map_key:11 # excluded: documented-restriction
+identity_map_key:12 # excluded: documented-restriction
+identity_map_key:14 # excluded: documented-restriction
+identity_map_key:15 # excluded: documented-restriction
+identity_map_key:16 # excluded: documented-restriction
+identity_multi_value_declaration:8 # excluded: documented-restriction
+identity_range_assignment:8 # excluded: documented-restriction
+identity_same_name_two_packages:10 # D3
+identity_shadowed_local_type:10 # D3
+label_invalid:25 # label-text
+label_invalid:33 # label-text
+label_invalid:41 # label-text
+label_undefined_break:5 # label-text
+label_unused:4 # label-text
+local_type_used_outside:9 # undefined-text
+numeric_int32_to_int64:5 # D3
+numeric_string_to_int:4 # D3
+range_defined_func:7 # any-operand-kind
+range_float_const:5 # D1
+range_float_const_integral:5 # D1
+range_float_lit:5 # D1
+range_float_typed_const:5 # D1
+range_operand_kinds:11 # any-operand-kind
+range_operand_kinds:14 # any-operand-kind
+return_forwarded_tuple_void:6 # excluded: secondary-lines
+return_forwarded_tuple_void:10 # excluded: secondary-lines
+return_forwarded_tuple_void:14 # excluded: secondary-lines
+shift_count_overflow:5 # shift-text
+shift_count_typed_float:6 # excluded: verdict
+shift_count_typed_float:7 # excluded: verdict
+shift_nonconst_typeparam_conversion:4 # shift-text
+shift_nonconst_typeparam_ctx:4 # shift-text
+spread_any:7 # any-operand-kind
+typeswitch_unused_binding:5 # unused-binding-text
+typeswitch_unused_binding_two_cases:5 # unused-binding-text
