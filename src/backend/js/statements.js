@@ -2257,6 +2257,8 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
+			// `_ = x`: only the right-hand side runs, as in `_genAssignStmt`.
+			if (stmt.lhs[0].name === "_" && stmt.op === "=") return rhs[0];
 			if (
 				this._isCompoundWithCall(stmt) ||
 				this._isComplexCompoundAssign(stmt)

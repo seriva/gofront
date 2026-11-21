@@ -884,6 +884,34 @@ func main() {
 	);
 });
 
+test("a blank assignment in a for init or post clause still runs its right side", async () => {
+	await assertJsTargetsOutput(
+		`package main
+import "fmt"
+func side(s string) int {
+	fmt.Println(s)
+	return 1
+}
+func main() {
+	for _ = 1; false; {
+	}
+	for _ = map[any]int{1: 1}; false; {
+	}
+	for _ = side("init"); false; {
+	}
+	n := 0
+	for ; n < 2; _ = side("post") {
+		n++
+	}
+	for i := 0; i < 1; _ = map[any]int{1: 1} {
+		i++
+	}
+	fmt.Println("done")
+}`,
+		"init\npost\npost\ndone\n",
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
