@@ -89,5 +89,9 @@ shift_count_typed_float:7 # excluded: verdict
 shift_nonconst_typeparam_conversion:4 # shift-text
 shift_nonconst_typeparam_ctx:4 # shift-text
 spread_any:7 # any-operand-kind
+spread_not_last:10 # excluded: gofront-only
+spread_not_last:11 # excluded: gofront-only
+spread_not_last:12 # excluded: gofront-only
+spread_not_last:13 # excluded: gofront-only
 typeswitch_unused_binding:5 # unused-binding-text
 typeswitch_unused_binding_two_cases:5 # unused-binding-text

@@ -2795,9 +2795,18 @@ export const expressionCheckMethods = {
 	},
 
 	// `f(a, xs...)` fills every parameter, the variadic one with `xs`: any
-	// other count is an error. Reports and returns true when it is wrong.
+	// other count is an error, and `...` may only follow the last argument.
+	// Reports and returns true when it is wrong.
 	_rejectSpreadCount(wanted, expr, callee) {
 		const given = expr.args.length;
+		const early = expr.args.findIndex((a, i) => a._spread && i < given - 1);
+		if (early >= 0) {
+			this.err(
+				`can only use ... with final argument in call to ${callee}`,
+				expr.args[early],
+			);
+			return true;
+		}
 		if (given === wanted || !expr.args.some((a) => a._spread)) return false;
 		const what = given > wanted ? "too many" : "not enough";
 		this.err(`${what} arguments in call to ${callee}`, expr);
