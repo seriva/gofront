@@ -1392,10 +1392,8 @@ export class ExprsEmitter {
 				if (expr.op === "+") return fits([l[0] + r[0], l[1] + r[1]]);
 				if (expr.op === "-") return fits([l[0] - r[1], l[1] - r[0]]);
 				const ps = [l[0] * r[0], l[0] * r[1], l[1] * r[0], l[1] * r[1]];
-				return fits([
-					ps.reduce((x, y) => (x < y ? x : y)),
-					ps.reduce((x, y) => (x > y ? x : y)),
-				]);
+				ps.sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+				return fits([ps[0], ps[3]]);
 			}
 		}
 		return null;
