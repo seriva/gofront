@@ -18,8 +18,23 @@
 // Cross-package access uses the qualified form: `pkg.Foo`.  The codegen
 // de-qualifies it because the dependency is inlined.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import {
+	existsSync,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
+import {
+	basename,
+	dirname,
+	isAbsolute,
+	join,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 import { CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
@@ -157,6 +172,231 @@ export function evictParseCache(filePath) {
 
 export function parseCacheSize() {
 	return _parseCache.size;
+}
+
+// ── //go:embed ───────────────────────────────────────────────
+
+// Whether `pattern` is not a plain path below the package directory: Go
+// rejects absolute paths, `.` and `..` elements, leading or trailing
+// slashes and backslashes.
+function embedPatternEscapes(pattern) {
+	if (pattern === "" || pattern.includes("\\") || isAbsolute(pattern))
+		return true;
+	if (pattern.startsWith("/") || pattern.endsWith("/")) return true;
+	return pattern.split("/").some((e) => e === "" || e === "." || e === "..");
+}
+
+// The character class of a glob element that starts at `chars[i]` (just after
+// its `[`): `{ neg, ranges, end }` with `end` the index of the closing `]`, or
+// null when it is malformed.
+function parseGlobClass(chars, i) {
+	const cls = { neg: chars[i] === "^", ranges: [], end: 0 };
+	if (cls.neg) i++;
+	const bound = (c) => c !== undefined && c !== "-" && c !== "]";
+	while (chars[i] !== "]" || cls.ranges.length === 0) {
+		const lo = chars[i];
+		let hi = lo;
+		if (!bound(lo)) return null;
+		i++;
+		if (chars[i] === "-") {
+			hi = chars[i + 1];
+			if (!bound(hi)) return null;
+			i += 2;
+		}
+		if (i >= chars.length) return null;
+		cls.ranges.push([lo.codePointAt(0), hi.codePointAt(0)]);
+	}
+	cls.end = i;
+	return cls;
+}
+
+// A glob element as path.Match reads it, as tokens: "*", "?", a literal
+// character or a character class `{ neg, ranges }`. null when it is malformed.
+function parseGlobElement(element) {
+	const chars = Array.from(element);
+	const tokens = [];
+	for (let i = 0; i < chars.length; i++) {
+		const c = chars[i];
+		if (c === "*" || c === "?") tokens.push(c);
+		else if (c !== "[") tokens.push({ lit: c });
+		else {
+			const cls = parseGlobClass(chars, i + 1);
+			if (!cls) return null;
+			tokens.push(cls);
+			i = cls.end;
+		}
+	}
+	return tokens;
+}
+
+// Whether `name` matches the parsed glob element `tokens` (path.Match for one
+// path element: `*` never matches a slash because elements have none).
+function globMatches(tokens, name) {
+	const chars = Array.from(name);
+	const at = (t, n) => {
+		if (t === tokens.length) return n === chars.length;
+		const tok = tokens[t];
+		if (tok === "*") {
+			for (let k = n; k <= chars.length; k++) if (at(t + 1, k)) return true;
+			return false;
+		}
+		if (n === chars.length) return false;
+		if (tok === "?") return at(t + 1, n + 1);
+		if (tok.lit !== undefined) return tok.lit === chars[n] && at(t + 1, n + 1);
+		const cp = chars[n].codePointAt(0);
+		const hit = tok.ranges.some(([lo, hi]) => lo <= cp && cp <= hi);
+		return hit !== tok.neg && at(t + 1, n + 1);
+	};
+	return at(0, 0);
+}
+
+// The package-relative paths `elements` (a pattern split at its slashes)
+// matches below `realDir`, in directory order. An element without `*?[` is
+// taken as written.
+function globPaths(realDir, elements) {
+	let found = [""];
+	for (const element of elements) {
+		const tokens = /[*?[]/.test(element) ? parseGlobElement(element) : null;
+		const next = [];
+		for (const base of found) {
+			const join_ = (name) => (base === "" ? name : `${base}/${name}`);
+			if (!tokens) {
+				try {
+					lstatSync(join(realDir, join_(element)));
+					next.push(join_(element));
+				} catch {}
+				continue;
+			}
+			let names;
+			try {
+				names = readdirSync(join(realDir, base)).sort();
+			} catch {
+				continue;
+			}
+			for (const name of names)
+				if (globMatches(tokens, name)) next.push(join_(name));
+		}
+		found = next;
+	}
+	return found;
+}
+
+// A path that does not leave `realDir`: `real` is its real path.
+function insideDir(realDir, real) {
+	const rel = relative(realDir, real);
+	return !(rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel));
+}
+
+// Adds the files of the directory `rel` to `files`, as Go does: names that
+// start with `.` or `_` are left out unless `all`, and so are nested modules.
+// A symlink or other irregular file is an error. Returns that error or null.
+function walkEmbedDir(realDir, rel, all, files) {
+	const entries = readdirSync(join(realDir, rel), { withFileTypes: true });
+	for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+		const path = `${rel}/${entry.name}`;
+		if (!all && (entry.name[0] === "." || entry.name[0] === "_")) continue;
+		if (entry.isDirectory()) {
+			if (existsSync(join(realDir, path, "go.mod"))) continue;
+			const error = walkEmbedDir(realDir, path, all, files);
+			if (error) return error;
+		} else if (entry.isFile()) {
+			files.set(path, readEmbedFile(realDir, path));
+		} else return `cannot embed irregular file ${path}`;
+	}
+	return null;
+}
+
+const readEmbedFile = (realDir, path) => ({
+	path,
+	bytes: new Uint8Array(readFileSync(join(realDir, path))),
+});
+
+// Adds what the matched path `rel` names to `files`: a file, or the tree of a
+// directory. Returns the error, or null.
+function addEmbedMatch(realDir, rel, all, files) {
+	let real;
+	let st;
+	try {
+		real = realpathSync(join(realDir, rel));
+		st = statSync(real);
+	} catch {
+		return `cannot embed irregular file ${rel}`;
+	}
+	if (!insideDir(realDir, real))
+		return "embed pattern escapes package directory";
+	if (st.isFile()) {
+		files.set(rel, readEmbedFile(realDir, rel));
+		return null;
+	}
+	if (!st.isDirectory()) return `cannot embed irregular file ${rel}`;
+	const before = files.size;
+	const error = walkEmbedDir(realDir, rel, all, files);
+	if (error) return error;
+	return files.size === before
+		? `cannot embed directory ${rel}: contains no embeddable files`
+		: null;
+}
+
+// The files `pattern` names below `realDir` (the real path of the package
+// directory): `{ files: { path, bytes }[] }`, or `{ error }`. A pattern is a
+// path.Match glob over the package tree, optionally prefixed with `all:`; a
+// directory it matches contributes its tree. Containment is checked on the real
+// path of every match, so a symlink pointing out of the package is refused.
+function embedPatternFiles(realDir, pattern) {
+	const escapes = { error: "embed pattern escapes package directory" };
+	const all = pattern.startsWith("all:");
+	const glob = all ? pattern.slice(4) : pattern;
+	if (embedPatternEscapes(glob)) return escapes;
+	const elements = glob.split("/");
+	if (elements.some((e) => /[*?[]/.test(e) && !parseGlobElement(e)))
+		return { error: `pattern ${pattern}: invalid pattern syntax` };
+	const matches = globPaths(realDir, elements);
+	if (matches.length === 0)
+		return { error: `pattern ${pattern} matches no files` };
+	const files = new Map();
+	for (const rel of matches) {
+		const error = addEmbedMatch(realDir, rel, all, files);
+		if (error) return { error };
+	}
+	return { files: [...files.values()] };
+}
+
+// Resolves the patterns of every `//go:embed` directive attached to a var to
+// `_embedFiles: { path, bytes }[]`, relative to the directory of the file that
+// declares it. It runs on every compile, because a cached AST must not keep
+// the bytes of an earlier build. Returns the diagnostics for patterns that
+// escape the package directory or match nothing.
+export function resolveEmbedFiles(programs) {
+	const errors = [];
+	for (const p of programs) {
+		if (!p._path) continue;
+		let realDir = null;
+		for (const d of p.decls) {
+			if (d.kind !== "VarDecl") continue;
+			for (const spec of d.decls) {
+				for (const directive of spec._embeds ?? []) {
+					directive._embedFiles = undefined;
+					if (directive.error) continue;
+					realDir ??= realpathSync(dirname(p._path));
+					const files = new Map();
+					const before = errors.length;
+					for (const pattern of directive.patterns) {
+						const f = embedPatternFiles(realDir, pattern);
+						if (f.error)
+							errors.push(
+								new TypeCheckError(f.error, directive, p._filename, p._source),
+							);
+						else for (const file of f.files) files.set(file.path, file);
+					}
+					if (errors.length === before)
+						directive._embedFiles = [...files.values()].sort((a, b) =>
+							a.path < b.path ? -1 : 1,
+						);
+				}
+			}
+		}
+	}
+	return errors;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -617,6 +857,9 @@ export function compileFiles(files, options = {}) {
 	// parsed and checked with the package but never written next to it.
 	const driver = testDriverProgram(options, programs, pkgTarget, fromDir);
 	if (driver) programs.push(driver);
+
+	const embedErrors = resolveEmbedFiles(programs);
+	if (embedErrors.length > 0) throw new CompileError(embedErrors);
 
 	// ── 2. Resolve imports ────────────────────────────────────────
 	const checker = new TypeChecker();

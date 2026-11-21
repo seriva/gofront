@@ -7,6 +7,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+- **`//go:embed` for `string`, `[]byte` and `embed.FS`**: a package-level variable under `//go:embed` (with `import _ "embed"`, or `import "embed"` for `embed.FS`) holds the matched files, from single files, globs and directories, on JavaScript and WebAssembly alike, so shaders, templates and data load with no network request. An `embed.FS` reads them with `ReadFile`; `ReadDir` and `Open` are not available ([details](docs/go-compatibility.md#embedding-files-with-goembed)).
+
 ### Changed
 - **Breaking:** Like Go, numeric types no longer mix implicitly: `int + float64`, `float64 == int`, `%` or `&` on floats, and passing an `int` as a `float64` argument or assigning it to a `float64` variable are compile errors. Convert where the error points, for example `float64(n)`; these programs used to print wrong values or build a WebAssembly module the browser refused to load ([rules](docs/go-compatibility.md#numeric-operands-need-identical-types)).
 - **Breaking:** Like Go, different anonymous struct types, different anonymous interface types, and a local type that shadows an outer type of the same name are no longer assignable to each other. Make the two types identical or convert the value explicitly ([rules](docs/go-compatibility.md#type-identity)).

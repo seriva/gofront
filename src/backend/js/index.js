@@ -20,6 +20,7 @@
 import {
 	computeEmbeddedStubs,
 	hasDirectRecover,
+	lowerEmbeds,
 	markInBoundsIndexes,
 	markRedundantNilChecks,
 	normalizeDefers,
@@ -52,6 +53,7 @@ import {
 } from "./names.js";
 import {
 	HELPER_APPEND,
+	HELPER_B64,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
@@ -101,6 +103,7 @@ const HELPER_MAP = [
 	["len", HELPER_LEN],
 	["u8enc", HELPER_U8ENC],
 	["u8dec", HELPER_U8DEC],
+	["b64", HELPER_B64],
 	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
 	["slicefail", HELPER_SLICEFAIL],
@@ -348,6 +351,7 @@ export class CodeGen {
 		// forwarded into interfaces into temps.
 		splitForwardedTuples(program);
 		normalizeDefers(program);
+		lowerEmbeds([program]);
 		// Strict mode: index checks the loop shape proves unnecessary are elided.
 		if (this.strict) {
 			markInBoundsIndexes(program);
@@ -1453,10 +1457,20 @@ export class CodeGen {
 
 	genVarDecl(decl) {
 		for (const spec of decl.decls) {
-			if (spec._commaOk) this._genDefineStmt(this._varSpecAsDefine(spec));
+			if (spec._embedData) this._genEmbedSpec(spec);
+			else if (spec._commaOk) this._genDefineStmt(this._varSpecAsDefine(spec));
 			else if (spec.value) this._genVarSpecValues(spec);
 			else this._genVarSpecZero(spec);
 		}
+	}
+
+	// `//go:embed` var: initialised from the file's bytes at package load. A
+	// blank var has no observable effect, so it emits nothing.
+	_genEmbedSpec(spec) {
+		const [name] = spec.names;
+		if (name === "_") return;
+		this._markOwnership(name, true);
+		this._emitVarBindings(spec.names, [this.genExpr(spec._embedData)], true);
 	}
 
 	_genVarSpecValues(spec) {
