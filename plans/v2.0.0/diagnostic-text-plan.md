@@ -1,7 +1,7 @@
 # Diagnostic Text Matches Go — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-21)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-19 (`/bs-plan follow-ups`): ledger *Assignment diagnostics text* (root `operand-text`, PRs #238, #240) and the four roots the conformance-harness fix (`f78f4e1b`) exposed, whose cases carry `// pending: <root>`. Verdicts (which programs are rejected) belong to [`checker-go-rules-plan.md`](checker-go-rules-plan.md) and [`checker-operand-rules-plan.md`](checker-operand-rules-plan.md); this plan changes only the text of errors that are already reported. Operator wording (Phase 4) lands after checker-operand-rules Phase 2, whose operator table decides which operator message applies.  
 **Release note:** Compile errors now describe your code and types in Go's words, for example `cannot use b (variable of type []string) as []int value in argument to append` instead of `Cannot assign []string to []int`, so messages match Go's documentation and are easier to search for.
