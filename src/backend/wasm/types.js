@@ -784,20 +784,10 @@ export function isStringType(goType, checker = null) {
 	return false;
 }
 
+// Any interface type, however spelled: `any`, `interface{}`, a defined
+// interface type, or a chain of them.  Same predicate as `isInterfaceType`.
 export function isAnyType(goType, checker = null) {
-	if (!goType) return false;
-	if (goType.kind === "TypeName" || goType.kind === "Ident") {
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved) return isAnyType(resolved, checker);
-		return goType.name === "any" || goType.name === "interface{}";
-	}
-	if (goType.kind === "named") {
-		if (goType.name === "any" || goType.name === "interface{}") return true;
-		if (goType.underlying) return isAnyType(goType.underlying, checker);
-	}
-	if (goType.kind === "basic") return goType.name === "any";
-	if (goType.kind === "interface") return true;
-	return false;
+	return isInterfaceType(goType, checker);
 }
 
 export function isInterfaceType(goType, checker = null) {
@@ -872,6 +862,14 @@ export function isNonEmptyInterface(goType, checker = null) {
 		return false;
 	}
 	return false;
+}
+
+// An interface with no methods, in every spelling (`any`, `interface{}`, a
+// defined type or chain of defined types over either).
+export function isEmptyInterface(goType, checker = null) {
+	return (
+		isInterfaceType(goType, checker) && !isNonEmptyInterface(goType, checker)
+	);
 }
 
 export function getReceiverTypeName(recvType, _node = null) {

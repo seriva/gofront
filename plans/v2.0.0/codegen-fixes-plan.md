@@ -153,7 +153,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Done when: valid module, Go's output; all remaining 50 `switch:tag:... # wasm-iface-equality` keys removed from `test/fuzz/check-baseline.txt` (0 `# wasm-iface-equality` keys left)
 
 ### Phase 4: `wasm` type tests against empty interfaces (root `wasm-typeswitch-empty-iface`)
-- [ ] Task 4.1: `isEmptyInterface` and `isAnyType` recognise every empty-interface spelling, and `_emitTypeTest` matches every non-nil value in type switches (F4.1, F4.2)
+- [x] Task 4.1: `isEmptyInterface` and `isAnyType` recognise every empty-interface spelling, and `_emitTypeTest` matches every non-nil value in type switches (F4.1, F4.2)
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-stmts.js` (`_emitTypeTest`)
   - Test: `test/unit/wasm/iface-assert.test.js`: F4.1, F4.2 (`interface{}` and chained `type C B`) → `1`; `case nil` and multi-type cases unchanged
   - Done when: Go's output on all targets

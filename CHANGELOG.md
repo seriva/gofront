@@ -38,6 +38,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Fixed
 - **JavaScript statements with a discarded map literal and `for range` over a string**: `_ = map[string]int{"a": 1}` no longer fails with a syntax error, and `for range s` runs once per character instead of once per UTF-16 unit.
 - **WebAssembly comparisons with an interface**: `n == v` and `s != v` with an `int`, `string`, array, pointer, struct or complex value against an interface, and `switch x { case v: }` with an interface `v`, now build and give Go's result instead of an invalid module.
+- **WebAssembly type switches on empty interfaces**: `case interface{}:` and a case naming a defined empty interface (`type B interface{}`) now match any non-nil value instead of never running.
 - **Complex constants, interface comparisons and tagless `switch` follow Go**: `var n int = 1 + 0i` and `real(c)` of a constant as an array length compile, `switch { case v: }` with an interface `v` holding a bool works, and comparing an interface with a struct or array value is `true` when type and value match. `c++` and `c--` on a complex number also work for variables, fields, map elements and `for` loops on every target.
 - **Multi-value calls as builtin arguments:** `min(f())`, `max(f())`, `append(f())` and similar accept a call returning several values, as in Go.
 - **Partly instantiated generic functions work as values**: `f := slices.Sort[[]int]` and user generics whose remaining type parameters follow from their constraints now compile and run.
