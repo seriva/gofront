@@ -1802,8 +1802,8 @@ func main() {
 	);
 });
 
-test("a complex value compares with an interface holding it on wasm", async () => {
-	await assertWasmProgramOutput(
+test("a complex value compares with an interface holding it", async () => {
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -1811,13 +1811,92 @@ import "fmt"
 func main() {
 	var c complex64 = 1 + 2i
 	var b any = c
-	fmt.Println(c == b, b == c, c != b)
+	fmt.Println(c == b, b == c, c != b, b != c)
 	var d complex128 = 1 + 2i
 	var e any = d
-	fmt.Println(d == e, e == d, d != e)
+	fmt.Println(d == e, e == d, d != e, e != d)
 }
 `,
-		"true true false\ntrue true false\n",
+		"true true false false\ntrue true false false\n",
+	);
+});
+
+test("a complex value differs from an interface holding another value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var d complex128 = 1 + 2i
+	var e any = complex128(3 + 4i)
+	fmt.Println(d == e, e == d, d != e, e != d)
+	var re any = complex128(1 + 3i)
+	fmt.Println(d == re, re != d)
+	var n any = 1
+	fmt.Println(d == n, n == d, d != n)
+	var s any = "x"
+	fmt.Println(d == s, s != d)
+	var z any = complex64(1 + 2i)
+	var c complex64 = 1 + 2i
+	fmt.Println(c == z, z != c)
+}
+`,
+		"false false true true\nfalse true\nfalse false true\nfalse true\ntrue false\n",
+	);
+});
+
+test("a complex switch tag matches an interface case by type and value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var d complex128 = 1 + 2i
+	var e any = d
+	switch d {
+	case e:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	e = complex128(5)
+	switch d {
+	case e:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	e = 1
+	switch d {
+	case e:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+}
+`,
+		"hit\nmiss\nmiss\n",
+	);
+});
+
+test("a complex64 and a complex128 holding the same parts differ in an interface on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a complex64 = 1 + 2i
+	var b any = complex128(1 + 2i)
+	fmt.Println(a == b, b == a, a != b)
+	var c complex128 = 1 + 2i
+	var d any = complex64(1 + 2i)
+	fmt.Println(c == d, d == c, c != d)
+}
+`,
+		"false false true\nfalse false true\n",
 	);
 });
 
