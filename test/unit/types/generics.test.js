@@ -2389,7 +2389,7 @@ func main() { ${call} }
 section("Generic instances over anonymous struct type arguments");
 
 test("distinct anonymous struct arguments give distinct instances", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -2407,7 +2407,7 @@ func main() {
 });
 
 test("nested generics keep anonymous struct arguments apart", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -2426,7 +2426,7 @@ func main() {
 });
 
 test("the same anonymous struct written twice shares one instance", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -2445,7 +2445,7 @@ func main() {
 });
 
 test("anonymous structs differing in field name stay distinct", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"
@@ -2486,7 +2486,7 @@ func main() {
 }
 
 test("new(T) of a type parameter instantiated with an anonymous struct", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"

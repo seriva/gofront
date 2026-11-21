@@ -54,6 +54,17 @@ export function goTypeName(t, specialized = null) {
 			return qualify(instanceName(t, specialized));
 		case "interface":
 			return t.name ? qualify(t.name) : "interface {}";
+		case "struct":
+		case "StructType": {
+			if (t.name) return qualify(t.name);
+			// `struct { X int; main.P }`: an embedded field is just its type.
+			const fields = [];
+			for (const f of t._structFields ?? t.fields ?? []) {
+				if (f.embedded) fields.push(go(f.type));
+				else for (const n of f.names ?? []) fields.push(`${n} ${go(f.type)}`);
+			}
+			return fields.length ? `struct { ${fields.join("; ")} }` : "struct {}";
+		}
 		case "pointer":
 		case "PointerType":
 			return `*${go(t.base)}`;

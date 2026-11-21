@@ -122,11 +122,11 @@ Root: `wasm`-only AST rewrites build new nodes without the static type the emitt
   - Done when: all pass with valid modules
 
 ### Phase 2: One `wasm` type key and anonymous-struct `typeToTypeNode` (root `wasm-type-key`)
-- [ ] Task 2.1: `goTypeKey` covers `struct`, `func`, `interface`, and `GenericTypeName` with reversible identifier-safe escaping
+- [x] Task 2.1: `goTypeKey` covers `struct`, `func`, `interface`, and `GenericTypeName` with reversible identifier-safe escaping
   - Files: `src/backend/wasm/types.js` (`goTypeKey`), `src/backend/wasm/module-emitter.js` (anonymous struct names from the key)
   - Test: `test/unit/wasm/structs.test.js`: key unit test (`struct{ A_int int }` vs `struct{ A int }`, `struct{ P }` vs `struct{ P P }`, func types differing only in a param, interface types) gives distinct identifier-safe keys; identical types written twice give one key
   - Done when: passes; existing wasm suite green
-- [ ] Task 2.2: Monomorph uses `goTypeKey`, `typeToTypeNode` supports anonymous structs and interfaces, and `goTypeName` formats anonymous structs (W2.1–W2.6)
+- [x] Task 2.2: Monomorph uses `goTypeKey`, `typeToTypeNode` supports anonymous structs and interfaces, and `goTypeName` formats anonymous structs (W2.1–W2.6)
   - Files: `src/backend/wasm/monomorph.js` (`typeKey` → `goTypeKey`, delete `rawTypeKey`, `typeToTypeNode` handles `struct`/`StructType` and `interface`/`InterfaceType`), `src/backend/shared/fmt-types.js` (`goTypeName` handles `struct`/`StructType`)
   - Test: `test/unit/wasm/generics.test.js`: W2.1 → `0 1`, W2.2 → `4`, W2.3 → `1 s`, W2.4 → `1 hi` and `main.Box[func(struct { X int }) int]` / `main.Box[func(struct { S string }) string]`, W2.5 (`f[struct{ X int }]`) → `0`, W2.6 (`id[interface{ M() int }]` and `id[interface{ K() int }]`) → `1 2`, with `assertAllTargetsOutput`; switch `test/unit/language/value-semantics.test.js` (lines 856–917, 1003–1045) and `test/unit/types/generics.test.js` (lines 2388–2500) to `assertAllTargetsOutput`
   - Done when: all pass on every target; `rawTypeKey` deleted

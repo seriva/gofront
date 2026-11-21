@@ -7,7 +7,9 @@
 // (e.g. Identity$int, Box$int, Stack$int.Push) and re-typechecks the monomorphised AST.
 
 import { TypeChecker } from "../../typechecker/index.js";
+import { embeddedFieldName } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { goTypeKey } from "./types.js";
 
 /**
  * Returns true if the AST contains any generic declarations.
@@ -32,66 +34,10 @@ export function hasGenerics(programs) {
 }
 
 /**
- * Returns a stable identifier-safe string key for any Go type or AST type node.
+ * The identifier-safe key of a Go type or AST type node: the one `wasm` type
+ * key, so an instance and a layout are shared exactly by identical types.
  */
-// A qualified type argument (`time.Duration`) becomes part of a JS and wasm
-// export identifier, so its dot is replaced.
-function typeKey(t) {
-	return rawTypeKey(t).replaceAll(".", "_");
-}
-
-function rawTypeKey(t) {
-	if (!t) return "any";
-	if (typeof t === "string") return t;
-	if (t.kind === "basic") return t.name;
-	if (t.kind === "untyped") return t.base ?? "int";
-	if (t.kind === "TypeName" || t.kind === "Ident") return t.name;
-	if (t.kind === "GenericTypeName") {
-		const args = (t.typeArgs ?? []).map(typeKey).join("$");
-		return args ? `${t.name}$${args}` : t.name;
-	}
-	if (t.kind === "named") {
-		if (t.typeArgs && t.typeArgs.length > 0) {
-			const args = t.typeArgs.map(typeKey).join("$");
-			return `${t.name}$${args}`;
-		}
-		return t.name;
-	}
-	if (t.kind === "pointer" || t.kind === "PointerType") {
-		return `ptr_${typeKey(t.base ?? t.expr ?? t.operand)}`;
-	}
-	if (t.kind === "StarExpr") {
-		return `ptr_${typeKey(t.expr ?? t.operand)}`;
-	}
-	if (t.kind === "slice" || t.kind === "SliceType") {
-		return `slice_${typeKey(t.elem)}`;
-	}
-	if (t.kind === "array" || t.kind === "ArrayType") {
-		const len = t.len ?? t.size ?? "";
-		return `arr_${len}_${typeKey(t.elem)}`;
-	}
-	if (t.kind === "map" || t.kind === "MapType") {
-		return `map_${typeKey(t.key)}_${typeKey(t.value)}`;
-	}
-	if (t.kind === "func") {
-		const params = (t.params ?? []).map(typeKey).join("_");
-		const rets = (t.returns ?? [])
-			.filter((r) => !(r?.kind === "basic" && r.name === "void"))
-			.map(typeKey)
-			.join("_");
-		return `fn_${params}_ret_${rets}`;
-	}
-	if (t.kind === "FuncType") {
-		const params = (t.params ?? []).map((p) => typeKey(p.type)).join("_");
-		const rt = t.returnType;
-		const rets = rt
-			? (rt.kind === "TupleType" ? rt.types : [rt]).map(typeKey).join("_")
-			: "";
-		return `fn_${params}_ret_${rets}`;
-	}
-	if (t.name) return t.name;
-	return "val";
-}
+const typeKey = goTypeKey;
 
 /**
  * Converts a Go type representation or AST type node into a concrete AST type node.
@@ -106,7 +52,9 @@ export function typeToTypeNode(t) {
 		t.kind === "SliceType" ||
 		t.kind === "ArrayType" ||
 		t.kind === "MapType" ||
-		t.kind === "FuncType"
+		t.kind === "FuncType" ||
+		t.kind === "StructType" ||
+		t.kind === "InterfaceType"
 	) {
 		return cloneAst(t);
 	}
@@ -149,7 +97,46 @@ export function typeToTypeNode(t) {
 	// Without this a func type argument fell through to `any`, so a
 	// `map[string]V` built in `mk[func()]` was a `map[string]any`.
 	if (t.kind === "func") return funcTypeNode(t);
+	// Likewise an anonymous struct or interface argument stayed `any`, so the
+	// instance had no fields or methods to select.
+	if (t.kind === "struct" && !t.name) return structTypeNode(t);
+	if (t.kind === "interface" && !t.name) return interfaceTypeNode(t);
 	return { kind: "TypeName", name: t.name ?? "any" };
+}
+
+// A checker struct type as a `StructType` node: the declared fields, an
+// embedded field named after its type.
+function structTypeNode(t) {
+	const fields = [];
+	if (Array.isArray(t._structFields)) {
+		for (const f of t._structFields) {
+			const type = typeToTypeNode(f.type);
+			if (f.embedded)
+				fields.push({
+					names: [],
+					type,
+					embedded: true,
+					embeddedName: embeddedFieldName(f),
+					tag: f.tag ?? null,
+				});
+			else fields.push({ names: [...f.names], type, tag: f.tag ?? null });
+		}
+	} else if (t.fields instanceof Map) {
+		for (const [name, type] of t.fields)
+			fields.push({ names: [name], type: typeToTypeNode(type), tag: null });
+	}
+	return { kind: "StructType", fields };
+}
+
+// A checker interface type as an `InterfaceType` node; the checker has
+// already folded embedded interfaces into the method set.
+function interfaceTypeNode(t) {
+	const methods = [];
+	for (const [name, sig] of t.methods ?? []) {
+		const { params, returnType } = funcTypeNode(sig);
+		methods.push({ name, params, returnType });
+	}
+	return { kind: "InterfaceType", methods, embeds: [] };
 }
 
 // A checker func type as a `FuncType` node (several results as a `TupleType`).

@@ -1,7 +1,9 @@
 // test/unit/wasm/structs.test.js
 // Tests for Phase 4a: Structs, Pointers, and Methods in WASM.
 
+import { goTypeKey } from "../../../src/backend/wasm/types.js";
 import {
+	assert,
 	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
@@ -770,5 +772,89 @@ func main() {
 }
 `,
 		"5 5\n",
+	);
+});
+
+section("WASM type keys");
+
+test("goTypeKey gives distinct identifier-safe keys to distinct types", () => {
+	const int = { kind: "basic", name: "int" };
+	const str = { kind: "basic", name: "string" };
+	const P = { kind: "named", name: "P" };
+	const st = (...fields) => ({
+		kind: "struct",
+		_structFields: fields.map((f) => ({
+			names: f.embedded ? [] : [f.name],
+			type: f.type,
+			embedded: f.embedded,
+		})),
+	});
+	const fn = (params, returns, variadic = false) => ({
+		kind: "func",
+		params,
+		returns,
+		variadic,
+	});
+	const iface = (...methods) => ({
+		kind: "interface",
+		methods: new Map(methods.map(([n, sig]) => [n, sig])),
+	});
+	const types = {
+		aInt: st({ name: "A_int", type: int }),
+		a: st({ name: "A", type: int }),
+		aInt2: st({ name: "A", type: { kind: "named", name: "int_x" } }),
+		embedP: st({ embedded: true, name: "P", type: P }),
+		namedP: st({ name: "P", type: P }),
+		nested: st({ name: "S", type: st({ name: "A", type: int }) }),
+		twoFields: st({ name: "A", type: int }, { name: "B", type: int }),
+		fnInt: fn([int], [int]),
+		fnStr: fn([str], [int]),
+		fnRetStr: fn([int], [str]),
+		fnVar: fn([{ kind: "slice", elem: int }], [int], true),
+		fnPlain: fn([{ kind: "slice", elem: int }], [int]),
+		ifaceM: iface(["M", fn([], [int])]),
+		ifaceK: iface(["K", fn([], [int])]),
+		ifaceMStr: iface(["M", fn([], [str])]),
+		sliceWord: { kind: "named", name: "sl" },
+		sliceInt: { kind: "slice", elem: { kind: "named", name: "int" } },
+		qualified: { kind: "named", name: "time.Duration" },
+		underscore: { kind: "named", name: "time_Duration" },
+	};
+	const seen = new Map();
+	for (const [name, t] of Object.entries(types)) {
+		const key = goTypeKey(t);
+		assert(
+			/^[A-Za-z0-9_$]+$/.test(key),
+			`${name} key ${key} is not an identifier`,
+		);
+		assert(!seen.has(key), `${name} and ${seen.get(key)} share the key ${key}`);
+		seen.set(key, name);
+	}
+	// Identical types written twice share one key, tags and field order aside.
+	assertEqual(goTypeKey(st({ name: "A", type: int })), goTypeKey(types.a));
+	assertEqual(goTypeKey(iface()), "any");
+	assertEqual(
+		goTypeKey(iface(["M", fn([], [int])], ["K", fn([], [int])])),
+		goTypeKey(iface(["K", fn([], [int])], ["M", fn([], [int])])),
+	);
+});
+
+test("anonymous structs differing only in underscores keep distinct layouts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int_x int
+
+func main() {
+	a := struct{ A_int int }{1}
+	b := struct{ A int_x }{2}
+	c := struct{ A int }{3}
+	m := map[struct{ A_int int }]int{a: 4}
+	fmt.Println(a.A_int, b.A, c.A, m[a])
+}
+`,
+		"1 2 3 4\n",
 	);
 });
