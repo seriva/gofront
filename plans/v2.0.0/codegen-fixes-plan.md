@@ -1,7 +1,7 @@
 # JS and `wasm` Codegen Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-21)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-19 (`/bs-plan follow-ups`): the one-off entries that share no root with an open plan, logged by checker-strictness Phase 6 and checker-go-rules Phases 3, 4, 8, 10 and the 2026-11-18 checker fuzzer. The rest of that sweep went to [`checker-go-rules-plan.md`](checker-go-rules-plan.md) (Phases 22–28), [`checker-operand-rules-plan.md`](checker-operand-rules-plan.md) (O4.11, O5.8, Phase 9), [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) (Phase 5) and [`diagnostic-text-plan.md`](diagnostic-text-plan.md). The shadowed-builtin entry is split: its all-target `len` form is checker-go-rules Phase 28.  
 **Release note:** **Breaking:** passing `xs...` to a function that is not variadic is now a compile error, as in Go; call it with the slice itself. Also fixes code that failed or misbehaved: `_ = map[...]...{...}` on JS, counting the runes of a string with `for range` on JS, and on WebAssembly comparing a value with an interface, type switches on `interface{}` and defined empty interfaces, defined pointer types such as `type P *int`, and user functions named `append` or `new` next to generic standard library code.
