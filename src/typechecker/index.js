@@ -34,6 +34,7 @@ import {
 	isVoid,
 	JS_BUILTIN_CLASSES,
 	NATIVES,
+	PackageScope,
 	promotedMethods,
 	Scope,
 	TAINTED_ANY,
@@ -384,6 +385,8 @@ export class TypeChecker {
 		);
 		// Their builtin calls reach the universe, not a user's shadow of it.
 		this._builtinsFromUniverse = !!(p._generated || p._stdlib);
+		if (this.globals instanceof PackageScope)
+			this.globals.currentPackage = p.pkg?.name ?? null;
 	}
 
 	check(program) {
