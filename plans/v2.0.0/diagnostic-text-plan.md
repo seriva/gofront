@@ -148,7 +148,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Files: `src/typechecker/expressions.js` (composite literals, calls, `delete`, map index), `src/typechecker/statements.js` (returns, range)
   - Test: remove `// pending: assign-message-text` from `nil_to_non_nilable_contexts`; a context table in `test/unit/types/checks.test.js` (one row per context: `variable declaration`, `assignment`, `return statement`, `argument to f`, `struct literal`, `map literal`, `array or slice literal`, `map index`, `range clause`)
   - Done when: Go's context on all targets
-- [ ] Task 3.3: Remaining unit test assertions and docs use the new wording
+- [x] Task 3.3: Remaining unit test assertions and docs use the new wording
   - Files: the 17 `.test.js` files asserting `Cannot assign` (`test/unit/**`), `docs/usage.md` (`:59`)
   - Test: `npm test`; `npm run conformance:go` loses every `D3` key
   - Done when: `grep -rn "Cannot assign" test/unit docs/` finds only the documented `identity_*` restriction and GoFront-only diagnostics tagged in the audit baseline
