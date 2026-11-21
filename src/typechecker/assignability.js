@@ -52,10 +52,6 @@ const TYPE_LITERAL_KINDS = new Set([
 
 // Basic types that are not number, string or bool types: JS-dynamic `any`,
 // the types of `nil` and `void`, and the `comparable` constraint.
-// Types assignable only when identical (or one side is unnamed over the
-// other's underlying type): their mismatch reads as Go's `cannot use`.
-const COMPOSITE_KINDS = new Set(["pointer", "array", "slice", "map", "func"]);
-
 const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
 // Composite kinds that no untyped constant converts to.
 const CONST_REJECTING_KINDS = new Set([
@@ -1064,7 +1060,8 @@ export const assignabilityMethods = {
 		if (this._checkNumericCoercion(target, source, at, ctx, operand ?? at))
 			return;
 		if (this._checkArrayAssignable(target, source, at, mismatch)) return;
-		if (this._checkTypedArrayAssignable(target, source, at)) return;
+		if (this._checkTypedArrayAssignable(target, source, at, operand ?? at, ctx))
+			return;
 		if (this._checkFuncAssignable(target, source, mismatch)) return;
 		if (!identical(target, source)) mismatch();
 	},
@@ -1384,6 +1381,21 @@ export const assignabilityMethods = {
 		);
 	},
 
+	// The one report of a value that is not assignable, as Go words it: `cannot
+	// use x (variable of type T) as U value in <ctx>`. `operand` is the
+	// expression whose value flows in (a forwarded call result has the call);
+	// `node` is where the error is reported.
+	_assignError(source, target, operand, ctx, node, hint) {
+		const what = isUntyped(source)
+			? operandKind(operand, source.base, true)
+			: operandKind(operand, typeStr(source), false);
+		this.err(
+			`cannot use ${exprText(operand)} (${what}) as ${typeStr(target)} value in ${ctx}`,
+			node,
+			hint,
+		);
+	},
+
 	_assertAssignableTypeMismatch(
 		target,
 		source,
@@ -1429,16 +1441,11 @@ export const assignabilityMethods = {
 			);
 			return;
 		}
-		if (COMPOSITE_KINDS.has(tBase?.kind) && COMPOSITE_KINDS.has(sBase?.kind)) {
-			this.err(
-				`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source), false)}) as ${typeStr(target)} value in ${ctx}`,
-				node,
-				this._seqToSliceHint(source, tBase, node),
-			);
-			return;
-		}
-		this.err(
-			`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
+		this._assignError(
+			source,
+			target,
+			operand ?? node,
+			ctx,
 			node,
 			this._seqToSliceHint(source, tBase, node),
 		);
@@ -1612,10 +1619,7 @@ export const assignabilityMethods = {
 			!this._isFloatToInt(target, source)
 		)
 			return false;
-		this.err(
-			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
-			node,
-		);
+		this._assignError(source, target, operand, ctx, node);
 		return true;
 	},
 
@@ -1658,7 +1662,7 @@ export const assignabilityMethods = {
 		return false;
 	},
 
-	_checkTypedArrayAssignable(target, source, node) {
+	_checkTypedArrayAssignable(target, source, node, operand, ctx) {
 		const isTa = (t) => t?.underlying?._isTypedArray || t?._isTypedArray;
 		const getSlice = (t) =>
 			t?.kind === "slice"
@@ -1678,7 +1682,7 @@ export const assignabilityMethods = {
 			const slice = targetSlice ?? sourceSlice;
 			if (isTypedArraySlice(slice) && identical(taElem, slice.elem))
 				return true;
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			this._assignError(source, target, operand, ctx, node);
 			return true;
 		}
 
@@ -1686,7 +1690,7 @@ export const assignabilityMethods = {
 			const tElem = target.underlying?._elemType ?? target._elemType;
 			const sElem = source.underlying?._elemType ?? source._elemType;
 			if (identical(tElem, sElem)) return true;
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			this._assignError(source, target, operand, ctx, node);
 			return true;
 		}
 

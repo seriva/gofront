@@ -5,7 +5,7 @@ func E1[M ~map[string]int | ~map[int]int](m M) {
 }
 
 func E2[M ~map[string]int](m M) {
-	delete(m, 1) // ERROR "Cannot assign untyped int to string"
+	delete(m, 1) // ERROR "cannot use 1 (untyped int constant) as string value in"
 }
 
 func main() {}

@@ -140,7 +140,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Done when: Go's headline on all targets; `D2` audit keys removed
 
 ### Phase 3: Assignment wording (root `assign-message-text`)
-- [ ] Task 3.1: One `_assignError` with operand, kind and context (D3.1–D3.3)
+- [x] Task 3.1: One `_assignError` with operand, kind and context (D3.1–D3.3)
   - Files: `src/typechecker/assignability.js` (`_assignError` replacing `:877`, `:1145`, `:1352`–`:1409`, passing outer types through `_assertNestedAssignable` and `_checkArrayAssignable`), `src/typechecker/statements.js` (`:507`, `:962`), conformance reject fixtures asserting `Cannot assign`
   - Test: remove `// pending: assign-message-text` from `append_spread_mismatch`, `append_elem_struct`, `generic_over_struct_field_type`; update `numeric_int32_to_int64` and the other non-`identity_*`-restriction reject fixtures asserting `Cannot assign` to Go's wording so `conformance.test.js` stays green on this commit; `assignability.js:1139` keeps its documented `here: convert it explicitly` wording
   - Done when: `grep -rn 'Cannot assign' src/typechecker` returns only `assignability.js:1139`; `conformance.test.js` passes
