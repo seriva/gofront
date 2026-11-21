@@ -9,6 +9,6 @@ func checkA(a A) {}
 func main() {
 	a := A{42}
 	u := struct{ X int }{42}
-	defer checkTop(a) // ERROR "Cannot assign A to struct{...} here"
-	defer checkA(u)   // ERROR "Cannot assign struct{...} to A here"
+	defer checkTop(a) // ERROR "Cannot assign A to struct{X int} here"
+	defer checkA(u)   // ERROR "Cannot assign struct{X int} to A here"
 }

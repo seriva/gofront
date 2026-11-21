@@ -130,7 +130,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Done when: `convert_embedded_vs_named_field` passes on all targets; `D1` audit keys removed
 
 ### Phase 2: Types and constant values in messages (roots `type-text-elided`, `const-key-text`, `constraint-text`)
-- [ ] Task 2.1: `typeStr` prints unnamed struct, interface, and inline-union interface types in full (D2.1, D2.2, D2.5)
+- [x] Task 2.1: `typeStr` prints unnamed struct, interface, and inline-union interface types in full (D2.1, D2.2, D2.5)
   - Files: `src/typechecker/types.js` (`typeStr` for `struct` and `interface` including `unionConstraint` / `_comparable` / `_typeSetEmbeds`), `src/typechecker/resolve.js` (`_resolveInterfaceType` union term resolution if not formatted via `operand-text.js`)
   - Test: remove `// pending: type-text-elided` from `incdec_empty_interface`; add reject fixture `generic_mod_inline_iface.go` (`constrained by interface{~int | ~float64}`); `test/unit/types/identity.test.js` table: `struct{X int}`, `struct{E}`, `interface{M()}`, `interface{}`, a self-referential unnamed type; update the 7 `identity_*.go` conformance fixtures asserting `struct{...}`
   - Done when: those cases pass; `grep -nE '(struct|interface)\{\.\.\.\}' src/typechecker/types.js` is empty; `conformance.test.js` and unit tests pass
@@ -157,7 +157,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
 *Lands after checker-operand-rules Phase 2 (operator table).*
 - [ ] Task 4.1: Mismatched operand types report Go's `mismatched types X and Y` (D4.2)
   - Files: `src/typechecker/assignability.js` (`:392` fallback)
-  - Test: remove `// pending: operator-message-text` from `identity_compound_assignment`; update `test/unit/compiler/templ.test.js:1220` (`Invalid operation: string + untyped int`)
+  - Test: (`identity_compound_assignment` lost its `// pending: operator-message-text` header in Task 2.1: `typeStr` now prints `struct{X int}`); update `test/unit/compiler/templ.test.js:1220` (`Invalid operation: string + untyped int`)
   - Done when: Go's text on all targets
 - [ ] Task 4.2: An operator not defined on its operand reports Go's `operator op not defined on x (…)` (D4.1)
   - Files: `src/typechecker/assignability.js` (`:384`–`:392`, including untyped-vs-typed operands such as `b += true`)
