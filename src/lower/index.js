@@ -23,7 +23,7 @@ import {
 	normalizeDefers,
 	splitForwardedTuples,
 } from "./functions.js";
-import { computeGlobalAnalysis } from "./globals.js";
+import { computeGlobalAnalysis, lowerEmbeds } from "./globals.js";
 import { OwnershipContext, takesElementAddress } from "./ownership.js";
 
 export { takesElementAddress };
@@ -91,6 +91,7 @@ export function lower(programOrPrograms, checker = null) {
 
 	splitForwardedTuples(programs);
 	normalizeDefers(programs);
+	lowerEmbeds(programs);
 
 	res.elemAddrTaken = programs.some((p) => takesElementAddress(p?.decls));
 

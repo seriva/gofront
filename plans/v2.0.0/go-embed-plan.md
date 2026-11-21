@@ -89,7 +89,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Done when: `import _ "embed"` compiles on every target; `string` and `[]byte`/`[]uint8` variables (and aliases) with one matched file pass; `//go:embed is not supported yet` is gone; `npm run check:layers` covers `stdlib/embed/**` (in `stdlib-mid`)
 
 ### Phase 2: Embedded `string` and `[]byte` on every target
-- [ ] Task 2.1: Lower scalar embed directives into `EmbedData` side-table nodes (split from former 1.4)
+- [x] Task 2.1: Lower scalar embed directives into `EmbedData` side-table nodes (split from former 1.4)
   - Files: `src/lower/globals.js`, `src/lower/index.js`
   - Test: `test/unit/compiler/embed-lower.test.js`: `lowerEmbeds` attaches `spec._embedData = { kind: "EmbedData", as, _files, _type }` for `string` and `[]byte`/`[]uint8` without mutating `spec.value`, and recompiling a cached AST does not trigger `var with initializer`
   - Done when: `lower()` populates `spec._embedData` for `string` and `[]byte` directives (carrying `_type`) and `spec.value` remains `null`

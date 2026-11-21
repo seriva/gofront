@@ -35,6 +35,40 @@ export function computeGlobalAnalysis(programs, _checker = null) {
 	return { neverAssignedGlobals, initPathFunctions, cachedGlobalsByFunc };
 }
 
+/**
+ * Attaches an `EmbedData` initializer node to every package-level var spec that
+ * carries `//go:embed` directives the type checker accepted:
+ * `spec._embedData = { kind: "EmbedData", as, _files, _type }` where `as` is
+ * "string" or "bytes", `_files` the distinct `{ path, bytes }` its directives
+ * matched and `_type` the variable's checked type. It is a side table: the
+ * spec's `value` stays empty, so a cached AST can be lowered on every compile
+ * (the bytes are re-read by the compiler each time) and `var x T` with a
+ * directive never counts as having an initializer. File bytes live under the
+ * underscore key `_files`, which AST walkers and clones pass over.
+ *
+ * @param {Array<Object>|Object} programs
+ */
+export function lowerEmbeds(programs) {
+	const progs = Array.isArray(programs) ? programs : [programs];
+	for (const p of progs) {
+		for (const d of p?.decls ?? []) {
+			if (d.kind !== "VarDecl") continue;
+			for (const spec of d.decls ?? []) {
+				if (!spec._embeds?.length || !spec._embedKind) continue;
+				const files = new Map();
+				for (const directive of spec._embeds)
+					for (const f of directive._embedFiles ?? []) files.set(f.path, f);
+				spec._embedData = {
+					kind: "EmbedData",
+					as: spec._embedKind,
+					_files: [...files.values()],
+					_type: spec._embedType,
+				};
+			}
+		}
+	}
+}
+
 function collectVarNames(spec, out) {
 	const names = spec.names ?? (spec.name ? [spec.name] : []);
 	for (const n of names) {
