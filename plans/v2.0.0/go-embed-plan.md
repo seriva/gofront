@@ -1,7 +1,7 @@
 # `//go:embed` — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phases 1–2) on 2026-11-17, re-probed that day; the milestone goal and the "No Runtime" invariant now live in `plans/roadmap.md` *v2.0.0*. [`incremental-builds-plan.md`](incremental-builds-plan.md) starts after this plan: embedded files become cache-key inputs and watch targets there (the former Task 2.4). Independent of the checker, `wasm` struct and value-store plans.  
 **Release note:** `//go:embed` compiles files into the bundle at build time as a `string`, `[]byte` or `embed.FS` (`ReadFile`) on every target, so shaders, templates and data load with no network request.  
