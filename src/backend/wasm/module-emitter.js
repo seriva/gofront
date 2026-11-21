@@ -11,6 +11,8 @@ import {
 	goTypeKey,
 	isScalarType,
 	isSliceType,
+	structFieldList,
+	structFieldsKey,
 	toWasmType,
 } from "./types.js";
 
@@ -239,33 +241,25 @@ export class ModuleEmitter {
 				}
 			} else if (resolvedStruct?.fields) {
 				let fIdx = 0;
-				// `fields` also holds promoted fields; the declared fields
-				// (`_structFields`) give the real layout of a defined struct.
-				const declared = resolvedStruct._structFields
-					? resolvedStruct._structFields.flatMap((sf) => {
-							if (!sf.embedded) return sf.names.map((n) => [n, sf.type]);
-							const inner = sf.type.kind === "pointer" ? sf.type.base : sf.type;
-							const n = (inner?.name ?? "").split(".").pop();
-							return n ? [[n, sf.type]] : [];
-						})
-					: [...resolvedStruct.fields.entries()];
-				for (const [fName, fType] of declared) {
-					const wType = toWasmType(fType, this.checker, this);
-					fields.push({ name: fName, goType: fType, wType });
-					fieldIndexMap.set(fName, fIdx);
-					fIdx++;
-				}
-				if (resolvedStruct?._embeds) {
-					for (const embed of resolvedStruct._embeds) {
-						const inner = embed.kind === "pointer" ? embed.base : embed;
-						const embedName = inner?.kind === "named" ? inner.name : null;
-						if (embedName && fieldIndexMap.has(embedName)) {
-							embeds.push({
-								name: embedName,
-								fieldIndex: fieldIndexMap.get(embedName),
-							});
-						}
+				// `fields` also holds promoted fields; the declared fields give
+				// the real layout of a defined struct.
+				for (const f of structFieldList(resolvedStruct, this.checker)) {
+					const wType = toWasmType(f.goType, this.checker, this);
+					fields.push({
+						name: f.name,
+						goType: f.goType,
+						wType,
+						embedded: f.embedded,
+					});
+					fieldIndexMap.set(f.name, fIdx);
+					if (f.embedded) {
+						embeds.push({
+							name: f.name,
+							...(f.typeName !== f.name && { typeName: f.typeName }),
+							fieldIndex: fIdx,
+						});
 					}
+					fIdx++;
 				}
 			}
 
@@ -290,8 +284,7 @@ export class ModuleEmitter {
 	}
 
 	getAnonStructType(fields) {
-		const key = fields.map((f) => `${f.name}:${goTypeKey(f.goType)}`).join(";");
-		const name = `__anon_${key.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+		const name = `__anon_${structFieldsKey(fields)}`;
 		if (this.structTypes.has(name)) {
 			return this.structTypes.get(name);
 		}
@@ -312,10 +305,21 @@ export class ModuleEmitter {
 				name: f.name,
 				wType: fieldWTypes[i],
 				goType: f.goType,
+				embedded: Boolean(f.embedded),
 				fieldIndex: i,
 			})),
 			fieldIndexMap: new Map(fields.map((f, i) => [f.name, i])),
-			embeds: [],
+			embeds: fields.flatMap((f, i) =>
+				f.embedded
+					? [
+							{
+								name: f.name,
+								...(f.typeName !== f.name && { typeName: f.typeName }),
+								fieldIndex: i,
+							},
+						]
+					: [],
+			),
 			pkgName: null,
 			pkgTarget: "wasm",
 			isAnon: true,

@@ -332,6 +332,14 @@ function rewriteStdlibValue(node, isCallee) {
 	return stdlibFuncLit(node);
 }
 
+// `(*T).M(nil)`: the checker leaves the bare `nil` untyped, but the call
+// `nil.M()` needs the receiver type to find `M`.
+function typedNilReceiver(recv, recvType) {
+	return recv?.kind === "BasicLit" && recv.litKind === "NIL"
+		? { ...recv, _type: recvType }
+		: recv;
+}
+
 function rewriteMethods(node, isCallee) {
 	if (node?.kind === "SelectorExpr" && node._isMethodExpr && node._type)
 		return forwardingFuncLit(node);
@@ -351,7 +359,12 @@ function rewriteMethods(node, isCallee) {
 		!node._multiForward
 	) {
 		const [recv, ...rest] = node.args;
-		const call = methodCall(node.func, recv, rest, node.func._type);
+		const call = methodCall(
+			node.func,
+			typedNilReceiver(recv, node.func._type.params[0]),
+			rest,
+			node.func._type,
+		);
 		call._type = node._type;
 		return call;
 	}

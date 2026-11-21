@@ -1,7 +1,10 @@
 // test/unit/wasm/structs.test.js
 // Tests for Phase 4a: Structs, Pointers, and Methods in WASM.
 
+import { goTypeKey } from "../../../src/backend/wasm/types.js";
 import {
+	assert,
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -562,5 +565,296 @@ func main() {
 }
 `,
 		'[ ] [ ] [  ] { [ ]} [  ] [[ ] [ ]] [[ ] [ ]]\ntrue true 0 ! true true true\n["" ""] ["" ""]\n',
+	);
+});
+
+test("anonymous struct with an embedded struct keeps the embedded field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	v := struct {
+		P
+		M int
+	}{P: P{5}, M: 6}
+	fmt.Println(v.N, v.P.N, v.M)
+	w := struct {
+		P
+		M int
+	}{P{5}, 6}
+	fmt.Println(w.N, w.P.N, w.M)
+}
+`,
+		"5 5 6\n5 5 6\n",
+	);
+});
+
+test("anonymous struct with an embedded struct and a pointer field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	y := struct {
+		P
+		M *P
+	}{P{1}, &P{2}}
+	y.N = 5
+	fmt.Println(y.N, y.M.N)
+}
+`,
+		"5 2\n",
+	);
+});
+
+test("slice of anonymous structs with an embedded struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	xs := []struct {
+		P
+		M int
+	}{{P{1}, 2}}
+	fmt.Println(xs[0].N, xs[0].M)
+}
+`,
+		"1 2\n",
+	);
+});
+
+test("anonymous struct embedding a pointer promotes through it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	v := struct{ *P }{&P{5}}
+	fmt.Println(v.N)
+	v.N = 6
+	fmt.Println(v.P.N)
+}
+`,
+		"5\n6\n",
+	);
+});
+
+test("anonymous struct embedding a generic instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner[A any] struct{ Y A }
+
+type S[A any] struct {
+	Inner[A]
+	X A
+}
+
+type W[B any] S[B]
+
+func main() {
+	v := struct {
+		Inner[int]
+		X int
+	}{Inner: Inner[int]{Y: 11}, X: 22}
+	fmt.Println(v.Y, v.X, v.Inner.Y)
+	w := W[int]{Inner: Inner[int]{Y: 11}, X: 22}
+	fmt.Println(w.Y, w.X, w.Inner.Y)
+}
+`,
+		"11 22 11\n11 22 11\n",
+	);
+});
+
+test("conversion between a named and an anonymous embedding struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type E struct{ V int }
+type A struct{ E }
+
+func main() {
+	a := A{E{11}}
+	u := struct{ E }(a)
+	b := A(u)
+	fmt.Println(u.V, b.V)
+}
+`,
+		"11 11\n",
+	);
+});
+
+test("appending a named struct to a slice of anonymous structs", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A struct{ X int }
+
+func main() {
+	var s []struct{ X int }
+	s = append(s, A{5})
+	fmt.Println(len(s), s[0].X)
+}
+`,
+		"1 5\n",
+	);
+});
+
+test("struct field names with underscores stay distinct from shorter names", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A struct{ X int }
+
+func main() {
+	var u struct{ X int } = A{5}
+	fmt.Println(u.X)
+	a := struct{ A_int int }{1}
+	b := struct{ A int }{2}
+	fmt.Println(a.A_int, b.A)
+}
+`,
+		"5\n1 2\n",
+	);
+});
+
+test("embedded alias of an anonymous struct promotes its fields", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type A = struct{ N int }
+
+func main() {
+	v := struct{ A }{A{5}}
+	fmt.Println(v.N, v.A.N)
+}
+`,
+		"5 5\n",
+	);
+});
+
+test("named struct embedding an alias of an anonymous struct promotes its fields", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type A = struct{ N int }
+type S struct{ A }
+
+func main() {
+	v := S{A{5}}
+	fmt.Println(v.N, v.A.N)
+}
+`,
+		"5 5\n",
+	);
+});
+
+section("WASM type keys");
+
+test("goTypeKey gives distinct identifier-safe keys to distinct types", () => {
+	const int = { kind: "basic", name: "int" };
+	const str = { kind: "basic", name: "string" };
+	const P = { kind: "named", name: "P" };
+	const st = (...fields) => ({
+		kind: "struct",
+		_structFields: fields.map((f) => ({
+			names: f.embedded ? [] : [f.name],
+			type: f.type,
+			embedded: f.embedded,
+		})),
+	});
+	const fn = (params, returns, variadic = false) => ({
+		kind: "func",
+		params,
+		returns,
+		variadic,
+	});
+	const iface = (...methods) => ({
+		kind: "interface",
+		methods: new Map(methods.map(([n, sig]) => [n, sig])),
+	});
+	const types = {
+		aInt: st({ name: "A_int", type: int }),
+		a: st({ name: "A", type: int }),
+		aInt2: st({ name: "A", type: { kind: "named", name: "int_x" } }),
+		embedP: st({ embedded: true, name: "P", type: P }),
+		namedP: st({ name: "P", type: P }),
+		nested: st({ name: "S", type: st({ name: "A", type: int }) }),
+		twoFields: st({ name: "A", type: int }, { name: "B", type: int }),
+		fnInt: fn([int], [int]),
+		fnStr: fn([str], [int]),
+		fnRetStr: fn([int], [str]),
+		fnVar: fn([{ kind: "slice", elem: int }], [int], true),
+		fnPlain: fn([{ kind: "slice", elem: int }], [int]),
+		ifaceM: iface(["M", fn([], [int])]),
+		ifaceK: iface(["K", fn([], [int])]),
+		ifaceMStr: iface(["M", fn([], [str])]),
+		sliceWord: { kind: "named", name: "sl" },
+		sliceInt: { kind: "slice", elem: { kind: "named", name: "int" } },
+		qualified: { kind: "named", name: "time.Duration" },
+		underscore: { kind: "named", name: "time_Duration" },
+	};
+	const seen = new Map();
+	for (const [name, t] of Object.entries(types)) {
+		const key = goTypeKey(t);
+		assert(
+			/^[A-Za-z0-9_$]+$/.test(key),
+			`${name} key ${key} is not an identifier`,
+		);
+		assert(!seen.has(key), `${name} and ${seen.get(key)} share the key ${key}`);
+		seen.set(key, name);
+	}
+	// Identical types written twice share one key, tags and field order aside.
+	assertEqual(goTypeKey(st({ name: "A", type: int })), goTypeKey(types.a));
+	assertEqual(goTypeKey(iface()), "any");
+	assertEqual(
+		goTypeKey(iface(["M", fn([], [int])], ["K", fn([], [int])])),
+		goTypeKey(iface(["K", fn([], [int])], ["M", fn([], [int])])),
+	);
+});
+
+test("anonymous structs differing only in underscores keep distinct layouts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int_x int
+
+func main() {
+	a := struct{ A_int int }{1}
+	b := struct{ A int_x }{2}
+	c := struct{ A int }{3}
+	m := map[struct{ A_int int }]int{a: 4}
+	fmt.Println(a.A_int, b.A, c.A, m[a])
+}
+`,
+		"1 2 3 4\n",
 	);
 });

@@ -20,6 +20,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	structFieldList,
 	toWasmType,
 } from "./types.js";
 
@@ -1160,18 +1161,8 @@ export class FunctionEmitter {
 			if (aliased?.kind === "struct") t = aliased;
 		}
 		if (t.kind === "struct" || t.kind === "StructType") {
-			const rawFields = [];
-			if (t.fields instanceof Map) {
-				for (const [k, v] of t.fields.entries())
-					rawFields.push({ name: k, goType: v });
-			} else if (Array.isArray(t.fields)) {
-				for (const f of t.fields) {
-					const names = f.names ?? (f.name ? [f.name] : []);
-					for (const n of names) rawFields.push({ name: n, goType: f.type });
-				}
-			}
 			if (this.mod.getAnonStructType) {
-				return this.mod.getAnonStructType(rawFields);
+				return this.mod.getAnonStructType(structFieldList(t, this.mod.checker));
 			}
 		}
 		return null;
@@ -1187,10 +1178,14 @@ export class FunctionEmitter {
 			// A generic instance is registered under its specialised name
 			// (`Inner$int`), which the field's type carries.
 			const ft = structInfo.fields[embed.fieldIndex]?.goType;
-			const instName = (ft?.kind === "PointerType" ? ft.base : ft)?.name;
+			const instName = (
+				ft?.kind === "PointerType" || ft?.kind === "pointer" ? ft.base : ft
+			)?.name;
 			const embedInfo =
 				(instName && this.mod.structTypes.get(instName)) ??
-				this.mod.structTypes.get(embed.typeName ?? embed.name);
+				this.mod.structTypes.get(embed.typeName ?? embed.name) ??
+				// An embedded alias of an anonymous struct has no registered name.
+				this._resolveStructInfo({ _type: ft });
 			if (embedInfo) {
 				const sub = this._resolveFieldPath(embedInfo, fieldName);
 				if (sub) {

@@ -2,7 +2,12 @@
 // Maps GoFront types to WasmGC types and manages type registry.
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
-import { ERROR, isComplex, isComplex64 } from "../../typechecker/types.js";
+import {
+	ERROR,
+	embeddedFieldName,
+	isComplex,
+	isComplex64,
+} from "../../typechecker/types.js";
 import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 
 export { isComplex, isComplex64 };
@@ -304,18 +309,7 @@ export function toWasmType(goType, checker = null, mod = null) {
 			};
 		}
 		if (mod?.getAnonStructType && goType.fields) {
-			const rawFields = [];
-			if (goType.fields instanceof Map) {
-				for (const [k, v] of goType.fields.entries()) {
-					rawFields.push({ name: k, goType: v });
-				}
-			} else if (Array.isArray(goType.fields)) {
-				for (const f of goType.fields) {
-					const names = f.names ?? (f.name ? [f.name] : []);
-					for (const n of names) rawFields.push({ name: n, goType: f.type });
-				}
-			}
-			const info = mod.getAnonStructType(rawFields);
+			const info = mod.getAnonStructType(structFieldList(goType, checker));
 			return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
 		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
@@ -368,27 +362,137 @@ export function getInterfaceMethodList(iface) {
 	return [];
 }
 
-// The type-argument part of a monomorphised name (see monomorph.js typeKey):
-// the dot of a qualified argument is replaced to keep the name an identifier.
+// The type-argument part of a monomorphised name (see monomorph.js typeKey).
 function instanceArgsKey(typeArgs) {
-	return typeArgs.map(goTypeKey).join("$").replaceAll(".", "_");
+	return typeArgs.map(goTypeKey).join("$");
 }
 
+// The declared fields of a struct type, in order: { name, goType, embedded,
+// typeName }. This is the one list every layout, key, hashability and boundary
+// decision reads, so a struct built in one place is read correctly in another.
+// It never holds promoted fields: an embedded field is one entry named after
+// its type, with `typeName` the specialised struct name of a generic instance
+// (`Inner$int`) or qualified type.
+export function structFieldList(t, checker = null) {
+	const out = [];
+	const embeddedEntry = (type, name) => {
+		const inner =
+			type?.kind === "pointer" || type?.kind === "PointerType"
+				? type.base
+				: type;
+		const ref = inner?.name;
+		const bare = (name ?? ref ?? "").split("$")[0].split(".").pop();
+		const typeName = (ref && checker?.types?.get(ref)?.name) ?? ref;
+		return {
+			name: bare,
+			goType: type,
+			embedded: true,
+			typeName: typeName ?? bare,
+		};
+	};
+	if (Array.isArray(t._structFields)) {
+		for (const f of t._structFields) {
+			if (f.embedded) {
+				out.push(embeddedEntry(f.type, embeddedFieldName(f) || undefined));
+			} else {
+				for (const n of f.names ?? [])
+					out.push({ name: n, goType: f.type, embedded: false });
+			}
+		}
+	} else if (Array.isArray(t.fields)) {
+		for (const f of t.fields) {
+			if (f.embedded) {
+				out.push(embeddedEntry(f.type, f.embeddedName ?? f.name));
+			} else {
+				const names = f.names ?? (f.name ? [f.name] : []);
+				for (const n of names)
+					out.push({ name: n, goType: f.type ?? f.goType, embedded: false });
+			}
+		}
+	} else if (t.fields instanceof Map) {
+		for (const [k, v] of t.fields.entries())
+			out.push({ name: k, goType: v, embedded: false });
+	}
+	return out;
+}
+
+// A name inside a type key. Go identifiers are letters, digits and `_`, so
+// doubling `_` frees a lone `_` to introduce the structural tokens below
+// (`_s` separator, `_c` colon, `_o`/`_q` open/close, `_d` dot); any other
+// character becomes `_x<hex>_`. A name that equals a constructor word (`sl`,
+// `map`, ...) ends in `$`, which no Go name has, so a key reads back one way
+// and two distinct types never share one. `$` itself is kept: it joins a
+// generic instance to its type arguments (`Box$int`).
+const KEY_WORDS = new Set([
+	"ptr",
+	"sl",
+	"arr",
+	"map",
+	"fn",
+	"fnv",
+	"tup",
+	"struct",
+	"iface",
+]);
+
+function keyName(name) {
+	let out = "";
+	for (const ch of String(name)) {
+		if (ch === "_") out += "__";
+		else if (ch === ".") out += "_d";
+		else if (/[A-Za-z0-9$]/.test(ch) || ch.charCodeAt(0) > 127) out += ch;
+		else out += `_x${ch.codePointAt(0).toString(16)}_`;
+	}
+	return KEY_WORDS.has(out) ? `${out}$` : out;
+}
+
+const keyList = (keys) => `_o${keys.join("_s")}_q`;
+
+// The key of a struct's field list, as `goTypeKey` builds it for a struct
+// type; `getAnonStructType` names an anonymous struct's layout after it. Tags
+// are not part of it.
+export function structFieldsKey(fields) {
+	return `struct${keyList(
+		fields.map(
+			(f) =>
+				`${f.embedded ? "E" : "F"}${keyName(f.name)}_c${goTypeKey(f.goType)}`,
+		),
+	)}`;
+}
+
+function interfaceKey(t) {
+	const methods = getInterfaceMethodList(t)
+		.map(
+			(m) =>
+				`${keyName(m.name)}_c${keyList(m.params.map(goTypeKey))}${keyList(m.returns.map(goTypeKey))}`,
+		)
+		.sort();
+	// A parsed interface lists embedded interfaces apart.
+	const embeds = (t.embeds ?? []).map((e) => `E${goTypeKey(e)}`).sort();
+	const all = [...methods, ...embeds];
+	return all.length === 0 && !t.unionConstraint
+		? "any"
+		: `iface${keyList(all)}${t.unionConstraint ? "_u" : ""}`;
+}
+
+// The one key for a type on `wasm`: identical types give one key, distinct
+// types distinct keys, and every key is a valid JS and wasm identifier. It
+// names layouts and instances (`Box$sl_int`, `__anon_struct_o...`).
 export function goTypeKey(t) {
 	if (!t) return "any";
 	if (typeof t === "string") {
 		if (t === "byte") return "uint8";
 		if (t === "rune") return "int32";
-		return t;
+		return keyName(t);
 	}
 	if (t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") {
 		const name = t.name ?? "any";
 		if (name === "byte") return "uint8";
 		if (name === "rune") return "int32";
-		return name;
+		return keyName(name);
 	}
 	if (t.kind === "untyped") {
-		return t.base ?? "int";
+		return keyName(t.base ?? "int");
 	}
 	if (t.kind === "pointer" || t.kind === "PointerType") {
 		return `ptr_${goTypeKey(t.base)}`;
@@ -414,40 +518,41 @@ export function goTypeKey(t) {
 		const parsed = t.kind === "FuncType";
 		const params = (t.params ?? []).map((p) => goTypeKey(parsed ? p.type : p));
 		const variadic = parsed ? t.params?.at(-1)?.variadic : t.variadic;
-		const rets = parsed
-			? t.returnType
-				? [t.returnType]
-				: []
-			: (t.returns ?? []).filter(
-					(r) => !(r?.kind === "basic" && r.name === "void"),
-				);
-		return `fn_${variadic ? "v" : ""}${params.join(",")}_${rets.map(goTypeKey).join(",")}`;
+		let rets;
+		if (parsed) {
+			const rt = t.returnType;
+			rets = !rt ? [] : rt.kind === "TupleType" ? rt.types : [rt];
+		} else {
+			rets = (t.returns ?? []).filter(
+				(r) => !(r?.kind === "basic" && r.name === "void"),
+			);
+		}
+		return `fn${variadic ? "v" : ""}${keyList(params)}${keyList(rets.map(goTypeKey))}`;
 	}
 	if (t.kind === "tuple" || t.kind === "TupleType")
-		return `tup_${(t.types ?? []).map(goTypeKey).join(",")}`;
+		return `tup${keyList((t.types ?? []).map(goTypeKey))}`;
 	if (t.kind === "struct" || t.kind === "StructType") {
-		if (t.name) return t.name;
-		const rawFields = [];
-		if (t.fields instanceof Map) {
-			for (const [k, v] of t.fields.entries())
-				rawFields.push(`${k}:${goTypeKey(v)}`);
-		} else if (Array.isArray(t.fields)) {
-			for (const f of t.fields) {
-				const names = f.names ?? (f.name ? [f.name] : []);
-				for (const n of names)
-					rawFields.push(`${n}:${goTypeKey(f.type ?? f.goType)}`);
-			}
-		}
-		return `struct_${rawFields.join("_")}`;
+		if (t.name) return keyName(t.name);
+		return structFieldsKey(structFieldList(t));
+	}
+	if (t.kind === "interface" || t.kind === "InterfaceType") {
+		if (t.name) return keyName(t.name);
+		return interfaceKey(t);
+	}
+	// A parsed instance `Box[int]` is the monomorphised `Box$int`.
+	if (t.kind === "GenericTypeName") {
+		const args = instanceArgsKey(t.typeArgs ?? []);
+		return args ? `${keyName(t.name)}$${args}` : keyName(t.name);
 	}
 	if (t.kind === "named") {
 		// An instance of a generic type is the monomorphised `Box$int`.
 		if (t.name && t.typeArgs?.length && !t.name.includes("$"))
-			return `${t.name}$${instanceArgsKey(t.typeArgs)}`;
-		return t.name ?? (t.underlying ? goTypeKey(t.underlying) : "any");
+			return `${keyName(t.name)}$${instanceArgsKey(t.typeArgs)}`;
+		if (t.name) return keyName(t.name);
+		return t.underlying ? goTypeKey(t.underlying) : "any";
 	}
-	if (t.name) return t.name;
-	return t.kind ?? "any";
+	if (t.name) return keyName(t.name);
+	return keyName(t.kind ?? "any");
 }
 
 export function anonIfaceName(iface, _checker = null, _mod = null) {
@@ -934,15 +1039,8 @@ export function isUnhashableGoType(goType, checker = null, seen = new Set()) {
 		return isUnhashableGoType(elem, checker, seen);
 	}
 	if (goType.kind === "struct" || goType.kind === "StructType") {
-		if (goType.fields instanceof Map) {
-			for (const f of goType.fields.values()) {
-				if (isUnhashableGoType(f, checker, seen)) return true;
-			}
-		} else if (Array.isArray(goType.fields)) {
-			for (const f of goType.fields) {
-				const fType = f.type ?? f.goType;
-				if (isUnhashableGoType(fType, checker, seen)) return true;
-			}
+		for (const f of structFieldList(goType, checker)) {
+			if (isUnhashableGoType(f.goType, checker, seen)) return true;
 		}
 	}
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {

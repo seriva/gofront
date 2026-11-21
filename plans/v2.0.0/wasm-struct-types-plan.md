@@ -1,7 +1,7 @@
 # `wasm` Struct Types — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-21)  
 **Base branch:** main  
 **Related:** Split out of the former `followup-fixes-plan.md` (now [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md)) on 2026-11-17 by root cause (its former Phases 2–3 and Tasks 8.2–8.3: F8, F17, F24, F25, F28, F31, L5, L11, L13), plus three `plans/follow-ups.md` entries with the same root (*WASM map keys*, *WASM struct conversion*, *WASM append of a named struct into an anonymous-struct slice*). Must merge before [`value-stores-plan.md`](value-stores-plan.md) Phase 4, whose embedded-field copy needs this layout. Independent of the other v2.0.0 plans.  
 **Release note:** More programs that use anonymous structs work on WebAssembly: structs with embedded fields, anonymous structs as map keys, in slices and as type arguments of generic functions, and conversions between named and anonymous struct types. Generic functions that use `(*T)(nil)` and method expressions called with a `nil` receiver also compile on WebAssembly.  
@@ -108,35 +108,35 @@ Root: `wasm`-only AST rewrites build new nodes without the static type the emitt
 > Split from the former `followup-fixes-plan.md` (re-probed 2026-11-17; reviewed and re-probed 2026-11-19 at `002e5180`) and three `plans/follow-ups.md` entries with the same root.
 
 ### Phase 1: One struct field list on `wasm` (root `wasm-struct-field-list`)
-- [ ] Task 1.1: `structFieldList` and the core layout paths (W1.1–W1.4, W1.9, W1.11, W1.12)
+- [x] Task 1.1: `structFieldList` and the core layout paths (W1.1–W1.4, W1.9, W1.11, W1.12)
   - Files: `src/backend/wasm/types.js` (`structFieldList`, `toWasmType`, `goTypeKey`, `isUnhashableGoType`), `src/backend/wasm/emit.js` (`_resolveStructInfo`, `_resolveFieldPath` for checker `pointer`), `src/backend/wasm/module-emitter.js` (`getAnonStructType` `embeds` and `resolvedStruct` layout)
   - Test: `test/unit/wasm/structs.test.js`: W1.1 and W1.2 → `5 5 6`, W1.3 → `5 2`, W1.4 → `1 2`, W1.9 (`struct{ *P }`) → `5`, W1.11 (`map[any]int` with `struct{ *P }` where `P` has `[]int`) → `7`, W1.12 (`struct{ Inner[int]; X int }` and `W[int]`) → `11 22 11` with `assertAllTargetsOutput`
   - Done when: all pass; `rawFields` removed from `types.js` and `emit.js`
-- [ ] Task 1.2: Boundary classification and struct conversions (W1.7, W1.8, W1.10)
+- [x] Task 1.2: Boundary classification and struct conversions (W1.7, W1.8, W1.10)
   - Files: `src/backend/wasm/boundary.js` (`classifyAnonStruct` uses `structFieldList`)
   - Test: `test/unit/wasm/boundary.test.js`: W1.10 (`func Make() struct{ P; M int }`) compiles with valid wasm; `test/unit/wasm/structs.test.js`: W1.7 → `11 11`, W1.8 → `1 5` (regression); switch `test/unit/language/value-semantics.test.js` lines 1047–1070 (`conversion to an embedding anonymous struct drops the source type`) to `assertAllTargetsOutput`
   - Done when: all pass with valid modules; `grep -rn "rawFields" src/backend/wasm` finds no matches
-- [ ] Task 1.3: Anonymous struct map keys (W1.5, W1.6)
+- [x] Task 1.3: Anonymous struct map keys (W1.5, W1.6)
   - Files: `src/backend/wasm/emit-maps.js` (`_resolveStructType` fallback to `structFieldList` / `getAnonStructType`)
   - Test: `test/unit/wasm/map-keys.test.js`: W1.5, W1.6 → `10` (and a key differing only in `A[1]` misses; an anonymous struct with an embedded field as a map key hits)
   - Done when: all pass with valid modules
 
 ### Phase 2: One `wasm` type key and anonymous-struct `typeToTypeNode` (root `wasm-type-key`)
-- [ ] Task 2.1: `goTypeKey` covers `struct`, `func`, `interface`, and `GenericTypeName` with reversible identifier-safe escaping
+- [x] Task 2.1: `goTypeKey` covers `struct`, `func`, `interface`, and `GenericTypeName` with reversible identifier-safe escaping
   - Files: `src/backend/wasm/types.js` (`goTypeKey`), `src/backend/wasm/module-emitter.js` (anonymous struct names from the key)
   - Test: `test/unit/wasm/structs.test.js`: key unit test (`struct{ A_int int }` vs `struct{ A int }`, `struct{ P }` vs `struct{ P P }`, func types differing only in a param, interface types) gives distinct identifier-safe keys; identical types written twice give one key
   - Done when: passes; existing wasm suite green
-- [ ] Task 2.2: Monomorph uses `goTypeKey`, `typeToTypeNode` supports anonymous structs and interfaces, and `goTypeName` formats anonymous structs (W2.1–W2.6)
+- [x] Task 2.2: Monomorph uses `goTypeKey`, `typeToTypeNode` supports anonymous structs and interfaces, and `goTypeName` formats anonymous structs (W2.1–W2.6)
   - Files: `src/backend/wasm/monomorph.js` (`typeKey` → `goTypeKey`, delete `rawTypeKey`, `typeToTypeNode` handles `struct`/`StructType` and `interface`/`InterfaceType`), `src/backend/shared/fmt-types.js` (`goTypeName` handles `struct`/`StructType`)
   - Test: `test/unit/wasm/generics.test.js`: W2.1 → `0 1`, W2.2 → `4`, W2.3 → `1 s`, W2.4 → `1 hi` and `main.Box[func(struct { X int }) int]` / `main.Box[func(struct { S string }) string]`, W2.5 (`f[struct{ X int }]`) → `0`, W2.6 (`id[interface{ M() int }]` and `id[interface{ K() int }]`) → `1 2`, with `assertAllTargetsOutput`; switch `test/unit/language/value-semantics.test.js` (lines 856–917, 1003–1045) and `test/unit/types/generics.test.js` (lines 2388–2500) to `assertAllTargetsOutput`
   - Done when: all pass on every target; `rawTypeKey` deleted
 
 ### Phase 3: `wasm` rewrites keep static types (root `wasm-rewrite-types`)
-- [ ] Task 3.1: `cloneAst`, `substituteInType`, and `substituteTypesInAst` for structs and parenthesised pointer conversions (W3.1, W3.2)
+- [x] Task 3.1: `cloneAst`, `substituteInType`, and `substituteTypesInAst` for structs and parenthesised pointer conversions (W3.1, W3.2)
   - Files: `src/backend/wasm/monomorph.js` (`cloneAst` keeps `_structFields` and clones `Map` entries; `substituteInType` adds `struct`; `substituteTypesInAst` `CallExpr` handles `UnaryExpr("*")` over type-param `Ident` such as `(*T)(nil)` / `(**T)(nil)`)
   - Test: `test/unit/wasm/generics.test.js`: W3.1 → `3`; W3.2 with type param `T` and `Proxy` → `0`; `(*T)(&x)` → `1`; `(**T)(nil)` → `0`
   - Done when: all pass on every target
-- [ ] Task 3.2: Method expressions with an untyped `nil` receiver (W3.4)
+- [x] Task 3.2: Method expressions with an untyped `nil` receiver (W3.4)
   - Files: `src/backend/wasm/method-expr.js` (`rewriteMethods`)
   - Test: `test/unit/wasm/pointers.test.js`: W3.4 with `U`, `undefined`, and generic `Box[int]` → `true`; `(*U).IsNil(&U{})`, `(*U).IsNil((*U)(nil))` → `false true`; a method expression stored in a variable and called with `nil`
   - Done when: all pass; `js`/`both` print the same
