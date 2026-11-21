@@ -75,7 +75,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
 > Split from the former `web-platform-evolution-plan.md` Phases 1–2 (re-probed 2026-11-17). Former task IDs in parentheses.
 
 ### Phase 1: Directives, patterns and the `embed` import
-- [ ] Task 1.1: Lex and parse `//go:embed` directives into AST var declarations (former 1.1)
+- [x] Task 1.1: Lex and parse `//go:embed` directives into AST var declarations (former 1.1)
   - Files: `src/lexer/lexer.js`, `src/parser/declarations.js`, `src/parser/index.js`
   - Test: `test/unit/parser/embed-directives.test.js`: pattern extraction (bare, double-quoted, back-quoted, several on one line, multiple consecutive directives, empty `//go:embed`), attachment across comments and blank lines to standalone `var` and `VarSpec` inside grouped `var (...)`, `inFunc` flag for local `var` inside a function, and unattached directives staying in `_embedDirectives` (including before `var (`)
   - Done when: `//go:embed asset.txt "b c.txt"` attaches `{ patterns: ["asset.txt", "b c.txt"], line, col }` to the following package-level `VarSpec`, `decodeRawBytes` is exported from `src/lexer/lexer.js`, and misplaced/empty/local-`var` directives are preserved for the checker to reject

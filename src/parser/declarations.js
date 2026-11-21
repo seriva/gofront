@@ -11,7 +11,7 @@ export const declarationParseMethods = {
 			case T.TYPE:
 				return this.parseTypeDecl();
 			case T.VAR:
-				return this.parseVarDecl();
+				return this.parseVarDecl(true);
 			case T.CONST:
 				return this.parseConstDecl();
 			default:
@@ -315,20 +315,42 @@ export const declarationParseMethods = {
 		return { kind: "TypeDecl", name, typeParams, type, isAlias };
 	},
 
-	parseVarDecl() {
+	// `topLevel` is true for a package-level `var`, whose spec takes the
+	// `//go:embed` directives written before it; a local `var` leaves them
+	// for the checker to reject.
+	parseVarDecl(topLevel = false) {
+		const varIndex = this.pos;
 		this.expect(T.VAR);
 		const decls = [];
 		if (this.match(T.LPAREN)) {
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {
-				decls.push(this.parseVarSpec());
+				const at = this.pos;
+				decls.push(this._attachEmbeds(this.parseVarSpec(), at, topLevel));
 				this.semi();
 			}
 			this.expect(T.RPAREN);
 		} else {
-			decls.push(this.parseVarSpec());
+			decls.push(this._attachEmbeds(this.parseVarSpec(), varIndex, topLevel));
 		}
 		this.semi();
 		return { kind: "VarDecl", decls };
+	},
+
+	// Hands the `//go:embed` directives written right before the token at
+	// `tokIndex` (comments and blank lines in between do not matter) to `spec`.
+	// Directives before a local `var` stay on the program, flagged `inFunc`.
+	_attachEmbeds(spec, tokIndex, topLevel) {
+		const found = (this.tokens.embedDirectives ?? []).filter(
+			(d) => d._tok === tokIndex,
+		);
+		if (found.length === 0) return spec;
+		if (topLevel) {
+			spec._embeds = found;
+			for (const d of found) this._claimedEmbeds.add(d);
+		} else {
+			for (const d of found) d.inFunc = true;
+		}
+		return spec;
 	},
 
 	parseVarSpec() {

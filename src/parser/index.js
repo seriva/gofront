@@ -49,6 +49,7 @@ export class Parser {
 		this.pos = 0;
 		this.filename = filename;
 		this.source = source;
+		this._claimedEmbeds = new Set(); // //go:embed directives given to a var
 	}
 
 	// ── Primitives ───────────────────────────────────────────────
@@ -131,7 +132,10 @@ export class Parser {
 			decls,
 			target: this.tokens?.target ?? null,
 			_targetDirective: this.tokens?.targetDirective ?? null,
-			_embedDirectives: this.tokens?.embedDirectives ?? [],
+			// Directives no package-level var took: the checker reports them.
+			_embedDirectives: (this.tokens?.embedDirectives ?? []).filter(
+				(d) => !this._claimedEmbeds.has(d),
+			),
 			_filename: this.filename,
 			_source: this.source,
 		};
