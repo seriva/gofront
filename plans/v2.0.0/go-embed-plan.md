@@ -83,7 +83,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/embed-resolve.test.js`, negative cases first: `..`, an absolute path, a backslash and a symlink out of the package → `embed pattern escapes package directory`; no match → `pattern <pat> matches no files`
   - Done when: every directive carries `_embedFiles: { path, bytes }[]` resolved relative to its file's directory on every compile (not stale across `_parseCache`), containment checked by `relative()`/`isAbsolute()` on the real path
-- [ ] Task 1.3: Type-check embed variables and accept the `embed` import (former 1.3)
+- [x] Task 1.3: Type-check embed variables and accept the `embed` import (former 1.3)
   - Files: `src/typechecker/index.js`, `src/typechecker/stdlib/excluded.js`, `stdlib/embed/embed.go`, `.sentrux/rules.toml`
   - Test: `test/unit/types/embed-check.test.js`: every message in *Edge Cases* (wrong type, misplaced/empty directives, local `var` in `func`, per-file missing import, `multiple files for type string`, plus valid `[]uint8`, type aliases and `var _ string`); update `test/unit/language/declarations.test.js` where it asserted `//go:embed is not supported yet`
   - Done when: `import _ "embed"` compiles on every target; `string` and `[]byte`/`[]uint8` variables (and aliases) with one matched file pass; `//go:embed is not supported yet` is gone; `npm run check:layers` covers `stdlib/embed/**` (in `stdlib-mid`)
