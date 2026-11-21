@@ -133,7 +133,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Done when: Go's output on all targets
 
 ### Phase 2: Spread arguments (root `spread-non-variadic`)
-- [ ] Task 2.1: `...` to a non-variadic callee, non-`append` builtin, or type conversion is an error (F2.1, F2.2, F2.4)
+- [x] Task 2.1: `...` to a non-variadic callee, non-`append` builtin, or type conversion is an error (F2.1, F2.2, F2.4)
   - Files: `src/typechecker/expressions.js` (`_checkCallExpr`, `_checkCallArgs`)
   - Test: reject fixtures `spread_non_variadic_func.go`, `spread_non_variadic_method.go`, `spread_non_variadic_func_value.go`, `spread_non_variadic_zero_param.go`, `spread_builtin_len.go`, `spread_type_conversion.go`
   - Done when: Go's message on all targets

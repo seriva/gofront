@@ -2355,6 +2355,7 @@ export const expressionCheckMethods = {
 	_checkTypeParamConversion(tp, argTypes, expr, scope) {
 		expr._isTypeConversion = true;
 		expr._conversionTargetType = tp;
+		if (this._rejectConversionSpread(tp, expr)) return tp;
 		if (expr.args.length !== 1) {
 			return this.err(
 				`cannot convert ${expr.args.length} arguments to type ${typeStr(tp)}`,
@@ -2563,6 +2564,14 @@ export const expressionCheckMethods = {
 		if (fnType.kind === "builtin") {
 			expr._builtinName = fnType.name;
 			const argTypes = this._resolveBuiltinArgTypes(fnType.name, expr, scope);
+			// Only `append` takes `xs...`; Go rejects it on every other builtin.
+			if (fnType.name !== "append" && expr.args.some((a) => a._spread)) {
+				this.err(
+					`invalid operation: invalid use of ... with built-in ${fnType.name}`,
+					expr,
+				);
+				return ANY;
+			}
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
@@ -2579,8 +2588,10 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		// `(any)(x)` / `type A = any; A(x)` convert like `any(x)`.
-		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef))
+		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef)) {
+			if (expr.func._isTypeRef) this._rejectConversionSpread(fnType, expr);
 			return ANY;
+		}
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.
@@ -2592,6 +2603,7 @@ export const expressionCheckMethods = {
 		) {
 			expr._isTypeConversion = true;
 			expr._conversionTargetType = fnType;
+			if (this._rejectConversionSpread(fnType, expr)) return fnType;
 			if (expr.args.length !== 1) {
 				return this.err(
 					`cannot convert ${expr.args.length} arguments to type ${typeStr(fnType)}`,
@@ -2686,6 +2698,8 @@ export const expressionCheckMethods = {
 	},
 
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
+		if (fnType.underlying && this._rejectSpreadCall(fnType.underlying, expr))
+			return null;
 		const typeArgs = this.inferTypeArgs(
 			fnType,
 			this._inferArgTypes(expr, argTypes),
@@ -2761,7 +2775,26 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `f(xs...)` needs a variadic `f`, which takes `xs` as its whole variadic
+	// parameter. Reports and returns true when the call cannot be.
+	_rejectSpreadCall(fnType, expr) {
+		if (fnType.variadic || !expr.args.some((a) => a._spread)) return false;
+		this.err(
+			`cannot use ... in call to non-variadic ${exprText(expr.func)}`,
+			expr,
+		);
+		return true;
+	},
+
+	// `T(xs...)`: a conversion takes one plain operand.
+	_rejectConversionSpread(target, expr) {
+		if (!expr.args.some((a) => a._spread)) return false;
+		this.err(`invalid use of ... in conversion to ${typeStr(target)}`, expr);
+		return true;
+	},
+
 	_checkCallArgs(fnType, argTypes, expr, scope = null) {
+		if (this._rejectSpreadCall(fnType, expr)) return;
 		this._checkArgCount(fnType, argTypes, expr);
 		this._checkMultiForwardVariadic(fnType, expr);
 		const maxLen = fnType.variadic
