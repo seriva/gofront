@@ -3469,7 +3469,25 @@ export class StmtsEmitter {
 	// Later expressions are not evaluated once one matches, as in Go.
 	_emitCaseListMatch(stmt, vals, tagTmp, tagWType, tagGoType) {
 		for (let j = 0; j < vals.length; j++) {
-			if (stmt.tag) {
+			if (
+				stmt.tag &&
+				isInterfaceType(vals[j]._type, this.mod.checker) &&
+				!isInterfaceType(tagGoType, this.mod.checker)
+			) {
+				// `case v:` with an interface `v` against a concrete tag compares
+				// interface values: the tag is boxed, as in `tag == v`.
+				const name = `__casetag$${this.tempCounter++}`;
+				const idx = this.allocLocal(name, tagWType, tagGoType, true);
+				this.pushInstruction({ op: "local.get", index: tagTmp });
+				this.pushInstruction({ op: "local.set", index: idx });
+				this.emitExpr(
+					{ kind: "Ident", name, _type: tagGoType, _parTmp: true },
+					"anyref",
+				);
+				this.locals.delete(name);
+				this.emitExpr(vals[j], "anyref");
+				this._emitAnyEq();
+			} else if (stmt.tag) {
 				this.pushInstruction({ op: "local.get", index: tagTmp });
 				this.emitExpr(vals[j], tagWType);
 				this._emitElemEq(tagGoType, tagWType);

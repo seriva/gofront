@@ -1881,3 +1881,112 @@ func main() {
 		"true true true false true false\n",
 	);
 });
+
+section("Switch case values that are interfaces");
+
+test("a switch case of interface type matches a concrete tag", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b any = 2
+	switch 2 {
+	case b:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	s := "x"
+	var c any = "y"
+	switch s {
+	case c:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+}
+`,
+		"hit\nmiss\n",
+	);
+});
+
+test("a switch case of interface type matches through fallthrough", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b any = 2
+	switch 2 {
+	case b:
+		fmt.Println("hit")
+		fallthrough
+	case 3:
+		fmt.Println("next")
+	}
+}
+`,
+		"hit\nnext\n",
+	);
+});
+
+test("a switch case of interface type works without fmt", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+func main() {
+	var b any = 2
+	switch 2 {
+	case b:
+	default:
+		panic("miss")
+	}
+}
+`,
+		"",
+	);
+});
+
+test("a switch case of a non-empty interface type matches a struct tag on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type I interface{}
+
+type S struct{ A int }
+
+func main() {
+	s := S{1}
+	var i I = S{1}
+	switch s {
+	case i:
+		fmt.Println("hit")
+	}
+}
+`,
+		"hit\n",
+	);
+});
+
+test("a switch with an interface tag and concrete cases is unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b any = 2
+	switch b {
+	case 2:
+		fmt.Println("hit")
+	}
+}
+`,
+		"hit\n",
+	);
+});
