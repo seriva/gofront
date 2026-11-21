@@ -1590,3 +1590,102 @@ func main() {
 		"0\n0\n1\n0\n",
 	);
 });
+
+section("Monomorphisation scopes");
+
+test("a user func named append does not leak into stdlib generics (F6.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func append(x int) int { return x + 1 }
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	fmt.Println(append(1), s)
+}
+`,
+		"2 [1 3]\n",
+	);
+});
+
+test("a type named like an unrelated declaration stays shared with stdlib generics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Ordered int
+type byte struct{ X int }
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	fmt.Println(Ordered(1), s)
+}
+`,
+		"1 [1 3]\n",
+	);
+});
+
+test("main shadowing append does not change a linked package's generic (F6.1)", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T { return append(s, v) }
+
+func Plain(s []int) []int { return append(s, 9) }
+`,
+		"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+func append(x int) int { return x + 1 }
+
+func main() {
+	println(len(util.Grow([]int{1}, 2)), append(1), len(util.Plain(nil)))
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "2 2 1");
+});
+
+test("a linked package's generic calls the builtin when a sibling package shadows it (F6.2)", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T { return append(s, v) }
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+var append = 42
+
+func Run() int { return len(util.Grow([]int{1}, 2)) + append }
+`,
+		"main.go": `//gofront:target wasm
+package main
+
+import (
+	"./lib"
+	"./util"
+)
+
+func main() { println(lib.Run(), len(util.Grow([]int{1}, 2))) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "44 2");
+});

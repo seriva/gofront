@@ -7,7 +7,7 @@
 // (e.g. Identity$int, Box$int, Stack$int.Push) and re-typechecks the monomorphised AST.
 
 import { TypeChecker } from "../../typechecker/index.js";
-import { embeddedFieldName } from "../../typechecker/types.js";
+import { embeddedFieldName, PackageScope } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import { goTypeKey } from "./types.js";
 
@@ -922,6 +922,9 @@ export function monomorphise(programs, checker) {
 	// 6. Typecheck the monomorphised program to annotate all concrete types
 	const monoChecker = new TypeChecker();
 	monoChecker.target = "wasm";
+	// Linked packages share one scope, but a package's unexported values
+	// (including a shadow of `append`) stay its own.
+	monoChecker.globals = new PackageScope(monoChecker.universe);
 	monoChecker.pkgName = targetProg?.pkg?.name ?? "main";
 	// The programs were checked once already, where `//gofront:native` is
 	// limited to the standard library; this pass only re-annotates them.
