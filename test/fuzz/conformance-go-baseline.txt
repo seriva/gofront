@@ -113,10 +113,6 @@ local_type_used_outside:9 # undefined-text
 numeric_int32_to_int64:5 # D3
 numeric_string_to_int:4 # D3
 range_defined_func:7 # any-operand-kind
-range_float_const:5 # D1
-range_float_const_integral:5 # D1
-range_float_lit:5 # D1
-range_float_typed_const:5 # D1
 range_operand_kinds:11 # any-operand-kind
 range_operand_kinds:14 # any-operand-kind
 return_forwarded_tuple_void:6 # excluded: secondary-lines

@@ -2124,6 +2124,69 @@ test("no operand kind of the table prints as the expression fallback", () => {
 		assertEqual(exprText(parsedOperand(src)).includes("expression"), false);
 });
 
+section("Constant operand kinds");
+
+// Every target prints a constant operand with its value, as Go does.
+const constantKindCases = [
+	[
+		"a typed constant's address",
+		"const k float64 = 2\n_ = &k",
+		"cannot take address of k (constant 2 of type float64)",
+	],
+	[
+		"an untyped float literal as a len argument",
+		"_ = len(1e3)",
+		"invalid argument: 1e3 (untyped float constant 1000) for built-in len",
+	],
+	[
+		"a folded untyped constant statement",
+		"1 + 2",
+		"1 + 2 (untyped int constant 3) is not used",
+	],
+	[
+		"a typed constant conversion statement",
+		"float64(1)",
+		"float64(1) (constant 1 of type float64) is not used",
+	],
+	[
+		"a typed constant statement",
+		"const k float64 = 2\nk",
+		"k (constant 2 of type float64) is not used",
+	],
+	[
+		"a named untyped constant statement",
+		"const half = 0.5\nhalf",
+		"half (untyped float constant 0.5) is not used",
+	],
+	[
+		"a non-constant untyped bool statement",
+		"x := 1\nx == 1",
+		"x == 1 (untyped bool value) is not used",
+	],
+	[
+		"a variable statement",
+		"x := 1.5\nx",
+		"x (variable of type float64) is not used",
+	],
+];
+
+for (const [name, body, want] of constantKindCases)
+	test(`constant operand kind: ${name}`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\nfunc main() {\n${body}\n}`, {
+				target,
+			});
+			assertErrorContains(errors, want);
+		}
+	});
+
+test("a constant statement names the value of a string constant", () => {
+	const { errors } = compile(
+		'package main\nfunc main() {\nconst s = "a"\ns\n}',
+	);
+	assertErrorContains(errors, 's (untyped string constant "a") is not used');
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -120,7 +120,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Files: `src/typechecker/operand-text.js` (`exprText`, `litText`, type-node printers)
   - Test: remove `// pending: operand-text` from `addr_lit_elem`, `assign_lit_elem`, `assign_lit_field`, `assign_assert_field`, `unused_conversion`; `test/unit/types/checks.test.js` table of node kinds → text (including `SliceExpr`, `FuncLit`, `InstantiationExpr`, `TypeExpr`, `AwaitExpr`)
   - Done when: those cases pass; no `"expression"` fallback for the tabled kinds
-- [ ] Task 1.3: `operandKind` reads `node._const` to carry the constant value across all callers (D1.6)
+- [x] Task 1.3: `operandKind` reads `node._const` to carry the constant value across all callers (D1.6)
   - Files: `src/typechecker/operand-text.js` (`operandKind`), `src/typechecker/statements.js` (`_checkExprStmt` at `:109-112`)
   - Test: reject fixture `range_typed_float_const.go` (`constant 2 of type float64`, including a function-local `const k float64 = 2`); `range_float_lit` marker corrected to Go's `(untyped float constant 1000)`; sibling assertions in `test/unit/types/checks.test.js` for `const k float64 = 2; _ = &k` (`constant 2 of type float64`), `len(1e3)` (`untyped float constant 1000`), and `1 + 2` unused statement (`untyped int constant 3`) vs `x == 1` (`untyped bool value`)
   - Done when: Go's constant-value operand kind on all targets across `range` and sibling callers

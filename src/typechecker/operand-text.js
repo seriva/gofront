@@ -148,10 +148,61 @@ export function exprText(node) {
 	return print ? print(node) : "expression";
 }
 
-// "variable of type float64", "untyped int constant", "value of type float64".
+// A decimal beyond float64 the way Go prints it (`1e+400`), from its exact
+// `{ n, e }` form (n * 10^-e).
+function hugeText(r) {
+	if (!r) return null;
+	const abs = (r.n < 0n ? -r.n : r.n).toString();
+	const digits = abs.replace(/0+$/, "") || "0";
+	const exp = abs.length - 1 - r.e;
+	const mantissa =
+		digits.length > 1 ? `${digits[0]}.${digits.slice(1, 6)}` : digits;
+	return `${r.n < 0n ? "-" : ""}${mantissa}e+${exp}`;
+}
+
+// How Go prints the value of a constant after its text (`0.5`, `(0 + 2i)`),
+// or null when the value is not known.
+export function constValueText(v) {
+	if (v?.k === "FLOAT" && !Number.isFinite(v.v)) return hugeText(v.r);
+	if (v?.k === "INT" || v?.k === "FLOAT") return String(v.v);
+	if (v?.k === "BOOL") return String(v.v);
+	if (v?.k === "STRING") return JSON.stringify(v.v);
+	return v?.k === "COMPLEX" ? `(${v.v.re} + ${v.v.im}i)` : null;
+}
+
+// The word Go uses for an untyped kind: `untyped float constant`.
+function untypedWord(base, rune) {
+	if (rune) return "rune";
+	if (base === "float64") return "float";
+	return base === "complex128" ? "complex" : base;
+}
+
+// What follows `constant` when the operand's text is not already its value:
+// ` 1000` for `1e3`, nothing for `"a"`.
+function valueSuffix(node, val) {
+	const value = constValueText(val);
+	return value === null || value === exprText(node) ? "" : ` ${value}`;
+}
+
+// How Go describes an operand in parentheses after its text: "variable of
+// type float64", "value of type float64", "constant 2 of type float64",
+// "untyped float constant 1000", "untyped bool value". `node._const` (or
+// `_cconst`) carries a constant's value, so every caller prints constants the
+// same way. An untyped operand is recognised by `isUntypedConst` (the caller
+// then passes the base name as `typeName`) or, when it is omitted, by
+// `node._type`.
 export function operandKind(node, typeName, isUntypedConst) {
-	if (isUntypedConst)
-		return `untyped ${typeName === "float64" ? "float" : typeName} constant`;
+	const val = node?._const ?? node?._cconst;
+	const t = node?._type;
+	const untyped = isUntypedConst ?? t?.kind === "untyped";
+	if (untyped) {
+		const inferred = isUntypedConst === undefined;
+		if (inferred && t.base === "nil") return "untyped nil";
+		const word = inferred ? untypedWord(t.base, t.rune) : untypedWord(typeName);
+		if (val) return `untyped ${word} constant${valueSuffix(node, val)}`;
+		return `untyped ${word} ${inferred ? "value" : "constant"}`;
+	}
+	if (val) return `constant${valueSuffix(node, val)} of type ${typeName}`;
 	return node?.kind === "Ident"
 		? `variable of type ${typeName}`
 		: `value of type ${typeName}`;

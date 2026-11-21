@@ -2,7 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { constIntValue, floatConstOf, realOfConst } from "./const-fold.js";
-import { exprText, operandKind } from "./operand-text.js";
+import { constValueText, exprText, operandKind } from "./operand-text.js";
 import { operandKindOf, operatorDefined } from "./operators.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
@@ -82,26 +82,6 @@ const CMP_KIND_NAMES = new Set([
 ]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
-
-// A decimal beyond float64 the way Go prints it (`1e+400`), from its exact
-// `{ n, e }` form (n * 10^-e).
-function hugeText(r) {
-	if (!r) return null;
-	const abs = (r.n < 0n ? -r.n : r.n).toString();
-	const digits = abs.replace(/0+$/, "") || "0";
-	const exp = abs.length - 1 - r.e;
-	const mantissa =
-		digits.length > 1 ? `${digits[0]}.${digits.slice(1, 6)}` : digits;
-	return `${r.n < 0n ? "-" : ""}${mantissa}e+${exp}`;
-}
-
-// How Go prints the value of an untyped numeric constant after its text
-// (`0.5`, `(0 + 2i)`), or null when the value is not known.
-function constValueText(v) {
-	if (v?.k === "FLOAT" && !Number.isFinite(v.v)) return hugeText(v.r);
-	if (v?.k === "INT" || v?.k === "FLOAT") return String(v.v);
-	return v?.k === "COMPLEX" ? `(${v.v.re} + ${v.v.im}i)` : null;
-}
 
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
 const UNTYPED_COMPAT = {
@@ -289,16 +269,11 @@ export const assignabilityMethods = {
 	},
 
 	// `1.5 (untyped float constant)`, `half (untyped float constant 0.5)`: Go
-	// adds the value when the operand's text is not the value itself.
+	// adds the value when the operand's text is not the value itself (see
+	// `operandKind`).
 	_untypedConstText(c, cNode) {
 		const base = c.rune ? "rune" : c.base === "complex128" ? "complex" : c.base;
-		const kind = operandKind(cNode, base, true);
-		const text = exprText(cNode);
-		const v = cNode?._const;
-		const value = constValueText(v ?? cNode?._cconst);
-		return value === null || value === text
-			? `${text} (${kind})`
-			: `${text} (${kind} ${value})`;
+		return `${exprText(cNode)} (${operandKind(cNode, base, true)})`;
 	},
 
 	// An operator on a type parameter needs every type in its constraint's
