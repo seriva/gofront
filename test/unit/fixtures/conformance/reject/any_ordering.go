@@ -2,5 +2,5 @@ package main
 
 func main() {
 	var v any = 2
-	_ = v < 3 // ERROR "operator < not defined on v (variable of type any)"
+	_ = v < 3 // ERROR "v < 3 (operator < not defined on interface)"
 }
