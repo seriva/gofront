@@ -8,7 +8,10 @@
 //
 // stdout: a JSON array of {"id", "ok", "syntax", "line", "col", "msg"}, in
 // input order. `line`, `col` and `msg` describe the first error by position;
-// `syntax` is set when that error is a parse error.
+// `syntax` is set when that error is a parse error. A case with `"all": true`
+// also gets "errors": every error of the program, as {"file", "line", "col",
+// "msg", "syntax"} in position order (the conformance audit,
+// test/fuzz/conformance-go.js, reads it).
 package main
 
 import (
@@ -22,24 +25,36 @@ import (
 	"go/types"
 	"os"
 	"sort"
+	"strings"
 )
 
 type input struct {
 	ID   string            `json:"id"`
 	Src  string            `json:"src"`
 	Pkgs map[string]string `json:"pkgs,omitempty"`
+	All  bool              `json:"all,omitempty"`
+}
+
+type errorItem struct {
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Col    int    `json:"col"`
+	Msg    string `json:"msg"`
+	Syntax bool   `json:"syntax,omitempty"`
 }
 
 type result struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Syntax bool   `json:"syntax,omitempty"`
-	Line   int    `json:"line,omitempty"`
-	Col    int    `json:"col,omitempty"`
-	Msg    string `json:"msg,omitempty"`
+	ID     string      `json:"id"`
+	OK     bool        `json:"ok"`
+	Syntax bool        `json:"syntax,omitempty"`
+	Line   int         `json:"line,omitempty"`
+	Col    int         `json:"col,omitempty"`
+	Msg    string      `json:"msg,omitempty"`
+	Errors []errorItem `json:"errors,omitempty"`
 }
 
 type finding struct {
+	file      string
 	line, col int
 	msg       string
 	syntax    bool
@@ -65,10 +80,10 @@ func checkFile(fset *token.FileSet, name, src string, imp types.Importer) (*type
 	if err != nil {
 		if list, ok := err.(scanner.ErrorList); ok {
 			for _, e := range list {
-				found = append(found, finding{e.Pos.Line, e.Pos.Column, e.Msg, true})
+				found = append(found, finding{name, e.Pos.Line, e.Pos.Column, e.Msg, true})
 			}
 		} else {
-			found = append(found, finding{0, 0, err.Error(), true})
+			found = append(found, finding{name, 0, 0, err.Error(), true})
 		}
 		return nil, found
 	}
@@ -77,10 +92,10 @@ func checkFile(fset *token.FileSet, name, src string, imp types.Importer) (*type
 		Error: func(err error) {
 			if te, ok := err.(types.Error); ok {
 				pos := te.Fset.Position(te.Pos)
-				found = append(found, finding{pos.Line, pos.Column, te.Msg, false})
+				found = append(found, finding{name, pos.Line, pos.Column, te.Msg, false})
 				return
 			}
-			found = append(found, finding{0, 0, err.Error(), false})
+			found = append(found, finding{name, 0, 0, err.Error(), false})
 		},
 	}
 	pkg, _ := conf.Check(file.Name.Name, fset, []*ast.File{file}, nil)
@@ -98,9 +113,7 @@ func check(in input, std types.Importer) result {
 	var found []finding
 	for _, path := range paths {
 		pkg, errs := checkFile(fset, path+"/pkg.go", in.Pkgs[path], imp)
-		for _, e := range errs {
-			found = append(found, finding{0, 0, path + ": " + e.msg, e.syntax})
-		}
+		found = append(found, errs...)
 		if pkg != nil {
 			imp.local[path] = pkg
 		}
@@ -110,14 +123,34 @@ func check(in input, std types.Importer) result {
 	if len(found) == 0 {
 		return result{ID: in.ID, OK: true}
 	}
-	sort.SliceStable(found, func(i, j int) bool {
-		if found[i].line != found[j].line {
-			return found[i].line < found[j].line
+	// An error in a local package sorts first and reads `path: msg`, so the
+	// first error is the same whatever line it is on.
+	pos := func(f finding) (int, int) {
+		if f.file != "main.go" {
+			return 0, 0
 		}
-		return found[i].col < found[j].col
+		return f.line, f.col
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		li, ci := pos(found[i])
+		lj, cj := pos(found[j])
+		if li != lj {
+			return li < lj
+		}
+		return ci < cj
 	})
 	first := found[0]
-	return result{ID: in.ID, Syntax: first.syntax, Line: first.line, Col: first.col, Msg: first.msg}
+	res := result{ID: in.ID, Syntax: first.syntax, Line: first.line, Col: first.col, Msg: first.msg}
+	if first.file != "main.go" {
+		res.Line, res.Col = 0, 0
+		res.Msg = strings.TrimSuffix(first.file, "/pkg.go") + ": " + first.msg
+	}
+	if in.All {
+		for _, f := range found {
+			res.Errors = append(res.Errors, errorItem{f.file, f.line, f.col, f.msg, f.syntax})
+		}
+	}
+	return res
 }
 
 func main() {

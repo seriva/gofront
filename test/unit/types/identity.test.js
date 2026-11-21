@@ -13,6 +13,7 @@ import {
 	DECLARED_ANY,
 	identical,
 	TAINTED_ANY,
+	typeStr,
 } from "../../../src/typechecker/types.js";
 import { assert, assertEqual, section, summarize, test } from "../helpers.js";
 
@@ -290,6 +291,55 @@ var w W[int]
 func main() {}
 `).checker.globals.get("w");
 	assertEqual(t.underlying?.kind, "struct");
+});
+
+section("Type text — unnamed struct and interface types print in full");
+
+function printsAs(decls, type, want) {
+	test(`typeStr: ${type}`, () => {
+		const { checker } = check(
+			`package main\n${decls}\nvar a ${type}\nfunc main() {}\n`,
+		);
+		assertEqual(typeStr(checker.globals.get("a")), want);
+	});
+}
+
+printsAs("", "struct{ X int }", "struct{X int}");
+printsAs("", "struct{ X, Y int; S string }", "struct{X int; Y int; S string}");
+printsAs("type E struct{}", "struct{ E }", "struct{E}");
+printsAs("type E struct{}", "struct{ *E }", "struct{*E}");
+printsAs("", 'struct{ X int `json:"x"` }', 'struct{X int "json:\\"x\\""}');
+printsAs("", "struct{}", "struct{}");
+printsAs("", "struct{ P struct{ X int } }", "struct{P struct{X int}}");
+printsAs("", "interface{}", "interface{}");
+printsAs("", "interface{ M() }", "interface{M()}");
+printsAs(
+	"",
+	"interface{ M(int, ...string) (bool, error); N() int }",
+	"interface{M(int, ...string) (bool, error); N() int}",
+);
+printsAs("", "[]struct{ X int }", "[]struct{X int}");
+
+test("typeStr: a self-referential unnamed struct stops at the repeat", () => {
+	const type = { kind: "struct", fields: new Map(), methods: new Map() };
+	type._structFields = [
+		{ names: ["Next"], type: { kind: "pointer", base: type } },
+	];
+	assertEqual(typeStr(type), "struct{Next *struct{…}}");
+});
+
+test("typeStr: inline union constraints print their terms", () => {
+	const { checker } = check(`package main
+type Num interface{ ~int | ~float64 }
+func F[T interface{ ~int | ~float64 }, U interface{ comparable; ~string }, V Num](a T, b U, c V) {}
+func main() {}
+`);
+	const [t, u, v] = checker.globals.get("F").typeParams;
+	const text = (tp) =>
+		typeStr(checker.resolveTypeNode(tp.constraint, checker.globals));
+	assertEqual(text(t), "interface{~int | ~float64}");
+	assertEqual(text(u), "interface{comparable; ~string}");
+	assertEqual(text(v), "Num");
 });
 
 summarize();

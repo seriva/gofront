@@ -46,7 +46,6 @@ const EXCLUDED_PACKAGE_GROUPS = {
 		"debug/macho",
 		"debug/pe",
 		"debug/plan9obj",
-		"embed",
 		"encoding",
 		"encoding/ascii85",
 		"encoding/asn1",
@@ -230,6 +229,9 @@ const EXCLUDED_MEMBER_GROUPS = {
 	},
 	"requires coroutines; out of scope (no runtime)": {
 		iter: ["Pull", "Pull2"],
+	},
+	"needs io/fs, which GoFront does not provide; read a file with ReadFile": {
+		embed: ["FS.ReadDir", "FS.Open"],
 	},
 	"files, processes and signals": {
 		os: [

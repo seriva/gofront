@@ -1,7 +1,7 @@
 # Diagnostic Text Matches Go — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-21)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-19 (`/bs-plan follow-ups`): ledger *Assignment diagnostics text* (root `operand-text`, PRs #238, #240) and the four roots the conformance-harness fix (`f78f4e1b`) exposed, whose cases carry `// pending: <root>`. Verdicts (which programs are rejected) belong to [`checker-go-rules-plan.md`](checker-go-rules-plan.md) and [`checker-operand-rules-plan.md`](checker-operand-rules-plan.md); this plan changes only the text of errors that are already reported. Operator wording (Phase 4) lands after checker-operand-rules Phase 2, whose operator table decides which operator message applies.  
 **Release note:** Compile errors now describe your code and types in Go's words, for example `cannot use b (variable of type []string) as []int value in argument to append` instead of `Cannot assign []string to []int`, so messages match Go's documentation and are easier to search for.
@@ -112,54 +112,54 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
 
 ### Phase 1: Marker audit and operand text (root `operand-text`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Assignment diagnostics text* and the `// pending: operand-text` cases.*
-- [ ] Task 1.1: `npm run conformance:go` audits every reject marker against Go
+- [x] Task 1.1: `npm run conformance:go` audits every reject marker against Go
   - Files: `test/fuzz/gocheck/main.go` (all-errors mode), `test/fuzz/conformance-go.js`, `package.json`
   - Test: `test/unit/cli/conformance-go.test.js` (no Go needed): marker extraction, baseline read/write and the substring rule on canned Go output; then `npm run conformance:go -- --write-baseline` writes `test/fuzz/conformance-go-baseline.txt`
   - Done when: the audit runs over all reject cases and its baseline lists today's misses with a tag per root (`D1`–`D4`, `excluded: gofront-only`, `excluded: documented-restriction`)
-- [ ] Task 1.2: `exprText` prints composite literal, assertion, conversion, slice, func literal, instantiation and type-node operands (D1.1–D1.4)
+- [x] Task 1.2: `exprText` prints composite literal, assertion, conversion, slice, func literal, instantiation and type-node operands (D1.1–D1.4)
   - Files: `src/typechecker/operand-text.js` (`exprText`, `litText`, type-node printers)
   - Test: remove `// pending: operand-text` from `addr_lit_elem`, `assign_lit_elem`, `assign_lit_field`, `assign_assert_field`, `unused_conversion`; `test/unit/types/checks.test.js` table of node kinds → text (including `SliceExpr`, `FuncLit`, `InstantiationExpr`, `TypeExpr`, `AwaitExpr`)
   - Done when: those cases pass; no `"expression"` fallback for the tabled kinds
-- [ ] Task 1.3: `operandKind` reads `node._const` to carry the constant value across all callers (D1.6)
+- [x] Task 1.3: `operandKind` reads `node._const` to carry the constant value across all callers (D1.6)
   - Files: `src/typechecker/operand-text.js` (`operandKind`), `src/typechecker/statements.js` (`_checkExprStmt` at `:109-112`)
   - Test: reject fixture `range_typed_float_const.go` (`constant 2 of type float64`, including a function-local `const k float64 = 2`); `range_float_lit` marker corrected to Go's `(untyped float constant 1000)`; sibling assertions in `test/unit/types/checks.test.js` for `const k float64 = 2; _ = &k` (`constant 2 of type float64`), `len(1e3)` (`untyped float constant 1000`), and `1 + 2` unused statement (`untyped int constant 3`) vs `x == 1` (`untyped bool value`)
   - Done when: Go's constant-value operand kind on all targets across `range` and sibling callers
-- [ ] Task 1.4: Shared `_convertError` prints operand, kind, and `to type T` (D1.5)
+- [x] Task 1.4: Shared `_convertError` prints operand, kind, and `to type T` (D1.5)
   - Files: `src/typechecker/expressions.js` (`_convertError` replacing the 13 `cannot convert` sites at `:1434`–`:2091`)
   - Test: remove `// pending: operand-text` from `convert_embedded_vs_named_field`; update `test/unit/wasm/generics.test.js:1131` and `test/unit/types/pointers.test.js:295` expecting the old `cannot convert X to Y` without `to type`
   - Done when: `convert_embedded_vs_named_field` passes on all targets; `D1` audit keys removed
 
 ### Phase 2: Types and constant values in messages (roots `type-text-elided`, `const-key-text`, `constraint-text`)
-- [ ] Task 2.1: `typeStr` prints unnamed struct, interface, and inline-union interface types in full (D2.1, D2.2, D2.5)
+- [x] Task 2.1: `typeStr` prints unnamed struct, interface, and inline-union interface types in full (D2.1, D2.2, D2.5)
   - Files: `src/typechecker/types.js` (`typeStr` for `struct` and `interface` including `unionConstraint` / `_comparable` / `_typeSetEmbeds`), `src/typechecker/resolve.js` (`_resolveInterfaceType` union term resolution if not formatted via `operand-text.js`)
   - Test: remove `// pending: type-text-elided` from `incdec_empty_interface`; add reject fixture `generic_mod_inline_iface.go` (`constrained by interface{~int | ~float64}`); `test/unit/types/identity.test.js` table: `struct{X int}`, `struct{E}`, `interface{M()}`, `interface{}`, a self-referential unnamed type; update the 7 `identity_*.go` conformance fixtures asserting `struct{...}`
   - Done when: those cases pass; `grep -nE '(struct|interface)\{\.\.\.\}' src/typechecker/types.js` is empty; `conformance.test.js` and unit tests pass
-- [ ] Task 2.2: Duplicate map keys and cases print the constant value (D2.3, D2.4)
+- [x] Task 2.2: Duplicate map keys and cases print the constant value (D2.3, D2.4)
   - Files: `src/typechecker/expressions.js` (duplicate map key at `:2866`), `src/typechecker/statements.js` (duplicate case at `:699`)
   - Test: remove `// pending: const-key-text` from `duplicate_map_key_forms`; `duplicate_case_other_forms` markers extended to Go's `(constant 1 of type int)`, `(constant 2 of type float64)`, and `(constant of type string)`
   - Done when: Go's headline on all targets; `D2` audit keys removed
 
 ### Phase 3: Assignment wording (root `assign-message-text`)
-- [ ] Task 3.1: One `_assignError` with operand, kind and context (D3.1–D3.3)
+- [x] Task 3.1: One `_assignError` with operand, kind and context (D3.1–D3.3)
   - Files: `src/typechecker/assignability.js` (`_assignError` replacing `:877`, `:1145`, `:1352`–`:1409`, passing outer types through `_assertNestedAssignable` and `_checkArrayAssignable`), `src/typechecker/statements.js` (`:507`, `:962`), conformance reject fixtures asserting `Cannot assign`
   - Test: remove `// pending: assign-message-text` from `append_spread_mismatch`, `append_elem_struct`, `generic_over_struct_field_type`; update `numeric_int32_to_int64` and the other non-`identity_*`-restriction reject fixtures asserting `Cannot assign` to Go's wording so `conformance.test.js` stays green on this commit; `assignability.js:1139` keeps its documented `here: convert it explicitly` wording
   - Done when: `grep -rn 'Cannot assign' src/typechecker` returns only `assignability.js:1139`; `conformance.test.js` passes
-- [ ] Task 3.2: Every caller passes Go's context name (D3.4)
+- [x] Task 3.2: Every caller passes Go's context name (D3.4)
   - Files: `src/typechecker/expressions.js` (composite literals, calls, `delete`, map index), `src/typechecker/statements.js` (returns, range)
   - Test: remove `// pending: assign-message-text` from `nil_to_non_nilable_contexts`; a context table in `test/unit/types/checks.test.js` (one row per context: `variable declaration`, `assignment`, `return statement`, `argument to f`, `struct literal`, `map literal`, `array or slice literal`, `map index`, `range clause`)
   - Done when: Go's context on all targets
-- [ ] Task 3.3: Remaining unit test assertions and docs use the new wording
+- [x] Task 3.3: Remaining unit test assertions and docs use the new wording
   - Files: the 17 `.test.js` files asserting `Cannot assign` (`test/unit/**`), `docs/usage.md` (`:59`)
   - Test: `npm test`; `npm run conformance:go` loses every `D3` key
   - Done when: `grep -rn "Cannot assign" test/unit docs/` finds only the documented `identity_*` restriction and GoFront-only diagnostics tagged in the audit baseline
 
 ### Phase 4: Operator wording (root `operator-message-text`)
 *Lands after checker-operand-rules Phase 2 (operator table).*
-- [ ] Task 4.1: Mismatched operand types report Go's `mismatched types X and Y` (D4.2)
+- [x] Task 4.1: Mismatched operand types report Go's `mismatched types X and Y` (D4.2)
   - Files: `src/typechecker/assignability.js` (`:392` fallback)
-  - Test: remove `// pending: operator-message-text` from `identity_compound_assignment`; update `test/unit/compiler/templ.test.js:1220` (`Invalid operation: string + untyped int`)
+  - Test: (`identity_compound_assignment` lost its `// pending: operator-message-text` header in Task 2.1: `typeStr` now prints `struct{X int}`); update `test/unit/compiler/templ.test.js:1220` (`Invalid operation: string + untyped int`)
   - Done when: Go's text on all targets
-- [ ] Task 4.2: An operator not defined on its operand reports Go's `operator op not defined on x (…)` (D4.1)
+- [x] Task 4.2: An operator not defined on its operand reports Go's `operator op not defined on x (…)` (D4.1)
   - Files: `src/typechecker/assignability.js` (`:384`–`:392`, including untyped-vs-typed operands such as `b += true`)
   - Test: remove `// pending: operator-message-text` from `compound_add_bool`
   - Done when: no `Invalid operation:` (capitalised) message remains in `src/typechecker`; `npm run conformance:go` baseline holds only `excluded:` keys

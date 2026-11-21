@@ -88,6 +88,7 @@ Coverage of the Go standard library, per package. Anything not listed here is no
 | `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
 | `crypto/sha256` | js, wasm, both | `Sum256`, `Sum224`, `New`, `New224`, `Size`, `Size224`, `BlockSize` |
+| `embed` | js, wasm, both | `//go:embed` on `string`, `[]byte` and `embed.FS` variables; `FS.ReadFile`; no `ReadDir` or `Open` (see [embedding files](go-compatibility.md#embedding-files-with-goembed)) |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings, `NewEncoding`, `WithPadding`, `Encode*`, `Decode*`, `Append*` |
 | `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` (`ByteOrder`, `AppendByteOrder`), varints |
 | `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `Append*`, `EncodedLen`, `DecodedLen`, `ErrLength`, `InvalidByteError` |
@@ -157,6 +158,7 @@ Notable members and behaviour per package, including GoFront's own packages:
 | External `.d.ts` types | ✓ — TypeScript tuple returns map to Go multi-value results (`state, setState := useState(0)`); rest parameters become variadic |
 | npm package type resolution | ✓ |
 | `.templ` files in packages | ✓ — mix `.go` and `.templ` files freely; templ components and `css` declarations visible across the whole package |
+| `//go:embed` directives | ✓ — embed files and directory trees into a `string`, `[]byte` or `embed.FS` variable at build time <!-- no-fixture: needs data files next to the source; see test/unit/compiler/embed-manifest.test.js --> |
 | `//gofront:target` directives | ✓ — per-package `js` / `wasm` / `both` targets; see the [hybrid guide](hybrid-wasm.md) |
 
 ### `.templ` templates

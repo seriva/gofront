@@ -1,4 +1,3 @@
-// pending: const-key-text
 package main
 
 const k = "a"

@@ -518,14 +518,19 @@ export function firstDiff(want, got) {
 // Compiles `source` as one package `target` (`js`, `both` or `wasm`), runs
 // `main` and returns its stdout.  `natives: false` compiles with the native
 // registries off (the Go bodies of `//gofront:native` functions run);
-// `stdlibRoot` swaps the stdlib directory.
+// `stdlibRoot` swaps the stdlib directory; `files` are written next to
+// `main.go` (data for `//go:embed`).
 export async function runProgram(
 	source,
-	{ target = "both", natives = true, stdlibRoot } = {},
+	{ target = "both", natives = true, stdlibRoot, files = {} } = {},
 ) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
 	try {
 		const goPath = join(dir, "main.go");
+		for (const [rel, content] of Object.entries(files)) {
+			mkdirSync(dirname(join(dir, rel)), { recursive: true });
+			writeFileSync(join(dir, rel), content);
+		}
 		writeFileSync(goPath, source);
 		let res;
 		try {
@@ -554,11 +559,16 @@ const TARGET_LABELS = { both: "js", wasm: "wasm", js: "js package" };
 export async function assertOutput(
 	source,
 	expected,
-	{ targets = ["both", "wasm"], natives = [true], stdlibRoot } = {},
+	{ targets = ["both", "wasm"], natives = [true], stdlibRoot, files } = {},
 ) {
 	for (const n of natives) {
 		for (const target of targets) {
-			const got = await runProgram(source, { target, natives: n, stdlibRoot });
+			const got = await runProgram(source, {
+				target,
+				natives: n,
+				stdlibRoot,
+				files,
+			});
 			if (got === expected) continue;
 			throw new Error(
 				`${TARGET_LABELS[target]} (natives ${n ? "on" : "off"}) output differs from real Go at ${firstDiff(expected, got)}`,

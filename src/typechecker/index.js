@@ -44,6 +44,12 @@ import {
 } from "./types.js";
 
 // Checker method per templ body node kind (see _checkTemplNodes).
+const EMBED_IMPORT_ERROR =
+	'go:embed only allowed in Go files that import "embed"';
+// The checked name of embed.FS (`stdlib/embed/embed.go`); no Go identifier
+// can spell it, so no user type collides.
+const EMBED_FS_TYPE = "FS$$embed";
+
 const TEMPL_NODE_CHECKS = {
 	TemplElement: "_checkTemplElement",
 	TemplExpr: "_checkTemplLeaf",
@@ -373,6 +379,9 @@ export class TypeChecker {
 		// The generated Go sits at package level and names any local type; they
 		// are unique by then (`renameLocalTypes`).
 		this._localTypesVisible = !!p._generated;
+		this._fileImportsEmbed = p.imports?.some((imp) =>
+			imp.imports?.some((spec) => spec.path === "embed"),
+		);
 		// Their builtin calls reach the universe, not a user's shadow of it.
 		this._builtinsFromUniverse = !!(p._generated || p._stdlib);
 	}
@@ -476,10 +485,60 @@ export class TypeChecker {
 		return this.errors;
 	}
 
+	// Directives that took no package-level var: a malformed one, one before
+	// a local var or anything else that is not a single `var` spec.
 	_checkEmbedDirectives(directives) {
-		for (const { line, col } of directives ?? []) {
-			this.err("//go:embed is not supported yet", { line, col });
+		for (const d of directives ?? []) {
+			if (d.error) this.err(d.error, d);
+			else if (!this._fileImportsEmbed) this.err(EMBED_IMPORT_ERROR, d);
+			else if (d.inFunc)
+				this.err("go:embed cannot apply to var inside func", d);
+			else this.err("misplaced go:embed directive", d);
 		}
+	}
+
+	// Go's rules for `//go:embed` on the package-level var spec: the file
+	// imports "embed", one name, no initializer, a string or []byte type with
+	// one file.
+	_checkEmbedSpec(spec, type) {
+		const directives = spec._embeds;
+		spec._embedKind = spec._embedType = undefined;
+		const malformed = directives.find((d) => d.error);
+		const at = malformed ?? directives[0];
+		const fail = (msg) => this.err(msg, at);
+		if (malformed) return fail(malformed.error);
+		if (!this._fileImportsEmbed) return fail(EMBED_IMPORT_ERROR);
+		if (spec.names.length > 1)
+			return fail("go:embed cannot apply to multiple vars");
+		if (spec.value)
+			return fail("go:embed cannot apply to var with initializer");
+		const kind = this._embedKind(type);
+		if (type?._tainted) return;
+		if (!kind)
+			return fail(`cannot embed into variable of type ${typeStr(type)}`);
+		// Read by `lowerEmbeds`, which has no scope to resolve the type node.
+		spec._embedKind = kind;
+		spec._embedType = type;
+		if (kind === "fs") return;
+		const paths = new Set(
+			directives.flatMap((d) => (d._embedFiles ?? []).map((f) => f.path)),
+		);
+		if (paths.size > 1) fail(`multiple files for type ${typeStr(type)}`);
+	}
+
+	// What a `//go:embed` variable of `type` holds: "string", "bytes" or "fs"
+	// (an embed.FS, through any alias but not a defined type over it); null for
+	// a type Go cannot embed into.
+	_embedKind(type) {
+		const t = this.resolveType(type);
+		if (t?.kind === "named" && t.name === EMBED_FS_TYPE) return "fs";
+		const u = this._deepUnderlying(this.resolveType(type));
+		if (u?.kind === "basic" && u.name === "string") return "string";
+		if (u?.kind === "slice") {
+			const elem = this._deepUnderlying(this.resolveType(u.elem));
+			if (elem?.kind === "basic" && elem.name === "uint8") return "bytes";
+		}
+		return null;
 	}
 
 	_checkDirectivesAndImportsPass(programs) {
@@ -1696,6 +1755,8 @@ export class TypeChecker {
 		this._sharedAllocOk = scope === this.globals;
 		for (const spec of decl.decls) {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
+			if (spec._embeds && scope === this.globals)
+				this._checkEmbedSpec(spec, type ?? ANY);
 			if (spec.value) {
 				const valTypesFlat = this._varSpecValueTypes(spec, scope);
 				for (let i = 0; i < spec.names.length; i++) {

@@ -117,7 +117,7 @@ const SIMPLE_ESCAPES = {
 // literal: valid UTF-8 sequences become their code point, every other byte
 // 0x80-0xff becomes the lone surrogate U+DC00+byte so the runtime can turn it
 // back into that byte when the string is converted to []byte.
-function decodeRawBytes(bytes) {
+export function decodeRawBytes(bytes) {
 	const dec = new TextDecoder("utf-8", { fatal: true });
 	let out = "";
 	for (let i = 0; i < bytes.length; ) {
@@ -138,6 +138,91 @@ function decodeRawBytes(bytes) {
 	return out;
 }
 
+// Parses the arguments of `//go:embed` as Go's go/build does: patterns are
+// separated by white space, and each is bare, "double-quoted" (Go escapes) or
+// `back-quoted`. Returns `{ patterns }` or `{ patterns, error }`.
+export function parseEmbedPatterns(args) {
+	const patterns = [];
+	let rest = args.trim();
+	const bad = (text) => ({
+		patterns,
+		error: text
+			? `invalid quoted string in //go:embed: ${text}`
+			: "invalid quoted string in //go:embed",
+	});
+	while (rest !== "") {
+		let path;
+		if (rest[0] === "`") {
+			const end = rest.indexOf("`", 1);
+			if (end < 0) return bad("");
+			path = rest.slice(1, end);
+			rest = rest.slice(end + 1);
+		} else if (rest[0] === '"') {
+			let i = 1;
+			while (i < rest.length && rest[i] !== '"') i += rest[i] === "\\" ? 2 : 1;
+			if (i >= rest.length) return bad("");
+			const quoted = rest.slice(0, i + 1);
+			path = unquoteGoString(quoted);
+			if (path === null) return bad(quoted);
+			rest = rest.slice(i + 1);
+		} else {
+			const end = rest.search(/\s/);
+			path = end < 0 ? rest : rest.slice(0, end);
+			rest = end < 0 ? "" : rest.slice(end);
+		}
+		if (rest !== "" && !/^\s/.test(rest)) return bad(rest);
+		patterns.push(path);
+		rest = rest.trimStart();
+	}
+	return { patterns };
+}
+
+// One piece of a Go string literal body: an escape (hex byte, \u, \U, octal,
+// or a single-character escape) or a run of plain text.
+const GO_STRING_PIECE =
+	/\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|([0-7]{3})|([\s\S]))|([^\\]+)/gy;
+
+// The bytes one GO_STRING_PIECE match stands for, or null for an invalid
+// escape.
+function goStringPieceBytes([, hex, u4, u8, octal, simple, text]) {
+	if (text !== undefined) return [...new TextEncoder().encode(text)];
+	if (hex !== undefined) return [Number.parseInt(hex, 16)];
+	if (octal !== undefined) {
+		const v = Number.parseInt(octal, 8);
+		return v > 255 ? null : [v];
+	}
+	if (simple !== undefined) {
+		const v = simple === '"' ? 34 : SIMPLE_ESCAPES[simple];
+		return v === undefined ? null : [v];
+	}
+	const cp = Number.parseInt(u4 ?? u8, 16);
+	if (cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000)) return null;
+	return [...new TextEncoder().encode(String.fromCodePoint(cp))];
+}
+
+// The value of the double-quoted Go string literal `quoted`, or null when it
+// has an invalid escape.
+function unquoteGoString(quoted) {
+	const body = quoted.slice(1, -1);
+	const bytes = [];
+	GO_STRING_PIECE.lastIndex = 0;
+	while (GO_STRING_PIECE.lastIndex < body.length) {
+		const m = GO_STRING_PIECE.exec(body);
+		const piece = m && goStringPieceBytes(m);
+		if (!piece) return null;
+		bytes.push(...piece);
+	}
+	return decodeRawBytes(bytes);
+}
+
+// The patterns of a `//go:embed` comment, or the error Go reports for it.
+function embedArguments(comment) {
+	const args = comment.slice("//go:embed".length);
+	if (args.trim() === "")
+		return { patterns: [], error: "usage: //go:embed pattern..." };
+	return parseEmbedPatterns(args);
+}
+
 export class Lexer {
 	constructor(source, filename = null) {
 		this.src = source;
@@ -150,7 +235,7 @@ export class Lexer {
 		this.targetDirective = null;
 		this.intrinsics = new Map(); // line -> name of a //gofront:intrinsic
 		this.natives = new Map(); // line -> name of a //gofront:native
-		this.embedDirectives = []; // {line, col} of each //go:embed line comment
+		this.embedDirectives = []; // each //go:embed line comment, see skip()
 	}
 
 	// ── Primitives ──────────────────────────────────────────────
@@ -202,7 +287,14 @@ export class Lexer {
 						this.src.slice(this.src.lastIndexOf("\n", start - 1) + 1, start),
 					)
 				)
-					this.embedDirectives.push({ line, col });
+					this.embedDirectives.push({
+						line,
+						col,
+						...embedArguments(comment),
+						// Tokens before the comment: the parser attaches it to the
+						// declaration starting at that token.
+						_tok: this.tokens.length,
+					});
 				const intrinsic = comment.match(/^\/\/gofront:intrinsic\s+(\S+)/);
 				if (intrinsic) this.intrinsics.set(line, intrinsic[1]);
 				const native = comment.match(/^\/\/gofront:native\s+(\S+)/);

@@ -26,7 +26,6 @@ These features are intentional additions for the JavaScript platform:
 | Feature | Reason | Prospect |
 |---|---|---|
 | `goto` | Neither backend has unstructured control flow; both would require a loop-plus-state-machine lowering. Rare in idiomatic Go. | Not planned. Reported in every target as `goto is not supported; restructure with labeled break/continue`. |
-| `//go:embed` and `embed.FS` | Embedding files at compile time needs support in the resolver and asset pipeline. | Not supported yet. Reported as `//go:embed is not supported yet`. |
 | Method values taken from an interface (`f := iface.Method`) | Taking a method value from an interface variable is not supported yet. | JavaScript fails when the value is called and WebAssembly fails to compile; call the method directly or wrap it in a func literal. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. `encoding/json` is supported through compile-time specialization without runtime reflection. |
@@ -44,7 +43,7 @@ GoFront supports standard library packages that compile to self-contained JavaSc
 | **Not supported: small utility packages** | `import` reports `package '<path>' is not available` with a suggested alternative in every target | `bufio`, `net/url`, `log`, `encoding/csv`, `encoding/base32`, `container/*`, `hash/adler32`, `hash/crc32`, `hash/fnv`, `crypto/hmac`, `crypto/md5`, `crypto/sha1`, `crypto/sha512`, `crypto/subtle`, `math/rand/v2`, `math/cmplx`, `sync/atomic`, `unicode/utf16` |
 | **Not supported: host OS** | Targeted diagnostic in every target: on the `import`, or on use for file I/O in `os` (`os.ReadFile is not available`) | `net/http`, `net`, `os/exec`, file I/O in `os`, `syscall` |
 | **Not supported: reflection** | Targeted diagnostic on `import` in every target | `text/template`, `html/template`, `encoding/xml`, `encoding/gob`, `flag` |
-| **Not supported: large packages** | Targeted diagnostic in every target: on the `import`, on use for the `unicode` tables, and on the directive for `//go:embed` | `math/big`, `compress/*`, `archive/*`, `image/*`, `crypto/{aes,cipher,rsa,ecdsa,ed25519,x509,tls,elliptic}`, `encoding/{asn1,pem,ascii85}`, `text/{tabwriter,scanner}`, `go/*`, `debug/*`, `hash/{crc64,maphash}`, script and property tables in `unicode`, `//go:embed` |
+| **Not supported: large packages** | Targeted diagnostic in every target: on the `import`, and on use for the `unicode` tables | `math/big`, `compress/*`, `archive/*`, `image/*`, `crypto/{aes,cipher,rsa,ecdsa,ed25519,x509,tls,elliptic}`, `encoding/{asn1,pem,ascii85}`, `text/{tabwriter,scanner}`, `go/*`, `debug/*`, `hash/{crc64,maphash}`, script and property tables in `unicode` |
 
 ### Standard library behaviour
 
@@ -56,6 +55,39 @@ Most packages (`fmt`, `slices`, `sort`, `maps`, `errors`, `io`, `os`, `unicode`,
 - **Numbers:** `strconv.FormatFloat` and `ParseFloat` round exactly as Go does for bit sizes 32 and 64, including `-0`, hexadecimal floats and `1e39` as `float32`. `strconv.Atoi` and `strconv.Itoa` use `int`, which is exact up to 2⁵³ in JavaScript output; `ParseInt` and `ParseUint` return exact `int64` and `uint64`.
 - **Host fast paths:** Searching, sorting primitive slices, trimming and case conversion in `strings`, `bytes`, `slices` and `sort`, and the digit conversion in `strconv.FormatFloat` and `ParseFloat`, call the host (`indexOf`, `toExponential`, `Number`) where it gives Go's result. The Go body runs for every other case. Pass `--no-natives` when compiling an input (`gofront <input> -o out.js --no-natives`) to run the Go bodies everywhere, for example to compare results.
 - **Still provided by the compiler:** `encoding/json` (generated per-type codecs), `gofront/shared` and `gofront/simd`. Every other package listed here, including `fmt` and `errors.As`, is Go source that you can read under `stdlib/`.
+
+### Embedding files with `//go:embed`
+
+Put a file's contents into the build with `//go:embed`, so shaders, templates and data load with no network request. Import `embed` in the file (`import _ "embed"` is enough when you only embed a `string` or `[]byte`):
+
+```go
+package main
+
+import "embed"
+
+//go:embed shader.wgsl
+var shader string // the file's text
+
+//go:embed logo.png
+var logo []byte // the file's bytes
+
+//go:embed templates/*.html assets
+var files embed.FS
+
+func main() {
+	page, err := files.ReadFile("templates/index.html")
+	_, _ = page, err
+}
+```
+
+It works the same in `js`, `wasm` and `both` packages, and the bytes are the same on every target. Rules are Go's:
+
+- The directive goes right above a package-level `var` with one name and no initializer; comments and blank lines may sit between them. A directive before `var (` applies to nothing and is an error, as are one inside a function and one in a file that does not import `embed`.
+- The variable is a `string`, a `[]byte` (or `[]uint8`) or an `embed.FS`, directly or through a type alias. A `string` or `[]byte` takes exactly one file (`multiple files for type string` otherwise); an `embed.FS` takes any number.
+- Patterns are relative to the directory of the file that declares the variable, separated by spaces; quote one that contains a space (`"my file.txt"`). They are `path.Match` globs (`*` never matches `/`), and a directory embeds its whole tree except names starting with `.` or `_`, unless you write `all:assets`. A glob that names a directory or a dot file explicitly embeds it. Paths cannot contain `.` or `..` elements, start or end with `/`, or contain `\`, and a symlink leading out of the package directory is refused (`embed pattern escapes package directory`). A pattern that matches nothing is an error.
+- A `string` holds the file's bytes as they are, so `[]byte(s)` returns them unchanged even for a file that is not UTF-8. A `[]byte` is a fresh copy for each variable.
+- `embed.FS.ReadFile(name)` returns a fresh copy of the file's bytes, or `open <name>: file does not exist`. `ReadDir` and `Open` are not available, because `io/fs` is not: they report `embed.FS.ReadDir is not available`. `ReadFile` of a directory name reports a missing file instead of Go's `is a directory` error.
+- A file embedded by several variables is stored once in the output.
 
 ### String semantics (both backends)
 
@@ -132,7 +164,7 @@ A Go `any` holds a value of some type and says nothing about which one. You can 
 
 ```go
 var v any = 2
-_ = v * 2       // invalid operation: operator * not defined on v (variable of type any)
+_ = v * 2       // invalid operation: v * 2 (mismatched types any and untyped int)
 _ = v.(int) * 2 // ok
 
 if s, ok := v.(string); ok { ... }
@@ -180,7 +212,7 @@ GoFront applies Go's operator rules to every kind of operand, with Go's messages
 #### Literals and duplicates
 
 - **Struct literals**: a positional literal lists every field (`S{1}` for a struct with two fields is `too few values in struct literal of type S`); a keyed literal may omit fields, and the two forms do not mix.
-- **Duplicate `switch` cases** of integer, float or string constants are `duplicate case 1 in expression switch`; constants are compared by value after conversion to the tag's type, so `1` and `0x1` collide and `case a:` with a variable does not. A `switch` on an interface keeps the constants' own types (`case 1` and `case 1.0` differ). Boolean and complex constants are not compared.
+- **Duplicate `switch` cases** of integer, float or string constants are `duplicate case 1 (constant of type int) in expression switch`; constants are compared by value after conversion to the tag's type, so `1` and `0x1` collide and `case a:` with a variable does not. A `switch` on an interface keeps the constants' own types (`case 1` and `case 1.0` differ). Boolean and complex constants are not compared.
 - **Duplicate map keys** in a literal, `map[string]int{"a": 1, "a": 2}`, are `duplicate key "a" in map literal`, with the same value rules; boolean keys are compared too. Duplicate indexes in a slice or array literal are an error as well.
 
 #### Type assertions

@@ -342,6 +342,11 @@ export function _collectPackageGlobals(progs, mod, checker) {
 							];
 						}
 					}
+					// A `//go:embed` var is set from its file by the start function.
+					const embed = !isConst && spec._embedData;
+					if (embed) needsRuntimeZero = false;
+					if (embed && name !== "_")
+						pending.push({ name, expr: spec._embedData });
 					if (needsRuntimeZero) pending.push({ name, zeroType: rawType });
 					if (!isConst && i === 0 && values.length === 1 && names.length > 1) {
 						// `var q, r = pair()`: one call fills every name.
