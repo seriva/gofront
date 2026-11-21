@@ -1522,13 +1522,16 @@ export const expressionCheckMethods = {
 			holder[key]._type = core.base;
 			return core.base;
 		}
-		if (t?.kind !== "pointer") return t;
-		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
+		// A defined pointer type (`type PA *[3]int`) shorthands like its pointer.
+		const ptr = t?.kind === "named" ? this._deepUnderlying(t) : t;
+		if (ptr?.kind !== "pointer") return t;
+		const base =
+			ptr.base?.kind === "named" ? this.resolveType(ptr.base) : ptr.base;
 		const under = this._deepUnderlying(base);
 		if (under?.kind !== "array") return t;
 		holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
-		holder[key]._type = t.base;
-		return t.base;
+		holder[key]._type = ptr.base;
+		return ptr.base;
 	},
 
 	// An index, slice bound or `make` size that is a constant must be an

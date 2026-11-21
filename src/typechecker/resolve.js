@@ -1482,12 +1482,44 @@ export const resolveMethods = {
 			return baseType?._tainted ? TAINTED_ANY : ANY;
 		if (this._isTransparentPointerField(baseType, field))
 			baseType = this.resolveType(baseType.base);
+		else {
+			const pointee = this._definedPointerStruct(baseType, field);
+			if (pointee)
+				return this._fieldTypeDefinedPointer(baseType, pointee, field, node);
+		}
 		const param = this._typeParamOperand(baseType, field);
 		if (param) return this._fieldTypeTypeParam(param, baseType, field, node);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
 			return baseType.methods.get(field);
 		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
+	},
+
+	// The struct type behind `p` of a defined pointer type (`type PS *S`) for
+	// a selector `p.f`; null for every other base.
+	_definedPointerStruct(baseType, field) {
+		if (baseType.kind !== "named" || field === "value") return null;
+		const under = this._deepUnderlying(baseType);
+		if (under?.kind !== "pointer") return null;
+		const pointee = this.resolveType(under.base);
+		return this._deepUnderlying(pointee)?.kind === "struct" ? pointee : null;
+	},
+
+	// `p.f` through a defined pointer type reads a field of the struct it
+	// points at, direct or promoted, as through a plain `*S`. The defined type
+	// has no methods of its own, and none of the struct's.
+	_fieldTypeDefinedPointer(baseType, pointee, field, node) {
+		const struct = this._deepUnderlying(pointee);
+		if (struct.fields?.has(field) && !isMethodPromotedOverField(struct, field))
+			return this._fieldTypeStruct(struct, pointee, field, node);
+		return this._errUndefinedSelector(baseType, field, node);
+	},
+
+	_errUndefinedSelector(baseType, field, node) {
+		return this.err(
+			`${exprText(node?.expr)}.${field} undefined (type ${typeStr(baseType)} has no field or method ${field})`,
+			node,
+		);
 	},
 
 	// The type parameter a selector reads through: `t` or `*t`. Its fields
@@ -1506,10 +1538,7 @@ export const resolveMethods = {
 		if (baseType === param && c?.kind === "interface") {
 			if (c.methods?.has(field)) return c.methods.get(field);
 		}
-		return this.err(
-			`${exprText(node?.expr)}.${field} undefined (type ${typeStr(baseType)} has no field or method ${field})`,
-			node,
-		);
+		return this._errUndefinedSelector(baseType, field, node);
 	},
 
 	_isTransparentPointerField(baseType, field) {
@@ -1652,7 +1681,15 @@ export const resolveMethods = {
 
 	_fieldTypeBadAccess(base, baseType, field, node) {
 		if (base.kind === "pointer" && field === "value") return base.base ?? ANY;
-		const badKinds = ["basic", "slice", "array", "map", "func", "tuple"];
+		const badKinds = [
+			"basic",
+			"slice",
+			"array",
+			"map",
+			"func",
+			"tuple",
+			"pointer",
+		];
 		if (badKinds.includes(base.kind))
 			return this.err(
 				`${typeStr(baseType ?? base)} has no field or method '${field}'`,

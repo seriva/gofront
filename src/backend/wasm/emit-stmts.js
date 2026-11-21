@@ -28,6 +28,7 @@ import {
 	isStringType,
 	isStructType,
 	isTaggedSliceType,
+	pointerBase,
 } from "./types.js";
 
 function hasReturnInBlock(n) {
@@ -1115,7 +1116,7 @@ export class StmtsEmitter {
 	// Raises Go's nil-dereference panic when the pointer held in `tmp` is nil
 	// (a plain cast or field write would trap, which `recover` cannot see).
 	_emitNilGuard(tmp, goType) {
-		if (goType?.kind !== "pointer") return;
+		if (!this._isCheckerPointer(goType)) return;
 		if (this.resolveBranchDepthToRole("nil") == null) return;
 		this.pushInstruction({ op: "local.get", index: tmp });
 		this._emitNilBranch();
@@ -1135,7 +1136,7 @@ export class StmtsEmitter {
 				? this.resolveLocal(operand.name)?.goType
 				: null) ??
 			this._resolveExprGoType(operand);
-		const baseGoType = operandGoType?.base ?? operandGoType;
+		const baseGoType = this._derefBaseType(operandGoType);
 		if (this._isValueArray(baseGoType)) {
 			this._emitArrayStoreInto(baseGoType, r, () => {
 				this.emitExpr(operand);
@@ -1441,10 +1442,8 @@ export class StmtsEmitter {
 
 	_structNameOf(goType) {
 		if (!goType) return null;
-		if (goType.kind === "PointerType" || goType.kind === "pointer")
-			return this._structNameOf(goType.base);
-		if (goType.kind === "StarExpr")
-			return this._structNameOf(goType.expr ?? goType.operand);
+		const pointee = pointerBase(goType, this.mod.checker);
+		if (pointee) return this._structNameOf(pointee);
 		return goType.name ?? null;
 	}
 
@@ -1939,7 +1938,7 @@ export class StmtsEmitter {
 					? this.resolveLocal(operand.name)?.goType
 					: null) ??
 				this._resolveExprGoType(operand);
-			const baseGoType = operandGoType?.base ?? operandGoType;
+			const baseGoType = this._derefBaseType(operandGoType);
 			if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
 			const box = this.mod.getBoxType(baseGoType);
 			const ptr = this.mod.getPtrType(baseGoType);
@@ -2083,7 +2082,7 @@ export class StmtsEmitter {
 						? this.resolveLocal(operand.name)?.goType
 						: null) ??
 					this._resolveExprGoType(operand);
-				const baseGoType = operandGoType?.base ?? operandGoType;
+				const baseGoType = this._derefBaseType(operandGoType);
 				if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
 				const box = this.mod.getBoxType(baseGoType);
 				const ptr = this.mod.getPtrType(baseGoType);

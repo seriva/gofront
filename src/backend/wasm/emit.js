@@ -20,6 +20,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	pointerBase,
 	structFieldList,
 	toWasmType,
 } from "./types.js";
@@ -811,7 +812,10 @@ export class FunctionEmitter {
 		if (!node || typeof node !== "object") return false;
 		if (Array.isArray(node)) return node.some((n) => this._needsNilBlock(n));
 		if (node.kind === "FuncLit") return false;
-		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "pointer")
+		if (
+			node.kind === "SelectorExpr" &&
+			this._isCheckerPointer(node.expr?._type)
+		)
 			return true;
 		if (this._isNilTrapSite(node)) return true;
 		for (const key of Object.keys(node)) {
@@ -843,7 +847,7 @@ export class FunctionEmitter {
 		const star =
 			(node.kind === "UnaryExpr" && node.op === "*") ||
 			node.kind === "StarExpr";
-		return star && (node.operand ?? node.expr)?._type?.kind === "pointer";
+		return star && this._isCheckerPointer((node.operand ?? node.expr)?._type);
 	}
 
 	// A call through a func variable, parameter or expression (not a declared
@@ -858,7 +862,7 @@ export class FunctionEmitter {
 			);
 		if (f.kind === "SelectorExpr") {
 			const t = f.expr?._type;
-			const base = t?.kind === "pointer" ? t.base : t;
+			const base = this._derefBaseType(t);
 			const fields = (base?.underlying ?? base)?.fields;
 			return fields instanceof Map && fields.has(f.field);
 		}
@@ -1142,12 +1146,10 @@ export class FunctionEmitter {
 			}
 		}
 		if (!t) return null;
-		while (
-			t.kind === "pointer" ||
-			t.kind === "PointerType" ||
-			t.kind === "StarExpr"
-		) {
-			t = t.base ?? t.expr ?? t.operand;
+		// A defined pointer type (`type PS *S`) stands for its pointee too.
+		for (let next = pointerBase(t, this.mod.checker); next; ) {
+			t = next;
+			next = pointerBase(t, this.mod.checker);
 		}
 		const name = t.name ?? (t.kind === "named" ? t.name : null);
 		if (name && this.mod.structTypes.has(name)) {

@@ -25,7 +25,7 @@ import {
 	typeStr,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
-import { namedUnderlying } from "../shared/named-underlying.js";
+import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 import { jsBindingName, jsClassName, jsMemberName } from "./names.js";
 import { jsNativeCall, NATIVE_HELPERS } from "./natives.js";
 
@@ -1508,7 +1508,9 @@ export const expressionGenMethods = {
 	_promotedPath(expr) {
 		if (expr._isMethodValue || expr._isMethodExpr) return "";
 		let t = expr.expr._type;
-		if (t?.kind === "pointer") t = t.base;
+		// A defined pointer type (`type PO *Outer`) reaches the same fields.
+		const ptr = namedBase(t);
+		if (ptr?.kind === "pointer") t = ptr.base;
 		const path = this._embedPath(t, expr.field, 0);
 		return path ? path.map((n) => `.${jsMemberName(n)}`).join("") : "";
 	},

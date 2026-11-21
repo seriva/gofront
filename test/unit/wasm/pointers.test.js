@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
+	compile,
 	compileHybrid,
 	compileWasm,
 	runWasm,
@@ -859,5 +860,393 @@ func main() {
 }
 `,
 		"false true\ntrue false\n",
+	);
+});
+
+section("WASM Pointers — Defined Pointer Types");
+
+test("dereferencing a defined pointer type reads the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type P1 *int
+	x := 3
+	var p P1 = &x
+	fmt.Println(*p)
+}
+`,
+		"3\n",
+	);
+});
+
+test("a defined pointer type declared at package level reads the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+
+func main() {
+	x := 3
+	var p P1 = &x
+	fmt.Println(*p)
+	var q P1
+	fmt.Println(q == nil)
+}
+`,
+		"3\ntrue\n",
+	);
+});
+
+test("a pointer type defined from another defined pointer type or a generic reads the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+type P2 P1
+type Opt[T any] *T
+
+func main() {
+	x := 3
+	var p P2 = &x
+	fmt.Println(*p)
+	var o Opt[int] = &x
+	fmt.Println(*o)
+}
+`,
+		"3\n3\n",
+	);
+});
+
+test("write, compound assignment and inc/dec through a defined pointer type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+
+func main() {
+	var p P1 = new(int)
+	*p = 4
+	*p += 2
+	*p++
+	fmt.Println(*p)
+}
+`,
+		"7\n",
+	);
+});
+
+test("a nil defined pointer type panics on dereference and recovers", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+
+func try(p P1) {
+	defer func() { fmt.Println(recover() != nil) }()
+	*p = 1
+}
+
+func main() {
+	try(nil)
+	var p P1
+	defer func() { fmt.Println(recover() != nil) }()
+	fmt.Println(*p)
+}
+`,
+		"true\ntrue\n",
+	);
+});
+
+test("selectors through a defined pointer to a struct read, write and compound-assign", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X int }
+type PS *S
+
+func main() {
+	s := S{3}
+	var p PS = &s
+	fmt.Println(p.X)
+	p.X = 9
+	p.X += 2
+	p.X++
+	fmt.Println(p.X, s.X)
+}
+`,
+		"3\n12 12\n",
+	);
+});
+
+test("a defined pointer to a struct as a parameter and dereferenced whole", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X, Y int }
+type PS *S
+
+func get(p PS) int { return p.X + p.Y }
+
+func main() {
+	s := S{3, 4}
+	var p PS = &s
+	fmt.Println(get(p))
+	t := *p
+	t.X = 100
+	fmt.Println(s.X, t.X)
+	*p = S{7, 8}
+	fmt.Println(s.X, s.Y)
+}
+`,
+		"7\n3 100\n7 8\n",
+	);
+});
+
+section("WASM Pointers — Selectors And Arrays Through Defined Pointer Types");
+
+// Compile errors of `src` for every target (js, both, wasm).
+function compileTarget(src, target) {
+	return target === "wasm" ? compileWasm(src) : compile(src, { target });
+}
+
+test("a field the struct behind a defined pointer lacks is a compile error", () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ X int }
+type PS *S
+
+func main() {
+	s := S{3}
+	var p PS = &s
+	fmt.Println(p.Y)
+}
+`;
+	for (const t of ["js", "both", "wasm"]) {
+		const { errors } = compileTarget(src, t);
+		assertErrorContains(
+			errors,
+			"p.Y undefined (type PS has no field or method Y)",
+		);
+	}
+});
+
+test("a defined pointer type has no methods, not even those of the pointee", () => {
+	const src = `package main
+
+type S struct{ X int }
+
+func (s *S) M() {}
+
+type PS *S
+
+func main() {
+	s := S{3}
+	var p PS = &s
+	p.M()
+}
+`;
+	for (const t of ["js", "both", "wasm"]) {
+		const { errors } = compileTarget(src, t);
+		assertErrorContains(
+			errors,
+			"p.M undefined (type PS has no field or method M)",
+		);
+	}
+});
+
+test("a method promoted through the struct behind a defined pointer is a compile error", () => {
+	const src = `package main
+
+import "fmt"
+
+type Inner struct{ A int }
+
+func (i Inner) Get() int { return i.A }
+
+type Outer struct{ Inner }
+type PO *Outer
+
+func main() {
+	o := Outer{Inner{4}}
+	var p PO = &o
+	fmt.Println(p.Get())
+}
+`;
+	for (const t of ["js", "both", "wasm"]) {
+		const { errors } = compileTarget(src, t);
+		assertErrorContains(
+			errors,
+			"p.Get undefined (type PO has no field or method Get)",
+		);
+	}
+});
+
+test("a selector on a plain pointer to a non-struct is a compile error", () => {
+	const src = `package main
+
+func main() {
+	var p *int
+	_ = p.Y
+}
+`;
+	for (const t of ["js", "both", "wasm"]) {
+		const { errors } = compileTarget(src, t);
+		assertErrorContains(errors, "*int has no field or method 'Y'");
+	}
+});
+
+test("a method through a plain pointer still resolves", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X int }
+
+func (s *S) M() int { return s.X }
+
+func main() {
+	s := S{3}
+	p := &s
+	fmt.Println(p.M(), p.X)
+}
+`,
+		"3 3\n",
+	);
+});
+
+test("promoted fields read, write and compound-assign through a defined pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner struct{ A int }
+type Outer struct{ Inner }
+type PO *Outer
+
+func main() {
+	o := Outer{Inner{9}}
+	var p PO = &o
+	fmt.Println(p.A)
+	p.A = 12
+	fmt.Println(o.A)
+	p.A += 3
+	p.A++
+	fmt.Println(o.A, p.Inner.A)
+}
+`,
+		"9\n12\n16 16\n",
+	);
+});
+
+test("a defined pointer to an array indexes, slices, measures and stores", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type PA *[3]int
+
+func main() {
+	a := [3]int{10, 20, 30}
+	var p PA = &a
+	fmt.Println(p[1], len(p), cap(p))
+	p[1] = 5
+	p[2] += 4
+	fmt.Println(a[1], a[2])
+	s := p[:]
+	s[0] = 1
+	fmt.Println(a[0], len(s), len(p[1:]))
+}
+`,
+		"20 3 3\n5 34\n1 3 2\n",
+	);
+});
+
+test("range over a defined pointer to an array", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type PA *[3]int
+
+func main() {
+	a := [3]int{4, 5, 6}
+	var p PA = &a
+	for i, v := range p {
+		fmt.Println(i, v)
+	}
+	var q PA
+	for i := range q {
+		fmt.Println(i)
+	}
+	fmt.Println(len(q), cap(q))
+}
+`,
+		"0 4\n1 5\n2 6\n0\n1\n2\n3 3\n",
+	);
+});
+
+test("a generic defined pointer to an array indexes and measures", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Opt[T any] *T
+
+func main() {
+	a := [2]int{7, 8}
+	var o Opt[[2]int] = &a
+	fmt.Println(o[0], len(o))
+}
+`,
+		"7 2\n",
+	);
+});
+
+test("indexing or ranging with a variable over a nil defined array pointer panics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type PA *[3]int
+
+func try(f func()) {
+	defer func() { fmt.Println(recover() != nil) }()
+	f()
+}
+
+func main() {
+	var p PA
+	try(func() { fmt.Println(p[1]) })
+	try(func() {
+		for i, v := range p {
+			fmt.Println(i, v)
+		}
+	})
+}
+`,
+		"true\ntrue\n",
 	);
 });
