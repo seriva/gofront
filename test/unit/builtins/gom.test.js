@@ -367,7 +367,7 @@ func main() {
 test("variadic gom.Node parameter", () => {
 	const { js, errors } = compile(`package main
 func row(children ...gom.Node) gom.Node {
-	return gom.Div(gom.Class("row"), children...)
+	return gom.Div(append([]gom.Node{gom.Class("row")}, children...)...)
 }
 func main() {
 	gom.Mount("#app", row(gom.Span(gom.Text("a")), gom.Span(gom.Text("b"))))

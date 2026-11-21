@@ -207,6 +207,7 @@ GoFront applies Go's operator rules to every kind of operand, with Go's messages
 
 - **`len`** takes a string, array (or pointer to one), slice or map: `len(5)`, `len(p)` with `p` an `*int`, and `len(v)` with `v` a Go `any` are `invalid argument: ... for built-in len`. `delete` needs a map, `clear` a map or slice, `copy` and `append` slices (`copy` may take a string source into a `[]byte`), and `min` and `max` integers, floats or strings.
 - **`append`** checks each element against the slice's element type (`append([]int{}, "a")` is an error) and `xs...` against the slice type, except that a string spreads into a `[]byte`. A call `f(xs...)` likewise needs `xs` to match the variadic parameter's slice type.
+- **`xs...`** passes a slice as the whole variadic argument, so it needs a variadic callee and fills every parameter: `f(xs...)` with `func f(xs []int)` is `cannot use ... in call to non-variadic f`, `f(1, xs...)` with `func f(xs ...int)` is `too many arguments in call to f`, and `len(xs...)` or `T(xs...)` is `invalid use of ...`. Only `append(s, xs...)` takes a spread among the builtins.
 - Dynamic JavaScript values (see above) are accepted by all of these.
 
 #### Literals and duplicates
