@@ -382,8 +382,8 @@ The names renamed are:
 
 Go code never sees the suffix: references from the same package, from importing packages
 (`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
-renamed binding. Builtins that are not JS globals (`len`, `append`, …), labels and package-level
-type names are not renamed. A struct field or method is renamed only when its name starts with `__`
+renamed binding. Builtins that are not JS globals (`len`, `append`, …) and labels are not
+renamed. A struct field or method is renamed only when its name starts with `__`
 (`__clone` is `__clone$` on the JS object), because the runtime uses such names itself;
 `fmt` and `%+v` still print the Go name. This applies to the JS output and to `both`
 structs that cross the WASM boundary; hand-written JavaScript reads the field as `r.__t$`.
@@ -398,8 +398,8 @@ unsuffixed name there is still the browser's global. Pick a different Go name fo
 functions you call from JS.
 
 > [!WARNING]
-> Package-level type declarations are **not** renamed. A struct type, or a named type with
-> methods, is emitted as a JS class of the same name, and a class named after a JavaScript
+> Package-level struct types and types with methods in `js` and `both` packages are **not**
+> renamed. Each is emitted as a JS class of the same name, and a class named after a JavaScript
 > built-in that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
 > `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array constructors, …) would
 > shadow it. GoFront therefore rejects such a declaration in `js` and `both` packages with
@@ -407,6 +407,15 @@ functions you call from JS.
 > (`ArrayData`, `AppError`, …). Interfaces (`type Number interface{ ~int | ~float64 }`),
 > method-less named types (`type String string`), aliases, DOM names (`type Element struct{…}`)
 > and every type in a `wasm` package emit no conflicting class and are accepted.
+
+A package-level type that Go allows but whose class would still shadow a built-in is
+renamed instead: a method-less named non-struct type in a `js` or `both` package
+(`type Map int`) and any type in a `wasm` package (`type WeakMap struct{ N int }`) is
+emitted as `Map$$main` / `WeakMap$$util` (the type name, `$$`, the package name). Go code,
+`%T` (`main.Map`, `util.WeakMap`) and error messages are unaffected; only hand-written
+JavaScript that reaches the type by name sees the suffix. A type named after a JavaScript
+reserved word (`let`, `yield`, `static`, …) gets the same `$` suffix the other names get, so a
+`wasm` struct called `let` is `let$` in the facade.
 
 Types declared inside a function are the exception: they can use these names freely
 (`type Map struct{ N int }` in `main` works in every target, and `%T` prints `main.Map`).

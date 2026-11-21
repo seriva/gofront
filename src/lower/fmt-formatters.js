@@ -149,8 +149,7 @@ function isMapSliceOrArray(t) {
 
 class FmtGen extends TypeSpeller {
 	constructor(checker, pkgName, qualifiers, programs, formatted = false) {
-		super(pkgName, qualifiers, programs);
-		this.checker = checker;
+		super(pkgName, qualifiers, programs, checker);
 		// A package with a format call: %d and %+v call no methods, so an
 		// error or Stringer in an interface is described by its type too.
 		this.formatted = formatted;

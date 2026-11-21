@@ -32,14 +32,18 @@
 //     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
 //     handed out by this facade) may be passed back in.
 
-import { shadowsJsGlobal, UnsupportedError } from "../../typechecker/types.js";
+import { UnsupportedError } from "../../typechecker/types.js";
 import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
 	unicodeToLowerJs,
 	unicodeToUpperJs,
 } from "../shared/host-unicode.js";
-import { jsMemberName } from "../shared/member-names.js";
+import {
+	jsBindingName,
+	jsClassName,
+	jsMemberName,
+} from "../shared/member-names.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -1699,7 +1703,7 @@ function outExpr(desc, v) {
 		case "struct":
 			return desc.info.pkgTarget === "both"
 				? `${P}from_${desc.name}(${v})`
-				: `${desc.name}.__wrap(${v})`;
+				: `${jsClassName(desc.name)}.__wrap(${v})`;
 		case "slice":
 			return `${P}slout_${desc.key}(${v})`;
 		case "array":
@@ -1756,7 +1760,7 @@ function viewExpr(desc, v) {
 		case "struct":
 			return desc.info.pkgTarget === "both"
 				? `${P}view_${desc.name}(${v})`
-				: `${desc.name}.__wrap(${v})`;
+				: `${jsClassName(desc.name)}.__wrap(${v})`;
 		case "slice":
 			return `${P}slview_${desc.key}(${v})`;
 		case "array":
@@ -2231,7 +2235,7 @@ function ${P}idxview(n, getAt, setAt) {
 // same `$` suffix as JS output uses (see jsBindingName in backend/js), so the
 // flat bundle keeps reaching the real global.
 function facadeName(name) {
-	return shadowsJsGlobal(name) ? `${name}$` : name;
+	return jsBindingName(name);
 }
 
 export function generateFacade(
@@ -2616,6 +2620,7 @@ function bindExports(src) {
 }
 
 function genBothStruct(out, name, fields) {
+	const cls = jsClassName(name);
 	const toArgs = fields.map((f) => {
 		const v = `o.${jsMemberName(f.name)}`;
 		if (isBothStruct(f.desc))
@@ -2662,19 +2667,19 @@ ${isTime ? `\to = ${P}time_in(o);\n` : ""}	if (o == null) return isValue ? __w._
 }
 function ${P}from_${name}(r) {
 	if (r == null) return null;
-	return ${isTime ? `${P}time_out(new ${name}(${fromArgs.join(", ")}))` : `new ${name}(${fromArgs.join(", ")})`};
+	return ${isTime ? `${P}time_out(new ${name}(${fromArgs.join(", ")}))` : `new ${cls}(${fromArgs.join(", ")})`};
 }
 // Live views share one prototype and are cached per wasm object so hot paths
 // (\`h.Pos.X = 1\` in a frame loop) do not allocate a wrapper per access.  The
 // prototype is built on first use: the facade may precede the \`both\`
-// package's own JS (and so the \`${name}\` class) in the bundle.
+// package's own JS (and so the \`${cls}\` class) in the bundle.
 let ${P}vp_${name} = null;
 const ${P}vc_${name} = new WeakMap();
 function ${P}view_${name}(r) {
 	if (r == null) return null;
 	let o = ${P}vc_${name}.get(r);
 	if (!o) {
-		if (${P}vp_${name} === null) ${P}vp_${name} = Object.create(${name}.prototype, { ${viewProps.join(", ")} });
+		if (${P}vp_${name} === null) ${P}vp_${name} = Object.create(${cls}.prototype, { ${viewProps.join(", ")} });
 		o = Object.create(${P}vp_${name}); o.__ref = r; ${P}vc_${name}.set(r, o);
 	}
 	return o;
@@ -2693,7 +2698,9 @@ function genIfaceFacade(out, key, desc) {
 		return `\t${jsMemberName(m.name)}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
 	});
 	const cases = desc.concrete.map((c, i) => {
-		const wrap = c.both ? `${P}view_${c.name}(r)` : `${c.name}.__wrap(r)`;
+		const wrap = c.both
+			? `${P}view_${c.name}(r)`
+			: `${jsClassName(c.name)}.__wrap(r)`;
 		return `\t\tcase ${i + 1}: return ${P}ptag(${wrap});`;
 	});
 	const tag =
@@ -2786,7 +2793,7 @@ function genGenericClasses(out, needs, mod) {
 		const table = [...instances]
 			.map(([id, cls]) => `${JSON.stringify(id)}: ${cls}`)
 			.join(", ");
-		out.push(`class ${facadeName(base)} {
+		out.push(`class ${jsClassName(base)} {
 	constructor(...a) {
 		const tz = a.at(-1);
 		const id = Array.isArray(tz) && typeof tz.at(-1) === "string" ? tz.at(-1).replaceAll(" ", "") : undefined;
@@ -2799,36 +2806,37 @@ function genGenericClasses(out, needs, mod) {
 }
 
 function genHandleStruct(out, name, fields, methods, promoted = []) {
+	const cls = jsClassName(name);
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
 	const fromArgs = fields.map((f) => `o.${jsMemberName(f.name)}`);
-	const ptrMsg = `GoFront: expected a ${name} handle for a *${name} parameter (use ${name}.from(obj) to create one)`;
+	const ptrMsg = `GoFront: expected a ${cls} handle for a *${cls} parameter (use ${cls}.from(obj) to create one)`;
 	const lines = [
 		`const ${P}h_${name} = new WeakMap();
 function ${P}hval_${name}(h) {
 	if (h == null) return __w.__zero_${name}();
 	if (h.__ref !== undefined) return __w.__clone_${name}(h.__ref);
-	return ${name}.from(h).__ref;
+	return ${cls}.from(h).__ref;
 }
 function ${P}href_${name}(h) {
 	if (h == null) return null;
 	if (h.__ref !== undefined) return h.__ref;
 	throw new TypeError(${JSON.stringify(ptrMsg)});
 }
-class ${name} {
+class ${cls} {
 	constructor(${ctorParams.join(", ")}) {
 		this.__ref = __w.__new_${name}(${ctorArgs.join(", ")});
 		${P}h_${name}.set(this.__ref, this);
 	}
-	static from(o) { return new ${name}(${fromArgs.join(", ")}); }
+	static from(o) { return new ${cls}(${fromArgs.join(", ")}); }
 	static __wrap(ref) {
 		if (ref == null) return null;
 		let h = ${P}h_${name}.get(ref);
-		if (!h) { h = Object.create(${name}.prototype); h.__ref = ref; ${P}h_${name}.set(ref, h); }
+		if (!h) { h = Object.create(${cls}.prototype); h.__ref = ref; ${P}h_${name}.set(ref, h); }
 		return h;
 	}
-	__clone() { return ${name}.__wrap(__w.__clone_${name}(this.__ref)); }`,
+	__clone() { return ${cls}.__wrap(__w.__clone_${name}(this.__ref)); }`,
 	];
 	for (const f of fields) {
 		const got = `__w.__get_${name}_${f.name}(this.__ref)`;

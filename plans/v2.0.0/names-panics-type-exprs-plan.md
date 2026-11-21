@@ -149,19 +149,19 @@ Root: where the parser or checker expects an expression, a type is recognised on
 > Remaining review follow-ups after the 2026-11-17 split (re-probed that day). Phase numbers restart because no task of the earlier draft had started.
 
 ### Phase 1: One JS name-escaping rule (root `js-name-collision`)
-- [ ] Task 1.1: Generated Go resolves renamed types through same-package, aliased and indirect imports (F30 prerequisite)
+- [x] Task 1.1: Generated Go resolves renamed types through same-package, aliased and indirect imports (F30 prerequisite)
   - Files: `src/lower/gen-types.js` (`spellNamed`), `src/lower/fmt-formatters.js` (`FmtGen.isNamedInScope`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `import u "./util"; fmt.Printf("%T", u.Make(5))` with a `$$`-renamed `Box` → `util.Box`; the same through a re-exporting package
   - Done when: passes (no `Unknown type 'util.Box'`)
-- [ ] Task 1.2: `pruneStdlibPrograms` keeps renamed user types (F30 prerequisite)
+- [x] Task 1.2: `pruneStdlibPrograms` keeps renamed user types (F30 prerequisite)
   - Files: `src/link/wasm.js` (`pruneStdlibPrograms`)
   - Test: `shadowing.test.js`: a `wasm` package and the js main both declare `Box`, the `wasm` package imports `fmt` and `errors`; `var m Box; m.N = 42`, `errors.As` into the type and a promoted method print Go's output
   - Done when: passes (fails first with the null deref from the PR #207 notes)
-- [ ] Task 1.3: Rename `wasm` types and method-less `js`/`both` named types after JS built-ins to `Name$$pkg` (F2, F30)
+- [x] Task 1.3: Rename `wasm` types and method-less `js`/`both` named types after JS built-ins to `Name$$pkg` (F2, F30)
   - Files: `src/link/type-names.js` (`mangleCollidingTypes`), `src/compiler.js` (`pkgTarget` before `mangleLocalTypes`), `src/backend/shared/fmt-types.js` (`Name$$pkg` → `pkg.Name`)
   - Test: `shadowing.test.js`: F30 → `3 2` with `%T` `util.WeakMap`; `util` as `both` with `type Map int` → `3`; F2 → `5` on every target with `%T` `main.Map`; F2b → `[1] a`; a second package also declaring `WeakMap` (no `$$util$$util`); a local `type Map` still gets `__L<n>`; `type Array struct{}` rejection tests stay green
   - Done when: all pass; programs without such types emit the same JS
-- [ ] Task 1.4: Facade names escape strict-mode reserved words (L12)
+- [x] Task 1.4: Facade names escape strict-mode reserved words (L12)
   - Files: `src/backend/shared/member-names.js` (`JS_RESERVED`), `src/backend/js/names.js` (re-export), `src/backend/wasm/boundary.js` (`facadeName`, `genHandleStruct`, `outExpr`, `genIfaceFacade`, `genBothStruct`)
   - Test: `test/unit/wasm/boundary.test.js`: L12 → `true`; a `wasm` struct named `let` returned by an export and its method called from js main → Go's output; a method named `static` stays a passing control; `node scripts/check-layers.js` passes; `docs/go-compatibility.md` *Names that shadow JS globals* updated
   - Done when: all pass and `js-globals.test.js` passes unmodified
