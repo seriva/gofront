@@ -2355,13 +2355,19 @@ export const statementGenMethods = {
 			this.line(`const ${tmp} = ${tag};`);
 			return {
 				tag: "true",
-				caseExpr: (e) =>
-					this._genComplexEquality(
+				caseExpr: (e) => {
+					if (this._isIfaceType(e._type)) {
+						// An interface case compares by dynamic type and value.
+						this.useHelper("ifeq");
+						return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
+					}
+					return this._genComplexEquality(
 						"===",
 						"&&",
 						tmp,
 						this._genComplexOperand(e),
-					),
+					);
+				},
 			};
 		}
 		if (stmt.tag && this._isMapTag(stmt.tag)) {

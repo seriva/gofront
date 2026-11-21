@@ -3510,6 +3510,10 @@ export const expressionGenMethods = {
 	},
 
 	_genBinaryExpr(expr) {
+		// An interface operand decides the comparison, also next to a complex
+		// one: it is not complex arithmetic.
+		if (this._isIfaceEquality(expr)) return this._genIfaceEquality(expr);
+
 		if (
 			isComplex(expr._type) ||
 			isComplex(expr.left._type) ||
@@ -3528,12 +3532,6 @@ export const expressionGenMethods = {
 
 		const tpEq = this._genTypeParamEquality(expr);
 		if (tpEq) return tpEq;
-
-		if (this._isIfaceEquality(expr)) {
-			this.useHelper("ifeq");
-			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
-			return expr.op === "==" ? cmp : `!${cmp}`;
-		}
 
 		if (this._isStructEquality(expr)) {
 			this.useHelper("equal");
@@ -3723,6 +3721,12 @@ export const expressionGenMethods = {
 		return (
 			this._isIfaceType(expr.left._type) || this._isIfaceType(expr.right._type)
 		);
+	},
+
+	_genIfaceEquality(expr) {
+		this.useHelper("ifeq");
+		const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
 	// A concrete operand compared with an interface is converted to an interface first.

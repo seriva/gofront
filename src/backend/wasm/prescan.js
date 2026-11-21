@@ -72,10 +72,13 @@ export function _usesAnyEq(funcDecls, mod) {
 		_someNode(fn.body, (n) => {
 			if (n.kind === "BinaryExpr" && (n.op === "==" || n.op === "!="))
 				return isAnyRef(n.left) || isAnyRef(n.right);
-			if (n.kind === "SwitchStmt" && n.tag) return isAnyRef(n.tag);
-			// A tagless case of interface type compares `true == case`.
+			// A tagless case of interface type compares `true == case`, and a
+			// case of interface type against a concrete tag compares boxed values.
 			if (n.kind === "SwitchStmt")
-				return n.cases.some((c) => (c.list ?? []).some(isAnyRef));
+				return (
+					(n.tag && isAnyRef(n.tag)) ||
+					n.cases.some((c) => (c.list ?? []).some(isAnyRef))
+				);
 			return false;
 		}),
 	);

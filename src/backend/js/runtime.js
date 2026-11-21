@@ -919,6 +919,13 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
   if (typeof a === "object" && typeof b === "object" && a.__v === true && b.__v === true && a.constructor === b.constructor) {
     return __equal(a, b);
   }
+  // Complex values are plain {re, im} objects: equal when both parts are.
+  if (typeof a === "object" && typeof b === "object" && a.constructor === Object && b.constructor === Object &&
+      a.__t === undefined && b.__t === undefined && a.__v !== true && b.__v !== true &&
+      typeof a.re === "number" && typeof a.im === "number" && typeof b.re === "number" && typeof b.im === "number" &&
+      Object.keys(a).length === 2 && Object.keys(b).length === 2) {
+    return a.re === b.re && a.im === b.im;
+  }
   // Array values of the same type compare element by element; slices and
   // defined slice types (registered in __uht) are not comparable.
   if (typeof a === "object" && typeof b === "object" && typeof a.__t === "string" && a.__t === b.__t &&

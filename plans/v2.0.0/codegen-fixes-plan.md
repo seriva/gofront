@@ -143,11 +143,11 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Done when: Go's message on all targets, no wasm invalid module
 
 ### Phase 3: `wasm` comparisons with an interface operand (root `wasm-iface-equality`)
-- [ ] Task 3.1: `==` and `!=` with an interface on either side (including against complex operands) box the concrete side (F3.1, F3.2)
+- [x] Task 3.1: `==` and `!=` with an interface on either side (including against complex operands) box the concrete side (F3.1, F3.2)
   - Files: `src/backend/wasm/emit-exprs.js`, `test/fuzz/check-baseline.txt`
   - Test: `test/unit/wasm/interfaces.test.js` F3.1 → `false`, F3.2 → `true`, `true`, `false`, `true`, `true`, `true` on all targets (or `wasm` for struct-vs-interface until checker-operand-rules JS struct-vs-interface lands)
   - Done when: valid module, Go's output; all 44 `binary:==:... # wasm-iface-equality` keys removed from `test/fuzz/check-baseline.txt`
-- [ ] Task 3.2: `switch` case values that are interfaces box a concrete tag and mark `_usesAnyEq` (F3.3)
+- [x] Task 3.2: `switch` case values that are interfaces box a concrete tag and mark `_usesAnyEq` (F3.3)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/prescan.js`, `test/fuzz/check-baseline.txt`
   - Test: `test/unit/wasm/interfaces.test.js` F3.3 → `hit` (plain, fallthrough, and without `fmt`) on all targets; tag-side control unchanged
   - Done when: valid module, Go's output; all remaining 50 `switch:tag:... # wasm-iface-equality` keys removed from `test/fuzz/check-baseline.txt` (0 `# wasm-iface-equality` keys left)
