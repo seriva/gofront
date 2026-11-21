@@ -46,6 +46,9 @@ import {
 // Checker method per templ body node kind (see _checkTemplNodes).
 const EMBED_IMPORT_ERROR =
 	'go:embed only allowed in Go files that import "embed"';
+// The checked name of embed.FS (`stdlib/embed/embed.go`); no Go identifier
+// can spell it, so no user type collides.
+const EMBED_FS_TYPE = "FS$$embed";
 
 const TEMPL_NODE_CHECKS = {
 	TemplElement: "_checkTemplElement",
@@ -516,15 +519,19 @@ export class TypeChecker {
 		// Read by `lowerEmbeds`, which has no scope to resolve the type node.
 		spec._embedKind = kind;
 		spec._embedType = type;
+		if (kind === "fs") return;
 		const paths = new Set(
 			directives.flatMap((d) => (d._embedFiles ?? []).map((f) => f.path)),
 		);
 		if (paths.size > 1) fail(`multiple files for type ${typeStr(type)}`);
 	}
 
-	// What a `//go:embed` variable of `type` holds: "string" or "bytes"; null
-	// for a type Go cannot embed into.
+	// What a `//go:embed` variable of `type` holds: "string", "bytes" or "fs"
+	// (an embed.FS, through any alias but not a defined type over it); null for
+	// a type Go cannot embed into.
 	_embedKind(type) {
+		const t = this.resolveType(type);
+		if (t?.kind === "named" && t.name === EMBED_FS_TYPE) return "fs";
 		const u = this._deepUnderlying(this.resolveType(type));
 		if (u?.kind === "basic" && u.name === "string") return "string";
 		if (u?.kind === "slice") {

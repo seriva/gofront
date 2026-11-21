@@ -107,7 +107,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Done when: a `wasm` package reads an embedded `[]byte` with no linear-memory copy
 
 ### Phase 3: `embed.FS`
-- [ ] Task 3.1: `embed.FS` with `ReadFile` in Go source (former 2.1)
+- [x] Task 3.1: `embed.FS` with `ReadFile` in Go source (former 2.1)
   - Files: `stdlib/embed/embed.go`, `src/typechecker/stdlib/excluded.js`, `src/typechecker/index.js`
   - Test: `test/unit/stdlib/embed-fs.test.js`: zero-value `var f embed.FS` `ReadFile` miss returns `open <name>: file does not exist`; `var files embed.FS` (and aliased `import e "embed"`) under a directive type-checks (requiring non-blank `"embed"` import); `ReadDir` and `Open` are compile errors with the `EXCLUDED_STDLIB_MEMBERS` diagnostic
   - Done when: `embed.FS` and `ReadFile` compile on every target and `ReadDir`/`Open` produce targeted diagnostics
