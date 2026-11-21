@@ -34,6 +34,7 @@ import {
 	isStringType,
 	isStructType,
 	isTaggedSliceType,
+	namedBasicName,
 	pointerBase,
 	toWasmType,
 } from "./types.js";
@@ -894,20 +895,26 @@ export class ExprsEmitter {
 
 	// Raises Go's slice-bounds panic.  `lo`, `hi` and `max` are bounds as
 	// `_emitIndexExprToI32` returns them, `cap` an i32 local; `form` is
-	// described at `__slice_bounds_panic`.  An i32 bound is sign-extended so a
-	// negative index prints as written; a 64-bit one that did not fit an i32 is
-	// read from its full value.
+	// described at `__slice_bounds_panic`.  A bound is widened as written: a
+	// negative i32 prints negative, an unsigned one unsigned, and a 64-bit one
+	// that did not fit an i32 is read from its full value.
 	_emitSliceBoundsPanic(lo, hi, max, cap, form) {
-		for (const bound of [lo, hi, max]) {
-			if (bound.wide != null) {
-				this.pushInstruction({ op: "local.get", index: bound.wide });
-			} else {
-				this.pushInstruction({ op: "local.get", index: bound.index });
-				this.pushInstruction("i64.extend_i32_s");
+		let unsignedBits = 0;
+		[lo, hi, max].forEach((bound, k) => {
+			const wide = bound.wide != null;
+			this.pushInstruction({
+				op: "local.get",
+				index: wide ? bound.wide : bound.index,
+			});
+			if (!wide) {
+				this.pushInstruction(
+					bound.unsigned ? "i64.extend_i32_u" : "i64.extend_i32_s",
+				);
 			}
-		}
+			if (bound.unsigned) unsignedBits |= 4 << k;
+		});
 		this.pushInstruction({ op: "local.get", index: cap });
-		this.pushInstruction({ op: "i32.const", value: form });
+		this.pushInstruction({ op: "i32.const", value: form | unsignedBits });
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),
@@ -1365,11 +1372,13 @@ export class ExprsEmitter {
 	}
 
 	// If the condition on the stack is true, panics with Go's index message;
-	// `pushIdx64` and `emitLen` push the i64 index and the i32 length.
-	_emitIndexPanicIf(pushIdx64, emitLen) {
+	// `pushIdx64` and `emitLen` push the i64 index and the i32 length, and
+	// `unsigned` says the index prints unsigned.
+	_emitIndexPanicIf(pushIdx64, emitLen, unsigned = false) {
 		this.pushInstruction({ op: "if", blockType: "void" });
 		pushIdx64();
 		emitLen();
+		this.pushInstruction({ op: "i32.const", value: unsigned ? 1 : 0 });
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getIndexPanicFuncIndex(),
@@ -1390,14 +1399,18 @@ export class ExprsEmitter {
 	// Pushes the bounds-checked i32 index onto the stack. `emitLen` must push
 	// the i32 length.  Inside a function body a failing check branches to the
 	// shared handler (`_closeOobBlocks`) with the index and a site id, and the
-	// handler reports Go's message; elsewhere the check panics inline.
+	// handler reports Go's message; elsewhere the check panics inline.  The
+	// handler prints a signed index, so one that does not print as a signed
+	// i32 or i64 (a uint32 at or above 2^31, an unsigned 64-bit one) always
+	// panics inline, with its own flag.
 	_emitCheckedIndex(indexNode, emitLen) {
 		const depth32 = this.resolveBranchDepthToOob(32);
 		if (this._isI32IndexExpr(indexNode)) {
 			const idx = this.acquireTemp("i32");
 			this.emitExpr(indexNode, "i32");
 			this.pushInstruction({ op: "local.tee", index: idx });
-			if (depth32 !== null) {
+			const unsigned = this._isWideUnsigned32(indexNode);
+			if (depth32 !== null && !unsigned) {
 				this._pushOobSite(emitLen);
 				this.pushInstruction({ op: "local.get", index: idx });
 				emitLen();
@@ -1408,19 +1421,26 @@ export class ExprsEmitter {
 				this.pushInstruction({ op: "local.get", index: idx });
 				emitLen();
 				this.pushInstruction("i32.ge_u");
-				this._emitIndexPanicIf(() => {
-					this.pushInstruction({ op: "local.get", index: idx });
-					this.pushInstruction("i64.extend_i32_s");
-				}, emitLen);
+				this._emitIndexPanicIf(
+					() => {
+						this.pushInstruction({ op: "local.get", index: idx });
+						this.pushInstruction(
+							unsigned ? "i64.extend_i32_u" : "i64.extend_i32_s",
+						);
+					},
+					emitLen,
+					unsigned,
+				);
 			}
 			this.releaseTemp(idx, "i32");
 			return;
 		}
 
+		const unsigned = !isSigned(indexNode._type);
 		const idx64 = this.acquireTemp("i64");
 		this.emitExpr(indexNode, "i64");
 		this.pushInstruction({ op: "local.tee", index: idx64 });
-		if (depth32 !== null) {
+		if (depth32 !== null && !unsigned) {
 			this._pushOobSite(emitLen);
 			this.pushInstruction({ op: "local.get", index: idx64 });
 			emitLen();
@@ -1438,6 +1458,7 @@ export class ExprsEmitter {
 			this._emitIndexPanicIf(
 				() => this.pushInstruction({ op: "local.get", index: idx64 }),
 				emitLen,
+				unsigned,
 			);
 			this.pushInstruction({ op: "local.get", index: idx64 });
 		}
@@ -1523,8 +1544,14 @@ export class ExprsEmitter {
 		this.releaseTemp(arrTmp, arrWType);
 	}
 
+	// A uint32 (or defined type over it): the one i32-lowered type whose
+	// values at or above 2^31 do not widen with a sign extension.
+	_isWideUnsigned32(node) {
+		return namedBasicName(node._type) === "uint32";
+	}
+
 	// Evaluates the integer `node` into the i32 local `tmp32` and returns its
-	// bound `{ index: tmp32, wide, unproven }`.  An operand `_isI32IndexExpr`
+	// bound `{ index: tmp32, unsigned, wide, unproven }`.  An operand `_isI32IndexExpr`
 	// proves narrow is stored as is.  Any other i64 is range-checked instead
 	// of wrapped (`__narrow_bound`): a value outside 0..2^31-1 stores a
 	// saturated i32 (the minimum for a negative one, else the maximum) that
@@ -1535,27 +1562,33 @@ export class ExprsEmitter {
 		if (this._isI32IndexExpr(node)) {
 			this.emitExpr(node, "i32");
 			this.pushInstruction({ op: "local.set", index: tmp32 });
-			return { index: tmp32, wide: null, unproven: false };
+			return {
+				index: tmp32,
+				unsigned: this._isWideUnsigned32(node),
+				wide: null,
+				unproven: false,
+			};
 		}
 		const wType = this.toWasmType(node._type);
 		if (wType !== "i64") {
 			this.emitExpr(node, "i32");
 			this.pushInstruction({ op: "local.set", index: tmp32 });
-			return { index: tmp32, wide: null, unproven: false };
+			return { index: tmp32, unsigned: false, wide: null, unproven: false };
 		}
 		const full = keepWide ? this.acquireTemp("i64") : null;
 		this.emitExpr(node, "i64");
 		if (keepWide) this.pushInstruction({ op: "local.tee", index: full });
 		this.pushInstruction({
-			op: "i32.const",
-			value: isSigned(node._type) ? 0 : 1,
-		});
-		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getNarrowBoundFuncIndex(),
 		});
 		this.pushInstruction({ op: "local.set", index: tmp32 });
-		return { index: tmp32, wide: full, unproven: true };
+		return {
+			index: tmp32,
+			unsigned: !isSigned(node._type),
+			wide: full,
+			unproven: true,
+		};
 	}
 
 	_releaseBound(bound) {

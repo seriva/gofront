@@ -640,7 +640,7 @@ ok <nil>
 	);
 });
 
-test("a uint64 slice bound above 2^32 panics", async () => {
+test("a uint64 slice bound above 2^32 panics, and one above 2^63 prints unsigned", async () => {
 	await assertProgramOutput(
 		`${SLICE_PRELUDE}
 func main() {
@@ -650,6 +650,60 @@ func main() {
 }
 `,
 		"u64 runtime error: slice bounds out of range [:1099511627776] with capacity 3\n",
+	);
+	await assertWasmProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := make([]int, 3, 5)
+	u := uint64(1) << 63
+	try("hi", func() { _ = xs[:u] })
+	try("lo", func() { _ = xs[u:] })
+	try("max", func() { _ = xs[:1:u] })
+	try("index", func() { _ = xs[u] })
+	try("uint", func() { v := uint(1) << 63; _ = xs[v] })
+	try("neg", func() { i := -5; _ = xs[i] })
+}
+`,
+		`hi runtime error: slice bounds out of range [:9223372036854775808] with capacity 5
+lo runtime error: slice bounds out of range [9223372036854775808:3]
+max runtime error: slice bounds out of range [::9223372036854775808] with capacity 5
+index runtime error: index out of range [9223372036854775808] with length 3
+uint runtime error: index out of range [9223372036854775808] with length 3
+neg runtime error: index out of range [-5]
+`,
+	);
+});
+
+test("a uint32 index or bound of 2^31 or more prints unsigned", async () => {
+	await assertProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := make([]int, 3, 5)
+	s := "abc"
+	var u32 uint32 = 1 << 31
+	try("F22a", func() { _ = xs[:u32] })
+	try("F22b", func() { _ = xs[u32] })
+	try("F22s", func() { _ = s[u32] })
+	try("F22lo", func() { _ = s[u32:] })
+	try("F22max", func() { _ = xs[:1:u32] })
+	var arr [3]int
+	try("F22arr", func() { _ = arr[u32] })
+	try("F22set", func() { xs[u32] = 1 })
+	var u8 uint8 = 200
+	try("u8", func() { _ = xs[u8] })
+	try("ok", func() { var i uint32 = 2; _ = xs[i]; _ = xs[i:]; _ = s[i] })
+}
+`,
+		`F22a runtime error: slice bounds out of range [:2147483648] with capacity 5
+F22b runtime error: index out of range [2147483648] with length 3
+F22s runtime error: index out of range [2147483648] with length 3
+F22lo runtime error: slice bounds out of range [2147483648:3]
+F22max runtime error: slice bounds out of range [::2147483648] with capacity 5
+F22arr runtime error: index out of range [2147483648] with length 3
+F22set runtime error: index out of range [2147483648] with length 3
+u8 runtime error: index out of range [200] with length 3
+ok <nil>
+`,
 	);
 });
 

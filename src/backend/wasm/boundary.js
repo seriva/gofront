@@ -2004,6 +2004,7 @@ function ${P}imports(stringTable, extraEnv, tag, write, toStderr) {
 		"str_trim_prefix": (s, p) => ((s ?? "").startsWith(p ?? "") ? (s ?? "").slice((p ?? "").length) : (s ?? "")),
 		"str_trim_suffix": (s, p) => ((s ?? "").endsWith(p ?? "") ? (s ?? "").slice(0, (s ?? "").length - (p ?? "").length) : (s ?? "")),
 		"str_from_i64": (n) => String(n),
+		"str_from_u64": (n) => String(BigInt.asUintN(64, n)),
 		"str_from_i32": (n) => String(n),
 		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
