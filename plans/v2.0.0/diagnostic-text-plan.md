@@ -112,19 +112,19 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
 
 ### Phase 1: Marker audit and operand text (root `operand-text`)
 *Scheduled from review follow-ups (2026-11-19): ledger *Assignment diagnostics text* and the `// pending: operand-text` cases.*
-- [ ] Task 1.1: `npm run conformance:go` audits every reject marker against Go
+- [x] Task 1.1: `npm run conformance:go` audits every reject marker against Go
   - Files: `test/fuzz/gocheck/main.go` (all-errors mode), `test/fuzz/conformance-go.js`, `package.json`
   - Test: `test/unit/cli/conformance-go.test.js` (no Go needed): marker extraction, baseline read/write and the substring rule on canned Go output; then `npm run conformance:go -- --write-baseline` writes `test/fuzz/conformance-go-baseline.txt`
   - Done when: the audit runs over all reject cases and its baseline lists today's misses with a tag per root (`D1`–`D4`, `excluded: gofront-only`, `excluded: documented-restriction`)
-- [ ] Task 1.2: `exprText` prints composite literal, assertion, conversion, slice, func literal, instantiation and type-node operands (D1.1–D1.4)
+- [x] Task 1.2: `exprText` prints composite literal, assertion, conversion, slice, func literal, instantiation and type-node operands (D1.1–D1.4)
   - Files: `src/typechecker/operand-text.js` (`exprText`, `litText`, type-node printers)
   - Test: remove `// pending: operand-text` from `addr_lit_elem`, `assign_lit_elem`, `assign_lit_field`, `assign_assert_field`, `unused_conversion`; `test/unit/types/checks.test.js` table of node kinds → text (including `SliceExpr`, `FuncLit`, `InstantiationExpr`, `TypeExpr`, `AwaitExpr`)
   - Done when: those cases pass; no `"expression"` fallback for the tabled kinds
-- [ ] Task 1.3: `operandKind` reads `node._const` to carry the constant value across all callers (D1.6)
+- [x] Task 1.3: `operandKind` reads `node._const` to carry the constant value across all callers (D1.6)
   - Files: `src/typechecker/operand-text.js` (`operandKind`), `src/typechecker/statements.js` (`_checkExprStmt` at `:109-112`)
   - Test: reject fixture `range_typed_float_const.go` (`constant 2 of type float64`, including a function-local `const k float64 = 2`); `range_float_lit` marker corrected to Go's `(untyped float constant 1000)`; sibling assertions in `test/unit/types/checks.test.js` for `const k float64 = 2; _ = &k` (`constant 2 of type float64`), `len(1e3)` (`untyped float constant 1000`), and `1 + 2` unused statement (`untyped int constant 3`) vs `x == 1` (`untyped bool value`)
   - Done when: Go's constant-value operand kind on all targets across `range` and sibling callers
-- [ ] Task 1.4: Shared `_convertError` prints operand, kind, and `to type T` (D1.5)
+- [x] Task 1.4: Shared `_convertError` prints operand, kind, and `to type T` (D1.5)
   - Files: `src/typechecker/expressions.js` (`_convertError` replacing the 13 `cannot convert` sites at `:1434`–`:2091`)
   - Test: remove `// pending: operand-text` from `convert_embedded_vs_named_field`; update `test/unit/wasm/generics.test.js:1131` and `test/unit/types/pointers.test.js:295` expecting the old `cannot convert X to Y` without `to type`
   - Done when: `convert_embedded_vs_named_field` passes on all targets; `D1` audit keys removed

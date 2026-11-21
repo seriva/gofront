@@ -110,9 +110,11 @@ export const statementCheckMethods = {
 		if (!isUnusedExprStmt(stmt.expr)) return;
 		if (type?._tainted) return;
 		const untyped = type?.kind === "untyped" && type.base !== "nil";
-		const what = untyped
-			? `untyped ${type.base} value`
-			: operandKind(stmt.expr, typeStr(type), false);
+		const constant = stmt.expr._const || stmt.expr._cconst;
+		const what =
+			untyped && !constant
+				? `untyped ${type.base} value`
+				: operandKind(stmt.expr, typeStr(type));
 		this.err(`${exprText(stmt.expr)} (${what}) is not used`, stmt.expr);
 	},
 
