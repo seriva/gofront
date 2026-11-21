@@ -21,6 +21,7 @@ import {
 	anyKind,
 	BOOL,
 	defaultType,
+	INT,
 	is64BitInt,
 	isAny,
 	isBool,
@@ -45,6 +46,13 @@ import {
 export function newLabelScope() {
 	return { defined: new Set(), enclosing: [] };
 }
+
+// The value a range clause assigns to `target` (`for s = range xs`): Go
+// quotes the target's text but describes it as a value, not a variable.
+const rangeValue = (target) => ({
+	kind: "RangeValue",
+	_spelling: exprText(target),
+});
 
 const BREAKABLE_BODIES = new Set(["ForStmt", "SwitchStmt", "TypeSwitchStmt"]);
 const LABEL_BRANCHES = new Set(["break", "continue"]);
@@ -162,6 +170,7 @@ export const statementCheckMethods = {
 	},
 
 	_assignOperand(stmt, i) {
+		if (stmt.rhs[0]?.kind === "RangeExpr") return rangeValue(stmt.lhs[i]);
 		if (stmt.rhs.length === stmt.lhs.length) return stmt.rhs[i];
 		return stmt.rhs.length === 1 ? stmt.rhs[0] : undefined;
 	},
@@ -219,7 +228,12 @@ export const statementCheckMethods = {
 		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return false;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
-		this.assertAssignable(resolvedBase.key, keyType, stmt.rhs[0].index);
+		this.assertAssignable(
+			resolvedBase.key,
+			keyType,
+			stmt.rhs[0].index,
+			"map index",
+		);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
@@ -279,7 +293,12 @@ export const statementCheckMethods = {
 		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return null;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
-		this.assertAssignable(resolvedBase.key, keyType, stmt.rhs[0].index);
+		this.assertAssignable(
+			resolvedBase.key,
+			keyType,
+			stmt.rhs[0].index,
+			"map index",
+		);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
@@ -540,7 +559,7 @@ export const statementCheckMethods = {
 			return false;
 		const tu = this.resolveType(this._deepUnderlying(target));
 		if (tu?.kind === "interface") return false;
-		this.err(`Cannot assign int to ${typeStr(target)}`, lhs);
+		this._assignError(INT, target, rangeValue(lhs), "assignment", lhs);
 		return true;
 	},
 
@@ -1122,20 +1141,27 @@ export const statementCheckMethods = {
 
 	// The yielded value is assigned to the target, so it must be assignable
 	// to it (`for s = range seq` with `s string` and `seq` yielding `int`).
-	// `float64 = int` is reported here in the plain "Cannot assign" form: the
-	// yielded value has no expression to quote.
+	// `float64 = int` is reported here: the yielded value has no expression
+	// of its own, so the report quotes the target as Go does (`cannot use s
+	// (value of type int) as string value in assignment`).
 	_checkRangeIterAssignable(node, target, source) {
 		if (!target || !source) return;
 		const t = this.resolveType(target);
 		const v = this.resolveType(source);
 		if (this._isIntToFloat(t, v)) {
-			this.err(`Cannot assign ${typeStr(v)} to ${typeStr(t)}`, node);
+			this._assignError(v, t, rangeValue(node), "assignment", node);
 			return;
 		}
 		if (!this._needsAssignCheck(target, source)) return;
 		this._skipIfaceMark = true;
 		try {
-			this.assertAssignable(target, source, node, "assignment");
+			this.assertAssignable(
+				target,
+				source,
+				node,
+				"assignment",
+				rangeValue(node),
+			);
 		} finally {
 			this._skipIfaceMark = false;
 		}

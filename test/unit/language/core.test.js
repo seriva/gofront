@@ -645,7 +645,10 @@ func main() {
 test("wrong type in var declaration", () => {
 	const { errors } = compile(`package main
 func main() { var x int = "hello" }`);
-	assertErrorContains(errors, "Cannot assign");
+	assertErrorContains(
+		errors,
+		'cannot use "hello" (untyped string constant) as int value in variable declaration',
+	);
 });
 
 test("interface not satisfied on function call", () => {

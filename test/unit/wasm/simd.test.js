@@ -979,11 +979,11 @@ func T() {
 	);
 	assertErrorContains(
 		check("v := simd.F32x4{}; _ = simd.Select(v, v, v)"),
-		"Cannot assign simd.F32x4 to simd.Mask32x4",
+		"cannot use v (variable of type simd.F32x4) as simd.Mask32x4 value in argument to simd.Select",
 	);
 	assertErrorContains(
 		check("v := simd.F32x4{}; var f simd.F32x4 = v.Less(v); _ = f"),
-		"Cannot assign simd.Mask32x4 to simd.F32x4",
+		"cannot use v.Less(v) (value of type simd.Mask32x4) as simd.F32x4 value in variable declaration",
 	);
 });
 

@@ -338,13 +338,19 @@ test("passing string to uint param is a type error", () => {
 	const { errors } = compile(`package main
 func f(n uint) { console.log(n) }
 func main() { f("oops") }`);
-	assertErrorContains(errors, "Cannot assign untyped string to uint");
+	assertErrorContains(
+		errors,
+		'cannot use "oops" (untyped string constant) as uint value in argument to f',
+	);
 });
 
 test("uint return type mismatch caught", () => {
 	const { errors } = compile(`package main
 func f() uint { return "bad" }`);
-	assertErrorContains(errors, "Cannot assign untyped string to uint");
+	assertErrorContains(
+		errors,
+		'cannot use "bad" (untyped string constant) as uint value in return statement',
+	);
 });
 
 test("uintptr accepted as type annotation", () => {
@@ -575,7 +581,10 @@ func main() {
   var m Mode = 3
   _ = m
 }`);
-	assertErrorContains(errors, "Cannot assign");
+	assertErrorContains(
+		errors,
+		"cannot use 3 (untyped int constant) as Mode value in variable declaration",
+	);
 });
 
 const interfaceMismatchCases = [
@@ -2317,6 +2326,72 @@ test("a conversion between pointers to distinct wasm structs names the operand",
 	assertErrorContains(
 		errors,
 		"cannot convert p (variable of type *A) to type *B in a wasm package",
+	);
+});
+
+section("Assignment context names");
+
+// One row per place a value is assigned: Go names it in `cannot use ... as T
+// value in <context>`.
+const assignContextCases = [
+	[
+		"variable declaration",
+		"var s string = 1\n_ = s",
+		"in variable declaration",
+	],
+	["assignment", "var s string\ns = 1", "in assignment"],
+	["return statement", null, "in return statement"],
+	["argument to f", 'f("x")', "in argument to f"],
+	["argument to a method", 'var b Box\nb.M("x")', "in argument to b.M"],
+	["argument to a variadic func", 'v(1, "x")', "in argument to v"],
+	[
+		"argument to append",
+		'var xs []int\n_ = append(xs, "x")',
+		"in argument to append",
+	],
+	[
+		"argument to delete",
+		"var m map[string]int\ndelete(m, 1)",
+		"in argument to delete",
+	],
+	["struct literal", '_ = W{X: "x"}', "in struct literal"],
+	["positional struct literal", '_ = W{"x"}', "in struct literal"],
+	["array or slice literal", '_ = []int{"x"}', "in array or slice literal"],
+	["array literal", '_ = [2]int{"x"}', "in array or slice literal"],
+	["map literal value", '_ = map[string]int{"a": "x"}', "in map literal"],
+	["map literal key", "_ = map[string]int{1: 2}", "in map literal"],
+	["map index", "var m map[string]int\n_ = m[1]", "in map index"],
+	["map index assignment", "var m map[string]int\nm[1] = 2", "in map index"],
+	["comma-ok map index", "var m map[string]int\n_, _ = m[1]", "in map index"],
+	[
+		"range clause",
+		"var s string\nfor s = range []int{1} {\n}\n_ = s",
+		"cannot use s (value of type int) as string value in assignment",
+	],
+];
+
+for (const [name, body, want] of assignContextCases)
+	test(`assignment context: ${name}`, () => {
+		const decls =
+			"type W struct{ X int }\ntype Box struct{ n int }\nfunc (b Box) M(a int) {}\nfunc f(a int) {}\nfunc v(a ...int) {}\n";
+		const src =
+			body === null
+				? `package main\n${decls}func g() int { return "a" }\nfunc main() {}`
+				: `package main\n${decls}func main() {\n${body}\n}`;
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(src, { target });
+			assertErrorContains(errors, want);
+			assertErrorContains(errors, "cannot use");
+		}
+	});
+
+test("a mismatched value reports its operand and kind", () => {
+	const { errors } = compile(
+		"package main\nfunc main() {\nvar a int32 = 1\nvar b int64 = a\n_ = b\n}",
+	);
+	assertErrorContains(
+		errors,
+		"cannot use a (variable of type int32) as int64 value in variable declaration",
 	);
 });
 

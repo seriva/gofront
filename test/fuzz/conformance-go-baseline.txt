@@ -44,7 +44,6 @@ any_recover_arithmetic:5 # D4
 any_slice:5 # any-operand-kind
 any_type_switch_default_arithmetic:9 # D4
 any_unary_minus:5 # D4
-append_elem_string_to_int:5 # D3
 assign_dot_imported_names:8 # type-as-value-text
 assign_imported_members:8 # type-as-value-text
 assign_imported_members:9 # type-as-value-text
@@ -68,27 +67,19 @@ assign_web_type_names:6 # excluded: gofront-only
 assign_web_type_names:7 # excluded: gofront-only
 block_type_used_outside:8 # undefined-text
 builtin_len_any:5 # any-operand-kind
-forwarded_tuple_arg_type:18 # D3
 forwarded_tuple_arg_type:21 # any-operand-kind
 forwarded_tuple_arg_type:22 # any-operand-kind
-generic_append_elem_type:6 # D3
-generic_append_elem_type:22 # D3
-generic_delete_key_type:8 # D3
 generic_function_value_forms:15 # generic-value-text
 generic_stdlib_func_value:9 # generic-value-text
-identity_anon_struct_assign:6 # D3
-identity_anon_struct_field_type:6 # D3
 identity_comma_ok_assertion:9 # excluded: documented-restriction
 identity_comma_ok_assertion_redeclared:8 # excluded: documented-restriction
 identity_comma_ok_map_lookup:9 # excluded: documented-restriction
 identity_defer_argument:12 # excluded: documented-restriction
 identity_defer_argument:13 # excluded: documented-restriction
-identity_distinct_named_structs:8 # D3
 identity_embedded_struct_conversion:8 # excluded: documented-restriction
 identity_embedded_struct_conversion:9 # excluded: documented-restriction
 identity_forwarded_argument:10 # excluded: documented-restriction
 identity_forwarded_return:8 # excluded: documented-restriction
-identity_generic_instances_differ:8 # D3
 identity_map_key:8 # excluded: documented-restriction
 identity_map_key:9 # excluded: documented-restriction
 identity_map_key:10 # excluded: documented-restriction
@@ -99,16 +90,12 @@ identity_map_key:15 # excluded: documented-restriction
 identity_map_key:16 # excluded: documented-restriction
 identity_multi_value_declaration:8 # excluded: documented-restriction
 identity_range_assignment:8 # excluded: documented-restriction
-identity_same_name_two_packages:10 # D3
-identity_shadowed_local_type:10 # D3
 label_invalid:25 # label-text
 label_invalid:33 # label-text
 label_invalid:41 # label-text
 label_undefined_break:5 # label-text
 label_unused:4 # label-text
 local_type_used_outside:9 # undefined-text
-numeric_int32_to_int64:5 # D3
-numeric_string_to_int:4 # D3
 range_defined_func:7 # any-operand-kind
 range_operand_kinds:11 # any-operand-kind
 range_operand_kinds:14 # any-operand-kind

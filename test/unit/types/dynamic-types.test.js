@@ -1227,12 +1227,21 @@ func main() {
 });
 
 for (const target of ["js", "both", "wasm"]) {
-	for (const [name, body] of [
-		["a rune variable into an int", "r := 'x'\n\tvar i int = r\n\t_ = i"],
-		["an int variable into a rune", "n := 1\n\tvar r rune = n\n\t_ = r"],
+	for (const [name, body, want] of [
+		[
+			"a rune variable into an int",
+			"r := 'x'\n\tvar i int = r\n\t_ = i",
+			"cannot use r (variable of type int32) as int value in variable declaration",
+		],
+		[
+			"an int variable into a rune",
+			"n := 1\n\tvar r rune = n\n\t_ = r",
+			"cannot use n (variable of type int) as int32 value in variable declaration",
+		],
 		[
 			"a rune constant sum into an int variable",
 			"const r = 'a'\n\tn := r\n\tvar i int = n\n\t_ = i",
+			"cannot use n (variable of type int32) as int value in variable declaration",
 		],
 	]) {
 		test(`${name} is rejected (${target})`, () => {
@@ -1241,7 +1250,7 @@ for (const target of ["js", "both", "wasm"]) {
 				target === "wasm"
 					? compileWasm(src).errors
 					: compile(src, { target }).errors;
-			assertErrorContains(errors, "Cannot assign");
+			assertErrorContains(errors, want);
 		});
 	}
 }

@@ -878,7 +878,7 @@ func main() {
 	assert(caretLine !== undefined, "expected a caret line");
 	const caretCol = caretLine.indexOf("^");
 	// caret should appear under "hello" — find its position in the source line
-	const srcLine = lines.find((l) => l.includes('"hello"'));
+	const srcLine = lines.find((l) => /^\s*\d+ \|/.test(l));
 	assert(srcLine !== undefined, "expected source line in error");
 	const srcCol = srcLine.indexOf('"hello"');
 	assertEqual(caretCol, srcCol);

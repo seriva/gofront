@@ -160,13 +160,26 @@ function errorsOn(target, src) {
 
 section("Untyped bool: typed bools and other defined types stay errors");
 
-for (const [name, body] of [
-	["a typed bool variable", "x := true\n\tvar b B = x\n\t_ = b"],
-	["!x of a typed bool", "x := true\n\tvar b B = !x\n\t_ = b"],
-	["a && b of typed bools", "x, y := true, false\n\tvar b B = x && y\n\t_ = b"],
+for (const [name, body, want] of [
+	[
+		"a typed bool variable",
+		"x := true\n\tvar b B = x\n\t_ = b",
+		"cannot use x (variable of type bool) as B value in variable declaration",
+	],
+	[
+		"!x of a typed bool",
+		"x := true\n\tvar b B = !x\n\t_ = b",
+		"cannot use !x (value of type bool) as B value in variable declaration",
+	],
+	[
+		"a && b of typed bools",
+		"x, y := true, false\n\tvar b B = x && y\n\t_ = b",
+		"cannot use x && y (value of type bool) as B value in variable declaration",
+	],
 	[
 		"a comparison into a defined int type",
 		"x := 1\n\tvar i MyI = x == 1\n\t_ = i",
+		"cannot use x == 1 (untyped bool value) as MyI value in variable declaration",
 	],
 ]) {
 	for (const target of ["js", "both", "wasm"]) {
@@ -176,7 +189,7 @@ for (const [name, body] of [
 					target,
 					`package main\n\ntype B bool\ntype MyI int\n\nfunc main() {\n\t${body}\n}\n`,
 				),
-				"Cannot assign",
+				want,
 			);
 		});
 	}
@@ -188,7 +201,7 @@ for (const [name, body, want] of [
 	[
 		"a && b of defined bools into a bool",
 		"var b1, b2 B = true, false\n\tvar c bool = b1 && b2\n\t_ = c",
-		"Cannot assign",
+		"cannot use b1 && b2 (value of type B) as bool value in variable declaration",
 	],
 	[
 		"B && bool variable",
