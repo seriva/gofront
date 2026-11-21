@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	section,
@@ -200,6 +201,126 @@ func main() {
 }
 `,
 		"nil inner\n",
+	);
+});
+
+section("WASM type tests against empty interfaces");
+
+test("a type switch case naming a defined empty interface matches a non-nil value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var x any = B(1)
+	switch v := x.(type) {
+	case B:
+		fmt.Println(v)
+	}
+}
+`,
+		"1\n",
+	);
+});
+
+test("a type switch case naming interface{} or a chained empty interface matches a non-nil value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+type C B
+
+func main() {
+	var x any = 1
+	switch v := x.(type) {
+	case interface{}:
+		fmt.Println(v)
+	}
+	switch v := x.(type) {
+	case C:
+		fmt.Println(v)
+	}
+}
+`,
+		"1\n1\n",
+	);
+});
+
+test("an empty-interface type switch still routes nil and multi-type cases", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var n any
+	switch n.(type) {
+	case B:
+		fmt.Println("B")
+	case nil:
+		fmt.Println("nil")
+	}
+	var x any = 1
+	switch v := x.(type) {
+	case B, string:
+		fmt.Printf("%v %T\\n", v, v)
+	}
+}
+`,
+		"nil\n1 int\n",
+	);
+});
+
+test("comma-ok assertions to empty interfaces succeed for non-nil values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var x any = 1
+	v, ok := x.(B)
+	fmt.Println(v, ok)
+	w, ok2 := x.(interface{})
+	fmt.Println(w, ok2)
+	var n any
+	_, ok3 := n.(B)
+	_, ok4 := n.(interface{})
+	fmt.Println(ok3, ok4)
+}
+`,
+		"1 true\n1 true\nfalse false\n",
+	);
+});
+
+test("single-value assertions to empty interfaces succeed for non-nil values and panic on nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var x any = 1
+	v := x.(B)
+	w := x.(interface{})
+	fmt.Println(v, w)
+	var n any
+	defer func() { fmt.Println(recover() != nil) }()
+	_ = n.(B)
+}
+`,
+		"1 1\ntrue\n",
 	);
 });
 

@@ -17,6 +17,7 @@ import {
 	isArrayType,
 	isComplex,
 	isComplex64,
+	isEmptyInterface,
 	isFuncType,
 	isInterfaceType,
 	isMapType,
@@ -1497,7 +1498,7 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (targetGoType.name === "any" || targetGoType.name === "interface{}") {
+		if (isEmptyInterface(targetGoType, this.mod.checker)) {
 			this.pushInstruction("ref.is_null");
 			this.pushInstruction("i32.eqz");
 			return;
