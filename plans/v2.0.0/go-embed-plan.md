@@ -97,7 +97,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js`, `src/backend/js/runtime.js`
   - Test: `test/unit/compiler/embed-js.test.js`: string content, `[]byte` with all 256 byte values, a non-UTF-8 `string` round-tripping through `[]byte(s)`, two `[]byte` vars embedding the same file store the base64 once but mutate independently, dependent `var n = len(data)` initialization order, `&data` and `var _ string`, identical results after `--minify --mangle`
   - Done when: `CodeGen.generate()` runs `lowerEmbeds`, embedded variables initialize at package load through `_emitVarBindings`, and the base64 decoder helper (in `HELPER_MAP`) is emitted only when a `[]byte` embed exists
-- [ ] Task 2.3: Data and DataCount sections in the wasm encoder (former 1.5)
+- [x] Task 2.3: Data and DataCount sections in the wasm encoder (former 1.5)
   - Files: `src/backend/wasm/encode.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/wat.js`
   - Test: `test/unit/wasm/data-section.test.js`: Section 12 before code (keeping `mod.codeOffsets` accurate for source maps), Section 11 after code, omitted when `mod.data` is empty, passive segment bytes, `array.new_data` (`0xfb 0x09` with `typeIndex` and `dataIndex` immediates) encoding and WAT formatting
   - Done when: `WebAssembly.validate` accepts modules with passive data segments and `--emit-wat` prints them

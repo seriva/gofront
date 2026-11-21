@@ -1026,6 +1026,7 @@ export function compileWasmModule(
 		tags: mod.tags,
 		globals: mod.globals,
 		elements: mod.elements,
+		data: mod.data,
 		funcs: mod.funcs,
 		exports: mod.exports,
 		memory: mod.memory ?? null,

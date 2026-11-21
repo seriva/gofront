@@ -64,6 +64,8 @@ export class ModuleEmitter {
 		this.exports = []; // export entries
 		this.stringTable = []; // string literals
 		this.stringCache = new Map();
+		this.data = []; // passive data segments: { bytes }
+		this.dataCache = new Map(); // base64 of the bytes -> segment index
 
 		// `errors.New` / `fmt.Errorf` / strconv parse failures allocate the
 		// runtime's own error struct; it joins the struct rec group so the
@@ -994,6 +996,18 @@ export class ModuleEmitter {
 		const idx = this.stringTable.length;
 		this.stringTable.push(str);
 		this.stringCache.set(str, idx);
+		return idx;
+	}
+
+	// Index of the passive data segment holding `bytes`; equal contents share
+	// one segment.
+	internData(bytes) {
+		const key = Buffer.from(bytes).toString("base64");
+		const known = this.dataCache.get(key);
+		if (known !== undefined) return known;
+		const idx = this.data.length;
+		this.data.push({ bytes: Uint8Array.from(bytes) });
+		this.dataCache.set(key, idx);
 		return idx;
 	}
 

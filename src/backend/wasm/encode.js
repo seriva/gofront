@@ -101,8 +101,8 @@ const ValType = {
 	f32: 0x7d,
 	f64: 0x7c,
 	v128: 0x7b,
-	i8: 0x7a,
-	i16: 0x79,
+	i8: 0x78,
+	i16: 0x77,
 	funcref: 0x70,
 	externref: 0x6f,
 	anyref: 0x6e,
@@ -380,6 +380,7 @@ const GC_OPCODES = {
 	"array.new": 0x06,
 	"array.new_default": 0x07,
 	"array.new_fixed": 0x08,
+	"array.new_data": 0x09,
 	"array.get": 0x0b,
 	"array.get_s": 0x0c,
 	"array.get_u": 0x0d,
@@ -541,6 +542,11 @@ function encodeInstruction(inst) {
 		if (op === "array.copy") {
 			bytes.push(...encodeU32LEB(inst.typeIndexDst ?? inst.typeIndex ?? 0));
 			bytes.push(...encodeU32LEB(inst.typeIndexSrc ?? inst.typeIndex ?? 0));
+			return bytes;
+		}
+		if (op === "array.new_data") {
+			bytes.push(...encodeU32LEB(inst.typeIndex ?? 0));
+			bytes.push(...encodeU32LEB(inst.dataIndex ?? 0));
 			return bytes;
 		}
 		if (op === "array.new_fixed") {
@@ -925,6 +931,28 @@ function encodeElementSection(elements) {
 	);
 }
 
+// Passive data segments: flag 1, then the segment's bytes. Each entry of
+// `data` is `{ bytes }` (a Uint8Array or number array). Instructions refer to a
+// segment by its index (`array.new_data`).
+function encodeDataSection(data) {
+	if (!data || data.length === 0) return [];
+	return encodeSection(
+		11,
+		encodeVector(data, (seg) => [
+			0x01,
+			...encodeU32LEB(seg.bytes.length),
+			...seg.bytes,
+		]),
+	);
+}
+
+// The segment count, which must precede the code section when code uses
+// `array.new_data`.
+function encodeDataCountSection(data) {
+	if (!data || data.length === 0) return [];
+	return encodeSection(12, encodeU32LEB(data.length));
+}
+
 // Encodes the code section.  `bodyOffsets` (when given) receives, per
 // function, the offset of the body's first instruction relative to the start
 // of the section bytes returned.
@@ -1031,6 +1059,8 @@ export function encodeModule(mod) {
 			? encodeSection(8, encodeU32LEB(mod.start))
 			: [];
 	const elemSec = encodeElementSection(mod.elements);
+	const dataCountSec = encodeDataCountSection(mod.data);
+	const dataSec = encodeDataSection(mod.data);
 	const sectionOffsets = [];
 	const codeSec = encodeCodeSection(mod.funcs, sectionOffsets);
 
@@ -1047,12 +1077,13 @@ export function encodeModule(mod) {
 		exportSec,
 		startSec,
 		elemSec,
+		dataCountSec,
 	];
 	let totalLen = 0;
 	for (const s of sections) totalLen += s.length;
 	const codeStart = totalLen;
 	mod.codeOffsets = sectionOffsets.map((o) => codeStart + o);
-	totalLen += codeSec.length;
+	totalLen += codeSec.length + dataSec.length;
 	let smSec = null;
 	if (mod.sourceMappingURL) {
 		smSec = encodeSection(0, [
@@ -1070,6 +1101,8 @@ export function encodeModule(mod) {
 	}
 	out.set(codeSec, offset);
 	offset += codeSec.length;
+	out.set(dataSec, offset);
+	offset += dataSec.length;
 	if (smSec) {
 		out.set(smSec, offset);
 	}
