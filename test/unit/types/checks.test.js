@@ -1081,10 +1081,7 @@ func main() {
   _ = x + 1
 }`);
 	assertEqual(errors.length, 1);
-	assertErrorContains(
-		errors,
-		"operator + not defined on x (variable of type any)",
-	);
+	assertErrorContains(errors, "x + 1 (mismatched types any and untyped int)");
 });
 
 test("function literal assignable to named function type", () => {

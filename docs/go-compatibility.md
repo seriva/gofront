@@ -132,7 +132,7 @@ A Go `any` holds a value of some type and says nothing about which one. You can 
 
 ```go
 var v any = 2
-_ = v * 2       // invalid operation: operator * not defined on v (variable of type any)
+_ = v * 2       // invalid operation: v * 2 (mismatched types any and untyped int)
 _ = v.(int) * 2 // ok
 
 if s, ok := v.(string); ok { ... }

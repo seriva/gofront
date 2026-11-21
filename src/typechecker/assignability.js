@@ -594,13 +594,35 @@ export const assignabilityMethods = {
 		);
 	},
 
-	// `v + 1` with `v` a Go `any`: the left operand is reported first.
+	// `v + 1` with `v` a Go `any`: the left operand is reported first, in
+	// Go's words for the operator: a shift names its operand or count, an
+	// ordering operator names `interface`, two operands of one type (or a
+	// JS-dynamic one, which adapts to either side) name the operator, and any
+	// other pair is a mismatch.
 	_checkDeclaredAnyBinary(op, lt, rt, node) {
 		if (op === "==" || op === "!=") return null;
-		return (
-			this._checkDeclaredAnyOperator(op, lt, node.left) ??
-			this._checkDeclaredAnyOperator(op, rt, node.right)
-		);
+		const leftAny = anyKind(lt) === "go";
+		if (!leftAny && anyKind(rt) !== "go") return null;
+		const [bad, type] = leftAny ? [node.left, lt] : [node.right, rt];
+		const kind = `${exprText(bad)} (${operandKind(bad, typeStr(type))})`;
+		let what;
+		if (op === "<<" || op === ">>")
+			what = `${leftAny ? "shifted operand" : "shift count"} ${kind} must be integer`;
+		else if (CMP_OPS.has(op))
+			what = `${exprText(node)} (operator ${op} not defined on interface)`;
+		else if (identical(lt, rt) || anyKind(leftAny ? rt : lt) === "dynamic")
+			what = `operator ${op} not defined on ${kind}`;
+		else
+			what = `${exprText(node)} (mismatched types ${this._mismatchTypeStr(lt)} and ${this._mismatchTypeStr(rt)})`;
+		return this.err(`invalid operation: ${what}`, bad);
+	},
+
+	// An untyped string or bool meeting an interface operand has already taken
+	// its default type in Go's message (`any and string`); a number stays untyped.
+	_mismatchTypeStr(t) {
+		if (t?.kind === "untyped" && (t.base === "string" || t.base === "bool"))
+			return t.base;
+		return this._operandTypeStr(t);
 	},
 
 	// The comparison rule (spec *Comparison operators*) for every operand

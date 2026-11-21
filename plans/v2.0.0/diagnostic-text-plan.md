@@ -155,11 +155,11 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
 
 ### Phase 4: Operator wording (root `operator-message-text`)
 *Lands after checker-operand-rules Phase 2 (operator table).*
-- [ ] Task 4.1: Mismatched operand types report Go's `mismatched types X and Y` (D4.2)
+- [x] Task 4.1: Mismatched operand types report Go's `mismatched types X and Y` (D4.2)
   - Files: `src/typechecker/assignability.js` (`:392` fallback)
   - Test: (`identity_compound_assignment` lost its `// pending: operator-message-text` header in Task 2.1: `typeStr` now prints `struct{X int}`); update `test/unit/compiler/templ.test.js:1220` (`Invalid operation: string + untyped int`)
   - Done when: Go's text on all targets
-- [ ] Task 4.2: An operator not defined on its operand reports Go's `operator op not defined on x (…)` (D4.1)
+- [x] Task 4.2: An operator not defined on its operand reports Go's `operator op not defined on x (…)` (D4.1)
   - Files: `src/typechecker/assignability.js` (`:384`–`:392`, including untyped-vs-typed operands such as `b += true`)
   - Test: remove `// pending: operator-message-text` from `compound_add_bool`
   - Done when: no `Invalid operation:` (capitalised) message remains in `src/typechecker`; `npm run conformance:go` baseline holds only `excluded:` keys
