@@ -184,6 +184,19 @@ function substituteInType(t, map) {
 			};
 		case "named":
 			return t.typeArgs?.length ? { ...t, typeArgs: t.typeArgs.map(sub) } : t;
+		case "struct":
+			// A named struct keeps its declaration; an anonymous one is its fields.
+			if (t.name) return t;
+			return {
+				...t,
+				fields: new Map([...t.fields].map(([k, v]) => [k, sub(v)])),
+				...(t._structFields && {
+					_structFields: t._structFields.map((f) => ({
+						...f,
+						type: sub(f.type),
+					})),
+				}),
+			};
 		default:
 			return t;
 	}
@@ -203,11 +216,31 @@ function getSpecializedName(baseName, typeArgs) {
 	return `${baseName}$${keys}`;
 }
 
-const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col", "_spread"]);
+// `_structFields` is the field list of a checker struct type inside
+// `_typeArgs`; without it the clone is a struct with no fields.
+const KEPT_CLONE_KEYS = new Set([
+	"_typeArgs",
+	"_structFields",
+	"_line",
+	"_col",
+	"_spread",
+]);
 
-function cloneAst(node) {
+function cloneAst(node, open = new Set()) {
 	if (!node || typeof node !== "object") return node;
-	if (Array.isArray(node)) return node.map(cloneAst);
+	if (Array.isArray(node)) return node.map((n) => cloneAst(n, open));
+	// A checker type may refer back to itself through a field; the reference
+	// stays shared instead of recursing.
+	if (open.has(node)) return node;
+	open.add(node);
+	const copy = cloneAstNode(node, open);
+	open.delete(node);
+	return copy;
+}
+
+function cloneAstNode(node, open) {
+	if (node instanceof Map)
+		return new Map([...node].map(([k, v]) => [k, cloneAst(v, open)]));
 	const copy = {};
 	for (const [k, v] of Object.entries(node)) {
 		// Side tables are dropped, except source positions (for diagnostics in
@@ -215,7 +248,7 @@ function cloneAst(node) {
 		// call inside a generic body: substitution needs them to specialise the
 		// callee (`isNaN(x)` inside `Compare[T]`).
 		if (k.startsWith("_") && !KEPT_CLONE_KEYS.has(k)) continue;
-		copy[k] = cloneAst(v);
+		copy[k] = cloneAst(v, open);
 	}
 	// Named results hang off the return type node and alias its types; keep
 	// just the names so `rebindNamedResults` can rebuild them after the types
