@@ -175,7 +175,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/backend/wasm/emit-exprs.js` (`_emitSliceBoundsPanic`, `_isI32IndexExpr`), `src/backend/wasm/emit.js` (`oob32`/`oob64` handlers), `src/backend/wasm/index.js` (`emitIndexPanicBody`, `emitSliceBoundsPanicBody` signedness flag), `src/backend/wasm/module-emitter.js` + `src/backend/wasm/boundary.js` (`str_from_u64`)
   - Test: `strict-panics.test.js`: F22a, F22b, F22s and F22u → Go's messages; a negative `int` index still prints negative
   - Done when: all pass on `wasm`; `both` JS side unchanged
-- [ ] Task 2.3: Integer `range` over an unproven 64-bit or unsigned count (F19r)
+- [x] Task 2.3: Integer `range` over an unproven 64-bit or unsigned count (F19r)
   - Files: `src/backend/wasm/emit-stmts.js` (`emitRangeForStmt`)
   - Test: `test/unit/language/loops.test.js`: F19r → `3` (and `uint64(1)<<63` / `uint32(1)<<31` broken after 3 iterations → `3`) with `assertAllTargetsOutput`; `for i := range len(xs)` and `range 10` keep the `i32` loop (checked through the emitted WAT or `zero-alloc.js`); `docs/go-compatibility.md` runtime-panics row (64-bit and unsigned bounds, `make` sizes)
   - Done when: all pass; `bce-mathx.js` passes

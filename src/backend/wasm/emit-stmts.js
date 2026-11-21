@@ -24,6 +24,7 @@ import {
 	isNonEmptyInterface,
 	isPointerToStruct,
 	isScalarType,
+	isSigned,
 	isSliceType,
 	isStringType,
 	isStructType,
@@ -2367,11 +2368,35 @@ export class StmtsEmitter {
 		};
 
 		if (isIntRangeType(iterType)) {
-			const limitTmp = this.acquireTemp("i32");
-			this._emitIndexExprToI32(iterExpr, limitTmp);
+			const idxGoType =
+				iterType?.kind === "untyped"
+					? { kind: "basic", name: "int" }
+					: iterType;
+			// A count `_isI32IndexExpr` cannot prove below 2^31 keeps an i64
+			// counter and limit, so it is neither wrapped nor capped.  Every
+			// other count counts in an i32, unsigned when it is a uint32.
+			const wideCount =
+				!this._isI32IndexExpr(iterExpr) &&
+				this.toWasmType(iterExpr._type) === "i64";
+			const cWType = wideCount ? "i64" : "i32";
+			const unsignedCount = wideCount
+				? !isSigned(idxGoType)
+				: this._isWideUnsigned32(iterExpr);
 
-			const idxTmp = this.acquireTemp("i32");
-			this.pushInstruction({ op: "i32.const", value: 0 });
+			const limitTmp = this.acquireTemp(cWType);
+			if (wideCount) {
+				this.emitExpr(iterExpr, "i64");
+				this.pushInstruction({ op: "local.set", index: limitTmp });
+			} else {
+				this._emitIndexExprToI32(iterExpr, limitTmp);
+			}
+
+			const idxTmp = this.acquireTemp(cWType);
+			this.pushInstruction(
+				wideCount
+					? { op: "i64.const", value: 0n }
+					: { op: "i32.const", value: 0 },
+			);
 			this.pushInstruction({ op: "local.set", index: idxTmp });
 
 			let idxLocalInfo = null;
@@ -2382,11 +2407,12 @@ export class StmtsEmitter {
 						!this.mutatedCaptures?.has(lhs[0].name) &&
 						!this.capturedNames?.includes(lhs[0].name) &&
 						!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
-					const wType = isNonEscaping ? "i32" : "i64";
-					const lIdx = this._allocRangeVar(lhs[0].name, wType, {
-						kind: "basic",
-						name: "int",
-					});
+					const wType = wideCount
+						? "i64"
+						: isNonEscaping
+							? "i32"
+							: this.toWasmType(idxGoType);
+					const lIdx = this._allocRangeVar(lhs[0].name, wType, idxGoType);
 					idxLocalInfo = { index: lIdx, type: wType };
 				} else {
 					idxLocalInfo =
@@ -2406,7 +2432,7 @@ export class StmtsEmitter {
 			// Condition: idx >= limit -> break
 			this.pushInstruction({ op: "local.get", index: idxTmp });
 			this.pushInstruction({ op: "local.get", index: limitTmp });
-			this.pushInstruction("i32.ge_s");
+			this.pushInstruction(`${cWType}.ge_${unsignedCount ? "u" : "s"}`);
 			const breakDepth = this.resolveBranchDepth(stmt.label, false);
 			this.pushInstruction({ op: "br_if", depth: breakDepth });
 
@@ -2418,16 +2444,18 @@ export class StmtsEmitter {
 			if (idxLocalInfo) {
 				const name = lhs[0].name;
 				const wType = this._rangeStoreWType(name, idxLocalInfo);
-				const idxGoType =
-					iterType?.kind === "untyped"
-						? { kind: "basic", name: "int" }
-						: iterType;
 				this._emitRangeAssignStore(
 					name,
 					idxLocalInfo,
 					(want = wType) => {
 						this.pushInstruction({ op: "local.get", index: idxTmp });
-						if (want === "i64") this.pushInstruction("i64.extend_i32_s");
+						if (cWType === "i32" && want === "i64") {
+							this.pushInstruction(
+								unsignedCount ? "i64.extend_i32_u" : "i64.extend_i32_s",
+							);
+						} else if (cWType === "i64" && want === "i32") {
+							this.pushInstruction("i32.wrap_i64");
+						}
 					},
 					idxGoType,
 				);
@@ -2445,8 +2473,12 @@ export class StmtsEmitter {
 
 			// Post: idx++
 			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction("i32.add");
+			this.pushInstruction(
+				wideCount
+					? { op: "i64.const", value: 1n }
+					: { op: "i32.const", value: 1 },
+			);
+			this.pushInstruction(`${cWType}.add`);
 			this.pushInstruction({ op: "local.set", index: idxTmp });
 
 			// Loop back
@@ -2458,8 +2490,8 @@ export class StmtsEmitter {
 			// End break
 			this.pushInstruction("end");
 
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(limitTmp, "i32");
+			this.releaseTemp(idxTmp, cWType);
+			this.releaseTemp(limitTmp, cWType);
 			restoreShadowed();
 			return;
 		}

@@ -5,8 +5,10 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
+	compileWasm,
 	runJs,
 	section,
 	test,
@@ -260,4 +262,222 @@ func main() {
 `,
 		"34\n",
 	);
+});
+
+section("Integer range over a 64-bit or unsigned count");
+
+test("range over a count of 2^32 or more runs to the break", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := (1 << 32) + 1
+	c := 0
+	for i := range n {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	last := -1
+	for i := range n {
+		last = i
+		if i == 5 {
+			break
+		}
+	}
+	fmt.Println(last)
+	var fs []func() int
+	for i := range n {
+		fs = append(fs, func() int { return i })
+		if i == 2 {
+			break
+		}
+	}
+	fmt.Println(len(fs), fs[0](), fs[2]())
+}
+`,
+		"3\n5\n3 0 2\n",
+	);
+});
+
+test("range over a negative or zero 64-bit count does not run", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	n := -(1 << 32)
+	z := 0
+	c := 0
+	for range n {
+		c++
+	}
+	for range z {
+		c++
+	}
+	for range int64(n) {
+		c++
+	}
+	fmt.Println(c)
+}
+`,
+		"0\n",
+	);
+});
+
+test("range over a uint32 or uint count at or above 2^31 runs to the break", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	u32 := uint32(1) << 31
+	var u uint = 1 << 40
+	c := 0
+	for i := range u32 {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	c = 0
+	for i := range u {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	var fs []func() uint32
+	for i := range u32 {
+		fs = append(fs, func() uint32 { return i })
+		if i == 1 {
+			break
+		}
+	}
+	fmt.Println(fs[0](), fs[1]())
+}
+`,
+		"3\n3\n0 1\n",
+	);
+});
+
+test("range over a uint64 or int64 count runs to the break on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	u64 := uint64(1) << 63
+	var i64 int64 = 1 << 40
+	c := 0
+	for i := range u64 {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	c = 0
+	for i := range i64 {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	var fs []func() uint64
+	for i := range u64 {
+		fs = append(fs, func() uint64 { return i })
+		if i == 1 {
+			break
+		}
+	}
+	fmt.Println(fs[0](), fs[1]())
+}
+`,
+		"3\n3\n0 1\n",
+	);
+});
+
+test("range over a small count still counts exactly", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var u8 uint8 = 4
+	var u32 uint32 = 3
+	n, sum := 5, 0
+	xs := []int{1, 2, 3}
+	for i := range n {
+		sum += i
+	}
+	for i := range u8 {
+		sum += int(i)
+	}
+	for i := range u32 {
+		sum += int(i)
+	}
+	for i := range len(xs) {
+		sum += i
+	}
+	for i := range 10 {
+		sum += i
+	}
+	fmt.Println(sum)
+}
+`,
+		"67\n",
+	);
+});
+
+test("range over len() or a small constant keeps the i32 loop", () => {
+	const { wat, errors } = compileWasm(
+		`package main
+
+func Main(xs []int) int {
+	s := 0
+	for i := range len(xs) {
+		s += i
+	}
+	for i := range 10 {
+		s += i
+	}
+	return s
+}
+`,
+		{ emitWat: true },
+	);
+	assert(errors.length === 0, "compiles");
+	assert(wat.includes("i32.ge_s"), "the i32 loop test is missing");
+	assert(!wat.includes("i64.ge_s"), "len()/constant range used an i64 loop");
+	assert(!wat.includes("i64.ge_u"), "len()/constant range used an i64 loop");
+});
+
+test("range over an unproven 64-bit count uses an i64 loop", () => {
+	const { wat, errors } = compileWasm(
+		`package main
+
+func Main(n int) int {
+	s := 0
+	for i := range n {
+		s += i
+	}
+	return s
+}
+`,
+		{ emitWat: true },
+	);
+	assert(errors.length === 0, "compiles");
+	assert(wat.includes("i64.ge_s"), "expected an i64 signed loop test");
 });
