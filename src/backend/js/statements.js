@@ -417,7 +417,7 @@ export const statementGenMethods = {
 				break;
 			}
 			case "ExprStmt":
-				this.line(`${this.genExpr(stmt.expr)};`);
+				this.line(this._exprStatement(this.genExpr(stmt.expr)));
 				break;
 			case "IfStmt":
 				if (stmt.init) {
@@ -895,8 +895,9 @@ export const statementGenMethods = {
 		const active = pairs.filter((p) => p.l !== "_");
 		if (active.length === 0) {
 			// Every right-hand side still runs, in order.
-			if (rhs.length === lhs.length) for (const r of rhs) this.line(`${r};`);
-			else if (rhs.length > 0) this.line(`${rhs[0]};`);
+			if (rhs.length === lhs.length)
+				for (const r of rhs) this.line(this._exprStatement(r));
+			else if (rhs.length > 0) this.line(this._exprStatement(rhs[0]));
 		} else if (lhs.length === 1) {
 			if (
 				stmt.op !== "=" &&
@@ -1409,6 +1410,12 @@ export const statementGenMethods = {
 			this.indented(() => this.genBlock(elseBody));
 			this.line("}");
 		}
+	},
+
+	// An expression statement that opens with `{` (an object literal, which is
+	// how a Go map literal is emitted) would parse as a block: parenthesise it.
+	_exprStatement(code) {
+		return code.startsWith("{") ? `(${code});` : `${code};`;
 	},
 
 	_rangeExprLimit(iterType, iteree) {
