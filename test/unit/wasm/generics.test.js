@@ -1743,6 +1743,55 @@ func main() {
 	});
 }
 
+for (const name of [
+	"append",
+	"new",
+	"copy",
+	"make",
+	"cap",
+	"panic",
+	"min",
+	"max",
+]) {
+	test(`main \`type ${name} int\` does not shadow the builtin in a linked package`, async () => {
+		const res = await compileHybridProject({
+			"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T {
+	t := make([]T, len(s), cap(s)+1)
+	copy(t, s)
+	return append(t, v)
+}
+
+func Plain(a, b int) int { return min(a, b) + max(a, b) }
+
+func Fresh() int { p := new(int); *p = 5; return *p }
+
+func Check(ok bool) {
+	if !ok {
+		panic("bad")
+	}
+}
+`,
+			"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+type ${name} int
+
+func main() {
+	var x ${name} = 7
+	util.Check(true)
+	println(len(util.Grow([]int{1}, 2)), util.Plain(1, 2), util.Fresh(), int(x))
+}
+`,
+		});
+		assertEqual(res.lines.join("\n"), "2 3 5 7");
+	});
+}
+
 const SHADOWS = [
 	["func append(x int) int { return x + 1 }", "append(1)", "2"],
 	["func new(x int) int { return x + 1 }", "new(1)", "2"],

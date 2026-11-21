@@ -1254,7 +1254,9 @@ export class Scope {
 // monomorphised program). Types and exported or instance-mangled (`$`)
 // declarations are shared, but a package's unexported `func`, `var` or
 // `const` is visible only while that package's files are being checked, so it
-// cannot shadow a predeclared builtin the other packages call.
+// cannot shadow a predeclared builtin the other packages call. The same holds
+// for an unexported type named like a builtin function (`type append int`);
+// other unexported types stay shared, as do `error`-like predeclared type names.
 export class PackageScope extends Scope {
 	constructor(parent = null) {
 		super(parent);
@@ -1264,13 +1266,18 @@ export class PackageScope extends Scope {
 		super._bind(name, kind, type, node, local);
 		this.objects.get(name).pkg = this.currentPackage;
 	}
+	// True when `name` is a predeclared builtin function (`append`, `len`), not
+	// a predeclared type such as `error`, which is bound as a builtin too.
+	_shadowsBuiltinFunc(name) {
+		return name !== "error" && this.parent?.lookup(name)?.kind === "builtin";
+	}
 	_hidden(name) {
 		const obj = this.objects.get(name);
 		return (
 			this.currentPackage != null &&
 			obj?.pkg != null &&
 			obj.pkg !== this.currentPackage &&
-			obj.kind !== "type" &&
+			(obj.kind !== "type" || this._shadowsBuiltinFunc(name)) &&
 			!name.includes("$") &&
 			!/^\p{Lu}/u.test(name)
 		);
