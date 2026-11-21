@@ -278,6 +278,52 @@ func main() {
 	);
 });
 
+test("comma-ok assertions to empty interfaces succeed for non-nil values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var x any = 1
+	v, ok := x.(B)
+	fmt.Println(v, ok)
+	w, ok2 := x.(interface{})
+	fmt.Println(w, ok2)
+	var n any
+	_, ok3 := n.(B)
+	_, ok4 := n.(interface{})
+	fmt.Println(ok3, ok4)
+}
+`,
+		"1 true\n1 true\nfalse false\n",
+	);
+});
+
+test("single-value assertions to empty interfaces succeed for non-nil values and panic on nil", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B interface{}
+
+func main() {
+	var x any = 1
+	v := x.(B)
+	w := x.(interface{})
+	fmt.Println(v, w)
+	var n any
+	defer func() { fmt.Println(recover() != nil) }()
+	_ = n.(B)
+}
+`,
+		"1 1\ntrue\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

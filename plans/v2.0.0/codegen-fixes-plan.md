@@ -157,7 +157,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-stmts.js` (`_emitTypeTest`)
   - Test: `test/unit/wasm/iface-assert.test.js`: F4.1, F4.2 (`interface{}` and chained `type C B`) → `1`; `case nil` and multi-type cases unchanged
   - Done when: Go's output on all targets
-- [ ] Task 4.2: Comma-ok and single-value assertions to `interface{}` and defined empty interfaces succeed for non-nil values and fail on `nil` (F4.3)
+- [x] Task 4.2: Comma-ok and single-value assertions to `interface{}` and defined empty interfaces succeed for non-nil values and fail on `nil` (F4.3)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`
   - Test: `test/unit/wasm/iface-assert.test.js`: F4.3 (`v, ok := x.(B)`, `v, ok := x.(interface{})` → `1 true`; `v := x.(B)`, `v := x.(interface{})` → `1`); `x.(B)` and `x.(interface{})` on a nil interface still panic / report `false`
   - Done when: Go's output on all targets
