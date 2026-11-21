@@ -1,7 +1,7 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
 import { constIntValue, realOfConst } from "./const-fold.js";
-import { exprText, operandKind } from "./operand-text.js";
+import { constValueText, exprText, operandKind } from "./operand-text.js";
 import { newLabelScope } from "./statements.js";
 import {
 	EXCLUDED_STDLIB_MEMBERS,
@@ -3331,7 +3331,7 @@ export const expressionCheckMethods = {
 				this.assertAssignable(base.key, kt, elem.key);
 				if (this._isDuplicateConst(seenKeys, elem.key, base.key, true))
 					this.err(
-						`duplicate key ${exprText(elem.key)} in map literal`,
+						`duplicate key ${constValueText(elem.key._const) ?? exprText(elem.key)} in map literal`,
 						elem.key,
 					);
 				this._markIfaceKey(base, elem.key, kt);
