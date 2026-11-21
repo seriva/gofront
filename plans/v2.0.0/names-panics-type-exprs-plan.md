@@ -161,7 +161,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/link/type-names.js` (`mangleCollidingTypes`), `src/compiler.js` (`pkgTarget` before `mangleLocalTypes`), `src/backend/shared/fmt-types.js` (`Name$$pkg` → `pkg.Name`)
   - Test: `shadowing.test.js`: F30 → `3 2` with `%T` `util.WeakMap`; `util` as `both` with `type Map int` → `3`; F2 → `5` on every target with `%T` `main.Map`; F2b → `[1] a`; a second package also declaring `WeakMap` (no `$$util$$util`); a local `type Map` still gets `__L<n>`; `type Array struct{}` rejection tests stay green
   - Done when: all pass; programs without such types emit the same JS
-- [ ] Task 1.4: Facade names escape strict-mode reserved words (L12)
+- [x] Task 1.4: Facade names escape strict-mode reserved words (L12)
   - Files: `src/backend/shared/member-names.js` (`JS_RESERVED`), `src/backend/js/names.js` (re-export), `src/backend/wasm/boundary.js` (`facadeName`, `genHandleStruct`, `outExpr`, `genIfaceFacade`, `genBothStruct`)
   - Test: `test/unit/wasm/boundary.test.js`: L12 → `true`; a `wasm` struct named `let` returned by an export and its method called from js main → Go's output; a method named `static` stays a passing control; `node scripts/check-layers.js` passes; `docs/go-compatibility.md` *Names that shadow JS globals* updated
   - Done when: all pass and `js-globals.test.js` passes unmodified

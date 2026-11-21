@@ -408,6 +408,15 @@ functions you call from JS.
 > method-less named types (`type String string`), aliases, DOM names (`type Element struct{…}`)
 > and every type in a `wasm` package emit no conflicting class and are accepted.
 
+A package-level type that Go allows but whose class would still shadow a built-in is
+renamed instead: a method-less named non-struct type in a `js` or `both` package
+(`type Map int`) and any type in a `wasm` package (`type WeakMap struct{ N int }`) is
+emitted as `Map$$main` / `WeakMap$$util` (the type name, `$$`, the package name). Go code,
+`%T` (`main.Map`, `util.WeakMap`) and error messages are unaffected; only hand-written
+JavaScript that reaches the type by name sees the suffix. A type named after a JavaScript
+reserved word (`let`, `yield`, `static`, …) gets the same `$` suffix the other names get, so a
+`wasm` struct called `let` is `let$` in the facade.
+
 Types declared inside a function are the exception: they can use these names freely
 (`type Map struct{ N int }` in `main` works in every target, and `%T` prints `main.Map`).
 
