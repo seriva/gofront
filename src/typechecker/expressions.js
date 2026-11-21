@@ -139,7 +139,7 @@ const BUILTIN_CHECK = {
 	delete: (s, _n, e, at, sc) => {
 		const mt = s._checkDeleteOperand(e, at[0], sc);
 		if (mt?.kind === "map" && e.args[1]) {
-			s.assertAssignable(mt.key, at[1], e.args[1]);
+			s.assertAssignable(mt.key, at[1], e.args[1], "argument to delete");
 			s._tagFloat32Const(s.resolveType(mt.key), at[1], e.args[1]);
 			s._markIfaceKey(mt, e.args[1], at[1]);
 		}
@@ -1352,7 +1352,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
-			this.assertAssignable(btu.key, indexType, expr.index);
+			this.assertAssignable(btu.key, indexType, expr.index, "map index");
 			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
@@ -2780,7 +2780,7 @@ export const expressionCheckMethods = {
 						{ kind: "slice", elem: fnType.params[paramIdx] },
 						this._deepUnderlying(argTypes[i]),
 						expr.args[i],
-						"argument",
+						`argument to ${exprText(expr.func)}`,
 					);
 				continue;
 			}
@@ -2793,7 +2793,7 @@ export const expressionCheckMethods = {
 				targetParam,
 				argTypes[i],
 				node,
-				expr._multiForward ? `argument to ${exprText(expr.func)}` : "argument",
+				`argument to ${exprText(expr.func)}`,
 				undefined,
 				!expr._isDeferCall,
 			);
@@ -3203,7 +3203,7 @@ export const expressionCheckMethods = {
 					fieldType,
 					vt,
 					elem,
-					"assignment",
+					"struct literal",
 					undefined,
 					true,
 				);
@@ -3229,7 +3229,7 @@ export const expressionCheckMethods = {
 						fieldType,
 						vt,
 						elem.value,
-						"assignment",
+						"struct literal",
 						undefined,
 						true,
 					);
@@ -3274,7 +3274,7 @@ export const expressionCheckMethods = {
 						base.elem,
 						vt,
 						elem.value,
-						"assignment",
+						"array or slice literal",
 						undefined,
 						true,
 					);
@@ -3285,7 +3285,7 @@ export const expressionCheckMethods = {
 					base.elem,
 					et,
 					elem,
-					"assignment",
+					"array or slice literal",
 					undefined,
 					true,
 				);
@@ -3328,7 +3328,7 @@ export const expressionCheckMethods = {
 				} else {
 					vt = this.checkExpr(elem.value, scope);
 				}
-				this.assertAssignable(base.key, kt, elem.key);
+				this.assertAssignable(base.key, kt, elem.key, "map literal");
 				if (this._isDuplicateConst(seenKeys, elem.key, base.key, true))
 					this.err(
 						`duplicate key ${constValueText(elem.key._const) ?? exprText(elem.key)} in map literal`,
@@ -3339,7 +3339,7 @@ export const expressionCheckMethods = {
 					base.value,
 					vt,
 					elem.value,
-					"assignment",
+					"map literal",
 					undefined,
 					true,
 				);

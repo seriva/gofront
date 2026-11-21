@@ -144,7 +144,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Files: `src/typechecker/assignability.js` (`_assignError` replacing `:877`, `:1145`, `:1352`–`:1409`, passing outer types through `_assertNestedAssignable` and `_checkArrayAssignable`), `src/typechecker/statements.js` (`:507`, `:962`), conformance reject fixtures asserting `Cannot assign`
   - Test: remove `// pending: assign-message-text` from `append_spread_mismatch`, `append_elem_struct`, `generic_over_struct_field_type`; update `numeric_int32_to_int64` and the other non-`identity_*`-restriction reject fixtures asserting `Cannot assign` to Go's wording so `conformance.test.js` stays green on this commit; `assignability.js:1139` keeps its documented `here: convert it explicitly` wording
   - Done when: `grep -rn 'Cannot assign' src/typechecker` returns only `assignability.js:1139`; `conformance.test.js` passes
-- [ ] Task 3.2: Every caller passes Go's context name (D3.4)
+- [x] Task 3.2: Every caller passes Go's context name (D3.4)
   - Files: `src/typechecker/expressions.js` (composite literals, calls, `delete`, map index), `src/typechecker/statements.js` (returns, range)
   - Test: remove `// pending: assign-message-text` from `nil_to_non_nilable_contexts`; a context table in `test/unit/types/checks.test.js` (one row per context: `variable declaration`, `assignment`, `return statement`, `argument to f`, `struct literal`, `map literal`, `array or slice literal`, `map index`, `range clause`)
   - Done when: Go's context on all targets

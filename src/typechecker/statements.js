@@ -228,7 +228,12 @@ export const statementCheckMethods = {
 		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return false;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
-		this.assertAssignable(resolvedBase.key, keyType, stmt.rhs[0].index);
+		this.assertAssignable(
+			resolvedBase.key,
+			keyType,
+			stmt.rhs[0].index,
+			"map index",
+		);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
@@ -288,7 +293,12 @@ export const statementCheckMethods = {
 		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return null;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
-		this.assertAssignable(resolvedBase.key, keyType, stmt.rhs[0].index);
+		this.assertAssignable(
+			resolvedBase.key,
+			keyType,
+			stmt.rhs[0].index,
+			"map index",
+		);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
