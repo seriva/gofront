@@ -137,7 +137,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Files: `src/typechecker/expressions.js` (`_checkCallExpr`, `_checkCallArgs`)
   - Test: reject fixtures `spread_non_variadic_func.go`, `spread_non_variadic_method.go`, `spread_non_variadic_func_value.go`, `spread_non_variadic_zero_param.go`, `spread_builtin_len.go`, `spread_type_conversion.go`
   - Done when: Go's message on all targets
-- [ ] Task 2.2: Extra arguments before a spread are counted on variadic calls and `append` (F2.3, F2.4)
+- [x] Task 2.2: Extra arguments before a spread are counted on variadic calls and `append` (F2.3, F2.4)
   - Files: `src/typechecker/expressions.js` (`_checkCallArgs`, `_checkAppendArgs`)
   - Test: reject fixtures `spread_extra_fixed_args.go` (`too many arguments in call to f`), `spread_append_extra_args.go` (`too many arguments in call to append`); `append(s, t...)` and `fmt.Println(xs...)` controls in `test/unit/types/checks.test.js`
   - Done when: Go's message on all targets, no wasm invalid module

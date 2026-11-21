@@ -112,6 +112,7 @@ const BUILTIN_CHECK = {
 	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
 	append: (s, _n, e, at, sc) => {
 		const st = at[0] ?? ANY;
+		if (s._rejectSpreadCount(2, e, "append")) return st;
 		if (isArray(st)) {
 			s.err(`cannot append to array (type ${typeStr(st)})`, e);
 			return st;
@@ -2793,8 +2794,22 @@ export const expressionCheckMethods = {
 		return true;
 	},
 
+	// `f(a, xs...)` fills every parameter, the variadic one with `xs`: any
+	// other count is an error. Reports and returns true when it is wrong.
+	_rejectSpreadCount(wanted, expr, callee) {
+		const given = expr.args.length;
+		if (given === wanted || !expr.args.some((a) => a._spread)) return false;
+		const what = given > wanted ? "too many" : "not enough";
+		this.err(`${what} arguments in call to ${callee}`, expr);
+		return true;
+	},
+
 	_checkCallArgs(fnType, argTypes, expr, scope = null) {
 		if (this._rejectSpreadCall(fnType, expr)) return;
+		if (
+			this._rejectSpreadCount(fnType.params.length, expr, exprText(expr.func))
+		)
+			return;
 		this._checkArgCount(fnType, argTypes, expr);
 		this._checkMultiForwardVariadic(fnType, expr);
 		const maxLen = fnType.variadic

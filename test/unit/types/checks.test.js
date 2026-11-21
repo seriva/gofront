@@ -2392,6 +2392,35 @@ test("a mismatched value reports its operand and kind", () => {
 	);
 });
 
+section("Spread arguments");
+
+test("spreading into a variadic call, append, and fmt.Println still works", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func sum(a int, xs ...int) int {
+	t := a
+	for _, x := range xs {
+		t += x
+	}
+	return t
+}
+
+func main() {
+	xs := []int{2, 3}
+	args := []any{"a", 1}
+	fmt.Println(sum(1, xs...), sum(1))
+	fmt.Println(args...)
+	fmt.Println(append([]int{1}, xs...))
+	fmt.Println(append([]byte("a"), "bc"...))
+}
+`,
+		"6 1\na 1\n[1 2 3]\n[97 98 99]\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
