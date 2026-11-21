@@ -6,6 +6,6 @@ func main() {
 	case string:
 		_ = x
 	default:
-		_ = x + 1 // ERROR "operator + not defined on x (variable of type any)"
+		_ = x + 1 // ERROR "x + 1 (mismatched types any and untyped int)"
 	}
 }

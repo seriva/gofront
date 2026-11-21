@@ -356,7 +356,10 @@ func main() {
 	f := float64(z)
 	_ = f
 }`);
-	assertErrorContains(errors, "use real() or imag()");
+	assertErrorContains(
+		errors,
+		"cannot convert z (variable of type complex128) to type float64",
+	);
 });
 
 // ── Phase 8 — Compound assignment ───────────────────────────

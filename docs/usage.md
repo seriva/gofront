@@ -56,7 +56,7 @@ listed as skipped, and the run exits with status 1 when anything failed:
 
 ```
 FAIL pkg/a
-Type error in x.go at line 2:13: Cannot assign untyped string to int
+Type error in x.go at line 2:13: cannot use "a" (untyped string constant) as int value in variable declaration
   ...
 gofront: pkg/c — skipped (pkg/a failed)
 gofront: pkg/ok — OK (8ms)

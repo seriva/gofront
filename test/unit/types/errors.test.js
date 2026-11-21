@@ -43,7 +43,7 @@ func main() { id(1, 2, 3) }`,
 		"return type mismatch",
 		`package main
 func getNum() int { return "oops" }`,
-		"Cannot assign",
+		'cannot use "oops" (untyped string constant) as int value in return statement',
 	],
 	[
 		"field access on unknown type",
@@ -113,7 +113,7 @@ func main() {
 func main() {
   var x int = "not an int"
 }`,
-		"Cannot assign",
+		'cannot use "not an int" (untyped string constant) as int value in variable declaration',
 	],
 	[
 		"wrong return type from function",
@@ -121,7 +121,7 @@ func main() {
 func name() string {
   return 42
 }`,
-		"Cannot assign",
+		"cannot use 42 (untyped int constant) as string value in return statement",
 	],
 	[
 		"calling result of non-function expression",
@@ -173,14 +173,14 @@ func main() {
 		`package main
 func double(n int) int { return n * 2 }
 func main() { double("hello") }`,
-		"Cannot assign",
+		'cannot use "hello" (untyped string constant) as int value in argument to double',
 	],
 	[
 		"wrong field type in struct literal",
 		`package main
 type Point struct { X int; Y int }
 func main() { _ := Point{X: "not an int", Y: 2} }`,
-		"Cannot assign",
+		'cannot use "not an int" (untyped string constant) as int value in struct literal',
 	],
 	[
 		"undefined type in var declaration",
@@ -222,7 +222,7 @@ func main() {
   b := Box{}
   b.Count = "five"
 }`,
-		"Cannot assign",
+		'cannot use "five" (untyped string constant) as int value in assignment',
 	],
 	[
 		"undefined type in struct field definition",
@@ -886,8 +886,14 @@ func main() {
 	_ = v
 	_ = ok
 }`);
-	assertErrorContains(c1.errors, "Cannot assign int to string");
-	assertErrorContains(c1.errors, "Cannot assign bool to int");
+	assertErrorContains(
+		c1.errors,
+		'cannot use m["k"] (value of type int) as string value in assignment',
+	);
+	assertErrorContains(
+		c1.errors,
+		'cannot use m["k"] (value of type bool) as int value in assignment',
+	);
 
 	const c2 = compile(`package main
 func main() {

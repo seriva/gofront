@@ -2,7 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { constIntValue, floatConstOf, realOfConst } from "./const-fold.js";
-import { exprText, operandKind } from "./operand-text.js";
+import { constValueText, exprText, operandKind } from "./operand-text.js";
 import { operandKindOf, operatorDefined } from "./operators.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
@@ -52,10 +52,6 @@ const TYPE_LITERAL_KINDS = new Set([
 
 // Basic types that are not number, string or bool types: JS-dynamic `any`,
 // the types of `nil` and `void`, and the `comparable` constraint.
-// Types assignable only when identical (or one side is unnamed over the
-// other's underlying type): their mismatch reads as Go's `cannot use`.
-const COMPOSITE_KINDS = new Set(["pointer", "array", "slice", "map", "func"]);
-
 const NIL_LOOSE_BASICS = new Set(["any", "nil", "void", "comparable"]);
 // Composite kinds that no untyped constant converts to.
 const CONST_REJECTING_KINDS = new Set([
@@ -82,26 +78,6 @@ const CMP_KIND_NAMES = new Set([
 ]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
-
-// A decimal beyond float64 the way Go prints it (`1e+400`), from its exact
-// `{ n, e }` form (n * 10^-e).
-function hugeText(r) {
-	if (!r) return null;
-	const abs = (r.n < 0n ? -r.n : r.n).toString();
-	const digits = abs.replace(/0+$/, "") || "0";
-	const exp = abs.length - 1 - r.e;
-	const mantissa =
-		digits.length > 1 ? `${digits[0]}.${digits.slice(1, 6)}` : digits;
-	return `${r.n < 0n ? "-" : ""}${mantissa}e+${exp}`;
-}
-
-// How Go prints the value of an untyped numeric constant after its text
-// (`0.5`, `(0 + 2i)`), or null when the value is not known.
-function constValueText(v) {
-	if (v?.k === "FLOAT" && !Number.isFinite(v.v)) return hugeText(v.r);
-	if (v?.k === "INT" || v?.k === "FLOAT") return String(v.v);
-	return v?.k === "COMPLEX" ? `(${v.v.re} + ${v.v.im}i)` : null;
-}
 
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
 const UNTYPED_COMPAT = {
@@ -289,16 +265,11 @@ export const assignabilityMethods = {
 	},
 
 	// `1.5 (untyped float constant)`, `half (untyped float constant 0.5)`: Go
-	// adds the value when the operand's text is not the value itself.
+	// adds the value when the operand's text is not the value itself (see
+	// `operandKind`).
 	_untypedConstText(c, cNode) {
 		const base = c.rune ? "rune" : c.base === "complex128" ? "complex" : c.base;
-		const kind = operandKind(cNode, base, true);
-		const text = exprText(cNode);
-		const v = cNode?._const;
-		const value = constValueText(v ?? cNode?._cconst);
-		return value === null || value === text
-			? `${text} (${kind})`
-			: `${text} (${kind} ${value})`;
+		return `${exprText(cNode)} (${operandKind(cNode, base, true)})`;
 	},
 
 	// An operator on a type parameter needs every type in its constraint's
@@ -623,13 +594,35 @@ export const assignabilityMethods = {
 		);
 	},
 
-	// `v + 1` with `v` a Go `any`: the left operand is reported first.
+	// `v + 1` with `v` a Go `any`: the left operand is reported first, in
+	// Go's words for the operator: a shift names its operand or count, an
+	// ordering operator names `interface`, two operands of one type (or a
+	// JS-dynamic one, which adapts to either side) name the operator, and any
+	// other pair is a mismatch.
 	_checkDeclaredAnyBinary(op, lt, rt, node) {
 		if (op === "==" || op === "!=") return null;
-		return (
-			this._checkDeclaredAnyOperator(op, lt, node.left) ??
-			this._checkDeclaredAnyOperator(op, rt, node.right)
-		);
+		const leftAny = anyKind(lt) === "go";
+		if (!leftAny && anyKind(rt) !== "go") return null;
+		const [bad, type] = leftAny ? [node.left, lt] : [node.right, rt];
+		const kind = `${exprText(bad)} (${operandKind(bad, typeStr(type))})`;
+		let what;
+		if (op === "<<" || op === ">>")
+			what = `${leftAny ? "shifted operand" : "shift count"} ${kind} must be integer`;
+		else if (CMP_OPS.has(op))
+			what = `${exprText(node)} (operator ${op} not defined on interface)`;
+		else if (identical(lt, rt) || anyKind(leftAny ? rt : lt) === "dynamic")
+			what = `operator ${op} not defined on ${kind}`;
+		else
+			what = `${exprText(node)} (mismatched types ${this._mismatchTypeStr(lt)} and ${this._mismatchTypeStr(rt)})`;
+		return this.err(`invalid operation: ${what}`, bad);
+	},
+
+	// An untyped string or bool meeting an interface operand has already taken
+	// its default type in Go's message (`any and string`); a number stays untyped.
+	_mismatchTypeStr(t) {
+		if (t?.kind === "untyped" && (t.base === "string" || t.base === "bool"))
+			return t.base;
+		return this._operandTypeStr(t);
 	},
 
 	// The comparison rule (spec *Comparison operators*) for every operand
@@ -1066,7 +1059,9 @@ export const assignabilityMethods = {
 		const at = node ?? this._forwardedCall;
 		if (this._checkIfaceToConcrete(target, source, at, ctx, operand ?? at))
 			return;
-		if (this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx))
+		if (
+			this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx, at)
+		)
 			return;
 		const mismatch = () =>
 			this._assertAssignableTypeMismatch(
@@ -1089,7 +1084,8 @@ export const assignabilityMethods = {
 		if (this._checkNumericCoercion(target, source, at, ctx, operand ?? at))
 			return;
 		if (this._checkArrayAssignable(target, source, at, mismatch)) return;
-		if (this._checkTypedArrayAssignable(target, source, at)) return;
+		if (this._checkTypedArrayAssignable(target, source, at, operand ?? at, ctx))
+			return;
 		if (this._checkFuncAssignable(target, source, mismatch)) return;
 		if (!identical(target, source)) mismatch();
 	},
@@ -1272,9 +1268,12 @@ export const assignabilityMethods = {
 			!this._isMethodIfaceTarget(targetType)
 		)
 			return false;
-		this.err(
-			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}: need type assertion`,
+		this._convertError(
 			expr,
+			operand,
+			srcType,
+			targetType,
+			": need type assertion",
 		);
 		return true;
 	},
@@ -1296,16 +1295,19 @@ export const assignabilityMethods = {
 	// `nil` only has a value in a pointer, slice, map, func, chan, interface or
 	// type-parameter type. JS-dynamic `any` and the other kinds the checker
 	// models loosely (`shared`, `simd`) keep accepting it.
-	_checkNilTarget(target, node, ctx) {
+	_checkNilTarget(target, at, ctx) {
 		if (this._isNilless(target))
-			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, node);
+			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, at);
 	},
 
-	_assertAssignableEarlyReturn(target, source, node, ctx) {
-		if (isNil(source)) this._checkNilTarget(target, node, ctx);
+	// `node` is the operand whose value flows in; `at` is where an error is
+	// reported (an operand with no position of its own, like a range value,
+	// still reports at the statement).
+	_assertAssignableEarlyReturn(target, source, node, ctx, at = node) {
+		if (isNil(source)) this._checkNilTarget(target, at, ctx);
 		if (target?.kind === "typeParam" || source?.kind === "typeParam") {
 			if (!isNil(source) && !this._typeParamAssignable(target, source, node))
-				this._reportTypeParamAssign(target, source, node, ctx);
+				this._reportTypeParamAssign(target, source, node, ctx, at);
 			return true;
 		}
 		return isAny(target) || isAny(source) || isNil(source);
@@ -1388,7 +1390,7 @@ export const assignabilityMethods = {
 		return u?.kind === "interface" ? u : null;
 	},
 
-	_reportTypeParamAssign(target, source, node, ctx) {
+	_reportTypeParamAssign(target, source, node, ctx, at = node) {
 		let what;
 		if (source.kind === "untyped") {
 			const cmp = node?.kind === "BinaryExpr" && CMP_OPS.has(node.op);
@@ -1402,7 +1404,22 @@ export const assignabilityMethods = {
 		}
 		this.err(
 			`cannot use ${exprText(node)} (${what}) as ${typeStr(target)} value in ${ctx}`,
+			at,
+		);
+	},
+
+	// The one report of a value that is not assignable, as Go words it: `cannot
+	// use x (variable of type T) as U value in <ctx>`. `operand` is the
+	// expression whose value flows in (a forwarded call result has the call);
+	// `node` is where the error is reported.
+	_assignError(source, target, operand, ctx, node, hint) {
+		const what = isUntyped(source)
+			? operandKind(operand, source.base, true)
+			: operandKind(operand, typeStr(source), false);
+		this.err(
+			`cannot use ${exprText(operand)} (${what}) as ${typeStr(target)} value in ${ctx}`,
 			node,
+			hint,
 		);
 	},
 
@@ -1451,16 +1468,11 @@ export const assignabilityMethods = {
 			);
 			return;
 		}
-		if (COMPOSITE_KINDS.has(tBase?.kind) && COMPOSITE_KINDS.has(sBase?.kind)) {
-			this.err(
-				`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source), false)}) as ${typeStr(target)} value in ${ctx}`,
-				node,
-				this._seqToSliceHint(source, tBase, node),
-			);
-			return;
-		}
-		this.err(
-			`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
+		this._assignError(
+			source,
+			target,
+			operand ?? node,
+			ctx,
 			node,
 			this._seqToSliceHint(source, tBase, node),
 		);
@@ -1634,10 +1646,7 @@ export const assignabilityMethods = {
 			!this._isFloatToInt(target, source)
 		)
 			return false;
-		this.err(
-			`cannot use ${exprText(operand)} (${operandKind(operand, typeStr(source))}) as ${typeStr(target)} value in ${ctx}`,
-			node,
-		);
+		this._assignError(source, target, operand, ctx, node);
 		return true;
 	},
 
@@ -1680,7 +1689,7 @@ export const assignabilityMethods = {
 		return false;
 	},
 
-	_checkTypedArrayAssignable(target, source, node) {
+	_checkTypedArrayAssignable(target, source, node, operand, ctx) {
 		const isTa = (t) => t?.underlying?._isTypedArray || t?._isTypedArray;
 		const getSlice = (t) =>
 			t?.kind === "slice"
@@ -1700,7 +1709,7 @@ export const assignabilityMethods = {
 			const slice = targetSlice ?? sourceSlice;
 			if (isTypedArraySlice(slice) && identical(taElem, slice.elem))
 				return true;
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			this._assignError(source, target, operand, ctx, node);
 			return true;
 		}
 
@@ -1708,7 +1717,7 @@ export const assignabilityMethods = {
 			const tElem = target.underlying?._elemType ?? target._elemType;
 			const sElem = source.underlying?._elemType ?? source._elemType;
 			if (identical(tElem, sElem)) return true;
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			this._assignError(source, target, operand, ctx, node);
 			return true;
 		}
 

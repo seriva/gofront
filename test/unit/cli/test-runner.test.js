@@ -675,13 +675,16 @@ func TestInvalid(t *testing.T) {
 		async (dir) => {
 			assertThrows(
 				() => compilePackageTests(dir),
-				"Cannot assign untyped string to int",
+				'cannot use "type mismatch" (untyped string constant) as int value in variable declaration',
 			);
 
 			const result = await runTests(dir, { captureOutput: true });
 			assertEqual(result.exitCode, 1);
 			assertContains(result.stderr, "[build failed]");
-			assertContains(result.stderr, "Cannot assign untyped string to int");
+			assertContains(
+				result.stderr,
+				'cannot use "type mismatch" (untyped string constant) as int value in variable declaration',
+			);
 		},
 	);
 });

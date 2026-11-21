@@ -223,7 +223,10 @@ test("custom .d.ts interface method — invalid field caught", () => {
 test("type alias from .d.ts", () => {
 	// type_alias_test.go: `var n int = s` where s is MyString (=string) → type error
 	const { errors } = compileFile(join(FIXTURES, "type_alias_test.go"));
-	assertErrorContains(errors, "Cannot assign");
+	assertErrorContains(
+		errors,
+		"cannot use s (variable of type string) as int value in variable declaration",
+	);
 });
 
 test("http_client.d.ts — valid fetch call compiles", () => {

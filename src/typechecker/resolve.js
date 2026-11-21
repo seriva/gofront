@@ -3,7 +3,7 @@
 
 import { parseJsonTag } from "../parser/struct-tag.js";
 import { foldConstExpr } from "./const-fold.js";
-import { exprText, operandKind } from "./operand-text.js";
+import { exprText, operandKind, typeNodeText } from "./operand-text.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
@@ -789,6 +789,7 @@ export const resolveMethods = {
 			if (union) this._checkApproxTerms(union, scope);
 		if (node.unionConstraint) {
 			result.unionConstraint = node.unionConstraint;
+			result._unionText = typeNodeText(node.unionConstraint);
 			result._unionScope = scope;
 		}
 		// A further union element is its own type set, intersected with the rest.
@@ -797,6 +798,7 @@ export const resolveMethods = {
 				kind: "interface",
 				methods: new Map(),
 				unionConstraint: union,
+				_unionText: typeNodeText(union),
 				_unionScope: scope,
 			});
 		}

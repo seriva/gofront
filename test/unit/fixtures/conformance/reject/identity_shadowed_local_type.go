@@ -7,7 +7,7 @@ func main() {
 	{
 		type T struct{ B string }
 		var y T
-		x = y // ERROR "Cannot assign"
+		x = y // ERROR ") as T value in assignment"
 	}
 	_ = x
 }

@@ -1,4 +1,3 @@
-// pending: operator-message-text
 package main
 
 type A struct{ X int }

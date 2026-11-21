@@ -681,6 +681,78 @@ export function defaultType(t) {
 	}
 }
 
+// Unnamed struct and interface types print in full, spelled as `go/types`
+// does (`struct{X int; Y string}`, `interface{M() int}`, `interface{~int |
+// ~float64}`). A literal met again while it is being printed prints `{…}`.
+const printing = new Set();
+
+function literalTypeStr(t) {
+	if (printing.has(t)) return `${t.kind}{…}`;
+	printing.add(t);
+	try {
+		const parts = t.kind === "struct" ? structParts(t) : interfaceParts(t);
+		return `${t.kind}{${parts.join("; ")}}`;
+	} finally {
+		printing.delete(t);
+	}
+}
+
+function structParts(t) {
+	const fields =
+		t._structFields ??
+		[...t.fields].map(([name, type]) => ({ names: [name], type }));
+	return fields.flatMap((f) => {
+		const tag = f.tag ? ` ${JSON.stringify(f.tag)}` : "";
+		if (f.embedded || !f.names?.length) return [`${typeStr(f.type)}${tag}`];
+		return f.names.map((name) => `${name} ${typeStr(f.type)}${tag}`);
+	});
+}
+
+function interfaceParts(t) {
+	const methods = [...t.methods].map(
+		([name, m]) => `${name}${signatureStr(m)}`,
+	);
+	return [
+		...methods,
+		...(t._comparable ? ["comparable"] : []),
+		...unionParts(t),
+	];
+}
+
+// The type-set elements of an interface: its own union, then each embedded
+// constraint's, one `; `-separated element apiece (`~int | ~string`).
+function unionParts(t) {
+	const terms = t.unionConstraint?.terms ?? [];
+	// Terms the checker substituted are types; the rest keep the text the
+	// resolver recorded from their source.
+	const own =
+		terms.length > 0 && terms.every((term) => term.resolved)
+			? terms
+					.map((term) => `${term.approx ? "~" : ""}${typeStr(term.resolved)}`)
+					.join(" | ")
+			: t._unionText;
+	return [
+		...(own ? [own] : []),
+		...(t._typeSetEmbeds ?? []).flatMap(unionParts),
+	];
+}
+
+// `(int, string) bool`: a method's parameters and results without `func`;
+// a `void` result is not written.
+function signatureStr(f) {
+	const params = f.params.map((p, i) =>
+		f.variadic && i === f.params.length - 1 ? `...${typeStr(p)}` : typeStr(p),
+	);
+	const results = f.returns.filter((r) => !isVoid(r));
+	const ret =
+		results.length === 0
+			? ""
+			: results.length === 1
+				? ` ${typeStr(results[0])}`
+				: ` (${results.map(typeStr).join(", ")})`;
+	return `(${params.join(", ")})${ret}`;
+}
+
 export function typeStr(t) {
 	if (!t) return "void";
 	if (t.kind === "basic" && t.alias) return t.alias;
@@ -700,9 +772,9 @@ export function typeStr(t) {
 		case "struct":
 			return t.typeArgs && t.typeArgs.length > 0
 				? `${t.name || "struct"}[${t.typeArgs.map(typeStr).join(", ")}]`
-				: t.name || "struct{...}";
+				: t.name || literalTypeStr(t);
 		case "interface":
-			return t.name || "interface{...}";
+			return t.name || literalTypeStr(t);
 		case "namespace":
 			return t.name || "namespace{...}";
 		case "func": {

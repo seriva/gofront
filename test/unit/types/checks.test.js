@@ -1,6 +1,7 @@
 // GoFront test suite — type checks, type switch, interfaces
 
 import { fileURLToPath } from "node:url";
+import { exprText } from "../../../src/typechecker/operand-text.js";
 import {
 	assertAllTargetsOutput,
 	assertEqual,
@@ -10,6 +11,8 @@ import {
 	assertWasmProgramOutput,
 	compile,
 	compileWasm,
+	Lexer,
+	Parser,
 	runJs,
 	section,
 	summarize,
@@ -335,13 +338,19 @@ test("passing string to uint param is a type error", () => {
 	const { errors } = compile(`package main
 func f(n uint) { console.log(n) }
 func main() { f("oops") }`);
-	assertErrorContains(errors, "Cannot assign untyped string to uint");
+	assertErrorContains(
+		errors,
+		'cannot use "oops" (untyped string constant) as uint value in argument to f',
+	);
 });
 
 test("uint return type mismatch caught", () => {
 	const { errors } = compile(`package main
 func f() uint { return "bad" }`);
-	assertErrorContains(errors, "Cannot assign untyped string to uint");
+	assertErrorContains(
+		errors,
+		'cannot use "bad" (untyped string constant) as uint value in return statement',
+	);
 });
 
 test("uintptr accepted as type annotation", () => {
@@ -572,7 +581,10 @@ func main() {
   var m Mode = 3
   _ = m
 }`);
-	assertErrorContains(errors, "Cannot assign");
+	assertErrorContains(
+		errors,
+		"cannot use 3 (untyped int constant) as Mode value in variable declaration",
+	);
 });
 
 const interfaceMismatchCases = [
@@ -1069,10 +1081,7 @@ func main() {
   _ = x + 1
 }`);
 	assertEqual(errors.length, 1);
-	assertErrorContains(
-		errors,
-		"operator + not defined on x (variable of type any)",
-	);
+	assertErrorContains(errors, "x + 1 (mismatched types any and untyped int)");
 });
 
 test("function literal assignable to named function type", () => {
@@ -2027,6 +2036,360 @@ func main() {
 			assertEqual(errors.length, 1);
 		}
 	}
+});
+
+section("Operand text");
+
+// The first expression of `_ = <src>` (or its first call argument for `arg`).
+function parsedOperand(src, arg = false) {
+	const code = `package main\nfunc main() {\n\t_ = ${src}\n}\n`;
+	const ast = new Parser(
+		new Lexer(code, "m.go").tokenize(),
+		"m.go",
+		code,
+	).parse();
+	const rhs = ast.decls[0].body.stmts[0].rhs[0];
+	return arg ? rhs.args[0] : rhs;
+}
+
+const operandTextCases = [
+	["[2]int{1, 2}", "[2]int{…}"],
+	["[2]int{1, 2}[0]", "[2]int{…}[0]"],
+	["P{}", "P{}"],
+	["P{}.X", "P{}.X"],
+	["&P{X: 1}", "&P{…}"],
+	["[]string{}", "[]string{}"],
+	['map[string][]int{"a": nil}', "map[string][]int{…}"],
+	[
+		'struct{ X int; Y, Z string }{1, "a", "b"}',
+		"struct{X int; Y, Z string}{…}",
+	],
+	["pkg.T{}", "pkg.T{}"],
+	["Box[int]{V: 1}", "Box[int]{…}"],
+	["i.(P)", "i.(P)"],
+	["i.(P).X", "i.(P).X"],
+	["i.(*P)", "i.(*P)"],
+	["i.(map[string]int)", "i.(map[string]int)"],
+	["float64(x)", "float64(x)"],
+	["[]byte(s)", "[]byte(s)"],
+	["struct{ E }(a)", "struct{E}(a)"],
+	["interface{ M(int) string }(v)", "interface{M(int) string}(v)"],
+	["xs[1:]", "xs[1:]"],
+	["xs[:2]", "xs[:2]"],
+	["xs[:]", "xs[:]"],
+	["xs[a:b:c]", "xs[a:b:c]"],
+	["xs[1:][0]", "xs[1:][0]"],
+	["func() {}", "(func() literal)"],
+	[
+		"func(a, b int, s ...string) (int, error) { return 0, nil }",
+		"(func(a, b int, s ...string) (int, error) literal)",
+	],
+	[
+		"func(int, string) bool { return true }",
+		"(func(int, string) bool literal)",
+	],
+	[
+		"func() (n int, err error) { return }",
+		"(func() (n int, err error) literal)",
+	],
+	["f[int]", "f[int]"],
+	["f[int, []string]", "f[int, []string]"],
+	["pkg.F[int]", "pkg.F[int]"],
+	["await f()", "await f()"],
+	["f(P{}, i.(T))", "f(P{}, i.(T))"],
+];
+
+for (const [src, want] of operandTextCases)
+	test(`operand text of ${src}`, () => {
+		assertEqual(exprText(parsedOperand(src)), want);
+	});
+
+test("operand text of a type argument and of every type form", () => {
+	const arg = (src) => exprText(parsedOperand(src, true));
+	assertEqual(arg("make(map[string]int)"), "map[string]int");
+	assertEqual(arg("make([]*P, 3)"), "[]*P");
+	assertEqual(arg("make([3]int)"), "[3]int");
+	assertEqual(arg("make(Box[int])"), "Box[int]");
+	const text = (src) => exprText(parsedOperand(src));
+	assertEqual(text("[...]int{1}"), "[...]int{…}");
+	assertEqual(text("[]func(int) string{}"), "[]func(int) string{}");
+	assertEqual(text("[]func(){}"), "[]func(){}");
+	assertEqual(
+		text("[]interface{ ~int | ~float64 }{}"),
+		"[]interface{~int | ~float64}{}",
+	);
+	assertEqual(
+		text("[]interface{ Reader; M() }{}"),
+		"[]interface{Reader; M()}{}",
+	);
+	assertEqual(text("[]struct{}{}"), "[]struct{}{}");
+});
+
+test("no operand kind of the table prints as the expression fallback", () => {
+	for (const [src] of operandTextCases)
+		assertEqual(exprText(parsedOperand(src)).includes("expression"), false);
+});
+
+section("Constant operand kinds");
+
+// Every target prints a constant operand with its value, as Go does.
+const constantKindCases = [
+	[
+		"a typed constant's address",
+		"const k float64 = 2\n_ = &k",
+		"cannot take address of k (constant 2 of type float64)",
+	],
+	[
+		"an untyped float literal as a len argument",
+		"_ = len(1e3)",
+		"invalid argument: 1e3 (untyped float constant 1000) for built-in len",
+	],
+	[
+		"a folded untyped constant statement",
+		"1 + 2",
+		"1 + 2 (untyped int constant 3) is not used",
+	],
+	[
+		"a typed constant conversion statement",
+		"float64(1)",
+		"float64(1) (constant 1 of type float64) is not used",
+	],
+	[
+		"a typed constant statement",
+		"const k float64 = 2\nk",
+		"k (constant 2 of type float64) is not used",
+	],
+	[
+		"a named untyped constant statement",
+		"const half = 0.5\nhalf",
+		"half (untyped float constant 0.5) is not used",
+	],
+	[
+		"a non-constant untyped bool statement",
+		"x := 1\nx == 1",
+		"x == 1 (untyped bool value) is not used",
+	],
+	[
+		"a variable statement",
+		"x := 1.5\nx",
+		"x (variable of type float64) is not used",
+	],
+	[
+		"a typed complex128 constant's address",
+		"const c complex128 = 1 + 2i\n_ = &c",
+		"cannot take address of c (constant (1 + 2i) of type complex128)",
+	],
+	[
+		"a typed complex64 constant's address",
+		"const c complex64 = 1 + 2i\n_ = &c",
+		"cannot take address of c (constant (1 + 2i) of type complex64)",
+	],
+	[
+		"a typed complex constant ranged over",
+		"const c complex128 = 1 + 2i\nfor range c {}",
+		"cannot range over c (constant (1 + 2i) of type complex128)",
+	],
+	[
+		"an untyped rune constant's length",
+		"const r = 'a'\n_ = len(r)",
+		"invalid argument: r (untyped rune constant 97) for built-in len",
+	],
+	[
+		"an untyped rune constant as a string case",
+		"const r = 'a'\nswitch \"a\" {\ncase r:\n}",
+		"cannot convert r (untyped rune constant 97) to type string",
+	],
+	[
+		"an untyped rune constant ranged over with two variables",
+		"const r = 'a'\nfor i, j := range r {\n_, _ = i, j\n}",
+		"range over r (untyped rune constant 97) permits only one iteration variable",
+	],
+	[
+		"a non-constant untyped bool converted",
+		"x := 1\n_ = int(x == 1)",
+		"cannot convert x == 1 (untyped bool value) to type int",
+	],
+	[
+		"a non-constant untyped bool ranged over",
+		"x := 1\nfor range x == 1 {}",
+		"cannot range over x == 1 (untyped bool value)",
+	],
+	[
+		"a non-constant shift as a len argument",
+		"s := uint(1)\n_ = len(1 << s)",
+		"invalid argument: 1 << s (untyped int value) for built-in len",
+	],
+	[
+		"a non-constant shift converted to bool",
+		"s := uint(1)\n_ = bool(1 << s)",
+		"cannot convert 1 << s (untyped int value) to type bool",
+	],
+	[
+		"a non-constant untyped bool as a switch case",
+		"x := 1\nswitch 1 {\ncase x == 1:\n}",
+		"(untyped bool value)",
+	],
+	[
+		"a parenthesized pointer conversion statement",
+		"var x int\n(*int)(&x)",
+		"(*int)(&x) (value of type *int) is not used",
+	],
+	[
+		"a struct conversion callee drops tags",
+		'var a struct{ X int }\nstruct{ X int `json:"x"` }(a)',
+		"struct{X int}(a)",
+	],
+	[
+		"a struct literal selector drops tags",
+		'_ = &struct{ X int `json:"x"` }{1}.X',
+		"cannot take address of struct{X int}{…}.X (value of type int)",
+	],
+];
+
+for (const [name, body, want] of constantKindCases)
+	test(`constant operand kind: ${name}`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\nfunc main() {\n${body}\n}`, {
+				target,
+			});
+			assertErrorContains(errors, want);
+		}
+	});
+
+test("a constant statement names the value of a string constant", () => {
+	const { errors } = compile(
+		'package main\nfunc main() {\nconst s = "a"\ns\n}',
+	);
+	assertErrorContains(errors, 's (untyped string constant "a") is not used');
+});
+
+section("Conversion errors name the operand");
+
+const convertErrorCases = [
+	[
+		"a complex variable to an integer",
+		"c := complex(1, 2)\n_ = int(c)",
+		"cannot convert c (variable of type complex128) to type int",
+	],
+	[
+		"a typed complex constant to an integer",
+		"const c complex128 = 1 + 2i\n_ = int(c)",
+		"cannot convert c (constant (1 + 2i) of type complex128) to type int",
+	],
+	["nil to an integer", "_ = int(nil)", "cannot convert nil to type int"],
+	[
+		"a string variable to a slice of ints",
+		"var s string\n_ = []int(s)",
+		"cannot convert s (variable of type string) to type []int",
+	],
+	[
+		"a typed constant to a string slice",
+		"const k float64 = 2\n_ = []string(k)",
+		"cannot convert k (constant 2 of type float64) to type []string",
+	],
+	[
+		"an untyped float constant to an integer",
+		"_ = int(1.5)",
+		"cannot convert 1.5 (untyped float constant) to type int (truncated)",
+	],
+];
+
+for (const [name, body, want] of convertErrorCases)
+	test(`conversion error: ${name}`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\nfunc main() {\n${body}\n}`, {
+				target,
+			});
+			assertErrorContains(errors, want);
+		}
+	});
+
+test("a complex operand converted to an integer has no real() suffix", () => {
+	const { errors } = compile(
+		"package main\nfunc main() {\nc := complex(1, 2)\n_ = int(c)\n}",
+	);
+	assertErrorContains(errors, "to type int");
+	assertEqual(
+		errors.some((e) => String(e.message ?? e).includes("real() or imag()")),
+		false,
+	);
+});
+
+test("a conversion between pointers to distinct wasm structs names the operand", () => {
+	const { errors } = compile(
+		"package main\ntype A struct{ X int }\ntype B struct{ X int }\nfunc main() {\nvar p *A\n_ = (*B)(p)\n}",
+		{ target: "wasm" },
+	);
+	assertErrorContains(
+		errors,
+		"cannot convert p (variable of type *A) to type *B in a wasm package",
+	);
+});
+
+section("Assignment context names");
+
+// One row per place a value is assigned: Go names it in `cannot use ... as T
+// value in <context>`.
+const assignContextCases = [
+	[
+		"variable declaration",
+		"var s string = 1\n_ = s",
+		"in variable declaration",
+	],
+	["assignment", "var s string\ns = 1", "in assignment"],
+	["return statement", null, "in return statement"],
+	["argument to f", 'f("x")', "in argument to f"],
+	["argument to a method", 'var b Box\nb.M("x")', "in argument to b.M"],
+	["argument to a variadic func", 'v(1, "x")', "in argument to v"],
+	[
+		"argument to append",
+		'var xs []int\n_ = append(xs, "x")',
+		"in argument to append",
+	],
+	[
+		"argument to delete",
+		"var m map[string]int\ndelete(m, 1)",
+		"in argument to delete",
+	],
+	["struct literal", '_ = W{X: "x"}', "in struct literal"],
+	["positional struct literal", '_ = W{"x"}', "in struct literal"],
+	["array or slice literal", '_ = []int{"x"}', "in array or slice literal"],
+	["array literal", '_ = [2]int{"x"}', "in array or slice literal"],
+	["map literal value", '_ = map[string]int{"a": "x"}', "in map literal"],
+	["map literal key", "_ = map[string]int{1: 2}", "in map literal"],
+	["map index", "var m map[string]int\n_ = m[1]", "in map index"],
+	["map index assignment", "var m map[string]int\nm[1] = 2", "in map index"],
+	["comma-ok map index", "var m map[string]int\n_, _ = m[1]", "in map index"],
+	[
+		"range clause",
+		"var s string\nfor s = range []int{1} {\n}\n_ = s",
+		"cannot use s (value of type int) as string value in assignment",
+	],
+];
+
+for (const [name, body, want] of assignContextCases)
+	test(`assignment context: ${name}`, () => {
+		const decls =
+			"type W struct{ X int }\ntype Box struct{ n int }\nfunc (b Box) M(a int) {}\nfunc f(a int) {}\nfunc v(a ...int) {}\n";
+		const src =
+			body === null
+				? `package main\n${decls}func g() int { return "a" }\nfunc main() {}`
+				: `package main\n${decls}func main() {\n${body}\n}`;
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(src, { target });
+			assertErrorContains(errors, want);
+			assertErrorContains(errors, "cannot use");
+		}
+	});
+
+test("a mismatched value reports its operand and kind", () => {
+	const { errors } = compile(
+		"package main\nfunc main() {\nvar a int32 = 1\nvar b int64 = a\n_ = b\n}",
+	);
+	assertErrorContains(
+		errors,
+		"cannot use a (variable of type int32) as int64 value in variable declaration",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

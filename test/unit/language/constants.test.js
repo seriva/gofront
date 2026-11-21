@@ -385,7 +385,10 @@ func main() {
 	f(1 << 64)
 }
 `);
-	assertErrorContains(viaAny.errors, "as int value in argument (overflows)");
+	assertErrorContains(
+		viaAny.errors,
+		"as int value in argument to f (overflows)",
+	);
 });
 
 test("shift-assign counts beyond the operand type do not overflow", () => {

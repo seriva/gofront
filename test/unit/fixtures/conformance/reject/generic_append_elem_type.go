@@ -3,7 +3,7 @@ package main
 type MySlice []int
 
 func A1[S ~[]int](s S) S {
-	return append(s, "a") // ERROR "Cannot assign untyped string to int"
+	return append(s, "a") // ERROR "cannot use \"a\" (untyped string constant) as int value in argument to append"
 }
 
 func A2[S ~[]int](s S) S {
@@ -19,7 +19,7 @@ func A4[S ~[]int](s S) S {
 }
 
 func A5[S interface{ []int | MySlice }](s S) S {
-	return append(s, "a") // ERROR "Cannot assign untyped string to int"
+	return append(s, "a") // ERROR "cannot use \"a\" (untyped string constant) as int value in argument to append"
 }
 
 func main() {}

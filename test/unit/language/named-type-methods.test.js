@@ -434,7 +434,10 @@ func main() {
 	_ = c
 }`);
 	assertEqual(errors.length, 1);
-	assertErrorContains(errors, "Cannot assign float64 to Celsius");
+	assertErrorContains(
+		errors,
+		"cannot use f (variable of type float64) as Celsius value in variable declaration",
+	);
 });
 
 section("Type errors");

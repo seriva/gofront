@@ -132,7 +132,7 @@ A Go `any` holds a value of some type and says nothing about which one. You can 
 
 ```go
 var v any = 2
-_ = v * 2       // invalid operation: operator * not defined on v (variable of type any)
+_ = v * 2       // invalid operation: v * 2 (mismatched types any and untyped int)
 _ = v.(int) * 2 // ok
 
 if s, ok := v.(string); ok { ... }
@@ -180,7 +180,7 @@ GoFront applies Go's operator rules to every kind of operand, with Go's messages
 #### Literals and duplicates
 
 - **Struct literals**: a positional literal lists every field (`S{1}` for a struct with two fields is `too few values in struct literal of type S`); a keyed literal may omit fields, and the two forms do not mix.
-- **Duplicate `switch` cases** of integer, float or string constants are `duplicate case 1 in expression switch`; constants are compared by value after conversion to the tag's type, so `1` and `0x1` collide and `case a:` with a variable does not. A `switch` on an interface keeps the constants' own types (`case 1` and `case 1.0` differ). Boolean and complex constants are not compared.
+- **Duplicate `switch` cases** of integer, float or string constants are `duplicate case 1 (constant of type int) in expression switch`; constants are compared by value after conversion to the tag's type, so `1` and `0x1` collide and `case a:` with a variable does not. A `switch` on an interface keeps the constants' own types (`case 1` and `case 1.0` differ). Boolean and complex constants are not compared.
 - **Duplicate map keys** in a literal, `map[string]int{"a": 1, "a": 2}`, are `duplicate key "a" in map literal`, with the same value rules; boolean keys are compared too. Duplicate indexes in a slice or array literal are an error as well.
 
 #### Type assertions
