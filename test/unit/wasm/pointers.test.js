@@ -861,3 +861,108 @@ func main() {
 		"false true\ntrue false\n",
 	);
 });
+
+section("WASM Pointers — Defined Pointer Types");
+
+test("dereferencing a defined pointer type reads the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type P1 *int
+	x := 3
+	var p P1 = &x
+	fmt.Println(*p)
+}
+`,
+		"3\n",
+	);
+});
+
+test("a defined pointer type declared at package level reads the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+
+func main() {
+	x := 3
+	var p P1 = &x
+	fmt.Println(*p)
+	var q P1
+	fmt.Println(q == nil)
+}
+`,
+		"3\ntrue\n",
+	);
+});
+
+test("a pointer type defined from another defined pointer type or a generic reads the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+type P2 P1
+type Opt[T any] *T
+
+func main() {
+	x := 3
+	var p P2 = &x
+	fmt.Println(*p)
+	var o Opt[int] = &x
+	fmt.Println(*o)
+}
+`,
+		"3\n3\n",
+	);
+});
+
+test("write, compound assignment and inc/dec through a defined pointer type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+
+func main() {
+	var p P1 = new(int)
+	*p = 4
+	*p += 2
+	*p++
+	fmt.Println(*p)
+}
+`,
+		"7\n",
+	);
+});
+
+test("a nil defined pointer type panics on dereference and recovers", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P1 *int
+
+func try(p P1) {
+	defer func() { fmt.Println(recover() != nil) }()
+	*p = 1
+}
+
+func main() {
+	try(nil)
+	var p P1
+	defer func() { fmt.Println(recover() != nil) }()
+	fmt.Println(*p)
+}
+`,
+		"true\ntrue\n",
+	);
+});

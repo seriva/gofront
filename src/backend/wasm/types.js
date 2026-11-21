@@ -581,15 +581,19 @@ export function isStructType(goType, checker = null, mod = null) {
 	return goType.kind === "struct" || goType.kind === "StructType";
 }
 
+// The type a pointer type points at, looking through defined types
+// (`type P *int`, `type PS *S`); null when `goType` is not a pointer type.
+export function pointerBase(goType, checker = null) {
+	const t = namedBase(goType, checker);
+	if (t?.kind === "PointerType" || t?.kind === "pointer") return t.base ?? null;
+	if (t?.kind === "StarExpr") return t.expr ?? t.operand ?? null;
+	return null;
+}
+
 export function isPointerToStruct(goType, checker = null, mod = null) {
 	if (!goType) return false;
-	if (goType.kind === "PointerType" || goType.kind === "pointer") {
-		return isStructType(goType.base, checker, mod);
-	}
-	if (goType.kind === "StarExpr") {
-		return isStructType(goType.expr ?? goType.operand, checker, mod);
-	}
-	return false;
+	const base = pointerBase(goType, checker);
+	return base != null && isStructType(base, checker, mod);
 }
 
 // Slices, maps and pointers are reference values that an assignment through a
