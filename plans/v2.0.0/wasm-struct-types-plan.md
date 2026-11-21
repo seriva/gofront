@@ -1,7 +1,7 @@
 # `wasm` Struct Types — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-21)  
 **Base branch:** main  
 **Related:** Split out of the former `followup-fixes-plan.md` (now [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md)) on 2026-11-17 by root cause (its former Phases 2–3 and Tasks 8.2–8.3: F8, F17, F24, F25, F28, F31, L5, L11, L13), plus three `plans/follow-ups.md` entries with the same root (*WASM map keys*, *WASM struct conversion*, *WASM append of a named struct into an anonymous-struct slice*). Must merge before [`value-stores-plan.md`](value-stores-plan.md) Phase 4, whose embedded-field copy needs this layout. Independent of the other v2.0.0 plans.  
 **Release note:** More programs that use anonymous structs work on WebAssembly: structs with embedded fields, anonymous structs as map keys, in slices and as type arguments of generic functions, and conversions between named and anonymous struct types. Generic functions that use `(*T)(nil)` and method expressions called with a `nil` receiver also compile on WebAssembly.  
