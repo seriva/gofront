@@ -68,8 +68,6 @@ assign_web_type_names:6 # excluded: gofront-only
 assign_web_type_names:7 # excluded: gofront-only
 block_type_used_outside:8 # undefined-text
 builtin_len_any:5 # any-operand-kind
-conv_untyped_float_to_named_int:6 # D1
-conv_untyped_float_to_named_int:7 # D1
 duplicate_switch_case:7 # D2
 forwarded_tuple_arg_type:18 # D3
 forwarded_tuple_arg_type:21 # any-operand-kind

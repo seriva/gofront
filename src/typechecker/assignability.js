@@ -1247,9 +1247,12 @@ export const assignabilityMethods = {
 			!this._isMethodIfaceTarget(targetType)
 		)
 			return false;
-		this.err(
-			`cannot convert ${exprText(operand)} (${operandKind(operand, typeStr(srcType))}) to type ${typeStr(targetType)}: need type assertion`,
+		this._convertError(
 			expr,
+			operand,
+			srcType,
+			targetType,
+			": need type assertion",
 		);
 		return true;
 	},

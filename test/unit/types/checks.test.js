@@ -2187,6 +2187,53 @@ test("a constant statement names the value of a string constant", () => {
 	assertErrorContains(errors, 's (untyped string constant "a") is not used');
 });
 
+section("Conversion errors name the operand");
+
+const convertErrorCases = [
+	[
+		"a complex variable to an integer",
+		"c := complex(1, 2)\n_ = int(c)",
+		"cannot convert c (variable of type complex128) to type int (use real() or imag())",
+	],
+	["nil to an integer", "_ = int(nil)", "cannot convert nil to type int"],
+	[
+		"a string variable to a slice of ints",
+		"var s string\n_ = []int(s)",
+		"cannot convert s (variable of type string) to type []int",
+	],
+	[
+		"a typed constant to a string slice",
+		"const k float64 = 2\n_ = []string(k)",
+		"cannot convert k (constant 2 of type float64) to type []string",
+	],
+	[
+		"an untyped float constant to an integer",
+		"_ = int(1.5)",
+		"cannot convert 1.5 (untyped float constant) to type int (truncated)",
+	],
+];
+
+for (const [name, body, want] of convertErrorCases)
+	test(`conversion error: ${name}`, () => {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(`package main\nfunc main() {\n${body}\n}`, {
+				target,
+			});
+			assertErrorContains(errors, want);
+		}
+	});
+
+test("a conversion between pointers to distinct wasm structs names the operand", () => {
+	const { errors } = compile(
+		"package main\ntype A struct{ X int }\ntype B struct{ X int }\nfunc main() {\nvar p *A\n_ = (*B)(p)\n}",
+		{ target: "wasm" },
+	);
+	assertErrorContains(
+		errors,
+		"cannot convert p (variable of type *A) to type *B in a wasm package",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

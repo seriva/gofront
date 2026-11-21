@@ -124,7 +124,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Files: `src/typechecker/operand-text.js` (`operandKind`), `src/typechecker/statements.js` (`_checkExprStmt` at `:109-112`)
   - Test: reject fixture `range_typed_float_const.go` (`constant 2 of type float64`, including a function-local `const k float64 = 2`); `range_float_lit` marker corrected to Go's `(untyped float constant 1000)`; sibling assertions in `test/unit/types/checks.test.js` for `const k float64 = 2; _ = &k` (`constant 2 of type float64`), `len(1e3)` (`untyped float constant 1000`), and `1 + 2` unused statement (`untyped int constant 3`) vs `x == 1` (`untyped bool value`)
   - Done when: Go's constant-value operand kind on all targets across `range` and sibling callers
-- [ ] Task 1.4: Shared `_convertError` prints operand, kind, and `to type T` (D1.5)
+- [x] Task 1.4: Shared `_convertError` prints operand, kind, and `to type T` (D1.5)
   - Files: `src/typechecker/expressions.js` (`_convertError` replacing the 13 `cannot convert` sites at `:1434`–`:2091`)
   - Test: remove `// pending: operand-text` from `convert_embedded_vs_named_field`; update `test/unit/wasm/generics.test.js:1131` and `test/unit/types/pointers.test.js:295` expecting the old `cannot convert X to Y` without `to type`
   - Done when: `convert_embedded_vs_named_field` passes on all targets; `D1` audit keys removed
