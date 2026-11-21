@@ -1183,7 +1183,9 @@ export class FunctionEmitter {
 			)?.name;
 			const embedInfo =
 				(instName && this.mod.structTypes.get(instName)) ??
-				this.mod.structTypes.get(embed.typeName ?? embed.name);
+				this.mod.structTypes.get(embed.typeName ?? embed.name) ??
+				// An embedded alias of an anonymous struct has no registered name.
+				this._resolveStructInfo({ _type: ft });
 			if (embedInfo) {
 				const sub = this._resolveFieldPath(embedInfo, fieldName);
 				if (sub) {

@@ -737,3 +737,38 @@ func main() {
 		"5\n1 2\n",
 	);
 });
+
+test("embedded alias of an anonymous struct promotes its fields", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type A = struct{ N int }
+
+func main() {
+	v := struct{ A }{A{5}}
+	fmt.Println(v.N, v.A.N)
+}
+`,
+		"5 5\n",
+	);
+});
+
+test("named struct embedding an alias of an anonymous struct promotes its fields", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type A = struct{ N int }
+type S struct{ A }
+
+func main() {
+	v := S{A{5}}
+	fmt.Println(v.N, v.A.N)
+}
+`,
+		"5 5\n",
+	);
+});
