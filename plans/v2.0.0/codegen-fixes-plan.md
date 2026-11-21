@@ -1,7 +1,7 @@
 # JS and `wasm` Codegen Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-21)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-19 (`/bs-plan follow-ups`): the one-off entries that share no root with an open plan, logged by checker-strictness Phase 6 and checker-go-rules Phases 3, 4, 8, 10 and the 2026-11-18 checker fuzzer. The rest of that sweep went to [`checker-go-rules-plan.md`](checker-go-rules-plan.md) (Phases 22–28), [`checker-operand-rules-plan.md`](checker-operand-rules-plan.md) (O4.11, O5.8, Phase 9), [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) (Phase 5) and [`diagnostic-text-plan.md`](diagnostic-text-plan.md). The shadowed-builtin entry is split: its all-target `len` form is checker-go-rules Phase 28.  
 **Release note:** **Breaking:** passing `xs...` to a function that is not variadic is now a compile error, as in Go; call it with the slice itself. Also fixes code that failed or misbehaved: `_ = map[...]...{...}` on JS, counting the runes of a string with `for range` on JS, and on WebAssembly comparing a value with an interface, type switches on `interface{}` and defined empty interfaces, defined pointer types such as `type P *int`, and user functions named `append` or `new` next to generic standard library code.
@@ -123,61 +123,61 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
 
 ### Phase 1: JS statement emission (roots `js-stmt-expr-start`, `js-zero-var-string-range`)
 *Scheduled from review follow-ups (2026-11-19). Two roots in one phase by file locality: both are statement emission in `src/backend/js/statements.js`, one task each.*
-- [ ] Task 1.1: Expression statements that would start with `{` are parenthesised (F1.1, F1.2)
+- [x] Task 1.1: Expression statements that would start with `{` are parenthesised (F1.1, F1.2)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/expressions.test.js` F1.1 and F1.2 (including `if _ = map[any]int{1: 1}; true {}`) run on js/both (`assertOutput`); the struct-literal control
   - Done when: Go's result on js/both; no other emitted statement changes
-- [ ] Task 1.2: Zero-variable string `range` iterates runes (F1.3, F1.4)
+- [x] Task 1.2: Zero-variable string `range` iterates runes (F1.3, F1.4)
   - Files: `src/backend/js/statements.js` (`_genRangeExprFor`)
   - Test: `test/unit/language/range-iter.test.js` F1.3 → `1`, F1.4 → `2`, `1` on all targets; one-variable index control unchanged
   - Done when: Go's output on all targets
 
 ### Phase 2: Spread arguments (root `spread-non-variadic`)
-- [ ] Task 2.1: `...` to a non-variadic callee, non-`append` builtin, or type conversion is an error (F2.1, F2.2, F2.4)
+- [x] Task 2.1: `...` to a non-variadic callee, non-`append` builtin, or type conversion is an error (F2.1, F2.2, F2.4)
   - Files: `src/typechecker/expressions.js` (`_checkCallExpr`, `_checkCallArgs`)
   - Test: reject fixtures `spread_non_variadic_func.go`, `spread_non_variadic_method.go`, `spread_non_variadic_func_value.go`, `spread_non_variadic_zero_param.go`, `spread_builtin_len.go`, `spread_type_conversion.go`
   - Done when: Go's message on all targets
-- [ ] Task 2.2: Extra arguments before a spread are counted on variadic calls and `append` (F2.3, F2.4)
+- [x] Task 2.2: Extra arguments before a spread are counted on variadic calls and `append` (F2.3, F2.4)
   - Files: `src/typechecker/expressions.js` (`_checkCallArgs`, `_checkAppendArgs`)
   - Test: reject fixtures `spread_extra_fixed_args.go` (`too many arguments in call to f`), `spread_append_extra_args.go` (`too many arguments in call to append`); `append(s, t...)` and `fmt.Println(xs...)` controls in `test/unit/types/checks.test.js`
   - Done when: Go's message on all targets, no wasm invalid module
 
 ### Phase 3: `wasm` comparisons with an interface operand (root `wasm-iface-equality`)
-- [ ] Task 3.1: `==` and `!=` with an interface on either side (including against complex operands) box the concrete side (F3.1, F3.2)
+- [x] Task 3.1: `==` and `!=` with an interface on either side (including against complex operands) box the concrete side (F3.1, F3.2)
   - Files: `src/backend/wasm/emit-exprs.js`, `test/fuzz/check-baseline.txt`
   - Test: `test/unit/wasm/interfaces.test.js` F3.1 → `false`, F3.2 → `true`, `true`, `false`, `true`, `true`, `true` on all targets (or `wasm` for struct-vs-interface until checker-operand-rules JS struct-vs-interface lands)
   - Done when: valid module, Go's output; all 44 `binary:==:... # wasm-iface-equality` keys removed from `test/fuzz/check-baseline.txt`
-- [ ] Task 3.2: `switch` case values that are interfaces box a concrete tag and mark `_usesAnyEq` (F3.3)
+- [x] Task 3.2: `switch` case values that are interfaces box a concrete tag and mark `_usesAnyEq` (F3.3)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/prescan.js`, `test/fuzz/check-baseline.txt`
   - Test: `test/unit/wasm/interfaces.test.js` F3.3 → `hit` (plain, fallthrough, and without `fmt`) on all targets; tag-side control unchanged
   - Done when: valid module, Go's output; all remaining 50 `switch:tag:... # wasm-iface-equality` keys removed from `test/fuzz/check-baseline.txt` (0 `# wasm-iface-equality` keys left)
 
 ### Phase 4: `wasm` type tests against empty interfaces (root `wasm-typeswitch-empty-iface`)
-- [ ] Task 4.1: `isEmptyInterface` and `isAnyType` recognise every empty-interface spelling, and `_emitTypeTest` matches every non-nil value in type switches (F4.1, F4.2)
+- [x] Task 4.1: `isEmptyInterface` and `isAnyType` recognise every empty-interface spelling, and `_emitTypeTest` matches every non-nil value in type switches (F4.1, F4.2)
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-stmts.js` (`_emitTypeTest`)
   - Test: `test/unit/wasm/iface-assert.test.js`: F4.1, F4.2 (`interface{}` and chained `type C B`) → `1`; `case nil` and multi-type cases unchanged
   - Done when: Go's output on all targets
-- [ ] Task 4.2: Comma-ok and single-value assertions to `interface{}` and defined empty interfaces succeed for non-nil values and fail on `nil` (F4.3)
+- [x] Task 4.2: Comma-ok and single-value assertions to `interface{}` and defined empty interfaces succeed for non-nil values and fail on `nil` (F4.3)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`
   - Test: `test/unit/wasm/iface-assert.test.js`: F4.3 (`v, ok := x.(B)`, `v, ok := x.(interface{})` → `1 true`; `v := x.(B)`, `v := x.(interface{})` → `1`); `x.(B)` and `x.(interface{})` on a nil interface still panic / report `false`
   - Done when: Go's output on all targets
 
 ### Phase 5: `wasm` defined pointer types (root `wasm-defined-pointer`)
-- [ ] Task 5.1: Dereference read, write, compound assignment, and inc/dec unwrap defined pointer types through `namedBase` (F5.1, F5.2)
+- [x] Task 5.1: Dereference read, write, compound assignment, and inc/dec unwrap defined pointer types through `namedBase` (F5.1, F5.2)
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/wasm/pointers.test.js`: F5.1 → `3`, F5.2 → `3`, `3`, `7` on all targets
   - Done when: valid modules, Go's output
-- [ ] Task 5.2: Selectors through a defined pointer to a struct resolve the struct for reads, writes, and compound ops (F5.3)
+- [x] Task 5.2: Selectors through a defined pointer to a struct resolve the struct for reads, writes, and compound ops (F5.3)
   - Files: `src/backend/wasm/emit.js` (`_resolveStructInfo`), `src/backend/wasm/emit-stmts.js` (`_structNameOf`)
   - Test: `test/unit/wasm/pointers.test.js`: F5.3 → `11` on all targets
   - Done when: no ICE, Go's output on all targets
 
 ### Phase 6: Monomorphisation scopes (root `wasm-flat-mono-scope`)
-- [ ] Task 6.1: `monomorphise` scopes each package's unexported value declarations to its own ASTs while keeping types and cross-package symbols shared (F6.1)
+- [x] Task 6.1: `monomorphise` scopes each package's unexported value declarations to its own ASTs while keeping types and cross-package symbols shared (F6.1)
   - Files: `src/backend/wasm/monomorph.js` (`monomorphise`)
   - Test: `test/unit/wasm/generics.test.js` F6.1 → `2 [1 3]` on all targets; multi-package user `wasm` generic call when `main` shadows `append`; existing monomorph tests pass
   - Done when: no ICE; a stdlib or imported package body never resolves another package's unexported declarations
-- [ ] Task 6.2: Every builtin the stdlib generics call can be shadowed by a user function, variable, or constant (F6.2)
+- [x] Task 6.2: Every builtin the stdlib generics call can be shadowed by a user function, variable, or constant (F6.2)
   - Files: `src/backend/wasm/monomorph.js`
   - Test: `test/unit/wasm/generics.test.js` table over user functions named `append`, `new`, `copy`, `make`, `cap`, `panic`, `min`, `max` and `var append = 42` beside `slices.Sort`/`maps.Keys` (`len` excluded: checker-go-rules Phase 28), each printing Go's output on `wasm`
   - Done when: all rows pass

@@ -13,6 +13,7 @@ import {
 	compositeLitMaxIndex,
 } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
+import { namedBase } from "../shared/named-underlying.js";
 import { emitWasmNative } from "./natives.js";
 import {
 	getInterfaceMethodList,
@@ -22,6 +23,7 @@ import {
 	isComplex,
 	isComplex64,
 	isFuncType,
+	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
 	isPointerToStruct,
@@ -32,6 +34,7 @@ import {
 	isStringType,
 	isStructType,
 	isTaggedSliceType,
+	pointerBase,
 	toWasmType,
 } from "./types.js";
 
@@ -746,7 +749,7 @@ export class ExprsEmitter {
 	// With a pointer on the stack, branches to the function's `nil` block
 	// (_openNilBlock) when it is null.  Outside one, the access traps.
 	_emitNilCheck(goType) {
-		if (goType?.kind !== "pointer") return;
+		if (!this._isCheckerPointer(goType)) return;
 		this._emitNilBranch();
 	}
 
@@ -1964,16 +1967,23 @@ export class ExprsEmitter {
 		});
 	}
 
+	// A checker pointer type, or a defined type whose underlying type is one.
+	_isCheckerPointer(t) {
+		return namedBase(t, this.mod.checker)?.kind === "pointer";
+	}
+
 	_isPointerGoType(t) {
-		let x = t;
-		if (x?.kind === "named" && x.underlying) x = x.underlying;
-		return x?.kind === "pointer" || x?.kind === "PointerType";
+		return pointerBase(t, this.mod.checker) != null;
 	}
 
 	_ptrBaseType(t) {
-		let x = t;
-		if (x?.kind === "named" && x.underlying) x = x.underlying;
-		return x?.kind === "pointer" ? x.base : null;
+		return this._isCheckerPointer(t) ? pointerBase(t, this.mod.checker) : null;
+	}
+
+	// The type `*operand` yields for a pointer-typed operand, looking through
+	// defined pointer types; the operand's own type when it is no pointer.
+	_derefBaseType(operandGoType) {
+		return pointerBase(operandGoType, this.mod.checker) ?? operandGoType;
 	}
 
 	// The struct a `*operand` reads or writes, or null when the operand points
@@ -1999,7 +2009,7 @@ export class ExprsEmitter {
 				? this.resolveLocal(operand.name)?.goType
 				: null) ??
 			this._resolveExprGoType(operand);
-		const baseGoType = operandGoType?.base ?? operandGoType;
+		const baseGoType = this._derefBaseType(operandGoType);
 		if (!isScalarType(baseGoType, this.mod.checker, this.mod)) {
 			const baseWType = this.toWasmType(baseGoType);
 			this.emitExpr(operand, baseWType);
@@ -2284,6 +2294,23 @@ export class ExprsEmitter {
 
 	emitBinaryExpr(expr, targetWasmType = null) {
 		const { op, left, right } = expr;
+
+		// `==`/`!=` with an interface on either side compares interface
+		// values: the concrete side is boxed, whatever its type (a complex
+		// operand included).  `nil` operands keep the null test below.
+		if (
+			(op === "==" || op === "!=") &&
+			(isInterfaceType(left._type, this.mod.checker) ||
+				isInterfaceType(right._type, this.mod.checker)) &&
+			!(left.kind === "BasicLit" && left.litKind === "NIL") &&
+			!(right.kind === "BasicLit" && right.litKind === "NIL")
+		) {
+			this.emitExpr(left, "anyref");
+			this.emitExpr(right, "anyref");
+			this._emitAnyEq();
+			if (op === "!=") this.pushInstruction("i32.eqz");
+			return;
+		}
 
 		if (
 			isComplex(expr._type) ||

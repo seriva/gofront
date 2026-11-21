@@ -5,6 +5,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertJsTargetsOutput,
 	assertThrows,
 	compile,
 	compileHybrid,
@@ -847,6 +848,68 @@ func Main() int {
 }`).run("Main");
 	assertEqual(res.jsRes, 3222);
 	assertEqual(Number(res.wasmRes), 3222);
+});
+
+section("Expression statements that would start with an object literal");
+
+test("a discarded map literal is a statement, not a block", async () => {
+	await assertJsTargetsOutput(
+		`package main
+import "fmt"
+func main() {
+	_ = map[any]int{1: 1}
+	_ = map[string]int{"a": 1}
+	_, _ = map[any]int{1: 1}, 2
+	if _ = map[any]int{1: 1}; true {
+		fmt.Println("if")
+	}
+	fmt.Println("done")
+}`,
+		"if\ndone\n",
+	);
+});
+
+test("discarded struct literals and blank declarations stay as they were", async () => {
+	await assertJsTargetsOutput(
+		`package main
+import "fmt"
+type P struct{ X int }
+var _ = map[any]int{1: 1}
+func main() {
+	_ = P{X: 1}
+	var _ = map[any]int{1: 1}
+	fmt.Println("ok")
+}`,
+		"ok\n",
+	);
+});
+
+test("a blank assignment in a for init or post clause still runs its right side", async () => {
+	await assertJsTargetsOutput(
+		`package main
+import "fmt"
+func side(s string) int {
+	fmt.Println(s)
+	return 1
+}
+func main() {
+	for _ = 1; false; {
+	}
+	for _ = map[any]int{1: 1}; false; {
+	}
+	for _ = side("init"); false; {
+	}
+	n := 0
+	for ; n < 2; _ = side("post") {
+		n++
+	}
+	for i := 0; i < 1; _ = map[any]int{1: 1} {
+		i++
+	}
+	fmt.Println("done")
+}`,
+		"init\npost\npost\ndone\n",
+	);
 });
 
 // ── Entry point ───────────────────────────────────────────────

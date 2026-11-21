@@ -112,6 +112,7 @@ const BUILTIN_CHECK = {
 	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
 	append: (s, _n, e, at, sc) => {
 		const st = at[0] ?? ANY;
+		if (s._rejectSpreadCount(2, e, "append")) return st;
 		if (isArray(st)) {
 			s.err(`cannot append to array (type ${typeStr(st)})`, e);
 			return st;
@@ -1521,13 +1522,16 @@ export const expressionCheckMethods = {
 			holder[key]._type = core.base;
 			return core.base;
 		}
-		if (t?.kind !== "pointer") return t;
-		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
+		// A defined pointer type (`type PA *[3]int`) shorthands like its pointer.
+		const ptr = t?.kind === "named" ? this._deepUnderlying(t) : t;
+		if (ptr?.kind !== "pointer") return t;
+		const base =
+			ptr.base?.kind === "named" ? this.resolveType(ptr.base) : ptr.base;
 		const under = this._deepUnderlying(base);
 		if (under?.kind !== "array") return t;
 		holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
-		holder[key]._type = t.base;
-		return t.base;
+		holder[key]._type = ptr.base;
+		return ptr.base;
 	},
 
 	// An index, slice bound or `make` size that is a constant must be an
@@ -2355,6 +2359,7 @@ export const expressionCheckMethods = {
 	_checkTypeParamConversion(tp, argTypes, expr, scope) {
 		expr._isTypeConversion = true;
 		expr._conversionTargetType = tp;
+		if (this._rejectConversionSpread(tp, expr)) return tp;
 		if (expr.args.length !== 1) {
 			return this.err(
 				`cannot convert ${expr.args.length} arguments to type ${typeStr(tp)}`,
@@ -2563,6 +2568,14 @@ export const expressionCheckMethods = {
 		if (fnType.kind === "builtin") {
 			expr._builtinName = fnType.name;
 			const argTypes = this._resolveBuiltinArgTypes(fnType.name, expr, scope);
+			// Only `append` takes `xs...`; Go rejects it on every other builtin.
+			if (fnType.name !== "append" && expr.args.some((a) => a._spread)) {
+				this.err(
+					`invalid operation: invalid use of ... with built-in ${fnType.name}`,
+					expr,
+				);
+				return ANY;
+			}
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
@@ -2579,8 +2592,10 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		// `(any)(x)` / `type A = any; A(x)` convert like `any(x)`.
-		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef))
+		if (isAny(fnType) && !(fnType._declared && expr.func._isTypeRef)) {
+			if (expr.func._isTypeRef) this._rejectConversionSpread(fnType, expr);
 			return ANY;
+		}
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.
@@ -2592,6 +2607,7 @@ export const expressionCheckMethods = {
 		) {
 			expr._isTypeConversion = true;
 			expr._conversionTargetType = fnType;
+			if (this._rejectConversionSpread(fnType, expr)) return fnType;
 			if (expr.args.length !== 1) {
 				return this.err(
 					`cannot convert ${expr.args.length} arguments to type ${typeStr(fnType)}`,
@@ -2686,6 +2702,8 @@ export const expressionCheckMethods = {
 	},
 
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
+		if (fnType.underlying && this._rejectSpreadCall(fnType.underlying, expr))
+			return null;
 		const typeArgs = this.inferTypeArgs(
 			fnType,
 			this._inferArgTypes(expr, argTypes),
@@ -2761,7 +2779,49 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// `f(xs...)` needs a variadic `f`, which takes `xs` as its whole variadic
+	// parameter. Reports and returns true when the call cannot be.
+	_rejectSpreadCall(fnType, expr) {
+		if (fnType.variadic || !expr.args.some((a) => a._spread)) return false;
+		this.err(
+			`cannot use ... in call to non-variadic ${exprText(expr.func)}`,
+			expr,
+		);
+		return true;
+	},
+
+	// `T(xs...)`: a conversion takes one plain operand.
+	_rejectConversionSpread(target, expr) {
+		if (!expr.args.some((a) => a._spread)) return false;
+		this.err(`invalid use of ... in conversion to ${typeStr(target)}`, expr);
+		return true;
+	},
+
+	// `f(a, xs...)` fills every parameter, the variadic one with `xs`: any
+	// other count is an error, and `...` may only follow the last argument.
+	// Reports and returns true when it is wrong.
+	_rejectSpreadCount(wanted, expr, callee) {
+		const given = expr.args.length;
+		const early = expr.args.findIndex((a, i) => a._spread && i < given - 1);
+		if (early >= 0) {
+			this.err(
+				`can only use ... with final argument in call to ${callee}`,
+				expr.args[early],
+			);
+			return true;
+		}
+		if (given === wanted || !expr.args.some((a) => a._spread)) return false;
+		const what = given > wanted ? "too many" : "not enough";
+		this.err(`${what} arguments in call to ${callee}`, expr);
+		return true;
+	},
+
 	_checkCallArgs(fnType, argTypes, expr, scope = null) {
+		if (this._rejectSpreadCall(fnType, expr)) return;
+		if (
+			this._rejectSpreadCount(fnType.params.length, expr, exprText(expr.func))
+		)
+			return;
 		this._checkArgCount(fnType, argTypes, expr);
 		this._checkMultiForwardVariadic(fnType, expr);
 		const maxLen = fnType.variadic

@@ -17,6 +17,7 @@ import {
 	isArrayType,
 	isComplex,
 	isComplex64,
+	isEmptyInterface,
 	isFuncType,
 	isInterfaceType,
 	isMapType,
@@ -27,6 +28,7 @@ import {
 	isStringType,
 	isStructType,
 	isTaggedSliceType,
+	pointerBase,
 } from "./types.js";
 
 function hasReturnInBlock(n) {
@@ -1114,7 +1116,7 @@ export class StmtsEmitter {
 	// Raises Go's nil-dereference panic when the pointer held in `tmp` is nil
 	// (a plain cast or field write would trap, which `recover` cannot see).
 	_emitNilGuard(tmp, goType) {
-		if (goType?.kind !== "pointer") return;
+		if (!this._isCheckerPointer(goType)) return;
 		if (this.resolveBranchDepthToRole("nil") == null) return;
 		this.pushInstruction({ op: "local.get", index: tmp });
 		this._emitNilBranch();
@@ -1134,7 +1136,7 @@ export class StmtsEmitter {
 				? this.resolveLocal(operand.name)?.goType
 				: null) ??
 			this._resolveExprGoType(operand);
-		const baseGoType = operandGoType?.base ?? operandGoType;
+		const baseGoType = this._derefBaseType(operandGoType);
 		if (this._isValueArray(baseGoType)) {
 			this._emitArrayStoreInto(baseGoType, r, () => {
 				this.emitExpr(operand);
@@ -1440,10 +1442,8 @@ export class StmtsEmitter {
 
 	_structNameOf(goType) {
 		if (!goType) return null;
-		if (goType.kind === "PointerType" || goType.kind === "pointer")
-			return this._structNameOf(goType.base);
-		if (goType.kind === "StarExpr")
-			return this._structNameOf(goType.expr ?? goType.operand);
+		const pointee = pointerBase(goType, this.mod.checker);
+		if (pointee) return this._structNameOf(pointee);
 		return goType.name ?? null;
 	}
 
@@ -1497,7 +1497,7 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (targetGoType.name === "any" || targetGoType.name === "interface{}") {
+		if (isEmptyInterface(targetGoType, this.mod.checker)) {
 			this.pushInstruction("ref.is_null");
 			this.pushInstruction("i32.eqz");
 			return;
@@ -1938,7 +1938,7 @@ export class StmtsEmitter {
 					? this.resolveLocal(operand.name)?.goType
 					: null) ??
 				this._resolveExprGoType(operand);
-			const baseGoType = operandGoType?.base ?? operandGoType;
+			const baseGoType = this._derefBaseType(operandGoType);
 			if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
 			const box = this.mod.getBoxType(baseGoType);
 			const ptr = this.mod.getPtrType(baseGoType);
@@ -2082,7 +2082,7 @@ export class StmtsEmitter {
 						? this.resolveLocal(operand.name)?.goType
 						: null) ??
 					this._resolveExprGoType(operand);
-				const baseGoType = operandGoType?.base ?? operandGoType;
+				const baseGoType = this._derefBaseType(operandGoType);
 				if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
 				const box = this.mod.getBoxType(baseGoType);
 				const ptr = this.mod.getPtrType(baseGoType);
@@ -3469,7 +3469,25 @@ export class StmtsEmitter {
 	// Later expressions are not evaluated once one matches, as in Go.
 	_emitCaseListMatch(stmt, vals, tagTmp, tagWType, tagGoType) {
 		for (let j = 0; j < vals.length; j++) {
-			if (stmt.tag) {
+			if (
+				stmt.tag &&
+				isInterfaceType(vals[j]._type, this.mod.checker) &&
+				!isInterfaceType(tagGoType, this.mod.checker)
+			) {
+				// `case v:` with an interface `v` against a concrete tag compares
+				// interface values: the tag is boxed, as in `tag == v`.
+				const name = `__casetag$${this.tempCounter++}`;
+				const idx = this.allocLocal(name, tagWType, tagGoType, true);
+				this.pushInstruction({ op: "local.get", index: tagTmp });
+				this.pushInstruction({ op: "local.set", index: idx });
+				this.emitExpr(
+					{ kind: "Ident", name, _type: tagGoType, _parTmp: true },
+					"anyref",
+				);
+				this.locals.delete(name);
+				this.emitExpr(vals[j], "anyref");
+				this._emitAnyEq();
+			} else if (stmt.tag) {
 				this.pushInstruction({ op: "local.get", index: tagTmp });
 				this.emitExpr(vals[j], tagWType);
 				this._emitElemEq(tagGoType, tagWType);

@@ -1590,3 +1590,248 @@ func main() {
 		"0\n0\n1\n0\n",
 	);
 });
+
+section("Monomorphisation scopes");
+
+test("a user func named append does not leak into stdlib generics (F6.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func append(x int) int { return x + 1 }
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	fmt.Println(append(1), s)
+}
+`,
+		"2 [1 3]\n",
+	);
+});
+
+test("a type named like an unrelated declaration stays shared with stdlib generics", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Ordered int
+type byte struct{ X int }
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	fmt.Println(Ordered(1), s)
+}
+`,
+		"1 [1 3]\n",
+	);
+});
+
+test("main shadowing append does not change a linked package's generic (F6.1)", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T { return append(s, v) }
+
+func Plain(s []int) []int { return append(s, 9) }
+`,
+		"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+func append(x int) int { return x + 1 }
+
+func main() {
+	println(len(util.Grow([]int{1}, 2)), append(1), len(util.Plain(nil)))
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "2 2 1");
+});
+
+test("a linked package's generic calls the builtin when a sibling package shadows it (F6.2)", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T { return append(s, v) }
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+var append = 42
+
+func Run() int { return len(util.Grow([]int{1}, 2)) + append }
+`,
+		"main.go": `//gofront:target wasm
+package main
+
+import (
+	"./lib"
+	"./util"
+)
+
+func main() { println(lib.Run(), len(util.Grow([]int{1}, 2))) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "44 2");
+});
+
+const PKG_SHADOWS = [
+	["func append(x int) int { return x + 1 }", "append(1)", "2"],
+	["func new(x int) int { return x + 1 }", "new(1)", "2"],
+	["func copy(x int) int { return x + 1 }", "copy(1)", "2"],
+	["func make(x int) int { return x + 1 }", "make(1)", "2"],
+	["func cap(x int) int { return x + 1 }", "cap(1)", "2"],
+	["func panic(x int) int { return x + 1 }", "panic(1)", "2"],
+	["func min(x int) int { return x + 1 }", "min(1)", "2"],
+	["func max(x int) int { return x + 1 }", "max(1)", "2"],
+	["var append = 42", "append", "42"],
+	["const copy = 42", "copy", "42"],
+	["var panic = 42", "panic", "42"],
+	["const min = 42", "min", "42"],
+];
+
+for (const [decl, use, want] of PKG_SHADOWS) {
+	test(`main \`${decl}\` beside a linked package calling the builtins`, async () => {
+		const res = await compileHybridProject({
+			"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T {
+	t := make([]T, len(s), cap(s)+1)
+	copy(t, s)
+	return append(t, v)
+}
+
+func Plain(a, b int) int { return min(a, b) + max(a, b) }
+
+func Fresh() int { p := new(int); *p = 5; return *p }
+
+func Check(ok bool) {
+	if !ok {
+		panic("bad")
+	}
+}
+`,
+			"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+${decl}
+
+func main() {
+	println(len(util.Grow([]int{1}, 2)), util.Plain(1, 2), util.Fresh(), ${use})
+}
+`,
+		});
+		assertEqual(res.lines.join("\n"), `2 3 5 ${want}`);
+	});
+}
+
+for (const name of [
+	"append",
+	"new",
+	"copy",
+	"make",
+	"cap",
+	"panic",
+	"min",
+	"max",
+]) {
+	test(`main \`type ${name} int\` does not shadow the builtin in a linked package`, async () => {
+		const res = await compileHybridProject({
+			"util/util.go": `//gofront:target wasm
+package util
+
+func Grow[T any](s []T, v T) []T {
+	t := make([]T, len(s), cap(s)+1)
+	copy(t, s)
+	return append(t, v)
+}
+
+func Plain(a, b int) int { return min(a, b) + max(a, b) }
+
+func Fresh() int { p := new(int); *p = 5; return *p }
+
+func Check(ok bool) {
+	if !ok {
+		panic("bad")
+	}
+}
+`,
+			"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+type ${name} int
+
+func main() {
+	var x ${name} = 7
+	util.Check(true)
+	println(len(util.Grow([]int{1}, 2)), util.Plain(1, 2), util.Fresh(), int(x))
+}
+`,
+		});
+		assertEqual(res.lines.join("\n"), "2 3 5 7");
+	});
+}
+
+const SHADOWS = [
+	["func append(x int) int { return x + 1 }", "append(1)", "2"],
+	["func new(x int) int { return x + 1 }", "new(1)", "2"],
+	["func copy(x int) int { return x + 1 }", "copy(1)", "2"],
+	["func make(x int) int { return x + 1 }", "make(1)", "2"],
+	["func cap(x int) int { return x + 1 }", "cap(1)", "2"],
+	["func panic(x int) int { return x + 1 }", "panic(1)", "2"],
+	["func min(x int) int { return x + 1 }", "min(1)", "2"],
+	["func max(x int) int { return x + 1 }", "max(1)", "2"],
+	["var append = 42", "append", "42"],
+	["var new = 42", "new", "42"],
+	["const copy = 42", "copy", "42"],
+	["const make = 42", "make", "42"],
+	["const cap = 42", "cap", "42"],
+	["var panic = 42", "panic", "42"],
+	["var min = 42", "min", "42"],
+	["const max = 42", "max", "42"],
+];
+
+for (const [decl, use, want] of SHADOWS) {
+	test(`user \`${decl}\` beside slices.Sort and maps.Keys`, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+${decl}
+
+func main() {
+	s := []int{3, 1}
+	slices.Sort(s)
+	ks := slices.Sorted(maps.Keys(map[string]int{"b": 1, "a": 2}))
+	fmt.Println(${use}, s, ks)
+}
+`,
+			`${want} [1 3] [a b]\n`,
+		);
+	});
+}

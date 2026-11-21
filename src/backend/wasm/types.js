@@ -581,15 +581,19 @@ export function isStructType(goType, checker = null, mod = null) {
 	return goType.kind === "struct" || goType.kind === "StructType";
 }
 
+// The type a pointer type points at, looking through defined types
+// (`type P *int`, `type PS *S`); null when `goType` is not a pointer type.
+export function pointerBase(goType, checker = null) {
+	const t = namedBase(goType, checker);
+	if (t?.kind === "PointerType" || t?.kind === "pointer") return t.base ?? null;
+	if (t?.kind === "StarExpr") return t.expr ?? t.operand ?? null;
+	return null;
+}
+
 export function isPointerToStruct(goType, checker = null, mod = null) {
 	if (!goType) return false;
-	if (goType.kind === "PointerType" || goType.kind === "pointer") {
-		return isStructType(goType.base, checker, mod);
-	}
-	if (goType.kind === "StarExpr") {
-		return isStructType(goType.expr ?? goType.operand, checker, mod);
-	}
-	return false;
+	const base = pointerBase(goType, checker);
+	return base != null && isStructType(base, checker, mod);
 }
 
 // Slices, maps and pointers are reference values that an assignment through a
@@ -784,20 +788,10 @@ export function isStringType(goType, checker = null) {
 	return false;
 }
 
+// Any interface type, however spelled: `any`, `interface{}`, a defined
+// interface type, or a chain of them.  Same predicate as `isInterfaceType`.
 export function isAnyType(goType, checker = null) {
-	if (!goType) return false;
-	if (goType.kind === "TypeName" || goType.kind === "Ident") {
-		const resolved = checker?.types?.get(goType.name);
-		if (resolved) return isAnyType(resolved, checker);
-		return goType.name === "any" || goType.name === "interface{}";
-	}
-	if (goType.kind === "named") {
-		if (goType.name === "any" || goType.name === "interface{}") return true;
-		if (goType.underlying) return isAnyType(goType.underlying, checker);
-	}
-	if (goType.kind === "basic") return goType.name === "any";
-	if (goType.kind === "interface") return true;
-	return false;
+	return isInterfaceType(goType, checker);
 }
 
 export function isInterfaceType(goType, checker = null) {
@@ -872,6 +866,14 @@ export function isNonEmptyInterface(goType, checker = null) {
 		return false;
 	}
 	return false;
+}
+
+// An interface with no methods, in every spelling (`any`, `interface{}`, a
+// defined type or chain of defined types over either).
+export function isEmptyInterface(goType, checker = null) {
+	return (
+		isInterfaceType(goType, checker) && !isNonEmptyInterface(goType, checker)
+	);
 }
 
 export function getReceiverTypeName(recvType, _node = null) {

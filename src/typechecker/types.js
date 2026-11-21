@@ -1249,3 +1249,61 @@ export class Scope {
 		return unused;
 	}
 }
+
+// The package-level scope of several linked packages checked together (the
+// monomorphised program). Types and exported or instance-mangled (`$`)
+// declarations are shared, but a package's unexported `func`, `var` or
+// `const` is visible only while that package's files are being checked, so it
+// cannot shadow a predeclared builtin the other packages call. The same holds
+// for an unexported type named like a builtin function (`type append int`);
+// other unexported types stay shared, as do `error`-like predeclared type names.
+export class PackageScope extends Scope {
+	constructor(parent = null) {
+		super(parent);
+		this.currentPackage = null; // package whose file is being checked
+	}
+	_bind(name, kind, type, node = null, local = false) {
+		super._bind(name, kind, type, node, local);
+		this.objects.get(name).pkg = this.currentPackage;
+	}
+	// True when `name` is a predeclared builtin function (`append`, `len`), not
+	// a predeclared type such as `error`, which is bound as a builtin too.
+	_shadowsBuiltinFunc(name) {
+		return name !== "error" && this.parent?.lookup(name)?.kind === "builtin";
+	}
+	_hidden(name) {
+		const obj = this.objects.get(name);
+		return (
+			this.currentPackage != null &&
+			obj?.pkg != null &&
+			obj.pkg !== this.currentPackage &&
+			(obj.kind !== "type" || this._shadowsBuiltinFunc(name)) &&
+			!name.includes("$") &&
+			!/^\p{Lu}/u.test(name)
+		);
+	}
+	has(name) {
+		return this.objects.has(name) && !this._hidden(name);
+	}
+	get(name) {
+		return this._hidden(name) ? undefined : super.get(name);
+	}
+	object(name) {
+		return this._hidden(name) ? undefined : super.object(name);
+	}
+	isConst(name) {
+		return !this._hidden(name) && super.isConst(name);
+	}
+	lookup(name) {
+		if (this._hidden(name)) return this.parent?.lookup(name) ?? null;
+		return super.lookup(name);
+	}
+	lookupConstExpr(name) {
+		if (this._hidden(name)) return this.parent?.lookupConstExpr(name) ?? null;
+		return super.lookupConstExpr(name);
+	}
+	lookupScope(name) {
+		if (this._hidden(name)) return this.parent?.lookupScope(name) ?? null;
+		return super.lookupScope(name);
+	}
+}

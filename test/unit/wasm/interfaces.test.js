@@ -1761,3 +1761,311 @@ test("Interface predicates terminate on a named placeholder registered in the ty
 	assertEqual(isInterfaceType(placeholder, checker), false);
 	assertEqual(isNonEmptyInterface(placeholder, checker), false);
 });
+
+section("Comparing a concrete value with an interface");
+
+test("a concrete int on the left of == with an interface is a valid comparison", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a int
+	var b any
+	fmt.Println(a == b)
+}
+`,
+		"false\n",
+	);
+});
+
+test("== and != box the concrete side for strings, arrays, pointers and complex values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := "x"
+	var b any = "x"
+	fmt.Println(a == b)
+	fmt.Println(a != b)
+	var arr any = [2]int{1, 2}
+	fmt.Println([2]int{1, 2} == arr)
+	x := 1
+	var p any = &x
+	fmt.Println(&x == p)
+}
+`,
+		"true\nfalse\ntrue\ntrue\n",
+	);
+});
+
+test("a complex value compares with an interface holding it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex64 = 1 + 2i
+	var b any = c
+	fmt.Println(c == b, b == c, c != b, b != c)
+	var d complex128 = 1 + 2i
+	var e any = d
+	fmt.Println(d == e, e == d, d != e, e != d)
+}
+`,
+		"true true false false\ntrue true false false\n",
+	);
+});
+
+test("a complex value differs from an interface holding another value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var d complex128 = 1 + 2i
+	var e any = complex128(3 + 4i)
+	fmt.Println(d == e, e == d, d != e, e != d)
+	var re any = complex128(1 + 3i)
+	fmt.Println(d == re, re != d)
+	var n any = 1
+	fmt.Println(d == n, n == d, d != n)
+	var s any = "x"
+	fmt.Println(d == s, s != d)
+	var z any = complex64(1 + 2i)
+	var c complex64 = 1 + 2i
+	fmt.Println(c == z, z != c)
+}
+`,
+		"false false true true\nfalse true\nfalse false true\nfalse true\ntrue false\n",
+	);
+});
+
+test("a complex switch tag matches an interface case by type and value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var d complex128 = 1 + 2i
+	var e any = d
+	switch d {
+	case e:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	e = complex128(5)
+	switch d {
+	case e:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	e = 1
+	switch d {
+	case e:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+}
+`,
+		"hit\nmiss\nmiss\n",
+	);
+});
+
+test("a complex64 and a complex128 holding the same parts differ in an interface on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a complex64 = 1 + 2i
+	var b any = complex128(1 + 2i)
+	fmt.Println(a == b, b == a, a != b)
+	var c complex128 = 1 + 2i
+	var d any = complex64(1 + 2i)
+	fmt.Println(c == d, d == c, c != d)
+}
+`,
+		"false false true\nfalse false true\n",
+	);
+});
+
+test("a concrete value compares with a non-empty interface on either side", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() int }
+
+type T int
+
+func (t T) M() int { return int(t) }
+
+func main() {
+	var i I = T(3)
+	t := T(3)
+	u := T(4)
+	fmt.Println(t == i, i == t, u == i, i != u)
+}
+`,
+		"true true false true\n",
+	);
+});
+
+test("a struct compares with an interface holding it on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+type I interface{}
+
+func main() {
+	s := S{1}
+	var i I = S{1}
+	var e any = S{2}
+	fmt.Println(s == i, s == e, i == s, s != e)
+}
+`,
+		"true false true true\n",
+	);
+});
+
+test("comparisons between interfaces and with nil are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = 1
+	var b any = 1
+	var n any
+	fmt.Println(a == b, a == 1, 1 == a, a == nil, n == nil, n != nil)
+}
+`,
+		"true true true false true false\n",
+	);
+});
+
+section("Switch case values that are interfaces");
+
+test("a switch case of interface type matches a concrete tag", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b any = 2
+	switch 2 {
+	case b:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+	s := "x"
+	var c any = "y"
+	switch s {
+	case c:
+		fmt.Println("hit")
+	default:
+		fmt.Println("miss")
+	}
+}
+`,
+		"hit\nmiss\n",
+	);
+});
+
+test("a switch case of interface type matches through fallthrough", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b any = 2
+	switch 2 {
+	case b:
+		fmt.Println("hit")
+		fallthrough
+	case 3:
+		fmt.Println("next")
+	}
+}
+`,
+		"hit\nnext\n",
+	);
+});
+
+test("a switch case of interface type works without fmt", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+func main() {
+	var b any = 2
+	switch 2 {
+	case b:
+	default:
+		panic("miss")
+	}
+}
+`,
+		"",
+	);
+});
+
+test("a switch case of a non-empty interface type matches a struct tag on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type I interface{}
+
+type S struct{ A int }
+
+func main() {
+	s := S{1}
+	var i I = S{1}
+	switch s {
+	case i:
+		fmt.Println("hit")
+	}
+}
+`,
+		"hit\n",
+	);
+});
+
+test("a switch with an interface tag and concrete cases is unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var b any = 2
+	switch b {
+	case 2:
+		fmt.Println("hit")
+	}
+}
+`,
+		"hit\n",
+	);
+});
