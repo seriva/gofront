@@ -2,6 +2,7 @@
 // Tests for Phase 4a: Structs, Pointers, and Methods in WASM.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -562,5 +563,177 @@ func main() {
 }
 `,
 		'[ ] [ ] [  ] { [ ]} [  ] [[ ] [ ]] [[ ] [ ]]\ntrue true 0 ! true true true\n["" ""] ["" ""]\n',
+	);
+});
+
+test("anonymous struct with an embedded struct keeps the embedded field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	v := struct {
+		P
+		M int
+	}{P: P{5}, M: 6}
+	fmt.Println(v.N, v.P.N, v.M)
+	w := struct {
+		P
+		M int
+	}{P{5}, 6}
+	fmt.Println(w.N, w.P.N, w.M)
+}
+`,
+		"5 5 6\n5 5 6\n",
+	);
+});
+
+test("anonymous struct with an embedded struct and a pointer field", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	y := struct {
+		P
+		M *P
+	}{P{1}, &P{2}}
+	y.N = 5
+	fmt.Println(y.N, y.M.N)
+}
+`,
+		"5 2\n",
+	);
+});
+
+test("slice of anonymous structs with an embedded struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	xs := []struct {
+		P
+		M int
+	}{{P{1}, 2}}
+	fmt.Println(xs[0].N, xs[0].M)
+}
+`,
+		"1 2\n",
+	);
+});
+
+test("anonymous struct embedding a pointer promotes through it", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	v := struct{ *P }{&P{5}}
+	fmt.Println(v.N)
+	v.N = 6
+	fmt.Println(v.P.N)
+}
+`,
+		"5\n6\n",
+	);
+});
+
+test("anonymous struct embedding a generic instance", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Inner[A any] struct{ Y A }
+
+type S[A any] struct {
+	Inner[A]
+	X A
+}
+
+type W[B any] S[B]
+
+func main() {
+	v := struct {
+		Inner[int]
+		X int
+	}{Inner: Inner[int]{Y: 11}, X: 22}
+	fmt.Println(v.Y, v.X, v.Inner.Y)
+	w := W[int]{Inner: Inner[int]{Y: 11}, X: 22}
+	fmt.Println(w.Y, w.X, w.Inner.Y)
+}
+`,
+		"11 22 11\n11 22 11\n",
+	);
+});
+
+test("conversion between a named and an anonymous embedding struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type E struct{ V int }
+type A struct{ E }
+
+func main() {
+	a := A{E{11}}
+	u := struct{ E }(a)
+	b := A(u)
+	fmt.Println(u.V, b.V)
+}
+`,
+		"11 11\n",
+	);
+});
+
+test("appending a named struct to a slice of anonymous structs", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A struct{ X int }
+
+func main() {
+	var s []struct{ X int }
+	s = append(s, A{5})
+	fmt.Println(len(s), s[0].X)
+}
+`,
+		"1 5\n",
+	);
+});
+
+test("struct field names with underscores stay distinct from shorter names", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A struct{ X int }
+
+func main() {
+	var u struct{ X int } = A{5}
+	fmt.Println(u.X)
+	a := struct{ A_int int }{1}
+	b := struct{ A int }{2}
+	fmt.Println(a.A_int, b.A)
+}
+`,
+		"5\n1 2\n",
 	);
 });

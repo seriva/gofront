@@ -108,7 +108,7 @@ Root: `wasm`-only AST rewrites build new nodes without the static type the emitt
 > Split from the former `followup-fixes-plan.md` (re-probed 2026-11-17; reviewed and re-probed 2026-11-19 at `002e5180`) and three `plans/follow-ups.md` entries with the same root.
 
 ### Phase 1: One struct field list on `wasm` (root `wasm-struct-field-list`)
-- [ ] Task 1.1: `structFieldList` and the core layout paths (W1.1–W1.4, W1.9, W1.11, W1.12)
+- [x] Task 1.1: `structFieldList` and the core layout paths (W1.1–W1.4, W1.9, W1.11, W1.12)
   - Files: `src/backend/wasm/types.js` (`structFieldList`, `toWasmType`, `goTypeKey`, `isUnhashableGoType`), `src/backend/wasm/emit.js` (`_resolveStructInfo`, `_resolveFieldPath` for checker `pointer`), `src/backend/wasm/module-emitter.js` (`getAnonStructType` `embeds` and `resolvedStruct` layout)
   - Test: `test/unit/wasm/structs.test.js`: W1.1 and W1.2 → `5 5 6`, W1.3 → `5 2`, W1.4 → `1 2`, W1.9 (`struct{ *P }`) → `5`, W1.11 (`map[any]int` with `struct{ *P }` where `P` has `[]int`) → `7`, W1.12 (`struct{ Inner[int]; X int }` and `W[int]`) → `11 22 11` with `assertAllTargetsOutput`
   - Done when: all pass; `rawFields` removed from `types.js` and `emit.js`
