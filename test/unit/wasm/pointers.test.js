@@ -966,3 +966,52 @@ func main() {
 		"true\ntrue\n",
 	);
 });
+
+test("selectors through a defined pointer to a struct read, write and compound-assign", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X int }
+type PS *S
+
+func main() {
+	s := S{3}
+	var p PS = &s
+	fmt.Println(p.X)
+	p.X = 9
+	p.X += 2
+	p.X++
+	fmt.Println(p.X, s.X)
+}
+`,
+		"3\n12 12\n",
+	);
+});
+
+test("a defined pointer to a struct as a parameter and dereferenced whole", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X, Y int }
+type PS *S
+
+func get(p PS) int { return p.X + p.Y }
+
+func main() {
+	s := S{3, 4}
+	var p PS = &s
+	fmt.Println(get(p))
+	t := *p
+	t.X = 100
+	fmt.Println(s.X, t.X)
+	*p = S{7, 8}
+	fmt.Println(s.X, s.Y)
+}
+`,
+		"7\n3 100\n7 8\n",
+	);
+});

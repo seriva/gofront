@@ -28,6 +28,7 @@ import {
 	isStringType,
 	isStructType,
 	isTaggedSliceType,
+	pointerBase,
 } from "./types.js";
 
 function hasReturnInBlock(n) {
@@ -1441,10 +1442,8 @@ export class StmtsEmitter {
 
 	_structNameOf(goType) {
 		if (!goType) return null;
-		if (goType.kind === "PointerType" || goType.kind === "pointer")
-			return this._structNameOf(goType.base);
-		if (goType.kind === "StarExpr")
-			return this._structNameOf(goType.expr ?? goType.operand);
+		const pointee = pointerBase(goType, this.mod.checker);
+		if (pointee) return this._structNameOf(pointee);
 		return goType.name ?? null;
 	}
 

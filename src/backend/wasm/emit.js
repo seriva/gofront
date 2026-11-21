@@ -20,6 +20,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	pointerBase,
 	structFieldList,
 	toWasmType,
 } from "./types.js";
@@ -1145,12 +1146,10 @@ export class FunctionEmitter {
 			}
 		}
 		if (!t) return null;
-		while (
-			t.kind === "pointer" ||
-			t.kind === "PointerType" ||
-			t.kind === "StarExpr"
-		) {
-			t = t.base ?? t.expr ?? t.operand;
+		// A defined pointer type (`type PS *S`) stands for its pointee too.
+		for (let next = pointerBase(t, this.mod.checker); next; ) {
+			t = next;
+			next = pointerBase(t, this.mod.checker);
 		}
 		const name = t.name ?? (t.kind === "named" ? t.name : null);
 		if (name && this.mod.structTypes.has(name)) {

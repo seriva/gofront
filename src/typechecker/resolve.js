@@ -1482,12 +1482,28 @@ export const resolveMethods = {
 			return baseType?._tainted ? TAINTED_ANY : ANY;
 		if (this._isTransparentPointerField(baseType, field))
 			baseType = this.resolveType(baseType.base);
+		else baseType = this._definedPointerFieldBase(baseType, field) ?? baseType;
 		const param = this._typeParamOperand(baseType, field);
 		if (param) return this._fieldTypeTypeParam(param, baseType, field, node);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
 			return baseType.methods.get(field);
 		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
+	},
+
+	// For `p.f` with `p` of a defined pointer type (`type PS *S`) and `f` a
+	// field of the struct it points at, that struct's type: Go reads the field
+	// through the pointer, but never a method (defined pointer types have
+	// none). Null for every other base.
+	_definedPointerFieldBase(baseType, field) {
+		if (baseType.kind !== "named" || field === "value") return null;
+		const under = this._deepUnderlying(baseType);
+		if (under?.kind !== "pointer") return null;
+		const pointee = this.resolveType(under.base);
+		const struct = this._deepUnderlying(pointee);
+		return struct?.kind === "struct" && struct.fields?.has(field)
+			? pointee
+			: null;
 	},
 
 	// The type parameter a selector reads through: `t` or `*t`. Its fields

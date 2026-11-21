@@ -167,7 +167,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`
   - Test: `test/unit/wasm/pointers.test.js`: F5.1 → `3`, F5.2 → `3`, `3`, `7` on all targets
   - Done when: valid modules, Go's output
-- [ ] Task 5.2: Selectors through a defined pointer to a struct resolve the struct for reads, writes, and compound ops (F5.3)
+- [x] Task 5.2: Selectors through a defined pointer to a struct resolve the struct for reads, writes, and compound ops (F5.3)
   - Files: `src/backend/wasm/emit.js` (`_resolveStructInfo`), `src/backend/wasm/emit-stmts.js` (`_structNameOf`)
   - Test: `test/unit/wasm/pointers.test.js`: F5.3 → `11` on all targets
   - Done when: no ICE, Go's output on all targets
