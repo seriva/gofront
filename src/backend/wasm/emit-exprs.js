@@ -406,18 +406,69 @@ export class ExprsEmitter {
 	// `//go:embed` initialiser (see `lowerEmbeds`). A string is a string-table
 	// entry. A []byte is read from a passive data segment into a packed byte
 	// array (`array.new_data`, no linear memory) and copied into a fresh
-	// `(array (mut i32))`, so each variable owns its bytes.
+	// `(array (mut i32))`, so each variable owns its bytes. An embed.FS is a
+	// struct of its sorted names and one such []byte per file.
 	emitEmbedData(node) {
-		const bytes = node._files[0]?.bytes ?? new Uint8Array(0);
-		if (node.as === "string") {
-			this.emitBasicLit({
-				kind: "BasicLit",
-				litKind: "STRING",
-				value: decodeRawBytes(bytes),
-			});
+		if (node.as === "fs") {
+			this._emitEmbedFs(node);
 			return;
 		}
-		const sliceInfo = this.mod.getSliceType(this._getSliceElemType(node._type));
+		const bytes = node._files[0]?.bytes ?? new Uint8Array(0);
+		if (node.as === "string") this._emitEmbedString(bytes);
+		else this._emitEmbedBytes(bytes, node._type);
+	}
+
+	_emitEmbedString(bytes) {
+		this.emitBasicLit({
+			kind: "BasicLit",
+			litKind: "STRING",
+			value: decodeRawBytes(bytes),
+		});
+	}
+
+	_emitEmbedFs(node) {
+		const info = this.mod.getStructType(node._type.name);
+		const [names, datas] = info.fields;
+		const files = node._files;
+		this._emitEmbedSlice(names.goType, files, (f) =>
+			this.emitBasicLit({ kind: "BasicLit", litKind: "STRING", value: f.path }),
+		);
+		const bytesType = this._getSliceElemType(datas.goType);
+		this._emitEmbedSlice(datas.goType, files, (f) =>
+			this._emitEmbedBytes(f.bytes, bytesType),
+		);
+		this.pushInstruction({ op: "struct.new", typeIndex: info.typeIndex });
+	}
+
+	// Pushes a slice of type `sliceType` with one element per file.
+	_emitEmbedSlice(sliceType, files, emitElem) {
+		const sliceInfo = this.mod.getSliceType(this._getSliceElemType(sliceType));
+		const arrInfo = sliceInfo.arrInfo;
+		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		const arrTmp = this.acquireTemp(arrW);
+		this.pushInstruction({ op: "i32.const", value: files.length });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: arrTmp });
+		files.forEach((f, i) => {
+			this.pushInstruction({ op: "local.get", index: arrTmp });
+			this.pushInstruction({ op: "i32.const", value: i });
+			emitElem(f);
+			this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+		});
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "i32.const", value: files.length });
+		this.pushInstruction({ op: "i32.const", value: files.length });
+		this.pushInstruction({ op: "struct.new", typeIndex: sliceInfo.typeIndex });
+		this.releaseTemp(arrTmp, arrW);
+	}
+
+	// Pushes a fresh `[]byte` (slice type `sliceType`) holding `bytes`.
+	_emitEmbedBytes(bytes, sliceType) {
+		const sliceInfo = this.mod.getSliceType(this._getSliceElemType(sliceType));
 		const arrInfo = sliceInfo.arrInfo;
 		const packedIndex = this.mod.getByteArrayType().typeIndex;
 		const packedW = { kind: "ref", nullable: true, typeIndex: packedIndex };

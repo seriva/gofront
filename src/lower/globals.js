@@ -39,8 +39,9 @@ export function computeGlobalAnalysis(programs, _checker = null) {
  * Attaches an `EmbedData` initializer node to every package-level var spec that
  * carries `//go:embed` directives the type checker accepted:
  * `spec._embedData = { kind: "EmbedData", as, _files, _type }` where `as` is
- * "string" or "bytes", `_files` the distinct `{ path, bytes }` its directives
- * matched and `_type` the variable's checked type. It is a side table: the
+ * "string", "bytes" or "fs" (an embed.FS), `_files` the distinct `{ path, bytes }`
+ * its directives matched, sorted by path, and `_type` the variable's checked
+ * type. It is a side table: the
  * spec's `value` stays empty, so a cached AST can be lowered on every compile
  * (the bytes are re-read by the compiler each time) and `var x T` with a
  * directive never counts as having an initializer. File bytes live under the
@@ -61,7 +62,9 @@ export function lowerEmbeds(programs) {
 				spec._embedData = {
 					kind: "EmbedData",
 					as: spec._embedKind,
-					_files: [...files.values()],
+					_files: [...files.values()].sort((a, b) =>
+						a.path < b.path ? -1 : 1,
+					),
 					_type: spec._embedType,
 				};
 			}

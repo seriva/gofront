@@ -230,6 +230,9 @@ const EXCLUDED_MEMBER_GROUPS = {
 	"requires coroutines; out of scope (no runtime)": {
 		iter: ["Pull", "Pull2"],
 	},
+	"needs io/fs, which GoFront does not provide; read a file with ReadFile": {
+		embed: ["FS.ReadDir", "FS.Open"],
+	},
 	"files, processes and signals": {
 		os: [
 			"Chdir",

@@ -1,5 +1,5 @@
-// GoFront test suite — `lowerEmbeds` turns //go:embed directives on `string`
-// and `[]byte` variables into `EmbedData` side-table nodes
+// GoFront test suite — `lowerEmbeds` turns //go:embed directives on `string`,
+// `[]byte` and `embed.FS` variables into `EmbedData` side-table nodes
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,12 +19,13 @@ import {
 	withTempDir,
 } from "../helpers.js";
 
-const SOURCE = (body) =>
-	`package main\n\nimport _ "embed"\n\n${body}\nfunc main() {}\n`;
+const EMBED_IMPORT = 'import _ "embed"';
+const SOURCE = (body, imports) =>
+	`package main\n\n${imports}\n\n${body}\nfunc main() {}\n`;
 
 // Parses, resolves and type-checks `body` as `main.go` in `dir`.
-function prepare(dir, body) {
-	const source = SOURCE(body);
+function prepare(dir, body, imports = EMBED_IMPORT) {
+	const source = SOURCE(body, imports);
 	const ast = new Parser(
 		new Lexer(source, "main.go").tokenize(),
 		"main.go",
@@ -153,7 +154,7 @@ section("lowerEmbeds: cached ASTs");
 test("embed-lower: recompiling a cached AST does not hit `var with initializer`", () => {
 	const files = {
 		"a.txt": "alpha",
-		"main.go": SOURCE("//go:embed a.txt\nvar s string\n"),
+		"main.go": SOURCE("//go:embed a.txt\nvar s string\n", EMBED_IMPORT),
 	};
 	withTempDir(files, (dir) => {
 		clearParseCache();
@@ -174,6 +175,38 @@ test("embed-lower: a changed file is lowered again from a cached AST", () => {
 		lower([ast], checker);
 		assertEqual(text(specs(ast)[0]._embedData._files[0].bytes), "omega");
 	});
+});
+
+section("lowerEmbeds: embed.FS");
+
+test("embed-lower: an embed.FS directive becomes an `fs` node with every file, sorted", () => {
+	withTempDir(
+		{
+			"b.txt": "beta",
+			"a.txt": "alpha",
+			"sub/c.txt": "c",
+			"main.go": SOURCE(
+				"//go:embed sub b.txt\n//go:embed a.txt\nvar files embed.FS\n",
+				'import "embed"',
+			),
+		},
+		(dir) => {
+			clearParseCache();
+			const { programs } = compileDir(dir);
+			const main = programs.find((p) => p._filename === "main.go");
+			const [spec] = specs(main);
+			assertEqual(spec.value ?? null, null);
+			const data = spec._embedData;
+			assertEqual(data.kind, "EmbedData");
+			assertEqual(data.as, "fs");
+			assertEqual(
+				data._files.map((f) => f.path).join(","),
+				"a.txt,b.txt,sub/c.txt",
+			);
+			assertEqual(text(data._files[2].bytes), "c");
+			assertEqual(data._type.name, "FS$$embed");
+		},
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
