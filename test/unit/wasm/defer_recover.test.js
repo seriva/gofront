@@ -1058,6 +1058,111 @@ func Main() {
 	assert(err.message.includes("42"), `message was ${err?.message}`);
 });
 
+section("Uncaught panic text of basic and defined values");
+
+// The message of the Error a `wasm` export throws when it panics with
+// `expr` (declared types in `decls`), as `go run` prints after `panic: `.
+function uncaughtPanicText(expr, { decls = "", viaAny = false } = {}) {
+	const body = viaAny ? `var v any = ${expr}\n\tpanic(v)` : `panic(${expr})`;
+	const src = `package main
+
+import "errors"
+
+var _ = errors.New
+
+${decls}
+
+func Main() {
+	${body}
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	assertValidWasm(wasm);
+	const { exports } = runWasm(wasm, { stringTable });
+	try {
+		exports.Main();
+	} catch (e) {
+		assert(e instanceof Error, `expected an Error, got ${e}`);
+		return e.message;
+	}
+	throw new Error("expected a panic");
+}
+
+const PANIC_DECLS = `
+type Str string
+type T int
+type U uint32
+type F float64
+type B bool
+type I8 int8
+`;
+
+const PANIC_TEXTS = [
+	["true", "true"],
+	["false", "false"],
+	["uint64(1) << 63", "9223372036854775808"],
+	["uint32(1) << 31", "2147483648"],
+	["uint(7)", "7"],
+	["uint16(65535)", "65535"],
+	["uintptr(5)", "5"],
+	["int8(-3)", "-3"],
+	["int64(-9)", "-9"],
+	["42", "42"],
+	["'a'", "97"],
+	["1.5", "1.5"],
+	['"s"', "s"],
+	["uint8(200)", "200"],
+	['Str("s")', 'main.Str("s")'],
+	["T(5)", "main.T(5)"],
+	["U(2147483648)", "main.U(2147483648)"],
+	["F(1.5)", "main.F(1.5)"],
+	["B(true)", "main.B(true)"],
+	["I8(-4)", "main.I8(-4)"],
+];
+
+for (const [expr, text] of PANIC_TEXTS) {
+	test(`an uncaught panic(${expr}) reaches the host as ${text}`, () => {
+		assertEqual(uncaughtPanicText(expr, { decls: PANIC_DECLS }), text);
+	});
+}
+
+for (const [expr, text] of PANIC_TEXTS) {
+	test(`an uncaught panic of ${expr} held in an any reaches the host as ${text}`, () => {
+		assertEqual(
+			uncaughtPanicText(expr, { decls: PANIC_DECLS, viaAny: true }),
+			text,
+		);
+	});
+}
+
+test("recover() still returns the typed value of a panic whose text is formatted", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T int
+type Str string
+
+func try(f func()) {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	f()
+}
+
+func main() {
+	try(func() { panic(true) })
+	try(func() { panic(uint64(1) << 63) })
+	try(func() { panic(T(5)) })
+	try(func() { panic(Str("s")) })
+}
+`,
+		"bool true\nuint64 9223372036854775808\nmain.T 5\nmain.Str s\n",
+	);
+});
+
 section("WASM Defer — untyped constant arguments");
 
 test("untyped constants take the parameter type of a deferred call", async () => {

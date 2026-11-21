@@ -40,6 +40,7 @@ import {
 	getMapKeyValTypes,
 	isInterfaceType,
 	isMapType,
+	isStringType,
 	toWasmType,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
@@ -630,6 +631,10 @@ export function compileWasmModule(
 	};
 	funcDecls.push(pushPanicFn);
 
+	mod.usesPanicText = funcDecls.some((fn) =>
+		_someNode(fn.body, (n) => _panicsWithValue(n, checker)),
+	);
+
 	// 1d. Interface dispatchers
 	_collectInterfaceDispatchers(progs, funcDecls, mod, checker);
 
@@ -887,6 +892,13 @@ export function compileWasmModule(
 				null,
 				"ta_fail",
 			),
+		);
+	}
+	// `panic(v)` of anything but a plain string shows the host the text of
+	// `v`'s dynamic type.
+	if (mod.usesPanicText) {
+		funcDecls.push(
+			helper("__panic_text", [{ name: "v", type: ANY_T }], STR_T, "panic_text"),
 		);
 	}
 	mod.usesAnyHash = false;
@@ -1158,6 +1170,17 @@ export function compileWasmModule(
 		facade,
 		sourceMapInfo: { sources, mappings },
 	};
+}
+
+// Whether `node` is a `panic` whose value is not a plain string, so the host
+// message comes from `__panic_text` rather than from the string itself.
+function _panicsWithValue(node, checker) {
+	if (node.kind !== "CallExpr" || node._builtinName !== "panic") return false;
+	const arg = node.args?.[0];
+	if (!arg) return false;
+	if (arg.kind === "BasicLit" && arg.litKind === "STRING") return false;
+	const t = arg._type;
+	return !(t && isStringType(t, checker) && t.kind !== "named");
 }
 
 function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {

@@ -181,7 +181,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Done when: all pass; `bce-mathx.js` passes
 
 ### Phase 3: `wasm` panic values (root `wasm-panic-value`)
-- [ ] Task 3.1: One panic-text formatter for basic and defined basic values (F20 `bool`/`uint64`, F20u32, F20d)
+- [x] Task 3.1: One panic-text formatter for basic and defined basic values (F20 `bool`/`uint64`, F20u32, F20d)
   - Files: `src/backend/wasm/index.js` (register and emit `__panic_text`), `src/backend/wasm/emit-builtins.js` (`emitPanicThrow` calls it when no host message is passed; delete the `_emitScalarPanic` width switch)
   - Test: `test/unit/wasm/defer_recover.test.js`: exports panicking with `true`, `uint64(1)<<63`, `uint32(1)<<31`, `Str("s")`, `T(5)` and the same values held in `any` throw `Error` with Go's text (*Verified Gaps*); the float, `uint8` and string controls unchanged; `recover()` values unchanged
   - Done when: all pass
