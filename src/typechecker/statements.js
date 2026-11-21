@@ -735,8 +735,15 @@ export const statementCheckMethods = {
 							e,
 						);
 					this._checkCaseValue(stmt.tag, e);
-					if (this._isDuplicateConst(seenCases, e, stmt.tag?._type, false))
-						this.err(`duplicate case ${exprText(e)} in expression switch`, e);
+					if (this._isDuplicateConst(seenCases, e, stmt.tag?._type, false)) {
+						const type = defaultType(
+							this._constIdentityType(e, stmt.tag?._type),
+						);
+						this.err(
+							`duplicate case ${exprText(e)} (${operandKind(e, typeStr(type), false)}) in expression switch`,
+							e,
+						);
+					}
 					if (stmt.tag) this._tagFloat32Const(stmt.tag._type, e._type, e);
 					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
 				}

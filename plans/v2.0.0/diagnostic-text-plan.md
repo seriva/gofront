@@ -134,7 +134,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Files: `src/typechecker/types.js` (`typeStr` for `struct` and `interface` including `unionConstraint` / `_comparable` / `_typeSetEmbeds`), `src/typechecker/resolve.js` (`_resolveInterfaceType` union term resolution if not formatted via `operand-text.js`)
   - Test: remove `// pending: type-text-elided` from `incdec_empty_interface`; add reject fixture `generic_mod_inline_iface.go` (`constrained by interface{~int | ~float64}`); `test/unit/types/identity.test.js` table: `struct{X int}`, `struct{E}`, `interface{M()}`, `interface{}`, a self-referential unnamed type; update the 7 `identity_*.go` conformance fixtures asserting `struct{...}`
   - Done when: those cases pass; `grep -nE '(struct|interface)\{\.\.\.\}' src/typechecker/types.js` is empty; `conformance.test.js` and unit tests pass
-- [ ] Task 2.2: Duplicate map keys and cases print the constant value (D2.3, D2.4)
+- [x] Task 2.2: Duplicate map keys and cases print the constant value (D2.3, D2.4)
   - Files: `src/typechecker/expressions.js` (duplicate map key at `:2866`), `src/typechecker/statements.js` (duplicate case at `:699`)
   - Test: remove `// pending: const-key-text` from `duplicate_map_key_forms`; `duplicate_case_other_forms` markers extended to Go's `(constant 1 of type int)`, `(constant 2 of type float64)`, and `(constant of type string)`
   - Done when: Go's headline on all targets; `D2` audit keys removed
