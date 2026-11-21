@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { decodeRawBytes } from "../../lexer/lexer.js";
 import {
 	closureMutates,
 	declaresVar,
@@ -590,6 +592,7 @@ const EXPR_GEN_DELEGATE = {
 	FuncLit: "_genFuncLit",
 	TypeConversion: "_genTypeConversion",
 	TypeAssertExpr: "_genTypeAssertExpr",
+	EmbedData: "_genEmbedData",
 };
 
 /** @type {ThisType<CodeGen>} */
@@ -830,6 +833,24 @@ export const expressionGenMethods = {
 				throw new Error(`CodeGen: unhandled expression kind '${expr.kind}'`);
 			}
 		}
+	},
+
+	// `//go:embed` initialiser (see `lowerEmbeds`). A string is a literal; a
+	// []byte decodes a base64 constant into a fresh Uint8Array, and the constant
+	// of a file is declared once however many variables embed it.
+	_genEmbedData(node) {
+		const bytes = node._files[0]?.bytes ?? new Uint8Array(0);
+		if (node.as === "string") return JSON.stringify(decodeRawBytes(bytes));
+		this.useHelper("b64");
+		const key = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+		const name = `__emb_${key}`;
+		this._embedBlobs ??= new Set();
+		if (!this._embedBlobs.has(name)) {
+			this._embedBlobs.add(name);
+			const b64 = Buffer.from(bytes).toString("base64").replace(/=+$/, "");
+			this.line(`var ${name} = ${JSON.stringify(b64)};`);
+		}
+		return `__b64(${name})`;
 	},
 
 	_gen64BitFoldedConst(expr, val) {

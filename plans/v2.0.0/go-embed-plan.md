@@ -93,7 +93,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `src/lower/globals.js`, `src/lower/index.js`
   - Test: `test/unit/compiler/embed-lower.test.js`: `lowerEmbeds` attaches `spec._embedData = { kind: "EmbedData", as, _files, _type }` for `string` and `[]byte`/`[]uint8` without mutating `spec.value`, and recompiling a cached AST does not trigger `var with initializer`
   - Done when: `lower()` populates `spec._embedData` for `string` and `[]byte` directives (carrying `_type`) and `spec.value` remains `null`
-- [ ] Task 2.2: Emit embedded scalars in the JS backend (former 1.4)
+- [x] Task 2.2: Emit embedded scalars in the JS backend (former 1.4)
   - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js`, `src/backend/js/runtime.js`
   - Test: `test/unit/compiler/embed-js.test.js`: string content, `[]byte` with all 256 byte values, a non-UTF-8 `string` round-tripping through `[]byte(s)`, two `[]byte` vars embedding the same file store the base64 once but mutate independently, dependent `var n = len(data)` initialization order, `&data` and `var _ string`, identical results after `--minify --mangle`
   - Done when: `CodeGen.generate()` runs `lowerEmbeds`, embedded variables initialize at package load through `_emitVarBindings`, and the base64 decoder helper (in `HELPER_MAP`) is emitted only when a `[]byte` embed exists
