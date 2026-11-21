@@ -10,6 +10,7 @@ import {
 	isInterfaceType,
 	isPointerToStruct,
 	isStringType,
+	structFieldList,
 	toWasmType,
 } from "./types.js";
 
@@ -29,8 +30,10 @@ function _resolveStructType(mod, goType) {
 		t = resolved;
 	}
 	if (t?.kind === "named") return mod.getStructType(t.name) ?? null;
-	if ((t?.kind === "struct" || t?.kind === "StructType") && t.name)
-		return mod.getStructType(t.name) ?? null;
+	if (t?.kind === "struct" || t?.kind === "StructType") {
+		if (t.name) return mod.getStructType(t.name) ?? null;
+		return mod.getAnonStructType(structFieldList(t, mod.checker));
+	}
 	return null;
 }
 
@@ -69,7 +72,7 @@ export class MapsEmitter {
 		}
 	}
 
-	// Struct info for a Go type used as a map key (named struct, alias, or complex).
+	// Struct info for a Go type used as a map key (named struct, alias, anonymous struct, or complex).
 	_structInfoForGoType(goType) {
 		return (
 			_complexTypeFor(this.mod, goType) ?? _resolveStructType(this.mod, goType)

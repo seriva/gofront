@@ -116,7 +116,7 @@ Root: `wasm`-only AST rewrites build new nodes without the static type the emitt
   - Files: `src/backend/wasm/boundary.js` (`classifyAnonStruct` uses `structFieldList`)
   - Test: `test/unit/wasm/boundary.test.js`: W1.10 (`func Make() struct{ P; M int }`) compiles with valid wasm; `test/unit/wasm/structs.test.js`: W1.7 → `11 11`, W1.8 → `1 5` (regression); switch `test/unit/language/value-semantics.test.js` lines 1047–1070 (`conversion to an embedding anonymous struct drops the source type`) to `assertAllTargetsOutput`
   - Done when: all pass with valid modules; `grep -rn "rawFields" src/backend/wasm` finds no matches
-- [ ] Task 1.3: Anonymous struct map keys (W1.5, W1.6)
+- [x] Task 1.3: Anonymous struct map keys (W1.5, W1.6)
   - Files: `src/backend/wasm/emit-maps.js` (`_resolveStructType` fallback to `structFieldList` / `getAnonStructType`)
   - Test: `test/unit/wasm/map-keys.test.js`: W1.5, W1.6 → `10` (and a key differing only in `A[1]` misses; an anonymous struct with an embedded field as a map key hits)
   - Done when: all pass with valid modules
