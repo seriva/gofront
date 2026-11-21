@@ -892,13 +892,19 @@ export class ExprsEmitter {
 		});
 	}
 
-	// Raises Go's slice-bounds panic.  `lo`, `hi`, `max` and `cap` are i32
-	// locals; `form` is described at `__slice_bounds_panic`.  The i32 bounds
-	// are sign-extended so a negative index prints as written.
+	// Raises Go's slice-bounds panic.  `lo`, `hi` and `max` are bounds as
+	// `_emitIndexExprToI32` returns them, `cap` an i32 local; `form` is
+	// described at `__slice_bounds_panic`.  An i32 bound is sign-extended so a
+	// negative index prints as written; a 64-bit one that did not fit an i32 is
+	// read from its full value.
 	_emitSliceBoundsPanic(lo, hi, max, cap, form) {
-		for (const index of [lo, hi, max]) {
-			this.pushInstruction({ op: "local.get", index });
-			this.pushInstruction("i64.extend_i32_s");
+		for (const bound of [lo, hi, max]) {
+			if (bound.wide != null) {
+				this.pushInstruction({ op: "local.get", index: bound.wide });
+			} else {
+				this.pushInstruction({ op: "local.get", index: bound.index });
+				this.pushInstruction("i64.extend_i32_s");
+			}
 		}
 		this.pushInstruction({ op: "local.get", index: cap });
 		this.pushInstruction({ op: "i32.const", value: form });
@@ -936,15 +942,17 @@ export class ExprsEmitter {
 			const lowTmp = this.acquireTemp("i32");
 			const highTmp = this.acquireTemp("i32");
 
+			let lowBound = { index: lowTmp };
 			if (expr.low) {
-				this._emitIndexExprToI32(expr.low, lowTmp);
+				lowBound = this._emitIndexExprToI32(expr.low, lowTmp, true);
 			} else {
 				this.pushInstruction({ op: "i32.const", value: 0 });
 				this.pushInstruction({ op: "local.set", index: lowTmp });
 			}
 
+			let highBound = { index: highTmp };
 			if (expr.high) {
-				this._emitIndexExprToI32(expr.high, highTmp);
+				highBound = this._emitIndexExprToI32(expr.high, highTmp, true);
 			} else {
 				this.pushInstruction({ op: "local.get", index: srcLenTmp });
 				this.pushInstruction({ op: "local.set", index: highTmp });
@@ -964,7 +972,13 @@ export class ExprsEmitter {
 			this.pushInstruction("i32.or");
 
 			this.pushInstruction({ op: "if", blockType: "void" });
-			this._emitSliceBoundsPanic(lowTmp, highTmp, srcLenTmp, srcLenTmp, 2);
+			this._emitSliceBoundsPanic(
+				lowBound,
+				highBound,
+				{ index: srcLenTmp },
+				srcLenTmp,
+				2,
+			);
 			this.pushInstruction("end");
 
 			this.pushInstruction({ op: "local.get", index: strTmp });
@@ -975,6 +989,8 @@ export class ExprsEmitter {
 				funcIndex: this.mod.getStringSliceImportIndex(),
 			});
 
+			this._releaseBound(highBound);
+			this._releaseBound(lowBound);
 			this.releaseTemp(highTmp, "i32");
 			this.releaseTemp(lowTmp, "i32");
 			this.releaseTemp(srcLenTmp, "i32");
@@ -1059,24 +1075,27 @@ export class ExprsEmitter {
 		}
 
 		const lowTmp = this.acquireTemp("i32");
+		let lowBound = { index: lowTmp };
 		if (expr.low) {
-			this._emitIndexExprToI32(expr.low, lowTmp);
+			lowBound = this._emitIndexExprToI32(expr.low, lowTmp, true);
 		} else {
 			this.pushInstruction({ op: "i32.const", value: 0 });
 			this.pushInstruction({ op: "local.set", index: lowTmp });
 		}
 
 		const highTmp = this.acquireTemp("i32");
+		let highBound = { index: highTmp };
 		if (expr.high) {
-			this._emitIndexExprToI32(expr.high, highTmp);
+			highBound = this._emitIndexExprToI32(expr.high, highTmp, true);
 		} else {
 			this.pushInstruction({ op: "local.get", index: srcLenTmp });
 			this.pushInstruction({ op: "local.set", index: highTmp });
 		}
 
 		const maxTmp = this.acquireTemp("i32");
+		let maxBound = { index: maxTmp };
 		if (expr.max) {
-			this._emitIndexExprToI32(expr.max, maxTmp);
+			maxBound = this._emitIndexExprToI32(expr.max, maxTmp, true);
 		} else {
 			this.pushInstruction({ op: "local.get", index: srcCapTmp });
 			this.pushInstruction({ op: "local.set", index: maxTmp });
@@ -1097,9 +1116,9 @@ export class ExprsEmitter {
 
 		this.pushInstruction({ op: "if", blockType: "void" });
 		this._emitSliceBoundsPanic(
-			lowTmp,
-			highTmp,
-			maxTmp,
+			lowBound,
+			highBound,
+			maxBound,
 			srcCapTmp,
 			(expr.max ? 1 : 0) | (isSlice ? 0 : 2),
 		);
@@ -1124,6 +1143,9 @@ export class ExprsEmitter {
 			typeIndex: sliceInfo.typeIndex,
 		});
 
+		this._releaseBound(maxBound);
+		this._releaseBound(highBound);
+		this._releaseBound(lowBound);
 		this.releaseTemp(maxTmp, "i32");
 		this.releaseTemp(highTmp, "i32");
 		this.releaseTemp(lowTmp, "i32");
@@ -1501,21 +1523,43 @@ export class ExprsEmitter {
 		this.releaseTemp(arrTmp, arrWType);
 	}
 
-	_emitIndexExprToI32(node, tmp32) {
+	// Evaluates the integer `node` into the i32 local `tmp32` and returns its
+	// bound `{ index: tmp32, wide, unproven }`.  An operand `_isI32IndexExpr`
+	// proves narrow is stored as is.  Any other i64 is range-checked instead
+	// of wrapped (`__narrow_bound`): a value outside 0..2^31-1 stores a
+	// saturated i32 (the minimum for a negative one, else the maximum) that
+	// every size or bounds comparison rejects.  With `keepWide` the full value
+	// stays in the i64 local `wide` (release it with `_releaseBound`) so the
+	// panic can print it.
+	_emitIndexExprToI32(node, tmp32, keepWide = false) {
 		if (this._isI32IndexExpr(node)) {
 			this.emitExpr(node, "i32");
 			this.pushInstruction({ op: "local.set", index: tmp32 });
-			return;
+			return { index: tmp32, wide: null, unproven: false };
 		}
 		const wType = this.toWasmType(node._type);
-		if (wType === "i64") {
-			this.emitExpr(node, "i64");
-			this.pushInstruction("i32.wrap_i64");
-			this.pushInstruction({ op: "local.set", index: tmp32 });
-		} else {
+		if (wType !== "i64") {
 			this.emitExpr(node, "i32");
 			this.pushInstruction({ op: "local.set", index: tmp32 });
+			return { index: tmp32, wide: null, unproven: false };
 		}
+		const full = keepWide ? this.acquireTemp("i64") : null;
+		this.emitExpr(node, "i64");
+		if (keepWide) this.pushInstruction({ op: "local.tee", index: full });
+		this.pushInstruction({
+			op: "i32.const",
+			value: isSigned(node._type) ? 0 : 1,
+		});
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getNarrowBoundFuncIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: tmp32 });
+		return { index: tmp32, wide: full, unproven: true };
+	}
+
+	_releaseBound(bound) {
+		if (bound.wide != null) this.releaseTemp(bound.wide, "i64");
 	}
 
 	// Integer conversions of constants (`int64(1e18 + 1)`) keep the exact value.

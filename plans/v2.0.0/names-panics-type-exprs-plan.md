@@ -167,7 +167,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Done when: all pass and `js-globals.test.js` passes unmodified
 
 ### Phase 2: `wasm` integers at Go width (root `wasm-bounds-width`)
-- [ ] Task 2.1: Checked narrowing for slice bounds and `make` sizes (F19, F19a, F19lo, F19s, F19m)
+- [x] Task 2.1: Checked narrowing for slice bounds and `make` sizes (F19, F19a, F19lo, F19s, F19m)
   - Files: `src/backend/wasm/emit-exprs.js` (`_emitIndexExprToI32` `onOverflow`, `emitSliceExpr`), `src/backend/wasm/emit-builtins.js` (`make` length, capacity, map hint), `src/backend/wasm/index.js` (`__slice_bounds_panic` takes the unwrapped `i64`)
   - Test: `test/unit/compiler/strict-panics.test.js`: F19, F19a, F19lo, F19s → Go's messages; F19m → `makeslice: len out of range` and `makeslice: cap out of range` on `wasm`; the 64-bit index control still passes
   - Done when: all pass on `wasm` and `both`; `bce-mathx.js` and `zero-alloc.js` pass (proven-narrow operands emit the same code)

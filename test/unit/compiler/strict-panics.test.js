@@ -10,6 +10,7 @@ import {
 	assertAllTargetsOutput,
 	assertEqual,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -603,6 +604,78 @@ func main() {
 	assert(!js.includes("__sslice"), "js package must not use the checked form");
 	const strict = compile(src, { strict: true }).js;
 	assert(strict.includes("__sslice(s, lo, hi)"), "both package is unchecked");
+});
+
+section("wasm slice bounds, indexes and make sizes keep their Go width");
+
+test("a 64-bit slice bound of 2^32 or more panics with its full value", async () => {
+	await assertProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := []int{1, 2, 3}
+	var a [3]int
+	s := "abc"
+	n := 1 << 32
+	try("F19", func() { _ = xs[:n] })
+	try("F19a", func() { _ = a[:n] })
+	try("F19lo", func() { _ = xs[(1<<32)+1:] })
+	try("F19lo-var", func() { lo := (1 << 32) + 1; _ = xs[lo:2] })
+	try("F19s", func() { _ = s[:n] })
+	try("F19max", func() { _ = xs[:2:n] })
+	try("F19neg", func() { m := -(1 << 32); _ = xs[m:] })
+	try("index", func() { _ = xs[n] })
+	try("ok", func() { _ = xs[1:3]; _ = s[1:] })
+}
+`,
+		`F19 runtime error: slice bounds out of range [:4294967296] with capacity 3
+F19a runtime error: slice bounds out of range [:4294967296] with length 3
+F19lo runtime error: slice bounds out of range [4294967297:3]
+F19lo-var runtime error: slice bounds out of range [4294967297:2]
+F19s runtime error: slice bounds out of range [:4294967296] with length 3
+F19max runtime error: slice bounds out of range [::4294967296] with capacity 3
+F19neg runtime error: slice bounds out of range [-4294967296:]
+index runtime error: index out of range [4294967296] with length 3
+ok <nil>
+`,
+	);
+});
+
+test("a uint64 slice bound above 2^32 panics", async () => {
+	await assertProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	xs := []int{1, 2, 3}
+	var u uint64 = 1 << 40
+	try("u64", func() { _ = xs[:u] })
+}
+`,
+		"u64 runtime error: slice bounds out of range [:1099511627776] with capacity 3\n",
+	);
+});
+
+test("make with a 64-bit size beyond 2^31 panics with Go's make text on wasm", async () => {
+	await assertWasmProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	n := 1 << 32
+	try("len", func() { xs := make([]int, n); fmt.Println(len(xs)) })
+	try("len-cap", func() { xs := make([]int, 0, n+1); fmt.Println(len(xs)) })
+	try("len-big", func() { xs := make([]int, n, 3); fmt.Println(len(xs)) })
+	try("neg", func() { m := -n; xs := make([]int, m); fmt.Println(len(xs)) })
+	try("map", func() { m := make(map[int]int, n); fmt.Println(len(m)) })
+	try("ok", func() { k := 3; xs := make([]int, k, k+1); fmt.Println(len(xs), cap(xs)) })
+}
+`,
+		`len runtime error: makeslice: len out of range
+len-cap runtime error: makeslice: cap out of range
+len-big runtime error: makeslice: cap out of range
+neg runtime error: makeslice: len out of range
+0
+map <nil>
+3 4
+ok <nil>
+`,
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

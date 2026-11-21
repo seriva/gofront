@@ -87,6 +87,33 @@ function emitIndexPanicBody(mod, emitter) {
 	emitter.emitRuntimePanicThrow();
 }
 
+// Body of `__narrow_bound(v i64, unsigned i32) i32`: `v` as an i32 when it is
+// in 0..2^31-1, else a value no size or bounds check accepts (the i32 minimum
+// for a negative signed `v`, the maximum otherwise).
+function emitNarrowBoundBody(emitter) {
+	const emit = (ins) => emitter.pushInstruction(ins);
+	emit({ op: "local.get", index: 0 });
+	emit({ op: "i64.const", value: 0x7fffffffn });
+	emit("i64.gt_u");
+	emit({ op: "if", blockType: "i32" });
+	emit({ op: "local.get", index: 0 });
+	emit({ op: "i64.const", value: 0n });
+	emit("i64.lt_s");
+	emit({ op: "local.get", index: 1 });
+	emit("i32.eqz");
+	emit("i32.and");
+	emit({ op: "if", blockType: "i32" });
+	emit({ op: "i32.const", value: -0x80000000 });
+	emit("else");
+	emit({ op: "i32.const", value: 0x7fffffff });
+	emit("end");
+	emit("else");
+	emit({ op: "local.get", index: 0 });
+	emit("i32.wrap_i64");
+	emit("end");
+	emit("return");
+}
+
 // Body of `__slice_bounds_panic(lo, hi, max i64, cap, form i32)`: Go's
 // `slice bounds out of range` text for the first failing bound, checked in
 // Go's order (max, then hi, then lo; hi, then lo for a two-index slice).
@@ -518,6 +545,18 @@ export function compileWasmModule(
 			"runtime error: invalid memory address or nil pointer dereference",
 	});
 
+	// An i64 size or bound narrowed to the i32 the runtime indexes with.
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__narrow_bound",
+		params: [
+			{ name: "v", type: { kind: "basic", name: "int64" } },
+			{ name: "unsigned", type: { kind: "basic", name: "int32" } },
+		],
+		returnType: { kind: "basic", name: "int32" },
+		_isNarrowBound: true,
+	});
+
 	// Go's slice-bounds panic from the failing bounds (`lo`, `hi`, `max` as
 	// signed values), the capacity (the length of an array or string) and
 	// `form`: bit 0 = three-index slice, bit 1 = limit worded as a length.
@@ -916,6 +955,7 @@ export function compileWasmModule(
 				!fn._isRuntimePanic &&
 				!fn._isIndexPanic &&
 				!fn._isSliceBoundsPanic &&
+				!fn._isNarrowBound &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -951,6 +991,8 @@ export function compileWasmModule(
 			emitIndexPanicBody(mod, emitter);
 		} else if (fn._isSliceBoundsPanic) {
 			emitSliceBoundsPanicBody(mod, emitter);
+		} else if (fn._isNarrowBound) {
+			emitNarrowBoundBody(emitter);
 		} else if (fn._isRuntimePanic) {
 			const strIdx = mod.internString(fn._panicMsg);
 			const funcIdx = mod.getStringImportIndex();

@@ -245,7 +245,17 @@ export class BuiltinsEmitter {
 			const mapInfo = this.mod.getMapType(keyType, valType);
 			if (args[1]) {
 				const hintTmp = this.acquireTemp("i32");
-				this._emitIndexExprToI32(args[1], hintTmp);
+				const hint = this._emitIndexExprToI32(args[1], hintTmp);
+				if (hint.unproven) {
+					// The hint only sizes the table: an unrepresentable one is no hint.
+					this.pushInstruction({ op: "local.get", index: hintTmp });
+					this.pushInstruction({ op: "i32.const", value: 0x3fffffff });
+					this.pushInstruction("i32.gt_u");
+					this.pushInstruction({ op: "if", blockType: "void" });
+					this.pushInstruction({ op: "i32.const", value: 0 });
+					this.pushInstruction({ op: "local.set", index: hintTmp });
+					this.pushInstruction("end");
+				}
 				this.pushInstruction({ op: "local.get", index: hintTmp });
 				this.releaseTemp(hintTmp, "i32");
 			} else {
@@ -268,11 +278,12 @@ export class BuiltinsEmitter {
 			const sliceInfo = this.mod.getSliceType(elemGoType);
 
 			const lenTmp = this.acquireTemp("i32");
-			this._emitIndexExprToI32(args[1], lenTmp);
+			const lenBound = this._emitIndexExprToI32(args[1], lenTmp);
 
 			const capTmp = this.acquireTemp("i32");
+			let capBound = null;
 			if (args[2]) {
-				this._emitIndexExprToI32(args[2], capTmp);
+				capBound = this._emitIndexExprToI32(args[2], capTmp);
 			} else {
 				this.pushInstruction({ op: "local.get", index: lenTmp });
 				this.pushInstruction({ op: "local.set", index: capTmp });
@@ -285,12 +296,24 @@ export class BuiltinsEmitter {
 			this.pushInstruction({ op: "if", blockType: "void" });
 			this.emitPanic("runtime error: makeslice: len out of range");
 			this.pushInstruction("end");
+			// A size a 64-bit operand saturated (at or above 2^31 - 1) cannot be
+			// allocated: a WasmGC array holds fewer elements.
+			const unallocatable = (tmp, what) => {
+				this.pushInstruction({ op: "local.get", index: tmp });
+				this.pushInstruction({ op: "i32.const", value: 0x7fffffff });
+				this.pushInstruction("i32.ge_s");
+				this.pushInstruction({ op: "if", blockType: "void" });
+				this.emitPanic(`runtime error: makeslice: ${what} out of range`);
+				this.pushInstruction("end");
+			};
+			if (!capBound && lenBound.unproven) unallocatable(lenTmp, "len");
 			this.pushInstruction({ op: "local.get", index: capTmp });
 			this.pushInstruction({ op: "local.get", index: lenTmp });
 			this.pushInstruction("i32.lt_s");
 			this.pushInstruction({ op: "if", blockType: "void" });
 			this.emitPanic("runtime error: makeslice: cap out of range");
 			this.pushInstruction("end");
+			if (capBound?.unproven) unallocatable(capTmp, "cap");
 
 			if (
 				isStructType(elemGoType, this.mod.checker, this.mod) ||

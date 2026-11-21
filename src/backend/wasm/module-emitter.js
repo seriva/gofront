@@ -1066,6 +1066,10 @@ export class ModuleEmitter {
 		return this.resolveFuncIndex("__index_panic");
 	}
 
+	getNarrowBoundFuncIndex() {
+		return this.resolveFuncIndex("__narrow_bound");
+	}
+
 	getNilPanicFuncIndex() {
 		return this.resolveFuncIndex("__nil_panic");
 	}
