@@ -79,7 +79,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `src/lexer/lexer.js`, `src/parser/declarations.js`, `src/parser/index.js`
   - Test: `test/unit/parser/embed-directives.test.js`: pattern extraction (bare, double-quoted, back-quoted, several on one line, multiple consecutive directives, empty `//go:embed`), attachment across comments and blank lines to standalone `var` and `VarSpec` inside grouped `var (...)`, `inFunc` flag for local `var` inside a function, and unattached directives staying in `_embedDirectives` (including before `var (`)
   - Done when: `//go:embed asset.txt "b c.txt"` attaches `{ patterns: ["asset.txt", "b c.txt"], line, col }` to the following package-level `VarSpec`, `decodeRawBytes` is exported from `src/lexer/lexer.js`, and misplaced/empty/local-`var` directives are preserved for the checker to reject
-- [ ] Task 1.2: Resolve embed patterns to files before type-checking (former 1.2)
+- [x] Task 1.2: Resolve embed patterns to files before type-checking (former 1.2)
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/embed-resolve.test.js`, negative cases first: `..`, an absolute path, a backslash and a symlink out of the package → `embed pattern escapes package directory`; no match → `pattern <pat> matches no files`
   - Done when: every directive carries `_embedFiles: { path, bytes }[]` resolved relative to its file's directory on every compile (not stale across `_parseCache`), containment checked by `relative()`/`isAbsolute()` on the real path
