@@ -112,7 +112,7 @@ Root: `wasm`-only AST rewrites build new nodes without the static type the emitt
   - Files: `src/backend/wasm/types.js` (`structFieldList`, `toWasmType`, `goTypeKey`, `isUnhashableGoType`), `src/backend/wasm/emit.js` (`_resolveStructInfo`, `_resolveFieldPath` for checker `pointer`), `src/backend/wasm/module-emitter.js` (`getAnonStructType` `embeds` and `resolvedStruct` layout)
   - Test: `test/unit/wasm/structs.test.js`: W1.1 and W1.2 → `5 5 6`, W1.3 → `5 2`, W1.4 → `1 2`, W1.9 (`struct{ *P }`) → `5`, W1.11 (`map[any]int` with `struct{ *P }` where `P` has `[]int`) → `7`, W1.12 (`struct{ Inner[int]; X int }` and `W[int]`) → `11 22 11` with `assertAllTargetsOutput`
   - Done when: all pass; `rawFields` removed from `types.js` and `emit.js`
-- [ ] Task 1.2: Boundary classification and struct conversions (W1.7, W1.8, W1.10)
+- [x] Task 1.2: Boundary classification and struct conversions (W1.7, W1.8, W1.10)
   - Files: `src/backend/wasm/boundary.js` (`classifyAnonStruct` uses `structFieldList`)
   - Test: `test/unit/wasm/boundary.test.js`: W1.10 (`func Make() struct{ P; M int }`) compiles with valid wasm; `test/unit/wasm/structs.test.js`: W1.7 → `11 11`, W1.8 → `1 5` (regression); switch `test/unit/language/value-semantics.test.js` lines 1047–1070 (`conversion to an embedding anonymous struct drops the source type`) to `assertAllTargetsOutput`
   - Done when: all pass with valid modules; `grep -rn "rawFields" src/backend/wasm` finds no matches
