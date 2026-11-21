@@ -111,7 +111,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `stdlib/embed/embed.go`, `src/typechecker/stdlib/excluded.js`, `src/typechecker/index.js`
   - Test: `test/unit/stdlib/embed-fs.test.js`: zero-value `var f embed.FS` `ReadFile` miss returns `open <name>: file does not exist`; `var files embed.FS` (and aliased `import e "embed"`) under a directive type-checks (requiring non-blank `"embed"` import); `ReadDir` and `Open` are compile errors with the `EXCLUDED_STDLIB_MEMBERS` diagnostic
   - Done when: `embed.FS` and `ReadFile` compile on every target and `ReadDir`/`Open` produce targeted diagnostics
-- [ ] Task 3.2: Glob and directory patterns (former 2.2)
+- [x] Task 3.2: Glob and directory patterns (former 2.2)
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/embed-glob.test.js`: `shaders/*.wgsl`, a directory pattern (recursive, skipping `.`/`_` names), `all:assets`, `*` not crossing `/`, sorted results
   - Done when: globs and directory patterns populate `_embedFiles` with Go's semantics
