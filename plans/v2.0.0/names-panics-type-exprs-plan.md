@@ -157,7 +157,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/link/wasm.js` (`pruneStdlibPrograms`)
   - Test: `shadowing.test.js`: a `wasm` package and the js main both declare `Box`, the `wasm` package imports `fmt` and `errors`; `var m Box; m.N = 42`, `errors.As` into the type and a promoted method print Go's output
   - Done when: passes (fails first with the null deref from the PR #207 notes)
-- [ ] Task 1.3: Rename `wasm` types and method-less `js`/`both` named types after JS built-ins to `Name$$pkg` (F2, F30)
+- [x] Task 1.3: Rename `wasm` types and method-less `js`/`both` named types after JS built-ins to `Name$$pkg` (F2, F30)
   - Files: `src/link/type-names.js` (`mangleCollidingTypes`), `src/compiler.js` (`pkgTarget` before `mangleLocalTypes`), `src/backend/shared/fmt-types.js` (`Name$$pkg` → `pkg.Name`)
   - Test: `shadowing.test.js`: F30 → `3 2` with `%T` `util.WeakMap`; `util` as `both` with `type Map int` → `3`; F2 → `5` on every target with `%T` `main.Map`; F2b → `[1] a`; a second package also declaring `WeakMap` (no `$$util$$util`); a local `type Map` still gets `__L<n>`; `type Array struct{}` rejection tests stay green
   - Done when: all pass; programs without such types emit the same JS

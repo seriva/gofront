@@ -2861,3 +2861,186 @@ func main() {
 	);
 	assertEqual(mod.__lines.join("\n"), "42 7 true 3 1");
 });
+
+test("F2: a method-less named type after a JS built-in runs on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Map int
+
+func main() {
+	var x Map = 5
+	fmt.Printf("%v %T\\n", x, x)
+}
+`,
+		"5 main.Map\n",
+	);
+});
+
+test("F2b: Promise and Symbol named types run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Promise []int
+type Symbol string
+
+func main() {
+	p := Promise{1}
+	s := Symbol("a")
+	fmt.Println(p, s)
+}
+`,
+		"[1] a\n",
+	);
+});
+
+test("F30: a wasm struct named WeakMap is usable from js main", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+type WeakMap struct{ N int }
+
+func Make(n int) WeakMap { return WeakMap{n} }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	var z util.WeakMap
+	z.N = 2
+	fmt.Println(util.Make(3).N, z.N)
+	fmt.Printf("%T\\n", z)
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "3 2\nutil.WeakMap");
+});
+
+test("F30: a both package with type Map int is usable from js main", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target both
+package util
+
+type Map int
+
+func Make(n int) Map { return Map(n) }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	fmt.Println(util.Make(3))
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "3");
+});
+
+test("a type named after a built-in in two packages gets one suffix", async () => {
+	const { mod, js } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+type WeakMap struct{ N int }
+
+func Make(n int) WeakMap { return WeakMap{n} }
+`,
+			"other/o.go": `//gofront:target both
+package other
+
+type WeakMap int
+
+func MakeOther(n int) WeakMap { return WeakMap(n) }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./other"
+	"./util"
+)
+
+func main() {
+	fmt.Printf("%T %T\\n", util.Make(1), other.MakeOther(2))
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "util.WeakMap other.WeakMap");
+	assert(!js.includes("$$util$$"), "type renamed twice");
+	assert(!js.includes("$$other$$"), "type renamed twice");
+});
+
+test("a function-local type named Map keeps a local name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Map struct{ N int }
+	fmt.Printf("%v %T\\n", Map{2}, Map{2})
+}
+`,
+		"{2} main.Map\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`%T of a type parameter instantiated with a renamed ${target} type names its package`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+import "fmt"
+
+type Box struct{ N int }
+type Map int
+
+func Show[T any](v T) string { return fmt.Sprintf("%T", v) }
+
+func Name() string {
+	return Show(Box{1}) + " " + Show(Map(2)) + " " + Show([]Box{})
+}
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+type Box struct{ M int }
+
+func main() {
+	fmt.Println(util.Name())
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "util.Box util.Map []util.Box");
+	});
+}

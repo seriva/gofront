@@ -8,12 +8,46 @@
 
 import { forEachChild } from "../lower/walk.js";
 
-function topLevelTypeNames(programs) {
-	const names = [];
+function topLevelTypeDecls(programs) {
+	const decls = [];
+	for (const p of programs)
+		for (const d of p.decls ?? []) if (d.kind === "TypeDecl") decls.push(d);
+	return decls;
+}
+
+function methodReceiverTypes(programs) {
+	const names = new Set();
 	for (const p of programs)
 		for (const d of p.decls ?? [])
-			if (d.kind === "TypeDecl") names.push(d.name);
+			if (d.kind === "MethodDecl") names.add(d.recvType?.name);
 	return names;
+}
+
+// Whether a `js`/`both` package emits no JS class for the type: it is not a
+// struct and has no methods.  The checker rejects a class named after a JS
+// built-in, so only this case gets past it.  A name another package declares
+// may be a struct, which is left to the checker.
+function isClassFree(decl, decls, methodTypes) {
+	if (decl.typeParams?.length > 0 || methodTypes.has(decl.name)) return false;
+	let t = decl.type;
+	for (let i = 0; i < 16 && t; i++) {
+		if (t.kind === "StructType") return false;
+		if (t.kind !== "TypeName") return true;
+		const next = decls.find((d) => d.name === t.name && !d.isAlias);
+		if (!next) return !t.name.includes(".");
+		t = next.type;
+	}
+	return false;
+}
+
+// A package-level type whose bare name would shadow a JS built-in the
+// generated code relies on: any type of a `wasm` package (its facade emits a
+// class for it) and a method-less named non-struct type of a `js` or `both`
+// package.  `shadows` is `{ target, builtins }`.
+function jsBuiltinClash(decl, decls, methodTypes, shadows) {
+	if (!shadows || decl.isAlias || !shadows.builtins.has(decl.name))
+		return false;
+	return shadows.target === "wasm" || isClassFree(decl, decls, methodTypes);
 }
 
 // Registers the package's type names in `owners` (name -> package key) and
@@ -24,23 +58,31 @@ function topLevelTypeNames(programs) {
 // by bare name, so the package's `int32` must not meet the predeclared one
 // that other packages (the Go-source stdlib) spell.  It takes the local-type
 // `Name__L<n>` form rather than `Name$$pkg`, which later stages read as a type
-// of another package.
+// of another package.  A type named after a JS built-in (see `jsBuiltinClash`)
+// takes `Name$$pkg` too, so the class it emits cannot shadow the built-in; it
+// does not claim the bare name, which no output uses.
 export function mangleCollidingTypes(
 	programs,
 	pkgKey,
 	pkgName,
 	owners,
 	predeclared = new Set(),
+	shadows = null,
 ) {
 	const renamed = new Map();
-	for (const name of topLevelTypeNames(programs)) {
+	const decls = topLevelTypeDecls(programs);
+	const methodTypes = methodReceiverTypes(programs);
+	for (const decl of decls) {
+		const { name } = decl;
 		if (predeclared.has(name)) {
 			renamed.set(name, `${name}__L${++localTypeCounter}`);
 			continue;
 		}
+		const clash = jsBuiltinClash(decl, decls, methodTypes, shadows);
 		const owner = owners.get(name);
-		if (owner === undefined) owners.set(name, pkgKey);
-		else if (owner !== pkgKey) renamed.set(name, `${name}$$${pkgName}`);
+		if (owner === undefined && !clash) owners.set(name, pkgKey);
+		else if (clash || owner !== pkgKey)
+			renamed.set(name, `${name}$$${pkgName}`);
 	}
 	if (renamed.size > 0)
 		for (const p of programs)
