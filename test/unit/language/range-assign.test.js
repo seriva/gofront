@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assertAllTargetsOutput,
+	assertEqual,
 	assertErrorContains,
 	assertJsProgramOutput,
 	assertProgramOutput,
@@ -908,6 +909,25 @@ for (const [name, body, want] of [
 		);
 	});
 }
+
+test("ranging into a type-parameter target reports at the target", () => {
+	const { errors } = compile(`package main
+func f[T any](xs []string) {
+	var t T
+	for _, t = range xs {
+	}
+	_ = t
+}
+func main() { f[string](nil) }
+`);
+	assertErrorContains(
+		errors,
+		"cannot use t (value of type string) as T value in assignment",
+	);
+	const e = errors.find((x) => x.message.includes("as T value"));
+	assertEqual(e.line, 4);
+	assertEqual(e.col, 9);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

@@ -1037,7 +1037,9 @@ export const assignabilityMethods = {
 		const at = node ?? this._forwardedCall;
 		if (this._checkIfaceToConcrete(target, source, at, ctx, operand ?? at))
 			return;
-		if (this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx))
+		if (
+			this._assertAssignableEarlyReturn(target, source, operand ?? at, ctx, at)
+		)
 			return;
 		const mismatch = () =>
 			this._assertAssignableTypeMismatch(
@@ -1271,16 +1273,19 @@ export const assignabilityMethods = {
 	// `nil` only has a value in a pointer, slice, map, func, chan, interface or
 	// type-parameter type. JS-dynamic `any` and the other kinds the checker
 	// models loosely (`shared`, `simd`) keep accepting it.
-	_checkNilTarget(target, node, ctx) {
+	_checkNilTarget(target, at, ctx) {
 		if (this._isNilless(target))
-			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, node);
+			this.err(`cannot use nil as ${typeStr(target)} value in ${ctx}`, at);
 	},
 
-	_assertAssignableEarlyReturn(target, source, node, ctx) {
-		if (isNil(source)) this._checkNilTarget(target, node, ctx);
+	// `node` is the operand whose value flows in; `at` is where an error is
+	// reported (an operand with no position of its own, like a range value,
+	// still reports at the statement).
+	_assertAssignableEarlyReturn(target, source, node, ctx, at = node) {
+		if (isNil(source)) this._checkNilTarget(target, at, ctx);
 		if (target?.kind === "typeParam" || source?.kind === "typeParam") {
 			if (!isNil(source) && !this._typeParamAssignable(target, source, node))
-				this._reportTypeParamAssign(target, source, node, ctx);
+				this._reportTypeParamAssign(target, source, node, ctx, at);
 			return true;
 		}
 		return isAny(target) || isAny(source) || isNil(source);
@@ -1363,7 +1368,7 @@ export const assignabilityMethods = {
 		return u?.kind === "interface" ? u : null;
 	},
 
-	_reportTypeParamAssign(target, source, node, ctx) {
+	_reportTypeParamAssign(target, source, node, ctx, at = node) {
 		let what;
 		if (source.kind === "untyped") {
 			const cmp = node?.kind === "BinaryExpr" && CMP_OPS.has(node.op);
@@ -1377,7 +1382,7 @@ export const assignabilityMethods = {
 		}
 		this.err(
 			`cannot use ${exprText(node)} (${what}) as ${typeStr(target)} value in ${ctx}`,
-			node,
+			at,
 		);
 	},
 
