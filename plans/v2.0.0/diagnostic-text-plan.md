@@ -116,7 +116,7 @@ Root: `src/typechecker/assignability.js:392` falls back to `Invalid operation: $
   - Files: `test/fuzz/gocheck/main.go` (all-errors mode), `test/fuzz/conformance-go.js`, `package.json`
   - Test: `test/unit/cli/conformance-go.test.js` (no Go needed): marker extraction, baseline read/write and the substring rule on canned Go output; then `npm run conformance:go -- --write-baseline` writes `test/fuzz/conformance-go-baseline.txt`
   - Done when: the audit runs over all reject cases and its baseline lists today's misses with a tag per root (`D1`–`D4`, `excluded: gofront-only`, `excluded: documented-restriction`)
-- [ ] Task 1.2: `exprText` prints composite literal, assertion, conversion, slice, func literal, instantiation and type-node operands (D1.1–D1.4)
+- [x] Task 1.2: `exprText` prints composite literal, assertion, conversion, slice, func literal, instantiation and type-node operands (D1.1–D1.4)
   - Files: `src/typechecker/operand-text.js` (`exprText`, `litText`, type-node printers)
   - Test: remove `// pending: operand-text` from `addr_lit_elem`, `assign_lit_elem`, `assign_lit_field`, `assign_assert_field`, `unused_conversion`; `test/unit/types/checks.test.js` table of node kinds → text (including `SliceExpr`, `FuncLit`, `InstantiationExpr`, `TypeExpr`, `AwaitExpr`)
   - Done when: those cases pass; no `"expression"` fallback for the tabled kinds

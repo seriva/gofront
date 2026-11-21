@@ -1,6 +1,7 @@
 // GoFront test suite — type checks, type switch, interfaces
 
 import { fileURLToPath } from "node:url";
+import { exprText } from "../../../src/typechecker/operand-text.js";
 import {
 	assertAllTargetsOutput,
 	assertEqual,
@@ -10,6 +11,8 @@ import {
 	assertWasmProgramOutput,
 	compile,
 	compileWasm,
+	Lexer,
+	Parser,
 	runJs,
 	section,
 	summarize,
@@ -2027,6 +2030,98 @@ func main() {
 			assertEqual(errors.length, 1);
 		}
 	}
+});
+
+section("Operand text");
+
+// The first expression of `_ = <src>` (or its first call argument for `arg`).
+function parsedOperand(src, arg = false) {
+	const code = `package main\nfunc main() {\n\t_ = ${src}\n}\n`;
+	const ast = new Parser(
+		new Lexer(code, "m.go").tokenize(),
+		"m.go",
+		code,
+	).parse();
+	const rhs = ast.decls[0].body.stmts[0].rhs[0];
+	return arg ? rhs.args[0] : rhs;
+}
+
+const operandTextCases = [
+	["[2]int{1, 2}", "[2]int{…}"],
+	["[2]int{1, 2}[0]", "[2]int{…}[0]"],
+	["P{}", "P{}"],
+	["P{}.X", "P{}.X"],
+	["&P{X: 1}", "&P{…}"],
+	["[]string{}", "[]string{}"],
+	['map[string][]int{"a": nil}', "map[string][]int{…}"],
+	[
+		'struct{ X int; Y, Z string }{1, "a", "b"}',
+		"struct{X int; Y, Z string}{…}",
+	],
+	["pkg.T{}", "pkg.T{}"],
+	["Box[int]{V: 1}", "Box[int]{…}"],
+	["i.(P)", "i.(P)"],
+	["i.(P).X", "i.(P).X"],
+	["i.(*P)", "i.(*P)"],
+	["i.(map[string]int)", "i.(map[string]int)"],
+	["float64(x)", "float64(x)"],
+	["[]byte(s)", "[]byte(s)"],
+	["struct{ E }(a)", "struct{E}(a)"],
+	["interface{ M(int) string }(v)", "interface{M(int) string}(v)"],
+	["xs[1:]", "xs[1:]"],
+	["xs[:2]", "xs[:2]"],
+	["xs[:]", "xs[:]"],
+	["xs[a:b:c]", "xs[a:b:c]"],
+	["xs[1:][0]", "xs[1:][0]"],
+	["func() {}", "(func() literal)"],
+	[
+		"func(a, b int, s ...string) (int, error) { return 0, nil }",
+		"(func(a, b int, s ...string) (int, error) literal)",
+	],
+	[
+		"func(int, string) bool { return true }",
+		"(func(int, string) bool literal)",
+	],
+	[
+		"func() (n int, err error) { return }",
+		"(func() (n int, err error) literal)",
+	],
+	["f[int]", "f[int]"],
+	["f[int, []string]", "f[int, []string]"],
+	["pkg.F[int]", "pkg.F[int]"],
+	["await f()", "await f()"],
+	["f(P{}, i.(T))", "f(P{}, i.(T))"],
+];
+
+for (const [src, want] of operandTextCases)
+	test(`operand text of ${src}`, () => {
+		assertEqual(exprText(parsedOperand(src)), want);
+	});
+
+test("operand text of a type argument and of every type form", () => {
+	const arg = (src) => exprText(parsedOperand(src, true));
+	assertEqual(arg("make(map[string]int)"), "map[string]int");
+	assertEqual(arg("make([]*P, 3)"), "[]*P");
+	assertEqual(arg("make([3]int)"), "[3]int");
+	assertEqual(arg("make(Box[int])"), "Box[int]");
+	const text = (src) => exprText(parsedOperand(src));
+	assertEqual(text("[...]int{1}"), "[...]int{…}");
+	assertEqual(text("[]func(int) string{}"), "[]func(int) string{}");
+	assertEqual(text("[]func(){}"), "[]func(){}");
+	assertEqual(
+		text("[]interface{ ~int | ~float64 }{}"),
+		"[]interface{~int | ~float64}{}",
+	);
+	assertEqual(
+		text("[]interface{ Reader; M() }{}"),
+		"[]interface{Reader; M()}{}",
+	);
+	assertEqual(text("[]struct{}{}"), "[]struct{}{}");
+});
+
+test("no operand kind of the table prints as the expression fallback", () => {
+	for (const [src] of operandTextCases)
+		assertEqual(exprText(parsedOperand(src)).includes("expression"), false);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
