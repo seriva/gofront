@@ -88,7 +88,7 @@ Coverage of the Go standard library, per package. Anything not listed here is no
 | `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
 | `crypto/sha256` | js, wasm, both | `Sum256`, `Sum224`, `New`, `New224`, `Size`, `Size224`, `BlockSize` |
-| `embed` | js, wasm, both | `//go:embed` on `string`, `[]byte` and `embed.FS` variables; `FS.ReadFile`; no `ReadDir` or `Open` (see [embedding files](go-compatibility.md#embedding-files-with-gotembed)) |
+| `embed` | js, wasm, both | `//go:embed` on `string`, `[]byte` and `embed.FS` variables; `FS.ReadFile`; no `ReadDir` or `Open` (see [embedding files](go-compatibility.md#embedding-files-with-goembed)) |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings, `NewEncoding`, `WithPadding`, `Encode*`, `Decode*`, `Append*` |
 | `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` (`ByteOrder`, `AppendByteOrder`), varints |
 | `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `Append*`, `EncodedLen`, `DecodedLen`, `ErrLength`, `InvalidByteError` |
