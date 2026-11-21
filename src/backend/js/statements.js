@@ -417,7 +417,7 @@ export const statementGenMethods = {
 				break;
 			}
 			case "ExprStmt":
-				this.line(`${this.genExpr(stmt.expr)};`);
+				this.line(this._exprStatement(this.genExpr(stmt.expr)));
 				break;
 			case "IfStmt":
 				if (stmt.init) {
@@ -895,8 +895,9 @@ export const statementGenMethods = {
 		const active = pairs.filter((p) => p.l !== "_");
 		if (active.length === 0) {
 			// Every right-hand side still runs, in order.
-			if (rhs.length === lhs.length) for (const r of rhs) this.line(`${r};`);
-			else if (rhs.length > 0) this.line(`${rhs[0]};`);
+			if (rhs.length === lhs.length)
+				for (const r of rhs) this.line(this._exprStatement(r));
+			else if (rhs.length > 0) this.line(this._exprStatement(rhs[0]));
 		} else if (lhs.length === 1) {
 			if (
 				stmt.op !== "=" &&
@@ -1411,6 +1412,12 @@ export const statementGenMethods = {
 		}
 	},
 
+	// An expression statement that opens with `{` (an object literal, which is
+	// how a Go map literal is emitted) would parse as a block: parenthesise it.
+	_exprStatement(code) {
+		return code.startsWith("{") ? `(${code});` : `${code};`;
+	},
+
 	_rangeExprLimit(iterType, iteree) {
 		if (this._isIntRangeType(iterType)) return iteree;
 		if (this._isMapRangeType(iterType))
@@ -1424,9 +1431,17 @@ export const statementGenMethods = {
 			return;
 		}
 		const iterType = stmt.cond.expr._coreType ?? stmt.cond.expr._type;
-		const iteree = this.genExpr(stmt.cond.expr);
-		const limit = this._rangeExprLimit(iterType, iteree);
-		this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
+		const wrapField = this._namedWrapperField(iterType, stmt.cond.expr);
+		const iteree = wrapField
+			? `${this.genExpr(stmt.cond.expr)}.${wrapField}`
+			: this.genExpr(stmt.cond.expr);
+		if (this._isStringRangeType(iterType)) {
+			// One iteration per code point, as the one- and two-variable forms.
+			this.line(`for (const _$ of ${iteree} ?? "") {`);
+		} else {
+			const limit = this._rangeExprLimit(iterType, iteree);
+			this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
+		}
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
 	},
@@ -2242,6 +2257,8 @@ export const statementGenMethods = {
 		this._markIndexLvalues(stmt.lhs);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
+			// `_ = x`: only the right-hand side runs, as in `_genAssignStmt`.
+			if (stmt.lhs[0].name === "_" && stmt.op === "=") return rhs[0];
 			if (
 				this._isCompoundWithCall(stmt) ||
 				this._isComplexCompoundAssign(stmt)
