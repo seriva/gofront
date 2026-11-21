@@ -272,6 +272,106 @@ func main() {
 	);
 });
 
+section("WASM anonymous struct map keys");
+
+test("an anonymous struct with an array field is a map key", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := struct {
+		X int
+		S string
+		A [2]int
+	}{1, "s", [2]int{3, 4}}
+	m := map[struct {
+		X int
+		S string
+		A [2]int
+	}]int{a: 10}
+	fmt.Println(m[a])
+	b := a
+	b.A[1] = 5
+	v, ok := m[b]
+	fmt.Println(v, ok, len(m))
+	m[b] = 20
+	fmt.Println(m[a], m[b], len(m))
+}
+`,
+		"10\n0 false 1\n10 20 2\n",
+	);
+});
+
+test("an anonymous struct key set and read through a variable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	m := map[struct{ X int }]int{}
+	u := struct{ X int }{1}
+	m[u] = 10
+	fmt.Println(m[u], m[struct{ X int }{1}], m[struct{ X int }{2}])
+	delete(m, u)
+	fmt.Println(len(m))
+}
+`,
+		"10 10 0\n0\n",
+	);
+});
+
+test("an anonymous struct with an embedded field is a map key", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+
+func main() {
+	k := struct {
+		P
+		M int
+	}{P{1}, 2}
+	m := map[struct {
+		P
+		M int
+	}]int{k: 3}
+	fmt.Println(m[k], m[struct {
+		P
+		M int
+	}{P{1}, 2}])
+	k.N = 9
+	_, ok := m[k]
+	fmt.Println(ok)
+}
+`,
+		"3 3\nfalse\n",
+	);
+});
+
+test("an anonymous struct key keeps its identity inside map[any]", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ S []int }
+
+func main() {
+	p := &P{[]int{1}}
+	k := struct{ *P }{p}
+	m := map[any]int{k: 7}
+	fmt.Println(m[k])
+}
+`,
+		"7\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

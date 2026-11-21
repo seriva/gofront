@@ -915,6 +915,37 @@ func main() { _ = anonpkg.Swap }
 	assertEqual(pAnon.Count, 15);
 });
 
+test("an exported function returns an anonymous struct with an embedded field", async () => {
+	const res = await compileHybridProject(
+		{
+			"embpkg/embpkg.go": `//gofront:target wasm
+package embpkg
+
+type P struct{ N int }
+
+func Make() struct {
+	P
+	M int
+} {
+	return struct {
+		P
+		M int
+	}{P: P{5}, M: 6}
+}
+`,
+			"main.go": `package main
+import "./embpkg"
+func main() { _ = embpkg.Make }
+`,
+		},
+		{ exports: ["Make"] },
+	);
+
+	const out = res.mod.Make();
+	assertEqual(out.P.N, 5);
+	assertEqual(out.M, 6);
+});
+
 test("anonymous interfaces share facade class and enforce WASM-owned values", async () => {
 	const res = await compileHybridProject(
 		{

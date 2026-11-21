@@ -1120,7 +1120,7 @@ func main() {
 });
 
 test("conversion to an embedding anonymous struct drops the source type", async () => {
-	await assertJsTargetsOutput(
+	await assertAllTargetsOutput(
 		`package main
 
 import "fmt"

@@ -44,6 +44,7 @@ import {
 	anonIfaceName,
 	getInterfaceMethodList,
 	getSharedInfo,
+	structFieldList,
 } from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
@@ -248,17 +249,7 @@ function classifySimd(t, mod, name = "") {
 }
 
 function classifyAnonStruct(t, mod) {
-	const rawFields = [];
-	if (t.fields instanceof Map) {
-		for (const [k, v] of t.fields.entries())
-			rawFields.push({ name: k, goType: v });
-	} else if (Array.isArray(t.fields)) {
-		for (const f of t.fields) {
-			const names = f.names ?? (f.name ? [f.name] : []);
-			for (const n of names) rawFields.push({ name: n, goType: f.type });
-		}
-	}
-	const info = mod.getAnonStructType(rawFields);
+	const info = mod.getAnonStructType(structFieldList(t, mod.checker));
 	const fields = [];
 	for (const f of info.fields) {
 		const fd = classifyType(f.goType, mod);

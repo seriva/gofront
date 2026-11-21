@@ -2,7 +2,12 @@
 // Maps GoFront types to WasmGC types and manages type registry.
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
-import { ERROR, isComplex, isComplex64 } from "../../typechecker/types.js";
+import {
+	ERROR,
+	embeddedFieldName,
+	isComplex,
+	isComplex64,
+} from "../../typechecker/types.js";
 import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 
 export { isComplex, isComplex64 };
@@ -304,18 +309,7 @@ export function toWasmType(goType, checker = null, mod = null) {
 			};
 		}
 		if (mod?.getAnonStructType && goType.fields) {
-			const rawFields = [];
-			if (goType.fields instanceof Map) {
-				for (const [k, v] of goType.fields.entries()) {
-					rawFields.push({ name: k, goType: v });
-				}
-			} else if (Array.isArray(goType.fields)) {
-				for (const f of goType.fields) {
-					const names = f.names ?? (f.name ? [f.name] : []);
-					for (const n of names) rawFields.push({ name: n, goType: f.type });
-				}
-			}
-			const info = mod.getAnonStructType(rawFields);
+			const info = mod.getAnonStructType(structFieldList(goType, checker));
 			return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
 		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
@@ -374,6 +368,55 @@ function instanceArgsKey(typeArgs) {
 	return typeArgs.map(goTypeKey).join("$").replaceAll(".", "_");
 }
 
+// The declared fields of a struct type, in order: { name, goType, embedded,
+// typeName }. This is the one list every layout, key, hashability and boundary
+// decision reads, so a struct built in one place is read correctly in another.
+// It never holds promoted fields: an embedded field is one entry named after
+// its type, with `typeName` the specialised struct name of a generic instance
+// (`Inner$int`) or qualified type.
+export function structFieldList(t, checker = null) {
+	const out = [];
+	const embeddedEntry = (type, name) => {
+		const inner =
+			type?.kind === "pointer" || type?.kind === "PointerType"
+				? type.base
+				: type;
+		const ref = inner?.name;
+		const bare = (name ?? ref ?? "").split("$")[0].split(".").pop();
+		const typeName = (ref && checker?.types?.get(ref)?.name) ?? ref;
+		return {
+			name: bare,
+			goType: type,
+			embedded: true,
+			typeName: typeName ?? bare,
+		};
+	};
+	if (Array.isArray(t._structFields)) {
+		for (const f of t._structFields) {
+			if (f.embedded) {
+				out.push(embeddedEntry(f.type, embeddedFieldName(f) || undefined));
+			} else {
+				for (const n of f.names ?? [])
+					out.push({ name: n, goType: f.type, embedded: false });
+			}
+		}
+	} else if (Array.isArray(t.fields)) {
+		for (const f of t.fields) {
+			if (f.embedded) {
+				out.push(embeddedEntry(f.type, f.embeddedName ?? f.name));
+			} else {
+				const names = f.names ?? (f.name ? [f.name] : []);
+				for (const n of names)
+					out.push({ name: n, goType: f.type ?? f.goType, embedded: false });
+			}
+		}
+	} else if (t.fields instanceof Map) {
+		for (const [k, v] of t.fields.entries())
+			out.push({ name: k, goType: v, embedded: false });
+	}
+	return out;
+}
+
 export function goTypeKey(t) {
 	if (!t) return "any";
 	if (typeof t === "string") {
@@ -427,18 +470,9 @@ export function goTypeKey(t) {
 		return `tup_${(t.types ?? []).map(goTypeKey).join(",")}`;
 	if (t.kind === "struct" || t.kind === "StructType") {
 		if (t.name) return t.name;
-		const rawFields = [];
-		if (t.fields instanceof Map) {
-			for (const [k, v] of t.fields.entries())
-				rawFields.push(`${k}:${goTypeKey(v)}`);
-		} else if (Array.isArray(t.fields)) {
-			for (const f of t.fields) {
-				const names = f.names ?? (f.name ? [f.name] : []);
-				for (const n of names)
-					rawFields.push(`${n}:${goTypeKey(f.type ?? f.goType)}`);
-			}
-		}
-		return `struct_${rawFields.join("_")}`;
+		return `struct_${structFieldList(t)
+			.map((f) => `${f.embedded ? "_e" : ""}${f.name}:${goTypeKey(f.goType)}`)
+			.join("_")}`;
 	}
 	if (t.kind === "named") {
 		// An instance of a generic type is the monomorphised `Box$int`.
@@ -934,15 +968,8 @@ export function isUnhashableGoType(goType, checker = null, seen = new Set()) {
 		return isUnhashableGoType(elem, checker, seen);
 	}
 	if (goType.kind === "struct" || goType.kind === "StructType") {
-		if (goType.fields instanceof Map) {
-			for (const f of goType.fields.values()) {
-				if (isUnhashableGoType(f, checker, seen)) return true;
-			}
-		} else if (Array.isArray(goType.fields)) {
-			for (const f of goType.fields) {
-				const fType = f.type ?? f.goType;
-				if (isUnhashableGoType(fType, checker, seen)) return true;
-			}
+		for (const f of structFieldList(goType, checker)) {
+			if (isUnhashableGoType(f.goType, checker, seen)) return true;
 		}
 	}
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
