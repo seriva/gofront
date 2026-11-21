@@ -1323,8 +1323,10 @@ export class ExprsEmitter {
 
 	// True when `expr` can be evaluated as an i32 without losing information:
 	// i32-backed locals (induction variables, narrow ints), small literals,
-	// `len`/`cap`, +/-/* over such operands, or any expression whose Go type
-	// already lowers to i32. Everything else goes through the i64 path.
+	// `len`/`cap`, `+`/`-`/`*` over such operands whose value range provably
+	// fits an i32 (`_i32Range`), or any expression whose Go type already
+	// lowers to i32 (where wrapping is Go's own).  Everything else goes
+	// through the i64 path.
 	_isI32IndexExpr(expr) {
 		if (!expr) return false;
 		switch (expr.kind) {
@@ -1344,10 +1346,9 @@ export class ExprsEmitter {
 			case "BinaryExpr":
 				if (
 					(expr.op === "+" || expr.op === "-" || expr.op === "*") &&
-					this._isI32IndexExpr(expr.left) &&
-					this._isI32IndexExpr(expr.right)
+					this.toWasmType(expr._type) !== "i32"
 				) {
-					return true;
+					return this._i32Range(expr) !== null;
 				}
 				break;
 			case "CallExpr":
@@ -1357,6 +1358,47 @@ export class ExprsEmitter {
 				break;
 		}
 		return this.toWasmType(expr._type) === "i32";
+	}
+
+	// The `[lo, hi]` range (BigInt) an int/int64 `expr` built from literals,
+	// `len`/`cap`, i32 locals and `+`/`-`/`*` can take, or null when it is
+	// unknown or does not fit an i32 (the arithmetic would wrap there).
+	_i32Range(expr) {
+		const MIN = -(2n ** 31n);
+		const MAX = 2n ** 31n - 1n;
+		const fits = (r) => (r[0] >= MIN && r[1] <= MAX ? r : null);
+		switch (expr?.kind) {
+			case "ParenExpr":
+				return this._i32Range(expr.expr);
+			case "BasicLit":
+				return expr.litKind === "INT"
+					? fits([BigInt(expr.value), BigInt(expr.value)])
+					: null;
+			case "CallExpr":
+				return expr._builtinName === "len" || expr._builtinName === "cap"
+					? [0n, MAX]
+					: null;
+			case "Ident": {
+				const local = this.resolveLocal(expr.name);
+				if (local?.type !== "i32") return null;
+				if (this.toWasmType(expr._type) !== "i32") return [0n, MAX];
+				return isSigned(expr._type) ? [MIN, MAX] : [0n, 2n ** 32n - 1n];
+			}
+			case "BinaryExpr": {
+				if (expr.op !== "+" && expr.op !== "-" && expr.op !== "*") return null;
+				const l = this._i32Range(expr.left);
+				const r = this._i32Range(expr.right);
+				if (!l || !r) return null;
+				if (expr.op === "+") return fits([l[0] + r[0], l[1] + r[1]]);
+				if (expr.op === "-") return fits([l[0] - r[1], l[1] - r[0]]);
+				const ps = [l[0] * r[0], l[0] * r[1], l[1] * r[0], l[1] * r[1]];
+				return fits([
+					ps.reduce((x, y) => (x < y ? x : y)),
+					ps.reduce((x, y) => (x > y ? x : y)),
+				]);
+			}
+		}
+		return null;
 	}
 
 	// Panics with the generic out-of-range message (shared buffers, SIMD

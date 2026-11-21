@@ -732,6 +732,34 @@ ok <nil>
 	);
 });
 
+test("an int product or sum that overflows 32 bits is checked at its full value on wasm", async () => {
+	await assertWasmProgramOutput(
+		`${SLICE_PRELUDE}
+func main() {
+	a := make([]int, 70000)
+	b := make([]int, 10)
+	xs := []int{1, 2, 3}
+	try("make", func() { _ = make([]int, len(a)*len(a)) })
+	try("slice-hi", func() { _ = xs[:len(a)*len(a)] })
+	try("index", func() { _ = xs[len(a)*len(a)] })
+	try("slice-hi-sum", func() { _ = xs[:len(b)+2147483640] })
+	try("index-sum", func() { _ = xs[len(b)+2147483640] })
+	try("cmp", func() { fmt.Println(len(a)*len(a) > 5) })
+	try("small", func() { _ = xs[len(xs)-1]; _ = xs[len(b)-9]; _ = xs[1+1] })
+}
+`,
+		`make runtime error: makeslice: len out of range
+slice-hi runtime error: slice bounds out of range [:4900000000] with capacity 3
+index runtime error: index out of range [4900000000] with length 3
+slice-hi-sum runtime error: slice bounds out of range [:2147483650] with capacity 3
+index-sum runtime error: index out of range [2147483650] with length 3
+true
+cmp <nil>
+small <nil>
+`,
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

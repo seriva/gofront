@@ -330,6 +330,42 @@ func main() {
 	);
 });
 
+test("range over a count whose int sum or product overflows 32 bits runs to the break", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	b := make([]int, 10)
+	a := make([]int, 70000)
+	c := 0
+	for i := range len(b) + 2147483640 {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	c = 0
+	for i := range len(a) * len(a) {
+		if i == 3 {
+			break
+		}
+		c++
+	}
+	fmt.Println(c)
+	c = 0
+	for i := range len(b) + 2 {
+		c += i
+	}
+	fmt.Println(c)
+}
+`,
+		"3\n3\n66\n",
+	);
+});
+
 test("range over a uint32 or uint count at or above 2^31 runs to the break", async () => {
 	await assertProgramOutput(
 		`package main
