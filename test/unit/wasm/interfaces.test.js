@@ -1761,3 +1761,123 @@ test("Interface predicates terminate on a named placeholder registered in the ty
 	assertEqual(isInterfaceType(placeholder, checker), false);
 	assertEqual(isNonEmptyInterface(placeholder, checker), false);
 });
+
+section("Comparing a concrete value with an interface");
+
+test("a concrete int on the left of == with an interface is a valid comparison", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a int
+	var b any
+	fmt.Println(a == b)
+}
+`,
+		"false\n",
+	);
+});
+
+test("== and != box the concrete side for strings, arrays, pointers and complex values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	a := "x"
+	var b any = "x"
+	fmt.Println(a == b)
+	fmt.Println(a != b)
+	var arr any = [2]int{1, 2}
+	fmt.Println([2]int{1, 2} == arr)
+	x := 1
+	var p any = &x
+	fmt.Println(&x == p)
+}
+`,
+		"true\nfalse\ntrue\ntrue\n",
+	);
+});
+
+test("a complex value compares with an interface holding it on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex64 = 1 + 2i
+	var b any = c
+	fmt.Println(c == b, b == c, c != b)
+	var d complex128 = 1 + 2i
+	var e any = d
+	fmt.Println(d == e, e == d, d != e)
+}
+`,
+		"true true false\ntrue true false\n",
+	);
+});
+
+test("a concrete value compares with a non-empty interface on either side", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type I interface{ M() int }
+
+type T int
+
+func (t T) M() int { return int(t) }
+
+func main() {
+	var i I = T(3)
+	t := T(3)
+	u := T(4)
+	fmt.Println(t == i, i == t, u == i, i != u)
+}
+`,
+		"true true false true\n",
+	);
+});
+
+test("a struct compares with an interface holding it on wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A int }
+
+type I interface{}
+
+func main() {
+	s := S{1}
+	var i I = S{1}
+	var e any = S{2}
+	fmt.Println(s == i, s == e, i == s, s != e)
+}
+`,
+		"true false true true\n",
+	);
+});
+
+test("comparisons between interfaces and with nil are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var a any = 1
+	var b any = 1
+	var n any
+	fmt.Println(a == b, a == 1, 1 == a, a == nil, n == nil, n != nil)
+}
+`,
+		"true true true false true false\n",
+	);
+});

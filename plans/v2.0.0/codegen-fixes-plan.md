@@ -143,7 +143,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Done when: Go's message on all targets, no wasm invalid module
 
 ### Phase 3: `wasm` comparisons with an interface operand (root `wasm-iface-equality`)
-- [ ] Task 3.1: `==` and `!=` with an interface on either side (including against complex operands) box the concrete side (F3.1, F3.2)
+- [x] Task 3.1: `==` and `!=` with an interface on either side (including against complex operands) box the concrete side (F3.1, F3.2)
   - Files: `src/backend/wasm/emit-exprs.js`, `test/fuzz/check-baseline.txt`
   - Test: `test/unit/wasm/interfaces.test.js` F3.1 → `false`, F3.2 → `true`, `true`, `false`, `true`, `true`, `true` on all targets (or `wasm` for struct-vs-interface until checker-operand-rules JS struct-vs-interface lands)
   - Done when: valid module, Go's output; all 44 `binary:==:... # wasm-iface-equality` keys removed from `test/fuzz/check-baseline.txt`

@@ -22,6 +22,7 @@ import {
 	isComplex,
 	isComplex64,
 	isFuncType,
+	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
 	isPointerToStruct,
@@ -2284,6 +2285,23 @@ export class ExprsEmitter {
 
 	emitBinaryExpr(expr, targetWasmType = null) {
 		const { op, left, right } = expr;
+
+		// `==`/`!=` with an interface on either side compares interface
+		// values: the concrete side is boxed, whatever its type (a complex
+		// operand included).  `nil` operands keep the null test below.
+		if (
+			(op === "==" || op === "!=") &&
+			(isInterfaceType(left._type, this.mod.checker) ||
+				isInterfaceType(right._type, this.mod.checker)) &&
+			!(left.kind === "BasicLit" && left.litKind === "NIL") &&
+			!(right.kind === "BasicLit" && right.litKind === "NIL")
+		) {
+			this.emitExpr(left, "anyref");
+			this.emitExpr(right, "anyref");
+			this._emitAnyEq();
+			if (op === "!=") this.pushInstruction("i32.eqz");
+			return;
+		}
 
 		if (
 			isComplex(expr._type) ||
