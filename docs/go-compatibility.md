@@ -382,8 +382,8 @@ The names renamed are:
 
 Go code never sees the suffix: references from the same package, from importing packages
 (`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
-renamed binding. Builtins that are not JS globals (`len`, `append`, …), labels and package-level
-type names are not renamed. A struct field or method is renamed only when its name starts with `__`
+renamed binding. Builtins that are not JS globals (`len`, `append`, …) and labels are not
+renamed. A struct field or method is renamed only when its name starts with `__`
 (`__clone` is `__clone$` on the JS object), because the runtime uses such names itself;
 `fmt` and `%+v` still print the Go name. This applies to the JS output and to `both`
 structs that cross the WASM boundary; hand-written JavaScript reads the field as `r.__t$`.
@@ -398,8 +398,8 @@ unsuffixed name there is still the browser's global. Pick a different Go name fo
 functions you call from JS.
 
 > [!WARNING]
-> Package-level type declarations are **not** renamed. A struct type, or a named type with
-> methods, is emitted as a JS class of the same name, and a class named after a JavaScript
+> Package-level struct types and types with methods in `js` and `both` packages are **not**
+> renamed. Each is emitted as a JS class of the same name, and a class named after a JavaScript
 > built-in that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
 > `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array constructors, …) would
 > shadow it. GoFront therefore rejects such a declaration in `js` and `both` packages with
