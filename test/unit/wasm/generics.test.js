@@ -1526,3 +1526,67 @@ func main() {
 		"1 2\n",
 	);
 });
+
+section("Generic rewrites keep static types");
+
+test("an anonymous struct built from a type parameter keeps its fields in a nested generic call", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func inner[T any](v T) T { return v }
+
+func outer[T any](x T) T { return inner(struct{ A T }{A: x}).A }
+
+func main() {
+	fmt.Println(outer(3))
+	fmt.Println(outer("s"))
+}
+`,
+		"3\ns\n",
+	);
+});
+
+test("a pointer conversion of a type parameter compiles", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Proxy struct{ N int }
+
+func f[T comparable](x T) int {
+	p := (*T)(nil)
+	if p == nil {
+		return 0
+	}
+	return 1
+}
+
+func g[T any](x T) int {
+	p := (*T)(&x)
+	if p != nil {
+		return 1
+	}
+	return 0
+}
+
+func h[T any](x T) int {
+	p := (**T)(nil)
+	if p == nil {
+		return 0
+	}
+	return 1
+}
+
+func main() {
+	fmt.Println(f(3))
+	fmt.Println(f(Proxy{1}))
+	fmt.Println(g(3))
+	fmt.Println(h(3))
+}
+`,
+		"0\n0\n1\n0\n",
+	);
+});

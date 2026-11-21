@@ -132,11 +132,11 @@ Root: `wasm`-only AST rewrites build new nodes without the static type the emitt
   - Done when: all pass on every target; `rawTypeKey` deleted
 
 ### Phase 3: `wasm` rewrites keep static types (root `wasm-rewrite-types`)
-- [ ] Task 3.1: `cloneAst`, `substituteInType`, and `substituteTypesInAst` for structs and parenthesised pointer conversions (W3.1, W3.2)
+- [x] Task 3.1: `cloneAst`, `substituteInType`, and `substituteTypesInAst` for structs and parenthesised pointer conversions (W3.1, W3.2)
   - Files: `src/backend/wasm/monomorph.js` (`cloneAst` keeps `_structFields` and clones `Map` entries; `substituteInType` adds `struct`; `substituteTypesInAst` `CallExpr` handles `UnaryExpr("*")` over type-param `Ident` such as `(*T)(nil)` / `(**T)(nil)`)
   - Test: `test/unit/wasm/generics.test.js`: W3.1 → `3`; W3.2 with type param `T` and `Proxy` → `0`; `(*T)(&x)` → `1`; `(**T)(nil)` → `0`
   - Done when: all pass on every target
-- [ ] Task 3.2: Method expressions with an untyped `nil` receiver (W3.4)
+- [x] Task 3.2: Method expressions with an untyped `nil` receiver (W3.4)
   - Files: `src/backend/wasm/method-expr.js` (`rewriteMethods`)
   - Test: `test/unit/wasm/pointers.test.js`: W3.4 with `U`, `undefined`, and generic `Box[int]` → `true`; `(*U).IsNil(&U{})`, `(*U).IsNil((*U)(nil))` → `false true`; a method expression stored in a variable and called with `nil`
   - Done when: all pass; `js`/`both` print the same

@@ -2,6 +2,7 @@
 // Addresses of scalar fields, elements and package-level variables are compile errors in wasm packages.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -808,5 +809,55 @@ func main() {
 }
 `,
 		"3 3\n3 0 99\n",
+	);
+});
+
+section("WASM Pointers — Method Expressions With A nil Receiver");
+
+test("a method expression called with an untyped nil receiver", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type U struct{ X int }
+
+func (u *U) IsNil() bool { return u == nil }
+
+type undefined struct{}
+
+func (u *undefined) IsNil() bool { return u == nil }
+
+type Box[T any] struct{ V T }
+
+func (b *Box[T]) IsNil() bool { return b == nil }
+
+func main() {
+	fmt.Println((*U).IsNil(nil))
+	fmt.Println((*undefined).IsNil(nil))
+	fmt.Println((*Box[int]).IsNil(nil))
+}
+`,
+		"true\ntrue\ntrue\n",
+	);
+});
+
+test("a method expression called with a typed receiver or a stored func", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type U struct{ X int }
+
+func (u *U) IsNil() bool { return u == nil }
+
+func main() {
+	fmt.Println((*U).IsNil(&U{}), (*U).IsNil((*U)(nil)))
+	f := (*U).IsNil
+	fmt.Println(f(nil), f(&U{}))
+}
+`,
+		"false true\ntrue false\n",
 	);
 });
