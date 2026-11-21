@@ -101,7 +101,7 @@ Support Go's `//go:embed` directive and package `embed` on `js`, `wasm` and `bot
   - Files: `src/backend/wasm/encode.js`, `src/backend/wasm/module-emitter.js`, `src/backend/wasm/wat.js`
   - Test: `test/unit/wasm/data-section.test.js`: Section 12 before code (keeping `mod.codeOffsets` accurate for source maps), Section 11 after code, omitted when `mod.data` is empty, passive segment bytes, `array.new_data` (`0xfb 0x09` with `typeIndex` and `dataIndex` immediates) encoding and WAT formatting
   - Done when: `WebAssembly.validate` accepts modules with passive data segments and `--emit-wat` prints them
-- [ ] Task 2.4: Emit embedded scalars in the wasm backend (former 1.6)
+- [x] Task 2.4: Emit embedded scalars in the wasm backend (former 1.6)
   - Files: `src/backend/wasm/globals.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/module-emitter.js`
   - Test: `test/unit/compiler/embed-wasm.test.js`: `[]byte` via passive segment + `array.new_data` into `(array (mut i8))` unpacked to `(array (mut i32))` and `string` via the string table (including non-UTF-8 round-trip) in `wasm` and `both` packages, same bytes as JS, independent mutability for two `[]byte` vars on the same file, dependent `var n = len(data)` and blank `var _ string`; still valid after `--wasm-opt` when `binaryen` is installed
   - Done when: a `wasm` package reads an embedded `[]byte` with no linear-memory copy

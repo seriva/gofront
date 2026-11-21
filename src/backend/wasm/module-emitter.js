@@ -508,6 +508,17 @@ export class ModuleEmitter {
 		return arrInfo;
 	}
 
+	// `(array (mut i8))`: the packed form `array.new_data` reads a passive data
+	// segment into.
+	getByteArrayType() {
+		if (this.byteArrayType) return this.byteArrayType;
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = { form: "array", elemType: "i8", mutable: true };
+		this._pushType(typeEntry);
+		this.byteArrayType = { typeIndex, typeEntry };
+		return this.byteArrayType;
+	}
+
 	getSliceType(elemGoType) {
 		const elemWType = toWasmType(elemGoType, this.checker, this);
 		const key =
