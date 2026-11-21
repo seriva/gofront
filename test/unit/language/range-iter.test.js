@@ -445,6 +445,53 @@ func main() { for x := range fn { _ = x + 1 } }`);
 	assertEqual(errors.length, 1);
 });
 
+section("Range over a string without variables");
+
+test("a zero-variable string range runs once per rune", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+type Word string
+func main() {
+	c := 0
+	for range Word("😀") {
+		c++
+	}
+	fmt.Println(c)
+	c = 0
+	for range "😀é" {
+		c++
+	}
+	fmt.Println(c)
+	s := "😀"
+	c = 0
+	for range s {
+		c++
+	}
+	fmt.Println(c)
+}`,
+		"1\n2\n1\n",
+	);
+});
+
+test("a blank-variable string range and the index form are unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+import "fmt"
+func main() {
+	c := 0
+	for _ = range "😀é" {
+		c++
+	}
+	fmt.Println(c)
+	for i := range "😀é" {
+		fmt.Println(i)
+	}
+}`,
+		"2\n0\n2\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

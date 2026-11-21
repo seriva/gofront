@@ -127,7 +127,7 @@ Root: `src/backend/wasm/monomorph.js:monomorphise` (`:649`, `:864–883`) re-che
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/expressions.test.js` F1.1 and F1.2 (including `if _ = map[any]int{1: 1}; true {}`) run on js/both (`assertOutput`); the struct-literal control
   - Done when: Go's result on js/both; no other emitted statement changes
-- [ ] Task 1.2: Zero-variable string `range` iterates runes (F1.3, F1.4)
+- [x] Task 1.2: Zero-variable string `range` iterates runes (F1.3, F1.4)
   - Files: `src/backend/js/statements.js` (`_genRangeExprFor`)
   - Test: `test/unit/language/range-iter.test.js` F1.3 → `1`, F1.4 → `2`, `1` on all targets; one-variable index control unchanged
   - Done when: Go's output on all targets

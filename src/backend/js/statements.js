@@ -1431,9 +1431,17 @@ export const statementGenMethods = {
 			return;
 		}
 		const iterType = stmt.cond.expr._coreType ?? stmt.cond.expr._type;
-		const iteree = this.genExpr(stmt.cond.expr);
-		const limit = this._rangeExprLimit(iterType, iteree);
-		this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
+		const wrapField = this._namedWrapperField(iterType, stmt.cond.expr);
+		const iteree = wrapField
+			? `${this.genExpr(stmt.cond.expr)}.${wrapField}`
+			: this.genExpr(stmt.cond.expr);
+		if (this._isStringRangeType(iterType)) {
+			// One iteration per code point, as the one- and two-variable forms.
+			this.line(`for (const _$ of ${iteree} ?? "") {`);
+		} else {
+			const limit = this._rangeExprLimit(iterType, iteree);
+			this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
+		}
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
 	},
