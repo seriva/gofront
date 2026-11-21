@@ -12,6 +12,7 @@ import {
 	isScalarType,
 	isSliceType,
 	structFieldList,
+	structFieldsKey,
 	toWasmType,
 } from "./types.js";
 
@@ -281,10 +282,7 @@ export class ModuleEmitter {
 	}
 
 	getAnonStructType(fields) {
-		const key = fields
-			.map((f) => `${f.embedded ? "_e" : ""}${f.name}:${goTypeKey(f.goType)}`)
-			.join(";");
-		const name = `__anon_${key.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+		const name = `__anon_${structFieldsKey(fields)}`;
 		if (this.structTypes.has(name)) {
 			return this.structTypes.get(name);
 		}

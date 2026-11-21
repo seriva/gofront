@@ -2,6 +2,7 @@
 // Tests for Phase H4 Task H4.2: Generics monomorphisation in WASM and JS-strict parity.
 
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
@@ -1403,5 +1404,125 @@ func main() {
 }
 `,
 		"main.Box[int]\nmain.Pair[string,int]\n*main.Box[string]\n[]main.Box[int]\nmain.Box[main.Foo]\nmain.Box[*main.Foo]\nmain.Box[main.Pair[string,[]int]]\nmain.Pair[main.Foo,map[string]main.Foo]\n{{0}}\n",
+	);
+});
+
+section("Anonymous struct and interface type arguments");
+
+test("an anonymous struct type argument keeps its fields", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func id[T any](v T) T { return v }
+
+func main() {
+	st := struct{ A [2]int }{}
+	a := id(st)
+	a.A[0] = 1
+	fmt.Println(st.A[0], a.A[0])
+	fmt.Println(id[struct{ N int }](struct{ N int }{4}).N)
+}
+`,
+		"0 1\n4\n",
+	);
+});
+
+test("different anonymous struct arguments give different instances", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func id[T any](v T) T { return v }
+
+func main() {
+	fmt.Println(id(struct{ X int }{1}).X, id(struct{ S string }{"s"}).S)
+}
+`,
+		"1 s\n",
+	);
+});
+
+test("func types over anonymous structs give distinct instances and %T names", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ f T }
+
+func main() {
+	a := Box[func(struct{ X int }) int]{func(s struct{ X int }) int { return s.X }}
+	b := Box[func(struct{ S string }) string]{func(s struct{ S string }) string { return s.S }}
+	fmt.Println(a.f(struct{ X int }{1}), b.f(struct{ S string }{"hi"}))
+	fmt.Printf("%T\\n%T\\n", a, b)
+}
+`,
+		"1 hi\nmain.Box[func(struct { X int }) int]\nmain.Box[func(struct { S string }) string]\n",
+	);
+});
+
+test("%T of an anonymous struct argument with several and embedded fields", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ N int }
+type Box[T any] struct{ v T }
+
+func main() {
+	fmt.Printf("%T\\n", Box[struct{ X int; Y int; S string }]{})
+	fmt.Printf("%T\\n", Box[struct{ P; M int }]{})
+	fmt.Printf("%T\\n", Box[struct{}]{})
+}
+`,
+		"main.Box[struct { X int; Y int; S string }]\nmain.Box[struct { main.P; M int }]\nmain.Box[struct {}]\n",
+	);
+});
+
+test("a type parameter shadowing a struct name takes an anonymous struct argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X int }
+
+func f[S any](v S) *S { return new(S) }
+
+func main() {
+	fmt.Println(f[struct{ X int }](struct{ X int }{}).X)
+}
+`,
+		"0\n",
+	);
+});
+
+test("anonymous interface type arguments give distinct instances", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A struct{}
+
+func (A) M() int { return 1 }
+
+type B struct{}
+
+func (B) K() int { return 2 }
+
+func id[T any](v T) T { return v }
+
+func main() {
+	x := id[interface{ M() int }](A{})
+	y := id[interface{ K() int }](B{})
+	fmt.Println(x.M(), y.K())
+}
+`,
+		"1 2\n",
 	);
 });
