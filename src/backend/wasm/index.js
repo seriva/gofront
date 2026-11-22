@@ -41,6 +41,7 @@ import {
 	isInterfaceType,
 	isMapType,
 	isStringType,
+	PANIC_NIL_STRUCT,
 	PANIC_STRINGER,
 	toWasmType,
 } from "./types.js";
@@ -946,6 +947,31 @@ export function compileWasmModule(
 			helper("__mk_error", [{ name: "msg", type: STR_T }], ANY_T, "mk_error"),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
 		);
+	}
+
+	if (mod.usesPanicNil) {
+		const nilErrPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: PANIC_NIL_STRUCT },
+		};
+		for (const [method, kind] of [
+			["Error", "panic_nil_text"],
+			["GofrontTypeName", "panic_nil_type_name"],
+		]) {
+			funcDecls.push(
+				helper(
+					`${PANIC_NIL_STRUCT}.${method}`,
+					[{ name: "e", type: nilErrPtr }],
+					STR_T,
+					kind,
+					{
+						_isMethod: true,
+						_recvTypeName: PANIC_NIL_STRUCT,
+						_methodName: method,
+					},
+				),
+			);
+		}
 	}
 
 	// 1f. Boundary metadata (exported surface of wasm packages)

@@ -23,6 +23,12 @@ export const PANIC_STRINGER = {
 };
 export const PANIC_STRINGER_DISPATCH = "__dispatch___panic_String";
 
+// Name of the runtime's `*runtime.PanicNilError` struct, the value a
+// `panic` with a nil interface raises (see `panicsWithNil`).
+export const PANIC_NIL_STRUCT = "__panicNilError";
+export const PANIC_NIL_TEXT = "panic called with nil argument";
+export const PANIC_NIL_TYPE_NAME = "*runtime.PanicNilError";
+
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";
 

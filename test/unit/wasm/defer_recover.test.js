@@ -1062,8 +1062,12 @@ section("Uncaught panic text of basic and defined values");
 
 // The message of the Error a `wasm` export throws when it panics with
 // `expr` (declared types in `decls`), as `go run` prints after `panic: `.
-function uncaughtPanicText(expr, { decls = "", viaAny = false } = {}) {
-	const body = viaAny ? `var v any = ${expr}\n\tpanic(v)` : `panic(${expr})`;
+function uncaughtPanicText(
+	expr,
+	{ decls = "", viaAny = false, body: custom = null } = {},
+) {
+	const body =
+		custom ?? (viaAny ? `var v any = ${expr}\n\tpanic(v)` : `panic(${expr})`);
 	const src = `package main
 
 import "errors"
@@ -1245,6 +1249,88 @@ func main() {
 }
 `,
 		"main.MyErr mine\n*errors.errorString bad\n",
+	);
+});
+
+section("panic(nil)");
+
+const PANIC_NIL_SOURCES = {
+	"panic(nil)": "panic(nil)",
+	"panic of a nil any": "var a any\n\tpanic(a)",
+	"panic of a nil error": "var e error\n\tpanic(e)",
+};
+
+for (const [name, body] of Object.entries(PANIC_NIL_SOURCES)) {
+	const src = `package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	${body}
+}
+`;
+	test(`${name} recovers a *runtime.PanicNilError on wasm`, async () => {
+		await assertWasmProgramOutput(
+			src,
+			"*runtime.PanicNilError panic called with nil argument\n",
+		);
+	});
+	test(`${name} still recovers nil on the JS targets`, async () => {
+		await assertJsTargetsOutput(src, "<nil> <nil>\n");
+	});
+	test(`an uncaught ${name} reaches the host as an Error`, () => {
+		assertEqual(
+			uncaughtPanicText("", {
+				body,
+			}),
+			"panic called with nil argument",
+		);
+	});
+}
+
+test("the value of panic(nil) is a non-nil error", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		e, ok := r.(error)
+		fmt.Println(r != nil, ok, e.Error())
+	}()
+	panic(nil)
+}
+`,
+		"true true panic called with nil argument\n",
+	);
+});
+
+test("a typed nil pointer in an interface is not a nil panic", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type E struct{}
+
+func (*E) Error() string { return "e" }
+
+func main() {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T\\n", r)
+	}()
+	var p *E
+	panic(p)
+}
+`,
+		"*main.E\n",
 	);
 });
 

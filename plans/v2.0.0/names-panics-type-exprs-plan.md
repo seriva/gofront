@@ -189,7 +189,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/backend/wasm/index.js` (`__panic_text` `error`/`Stringer` arms)
   - Test: `defer_recover.test.js`: `errors.New("bad")`, `MyErr{}`, `Stringer{}`, `var v any = errors.New("bad")` and a type with both methods → `bad` / `mine` / `str` / `bad` / its `Error()`; a plain struct still `[panic object]`
   - Done when: all pass
-- [ ] Task 3.3: `panic(nil)` panics with `*runtime.PanicNilError` (F21, F21b, F21c)
+- [x] Task 3.3: `panic(nil)` panics with `*runtime.PanicNilError` (F21, F21b, F21c)
   - Files: `src/backend/wasm/types.js` (`PANIC_NIL_STRUCT`), `src/backend/wasm/module-emitter.js` + `src/backend/wasm/index.js` (register struct and `Error()`/`GofrontTypeName()` helpers), `src/backend/wasm/emit-builtins.js` (`nil` and nil-interface arguments)
   - Test: `defer_recover.test.js`: `panic(nil)`, `var a any; panic(a)` and `var e error; panic(e)` → `*runtime.PanicNilError panic called with nil argument` on `wasm`; uncaught → `Error: panic called with nil argument`; `js`/`both` unchanged (`<nil> <nil>`); `docs/go-compatibility.md` `defer`/`recover()` row (new uncaught texts, only plain structs report `[panic object]`, `panic(nil)` on `js`/`both`)
   - Done when: all pass

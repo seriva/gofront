@@ -6,6 +6,7 @@ import { hasCallOrReceive } from "../../lower/walk.js";
 import { ERROR } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import { namedBase } from "../shared/named-underlying.js";
+import { panicsWithNil } from "./prescan.js";
 import {
 	anonIfaceName,
 	ERROR_STRUCT,
@@ -22,6 +23,9 @@ import {
 	isStringType,
 	isStructType,
 	isUnhashableGoType,
+	PANIC_NIL_STRUCT,
+	PANIC_NIL_TEXT,
+	PANIC_NIL_TYPE_NAME,
 	PANIC_STRINGER,
 	PANIC_STRINGER_DISPATCH,
 	printOperandKind,
@@ -855,7 +859,24 @@ export class BuiltinsEmitter {
 			return;
 		}
 		this.emitExpr(arg, "anyref");
+		if (this.mod.usesPanicNil && panicsWithNil(call, this.mod.checker))
+			this._emitPanicNilGuard();
 		this.emitPanicThrow();
+	}
+
+	// The anyref value on the stack, or a fresh `*runtime.PanicNilError` when
+	// it is nil: Go's `panic(nil)` panics with that error.
+	_emitPanicNilGuard() {
+		const nilError = this.mod.getStructType(PANIC_NIL_STRUCT);
+		const valTmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.tee", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this.pushInstruction({ op: "struct.new", typeIndex: nilError.typeIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("end");
+		this.releaseTemp(valTmp, "anyref");
 	}
 
 	// Raises the panic whose value and host message are the externref string
@@ -1652,7 +1673,9 @@ export class BuiltinsEmitter {
 				info.typeIndex,
 				info.name === ERROR_STRUCT
 					? "*errors.errorString"
-					: `*${named(info.name)}`,
+					: info.name === PANIC_NIL_STRUCT
+						? PANIC_NIL_TYPE_NAME
+						: `*${named(info.name)}`,
 			]);
 		}
 		for (const c of mod.closureTypes.values())
@@ -2275,6 +2298,15 @@ export class BuiltinsEmitter {
 				return;
 			case "panic_text":
 				this._emitPanicText();
+				return;
+			case "panic_nil_text":
+			case "panic_nil_type_name":
+				this._pushStringConst(
+					fn._isRuntimeHelper === "panic_nil_text"
+						? PANIC_NIL_TEXT
+						: PANIC_NIL_TYPE_NAME,
+				);
+				this.pushInstruction("return");
 				return;
 			case "error_msg":
 				this.pushInstruction({ op: "local.get", index: 0 });
