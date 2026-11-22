@@ -139,6 +139,20 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._labels = newLabelScope(); // labels of the current function body
 		this._imports = []; // tracked imports for unused-import detection
+		// Imports are bound per file, as in Go: each file's scope holds its own
+		// package qualifiers, `.d.ts` bindings and dot-imported names, and sits
+		// between `globals` (the package's own declarations) and the universe
+		// while that file is checked (see `_setCurrentFile`). The scope under
+		// the key `null` is shared by every file: bindings made with no file.
+		this.fileScopes = new Map();
+		this._importScopes = new Set();
+		// Type-table keys an import registered (`pkg.T`, or a bare `T`): the
+		// table spans the build, so a name resolves only where the file's scope
+		// binds it (see `_visibleType`).
+		this._importKeys = new Set();
+		this._ungated = 0; // > 0 while resolving a declaration from another package
+		this._declFiles = new WeakMap(); // generic declaration -> its file
+		this._constFiles = new Map(); // package const name -> file declaring it
 		// Lazy body checking (Go-source stdlib): with `lazyBodies` set, checkAll
 		// types declarations only and `checkBody` types a function or method
 		// body when it is first reached.
@@ -173,27 +187,76 @@ export class TypeChecker {
 	addDefinitions(
 		types,
 		values,
-		{ external = true, consts = null, kinds = null } = {},
+		{ external = true, consts = null, kinds = null, file = null } = {},
 	) {
-		for (const [name, type] of types) {
-			this.types.set(name, type);
-		}
+		const scope = this._fileScope(file);
+		for (const [name, type] of types) this._bindImportedType(file, name, type);
 		for (const [name, type] of values) {
 			const kind = kinds?.get(name);
 			if (kinds ? kind === "type" : types.get(name) === type)
-				this.globals.defineType(name, type);
+				scope.defineType(name, type);
 			else if (type?.kind === "namespace" && type.name === name)
-				this.globals.definePackage(name, type);
-			else if (kind === "func") this.globals.defineFunc(name, type);
-			else if (kind === "const") this.globals.defineConst(name, type);
-			else this.globals.define(name, type);
+				scope.definePackage(name, type);
+			else if (kind === "func") scope.defineFunc(name, type);
+			else if (kind === "const") scope.defineConst(name, type);
+			else scope.define(name, type);
 			if (external) this._externalNames.add(name);
 		}
 		for (const [name, v] of consts ?? []) {
 			if (!v || !values.has(name)) continue;
-			this.globals.defineConst(name, values.get(name));
+			scope.defineConst(name, values.get(name));
 			this._importedConsts.set(name, v);
 		}
+	}
+
+	// The scope holding the imports of `file` (null: those of every file).
+	_fileScope(file = null) {
+		const key = file ?? null;
+		let scope = this.fileScopes.get(key);
+		if (!scope) {
+			scope = new Scope(key === null ? this.universe : this._fileScope(null));
+			scope.importedTypes = new Map(); // type-table key -> type, as imported
+			this.fileScopes.set(key, scope);
+			this._importScopes.add(scope);
+		}
+		return scope;
+	}
+
+	// Whether `scope` holds a file's imports (an import is never part of the
+	// package's own declarations in `globals`).
+	_isImportScope(scope) {
+		return scope === this.globals || this._importScopes.has(scope);
+	}
+
+	// Runs `fn` with `file`'s imports in scope.
+	_atFile(file, fn) {
+		const parent = this.globals.parent;
+		this.globals.parent = this._fileScope(file);
+		try {
+			return fn();
+		} finally {
+			this.globals.parent = parent;
+		}
+	}
+
+	// Registers the type `type` an import of `file` names `key`: the type table
+	// (the build's registry, which backends and `resolveType` read) knows it,
+	// and only `file` resolves the name.
+	_bindImportedType(file, key, type) {
+		// A predeclared type (`error`) an importer's table also lists is no import.
+		if (this.types.get(key) === type && !this._importKeys.has(key)) return;
+		this.types.set(key, type);
+		this._importKeys.add(key);
+		this._fileScope(file).importedTypes.set(key, type);
+	}
+
+	// The type an import in `scope` (a file's scope) or in the scope shared by
+	// every file names `key`.
+	_importedType(scope, key) {
+		return (
+			scope?.importedTypes?.get(key) ??
+			this._fileScope(null).importedTypes.get(key)
+		);
 	}
 
 	// Bind the name of an npm import that has no type declarations. It is a
@@ -218,11 +281,12 @@ export class TypeChecker {
 		target = null,
 		consts = null,
 		kinds = null,
+		file = null,
 	) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
-		this.globals.definePackage(pkgName, {
+		this._fileScope(file).definePackage(pkgName, {
 			kind: "namespace",
 			name: pkgName,
 			members,
@@ -241,8 +305,13 @@ export class TypeChecker {
 			// A renamed type (`Pt` declared as `Pt$$b`) never takes the bare name:
 			// another package owns it, and this package's own declaration would
 			// otherwise reuse the imported placeholder. It is reached as `pkg.Pt`.
-			if (type.name === name) this.types.set(name, type);
-			this.types.set(`${pkgName}.${name}`, type);
+			// The bare name is the build's registry only; no file resolves it
+			// (a dot import binds it in its file, see `addDefinitions`).
+			if (type.name === name && prior !== type) {
+				this.types.set(name, type);
+				this._importKeys.add(name);
+			}
+			this._bindImportedType(file, `${pkgName}.${name}`, type);
 			this._importedTypes.add(type);
 		}
 	}
@@ -255,10 +324,11 @@ export class TypeChecker {
 		this._imports.push({ name, node, filename, source });
 	}
 
-	// Report any tracked imports whose package name was never referenced.
+	// Report any tracked imports whose package name was never referenced in
+	// the file that imports it.
 	reportUnusedImports() {
 		for (const { name, node, filename, source } of this._imports) {
-			if (!this.globals._used.has(name) && !this.universe._used.has(name)) {
+			if (!this._importUsed(name, filename)) {
 				const saved = [this._currentFile, this._currentSource];
 				this._currentFile = filename;
 				this._currentSource = source;
@@ -266,6 +336,15 @@ export class TypeChecker {
 				[this._currentFile, this._currentSource] = saved;
 			}
 		}
+	}
+
+	_importUsed(name, filename) {
+		return (
+			this._fileScope(filename)._used.has(name) ||
+			this._fileScope(null)._used.has(name) ||
+			this.globals._used.has(name) ||
+			this.universe._used.has(name)
+		);
 	}
 
 	// Return a snapshot of all user-defined globals (excludes built-ins).
@@ -284,9 +363,17 @@ export class TypeChecker {
 		const out = new Map();
 		for (const name of this.globals.names("const")) {
 			if (!this.globals.lookupConstExpr(name)) continue;
-			out.set(name, this._constValue({ kind: "Ident", name }, this.globals));
+			out.set(name, this.constValueOf(name));
 		}
 		return out;
+	}
+
+	// The folded value of the package constant `name`, evaluated where it is
+	// declared: its initializer may name an import of that file only.
+	constValueOf(name) {
+		return this._atFile(this._constFiles.get(name) ?? null, () =>
+			this._constValue({ kind: "Ident", name }, this.globals),
+		);
 	}
 
 	// What the package declares each of its names as (see Scope), for
@@ -377,6 +464,8 @@ export class TypeChecker {
 	_setCurrentFile(p) {
 		this._currentFile = p._filename ?? null;
 		this._currentSource = p._source ?? null;
+		// Names resolve against the imports of the file being checked.
+		this.globals.parent = this._fileScope(this._currentFile);
 		this._currentPkgName = p?.pkg?.name ?? this.pkgName ?? null;
 		// The generated Go sits at package level and names any local type; they
 		// are unique by then (`renameLocalTypes`).
@@ -692,6 +781,7 @@ export class TypeChecker {
 	_collectTypesPass(programs) {
 		for (const p of programs) {
 			for (const d of p.decls) {
+				if (d.kind === "TypeDecl") this._declFiles.set(d, p._filename ?? null);
 				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
 					const placeholder = {
 						kind: "named",
@@ -840,6 +930,7 @@ export class TypeChecker {
 					spec.names.forEach((name, i) => {
 						const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
 						if (expr) this.globals._constExprs.set(name, expr);
+						this._constFiles.set(name, p._filename ?? null);
 					});
 				}
 			}
@@ -1042,6 +1133,7 @@ export class TypeChecker {
 	// ── Type collection ──────────────────────────────────────────
 
 	collectType(decl, scope = null) {
+		this._declFiles.set(decl, this._currentFile);
 		// `type N interface{ ~int }` and `type D N` declare constraints.
 		this._markConstraintPos(decl.type);
 		if (decl.typeParams && decl.isAlias) {

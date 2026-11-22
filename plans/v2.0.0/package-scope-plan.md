@@ -108,7 +108,7 @@ Root: no selector, qualified type lookup, method expression or composite literal
 > Split from the former `followup-fixes-plan.md` Phases 1 and 7 (re-probed 2026-11-17; audited 2026-11-19).
 
 ### Phase 1: Imports are bound per file (root `package-wide-imports`)
-- [ ] Task 1.1: Per-file import scopes in the checker (I1.1–I1.3, I1.8–I1.9)
+- [x] Task 1.1: Per-file import scopes in the checker (I1.1–I1.3, I1.8–I1.9)
   - Files: `src/typechecker/index.js` (`fileScopes`, `_fileScope`, `_isImportScope`, chain `this.globals.parent` in `_setCurrentFile`, per-file `reportUnusedImports`, file-aware `getExportedConsts`), `src/typechecker/expressions.js` (`_isImportScope` in place of `owner === this.globals` at `:283`, `:294`, `:908`), `src/typechecker/resolve.js` (per-file type/qualified-type lookup in `resolveTypeNode`, `_resolveGenericTypeName`, `resolveTypeNodeName`, `_jsOnlyMember`, `_useQualifiedTypeName`)
   - Test: `test/unit/compiler/imports.test.js`: unit tests for file-scoped `addPackageNamespace`/`addDefinitions` (values and types) and per-file `reportUnusedImports`; `npm test` stays green while callers still pass default file
   - Done when: all pass and existing `npm test` is green

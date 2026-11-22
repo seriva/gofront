@@ -4,6 +4,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Lexer } from "../../../src/lexer/lexer.js";
+import { Parser } from "../../../src/parser/index.js";
+import { TypeChecker } from "../../../src/typechecker/index.js";
+import { INT } from "../../../src/typechecker/types.js";
 import {
 	assert,
 	assertContains,
@@ -13,6 +17,7 @@ import {
 	compile,
 	compileDir,
 	FIXTURES,
+	parseDts,
 	runJs,
 	section,
 	test,
@@ -234,6 +239,154 @@ func main() {
   s := fmt.Sprintf("%d", 42)
   println(s)
 }`);
+	assertEqual(errors.length, 0);
+});
+
+// ═════════════════════════════════════════════════════════════
+// Imports are bound per file
+// ═════════════════════════════════════════════════════════════
+
+section("Checker — per-file import scopes");
+
+function parseFile(name, source) {
+	const ast = new Parser(
+		new Lexer(source, name).tokenize(),
+		name,
+		source,
+	).parse();
+	ast._source = source;
+	return ast;
+}
+
+// A package of two files, `a.go` and `b.go`, checked with whatever `bind`
+// binds before the check. Returns the errors.
+function checkTwoFiles(aSrc, bSrc, bind) {
+	const checker = new TypeChecker();
+	const a = parseFile("a.go", `package main\n${aSrc}`);
+	const b = parseFile("b.go", `package main\n${bSrc}`);
+	bind(checker, a);
+	const errors = checker.checkAll([a, b]);
+	checker.reportUnusedImports();
+	return errors;
+}
+
+const LIB_FN = { kind: "func", params: [], returns: [INT] };
+const LIB_BOX = { kind: "named", name: "Box", underlying: INT };
+const bindLib = (file) => (checker) =>
+	checker.addPackageNamespace(
+		"lib",
+		new Map([["Fn", LIB_FN]]),
+		new Map([["Box", LIB_BOX]]),
+		null,
+		null,
+		null,
+		file,
+	);
+
+test("addPackageNamespace binds the package qualifier in one file", () => {
+	const errors = checkTwoFiles(
+		"func A() int { return lib.Fn() }",
+		"func B() int { return lib.Fn() }",
+		bindLib("a.go"),
+	);
+	assertErrorContains(errors, "Undefined: 'lib'");
+	assertEqual(errors.length, 1);
+});
+
+test("addPackageNamespace binds package types in one file", () => {
+	const errors = checkTwoFiles(
+		"var x lib.Box",
+		"var y lib.Box",
+		bindLib("a.go"),
+	);
+	assertErrorContains(errors, "Unknown type 'lib.Box'");
+	assertEqual(errors.length, 1);
+});
+
+test("addPackageNamespace does not leak a bare type name to other files", () => {
+	const errors = checkTwoFiles("var x lib.Box", "var y Box", bindLib("a.go"));
+	assertErrorContains(errors, "Unknown type 'Box'");
+	assertEqual(errors.length, 1);
+});
+
+test("addPackageNamespace in two files binds each file", () => {
+	const errors = checkTwoFiles(
+		"func A() int { return lib.Fn() }\nvar x lib.Box",
+		"func B() int { return lib.Fn() }\nvar y lib.Box",
+		(checker) => {
+			bindLib("a.go")(checker);
+			bindLib("b.go")(checker);
+		},
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("addPackageNamespace without a file binds every file", () => {
+	const errors = checkTwoFiles(
+		"func A() int { return lib.Fn() }",
+		"func B() int { return lib.Fn() }\nvar y lib.Box",
+		bindLib(undefined),
+	);
+	assertEqual(errors.length, 0);
+});
+
+const DTS = parseDts(
+	"export declare function helper(): number;\nexport interface Foo { n: number }",
+);
+
+test("addDefinitions binds values and types in one file", () => {
+	const bind = (checker) =>
+		checker.addDefinitions(DTS.types, DTS.values, { file: "a.go" });
+	const errors = checkTwoFiles(
+		"func A() float64 { return helper() }\nvar x Foo",
+		"func B() float64 { return helper() }\nvar y Foo",
+		bind,
+	);
+	assertErrorContains(errors, "Undefined: 'helper'");
+	assertErrorContains(errors, "Unknown type 'Foo'");
+	assertEqual(errors.length, 2);
+});
+
+test("addDefinitions without a file binds every file", () => {
+	const errors = checkTwoFiles(
+		"func A() float64 { return helper() }\nvar x Foo",
+		"func B() float64 { return helper() }\nvar y Foo",
+		(checker) => checker.addDefinitions(DTS.types, DTS.values),
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("reportUnusedImports checks the file that imports", () => {
+	const errors = checkTwoFiles(
+		"func A() {}",
+		"func B() int { return lib.Fn() }",
+		(checker) => {
+			bindLib("a.go")(checker);
+			bindLib("b.go")(checker);
+			checker.trackImport("lib", { _line: 2 }, "a.go", "");
+			checker.trackImport("lib", { _line: 2 }, "b.go", "");
+		},
+	);
+	assertErrorContains(errors, "'lib' imported and not used");
+	assertEqual(errors.length, 1);
+});
+
+test("a file's own package-level names stay out of its imports", () => {
+	const errors = checkTwoFiles(
+		"func A() int { return 1 }",
+		"func B() int { return A() }",
+		(checker) => bindLib("a.go")(checker),
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a type's generic instance resolves in its declaring file", () => {
+	// `Box` names `lib.Box` in a.go only; b.go instantiates the generic.
+	const errors = checkTwoFiles(
+		"type G[T any] struct { v T; b lib.Box }",
+		"var g G[int]",
+		bindLib("a.go"),
+	);
 	assertEqual(errors.length, 0);
 });
 
