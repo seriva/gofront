@@ -2170,7 +2170,7 @@ export const expressionGenMethods = {
 			case "map":
 				return this._isNilLiteral(srcExpr) ? { kind: "MapType" } : null;
 			case "slice": {
-				const elem = base.elem?.name;
+				const elem = this._underlyingOf(base.elem)?.name;
 				const fromText =
 					this._isStringExprType(srcExpr?._type) &&
 					["byte", "uint8", "rune", "int32", "int"].includes(elem);
@@ -3878,7 +3878,11 @@ export const expressionGenMethods = {
 	_genSliceTypeConversion(expr, inner, t) {
 		// `[]T(nil)` is the nil slice, not a copy of anything.
 		if (this._isNilLiteral(expr.expr)) return "null";
-		const elem = t.elem?.name;
+		const elemType =
+			t.elem?.kind === "TypeName"
+				? (this.checker?.types.get(t.elem.name) ?? t.elem)
+				: t.elem;
+		const elem = this._underlyingOf(elemType)?.name;
 		// Converting a nil slice yields a nil slice.
 		const src = this._underlyingOf(expr.expr._type);
 		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
@@ -3921,7 +3925,7 @@ export const expressionGenMethods = {
 			return `__rstr(${inner})`;
 		}
 		if (base?.kind === "slice") {
-			const elem = base.elem?.name;
+			const elem = this._underlyingOf(base.elem)?.name;
 			if (elem === "byte" || elem === "uint8") {
 				this.useHelper("u8dec");
 				return `__u8dec(${inner})`;

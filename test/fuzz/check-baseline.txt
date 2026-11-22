@@ -37,53 +37,13 @@ builtins:real:1.5:go-accept/gf-reject # builtin-complex-operands
 builtins:real:1:go-accept/gf-reject # builtin-complex-operands
 builtins:real:1e40:go-accept/gf-reject # builtin-complex-operands
 builtins:real:rune:go-accept/gf-reject # builtin-complex-operands
-conv:array:func,func:go-accept/gf-reject # parser-conversion-type
-conv:func:E,E:go-accept/gf-reject # parser-conversion-type
-conv:func:I,I:go-accept/gf-reject # parser-conversion-type
-conv:func:I2,I2:go-accept/gf-reject # parser-conversion-type
-conv:func:MB,MB:go-accept/gf-reject # parser-conversion-type
-conv:func:MI,MI:go-accept/gf-reject # parser-conversion-type
-conv:func:MI2,MI2:go-accept/gf-reject # parser-conversion-type
-conv:func:MS,MS:go-accept/gf-reject # parser-conversion-type
-conv:func:MS2,MS2:go-accept/gf-reject # parser-conversion-type
-conv:func:P,P:go-accept/gf-reject # parser-conversion-type
-conv:func:PS,PS:go-accept/gf-reject # parser-conversion-type
-conv:func:Tany,Tany:go-accept/gf-reject # parser-conversion-type
-conv:func:Tcomparable,Tcomparable:go-accept/gf-reject # parser-conversion-type
-conv:func:Tnum,Tnum:go-accept/gf-reject # parser-conversion-type
-conv:func:any,any:go-accept/gf-reject # parser-conversion-type
-conv:func:array,array:go-accept/gf-reject # parser-conversion-type
-conv:func:bool,bool:go-accept/gf-reject # parser-conversion-type
-conv:func:complex128,complex128:go-accept/gf-reject # parser-conversion-type
-conv:func:complex64,complex64:go-accept/gf-reject # parser-conversion-type
-conv:func:error,error:go-accept/gf-reject # parser-conversion-type
-conv:func:float32,float32:go-accept/gf-reject # parser-conversion-type
-conv:func:float64,float64:go-accept/gf-reject # parser-conversion-type
-conv:func:func,func:go-accept/gf-reject # parser-conversion-type
-conv:func:int,int:go-accept/gf-reject # parser-conversion-type
-conv:func:int8,int8:go-accept/gf-reject # parser-conversion-type
-conv:func:map,map:go-accept/gf-reject # parser-conversion-type
-conv:func:ptr,ptr:go-accept/gf-reject # parser-conversion-type
-conv:func:slice,slice:go-accept/gf-reject # parser-conversion-type
-conv:func:string,string:go-accept/gf-reject # parser-conversion-type
-conv:func:struct,struct:go-accept/gf-reject # parser-conversion-type
-conv:func:uint,uint:go-accept/gf-reject # parser-conversion-type
-conv:map:func,func:go-accept/gf-reject # parser-conversion-type
 conv:ptr:P,struct:wasm-reject # excluded: wasm converts no struct pointers
-conv:ptr:array,array:go-accept/gf-reject # parser-conversion-type
-conv:ptr:error,error:go-accept/gf-reject # parser-conversion-type
-conv:ptr:func,func:go-accept/gf-reject # parser-conversion-type
-conv:ptr:map,map:go-accept/gf-reject # parser-conversion-type
-conv:ptr:slice,slice:go-accept/gf-reject # parser-conversion-type
-conv:ptr:struct,P:go-accept/gf-reject # parser-conversion-type
-conv:ptr:struct,struct:go-accept/gf-reject # parser-conversion-type
-conv:slice:func,func:go-accept/gf-reject # parser-conversion-type
+conv:ptr:error,error:go-accept/gf-reject # error resolves as builtin under *error
+conv:ptr:struct,P:wasm-reject # excluded: wasm converts no struct pointers
 conv:value:error,MS2:go-reject/gf-accept # excluded: error(s) turns a string into an error value
 conv:value:error,MS:go-reject/gf-accept # excluded: error(s) turns a string into an error value
 conv:value:error,str:go-reject/gf-accept # excluded: error(s) turns a string into an error value
 conv:value:error,string:go-reject/gf-accept # excluded: error(s) turns a string into an error value
-conv:value:func,func:go-accept/gf-reject # parser-conversion-type
-conv:value:func,nil:go-accept/gf-reject # parser-conversion-type
 names:addr:dot-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:field:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:func-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field

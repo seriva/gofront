@@ -336,14 +336,24 @@ import "fmt"
 
 type T struct{ f int }
 
+func id(x int) int { return x }
+
 func main() {
 	f := func(x int) int { return x + 1 }
 	t := T{f: 4}
 	p := &t
+	x := 9
+	m := map[any]int{T{f: 3}: 11}
+	mi := map[int]int{3: 11}
 	fmt.Println((f)(1), (func() int { return 1 })(), (*p).f, (*T)(nil) == nil)
+	fmt.Println(([]int{1, 2}), ([]int{1, 2}[0]), (struct{ X int }{1}.X))
+	fmt.Println((map[string]int{"a": 1}["a"]), ([]byte("abc")[0]))
+	fmt.Println((struct{ X int }(struct{ X int }{7})).X)
+	fmt.Println(*([]*int{&x}[0]), *(struct{ P *int }{&x}.P))
+	fmt.Println(id(m[interface{}(T{f: 3})]), id(mi[struct{ f int }(T{f: 3}).f]))
 }
 `,
-		"2 1 4 true\n",
+		"2 1 4 true\n[1 2] 1 1\n1 97\n7\n9 9\n11 11\n",
 	);
 });
 

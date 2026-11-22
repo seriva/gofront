@@ -722,17 +722,26 @@ export function getSliceElemType(t, checker = null) {
 	return null;
 }
 
-// `[]rune` / `[]int32` (also through named types): the target of `[]rune(s)`.
+function _sliceElemBaseName(goType, checker = null) {
+	if (!isSliceType(goType, checker)) return null;
+	const elem = getSliceElemType(goType, checker);
+	const resolved =
+		(elem?.kind === "TypeName" || elem?.kind === "Ident") &&
+		checker?.types?.has(elem.name)
+			? checker.types.get(elem.name)
+			: elem;
+	return namedBase(resolved, checker)?.name ?? null;
+}
+
+// `[]byte` / `[]uint8` (also through named element/slice types).
+export function isByteSlice(goType, checker = null) {
+	const name = _sliceElemBaseName(goType, checker);
+	return name === "byte" || name === "uint8";
+}
+
+// `[]rune` / `[]int32` (also through named element/slice types): target of `[]rune(s)`.
 export function isRuneSlice(goType, checker = null) {
-	if (!isSliceType(goType, checker)) return false;
-	let t = goType;
-	while (t && !t.elem) {
-		if (t.kind === "named") t = namedBase(t, checker);
-		else if (t.kind === "TypeName" || t.kind === "Ident")
-			t = checker?.types?.get(t.name);
-		else return false;
-	}
-	const name = t?.elem?.name;
+	const name = _sliceElemBaseName(goType, checker);
 	return name === "rune" || name === "int32";
 }
 

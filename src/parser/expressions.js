@@ -104,8 +104,11 @@ function _opensArgs(after, noCompLit) {
 }
 
 function _isCallParen(src, i, braces) {
+	const prev = src[i - 1]?.type;
 	return (
-		src[i].type === T.LPAREN && braces === 0 && src[i - 1]?.type === T.IDENT
+		src[i].type === T.LPAREN &&
+		braces === 0 &&
+		(prev === T.IDENT || prev === T.RBRACE)
 	);
 }
 
@@ -443,6 +446,36 @@ export const expressionParserMethods = {
 		}
 	},
 
+	// Parses `(typeLiteral)` when `)` immediately follows the type.  Restores
+	// `this.pos` and returns null otherwise so parenthesised expressions such
+	// as `([]int{1, 2})` fall back to `parseExpr`.
+	_tryParseParenTypeLiteral() {
+		if (!this._looksLikeTypeLiteralStart()) return null;
+		const start = this.pos;
+		let targetType;
+		try {
+			targetType = this.parseType();
+		} catch {
+			this.pos = start;
+			return null;
+		}
+		if (!this.check(T.RPAREN)) {
+			this.pos = start;
+			return null;
+		}
+		this.advance();
+		if (this.check(T.LBRACE)) {
+			this.err("cannot parenthesize type in composite literal");
+		}
+		if (this.check(T.LPAREN)) {
+			this.advance();
+			const expr = this.parseExpr();
+			this.expect(T.RPAREN);
+			return { kind: "TypeConversion", targetType, expr };
+		}
+		return { kind: "TypeExpr", type: targetType };
+	},
+
 	// Whether the current cursor starts a type literal (struct, slice/array,
 	// map, interface, func type without a body, or `*` followed by one of
 	// these).  Used after `(` in `_parsePrimary` and for `parseCall` args.
@@ -547,20 +580,8 @@ export const expressionParserMethods = {
 		// Parenthesised type literal conversion or parenthesised expression
 		if (t.type === T.LPAREN) {
 			this.advance();
-			if (this._looksLikeTypeLiteralStart()) {
-				const targetType = this.parseType();
-				this.expect(T.RPAREN);
-				if (this.check(T.LBRACE)) {
-					this.err("cannot parenthesize type in composite literal");
-				}
-				if (this.check(T.LPAREN)) {
-					this.advance();
-					const expr = this.parseExpr();
-					this.expect(T.RPAREN);
-					return { kind: "TypeConversion", targetType, expr };
-				}
-				return { kind: "TypeExpr", type: targetType };
-			}
+			const typeLit = this._tryParseParenTypeLiteral();
+			if (typeLit) return typeLit;
 			const expr = this.parseExpr();
 			this.expect(T.RPAREN);
 			return expr;

@@ -2457,6 +2457,28 @@ func main() {
 	);
 });
 
+test("string conversions to slice aliases with defined byte/rune elements work on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyByte byte
+type MyBytes = []MyByte
+type MyRune rune
+type MyRunes = []MyRune
+
+func main() {
+	bs := MyBytes("ab")
+	rs := MyRunes("cd")
+	fmt.Println(bs, rs, ([]MyByte)("ef"), ([]MyRune)("gh"))
+	fmt.Println(string(bs), string(rs))
+}
+`,
+		"[97 98] [99 100] [101 102] [103 104]\nab cd\n",
+	);
+});
+
 test("L1 negative: invalid alias conversion reports cannot convert, not non-function call", () => {
 	for (const target of ["js", "both", "wasm"]) {
 		const { errors } = compile(
