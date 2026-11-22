@@ -641,6 +641,7 @@ export function checkGeneratedGo(
 		options,
 		deps,
 	);
+	checker.bindReachedPackages(filename);
 	const before = checker.errors.length;
 	checker.checkAll([ast]);
 	if (checker.errors.length > before) {

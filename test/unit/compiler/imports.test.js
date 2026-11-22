@@ -709,6 +709,73 @@ func main() { fmt.Println(A(), fmt.Sprintf("%v", []int{1})) }
 	);
 });
 
+test("generated code names a local package's type next to the package's own (I1.12)", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import (
+	"encoding/json"
+	"./sub"
+)
+
+type MyInt int
+
+type Doc struct {
+	A MyInt
+	B sub.MyInt
+}
+
+func main() {
+	var d Doc
+	if err := json.Unmarshal([]byte(\`{"A":1,"B":2}\`), &d); err != nil {
+		println("err")
+		return
+	}
+	println(d.A, d.B)
+}
+`,
+			"sub/sub.go": `package sub
+
+type MyInt int
+`,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "1 2"),
+	);
+});
+
+test("a dot-imported type does not hide the package's own type of that name (I1.13)", () => {
+	const files = (own, dot) => ({
+		[own]: `package main
+
+type T struct{ M string }
+
+func main() {
+	t := T{M: "x"}
+	println(A(), t.M)
+}
+`,
+		[dot]: `package main
+
+import . "./sub"
+
+func A() int {
+	var t T
+	t.N = 3
+	return t.N
+}
+`,
+		"sub/sub.go": SUB_PKG,
+	});
+	for (const [own, dot] of [
+		["b.go", "a.go"],
+		["a.go", "b.go"],
+	])
+		withTempDir(files(own, dot), (dir) =>
+			assertEqual(runJs(compileDir(dir).js).trim(), "3 x"),
+		);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

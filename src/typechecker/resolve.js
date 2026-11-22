@@ -716,8 +716,14 @@ export const resolveMethods = {
 	// `_inDeclContext`) sees every name, as that package's own scope is not
 	// this checker's.
 	_typeNamed(name) {
-		if (this._ungated === 0 && this._importKeys.has(name))
-			return this._importedType(this.globals.parent, name);
+		if (this._ungated === 0 && this._importKeys.has(name)) {
+			const imported = this._importedType(this.globals.parent, name);
+			if (imported) return imported;
+			// No import of this file binds it: the package's own declaration of
+			// the name stands, which another file's import does not hide.
+			const own = this.types.get(name);
+			return this._importBound.has(own) ? undefined : own;
+		}
 		return this.types.get(name);
 	},
 
@@ -1796,6 +1802,10 @@ export const resolveMethods = {
 				`${base.name}.${field} is not available: ${excluded}`,
 				node,
 			);
+		// `pkg.T`, a type the import names: `_checkSelectorExpr` marks the node
+		// a type reference, so `pkg.T(x)` converts.
+		const named = this._typeNamed(`${base.name}.${field}`);
+		if (named) return named;
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 

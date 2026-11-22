@@ -150,6 +150,7 @@ export class TypeChecker {
 		// table spans the build, so a name resolves only where the file's scope
 		// binds it (see `_visibleType`).
 		this._importKeys = new Set();
+		this._importBound = new WeakSet(); // types an import registered (never reused by a local declaration)
 		this._ungated = 0; // > 0 while resolving a declaration from another package
 		this._declFiles = new WeakMap(); // generic declaration -> its file
 		this._constFiles = new Map(); // package const name -> file declaring it
@@ -247,7 +248,20 @@ export class TypeChecker {
 		if (this.types.get(key) === type && !this._importKeys.has(key)) return;
 		this.types.set(key, type);
 		this._importKeys.add(key);
+		this._importBound.add(type);
 		this._fileScope(file).importedTypes.set(key, type);
+	}
+
+	// The generated Go names a local package by the qualifier an importing file
+	// gave it, in expression position too (`sub.T(v)`). Binds in `file` each
+	// package qualifier any other file imports, unless `file` binds the name.
+	bindReachedPackages(file) {
+		const scope = this._fileScope(file);
+		for (const [key, other] of this.fileScopes) {
+			if (key === file) continue;
+			for (const name of other.names("pkg"))
+				if (!scope.has(name)) scope.definePackage(name, other.get(name));
+		}
 	}
 
 	// The type an import in `scope` (a file's scope) or in the scope shared by
@@ -1211,7 +1225,7 @@ export class TypeChecker {
 		// An imported package's type is never reused: a local declaration of
 		// the same name gets its own type and leaves `pkg.T` untouched.
 		const named =
-			existing?.kind === "named" && !this._importedTypes.has(existing)
+			existing?.kind === "named" && !this._importBound.has(existing)
 				? existing
 				: { kind: "named", name: decl.name };
 		if (!named._pkgName && pkgName) named._pkgName = pkgName;
@@ -1273,7 +1287,7 @@ export class TypeChecker {
 
 	_registerLocalTypePlaceholder(decl, scope) {
 		const prior = this.types.get(decl.name);
-		if (decl.isAlias || (prior && !this._importedTypes.has(prior))) return;
+		if (decl.isAlias || (prior && !this._importBound.has(prior))) return;
 		const pkgName = this._currentPkgName ?? this.pkgName;
 		const placeholder = {
 			kind: "named",
