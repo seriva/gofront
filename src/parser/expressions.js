@@ -119,6 +119,15 @@ function _isTypeIntroducerToken(tt) {
 	);
 }
 
+function _isTypeBodyBrace(src, i) {
+	const prev = src[i - 1]?.type;
+	return prev === T.STRUCT || prev === T.INTERFACE;
+}
+
+function _isLiteralToken(tt) {
+	return tt === T.INT || tt === T.FLOAT || tt === T.STRING;
+}
+
 // Records the leftmost token of an expression on its node (unless the node
 // already carries a position) and returns the node.
 function at(node, tok) {
@@ -340,11 +349,17 @@ export const expressionParserMethods = {
 			if (tt === T.DOT && src[i + 1]?.type === T.LPAREN) return false;
 			// `uint(u)` / `f(x)`: a call or conversion is a value (a method
 			// signature inside `interface{ M() }` is the only type that has one).
-			if (tt === T.LBRACE) braces++;
-			else if (tt === T.RBRACE) braces--;
-			else if (_isCallParen(src, i, braces)) return false;
-			// Reject literals — it's an index expression
-			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
+			// Only `struct { ... }` and `interface { ... }` open `{` in a type;
+			// other `{` tokens (such as `S{1}`) start composite literals.
+			if (tt === T.LBRACE) {
+				if (!_isTypeBodyBrace(src, i)) return false;
+				braces++;
+			} else if (tt === T.RBRACE) {
+				if (braces === 0) return false;
+				braces--;
+			} else if (_isCallParen(src, i, braces)) return false;
+			// Reject literals outside struct/interface bodies — it's an index expression
+			if (braces === 0 && _isLiteralToken(tt)) return false;
 			// Reject binary operators that wouldn't appear in type args
 			if (_isDisallowedInTypeArgs(tt)) return false;
 			if (depth === 1) {
@@ -362,7 +377,7 @@ export const expressionParserMethods = {
 			}
 			i++;
 		}
-		if (depth !== 0) return false;
+		if (depth !== 0 || braces !== 0) return false;
 		// Check what follows ]
 		const after = src[i + 1];
 		if (!after) return false;

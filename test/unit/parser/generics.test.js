@@ -182,6 +182,73 @@ func main() {
 	);
 });
 
+section("Parser — struct tags and array lengths inside generic type arguments");
+
+test("L2/L2p/L2h/L2f: struct tags inside generic type arguments compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+var pkgVar Box[struct{ X int \`json:"x"\` }]
+
+func Z[T any]() T {
+	var zero T
+	return zero
+}
+
+func main() {
+	var localVar Box[struct{ X int \`json:"x"\` }]
+	shortVar := Box[struct{ X int \`json:"x"\` }]{}
+	fnRes := Z[struct{ X int \`json:"x"\` }]()
+	fmt.Println(localVar.V.X, pkgVar.V.X, shortVar.V.X, fnRes.X)
+}
+`,
+		"0 0 0 0\n",
+	);
+});
+
+test("L2g: struct with array field inside generic type argument compiles and runs on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Z[T any]() T {
+	var zero T
+	return zero
+}
+
+func main() {
+	fmt.Println(Z[struct{ A [2]int }](), Z[[2]int]())
+}
+`,
+		"{[0 0]} [0 0]\n",
+	);
+});
+
+test("string index, composite-literal field index, and map string index stay IndexExpr", () => {
+	const ast = parse(`package main
+type S struct{ X int }
+func take(x int) int { return x }
+func f(xs []int, m map[string]int, i string) int {
+	a := m["k"]
+	b := xs[S{1}.X]
+	c := m[i]
+	d := take(xs[S{1}.X])
+	e := take(xs[struct{ X int }{1}.X])
+	return a + b + c + d + e
+}
+func g(fns []func() int, idx []int, m map[string]int) int {
+	return fns[idx[0]]() + fns[m["k"]]()
+}
+`);
+	const text = JSON.stringify(ast);
+	assertEqual(text.includes('"InstantiationExpr"'), false);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -195,7 +195,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Done when: all pass
 
 ### Phase 4: Types in expression position (root `type-in-expression`)
-- [ ] Task 4.1: Struct tags inside generic type arguments parse (L2)
+- [x] Task 4.1: Struct tags inside generic type arguments parse (L2)
   - Files: `src/parser/types.js` (`_looksLikeTypeArgListInType`), `src/parser/expressions.js` (`looksLikeTypeArgList`)
   - Test: `test/unit/parser/generics.test.js`: L2, L2p, L2h, L2f → `0` and L2g → `{[0 0]}` with `assertAllTargetsOutput` (`wasm` needs [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Task 3.2; until it lands `assertJsTargetsOutput` with a note, which that task switches); `xs[i]` with a string index, `m["k"]`, `xs[S{1}.X]` and `Z[[2]int]()` still parse
   - Done when: all pass; existing parser generics tests green
