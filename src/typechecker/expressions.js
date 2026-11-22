@@ -545,6 +545,12 @@ export const expressionCheckMethods = {
 		return k !== "struct" && k !== "array" && k !== "typeParam";
 	},
 
+	// Whether `scope` holds package-level names: the package's own declarations
+	// or the imports of one of its files.
+	_isPackageScope(scope) {
+		return scope === this.globals || this._isImportScope(scope);
+	},
+
 	// True when `operand` is a struct field, array/slice element or package-level
 	// variable holding a scalar, in a package compiled to wasm.
 	_isScalarInteriorOperand(operand, type, scope) {
@@ -554,7 +560,7 @@ export const expressionCheckMethods = {
 		if (!node) return false;
 		if (node.kind === "Ident") {
 			const owner = scope.lookupScope(node.name);
-			if (!this._isImportScope(owner)) return false;
+			if (!this._isPackageScope(owner)) return false;
 			if (scope.isConst?.(node.name)) return false;
 			const sym = owner.get(node.name);
 			if (sym?.kind === "func" || sym?.kind === "namespace") return false;

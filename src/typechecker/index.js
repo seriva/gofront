@@ -225,7 +225,7 @@ export class TypeChecker {
 	// Whether `scope` holds a file's imports (an import is never part of the
 	// package's own declarations in `globals`).
 	_isImportScope(scope) {
-		return scope === this.globals || this._importScopes.has(scope);
+		return this._importScopes.has(scope);
 	}
 
 	// Runs `fn` with `file`'s imports in scope.
@@ -259,12 +259,15 @@ export class TypeChecker {
 		);
 	}
 
-	// Bind the name of an npm import that has no type declarations. It is a
-	// JS-dynamic `any` global; a wasm or both package reports it on use.
-	defineUntypedImport(name) {
-		this.globals.define(name, ANY);
+	// Bind the name of an npm import that has no type declarations in `file`.
+	// It is a JS-dynamic `any` global; a wasm or both package reports it on
+	// use. With `at` ({ node, source }, the import's position) the import is
+	// tracked, so an unused one is reported like any other.
+	defineUntypedImport(name, file = null, at = null) {
+		this._fileScope(file).define(name, ANY);
 		this._externalNames.add(name);
 		this._untypedImports.add(name);
+		if (at) this.trackImport(name, at.node, file, at.source);
 	}
 
 	// Add an imported GoFront package as a qualified namespace.

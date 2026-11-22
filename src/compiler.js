@@ -519,7 +519,7 @@ function resolveImports(
 			checker._currentFile = p._filename ?? null;
 			checker._currentSource = p._source ?? null;
 			for (const imp of p.imports) {
-				for (const { path, _line, _col, line, col } of imp.imports) {
+				for (const { path, alias, _line, _col, line, col } of imp.imports) {
 					const impNode = {
 						_line,
 						_col,
@@ -545,7 +545,11 @@ function resolveImports(
 					) {
 						// An npm package without types is a dynamic global: the
 						// checker reports it where the name is used.
-						if (!isBuiltinPackage(path) && resolved.get(path) === null) {
+						if (
+							!isBuiltinPackage(path) &&
+							resolved.get(path) === null &&
+							alias !== "."
+						) {
 							// deferred to Ident lookup
 						} else if (!isBuiltinPackage(path)) {
 							checker.recordBlocker("js: import", path);
@@ -604,7 +608,7 @@ function resolveImports(
 			}
 		}
 	}
-	bindUntypedImports(allImportsNoSideEffect, resolved, checker);
+	bindUntypedImports(programs, resolved, checker);
 
 	importStdlibPackages(
 		programs,

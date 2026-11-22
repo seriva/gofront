@@ -79,7 +79,7 @@ test("unknown npm package warns but compiles as any", () => {
 	const { errors } = compile(
 		`package main
 import "totally-unknown-pkg"
-func main() { console.log("ok") }`,
+func main() { console.log("ok", totally_unknown_pkg) }`,
 		{ fromFile: join(FIXTURES, "_dummy.go") },
 	);
 	assertEqual(errors.length, 0);

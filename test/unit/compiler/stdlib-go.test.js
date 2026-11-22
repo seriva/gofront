@@ -699,7 +699,7 @@ test("an unknown third-party path still compiles with the missing-types warning"
 	let errors;
 	try {
 		({ errors } = compile(
-			`package main\nimport z "nope/zzz"\nfunc main() {}\n`,
+			`package main\nimport z "nope/zzz"\nfunc main() { z.F() }\n`,
 		));
 	} finally {
 		console.error = realError;
@@ -776,6 +776,75 @@ test("an untyped npm import in a wasm package compiled from disk reports the use
 			assertContains(msg, "'zzz' is only available in js packages");
 		},
 	);
+});
+
+// The error text compiling the package in `files` from disk fails with ("" on
+// success), with the missing-types warnings captured.
+function diskErrors(files, options = {}) {
+	return withTempDir(files, (dir) => {
+		let msg = "";
+		captureWarnings(() => {
+			try {
+				compileDir(dir, options);
+			} catch (e) {
+				msg = e.message;
+			}
+		});
+		return msg;
+	});
+}
+
+test("an untyped npm import binds only in the file that imports it", () => {
+	const msg = diskErrors({
+		"a.go": `package main\nimport "nope/zzz"\nfunc A() { zzz.F() }\n`,
+		"b.go": `package main\nfunc B() { zzz.G() }\nfunc main() { A(); B() }\n`,
+	});
+	assertContains(msg, "Undefined: 'zzz'");
+	assertContains(msg, "in b.go");
+	assert(!msg.includes("in a.go"), msg);
+});
+
+test("an untyped npm import used in two files that import it compiles", () => {
+	const msg = diskErrors({
+		"a.go": `package main\nimport "nope/zzz"\nfunc A() { zzz.F() }\n`,
+		"b.go": `package main\nimport "nope/zzz"\nfunc main() { A(); zzz.G() }\n`,
+	});
+	assertEqual(msg, "");
+});
+
+test("an unused untyped npm import is reported in js and wasm packages", () => {
+	for (const forceTarget of ["js", "wasm"]) {
+		const msg = diskErrors(
+			{ "main.go": `package main\nimport "nope/zzz"\nfunc main() {}\n` },
+			{ forceTarget },
+		);
+		assertContains(msg, "'zzz' imported and not used");
+	}
+});
+
+test("an untyped npm import used only in another file is unused where imported", () => {
+	const msg = diskErrors({
+		"a.go": `package main\nimport "nope/zzz"\nfunc A() {}\n`,
+		"b.go": `package main\nimport "nope/zzz"\nfunc main() { A(); zzz.G() }\n`,
+	});
+	assertContains(msg, "'zzz' imported and not used");
+	assertContains(msg, "in a.go");
+	assert(!msg.includes("in b.go"), msg);
+});
+
+test("a blank untyped npm import is never unused", () => {
+	const msg = diskErrors({
+		"main.go": `package main\nimport _ "nope/zzz"\nfunc main() {}\n`,
+	});
+	assertEqual(msg, "");
+});
+
+test("a dot import of an untyped npm package is rejected in a wasm package", () => {
+	const msg = diskErrors(
+		{ "main.go": `package main\nimport . "nope/zzz"\nfunc main() {}\n` },
+		{ forceTarget: "wasm" },
+	);
+	assertContains(msg, "js: imports are not allowed in wasm packages");
 });
 
 test("kept packages still compile on both backends", async () => {

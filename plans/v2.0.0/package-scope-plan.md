@@ -120,7 +120,7 @@ Root: no selector, qualified type lookup, method expression or composite literal
   - Files: `example/simple/src/main.go`, `example/simple/src/store.go`
   - Test: `node src/index.js check example/...` fails after 1.2 with `Undefined: 'errors'`/`'utils'`/`'sleep'` until `main.go` gains `errors`, `./utils`, `js:./browser.d.ts` and `store.go` gains `./utils` (dropping unused `js:./browser.d.ts`); the `example/simple` Playwright spec
   - Done when: `npm run check` and `npm run test:e2e` pass
-- [ ] Task 1.4: Untyped npm imports are file-scoped and tracked (I1.1, I1.4–I1.6)
+- [x] Task 1.4: Untyped npm imports are file-scoped and tracked (I1.1, I1.4–I1.6)
   - Files: `src/typechecker/index.js` (`defineUntypedImport` binds in the file scope and calls `trackImport`), `src/resolver.js` (`bindUntypedImports` takes per-file imports and passes the file), `src/compiler.js` (per-file `bindUntypedImports` and dot import of an untyped package in `wasm`/`both`)
   - Test: `test/unit/compiler/stdlib-go.test.js`: I1.1 → `Undefined: 'zzz'` at `b.go`, I1.4 and I1.6 → `'zzz' imported and not used`, I1.5 → `js: imports are not allowed in wasm packages`; update existing unused-import test at `:695` to reference `z`; the existing *rejected where it is used* tests stay green
   - Done when: all pass

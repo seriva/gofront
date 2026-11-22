@@ -261,14 +261,15 @@ export class TypeSpeller {
 		return indirect ? standIn : null;
 	}
 
-	// `q.Name` as the checker reaches a type through the import `q`: the
-	// generated file imports that package itself, as it cannot rely on the
-	// imports of the user's files.
+	// `q.Name` as the checker reaches a type through the import `q`: a
+	// standard library package is imported by the generated file itself, as it
+	// cannot rely on the imports of the user's files. A local package keeps
+	// the name its importer gave it, which the type table knows.
 	qualifiedSpelling(spelled) {
 		const dot = spelled.indexOf(".");
 		const modPath =
 			dot > 0 ? this.importPaths.get(spelled.slice(0, dot)) : null;
-		return modPath
+		return modPath && !modPath.startsWith(".")
 			? `${this.qualifierFor(modPath)}${spelled.slice(dot)}`
 			: spelled;
 	}
