@@ -331,7 +331,7 @@ export const resolveMethods = {
 				// SelectorExpr; resolve it like a qualified TypeName.
 				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
 					const qualified = `${node.expr.name}.${node.field}`;
-					if (this.types.has(qualified)) {
+					if (this._typeNamed(qualified)) {
 						// Never reaches checkExpr: tag the qualifier as the package
 						// name it is so JS output does not rename it.
 						node.expr._isNamespace = true;
@@ -706,7 +706,49 @@ export const resolveMethods = {
 			scope.lookupObject(name)?.kind !== "type"
 		)
 			return undefined;
+		return this._typeNamed(name);
+	},
+
+	// The type the name `name` (a bare or `pkg.`-qualified type name written in
+	// source) stands for in the file being checked. A name an import
+	// registered resolves only in a file that binds it; the type table itself
+	// spans the build. Resolving a declaration from another package (see
+	// `_inDeclContext`) sees every name, as that package's own scope is not
+	// this checker's.
+	_typeNamed(name) {
+		if (this._ungated === 0 && this._importKeys.has(name)) {
+			const imported = this._importedType(this.globals.parent, name);
+			if (imported) return imported;
+			// No import of this file binds it: the package's own declaration of
+			// the name stands, which another file's import does not hide.
+			const own = this.types.get(name);
+			return this._importBound.has(own) ? undefined : own;
+		}
 		return this.types.get(name);
+	},
+
+	// Runs `fn` to resolve the type nodes of `declNode`: in the scope of the
+	// file that declares it, or with every import name visible when another
+	// package declares it.
+	_inDeclContext(declNode, fn) {
+		const file = this._declFiles.get(declNode);
+		if (file === undefined) {
+			this._ungated++;
+			try {
+				return fn();
+			} finally {
+				this._ungated--;
+			}
+		}
+		return this._atFile(file, () => {
+			const ungated = this._ungated;
+			this._ungated = 0;
+			try {
+				return fn();
+			} finally {
+				this._ungated = ungated;
+			}
+		});
 	},
 
 	resolveTypeNodeName(node, scope) {
@@ -911,7 +953,9 @@ export const resolveMethods = {
 		generic._buildSizes.push(size);
 		let instantiated;
 		try {
-			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
+			const underlying = this._inDeclContext(generic.declNode, () =>
+				this.resolveTypeNode(generic.declNode.type, typeScope),
+			);
 			instantiated = this.substituteType(underlying, map);
 			// `type W[T any] V[T]`: W[int]'s underlying type is V[int]'s.
 			if (instantiated.kind === "named")
@@ -983,7 +1027,9 @@ export const resolveMethods = {
 			}
 			aliasScope.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
 		}
-		return this.resolveTypeNode(declNode.type, aliasScope);
+		return this._inDeclContext(declNode, () =>
+			this.resolveTypeNode(declNode.type, aliasScope),
+		);
 	},
 
 	// `explicit` seeds the leading type arguments of a partial instantiation
@@ -1756,6 +1802,10 @@ export const resolveMethods = {
 				`${base.name}.${field} is not available: ${excluded}`,
 				node,
 			);
+		// `pkg.T`, a type the import names: `_checkSelectorExpr` marks the node
+		// a type reference, so `pkg.T(x)` converts.
+		const named = this._typeNamed(`${base.name}.${field}`);
+		if (named) return named;
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 

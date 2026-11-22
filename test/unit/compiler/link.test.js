@@ -224,6 +224,7 @@ const stubChecker = () => ({
 	},
 	recordBlocker() {},
 	_setCurrentFile() {},
+	bindReachedPackages() {},
 	err(message) {
 		this.errors.push({ message });
 	},

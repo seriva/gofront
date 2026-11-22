@@ -108,19 +108,19 @@ Root: no selector, qualified type lookup, method expression or composite literal
 > Split from the former `followup-fixes-plan.md` Phases 1 and 7 (re-probed 2026-11-17; audited 2026-11-19).
 
 ### Phase 1: Imports are bound per file (root `package-wide-imports`)
-- [ ] Task 1.1: Per-file import scopes in the checker (I1.1–I1.3, I1.8–I1.9)
+- [x] Task 1.1: Per-file import scopes in the checker (I1.1–I1.3, I1.8–I1.9)
   - Files: `src/typechecker/index.js` (`fileScopes`, `_fileScope`, `_isImportScope`, chain `this.globals.parent` in `_setCurrentFile`, per-file `reportUnusedImports`, file-aware `getExportedConsts`), `src/typechecker/expressions.js` (`_isImportScope` in place of `owner === this.globals` at `:283`, `:294`, `:908`), `src/typechecker/resolve.js` (per-file type/qualified-type lookup in `resolveTypeNode`, `_resolveGenericTypeName`, `resolveTypeNodeName`, `_jsOnlyMember`, `_useQualifiedTypeName`)
   - Test: `test/unit/compiler/imports.test.js`: unit tests for file-scoped `addPackageNamespace`/`addDefinitions` (values and types) and per-file `reportUnusedImports`; `npm test` stays green while callers still pass default file
   - Done when: all pass and existing `npm test` is green
-- [ ] Task 1.2: Wire compiler and stdlib per-file import binding (I1.1–I1.3, I1.8–I1.9, I1.11)
+- [x] Task 1.2: Wire compiler and stdlib per-file import binding (I1.1–I1.3, I1.8–I1.9, I1.11)
   - Files: `src/compiler.js` (per-file `.d.ts` and local package binding; remove `seenLocalPaths` skip while keeping `depCache` dedupe), `src/link/stdlib.js` (`bindStdlibImport` binds in `p._filename`'s scope; `implicitImports` computed per file)
   - Test: `test/unit/compiler/imports.test.js` with `withTempDir` + `compileDir`: I1.2 → `Undefined: 'strings'` at `b.go`, I1.3 → `Undefined: 's'`, I1.8 → `strings.Builder`, `sub.Box[int]`, and bare `T` rejected at `b.go`, I1.9 → `js:` `.d.ts` values/types and dot-imported values/types rejected at `b.go`, I1.11 → same local path under two names compiles; controls: both files import `strings` → `b A`; exported `const` referencing a file-scoped import in `a.go` with `b.go` not importing it; a `_test.go` file and generated `gofront_gen.go` compile
   - Done when: all pass; `npm test` green apart from `example/simple` (Task 1.3)
-- [ ] Task 1.3: Migrate `example/simple` and any stdlib file to file-scoped imports
+- [x] Task 1.3: Migrate `example/simple` and any stdlib file to file-scoped imports
   - Files: `example/simple/src/main.go`, `example/simple/src/store.go`
   - Test: `node src/index.js check example/...` fails after 1.2 with `Undefined: 'errors'`/`'utils'`/`'sleep'` until `main.go` gains `errors`, `./utils`, `js:./browser.d.ts` and `store.go` gains `./utils` (dropping unused `js:./browser.d.ts`); the `example/simple` Playwright spec
   - Done when: `npm run check` and `npm run test:e2e` pass
-- [ ] Task 1.4: Untyped npm imports are file-scoped and tracked (I1.1, I1.4–I1.6)
+- [x] Task 1.4: Untyped npm imports are file-scoped and tracked (I1.1, I1.4–I1.6)
   - Files: `src/typechecker/index.js` (`defineUntypedImport` binds in the file scope and calls `trackImport`), `src/resolver.js` (`bindUntypedImports` takes per-file imports and passes the file), `src/compiler.js` (per-file `bindUntypedImports` and dot import of an untyped package in `wasm`/`both`)
   - Test: `test/unit/compiler/stdlib-go.test.js`: I1.1 → `Undefined: 'zzz'` at `b.go`, I1.4 and I1.6 → `'zzz' imported and not used`, I1.5 → `js: imports are not allowed in wasm packages`; update existing unused-import test at `:695` to reference `z`; the existing *rejected where it is used* tests stay green
   - Done when: all pass

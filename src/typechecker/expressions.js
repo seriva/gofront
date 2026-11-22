@@ -359,7 +359,7 @@ export const expressionCheckMethods = {
 					const owner = scope.lookupScope(expr.name);
 					if (
 						owner !== this.universe &&
-						!(owner === this.globals && this._externalNames.has(expr.name))
+						!(this._isImportScope(owner) && this._externalNames.has(expr.name))
 					)
 						expr._shadowsGlobal = true;
 				}
@@ -370,7 +370,7 @@ export const expressionCheckMethods = {
 				if (
 					(this.target === "wasm" || this.target === "both") &&
 					this._untypedImports.has(expr.name) &&
-					scope.lookupScope(expr.name) === this.globals
+					this._isImportScope(scope.lookupScope(expr.name))
 				)
 					return this._errJsOnly(expr.name, expr);
 				if (
@@ -545,6 +545,12 @@ export const expressionCheckMethods = {
 		return k !== "struct" && k !== "array" && k !== "typeParam";
 	},
 
+	// Whether `scope` holds package-level names: the package's own declarations
+	// or the imports of one of its files.
+	_isPackageScope(scope) {
+		return scope === this.globals || this._isImportScope(scope);
+	},
+
 	// True when `operand` is a struct field, array/slice element or package-level
 	// variable holding a scalar, in a package compiled to wasm.
 	_isScalarInteriorOperand(operand, type, scope) {
@@ -553,9 +559,10 @@ export const expressionCheckMethods = {
 		while (node?.kind === "ParenExpr") node = node.expr;
 		if (!node) return false;
 		if (node.kind === "Ident") {
-			if (scope.lookupScope(node.name) !== this.globals) return false;
+			const owner = scope.lookupScope(node.name);
+			if (!this._isPackageScope(owner)) return false;
 			if (scope.isConst?.(node.name)) return false;
-			const sym = this.globals.get(node.name);
+			const sym = owner.get(node.name);
 			if (sym?.kind === "func" || sym?.kind === "namespace") return false;
 		} else if (node.kind !== "SelectorExpr" && node.kind !== "IndexExpr") {
 			return false;
@@ -1015,7 +1022,7 @@ export const expressionCheckMethods = {
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
 			return false;
-		return owner === this.globals || this.types.get(name) === t;
+		return this._isImportScope(owner) || this.types.get(name) === t;
 	},
 
 	// What a name that is no value says when it stands where a value does:

@@ -1,6 +1,12 @@
 package main
 
-import "unicode/utf8"
+import (
+    "errors"
+    "unicode/utf8"
+
+    "./utils"
+    "js:./browser.d.ts"
+)
 
 const maxTodoLen = 120
 
