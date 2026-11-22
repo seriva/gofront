@@ -14,7 +14,9 @@ import {
 	assertValidWasm,
 	assertWasmProgramOutput,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
+	runProgram,
 	runWasm,
 	section,
 	test,
@@ -1064,15 +1066,20 @@ section("Uncaught panic text of basic and defined values");
 // `expr` (declared types in `decls`), as `go run` prints after `panic: `.
 function uncaughtPanicText(
 	expr,
-	{ decls = "", viaAny = false, body: custom = null } = {},
+	{ decls = "", imports = "", viaAny = false, body: custom = null } = {},
 ) {
 	const body =
 		custom ?? (viaAny ? `var v any = ${expr}\n\tpanic(v)` : `panic(${expr})`);
 	const src = `package main
 
-import "errors"
+import (
+	"errors"
+	"math"
+	${imports}
+)
 
 var _ = errors.New
+var _ = math.NaN
 
 ${decls}
 
@@ -1099,6 +1106,8 @@ type U uint32
 type F float64
 type B bool
 type I8 int8
+type C complex128
+type C64 complex64
 `;
 
 const PANIC_TEXTS = [
@@ -1116,12 +1125,26 @@ const PANIC_TEXTS = [
 	["1.5", "1.5"],
 	['"s"', "s"],
 	["uint8(200)", "200"],
+	["1 + 2i", "(1+2i)"],
+	["complex64(1 + 2i)", "(1+2i)"],
+	["1 - 2i", "(1-2i)"],
+	["1 + 0i", "(1+0i)"],
+	["complex(1, math.Copysign(0, -1))", "(1-0i)"],
+	["complex(0, 0)", "(0+0i)"],
+	["complex(math.Copysign(0, -1), math.Copysign(0, -1))", "(-0-0i)"],
+	["complex(math.Inf(1), math.Inf(-1))", "(+Inf-Infi)"],
+	["complex(1, math.Inf(1))", "(1+Infi)"],
+	["complex(math.NaN(), math.NaN())", "(NaN+NaNi)"],
+	["complex(1, math.NaN())", "(1+NaNi)"],
+	["complex64(complex(1.5, -2.5))", "(1.5-2.5i)"],
 	['Str("s")', 'main.Str("s")'],
 	["T(5)", "main.T(5)"],
 	["U(2147483648)", "main.U(2147483648)"],
 	["F(1.5)", "main.F(1.5)"],
 	["B(true)", "main.B(true)"],
 	["I8(-4)", "main.I8(-4)"],
+	["C(1 + 2i)", "main.C(1+2i)"],
+	["C64(1 - 2i)", "main.C64(1-2i)"],
 ];
 
 for (const [expr, text] of PANIC_TEXTS) {
@@ -1159,6 +1182,11 @@ type In struct{}
 func (In) Error() string { return "inner" }
 type Out struct{ In }
 type P struct{ X int }
+type Arr [2]int
+type CS string
+func (CS) String() string { return "cs" }
+type CC complex128
+func (CC) String() string { return "cc" }
 `;
 
 const METHOD_TEXTS = [
@@ -1172,9 +1200,15 @@ const METHOD_TEXTS = [
 	['SE("x")', "se:x"],
 	["Out{}", "inner"],
 	["&Out{}", "inner"],
+	['CS("a")', "cs"],
+	["CC(1 + 2i)", "cc"],
 	["P{3}", "[panic object]"],
 	["&P{3}", "[panic object]"],
+	["[2]int{1, 2}", "[panic object]"],
+	["Arr{1, 2}", "[panic object]"],
 	["[]int{1}", "[panic object]"],
+	['map[string]int{"a": 1}', "[panic object]"],
+	["func() {}", "[panic object]"],
 ];
 
 for (const [expr, text] of METHOD_TEXTS) {
@@ -1356,10 +1390,156 @@ func main() {
 	try(func() { panic(uint64(1) << 63) })
 	try(func() { panic(T(5)) })
 	try(func() { panic(Str("s")) })
+	try(func() { panic(1 + 2i) })
 }
 `,
-		"bool true\nuint64 9223372036854775808\nmain.T 5\nmain.Str s\n",
+		"bool true\nuint64 9223372036854775808\nmain.T 5\nmain.Str s\ncomplex128 (1+2i)\n",
 	);
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func try(f func()) {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	f()
+}
+
+func main() {
+	try(func() { panic(complex64(1 - 2i)) })
+}
+`,
+		"complex64 (1-2i)\n",
+	);
+	await assertWasmProgramOutput(
+		`package main
+
+type C complex128
+
+func main() {
+	defer func() {
+		r := recover()
+		c, ok := r.(C)
+		println(ok, real(c), imag(c))
+	}()
+	panic(C(3 + 4i))
+}
+`,
+		"true 3 4\n",
+	);
+});
+
+test("uncaught panic of simd and shared values reports [panic object] on wasm", () => {
+	assertEqual(
+		uncaughtPanicText("simd.NewF32x4(1, 2, 3, 4)", {
+			imports: `"gofront/simd"`,
+		}),
+		"[panic object]",
+	);
+	assertEqual(
+		uncaughtPanicText("sbuf", {
+			imports: `"gofront/shared"`,
+			decls: "var sbuf = shared.NewFloat32(2)",
+		}),
+		"[panic object]",
+	);
+});
+
+test("uncaught panic of mangled and local defined basic types omits internal suffixes", async () => {
+	const cases = [
+		[
+			`package main
+type Map int
+func main() { panic(Map(5)) }`,
+			"main.Map(5)",
+		],
+		[
+			`package main
+type T int
+func f() {
+	type T int
+	panic(T(5))
+}
+func main() { f() }`,
+			"main.T(5)",
+		],
+		[
+			`package main
+type Map string
+func f() {
+	type Map string
+	var v any = Map("hi")
+	panic(v)
+}
+func main() { f() }`,
+			'main.Map("hi")',
+		],
+	];
+	for (const [src, want] of cases) {
+		let err = null;
+		try {
+			await runProgram(src, { target: "wasm" });
+		} catch (e) {
+			err = e;
+		}
+		assert(err instanceof Error, `expected Error for ${want}, got ${err}`);
+		assertEqual(err.message, want);
+	}
+});
+
+test("uncaught panic of foreign wasm-package defined basic types uses package qualifier", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/util.go": `//gofront:target wasm
+package util
+
+type Map int
+type T int
+type S string
+type C complex128
+
+func PanicMap() { panic(Map(5)) }
+func PanicT() { panic(T(5)) }
+func PanicS() { panic(S("x")) }
+func PanicC() { panic(C(1 + 2i)) }
+func PanicLocal() {
+	type T int
+	panic(T(7))
+}
+`,
+			"main.go": `//gofront:target wasm
+package main
+
+import "./util"
+
+func RunMap() { util.PanicMap() }
+func RunT() { util.PanicT() }
+func RunS() { util.PanicS() }
+func RunC() { util.PanicC() }
+func RunLocal() { util.PanicLocal() }
+`,
+		},
+		{ exports: ["RunMap", "RunT", "RunS", "RunC", "RunLocal"] },
+	);
+	for (const [fn, want] of [
+		["RunMap", "util.Map(5)"],
+		["RunT", "util.T(5)"],
+		["RunS", 'util.S("x")'],
+		["RunC", "util.C(1+2i)"],
+		["RunLocal", "util.T(7)"],
+	]) {
+		let err = null;
+		try {
+			mod[fn]();
+		} catch (e) {
+			err = e;
+		}
+		assert(err instanceof Error, `expected Error for ${fn}, got ${err}`);
+		assertEqual(err.message, want);
+	}
 });
 
 section("WASM Defer — untyped constant arguments");

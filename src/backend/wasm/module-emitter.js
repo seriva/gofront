@@ -179,7 +179,11 @@ export class ModuleEmitter {
 					const name = t.name ?? key;
 					if (!seen.has(name)) {
 						seen.add(name);
-						rawStructs.push({ name, structType: t.underlying });
+						rawStructs.push({
+							name,
+							structType: t.underlying,
+							pkgName: t._pkgName ?? null,
+						});
 					}
 					if (key !== name) aliases.push([key, name]);
 				}

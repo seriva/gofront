@@ -949,17 +949,26 @@ export function monomorphise(programs, checker) {
 }
 
 // Records Go's spelling of each generic instance (`Box[int]`) on its
-// monomorphised type, which is named `Box$int`; `%T` prints the spelling.
+// monomorphised type, which is named `Box$int`; `%T` prints the spelling, and
+// `_instanceKey` keeps the unqualified form the JS facade caller passes.
 function nameInstances(checker, instances) {
-	const spelling = {
-		has: (name) => instances.has(name),
-		get: (name) => {
-			const { genericName, typeArgs } = instances.get(name);
-			return `${genericName}[${typeArgs.map((a) => goTypeName(a, spelling)).join(",")}]`;
-		},
+	const spell = (qualifyNames) => {
+		const map = {
+			has: (name) => instances.has(name),
+			get: (name) => {
+				const { genericName, typeArgs } = instances.get(name);
+				return `${genericName}[${typeArgs.map((a) => goTypeName(a, map, qualifyNames)).join(",")}]`;
+			},
+		};
+		return map;
 	};
+	const qualified = spell(true);
+	const unqualified = spell(false);
 	for (const name of instances.keys()) {
 		const type = checker.types.get(name);
-		if (type) type._goName = spelling.get(name);
+		if (type) {
+			type._goName = qualified.get(name);
+			type._instanceKey = unqualified.get(name);
+		}
 	}
 }

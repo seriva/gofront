@@ -2006,7 +2006,14 @@ function ${P}imports(stringTable, extraEnv, tag, write, toStderr) {
 		"str_from_i64": (n) => String(n),
 		"str_from_u64": (n) => String(BigInt.asUintN(64, n)),
 		"str_from_i32": (n) => String(n),
-		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
+		"str_from_f64": (f) =>
+			f === Infinity
+				? "+Inf"
+				: f === -Infinity
+					? "-Inf"
+					: Object.is(f, -0)
+						? "-0"
+						: String(f),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"str_to_bytes": (s) => {
 			utf8Encoded = ${P}u8enc(s ?? "");
@@ -2781,7 +2788,8 @@ function genGenericClasses(out, needs, mod) {
 	const groups = new Map();
 	for (const [name, { info }] of needs.structs) {
 		if (info.pkgTarget === "both") continue;
-		const goName = mod?.checker?.types?.get(info.name)?._goName;
+		const t = mod?.checker?.types?.get(info.name);
+		const goName = t?._instanceKey ?? t?._goName;
 		const m = goName ? /^([^[]+)\[(.*)\]$/s.exec(goName) : null;
 		if (!m) continue;
 		if (!groups.has(m[1])) groups.set(m[1], new Map());
