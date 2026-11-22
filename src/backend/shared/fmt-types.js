@@ -2,8 +2,24 @@
 // records it for `%T` of a type-parameter operand), shared by the JS and WASM
 // backends.
 
-const qualify = (name) =>
-	name.split("[")[0].includes(".") ? name : `main.${name}`;
+import { displayTypeName } from "../../typechecker/types.js";
+
+const stripHead = (name) => {
+	const bracket = name.indexOf("[");
+	const head = bracket < 0 ? name : name.slice(0, bracket);
+	const tail = bracket < 0 ? "" : name.slice(bracket);
+	return [displayTypeName(head), tail];
+};
+
+const qualify = (name, pkgName = null) => {
+	const [d, tail] = stripHead(name);
+	return (d.includes(".") ? d : `${pkgName || "main"}.${d}`) + tail;
+};
+
+const unqualify = (name) => {
+	const [d, tail] = stripHead(name);
+	return d + tail;
+};
 
 const PREDECLARED = new Set([
 	"bool",
@@ -36,8 +52,10 @@ const PREDECLARED = new Set([
  * @param {Map<string, string>} [specialized]
  * @returns {string}
  */
-export function goTypeName(t, specialized = null) {
-	const go = (x) => goTypeName(x, specialized);
+export function goTypeName(t, specialized = null, qualifyNames = true) {
+	const go = (x) => goTypeName(x, specialized, qualifyNames);
+	const q = (name, pkgName = null) =>
+		qualifyNames ? qualify(name, pkgName) : unqualify(name);
 	switch (t?.kind) {
 		case "basic":
 			return t.name === "any" ? "interface {}" : t.name;
@@ -45,18 +63,19 @@ export function goTypeName(t, specialized = null) {
 			return t.base;
 		case "TypeName":
 		case "Ident":
-			if (specialized?.has(t.name)) return qualify(specialized.get(t.name));
+			if (specialized?.has(t.name))
+				return q(specialized.get(t.name), t._pkgName);
 			if (t.name === "any") return "interface {}";
-			return PREDECLARED.has(t.name) ? t.name : qualify(t.name);
+			return PREDECLARED.has(t.name) ? t.name : q(t.name, t._pkgName);
 		case "GenericTypeName":
-			return qualify(`${t.name}[${t.typeArgs.map(go).join(",")}]`);
+			return q(`${t.name}[${t.typeArgs.map(go).join(",")}]`, t._pkgName);
 		case "named":
-			return qualify(instanceName(t, specialized));
+			return q(instanceName(t, specialized, qualifyNames), t._pkgName);
 		case "interface":
-			return t.name ? qualify(t.name) : "interface {}";
+			return t.name ? q(t.name, t._pkgName) : "interface {}";
 		case "struct":
 		case "StructType": {
-			if (t.name) return qualify(t.name);
+			if (t.name) return q(t.name, t._pkgName);
 			// `struct { X int; main.P }`: an embedded field is just its type.
 			const fields = [];
 			for (const f of t._structFields ?? t.fields ?? []) {
@@ -113,8 +132,9 @@ export function goTypeName(t, specialized = null) {
 
 // `Box[int]` for a generic instance: the checker's type arguments on JS, the
 // spelling the monomorphiser recorded on WASM.
-function instanceName(t, specialized = null) {
+function instanceName(t, specialized = null, qualifyNames = true) {
+	if (!qualifyNames && t._instanceKey) return t._instanceKey;
 	if (t._goName) return t._goName;
 	if (!t.typeArgs?.length) return t.name ?? "";
-	return `${t.name}[${t.typeArgs.map((a) => goTypeName(a, specialized)).join(",")}]`;
+	return `${t.name}[${t.typeArgs.map((a) => goTypeName(a, specialized, qualifyNames)).join(",")}]`;
 }

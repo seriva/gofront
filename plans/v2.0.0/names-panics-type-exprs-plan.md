@@ -181,15 +181,15 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Done when: all pass; `bce-mathx.js` passes
 
 ### Phase 3: `wasm` panic values (root `wasm-panic-value`)
-- [ ] Task 3.1: One panic-text formatter for basic and defined basic values (F20 `bool`/`uint64`, F20u32, F20d)
+- [x] Task 3.1: One panic-text formatter for basic and defined basic values (F20 `bool`/`uint64`, F20u32, F20d)
   - Files: `src/backend/wasm/index.js` (register and emit `__panic_text`), `src/backend/wasm/emit-builtins.js` (`emitPanicThrow` calls it when no host message is passed; delete the `_emitScalarPanic` width switch)
   - Test: `test/unit/wasm/defer_recover.test.js`: exports panicking with `true`, `uint64(1)<<63`, `uint32(1)<<31`, `Str("s")`, `T(5)` and the same values held in `any` throw `Error` with Go's text (*Verified Gaps*); the float, `uint8` and string controls unchanged; `recover()` values unchanged
   - Done when: all pass
-- [ ] Task 3.2: `error` and `Stringer` values, static or in an interface (F20 `error`, F20m, F20g, F20i)
+- [x] Task 3.2: `error` and `Stringer` values, static or in an interface (F20 `error`, F20m, F20g, F20i)
   - Files: `src/backend/wasm/index.js` (`__panic_text` `error`/`Stringer` arms)
   - Test: `defer_recover.test.js`: `errors.New("bad")`, `MyErr{}`, `Stringer{}`, `var v any = errors.New("bad")` and a type with both methods → `bad` / `mine` / `str` / `bad` / its `Error()`; a plain struct still `[panic object]`
   - Done when: all pass
-- [ ] Task 3.3: `panic(nil)` panics with `*runtime.PanicNilError` (F21, F21b, F21c)
+- [x] Task 3.3: `panic(nil)` panics with `*runtime.PanicNilError` (F21, F21b, F21c)
   - Files: `src/backend/wasm/types.js` (`PANIC_NIL_STRUCT`), `src/backend/wasm/module-emitter.js` + `src/backend/wasm/index.js` (register struct and `Error()`/`GofrontTypeName()` helpers), `src/backend/wasm/emit-builtins.js` (`nil` and nil-interface arguments)
   - Test: `defer_recover.test.js`: `panic(nil)`, `var a any; panic(a)` and `var e error; panic(e)` → `*runtime.PanicNilError panic called with nil argument` on `wasm`; uncaught → `Error: panic called with nil argument`; `js`/`both` unchanged (`<nil> <nil>`); `docs/go-compatibility.md` `defer`/`recover()` row (new uncaught texts, only plain structs report `[panic object]`, `panic(nil)` on `js`/`both`)
   - Done when: all pass

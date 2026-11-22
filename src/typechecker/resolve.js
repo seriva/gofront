@@ -230,6 +230,7 @@ const SUBSTITUTE_DISPATCH = {
 		return {
 			kind: "named",
 			name: type.name,
+			...(type._pkgName && { _pkgName: type._pkgName }),
 			// A copy is still the declaration it came from (see `identical`).
 			_substOf: type._substOf ?? type,
 			...(type.typeArgs && {
@@ -892,9 +893,11 @@ export const resolveMethods = {
 		const map = new Map();
 		for (let i = 0; i < generic.typeParams.length; i++)
 			map.set(generic.typeParams[i].name, typeArgs[i] ?? ANY);
+		const pkgName = generic.declNode?._pkgName ?? generic._pkgName;
 		const named = {
 			kind: "named",
 			name: generic.declNode.name,
+			...(pkgName && { _pkgName: pkgName }),
 			typeArgs,
 			underlying: null,
 			_genericOf: generic,

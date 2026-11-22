@@ -40,6 +40,9 @@ import {
 	getMapKeyValTypes,
 	isInterfaceType,
 	isMapType,
+	isStringType,
+	PANIC_NIL_STRUCT,
+	PANIC_STRINGER,
 	toWasmType,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
@@ -630,6 +633,10 @@ export function compileWasmModule(
 	};
 	funcDecls.push(pushPanicFn);
 
+	mod.usesPanicText = funcDecls.some((fn) =>
+		_someNode(fn.body, (n) => _panicsWithValue(n, checker)),
+	);
+
 	// 1d. Interface dispatchers
 	_collectInterfaceDispatchers(progs, funcDecls, mod, checker);
 
@@ -889,6 +896,13 @@ export function compileWasmModule(
 			),
 		);
 	}
+	// `panic(v)` of anything but a plain string shows the host the text of
+	// `v`'s dynamic type.
+	if (mod.usesPanicText) {
+		funcDecls.push(
+			helper("__panic_text", [{ name: "v", type: ANY_T }], STR_T, "panic_text"),
+		);
+	}
 	mod.usesAnyHash = false;
 	for (const info of mod.mapTypes.values()) {
 		if (isInterfaceType(info.keyGoType, checker)) {
@@ -933,6 +947,31 @@ export function compileWasmModule(
 			helper("__mk_error", [{ name: "msg", type: STR_T }], ANY_T, "mk_error"),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
 		);
+	}
+
+	if (mod.usesPanicNil) {
+		const nilErrPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: PANIC_NIL_STRUCT },
+		};
+		for (const [method, kind] of [
+			["Error", "panic_nil_text"],
+			["GofrontTypeName", "panic_nil_type_name"],
+		]) {
+			funcDecls.push(
+				helper(
+					`${PANIC_NIL_STRUCT}.${method}`,
+					[{ name: "e", type: nilErrPtr }],
+					STR_T,
+					kind,
+					{
+						_isMethod: true,
+						_recvTypeName: PANIC_NIL_STRUCT,
+						_methodName: method,
+					},
+				),
+			);
+		}
 	}
 
 	// 1f. Boundary metadata (exported surface of wasm packages)
@@ -1160,6 +1199,17 @@ export function compileWasmModule(
 	};
 }
 
+// Whether `node` is a `panic` whose value is not a plain string, so the host
+// message comes from `__panic_text` rather than from the string itself.
+function _panicsWithValue(node, checker) {
+	if (node.kind !== "CallExpr" || node._builtinName !== "panic") return false;
+	const arg = node.args?.[0];
+	if (!arg) return false;
+	if (arg.kind === "BasicLit" && arg.litKind === "STRING") return false;
+	const t = arg._type;
+	return !(t && isStringType(t, checker) && t.kind !== "named");
+}
+
 function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 	const interfaceCalls = new Map();
 	for (const fn of funcDecls) {
@@ -1170,7 +1220,10 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 
 	// `error.Error()` is reached implicitly by fmt verbs and errors.Is, so
 	// the dispatcher must exist even when user code never calls it.
-	if (mod.hasErrorType && !interfaceCalls.has("error.Error")) {
+	if (
+		(mod.hasErrorType || mod.usesPanicText) &&
+		!interfaceCalls.has("error.Error")
+	) {
 		interfaceCalls.set("error.Error", {
 			ifaceName: "error",
 			ifaceType: ERROR,
@@ -1180,6 +1233,16 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 				params: [],
 				returns: [{ kind: "basic", name: "string" }],
 			},
+		});
+	}
+
+	// An uncaught panic shows the host its value's `Error()` or `String()`.
+	if (mod.usesPanicText) {
+		interfaceCalls.set("__panic.String", {
+			ifaceName: "__panic",
+			ifaceType: PANIC_STRINGER,
+			methodName: "String",
+			methodSig: PANIC_STRINGER.methods.get("String"),
 		});
 	}
 

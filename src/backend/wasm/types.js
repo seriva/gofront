@@ -7,10 +7,27 @@ import {
 	embeddedFieldName,
 	isComplex,
 	isComplex64,
+	STRING,
 } from "../../typechecker/types.js";
 import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 
 export { isComplex, isComplex64 };
+
+// The interface an uncaught `panic` value is tested against to print its
+// `String()` (after `error`), and the dispatcher that calls it.
+export const PANIC_STRINGER = {
+	kind: "interface",
+	methods: new Map([
+		["String", { kind: "func", params: [], returns: [STRING], async: false }],
+	]),
+};
+export const PANIC_STRINGER_DISPATCH = "__dispatch___panic_String";
+
+// Name of the runtime's `*runtime.PanicNilError` struct, the value a
+// `panic` with a nil interface raises (see `panicsWithNil`).
+export const PANIC_NIL_STRUCT = "__panicNilError";
+export const PANIC_NIL_TEXT = "panic called with nil argument";
+export const PANIC_NIL_TYPE_NAME = "*runtime.PanicNilError";
 
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";

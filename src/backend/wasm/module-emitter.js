@@ -3,7 +3,7 @@
 
 import { namedUnderlying } from "../shared/named-underlying.js";
 import { wTypeKey } from "./boundary.js";
-import { hasErrorUsage } from "./prescan.js";
+import { hasErrorUsage, hasPanicNilUsage } from "./prescan.js";
 import {
 	ERROR_STRUCT,
 	getFuncSignature,
@@ -11,6 +11,7 @@ import {
 	goTypeKey,
 	isScalarType,
 	isSliceType,
+	PANIC_NIL_STRUCT,
 	structFieldList,
 	structFieldsKey,
 	toWasmType,
@@ -73,6 +74,9 @@ export class ModuleEmitter {
 		// runtime's own error struct; it joins the struct rec group so the
 		// `error.Error` dispatcher can `ref.test` it like any user type.
 		this.hasErrorType = hasErrorUsage(programs);
+		// A `panic` that may carry a nil interface raises the runtime's
+		// `*runtime.PanicNilError` struct, declared the same way.
+		this.usesPanicNil = hasPanicNilUsage(programs, checker);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -102,6 +106,26 @@ export class ModuleEmitter {
 		});
 	}
 
+	// `*runtime.PanicNilError`: an `error` whose `%T` is its Go name.
+	_registerPanicNilType() {
+		const types = this.checker?.types;
+		if (!types || types.has(PANIC_NIL_STRUCT)) return;
+		const STRING = { kind: "basic", name: "string" };
+		const method = { kind: "func", params: [], returns: [STRING] };
+		types.set(PANIC_NIL_STRUCT, {
+			kind: "named",
+			name: PANIC_NIL_STRUCT,
+			underlying: {
+				kind: "struct",
+				fields: new Map(),
+				methods: new Map([
+					["Error", method],
+					["GofrontTypeName", method],
+				]),
+			},
+		});
+	}
+
 	initTypes(programs) {
 		const progs = Array.isArray(programs) ? programs : [programs];
 		const rawStructs = [];
@@ -117,6 +141,15 @@ export class ModuleEmitter {
 					kind: "struct",
 					fields: new Map([["msg", { kind: "basic", name: "string" }]]),
 				},
+			});
+		}
+
+		if (this.usesPanicNil) {
+			this._registerPanicNilType();
+			seen.add(PANIC_NIL_STRUCT);
+			rawStructs.push({
+				name: PANIC_NIL_STRUCT,
+				structType: { kind: "struct", fields: new Map() },
 			});
 		}
 
@@ -146,7 +179,11 @@ export class ModuleEmitter {
 					const name = t.name ?? key;
 					if (!seen.has(name)) {
 						seen.add(name);
-						rawStructs.push({ name, structType: t.underlying });
+						rawStructs.push({
+							name,
+							structType: t.underlying,
+							pkgName: t._pkgName ?? null,
+						});
 					}
 					if (key !== name) aliases.push([key, name]);
 				}
