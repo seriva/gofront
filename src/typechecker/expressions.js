@@ -2547,16 +2547,52 @@ export const expressionCheckMethods = {
 		return this._checkSingleValueArg(arg, scope);
 	},
 
+	// Name of a predeclared type (`int`, `string`, `any`, `error`, …) when
+	// `fn` is an `Ident` with no shadowing declaration in `scope`, else null.
+	_unshadowedPredeclaredType(fn, scope) {
+		if (fn?.kind !== "Ident") return null;
+		const { name } = fn;
+		if (!Object.hasOwn(BASIC_TYPES, name) && name !== "error") return null;
+		if (fn._universe) return name;
+		const owner = scope.lookupScope(name);
+		return !owner || owner === this.universe ? name : null;
+	},
+
 	checkCall(expr, scope) {
 		// The generated Go and the stdlib's Go source call the builtins `len`,
-		// `append`, `make`, ...: a function of that name in the user's package
-		// must not capture them.
+		// `append`, `make`, ... and predeclared type conversions: a declaration
+		// of that name in the user's package must not capture them.
 		if (
 			this._builtinsFromUniverse &&
 			expr.func.kind === "Ident" &&
-			this.universe.lookup(expr.func.name)?.kind === "builtin"
+			(this.universe.lookup(expr.func.name)?.kind === "builtin" ||
+				Object.hasOwn(BASIC_TYPES, expr.func.name))
 		)
 			expr.func._universe = true;
+		const predeclared = this._unshadowedPredeclaredType(expr.func, scope);
+		if (predeclared) {
+			if (expr.args.length === 1 && !expr.args[0]._spread) {
+				const arg = expr.args[0];
+				delete expr.func;
+				delete expr.args;
+				expr.kind = "TypeConversion";
+				expr.targetType = { kind: "TypeName", name: predeclared };
+				expr.expr = arg;
+				return this._checkTypeConversion(expr, scope);
+			}
+			this._resolveCallArgTypes(expr, scope);
+			const target =
+				predeclared === "error"
+					? ERROR
+					: predeclared === "any"
+						? DECLARED_ANY
+						: BASIC_TYPES[predeclared];
+			if (this._rejectConversionSpread(target, expr)) return target;
+			return this.err(
+				`cannot convert ${expr.args.length} arguments to type ${typeStr(target)}`,
+				expr,
+			);
+		}
 		expr.func._typeRefOk = true;
 		expr.func._genericOk = true;
 		let fnType = this.checkExpr(expr.func, scope);

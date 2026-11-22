@@ -3099,3 +3099,92 @@ func main() { _ = int(1.5) }
 `);
 	assertErrorContains(errors, "truncated");
 });
+
+test("1-arg call to a shadowed type keyword resolves to the value in scope (L15i)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	int := func(x float64) float64 { return x * 2 }
+	fmt.Println(int(1.5))
+}
+`,
+		"3\n",
+	);
+});
+
+test("1-arg calls to shadowed string, error, bool and any call the values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func string(x int) int { return x + 1 }
+func error(x int) int { return x + 2 }
+
+func main() {
+	bool := func(x int) int { return x + 3 }
+	any := func(x int) int { return x + 4 }
+	fmt.Println(string(10), error(10), bool(10), any(10))
+}
+`,
+		"11 12 13 14\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`package-level func string() in ${target} util leaves string(b) conversion in main`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+func string() int { return 9 }
+
+func Call() int { return string() }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	b := []byte("hi")
+	fmt.Println(util.Call(), string(b))
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "9 hi");
+	});
+}
+
+test("unshadowed type keyword with wrong arg count and shadowed non-func report errors", () => {
+	const r0 = compile(`package main
+func main() { _ = int() }
+`);
+	assertErrorContains(r0.errors, "cannot convert 0 arguments to type int");
+
+	const r2 = compile(`package main
+func main() { _ = int(1, 2) }
+`);
+	assertErrorContains(r2.errors, "cannot convert 2 arguments to type int");
+
+	const re = compile(`package main
+func main() { _ = error() }
+`);
+	assertErrorContains(re.errors, "cannot convert 0 arguments to type error");
+
+	const rnf = compile(`package main
+func main() {
+	int := 42
+	_ = int(1)
+}
+`);
+	assertErrorContains(rnf.errors, "Cannot call non-function type int");
+});

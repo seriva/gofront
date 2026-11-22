@@ -290,7 +290,7 @@ _ = int{}       // invalid composite literal type int
 
 #### Names that shadow predeclared types
 
-As in Go, your own declarations may reuse a predeclared name: a type named like a basic type, `any`, `error` or `comparable` (`type int32 = string`, `type error int`), a function or variable named like a builtin (`func len() int`, `max := 3`), and a local type named like an import. The name means your declaration in its scope, at package level or from a local declaration to the end of its block, nested blocks included, and keeps its predeclared meaning everywhere else: the standard library's `error` results, `errors.New` and `fmt` still use the built-in `error` interface next to a package's own `type error`.
+As in Go, your own declarations may reuse a predeclared name: a type named like a basic type, `any`, `error` or `comparable` (`type int32 = string`, `type error int`), a function or variable named like a builtin or basic type (`func len() int`, `func bool() int`, `max := 3`), and a local type named like an import. The name means your declaration in its scope, at package level or from a local declaration to the end of its block, nested blocks included, and keeps its predeclared meaning everywhere else: the standard library's `error` results, `errors.New` and `fmt` still use the built-in `error` interface next to a package's own `type error`.
 
 ```go
 type error int

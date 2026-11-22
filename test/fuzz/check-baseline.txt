@@ -49,7 +49,6 @@ names:addr:field:wasm-reject # excluded: wasm takes no address of a scalar varia
 names:addr:func-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:pkg-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
 names:addr:shadow-builtin-pkg-var:wasm-reject # excluded: wasm takes no address of a scalar variable or field
-names:conv:shadow-type-var:go-reject/gf-accept # R8
 names:type:shadow-type-var:go-reject/gf-accept # R8
 switch:tag:I,Tcomparable:go-reject/gf-accept # R9
 switch:tag:I,Tnum:go-reject/gf-accept # R9

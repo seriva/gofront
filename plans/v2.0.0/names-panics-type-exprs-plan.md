@@ -214,7 +214,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/parser/expressions.js` (`_parsePrimary`, `TYPE_KEYWORDS`)
   - Test: `test/unit/types/shadowing.test.js`: L15 → `20`, L15s → `3`, L15e → `1` with `assertAllTargetsOutput`; `int(1.5)`, `string(rune(65))`, `[]byte("a")` still convert
   - Done when: all pass on every target; no parse error for a keyword callee with zero arguments
-- [ ] Task 5.2: The checker resolves a 1-arg keyword callee to the value in scope before the predeclared type (L15i)
+- [x] Task 5.2: The checker resolves a 1-arg keyword callee to the value in scope before the predeclared type (L15i)
   - Files: `src/parser/expressions.js` (`_parsePrimary` drops the `isTypeKeyword` `TypeConversion` special case), `src/typechecker/expressions.js` (`checkCall` normalises an unshadowed 1-arg predeclared-type `CallExpr` to `TypeConversion` checked by `_checkTypeConversion`)
   - Test: `shadowing.test.js`: L15i → `3` on all targets; a package-level `func string() int` used beside `string(b)` in another package keeps the conversion there
   - Done when: passes; `'int' declared and not used` no longer reported for a called local
