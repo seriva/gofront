@@ -482,13 +482,15 @@ const BUILTIN_GEN = {
 		if (typeName && s.structNames.has(typeName)) {
 			return `new ${jsClassName(typeName)}()`;
 		}
-		const t = arg._type;
+		const t = arg._type ?? base;
+		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
+		const typeNode = arg.kind === "TypeExpr" ? arg.type : arg;
 		if (s._isStructType(t)) {
 			const name = t.name ?? (t.kind === "named" ? t.name : null);
 			if (name) return `new ${jsClassName(name)}()`;
+			return s.zeroValueForExpr(typeNode);
 		}
-		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
-		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
+		const zero = s.zeroValueForExpr(typeNode);
 		return `{ value: ${zero} }`;
 	},
 	// `print` writes without a trailing newline (Go semantics); the wasm glue

@@ -409,6 +409,12 @@ export const expressionCheckMethods = {
 				// `Box[int]` in `(*Box[int]).Set` to the TypeName `Box$int`.
 				expr._isTypeRef = true;
 				return this._typeRefOperand(expr, this.resolveTypeNode(expr, scope));
+			case "TypeExpr":
+				expr._isTypeRef = true;
+				return this._typeRefOperand(
+					expr,
+					this.resolveTypeNode(expr.type, scope),
+				);
 			default: {
 				const m = CHECK_EXPR_DELEGATE[expr.kind];
 				if (m) return this[m](expr, scope);

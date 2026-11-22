@@ -400,18 +400,14 @@ export const expressionParserMethods = {
 				// when they are NOT followed by { (which would make them composite literals).
 				// Needed for make(map[K]V), make([]T, n), new(T), etc.
 				const t = this.peek();
-				const isSliceOrArrayType =
-					t.type === T.LBRACKET &&
-					(this.peek2()?.type === T.RBRACKET || // []T
-						this.peek2()?.type === T.INT); // [n]T
 				if (
-					(t.type === T.MAP || isSliceOrArrayType) &&
+					this._looksLikeTypeLiteralStart() &&
 					!this.looksLikeCompositeLitArg()
 				) {
 					const start = this.pos;
 					const typeNode = this.parseType();
-					// `[]byte(s)` / `[]int(nil)` is a conversion: an ordinary
-					// operand that may be compared, spread or selected from.
+					// `[]byte(s)` / `[]int(nil)` / `struct{...}(v)` is a conversion:
+					// an ordinary operand that may be compared, spread or selected from.
 					if (this.check(T.LPAREN)) {
 						this.pos = start;
 						const arg = this.parseExpr();
@@ -444,6 +440,34 @@ export const expressionParserMethods = {
 			return false;
 		} finally {
 			this.pos = start;
+		}
+	},
+
+	// Whether the current cursor starts a type literal (struct, slice/array,
+	// map, interface, func type without a body, or `*` followed by one of
+	// these).  Used after `(` in `_parsePrimary` and for `parseCall` args.
+	_looksLikeTypeLiteralStart() {
+		let i = this.pos;
+		const src = this.tokens;
+		while (src[i]?.type === T.STAR) i++;
+		const tt = src[i]?.type;
+		if (
+			tt === T.STRUCT ||
+			tt === T.LBRACKET ||
+			tt === T.MAP ||
+			tt === T.INTERFACE
+		)
+			return true;
+		if (tt !== T.FUNC) return false;
+		const saved = this.pos;
+		try {
+			this.pos = i;
+			this.parseFuncType();
+			return !this.check(T.LBRACE);
+		} catch {
+			return false;
+		} finally {
+			this.pos = saved;
 		}
 	},
 
@@ -520,9 +544,23 @@ export const expressionParserMethods = {
 			this.advance();
 			return { kind: "ImagLit", value: t.value };
 		}
-		// Parenthesised expression
+		// Parenthesised type literal conversion or parenthesised expression
 		if (t.type === T.LPAREN) {
 			this.advance();
+			if (this._looksLikeTypeLiteralStart()) {
+				const targetType = this.parseType();
+				this.expect(T.RPAREN);
+				if (this.check(T.LBRACE)) {
+					this.err("cannot parenthesize type in composite literal");
+				}
+				if (this.check(T.LPAREN)) {
+					this.advance();
+					const expr = this.parseExpr();
+					this.expect(T.RPAREN);
+					return { kind: "TypeConversion", targetType, expr };
+				}
+				return { kind: "TypeExpr", type: targetType };
+			}
 			const expr = this.parseExpr();
 			this.expect(T.RPAREN);
 			return expr;

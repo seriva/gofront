@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertAllTargetsOutput,
 	assertEqual,
+	assertErrorContains,
 	assertProgramOutput,
 	compile,
 	Lexer,
@@ -247,6 +248,103 @@ func g(fns []func() int, idx []int, m map[string]int) int {
 `);
 	const text = JSON.stringify(ast);
 	assertEqual(text.includes('"InstantiationExpr"'), false);
+});
+
+section("Parser — parenthesised type literals and new(<type literal>)");
+
+test("L3/L3c/L3e/L3p: parenthesised type-literal conversions compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A [2]int }
+
+func main() {
+	var s S
+	u := (struct{ A [2]int })(s)
+	fmt.Println(u)
+	fmt.Println(([]int)(nil))
+	fmt.Println(len((map[string]int)(nil)), (func() int)(nil) == nil)
+	fmt.Println((*[]int)(nil) == nil, (*struct{ X int })(nil) == nil)
+}
+`,
+		"{[0 0]}\n[]\n0 true\ntrue true\n",
+	);
+});
+
+test("L3d: new(struct{...}) compiles and runs on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	p := new(struct{ A [2]int })
+	fmt.Println(p.A[0])
+}
+`,
+		"0\n",
+	);
+});
+
+test("L3f: parenthesised func, slice-of-func, and pointer-to-map conversions compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := func() {}
+	(func())(f)()
+	x := []func(){f}
+	fmt.Println(len(([]func())(x)))
+	fi := func() int { return 7 }
+	fmt.Println((func() int)(fi)())
+	var p *map[int]int
+	fmt.Println((*map[int]int)(p) == nil)
+}
+`,
+		"1\n7\ntrue\n",
+	);
+});
+
+test("parenthesised type in composite literal reports Go's error with line:col", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = ([]int){1, 2}
+}
+`);
+	assertErrorContains(errors, "cannot parenthesize type in composite literal");
+	assertErrorContains(errors, "3:");
+});
+
+test("bare parenthesised type literal is rejected as not an expression", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = ([]int)
+}
+`);
+	assertErrorContains(errors, "is not an expression");
+});
+
+test("parenthesised expressions, func literals, pointer derefs and named conversions stay unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ f int }
+
+func main() {
+	f := func(x int) int { return x + 1 }
+	t := T{f: 4}
+	p := &t
+	fmt.Println((f)(1), (func() int { return 1 })(), (*p).f, (*T)(nil) == nil)
+}
+`,
+		"2 1 4 true\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
