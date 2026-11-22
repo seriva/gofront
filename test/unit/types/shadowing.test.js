@@ -3044,3 +3044,58 @@ func main() {
 		assertEqual(mod.__lines.join("\n"), "util.Box util.Map []util.Box");
 	});
 }
+
+section("Shadowed type keywords as callees (Phase 5)");
+
+test("zero-arg calls to shadowed type keywords (bool, string, error)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func bool() int { return 20 }
+func error() int { return 1 }
+
+func main() {
+	string := func() int { return 3 }
+	fmt.Println(bool(), string(), error())
+}
+`,
+		"20 3 1\n",
+	);
+});
+
+test("multi-arg call to a shadowed type keyword", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func float64(a, b int) int { return a + b }
+
+func main() {
+	fmt.Println(float64(2, 5))
+}
+`,
+		"7\n",
+	);
+});
+
+test("unshadowed type keyword conversions still work", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := 1.5
+	fmt.Println(int(f), string(rune(65)), len([]byte("a")))
+}
+`,
+		"1 A 1\n",
+	);
+	const { errors } = compile(`package main
+func main() { _ = int(1.5) }
+`);
+	assertErrorContains(errors, "truncated");
+});

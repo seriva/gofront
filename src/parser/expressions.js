@@ -612,17 +612,24 @@ export const expressionParserMethods = {
 			this.isBuiltinKeyword(t)
 		) {
 			this.advance();
-			// Type conversion or composite lit: Type(expr) or Type{...}
+			// Type conversion: int(x), string(x), etc. Zero- or multi-arg
+			// forms (`bool()`, `float64(a, b)`) fall through to `Ident` so
+			// `parsePostfix` parses them as a call to a shadowed value.
 			if (this.isTypeKeyword(t) && this.check(T.LPAREN)) {
-				// type conversion: int(x), string(x), etc.
+				const saved = this.pos;
 				this.advance();
-				const expr = this.parseExpr();
-				this.expect(T.RPAREN);
-				return {
-					kind: "TypeConversion",
-					targetType: { kind: "TypeName", name: t.value },
-					expr,
-				};
+				if (!this.check(T.RPAREN)) {
+					const expr = this.parseExpr();
+					if (this.check(T.RPAREN)) {
+						this.advance();
+						return {
+							kind: "TypeConversion",
+							targetType: { kind: "TypeName", name: t.value },
+							expr,
+						};
+					}
+				}
+				this.pos = saved;
 			}
 			return { kind: "Ident", name: t.value };
 		}
