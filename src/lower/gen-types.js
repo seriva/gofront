@@ -261,6 +261,18 @@ export class TypeSpeller {
 		return indirect ? standIn : null;
 	}
 
+	// `q.Name` as the checker reaches a type through the import `q`: the
+	// generated file imports that package itself, as it cannot rely on the
+	// imports of the user's files.
+	qualifiedSpelling(spelled) {
+		const dot = spelled.indexOf(".");
+		const modPath =
+			dot > 0 ? this.importPaths.get(spelled.slice(0, dot)) : null;
+		return modPath
+			? `${this.qualifierFor(modPath)}${spelled.slice(dot)}`
+			: spelled;
+	}
+
 	spellNamed(t) {
 		let name = t.name;
 		const at = name.indexOf("$$");
@@ -268,7 +280,7 @@ export class TypeSpeller {
 		if (at >= 0) {
 			const orig = name.slice(0, at);
 			const spelled = this.renamedSpelling(t);
-			if (spelled) name = spelled;
+			if (spelled) name = this.qualifiedSpelling(spelled);
 			else {
 				const modPath = name.slice(at + 2).replaceAll("$", "/");
 				name = `${this.qualifierFor(modPath)}.${orig}`;

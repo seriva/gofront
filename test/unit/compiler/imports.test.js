@@ -21,6 +21,8 @@ import {
 	runJs,
 	section,
 	test,
+	toCompileResult,
+	withTempDir,
 } from "../helpers.js";
 
 section("compiler.js — error paths");
@@ -388,6 +390,323 @@ test("a type's generic instance resolves in its declaring file", () => {
 		bindLib("a.go"),
 	);
 	assertEqual(errors.length, 0);
+});
+
+section("Compiler — imports are bound per file");
+
+const SUB_PKG = `package sub
+
+type Box[T any] struct{ V T }
+
+type T struct{ N int }
+
+func Hi() string { return "hi" }
+`;
+
+// Compiles `files` in a temp dir and returns the errors, each as
+// "<file>: <message>" so a test can say where an error is reported.
+function errorsOf(files, options = {}) {
+	return withTempDir(files, (dir) => {
+		const { errors } = toCompileResult(() => compileDir(dir, options));
+		return errors.map((e) => {
+			const m = /Type error in (\S+) at line \d+:\d+: (.*)/.exec(e.message);
+			return m ? `${m[1]}: ${m[2]}` : e.message;
+		});
+	});
+}
+
+// Asserts `errors` holds exactly one error, `file: message`.
+function assertOnlyError(errors, want) {
+	assertEqual(errors.length, 1);
+	assertContains(errors[0], want);
+}
+
+const TARGETS = ["js", "both", "wasm"];
+
+test("an import of a stdlib package applies to its own file (I1.2)", () => {
+	for (const forceTarget of TARGETS) {
+		const errors = errorsOf(
+			{
+				"a.go": `package main
+
+import "strings"
+
+func A() string { return strings.ToUpper("a") }
+`,
+				"b.go": `package main
+
+func B() string { return strings.ToUpper("b") }
+
+func main() { println(A(), B()) }
+`,
+			},
+			{ forceTarget },
+		);
+		assertOnlyError(errors, "b.go: Undefined: 'strings'");
+	}
+});
+
+test("an import alias applies to its own file (I1.3)", () => {
+	const errors = errorsOf({
+		"a.go": `package main
+
+import s "strings"
+
+func A() string { return s.ToUpper("a") }
+`,
+		"b.go": `package main
+
+func B() string { return s.ToUpper("b") }
+
+func main() { println(A(), B()) }
+`,
+	});
+	assertOnlyError(errors, "b.go: Undefined: 's'");
+});
+
+test("two files that both import a package use it (control)", () => {
+	withTempDir(
+		{
+			"a.go": `package main
+
+import "strings"
+
+func A() string { return strings.ToUpper("a") }
+`,
+			"b.go": `package main
+
+import "strings"
+
+func main() { println(A(), strings.ToUpper("b")) }
+`,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "A B"),
+	);
+});
+
+test("types of an import resolve only in the importing file (I1.8)", () => {
+	const importing = `package main
+
+import (
+	"strings"
+	"./sub"
+)
+
+var _ strings.Builder
+var _ sub.Box[int]
+var _ sub.T
+
+func main() {}
+`;
+	const using = (decl) => `package main
+
+${decl}
+`;
+	const cases = [
+		["var _ strings.Builder", "Unknown type 'strings.Builder'"],
+		["var _ sub.Box[int]", "Unknown type 'sub.Box'"],
+		["var _ T", "Unknown type 'T'"],
+	];
+	for (const [decl, want] of cases) {
+		const errors = errorsOf({
+			"a.go": importing,
+			"b.go": using(decl),
+			"sub/sub.go": SUB_PKG,
+		});
+		assertOnlyError(errors, `b.go: ${want}`);
+	}
+});
+
+test("types of an import resolve in every file that imports it (I1.8 control)", () => {
+	const errors = errorsOf({
+		"a.go": `package main
+
+import "strings"
+
+var _ strings.Builder
+
+func main() {}
+`,
+		"b.go": `package main
+
+import "strings"
+
+var _ strings.Builder
+`,
+	});
+	assertEqual(errors.length, 0);
+});
+
+test("js: .d.ts values and types bind in the importing file (I1.9)", () => {
+	const files = {
+		"h.d.ts": `export declare function helper(): number;
+export interface Foo { n: number }
+`,
+		"a.go": `package main
+
+import "js:./h.d.ts"
+
+var _ Foo
+
+func main() { println(helper()) }
+`,
+	};
+	const errors = errorsOf({
+		...files,
+		"b.go": `package main
+
+func B() float64 { return helper() }
+
+var _ Foo
+`,
+	});
+	assertEqual(errors.length, 2);
+	assertContains(errors.join("\n"), "b.go: Undefined: 'helper'");
+	assertContains(errors.join("\n"), "b.go: Unknown type 'Foo'");
+});
+
+test("dot-imported values and types bind in the importing file (I1.9)", () => {
+	const errors = errorsOf({
+		"a.go": `package main
+
+import . "./sub"
+
+var _ T
+
+func main() { println(Hi()) }
+`,
+		"b.go": `package main
+
+func B() string { return Hi() }
+
+var _ T
+`,
+		"sub/sub.go": SUB_PKG,
+	});
+	assertEqual(errors.length, 2);
+	assertContains(errors.join("\n"), "b.go: Undefined: 'Hi'");
+	assertContains(errors.join("\n"), "b.go: Unknown type 'T'");
+});
+
+test("a local package imported by two files under two names compiles (I1.11)", () => {
+	withTempDir(
+		{
+			"a.go": `package main
+
+import "./sub"
+
+func A() string { return sub.Hi() }
+`,
+			"b.go": `package main
+
+import s "./sub"
+
+func main() { println(A(), s.Hi()) }
+`,
+			"sub/sub.go": SUB_PKG,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "hi hi"),
+	);
+});
+
+test("an exported constant folds with the import of its own file", () => {
+	withTempDir(
+		{
+			"a.go": `package main
+
+import "math"
+
+const Half = math.MaxInt8 / 2
+
+func main() { println(Half) }
+`,
+			"b.go": `package main
+
+const Other = 1
+`,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "63"),
+	);
+	// ... and an importer of the package folds it without the import.
+	withTempDir(
+		{
+			"main.go": `package main
+
+import "./sub"
+
+func main() { println(sub.Half) }
+`,
+			"sub/a.go": `package sub
+
+import "math"
+
+const Half = math.MaxInt8 / 2
+`,
+			"sub/b.go": `package sub
+
+const Other = 1
+`,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "63"),
+	);
+});
+
+test("a _test.go file imports what it uses", () => {
+	withTempDir(
+		{
+			"a.go": `package main
+
+import "strings"
+
+func A() string { return strings.ToUpper("a") }
+
+func main() { println(A()) }
+`,
+			"a_test.go": `package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestA(t *testing.T) {
+	if strings.ToLower(A()) != "a" {
+		t.Fail()
+	}
+}
+`,
+		},
+		(dir) => {
+			const { errors } = toCompileResult(() =>
+				compileDir(dir, { includeTests: true }),
+			);
+			assertEqual(errors.length, 0);
+		},
+	);
+});
+
+test("generated code compiles when the files import different packages", () => {
+	withTempDir(
+		{
+			"a.go": `package main
+
+import (
+	"fmt"
+	"./sub"
+)
+
+func A() string { return fmt.Sprint(sub.T{N: 1}) }
+`,
+			"b.go": `package main
+
+import "fmt"
+
+func main() { fmt.Println(A(), fmt.Sprintf("%v", []int{1})) }
+`,
+			"sub/sub.go": SUB_PKG,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "{1} [1]"),
+	);
 });
 
 // ── Entry point ───────────────────────────────────────────────

@@ -340,10 +340,7 @@ export class TypeChecker {
 
 	_importUsed(name, filename) {
 		return (
-			this._fileScope(filename)._used.has(name) ||
-			this._fileScope(null)._used.has(name) ||
-			this.globals._used.has(name) ||
-			this.universe._used.has(name)
+			this._fileScope(filename)._used.has(name) || this.universe._used.has(name)
 		);
 	}
 
@@ -464,8 +461,11 @@ export class TypeChecker {
 	_setCurrentFile(p) {
 		this._currentFile = p._filename ?? null;
 		this._currentSource = p._source ?? null;
-		// Names resolve against the imports of the file being checked.
+		// Names resolve against the imports of the file being checked. The
+		// generated Go names types of any package the program reaches, however
+		// the user's files import it.
 		this.globals.parent = this._fileScope(this._currentFile);
+		this._ungated = p._generated ? 1 : 0;
 		this._currentPkgName = p?.pkg?.name ?? this.pkgName ?? null;
 		// The generated Go sits at package level and names any local type; they
 		// are unique by then (`renameLocalTypes`).

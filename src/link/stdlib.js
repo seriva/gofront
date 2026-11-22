@@ -288,10 +288,7 @@ function stdlibNamespace(checker, { pkgName, values, types, suffix }, jsOnly) {
 		mangle.set(name, name + suffix);
 		// An exported constant's folded value, so importers fold `pkg.Name`.
 		if (obj.kind === "const") {
-			const v = checker._constValue(
-				{ kind: "Ident", name: name + suffix },
-				checker.globals,
-			);
+			const v = checker.constValueOf(name + suffix);
 			if (v) consts.set(name, v);
 		}
 	}
@@ -550,10 +547,12 @@ function bindStdlibImport(checker, p, spec, pkg) {
 	}
 	const name = alias ?? pkg.pkgName;
 	const ns = { ...pkg.namespace, name };
-	checker.globals.definePackage(name, ns);
+	const file = p._filename ?? null;
+	checker._fileScope(file).definePackage(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
-		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
+		if (dot < 0) checker.types.set(k, t);
+		else checker._bindImportedType(file, `${name}${k.slice(dot)}`, t);
 	}
 	if (!spec._implicit)
 		checker.trackImport(name, importNode(spec), p._filename, p._source);
@@ -663,14 +662,12 @@ export function checkGeneratedGo(
 // or importing it gets the import.
 const IMPLICIT_PACKAGES = ["fmt", "gom", "regexp"];
 
-function implicitImports(programs) {
+function implicitImports(p, programs) {
+	const topLevel = stdlibTopLevelNames(programs).values;
 	const declared = (name) =>
-		programs.some(
-			(p) =>
-				p.imports.some((imp) =>
-					imp.imports.some((s) => s.path === name || s.alias === name),
-				) || stdlibTopLevelNames([p]).values.has(name),
-		);
+		p.imports.some((imp) =>
+			imp.imports.some((s) => s.path === name || s.alias === name),
+		) || topLevel.has(name);
 	const used = new Set();
 	const visit = (node) => {
 		if (!node || typeof node !== "object") return;
@@ -686,7 +683,7 @@ function implicitImports(programs) {
 				if (node.name.startsWith(`${name}.`)) used.add(name);
 		forEachChild(node, visit);
 	};
-	for (const p of programs) visit(p.decls);
+	visit(p.decls);
 	return [...used]
 		.filter((name) => !declared(name))
 		.map((path) => ({ path, _line: 1, _col: 1, _implicit: true }));
@@ -747,10 +744,9 @@ export function importStdlibPackages(
 	deps,
 ) {
 	const wasmImporter = checker.target === "wasm" || checker.target === "both";
-	const implicit = wasmImporter ? [] : implicitImports(programs);
 	for (const p of programs) {
 		const specs = p.imports.flatMap((imp) => imp.imports);
-		if (p === programs[0]) specs.push(...implicit);
+		if (!wasmImporter) specs.push(...implicitImports(p, programs));
 		for (const spec of specs)
 			importStdlibSpec(p, spec, checker, preambles, bundledDirs, options, deps);
 	}
