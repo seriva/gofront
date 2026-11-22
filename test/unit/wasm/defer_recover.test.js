@@ -1135,6 +1135,119 @@ for (const [expr, text] of PANIC_TEXTS) {
 	});
 }
 
+const METHOD_DECLS = `
+type MyErr struct{}
+func (MyErr) Error() string { return "mine" }
+type S struct{}
+func (S) String() string { return "str" }
+type Both struct{}
+func (Both) Error() string { return "err" }
+func (Both) String() string { return "strr" }
+type PE struct{}
+func (*PE) Error() string { return "pe" }
+type TS int
+func (t TS) String() string { return "ts" }
+type TE int
+func (t TE) Error() string { return "te" }
+type SE string
+func (s SE) Error() string { return "se:" + string(s) }
+type In struct{}
+func (In) Error() string { return "inner" }
+type Out struct{ In }
+type P struct{ X int }
+`;
+
+const METHOD_TEXTS = [
+	['errors.New("bad")', "bad"],
+	["MyErr{}", "mine"],
+	["S{}", "str"],
+	["Both{}", "err"],
+	["&PE{}", "pe"],
+	["TS(1)", "ts"],
+	["TE(2)", "te"],
+	['SE("x")', "se:x"],
+	["Out{}", "inner"],
+	["&Out{}", "inner"],
+	["P{3}", "[panic object]"],
+	["&P{3}", "[panic object]"],
+	["[]int{1}", "[panic object]"],
+];
+
+for (const [expr, text] of METHOD_TEXTS) {
+	test(`an uncaught panic(${expr}) reaches the host as ${text}`, () => {
+		assertEqual(uncaughtPanicText(expr, { decls: METHOD_DECLS }), text);
+	});
+	test(`an uncaught panic of ${expr} held in an any reaches the host as ${text}`, () => {
+		assertEqual(
+			uncaughtPanicText(expr, { decls: METHOD_DECLS, viaAny: true }),
+			text,
+		);
+	});
+}
+
+test("an uncaught panic of an error variable reaches the host as its Error text", () => {
+	assertEqual(
+		uncaughtPanicText("e", {
+			decls: `${METHOD_DECLS}
+var e error = MyErr{}`,
+		}),
+		"mine",
+	);
+});
+
+test("an uncaught panic with an Error method needs no use of the error type", () => {
+	const src = `package main
+
+type MyErr struct{}
+
+func (MyErr) Error() string { return "mine" }
+
+func Main() {
+	panic(MyErr{})
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	assertValidWasm(wasm);
+	const { exports } = runWasm(wasm, { stringTable });
+	try {
+		exports.Main();
+	} catch (e) {
+		assertEqual(e.message, "mine");
+		return;
+	}
+	throw new Error("expected a panic");
+});
+
+test("recover() still returns the error value of a panic whose text is formatted", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type MyErr struct{}
+
+func (MyErr) Error() string { return "mine" }
+
+func try(f func()) {
+	defer func() {
+		r := recover()
+		fmt.Printf("%T %v\\n", r, r)
+	}()
+	f()
+}
+
+func main() {
+	try(func() { panic(MyErr{}) })
+	try(func() { panic(errors.New("bad")) })
+}
+`,
+		"main.MyErr mine\n*errors.errorString bad\n",
+	);
+});
+
 test("recover() still returns the typed value of a panic whose text is formatted", async () => {
 	await assertProgramOutput(
 		`package main

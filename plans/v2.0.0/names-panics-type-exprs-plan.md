@@ -185,7 +185,7 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Files: `src/backend/wasm/index.js` (register and emit `__panic_text`), `src/backend/wasm/emit-builtins.js` (`emitPanicThrow` calls it when no host message is passed; delete the `_emitScalarPanic` width switch)
   - Test: `test/unit/wasm/defer_recover.test.js`: exports panicking with `true`, `uint64(1)<<63`, `uint32(1)<<31`, `Str("s")`, `T(5)` and the same values held in `any` throw `Error` with Go's text (*Verified Gaps*); the float, `uint8` and string controls unchanged; `recover()` values unchanged
   - Done when: all pass
-- [ ] Task 3.2: `error` and `Stringer` values, static or in an interface (F20 `error`, F20m, F20g, F20i)
+- [x] Task 3.2: `error` and `Stringer` values, static or in an interface (F20 `error`, F20m, F20g, F20i)
   - Files: `src/backend/wasm/index.js` (`__panic_text` `error`/`Stringer` arms)
   - Test: `defer_recover.test.js`: `errors.New("bad")`, `MyErr{}`, `Stringer{}`, `var v any = errors.New("bad")` and a type with both methods → `bad` / `mine` / `str` / `bad` / its `Error()`; a plain struct still `[panic object]`
   - Done when: all pass

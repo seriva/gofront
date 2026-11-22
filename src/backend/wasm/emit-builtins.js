@@ -3,6 +3,7 @@
 // call expression dispatch (static, method, closure, package).
 
 import { hasCallOrReceive } from "../../lower/walk.js";
+import { ERROR } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import { namedBase } from "../shared/named-underlying.js";
 import {
@@ -21,6 +22,8 @@ import {
 	isStringType,
 	isStructType,
 	isUnhashableGoType,
+	PANIC_STRINGER,
+	PANIC_STRINGER_DISPATCH,
 	printOperandKind,
 	toWasmType,
 } from "./types.js";
@@ -1760,9 +1763,10 @@ export class BuiltinsEmitter {
 
 	// Body of `__panic_text(v any) string`: the text the host shows for an
 	// uncaught panic with the value `v`, as Go's `printpanicval` builds it from
-	// the dynamic type: a string as is, a boxed basic value by its type
-	// (unsigned widths unsigned, `bool` as `true`/`false`), a defined basic
-	// type as `main.T(v)` (a string quoted), anything else as `[panic object]`.
+	// the dynamic type: a string as is, `Error()` of an `error`, else
+	// `String()` of a `Stringer`, a boxed basic value by its type (unsigned
+	// widths unsigned, `bool` as `true`/`false`), a defined basic type as
+	// `main.T(v)` (a string quoted), anything else as `[panic object]`.
 	_emitPanicText() {
 		const emit = (ins) => this.pushInstruction(ins);
 		const text = (s) => this._pushStringConst(s);
@@ -1778,6 +1782,9 @@ export class BuiltinsEmitter {
 		emit("extern.convert_any");
 		emit("return");
 		emit("end");
+		// `error` before `Stringer`, as Go prints a value with both.
+		this._emitPanicMethodArm(ERROR, "__dispatch_error_Error");
+		this._emitPanicMethodArm(PANIC_STRINGER, PANIC_STRINGER_DISPATCH);
 		for (const box of this.mod.ifaceBoxTypes.values()) {
 			const kind = this._panicBoxKind(box);
 			if (!kind) continue;
@@ -1801,6 +1808,26 @@ export class BuiltinsEmitter {
 		}
 		text("[panic object]");
 		emit("return");
+	}
+
+	// Returns the string `dispatch` makes of the value in local 0 when its
+	// dynamic type implements `ifaceType`.
+	_emitPanicMethodArm(ifaceType, dispatch) {
+		if (
+			!this.mod.funcMap.has(dispatch) ||
+			this.mod.getTypesImplementingInterface(ifaceType).length === 0
+		)
+			return;
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this._emitInterfaceTypeTest(ifaceType);
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex(dispatch),
+		});
+		this.pushInstruction("return");
+		this.pushInstruction("end");
 	}
 
 	// How a boxed value prints in a panic message: its `kind` is `bool`,

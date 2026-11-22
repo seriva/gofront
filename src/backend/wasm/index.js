@@ -41,6 +41,7 @@ import {
 	isInterfaceType,
 	isMapType,
 	isStringType,
+	PANIC_STRINGER,
 	toWasmType,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
@@ -1193,7 +1194,10 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 
 	// `error.Error()` is reached implicitly by fmt verbs and errors.Is, so
 	// the dispatcher must exist even when user code never calls it.
-	if (mod.hasErrorType && !interfaceCalls.has("error.Error")) {
+	if (
+		(mod.hasErrorType || mod.usesPanicText) &&
+		!interfaceCalls.has("error.Error")
+	) {
 		interfaceCalls.set("error.Error", {
 			ifaceName: "error",
 			ifaceType: ERROR,
@@ -1203,6 +1207,16 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 				params: [],
 				returns: [{ kind: "basic", name: "string" }],
 			},
+		});
+	}
+
+	// An uncaught panic shows the host its value's `Error()` or `String()`.
+	if (mod.usesPanicText) {
+		interfaceCalls.set("__panic.String", {
+			ifaceName: "__panic",
+			ifaceType: PANIC_STRINGER,
+			methodName: "String",
+			methodSig: PANIC_STRINGER.methods.get("String"),
 		});
 	}
 
