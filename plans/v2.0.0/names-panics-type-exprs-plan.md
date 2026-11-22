@@ -210,11 +210,11 @@ Root: where the parser or checker expects an expression, a type is recognised on
 
 ### Phase 5: Type keywords that name values (root `type-in-expression`, callee side)
 *Scheduled from review follow-ups (2026-11-19): ledger *Shadowed type keywords as callees*. Same decision point as Phase 4 (`_parsePrimary` choosing type or expression); lands after it.*
-- [ ] Task 5.1: `_parsePrimary` parses `<type keyword>()` with zero (or >1) arguments as a call node (L15, L15s, L15e)
+- [x] Task 5.1: `_parsePrimary` parses `<type keyword>()` with zero (or >1) arguments as a call node (L15, L15s, L15e)
   - Files: `src/parser/expressions.js` (`_parsePrimary`, `TYPE_KEYWORDS`)
   - Test: `test/unit/types/shadowing.test.js`: L15 → `20`, L15s → `3`, L15e → `1` with `assertAllTargetsOutput`; `int(1.5)`, `string(rune(65))`, `[]byte("a")` still convert
   - Done when: all pass on every target; no parse error for a keyword callee with zero arguments
-- [ ] Task 5.2: The checker resolves a 1-arg keyword callee to the value in scope before the predeclared type (L15i)
+- [x] Task 5.2: The checker resolves a 1-arg keyword callee to the value in scope before the predeclared type (L15i)
   - Files: `src/parser/expressions.js` (`_parsePrimary` drops the `isTypeKeyword` `TypeConversion` special case), `src/typechecker/expressions.js` (`checkCall` normalises an unshadowed 1-arg predeclared-type `CallExpr` to `TypeConversion` checked by `_checkTypeConversion`)
   - Test: `shadowing.test.js`: L15i → `3` on all targets; a package-level `func string() int` used beside `string(b)` in another package keeps the conversion there
   - Done when: passes; `'int' declared and not used` no longer reported for a called local

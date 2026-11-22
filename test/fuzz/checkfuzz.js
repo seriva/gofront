@@ -68,9 +68,7 @@ const SELF_TEST = args.includes("--self-test");
 // Cases GoFront's parser does not read. Go's parser reads them all, so the
 // run reports them like any other disagreement; listing them here keeps a
 // case the grid renders wrongly from hiding among them.
-const UNPARSED = [
-	/^names:call:(predeclared-type|shadow-type-\w+|shadow-any)$/, // `int()`
-];
+const UNPARSED = [];
 const unparsed = (key) => UNPARSED.some((re) => re.test(key));
 
 // ── Baseline ─────────────────────────────────────────────────

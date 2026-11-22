@@ -3044,3 +3044,213 @@ func main() {
 		assertEqual(mod.__lines.join("\n"), "util.Box util.Map []util.Box");
 	});
 }
+
+section("Shadowed type keywords as callees (Phase 5)");
+
+test("zero-arg calls to shadowed type keywords (bool, string, error)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func bool() int { return 20 }
+func error() int { return 1 }
+
+func main() {
+	string := func() int { return 3 }
+	fmt.Println(bool(), string(), error())
+}
+`,
+		"20 3 1\n",
+	);
+});
+
+test("multi-arg call to a shadowed type keyword", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func float64(a, b int) int { return a + b }
+
+func main() {
+	fmt.Println(float64(2, 5))
+}
+`,
+		"7\n",
+	);
+});
+
+test("unshadowed type keyword conversions still work", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := 1.5
+	fmt.Println(int(f), string(rune(65)), len([]byte("a")))
+}
+`,
+		"1 A 1\n",
+	);
+	const { errors } = compile(`package main
+func main() { _ = int(1.5) }
+`);
+	assertErrorContains(errors, "truncated");
+});
+
+test("1-arg call to a shadowed type keyword resolves to the value in scope (L15i)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	int := func(x float64) float64 { return x * 2 }
+	fmt.Println(int(1.5))
+}
+`,
+		"3\n",
+	);
+});
+
+test("1-arg calls to shadowed string, error, bool and any call the values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func string(x int) int { return x + 1 }
+func error(x int) int { return x + 2 }
+
+func main() {
+	bool := func(x int) int { return x + 3 }
+	any := func(x int) int { return x + 4 }
+	fmt.Println(string(10), error(10), bool(10), any(10))
+}
+`,
+		"11 12 13 14\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`package-level func string() in ${target} util leaves string(b) conversion in main`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+func string() int { return 9 }
+
+func Call() int { return string() }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	b := []byte("hi")
+	fmt.Println(util.Call(), string(b))
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "9 hi");
+	});
+}
+
+test("unshadowed type keyword with wrong arg count and shadowed non-func report errors", () => {
+	const r0 = compile(`package main
+func main() { _ = int() }
+`);
+	assertErrorContains(r0.errors, "cannot convert 0 arguments to type int");
+
+	const r2 = compile(`package main
+func main() { _ = int(1, 2) }
+`);
+	assertErrorContains(r2.errors, "cannot convert 2 arguments to type int");
+
+	const re = compile(`package main
+func main() { _ = error() }
+`);
+	assertErrorContains(re.errors, "cannot convert 0 arguments to type error");
+
+	const rnf = compile(`package main
+func main() {
+	int := 42
+	_ = int(1)
+}
+`);
+	assertErrorContains(rnf.errors, "Cannot call non-function type int");
+});
+
+test("defer rejects predeclared, parenthesised and named type conversions", () => {
+	const cases = [
+		[
+			"predeclared int(x)",
+			"package main\nfunc main() { x := 1; defer int(x) }\n",
+		],
+		[
+			"parenthesised (int)(x)",
+			"package main\nfunc main() { x := 1; defer (int)(x) }\n",
+		],
+		[
+			"named type T(x)",
+			"package main\ntype T int\nfunc main() { x := 1; defer T(x) }\n",
+		],
+	];
+	for (const [label, src] of cases) {
+		for (const target of ["js", "both", "wasm"]) {
+			const res =
+				target === "wasm" ? compileWasm(src) : compile(src, { target });
+			assertErrorContains(
+				res.errors,
+				"defer requires a function call",
+				`${label} (${target})`,
+			);
+		}
+	}
+});
+
+test("defer allows calling a shadowed predeclared type name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	int := func(x int64) { fmt.Println(x) }
+	defer int(7)
+}
+`,
+		"7\n",
+	);
+});
+
+test("constant len() of array expressions with predeclared type conversions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var a [len([2][3]int{}[int(0)])]int
+var b [len([3]int{int(1)})]int
+
+func main() {
+	fmt.Println(len(a), len(b))
+}
+`,
+		"3 3\n",
+	);
+	const bad = compile(`package main
+func idx() int { return 0 }
+var a [len([2][3]int{}[idx()])]int
+func main() { _ = a }
+`);
+	assertErrorContains(bad.errors, "invalid array length");
+});

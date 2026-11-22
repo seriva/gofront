@@ -185,20 +185,6 @@ export class BuiltinsEmitter {
 		}
 	}
 
-	_emitBuiltinString(call) {
-		const arg = call.args[0];
-		const argType = arg._type;
-		const argWType = toWasmType(argType, this.mod.checker);
-		if (argWType === "i64") {
-			this.emitExpr(arg, "i64");
-			this.pushInstruction("i32.wrap_i64");
-		} else {
-			this.emitExpr(arg, "i32");
-		}
-		const funcIdx = this.mod.getStringFromCodePointImportIndex();
-		this.pushInstruction({ op: "call", funcIndex: funcIdx });
-	}
-
 	_emitBuiltinCap(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type;
@@ -1092,14 +1078,10 @@ export class BuiltinsEmitter {
 		const split = this._splitForwardedBuiltin(call);
 		if (split) return this._emitBuiltinCall(split, targetWasmType);
 		// The checker names a call to the predeclared builtin; a user
-		// declaration spelled `len` or `max` is an ordinary call.
-		const name = func.name === "string" ? "string" : call._builtinName;
-		switch (name) {
+		// declaration spelled `len`, `max` or `string` is an ordinary call.
+		switch (call._builtinName) {
 			case "len":
 				this._emitBuiltinLen(call, targetWasmType);
-				return true;
-			case "string":
-				this._emitBuiltinString(call);
 				return true;
 			case "cap":
 				this._emitBuiltinCap(call, targetWasmType);

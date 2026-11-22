@@ -605,25 +605,15 @@ export const expressionParserMethods = {
 			return { kind: "RangeExpr", expr: this.parseExpr(0, true) };
 		}
 
-		// Builtin / identifier
+		// Builtin / identifier (type keywords included — `checkCall` turns an
+		// unshadowed 1-arg predeclared-type call into a TypeConversion so a
+		// value in scope of the same name wins).
 		if (
 			t.type === T.IDENT ||
 			this.isTypeKeyword(t) ||
 			this.isBuiltinKeyword(t)
 		) {
 			this.advance();
-			// Type conversion or composite lit: Type(expr) or Type{...}
-			if (this.isTypeKeyword(t) && this.check(T.LPAREN)) {
-				// type conversion: int(x), string(x), etc.
-				this.advance();
-				const expr = this.parseExpr();
-				this.expect(T.RPAREN);
-				return {
-					kind: "TypeConversion",
-					targetType: { kind: "TypeName", name: t.value },
-					expr,
-				};
-			}
 			return { kind: "Ident", name: t.value };
 		}
 
