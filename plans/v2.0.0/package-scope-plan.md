@@ -1,7 +1,7 @@
 # Package Scope: Imports and Exports — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Split out of the former `followup-fixes-plan.md` (now [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md)) on 2026-11-17 by root cause: its former Phase 7 (L6–L10) and export visibility (F5, F29, plus the ledger entry *Struct literals*), re-probed that day. Export visibility on every target is a user decision (2026-11-17). Must merge before [`incremental-builds-plan.md`](incremental-builds-plan.md), which restructures `src/compiler.js`. L4 (a local type named after an import) has the same root as `checker-go-rules-plan.md` R8 (`mangleLocalTypes` reserves too few names) and is scheduled there.  
 **Release note:** **Breaking:** an import now applies only to the file that declares it, as in Go, and an unused npm import is an error like any other unused import; add the import to each file that uses the package and remove unused ones. **Breaking:** a package can no longer use another package's unexported names, methods or fields (including positional struct literals that set them), on every target; export the name or move the code into that package. Packages now export only the names they declare, and using a type from an npm package in a WebAssembly package reports a clear error.  
