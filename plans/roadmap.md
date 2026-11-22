@@ -15,6 +15,7 @@ features (e.g. `plans/v1.8.0/`).
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
 | Post-2.0.0 cleanup & shrinking | Medium | Idea | Decide whether to retire or keep `test/fuzz/` (`check-baseline.txt` already empties in v2.0.0 `checker-operand-rules`), consolidate overlapping `test/unit/` tests and conformance fixtures, drop leftover `JS_DYNAMIC_ANY` escape hatches after `typed-web-platform`, and run a backend shrinking pass over `src/backend/wasm/` and `src/backend/js/`. Expand with `/bs-plan` after v2.0.0 ships. See [post-2.0-cleanup-plan.md](v2.1.0/post-2.0-cleanup-plan.md). |
+| Compiler architecture hardening | High | Idea | Close internal quality blind spots left after v2.0.0: move WASM module-level state (`v128Conv`, `bundled`) off module scope, tame in-place AST `.kind` mutations and 153 hidden `._*` tags, decompose the 4 WASM mega-functions (`compileWasmModule`, `emitRangeForStmt`, `addBoundaryHelpers`, `emitMapSet`) and `JSON.stringify` type keys, replace JS string-inspection regexes with type-driven helpers, tighten mixin state, and clear any residual WASM ICEs / `check-baseline.txt` roots / Biome warnings. Expand with `/bs-plan` after v2.0.0 ships. See [compiler-architecture-hardening-plan.md](v2.1.0/compiler-architecture-hardening-plan.md). |
 
 ---
 
