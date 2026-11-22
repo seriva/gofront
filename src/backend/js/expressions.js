@@ -482,13 +482,15 @@ const BUILTIN_GEN = {
 		if (typeName && s.structNames.has(typeName)) {
 			return `new ${jsClassName(typeName)}()`;
 		}
-		const t = arg._type;
+		const t = arg._type ?? base;
+		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
+		const typeNode = arg.kind === "TypeExpr" ? arg.type : arg;
 		if (s._isStructType(t)) {
 			const name = t.name ?? (t.kind === "named" ? t.name : null);
 			if (name) return `new ${jsClassName(name)}()`;
+			return s.zeroValueForExpr(typeNode);
 		}
-		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
-		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
+		const zero = s.zeroValueForExpr(typeNode);
 		return `{ value: ${zero} }`;
 	},
 	// `print` writes without a trailing newline (Go semantics); the wasm glue
@@ -2155,49 +2157,60 @@ export const expressionGenMethods = {
 		return this._cloneAnonStruct(base, inner, true);
 	},
 
+	_resolvedConversionTargetNode(base, srcExpr) {
+		switch (base?.kind) {
+			case "basic":
+				return { kind: "TypeName", name: base.name };
+			case "interface":
+				return base.name === "error"
+					? { kind: "TypeName", name: "error" }
+					: null;
+			case "array":
+				return { kind: "ArrayType", size: base.size, elem: base.elem };
+			case "map":
+				return this._isNilLiteral(srcExpr) ? { kind: "MapType" } : null;
+			case "slice": {
+				const elem = this._underlyingOf(base.elem)?.name;
+				const fromText =
+					this._isStringExprType(srcExpr?._type) &&
+					["byte", "uint8", "rune", "int32", "int"].includes(elem);
+				return this._isNilLiteral(srcExpr) || fromText
+					? { kind: "SliceType", elem: base.elem }
+					: null;
+			}
+			default:
+				return null;
+		}
+	},
+
 	_genTypeConversionCall(expr) {
 		const targetType = expr._conversionTargetType;
-		const arg = this.genExpr(expr.args[0]);
+		const srcExpr = expr.args[0];
+		const arg = this.genExpr(srcExpr);
 		const anonConv = this._genAnonStructConversion(targetType, arg);
 		if (anonConv) return anonConv;
 		const viaParam = this._genTypeParamConversion(targetType?.name, arg);
 		if (targetType?.kind === "typeParam" && viaParam) return viaParam;
 		const structConv = this._genStructClassConversion(
 			targetType?.kind === "named" ? targetType.name : undefined,
-			expr.args[0]?._type,
+			srcExpr?._type,
 			arg,
 			targetType,
 		);
 		if (structConv) return structConv;
-		const base =
-			targetType?.kind === "named" ? targetType.underlying : targetType;
-		if (base?.kind === "map" && this._isNilLiteral(expr.args[0]))
-			return this._nilMapZero();
 		if (this._isTaggedFuncType(targetType)) {
 			this.useHelper("ifaceBox");
 			return `__tfn(${arg}, ${JSON.stringify(targetType.name)})`;
 		}
-		if (
-			targetType?.kind === "named" &&
-			base?.kind === "basic" &&
-			this._namedBoxInfo(targetType)
-		)
-			return this._genPrimitiveConversion(
-				{ expr: expr.args[0] },
-				arg,
-				base.name,
-			);
-		if (base?.kind === "slice") {
-			const elem = base.elem?.name;
-			if (
-				(elem === "byte" || elem === "uint8") &&
-				this._isStringExprType(expr.args[0]?._type)
-			) {
-				this.useHelper("u8enc");
-				return `__u8enc(${arg})`;
-			}
-		}
-		return arg;
+		const base =
+			targetType?.kind === "named" ? targetType.underlying : targetType;
+		const targetNode = this._resolvedConversionTargetNode(base, srcExpr);
+		return targetNode
+			? this._genTypeConversion(
+					{ targetType: targetNode, expr: srcExpr, _type: expr._type },
+					arg,
+				)
+			: arg;
 	},
 
 	// `json.Marshal(v)` / `enc.Encode(v)` call the generated codec entry
@@ -3803,8 +3816,8 @@ export const expressionGenMethods = {
 		return `__tconv(${factory}, ${inner})`;
 	},
 
-	_genTypeConversion(expr) {
-		const inner = this.genExpr(expr.expr);
+	_genTypeConversion(expr, preInner = null) {
+		const inner = preInner ?? this.genExpr(expr.expr);
 		const t = expr.targetType;
 		const viaParam = this._genTypeParamConversion(t?.name, inner);
 		if (viaParam) return viaParam;
@@ -3865,7 +3878,11 @@ export const expressionGenMethods = {
 	_genSliceTypeConversion(expr, inner, t) {
 		// `[]T(nil)` is the nil slice, not a copy of anything.
 		if (this._isNilLiteral(expr.expr)) return "null";
-		const elem = t.elem?.name;
+		const elemType =
+			t.elem?.kind === "TypeName"
+				? (this.checker?.types.get(t.elem.name) ?? t.elem)
+				: t.elem;
+		const elem = this._underlyingOf(elemType)?.name;
 		// Converting a nil slice yields a nil slice.
 		const src = this._underlyingOf(expr.expr._type);
 		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
@@ -3908,7 +3925,7 @@ export const expressionGenMethods = {
 			return `__rstr(${inner})`;
 		}
 		if (base?.kind === "slice") {
-			const elem = base.elem?.name;
+			const elem = this._underlyingOf(base.elem)?.name;
 			if (elem === "byte" || elem === "uint8") {
 				this.useHelper("u8dec");
 				return `__u8dec(${inner})`;

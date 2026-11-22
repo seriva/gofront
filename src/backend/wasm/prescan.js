@@ -42,6 +42,18 @@ export function hasErrorUsage(programs) {
 	});
 }
 
+// Whether `node` is a `panic` whose value may be a nil interface (the `nil`
+// literal or an interface-typed operand), which Go turns into a
+// `*runtime.PanicNilError`.
+export function panicsWithNil(node, checker) {
+	if (node.kind !== "CallExpr" || node._builtinName !== "panic") return false;
+	const arg = node.args?.[0];
+	if (!arg) return false;
+	if (arg.kind === "BasicLit" && arg.litKind === "NIL") return true;
+	const t = arg._type;
+	return t?.kind === "nil" || t?.name === "nil" || isInterfaceType(t, checker);
+}
+
 // Depth-first search over AST nodes (skipping `_`-prefixed annotations).
 export function _someNode(node, pred) {
 	if (!node || typeof node !== "object") return false;
@@ -52,6 +64,12 @@ export function _someNode(node, pred) {
 		if (_someNode(node[key], pred)) return true;
 	}
 	return false;
+}
+
+export function hasPanicNilUsage(programs, checker) {
+	return (programs ?? []).some((p) =>
+		_someNode(p, (n) => panicsWithNil(n, checker)),
+	);
 }
 
 // `__any_eq` is only needed when some `==`/`!=` (or switch case) compares

@@ -406,6 +406,7 @@ export class FunctionEmitter {
 		this.pushInstruction({ op: "local.set", index: len });
 		this.pushInstruction({ op: "local.get", index: idx });
 		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getIndexPanicFuncIndex(),

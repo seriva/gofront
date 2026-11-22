@@ -377,6 +377,7 @@ export class TypeChecker {
 	_setCurrentFile(p) {
 		this._currentFile = p._filename ?? null;
 		this._currentSource = p._source ?? null;
+		this._currentPkgName = p?.pkg?.name ?? this.pkgName ?? null;
 		// The generated Go sits at package level and names any local type; they
 		// are unique by then (`renameLocalTypes`).
 		this._localTypesVisible = !!p._generated;
@@ -692,7 +693,12 @@ export class TypeChecker {
 		for (const p of programs) {
 			for (const d of p.decls) {
 				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
-					const placeholder = { kind: "named", name: d.name, underlying: null };
+					const placeholder = {
+						kind: "named",
+						name: d.name,
+						underlying: null,
+						...(p.pkg?.name && { _pkgName: p.pkg.name }),
+					};
 					// A generic type is known to be generic before any field resolves,
 					// so types declared earlier can instantiate it.
 					if (d.typeParams) {
@@ -703,6 +709,7 @@ export class TypeChecker {
 								constraint: tp.constraint,
 							})),
 							declNode: d,
+							...(p.pkg?.name && { _pkgName: p.pkg.name }),
 						};
 					}
 					this.types.set(d.name, placeholder);
@@ -1057,16 +1064,23 @@ export class TypeChecker {
 				typeScope.defineType(tp.name, t);
 				return t;
 			});
+			const pkgName = this._currentPkgName ?? this.pkgName;
 			const existing = this.types.get(decl.name);
 			const named =
 				existing?.kind === "named"
 					? existing
 					: { kind: "named", name: decl.name };
+			if (!named._pkgName && pkgName) named._pkgName = pkgName;
 			// Registered before the fields resolve so `Next *List[T]` finds the
 			// generic declaration it is part of.
 			named._declNode = decl;
 			if (preset?.declNode === decl) named._generic = preset;
-			else named._generic = { typeParams: typeParamTypes, declNode: decl };
+			else
+				named._generic = {
+					typeParams: typeParamTypes,
+					declNode: decl,
+					...(named._pkgName && { _pkgName: named._pkgName }),
+				};
 			this.types.set(decl.name, named);
 			let underlying = this.resolveTypeNode(decl.type, typeScope);
 			// `type W[T any] V[T]`: W's underlying type is V[T]'s.
@@ -1097,6 +1111,7 @@ export class TypeChecker {
 			this._defineTypeBinding(decl.name, underlying, scope);
 			return;
 		}
+		const pkgName = this._currentPkgName ?? this.pkgName;
 		const existing = this.types.get(decl.name);
 		// An imported package's type is never reused: a local declaration of
 		// the same name gets its own type and leaves `pkg.T` untouched.
@@ -1104,17 +1119,20 @@ export class TypeChecker {
 			existing?.kind === "named" && !this._importedTypes.has(existing)
 				? existing
 				: { kind: "named", name: decl.name };
+		if (!named._pkgName && pkgName) named._pkgName = pkgName;
 		named.underlying = underlying;
 		named._declNode = decl;
 		named._target = this.target;
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
+			if (named._pkgName) underlying._pkgName = named._pkgName;
 			underlying.methods = new Map();
 		} else if (underlying.kind !== "interface") {
 			named.methods = new Map();
 		}
 		if (underlying.kind === "interface") {
 			underlying.name = decl.name;
+			if (named._pkgName) underlying._pkgName = named._pkgName;
 		}
 		this.types.set(decl.name, named);
 		this._defineTypeBinding(decl.name, named, scope);
@@ -1161,7 +1179,13 @@ export class TypeChecker {
 	_registerLocalTypePlaceholder(decl, scope) {
 		const prior = this.types.get(decl.name);
 		if (decl.isAlias || (prior && !this._importedTypes.has(prior))) return;
-		const placeholder = { kind: "named", name: decl.name, underlying: null };
+		const pkgName = this._currentPkgName ?? this.pkgName;
+		const placeholder = {
+			kind: "named",
+			name: decl.name,
+			underlying: null,
+			...(pkgName && { _pkgName: pkgName }),
+		};
 		this.types.set(decl.name, placeholder);
 		this._defineTypeBinding(decl.name, placeholder, scope);
 	}
@@ -1179,10 +1203,12 @@ export class TypeChecker {
 		// Resolve once with the parameters in scope to report errors in the
 		// aliased type at the declaration.
 		const underlying = this.resolveTypeNode(decl.type, typeScope);
+		const pkgName = this._currentPkgName ?? this.pkgName;
 		const alias = {
 			kind: "named",
 			name: decl.name,
 			underlying,
+			...(pkgName && { _pkgName: pkgName }),
 			_generic: { typeParams: typeParamTypes, declNode: decl, isAlias: true },
 		};
 		this.types.set(decl.name, alias);

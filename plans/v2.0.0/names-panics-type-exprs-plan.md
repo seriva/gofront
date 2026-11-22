@@ -1,7 +1,7 @@
 # JS Names, `wasm` Panics and Type Expressions — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-22)  
 **Base branch:** main  
 **Related:** Holds the follow-ups split off from [`../v1.9.3/follow-ups-2026-11-16-plan.md`](../v1.9.3/follow-ups-2026-11-16-plan.md) and the 2026-11-16 ledger sweep that remain after the 2026-11-17 split by root cause. Moved out on 2026-11-17: `wasm` struct layout, type keys and rewrites (F8, F17, F24, F25, F28, F31, L5, L11, L13) → [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md); file-scoped imports and qualified names (L6–L10), and on 2026-11-17 (later) export visibility (F5, F29) → [`package-scope-plan.md`](package-scope-plan.md); JS `new` of an anonymous struct (L14) → [`value-stores-plan.md`](value-stores-plan.md); local type named after an import (L4) → [`checker-go-rules-plan.md`](checker-go-rules-plan.md) Phase 8. Phase 1 needs the v1.9.3 Task 1.3 (`instanceKey`) merged (it is). Independent of the other v2.0.0 plans, except that Task 4.1's `wasm` assertion is switched on by [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Task 3.2, and `mangleLocalTypes` is also changed by [`checker-go-rules-plan.md`](checker-go-rules-plan.md) Task 8.1 (whichever lands second rebases); start before [`incremental-builds-plan.md`](incremental-builds-plan.md), which restructures `src/compiler.js`.  
 **Release note:** Types named after JavaScript built-ins such as `Map` or `WeakMap`, WebAssembly types named after reserved words, conversions through type aliases, struct tags in type arguments and parenthesised type literals now work. On WebAssembly, slice bounds, `make` sizes and integer `range` counts of 2³² or more are no longer truncated, and panics show Go's message for `panic(nil)`, unsigned indexes and `bool`, unsigned, `error`, `Stringer` and defined-type values, also when the value is held in an interface.  
@@ -149,72 +149,72 @@ Root: where the parser or checker expects an expression, a type is recognised on
 > Remaining review follow-ups after the 2026-11-17 split (re-probed that day). Phase numbers restart because no task of the earlier draft had started.
 
 ### Phase 1: One JS name-escaping rule (root `js-name-collision`)
-- [ ] Task 1.1: Generated Go resolves renamed types through same-package, aliased and indirect imports (F30 prerequisite)
+- [x] Task 1.1: Generated Go resolves renamed types through same-package, aliased and indirect imports (F30 prerequisite)
   - Files: `src/lower/gen-types.js` (`spellNamed`), `src/lower/fmt-formatters.js` (`FmtGen.isNamedInScope`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `import u "./util"; fmt.Printf("%T", u.Make(5))` with a `$$`-renamed `Box` → `util.Box`; the same through a re-exporting package
   - Done when: passes (no `Unknown type 'util.Box'`)
-- [ ] Task 1.2: `pruneStdlibPrograms` keeps renamed user types (F30 prerequisite)
+- [x] Task 1.2: `pruneStdlibPrograms` keeps renamed user types (F30 prerequisite)
   - Files: `src/link/wasm.js` (`pruneStdlibPrograms`)
   - Test: `shadowing.test.js`: a `wasm` package and the js main both declare `Box`, the `wasm` package imports `fmt` and `errors`; `var m Box; m.N = 42`, `errors.As` into the type and a promoted method print Go's output
   - Done when: passes (fails first with the null deref from the PR #207 notes)
-- [ ] Task 1.3: Rename `wasm` types and method-less `js`/`both` named types after JS built-ins to `Name$$pkg` (F2, F30)
+- [x] Task 1.3: Rename `wasm` types and method-less `js`/`both` named types after JS built-ins to `Name$$pkg` (F2, F30)
   - Files: `src/link/type-names.js` (`mangleCollidingTypes`), `src/compiler.js` (`pkgTarget` before `mangleLocalTypes`), `src/backend/shared/fmt-types.js` (`Name$$pkg` → `pkg.Name`)
   - Test: `shadowing.test.js`: F30 → `3 2` with `%T` `util.WeakMap`; `util` as `both` with `type Map int` → `3`; F2 → `5` on every target with `%T` `main.Map`; F2b → `[1] a`; a second package also declaring `WeakMap` (no `$$util$$util`); a local `type Map` still gets `__L<n>`; `type Array struct{}` rejection tests stay green
   - Done when: all pass; programs without such types emit the same JS
-- [ ] Task 1.4: Facade names escape strict-mode reserved words (L12)
+- [x] Task 1.4: Facade names escape strict-mode reserved words (L12)
   - Files: `src/backend/shared/member-names.js` (`JS_RESERVED`), `src/backend/js/names.js` (re-export), `src/backend/wasm/boundary.js` (`facadeName`, `genHandleStruct`, `outExpr`, `genIfaceFacade`, `genBothStruct`)
   - Test: `test/unit/wasm/boundary.test.js`: L12 → `true`; a `wasm` struct named `let` returned by an export and its method called from js main → Go's output; a method named `static` stays a passing control; `node scripts/check-layers.js` passes; `docs/go-compatibility.md` *Names that shadow JS globals* updated
   - Done when: all pass and `js-globals.test.js` passes unmodified
 
 ### Phase 2: `wasm` integers at Go width (root `wasm-bounds-width`)
-- [ ] Task 2.1: Checked narrowing for slice bounds and `make` sizes (F19, F19a, F19lo, F19s, F19m)
+- [x] Task 2.1: Checked narrowing for slice bounds and `make` sizes (F19, F19a, F19lo, F19s, F19m)
   - Files: `src/backend/wasm/emit-exprs.js` (`_emitIndexExprToI32` `onOverflow`, `emitSliceExpr`), `src/backend/wasm/emit-builtins.js` (`make` length, capacity, map hint), `src/backend/wasm/index.js` (`__slice_bounds_panic` takes the unwrapped `i64`)
   - Test: `test/unit/compiler/strict-panics.test.js`: F19, F19a, F19lo, F19s → Go's messages; F19m → `makeslice: len out of range` and `makeslice: cap out of range` on `wasm`; the 64-bit index control still passes
   - Done when: all pass on `wasm` and `both`; `bce-mathx.js` and `zero-alloc.js` pass (proven-narrow operands emit the same code)
-- [ ] Task 2.2: Unsigned operands print unsigned (F22a, F22b, F22s, F22u)
+- [x] Task 2.2: Unsigned operands print unsigned (F22a, F22b, F22s, F22u)
   - Files: `src/backend/wasm/emit-exprs.js` (`_emitSliceBoundsPanic`, `_isI32IndexExpr`), `src/backend/wasm/emit.js` (`oob32`/`oob64` handlers), `src/backend/wasm/index.js` (`emitIndexPanicBody`, `emitSliceBoundsPanicBody` signedness flag), `src/backend/wasm/module-emitter.js` + `src/backend/wasm/boundary.js` (`str_from_u64`)
   - Test: `strict-panics.test.js`: F22a, F22b, F22s and F22u → Go's messages; a negative `int` index still prints negative
   - Done when: all pass on `wasm`; `both` JS side unchanged
-- [ ] Task 2.3: Integer `range` over an unproven 64-bit or unsigned count (F19r)
+- [x] Task 2.3: Integer `range` over an unproven 64-bit or unsigned count (F19r)
   - Files: `src/backend/wasm/emit-stmts.js` (`emitRangeForStmt`)
   - Test: `test/unit/language/loops.test.js`: F19r → `3` (and `uint64(1)<<63` / `uint32(1)<<31` broken after 3 iterations → `3`) with `assertAllTargetsOutput`; `for i := range len(xs)` and `range 10` keep the `i32` loop (checked through the emitted WAT or `zero-alloc.js`); `docs/go-compatibility.md` runtime-panics row (64-bit and unsigned bounds, `make` sizes)
   - Done when: all pass; `bce-mathx.js` passes
 
 ### Phase 3: `wasm` panic values (root `wasm-panic-value`)
-- [ ] Task 3.1: One panic-text formatter for basic and defined basic values (F20 `bool`/`uint64`, F20u32, F20d)
+- [x] Task 3.1: One panic-text formatter for basic and defined basic values (F20 `bool`/`uint64`, F20u32, F20d)
   - Files: `src/backend/wasm/index.js` (register and emit `__panic_text`), `src/backend/wasm/emit-builtins.js` (`emitPanicThrow` calls it when no host message is passed; delete the `_emitScalarPanic` width switch)
   - Test: `test/unit/wasm/defer_recover.test.js`: exports panicking with `true`, `uint64(1)<<63`, `uint32(1)<<31`, `Str("s")`, `T(5)` and the same values held in `any` throw `Error` with Go's text (*Verified Gaps*); the float, `uint8` and string controls unchanged; `recover()` values unchanged
   - Done when: all pass
-- [ ] Task 3.2: `error` and `Stringer` values, static or in an interface (F20 `error`, F20m, F20g, F20i)
+- [x] Task 3.2: `error` and `Stringer` values, static or in an interface (F20 `error`, F20m, F20g, F20i)
   - Files: `src/backend/wasm/index.js` (`__panic_text` `error`/`Stringer` arms)
   - Test: `defer_recover.test.js`: `errors.New("bad")`, `MyErr{}`, `Stringer{}`, `var v any = errors.New("bad")` and a type with both methods → `bad` / `mine` / `str` / `bad` / its `Error()`; a plain struct still `[panic object]`
   - Done when: all pass
-- [ ] Task 3.3: `panic(nil)` panics with `*runtime.PanicNilError` (F21, F21b, F21c)
+- [x] Task 3.3: `panic(nil)` panics with `*runtime.PanicNilError` (F21, F21b, F21c)
   - Files: `src/backend/wasm/types.js` (`PANIC_NIL_STRUCT`), `src/backend/wasm/module-emitter.js` + `src/backend/wasm/index.js` (register struct and `Error()`/`GofrontTypeName()` helpers), `src/backend/wasm/emit-builtins.js` (`nil` and nil-interface arguments)
   - Test: `defer_recover.test.js`: `panic(nil)`, `var a any; panic(a)` and `var e error; panic(e)` → `*runtime.PanicNilError panic called with nil argument` on `wasm`; uncaught → `Error: panic called with nil argument`; `js`/`both` unchanged (`<nil> <nil>`); `docs/go-compatibility.md` `defer`/`recover()` row (new uncaught texts, only plain structs report `[panic object]`, `panic(nil)` on `js`/`both`)
   - Done when: all pass
 
 ### Phase 4: Types in expression position (root `type-in-expression`)
-- [ ] Task 4.1: Struct tags inside generic type arguments parse (L2)
+- [x] Task 4.1: Struct tags inside generic type arguments parse (L2)
   - Files: `src/parser/types.js` (`_looksLikeTypeArgListInType`), `src/parser/expressions.js` (`looksLikeTypeArgList`)
   - Test: `test/unit/parser/generics.test.js`: L2, L2p, L2h, L2f → `0` and L2g → `{[0 0]}` with `assertAllTargetsOutput` (`wasm` needs [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Task 3.2; until it lands `assertJsTargetsOutput` with a note, which that task switches); `xs[i]` with a string index, `m["k"]`, `xs[S{1}.X]` and `Z[[2]int]()` still parse
   - Done when: all pass; existing parser generics tests green
-- [ ] Task 4.2: Parenthesised type literals in expressions and `new` (L3, L3f)
+- [x] Task 4.2: Parenthesised type literals in expressions and `new` (L3, L3f)
   - Files: `src/parser/expressions.js` (`_parsePrimary`, `parseCall`)
   - Test: `generics.test.js` (parser): L3 → `{[0 0]}`, L3c → `[]`, L3d → `0`, L3e → `0 true`, L3p → `true true`, L3f (`(func())(f)`, `([]func())(x)`, `(func() int)(f)`, `(*map[int]int)(p)`) with `assertAllTargetsOutput`; `([]int){1, 2}` → `cannot parenthesize type in composite literal` with line:col; controls `(f)(1)`, `(func() int { return 1 })()`, `(*p).f`, `(*T)(nil)` unchanged
   - Done when: all pass on every target
-- [ ] Task 4.3: Conversions through any type the callee names (L1, L1f)
+- [x] Task 4.3: Conversions through any type the callee names (L1, L1f)
   - Files: `src/typechecker/expressions.js` (conversion branch keys on `_isTypeRef`), `src/backend/js/expressions.js` (`_genTypeConversionCall` delegates basic, `[]rune` and array conversions to `_genTypeConversion`)
   - Test: `test/unit/types/checks.test.js`: L1 → `{1}`, L1c → `0`, L1d → `2`, L1e → `0 true`, L1f → `A 6 [97 98]` with `assertAllTargetsOutput`; generic alias control unchanged; `type A = struct{ X int }; A(1)` → `cannot convert`
   - Done when: all pass; no `Cannot call non-function type` for a type callee
 
 ### Phase 5: Type keywords that name values (root `type-in-expression`, callee side)
 *Scheduled from review follow-ups (2026-11-19): ledger *Shadowed type keywords as callees*. Same decision point as Phase 4 (`_parsePrimary` choosing type or expression); lands after it.*
-- [ ] Task 5.1: `_parsePrimary` parses `<type keyword>()` with zero (or >1) arguments as a call node (L15, L15s, L15e)
+- [x] Task 5.1: `_parsePrimary` parses `<type keyword>()` with zero (or >1) arguments as a call node (L15, L15s, L15e)
   - Files: `src/parser/expressions.js` (`_parsePrimary`, `TYPE_KEYWORDS`)
   - Test: `test/unit/types/shadowing.test.js`: L15 → `20`, L15s → `3`, L15e → `1` with `assertAllTargetsOutput`; `int(1.5)`, `string(rune(65))`, `[]byte("a")` still convert
   - Done when: all pass on every target; no parse error for a keyword callee with zero arguments
-- [ ] Task 5.2: The checker resolves a 1-arg keyword callee to the value in scope before the predeclared type (L15i)
+- [x] Task 5.2: The checker resolves a 1-arg keyword callee to the value in scope before the predeclared type (L15i)
   - Files: `src/parser/expressions.js` (`_parsePrimary` drops the `isTypeKeyword` `TypeConversion` special case), `src/typechecker/expressions.js` (`checkCall` normalises an unshadowed 1-arg predeclared-type `CallExpr` to `TypeConversion` checked by `_checkTypeConversion`)
   - Test: `shadowing.test.js`: L15i → `3` on all targets; a package-level `func string() int` used beside `string(b)` in another package keeps the conversion there
   - Done when: passes; `'int' declared and not used` no longer reported for a called local

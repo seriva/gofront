@@ -163,11 +163,27 @@ export function collectProgramTypes(programs, checker) {
 	return found;
 }
 
+// A type this package declared as `Name$$pkg` cannot be written in Go source;
+// generated files spell it `Name__PKG_pkg` and `restoredTypeName` renames the
+// parsed references back.
+const STAND_IN = /^(.+)__PKG_(\w+)$/;
+
+export function renamedStandIn(name) {
+	const at = name.indexOf("$$");
+	return `${name.slice(0, at)}__PKG_${name.slice(at + 2)}`;
+}
+
+export function restoredTypeName(name) {
+	const m = STAND_IN.exec(name);
+	return m ? `${m[1]}$$${m[2]}` : name;
+}
+
 export class TypeSpeller {
 	// `qualifiers` receives name -> import path for each package the spelled
 	// code names.
-	constructor(pkgName, qualifiers, programs = []) {
+	constructor(pkgName, qualifiers, programs = [], checker = null) {
 		this.pkgName = pkgName;
+		this.checker = checker;
 		this.qualifiers = qualifiers;
 		this.programs = programs;
 		this.importPaths = importPaths(programs);
@@ -222,14 +238,41 @@ export class TypeSpeller {
 		return name;
 	}
 
+	// How the generated file names a type declared as `Name$$pkg` because its
+	// bare name was taken, or null for a stdlib package it reaches by path.
+	// A package's own type, and one that no import of this package names (it
+	// came through another package), is spelled by a lexable stand-in that
+	// `restoredTypeName` turns back into the declared name once parsed; a
+	// package the checker reaches as `q` is spelled `q.Name`.
+	renamedSpelling(t) {
+		const orig = t.name.slice(0, t.name.indexOf("$$"));
+		const standIn = renamedStandIn(t.name);
+		if (this.declared.has(t.name) || !this.checker) {
+			return this.declared.has(t.name) ? standIn : null;
+		}
+		const through = `.${t.name.slice(t.name.indexOf("$$") + 2)}.${orig}`;
+		let indirect = false;
+		for (const [key, v] of this.checker.types) {
+			const dot = key.indexOf(".");
+			if (v !== t || dot <= 0) continue;
+			if (key.slice(dot + 1) === orig) return key;
+			if (key.endsWith(through)) indirect = true;
+		}
+		return indirect ? standIn : null;
+	}
+
 	spellNamed(t) {
 		let name = t.name;
 		const at = name.indexOf("$$");
 		const dot = name.indexOf(".");
 		if (at >= 0) {
 			const orig = name.slice(0, at);
-			const modPath = name.slice(at + 2).replaceAll("$", "/");
-			name = `${this.qualifierFor(modPath)}.${orig}`;
+			const spelled = this.renamedSpelling(t);
+			if (spelled) name = spelled;
+			else {
+				const modPath = name.slice(at + 2).replaceAll("$", "/");
+				name = `${this.qualifierFor(modPath)}.${orig}`;
+			}
 		} else if (dot > 0) {
 			const modPath = this.importPaths.get(name.slice(0, dot));
 			if (modPath) name = `${this.qualifierFor(modPath)}${name.slice(dot)}`;

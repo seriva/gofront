@@ -2438,3 +2438,91 @@ func main() {
 	assert(!res.js.includes("__sprintf"), "facade must not ship __sprintf");
 	assert(!res.js.includes("fmt_sprintf"), "facade must not define fmt_sprintf");
 });
+
+section("Facade names that are JS reserved words");
+
+test("a wasm struct named after a strict-mode reserved word embeds and reports nil", async () => {
+	const res = await compileHybridProject({
+		"util/u.go": `//gofront:target wasm
+package util
+
+type yield struct{ X int }
+
+func (y *yield) IsNil() bool { return y == nil }
+
+type Outer struct{ *yield }
+
+func Check() bool {
+	var o Outer
+	return o.IsNil()
+}
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	fmt.Println(util.Check())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "true");
+});
+
+test("a wasm struct named let returned by an export keeps its methods", async () => {
+	const res = await compileHybridProject({
+		"util/u.go": `//gofront:target wasm
+package util
+
+type let struct{ N int }
+
+func (l *let) Double() int { return l.N * 2 }
+
+func Make(n int) *let { return &let{n} }
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	l := util.Make(4)
+	fmt.Println(l.N, l.Double())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "4 8");
+});
+
+test("a wasm struct named static with a method named static stays usable", async () => {
+	const res = await compileHybridProject({
+		"util/u.go": `//gofront:target wasm
+package util
+
+type Box struct{ N int }
+
+func (b *Box) static() int { return b.N }
+
+func (b *Box) Get() int { return b.static() }
+
+func Make(n int) *Box { return &Box{n} }
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	fmt.Println(util.Make(5).Get())
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "5");
+});

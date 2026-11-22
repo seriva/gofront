@@ -64,6 +64,7 @@ export const typeParserMethods = {
 		let i = this.pos + 1; // skip [
 		const src = this.tokens;
 		let depth = 1;
+		let braces = 0;
 		while (i < src.length && depth > 0) {
 			const tt = src[i].type;
 			if (tt === T.LBRACKET) {
@@ -77,13 +78,31 @@ export const typeParserMethods = {
 				i++;
 				continue;
 			}
-			// Reject literals — it's an index/array expression. A literal nested
-			// deeper is an array length inside a type argument: Stack[[2]int].
-			if (depth === 1 && (tt === T.INT || tt === T.FLOAT || tt === T.STRING))
+			if (tt === T.LBRACE) {
+				const prev = src[i - 1]?.type;
+				if (prev !== T.STRUCT && prev !== T.INTERFACE) return false;
+				braces++;
+				i++;
+				continue;
+			}
+			if (tt === T.RBRACE) {
+				if (braces === 0) return false;
+				braces--;
+				i++;
+				continue;
+			}
+			// Reject literals outside struct/interface bodies at depth 1 — it's an
+			// index/array expression. A literal inside struct{ ... } (struct tag or
+			// field array length) or deeper brackets (Stack[[2]int]) is valid.
+			if (
+				braces === 0 &&
+				depth === 1 &&
+				(tt === T.INT || tt === T.FLOAT || tt === T.STRING)
+			)
 				return false;
 			i++;
 		}
-		return depth === 0;
+		return depth === 0 && braces === 0;
 	},
 
 	parseTypeParamList() {

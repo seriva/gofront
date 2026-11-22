@@ -11,6 +11,7 @@ import { CodeGen } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
 import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
+import { restoredTypeName } from "../lower/gen-types.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
@@ -567,6 +568,19 @@ const GENERATORS = [
 	generateFmtFormatters,
 ];
 
+// The generated Go names the package's own `Name$$pkg` types with a lexable
+// stand-in (see `renamedStandIn`); the parsed references get the declared
+// name back.
+function restoreRenamedTypes(node) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) return node.forEach(restoreRenamedTypes);
+	if (typeof node.name === "string" && RENAMEABLE.has(node.kind))
+		node.name = restoredTypeName(node.name);
+	forEachChild(node, restoreRenamedTypes);
+}
+
+const RENAMEABLE = new Set(["TypeName", "GenericTypeName", "Ident"]);
+
 // Generates, imports and checks the package's generated Go (json codecs,
 // `errors.As` functions) as one more file.  Returns the generated programs:
 // none for a package with errors or one with no generated call sites.
@@ -615,6 +629,7 @@ export function checkGeneratedGo(
 		filename,
 		source,
 	).parse();
+	restoreRenamedTypes(ast.decls);
 	ast._source = source;
 	ast._generated = true;
 	ast._path = join(dirname(programs[0]._path ?? "."), filename);

@@ -138,11 +138,11 @@ function classifyTarget(call) {
 // Generates the `errors.As` functions for a package's call sites.  Returns
 // null when it has none; otherwise { body, imports, diagnostics, link } and
 // marks each call's SelectorExpr with `_genEntry`.
-export function generateErrorsAs(programs, _checker, pkgName) {
+export function generateErrorsAs(programs, checker, pkgName) {
 	const { sites, diagnostics } = findSites(programs);
 	if (sites.length + diagnostics.length === 0) return null;
 	const qualifiers = new Map();
-	const speller = new TypeSpeller(pkgName, qualifiers, programs);
+	const speller = new TypeSpeller(pkgName, qualifiers, programs, checker);
 	const prefix = `gfe_${String(pkgName).replace(/[^A-Za-z0-9_]/g, "_")}_as_`;
 	const names = new Map(); // spelled target -> function name
 	const out = [];

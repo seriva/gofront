@@ -3,8 +3,10 @@
 // call expression dispatch (static, method, closure, package).
 
 import { hasCallOrReceive } from "../../lower/walk.js";
+import { ERROR } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import { namedBase } from "../shared/named-underlying.js";
+import { panicsWithNil } from "./prescan.js";
 import {
 	anonIfaceName,
 	ERROR_STRUCT,
@@ -21,6 +23,11 @@ import {
 	isStringType,
 	isStructType,
 	isUnhashableGoType,
+	PANIC_NIL_STRUCT,
+	PANIC_NIL_TEXT,
+	PANIC_NIL_TYPE_NAME,
+	PANIC_STRINGER,
+	PANIC_STRINGER_DISPATCH,
 	printOperandKind,
 	toWasmType,
 } from "./types.js";
@@ -39,8 +46,7 @@ export class BuiltinsEmitter {
 	// `runtime.Error`); the host still reports the message text.
 	emitRuntimePanicThrow() {
 		if (!this.mod.hasErrorType) {
-			this.pushInstruction("any.convert_extern");
-			this.emitPanicThrow();
+			this._emitTextPanic();
 			return;
 		}
 		const msgTmp = this.acquireTemp("externref");
@@ -54,8 +60,9 @@ export class BuiltinsEmitter {
 	}
 
 	// Consumes the anyref value on the stack, pushes a PanicNode, and raises the
-	// panic via `env.panic` (with the value, or the externref message in
-	// `hostMsgTmp`); `unreachable` tells the validator control never returns.
+	// panic via `env.panic` (with the externref message in `hostMsgTmp`, else
+	// the value's text from `__panic_text`); `unreachable` tells the validator
+	// control never returns.
 	emitPanicThrow(hostMsgTmp = null) {
 		const panicNodeTypeIndex = this.mod.getPanicNodeTypeIndex();
 		const panicGlobal = this.mod.getPanicGlobalIndex();
@@ -77,7 +84,10 @@ export class BuiltinsEmitter {
 			this.pushInstruction({ op: "local.get", index: hostMsgTmp });
 		} else {
 			this.pushInstruction({ op: "local.get", index: tmpVal });
-			this.pushInstruction("extern.convert_any");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__panic_text"),
+			});
 		}
 		this.pushInstruction({
 			op: "call",
@@ -175,20 +185,6 @@ export class BuiltinsEmitter {
 		}
 	}
 
-	_emitBuiltinString(call) {
-		const arg = call.args[0];
-		const argType = arg._type;
-		const argWType = toWasmType(argType, this.mod.checker);
-		if (argWType === "i64") {
-			this.emitExpr(arg, "i64");
-			this.pushInstruction("i32.wrap_i64");
-		} else {
-			this.emitExpr(arg, "i32");
-		}
-		const funcIdx = this.mod.getStringFromCodePointImportIndex();
-		this.pushInstruction({ op: "call", funcIndex: funcIdx });
-	}
-
 	_emitBuiltinCap(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type;
@@ -245,7 +241,17 @@ export class BuiltinsEmitter {
 			const mapInfo = this.mod.getMapType(keyType, valType);
 			if (args[1]) {
 				const hintTmp = this.acquireTemp("i32");
-				this._emitIndexExprToI32(args[1], hintTmp);
+				const hint = this._emitIndexExprToI32(args[1], hintTmp);
+				if (hint.unproven) {
+					// The hint only sizes the table: an unrepresentable one is no hint.
+					this.pushInstruction({ op: "local.get", index: hintTmp });
+					this.pushInstruction({ op: "i32.const", value: 0x3fffffff });
+					this.pushInstruction("i32.gt_u");
+					this.pushInstruction({ op: "if", blockType: "void" });
+					this.pushInstruction({ op: "i32.const", value: 0 });
+					this.pushInstruction({ op: "local.set", index: hintTmp });
+					this.pushInstruction("end");
+				}
 				this.pushInstruction({ op: "local.get", index: hintTmp });
 				this.releaseTemp(hintTmp, "i32");
 			} else {
@@ -268,11 +274,12 @@ export class BuiltinsEmitter {
 			const sliceInfo = this.mod.getSliceType(elemGoType);
 
 			const lenTmp = this.acquireTemp("i32");
-			this._emitIndexExprToI32(args[1], lenTmp);
+			const lenBound = this._emitIndexExprToI32(args[1], lenTmp);
 
 			const capTmp = this.acquireTemp("i32");
+			let capBound = null;
 			if (args[2]) {
-				this._emitIndexExprToI32(args[2], capTmp);
+				capBound = this._emitIndexExprToI32(args[2], capTmp);
 			} else {
 				this.pushInstruction({ op: "local.get", index: lenTmp });
 				this.pushInstruction({ op: "local.set", index: capTmp });
@@ -285,12 +292,24 @@ export class BuiltinsEmitter {
 			this.pushInstruction({ op: "if", blockType: "void" });
 			this.emitPanic("runtime error: makeslice: len out of range");
 			this.pushInstruction("end");
+			// A size a 64-bit operand saturated (at or above 2^31 - 1) cannot be
+			// allocated: a WasmGC array holds fewer elements.
+			const unallocatable = (tmp, what) => {
+				this.pushInstruction({ op: "local.get", index: tmp });
+				this.pushInstruction({ op: "i32.const", value: 0x7fffffff });
+				this.pushInstruction("i32.ge_s");
+				this.pushInstruction({ op: "if", blockType: "void" });
+				this.emitPanic(`runtime error: makeslice: ${what} out of range`);
+				this.pushInstruction("end");
+			};
+			if (!capBound && lenBound.unproven) unallocatable(lenTmp, "len");
 			this.pushInstruction({ op: "local.get", index: capTmp });
 			this.pushInstruction({ op: "local.get", index: lenTmp });
 			this.pushInstruction("i32.lt_s");
 			this.pushInstruction({ op: "if", blockType: "void" });
 			this.emitPanic("runtime error: makeslice: cap out of range");
 			this.pushInstruction("end");
+			if (capBound?.unproven) unallocatable(capTmp, "cap");
 
 			if (
 				isStructType(elemGoType, this.mod.checker, this.mod) ||
@@ -804,81 +823,56 @@ export class BuiltinsEmitter {
 	}
 
 	_emitBuiltinPanic(call) {
-		const { args } = call;
-		const arg = args?.[0];
+		const arg = call.args?.[0];
 		if (!arg) {
-			const strIdx = this.mod.internString("");
-			const funcIdx = this.mod.getStringImportIndex();
-			this.pushInstruction({ op: "i32.const", value: strIdx });
-			this.pushInstruction({ op: "call", funcIndex: funcIdx });
-			this.pushInstruction("any.convert_extern");
-		} else {
-			const goType = this._resolveExprGoType(arg);
-			const wType = toWasmType(goType, this.mod.checker);
-			if (goType?.kind === "named" && wType === "externref") {
-				// A defined string type keeps its identity (and methods) in the
-				// panic value, so `recover()` returns it, not the bare string.
-				this.emitExpr(arg, "anyref");
-			} else if (
-				isStringType(goType, this.mod.checker) ||
-				(arg.kind === "BasicLit" && arg.litKind === "STRING") ||
-				wType === "externref"
-			) {
-				this.emitExpr(arg, "externref");
-				this.pushInstruction("any.convert_extern");
-			} else if (
-				wType === "i64" ||
-				wType === "i32" ||
-				wType === "f64" ||
-				wType === "f32"
-			) {
-				this._emitScalarPanic(arg, goType);
-				return;
-			} else {
-				this.emitExpr(arg, "anyref");
-			}
+			this._pushStringConst("");
+			this._emitTextPanic();
+			return;
 		}
+		const goType = this._resolveExprGoType(arg);
+		const wType = toWasmType(goType, this.mod.checker);
+		// A defined string type keeps its identity (and methods) in the panic
+		// value, so `recover()` returns it, not the bare string.  Every value
+		// that is not a plain string (or host reference) reaches the host with
+		// the text `__panic_text` gives its dynamic type, as in `var a any = v`.
+		const plainString =
+			isStringType(goType, this.mod.checker) ||
+			(arg.kind === "BasicLit" && arg.litKind === "STRING") ||
+			wType === "externref";
+		if (plainString && goType?.kind !== "named") {
+			this.emitExpr(arg, "externref");
+			this._emitTextPanic();
+			return;
+		}
+		this.emitExpr(arg, "anyref");
+		if (this.mod.usesPanicNil && panicsWithNil(call, this.mod.checker))
+			this._emitPanicNilGuard();
 		this.emitPanicThrow();
 	}
 
-	// `panic(v)` of a number or bool: the panic value is `v` boxed as in
-	// `var a any = v`, so `recover()` returns it with its dynamic type, and
-	// an uncaught panic reaches the host with the value's text as message.
-	_emitScalarPanic(arg, goType) {
-		this.emitExpr(arg, "anyref");
-		const anyTmp = this.acquireTemp("anyref");
-		this.pushInstruction({ op: "local.tee", index: anyTmp });
-		const box = this._isMethodNamedRef(goType)
-			? this.mod.getIfaceBoxType(this._resolveTestTarget(goType))
-			: this._scalarIfaceBox(goType);
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: box.typeIndex,
-			typeName: box.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: box.typeIndex,
-			typeName: box.name,
-			fieldIndex: 0,
-		});
-		// The box's own field type decides the conversion: an untyped rune
-		// is boxed as an int32 although `toWasmType` maps it to i64.
-		const boxType = box.wType;
-		if (boxType === "f32") this.pushInstruction("f64.promote_f32");
-		const strFrom =
-			boxType === "i64"
-				? this.mod.getStrFromI64ImportIndex()
-				: boxType === "i32"
-					? this.mod.getStrFromI32ImportIndex()
-					: this.mod.getStrFromF64ImportIndex();
-		this.pushInstruction({ op: "call", funcIndex: strFrom });
-		const msgTmp = this.acquireTemp("externref");
-		this.pushInstruction({ op: "local.set", index: msgTmp });
-		this.pushInstruction({ op: "local.get", index: anyTmp });
-		this.emitPanicThrow(msgTmp);
-		this.releaseTemp(msgTmp, "externref");
-		this.releaseTemp(anyTmp, "anyref");
+	// The anyref value on the stack, or a fresh `*runtime.PanicNilError` when
+	// it is nil: Go's `panic(nil)` panics with that error.
+	_emitPanicNilGuard() {
+		const nilError = this.mod.getStructType(PANIC_NIL_STRUCT);
+		const valTmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.tee", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this.pushInstruction({ op: "struct.new", typeIndex: nilError.typeIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("end");
+		this.releaseTemp(valTmp, "anyref");
+	}
+
+	// Raises the panic whose value and host message are the externref string
+	// on the stack.
+	_emitTextPanic() {
+		const textTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.tee", index: textTmp });
+		this.pushInstruction("any.convert_extern");
+		this.emitPanicThrow(textTmp);
+		this.releaseTemp(textTmp, "externref");
 	}
 
 	_emitBuiltinRecover(_call, targetWasmType) {
@@ -1084,14 +1078,10 @@ export class BuiltinsEmitter {
 		const split = this._splitForwardedBuiltin(call);
 		if (split) return this._emitBuiltinCall(split, targetWasmType);
 		// The checker names a call to the predeclared builtin; a user
-		// declaration spelled `len` or `max` is an ordinary call.
-		const name = func.name === "string" ? "string" : call._builtinName;
-		switch (name) {
+		// declaration spelled `len`, `max` or `string` is an ordinary call.
+		switch (call._builtinName) {
 			case "len":
 				this._emitBuiltinLen(call, targetWasmType);
-				return true;
-			case "string":
-				this._emitBuiltinString(call);
 				return true;
 			case "cap":
 				this._emitBuiltinCap(call, targetWasmType);
@@ -1641,12 +1631,6 @@ export class BuiltinsEmitter {
 	// Every `[wasm type index, Go type name]` an `any` can hold in this module,
 	// more specific types last so they overwrite their supertypes.
 	_dynamicTypeNames() {
-		const named = (name) => {
-			const i = name.indexOf("$$");
-			return i < 0
-				? goTypeName({ kind: "named", name })
-				: `${name.slice(i + 2)}.${name.slice(0, i)}`;
-		};
 		const mod = this.mod;
 		const names = [];
 		for (const s of mod.sliceTypes.values())
@@ -1665,7 +1649,13 @@ export class BuiltinsEmitter {
 				info.typeIndex,
 				info.name === ERROR_STRUCT
 					? "*errors.errorString"
-					: `*${named(info.name)}`,
+					: info.name === PANIC_NIL_STRUCT
+						? PANIC_NIL_TYPE_NAME
+						: `*${goTypeName({
+								kind: "named",
+								name: info.name,
+								_pkgName: info.pkgName,
+							})}`,
 			]);
 		}
 		for (const c of mod.closureTypes.values())
@@ -1772,6 +1762,204 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "local.get", index: 2 });
 		concat();
 		this.emitRuntimePanicThrow();
+	}
+
+	// Body of `__panic_text(v any) string`: the text the host shows for an
+	// uncaught panic with the value `v`, as Go's `printpanicval` builds it from
+	// the dynamic type: a string as is, `Error()` of an `error`, else
+	// `String()` of a `Stringer`, a boxed basic value by its type (unsigned
+	// widths unsigned, `bool` as `true`/`false`, complex as `(re+imi)`), a
+	// defined basic type as `<pkg>.T(v)` (a string quoted), anything else as
+	// `[panic object]`.
+	_emitPanicText() {
+		const emit = (ins) => this.pushInstruction(ins);
+		const text = (s) => this._pushStringConst(s);
+		const concat = () =>
+			emit({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+		emit({ op: "local.get", index: 0 });
+		emit({ op: "call", funcIndex: this.mod.getIsStringImportIndex() });
+		emit({ op: "if", blockType: "void" });
+		emit({ op: "local.get", index: 0 });
+		emit("extern.convert_any");
+		emit("return");
+		emit("end");
+		// `error` before `Stringer`, as Go prints a value with both.
+		this._emitPanicMethodArm(ERROR, "__dispatch_error_Error");
+		this._emitPanicMethodArm(PANIC_STRINGER, PANIC_STRINGER_DISPATCH);
+		for (const box of this.mod.ifaceBoxTypes.values()) {
+			const kind = this._panicBoxKind(box);
+			if (!kind) continue;
+			const isComplexKind = kind === "complex64" || kind === "complex128";
+			emit({ op: "local.get", index: 0 });
+			emit({ op: "ref.test", typeIndex: box.typeIndex });
+			emit({ op: "if", blockType: "void" });
+			const defined = box.goType.kind === "named";
+			if (defined || isComplexKind)
+				text(
+					`${defined ? goTypeName(box.goType) : ""}(${kind === "string" ? '"' : ""}`,
+				);
+			emit({ op: "local.get", index: 0 });
+			emit({ op: "ref.cast", typeIndex: box.typeIndex });
+			emit({ op: "struct.get", typeIndex: box.typeIndex, fieldIndex: 0 });
+			this._emitPanicScalarText(kind, box.wType);
+			if (defined || isComplexKind) {
+				concat();
+				text(kind === "string" ? '")' : ")");
+				concat();
+			}
+			emit("return");
+			emit("end");
+		}
+		text("[panic object]");
+		emit("return");
+	}
+
+	// Returns the string `dispatch` makes of the value in local 0 when its
+	// dynamic type implements `ifaceType`.
+	_emitPanicMethodArm(ifaceType, dispatch) {
+		if (
+			!this.mod.funcMap.has(dispatch) ||
+			this.mod.getTypesImplementingInterface(ifaceType).length === 0
+		)
+			return;
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this._emitInterfaceTypeTest(ifaceType);
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex(dispatch),
+		});
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+	}
+
+	// How a boxed value prints in a panic message: its `kind` is `bool`,
+	// `int`, `uint`, `float`, `complex64`, `complex128`, or `string`; null for
+	// a box `printpanicval` shows by address or `[panic object]`.
+	_panicBoxKind(box) {
+		// An untyped constant is boxed under its untyped kind (`panic(42)`).
+		const base =
+			box.goType.kind === "untyped"
+				? { kind: "basic", name: box.goType.base }
+				: namedBase(box.goType, this.mod.checker);
+		const name = base?.kind === "basic" ? base.name : null;
+		if (name === "bool") return "bool";
+		if (name === "string") return "string";
+		if (name === "float32" || name === "float64") return "float";
+		if (name === "complex64" || name === "complex128") return name;
+		if (name === "byte" || name?.startsWith("uint")) return "uint";
+		if (name === "rune" || /^int(8|16|32|64)?$/.test(name ?? "")) return "int";
+		return null;
+	}
+
+	// The boxed basic value on the stack, of wasm type `wType`, as text.
+	_emitPanicScalarText(kind, wType) {
+		const emit = (ins) => this.pushInstruction(ins);
+		const mod = this.mod;
+		const call = (funcIndex) => emit({ op: "call", funcIndex });
+		switch (kind) {
+			case "string":
+				return;
+			case "bool":
+				emit({ op: "if", blockType: "externref" });
+				this._pushStringConst("true");
+				emit("else");
+				this._pushStringConst("false");
+				emit("end");
+				return;
+			case "float":
+				if (wType === "f32") emit("f64.promote_f32");
+				call(mod.getStrFromF64ImportIndex());
+				return;
+			case "complex64":
+			case "complex128":
+				this._emitPanicComplexText(kind, wType);
+				return;
+			case "uint":
+				if (wType === "i32") emit("i64.extend_i32_u");
+				call(mod.getStrFromU64ImportIndex());
+				return;
+			default:
+				call(
+					wType === "i64"
+						? mod.getStrFromI64ImportIndex()
+						: mod.getStrFromI32ImportIndex(),
+				);
+		}
+	}
+
+	// Formats the complex struct on the stack as `re+imi` (without outer
+	// parentheses, which `_emitPanicText` supplies).
+	_emitPanicComplexText(kind, wType) {
+		const emit = (ins) => this.pushInstruction(ins);
+		const mod = this.mod;
+		const info = mod.getComplexType(kind);
+		const cTmp = this.acquireTemp(wType);
+		const reTmp = this.acquireTemp("f64");
+		const imTmp = this.acquireTemp("f64");
+		const outTmp = this.acquireTemp("externref");
+
+		emit({ op: "local.set", index: cTmp });
+		emit({ op: "local.get", index: cTmp });
+		emit("ref.is_null");
+		emit({ op: "if", blockType: "void" });
+		emit({ op: "f64.const", value: 0 });
+		emit({ op: "local.set", index: reTmp });
+		emit({ op: "f64.const", value: 0 });
+		emit({ op: "local.set", index: imTmp });
+		emit("else");
+		for (const [fieldIndex, dst] of [
+			[0, reTmp],
+			[1, imTmp],
+		]) {
+			emit({ op: "local.get", index: cTmp });
+			emit({ op: "struct.get", typeIndex: info.typeIndex, fieldIndex });
+			if (info.elemWType === "f32") emit("f64.promote_f32");
+			emit({ op: "local.set", index: dst });
+		}
+		emit("end");
+
+		emit({ op: "local.get", index: reTmp });
+		emit({ op: "call", funcIndex: mod.getStrFromF64ImportIndex() });
+		emit({ op: "local.set", index: outTmp });
+
+		// Prefix `+` unless `im` is `+Inf` (already `+Inf`) or a non-NaN value
+		// with its sign bit set (`-0`, negative finite, `-Inf`).
+		emit({ op: "local.get", index: imTmp });
+		emit({ op: "local.get", index: imTmp });
+		emit("f64.eq");
+		emit({ op: "local.get", index: imTmp });
+		emit("i64.reinterpret_f64");
+		emit({ op: "i64.const", value: 0n });
+		emit("i64.lt_s");
+		emit("i32.and");
+		emit({ op: "local.get", index: imTmp });
+		emit({ op: "f64.const", value: Infinity });
+		emit("f64.eq");
+		emit("i32.or");
+		emit("i32.eqz");
+		emit({ op: "if", blockType: "void" });
+		emit({ op: "local.get", index: outTmp });
+		this._pushStringConst("+");
+		emit({ op: "call", funcIndex: mod.getStringConcatImportIndex() });
+		emit({ op: "local.set", index: outTmp });
+		emit("end");
+
+		emit({ op: "local.get", index: outTmp });
+		emit({ op: "local.get", index: imTmp });
+		emit({ op: "call", funcIndex: mod.getStrFromF64ImportIndex() });
+		emit({ op: "call", funcIndex: mod.getStringConcatImportIndex() });
+		this._pushStringConst("i");
+		emit({ op: "call", funcIndex: mod.getStringConcatImportIndex() });
+
+		this.releaseTemp(outTmp, "externref");
+		this.releaseTemp(imTmp, "f64");
+		this.releaseTemp(reTmp, "f64");
+		this.releaseTemp(cTmp, wType);
 	}
 
 	// `any_eq` arm for two arrays of one wasm array type (an array stored in
@@ -2166,6 +2354,18 @@ export class BuiltinsEmitter {
 			}
 			case "ta_fail":
 				this._emitTypeAssertFail();
+				return;
+			case "panic_text":
+				this._emitPanicText();
+				return;
+			case "panic_nil_text":
+			case "panic_nil_type_name":
+				this._pushStringConst(
+					fn._isRuntimeHelper === "panic_nil_text"
+						? PANIC_NIL_TEXT
+						: PANIC_NIL_TYPE_NAME,
+				);
+				this.pushInstruction("return");
 				return;
 			case "error_msg":
 				this.pushInstruction({ op: "local.get", index: 0 });

@@ -2735,3 +2735,522 @@ func main() {
 		);
 	});
 }
+
+section("Types named after JS built-ins and colliding type names");
+
+// A type another package also declares is renamed `Name$$pkg`; generated Go
+// and `%T` still spell it `pkg.Name`.
+for (const target of ["both", "wasm"]) {
+	test(`%T of a ${target} package type that collides with a main type is util.Box`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+type Box struct{ N int }
+
+func Make(n int) Box { return Box{n} }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	u "./util"
+)
+
+type Box struct{ M int }
+
+func main() {
+	fmt.Printf("%T %T\\n", u.Make(5), Box{1})
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "util.Box main.Box");
+	});
+}
+
+test("%T of a renamed type reaches through a re-exporting package", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target both
+package util
+
+type Box struct{ N int }
+
+func Make(n int) Box { return Box{n} }
+`,
+			"mid/m.go": `//gofront:target both
+package mid
+
+import "../util"
+
+func Wrap(n int) util.Box { return util.Make(n) }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./mid"
+)
+
+type Box struct{ M int }
+
+func main() {
+	fmt.Printf("%T %T\\n", mid.Wrap(5), Box{1})
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "util.Box main.Box");
+});
+
+test("a wasm package keeps a renamed type through stdlib pruning", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+import (
+	"errors"
+	"fmt"
+)
+
+type Base struct{ ID int }
+
+func (b *Base) Get() int { return b.ID }
+
+type Box struct {
+	Base
+	N int
+}
+
+type BoxErr struct{ Code int }
+
+func (e *BoxErr) Error() string { return fmt.Sprint("box ", e.Code) }
+
+func Run() string {
+	var m Box
+	m.N = 42
+	m.ID = 7
+	var err error = &BoxErr{3}
+	var target *BoxErr
+	ok := errors.As(fmt.Errorf("wrap: %w", err), &target)
+	return fmt.Sprint(m.N, m.Get(), ok, target.Code)
+}
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+type Box struct{ M int }
+
+func main() {
+	var b Box
+	b.M = 1
+	fmt.Println(util.Run(), b.M)
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "42 7 true 3 1");
+});
+
+test("F2: a method-less named type after a JS built-in runs on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Map int
+
+func main() {
+	var x Map = 5
+	fmt.Printf("%v %T\\n", x, x)
+}
+`,
+		"5 main.Map\n",
+	);
+});
+
+test("F2b: Promise and Symbol named types run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Promise []int
+type Symbol string
+
+func main() {
+	p := Promise{1}
+	s := Symbol("a")
+	fmt.Println(p, s)
+}
+`,
+		"[1] a\n",
+	);
+});
+
+test("F30: a wasm struct named WeakMap is usable from js main", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+type WeakMap struct{ N int }
+
+func Make(n int) WeakMap { return WeakMap{n} }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	var z util.WeakMap
+	z.N = 2
+	fmt.Println(util.Make(3).N, z.N)
+	fmt.Printf("%T\\n", z)
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "3 2\nutil.WeakMap");
+});
+
+test("F30: a both package with type Map int is usable from js main", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target both
+package util
+
+type Map int
+
+func Make(n int) Map { return Map(n) }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	fmt.Println(util.Make(3))
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "3");
+});
+
+test("a type named after a built-in in two packages gets one suffix", async () => {
+	const { mod, js } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target wasm
+package util
+
+type WeakMap struct{ N int }
+
+func Make(n int) WeakMap { return WeakMap{n} }
+`,
+			"other/o.go": `//gofront:target both
+package other
+
+type WeakMap int
+
+func MakeOther(n int) WeakMap { return WeakMap(n) }
+`,
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./other"
+	"./util"
+)
+
+func main() {
+	fmt.Printf("%T %T\\n", util.Make(1), other.MakeOther(2))
+}
+`,
+		},
+		{},
+	);
+	assertEqual(mod.__lines.join("\n"), "util.WeakMap other.WeakMap");
+	assert(!js.includes("$$util$$"), "type renamed twice");
+	assert(!js.includes("$$other$$"), "type renamed twice");
+});
+
+test("a function-local type named Map keeps a local name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Map struct{ N int }
+	fmt.Printf("%v %T\\n", Map{2}, Map{2})
+}
+`,
+		"{2} main.Map\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`%T of a type parameter instantiated with a renamed ${target} type names its package`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+import "fmt"
+
+type Box struct{ N int }
+type Map int
+
+func Show[T any](v T) string { return fmt.Sprintf("%T", v) }
+
+func Name() string {
+	return Show(Box{1}) + " " + Show(Map(2)) + " " + Show([]Box{})
+}
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+type Box struct{ M int }
+
+func main() {
+	fmt.Println(util.Name())
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "util.Box util.Map []util.Box");
+	});
+}
+
+section("Shadowed type keywords as callees (Phase 5)");
+
+test("zero-arg calls to shadowed type keywords (bool, string, error)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func bool() int { return 20 }
+func error() int { return 1 }
+
+func main() {
+	string := func() int { return 3 }
+	fmt.Println(bool(), string(), error())
+}
+`,
+		"20 3 1\n",
+	);
+});
+
+test("multi-arg call to a shadowed type keyword", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func float64(a, b int) int { return a + b }
+
+func main() {
+	fmt.Println(float64(2, 5))
+}
+`,
+		"7\n",
+	);
+});
+
+test("unshadowed type keyword conversions still work", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := 1.5
+	fmt.Println(int(f), string(rune(65)), len([]byte("a")))
+}
+`,
+		"1 A 1\n",
+	);
+	const { errors } = compile(`package main
+func main() { _ = int(1.5) }
+`);
+	assertErrorContains(errors, "truncated");
+});
+
+test("1-arg call to a shadowed type keyword resolves to the value in scope (L15i)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	int := func(x float64) float64 { return x * 2 }
+	fmt.Println(int(1.5))
+}
+`,
+		"3\n",
+	);
+});
+
+test("1-arg calls to shadowed string, error, bool and any call the values", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func string(x int) int { return x + 1 }
+func error(x int) int { return x + 2 }
+
+func main() {
+	bool := func(x int) int { return x + 3 }
+	any := func(x int) int { return x + 4 }
+	fmt.Println(string(10), error(10), bool(10), any(10))
+}
+`,
+		"11 12 13 14\n",
+	);
+});
+
+for (const target of ["both", "wasm"]) {
+	test(`package-level func string() in ${target} util leaves string(b) conversion in main`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+func string() int { return 9 }
+
+func Call() int { return string() }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func main() {
+	b := []byte("hi")
+	fmt.Println(util.Call(), string(b))
+}
+`,
+			},
+			{},
+		);
+		assertEqual(mod.__lines.join("\n"), "9 hi");
+	});
+}
+
+test("unshadowed type keyword with wrong arg count and shadowed non-func report errors", () => {
+	const r0 = compile(`package main
+func main() { _ = int() }
+`);
+	assertErrorContains(r0.errors, "cannot convert 0 arguments to type int");
+
+	const r2 = compile(`package main
+func main() { _ = int(1, 2) }
+`);
+	assertErrorContains(r2.errors, "cannot convert 2 arguments to type int");
+
+	const re = compile(`package main
+func main() { _ = error() }
+`);
+	assertErrorContains(re.errors, "cannot convert 0 arguments to type error");
+
+	const rnf = compile(`package main
+func main() {
+	int := 42
+	_ = int(1)
+}
+`);
+	assertErrorContains(rnf.errors, "Cannot call non-function type int");
+});
+
+test("defer rejects predeclared, parenthesised and named type conversions", () => {
+	const cases = [
+		[
+			"predeclared int(x)",
+			"package main\nfunc main() { x := 1; defer int(x) }\n",
+		],
+		[
+			"parenthesised (int)(x)",
+			"package main\nfunc main() { x := 1; defer (int)(x) }\n",
+		],
+		[
+			"named type T(x)",
+			"package main\ntype T int\nfunc main() { x := 1; defer T(x) }\n",
+		],
+	];
+	for (const [label, src] of cases) {
+		for (const target of ["js", "both", "wasm"]) {
+			const res =
+				target === "wasm" ? compileWasm(src) : compile(src, { target });
+			assertErrorContains(
+				res.errors,
+				"defer requires a function call",
+				`${label} (${target})`,
+			);
+		}
+	}
+});
+
+test("defer allows calling a shadowed predeclared type name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	int := func(x int64) { fmt.Println(x) }
+	defer int(7)
+}
+`,
+		"7\n",
+	);
+});
+
+test("constant len() of array expressions with predeclared type conversions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var a [len([2][3]int{}[int(0)])]int
+var b [len([3]int{int(1)})]int
+
+func main() {
+	fmt.Println(len(a), len(b))
+}
+`,
+		"3 3\n",
+	);
+	const bad = compile(`package main
+func idx() int { return 0 }
+var a [len([2][3]int{}[idx()])]int
+func main() { _ = a }
+`);
+	assertErrorContains(bad.errors, "invalid array length");
+});

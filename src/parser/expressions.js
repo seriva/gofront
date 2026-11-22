@@ -104,8 +104,11 @@ function _opensArgs(after, noCompLit) {
 }
 
 function _isCallParen(src, i, braces) {
+	const prev = src[i - 1]?.type;
 	return (
-		src[i].type === T.LPAREN && braces === 0 && src[i - 1]?.type === T.IDENT
+		src[i].type === T.LPAREN &&
+		braces === 0 &&
+		(prev === T.IDENT || prev === T.RBRACE)
 	);
 }
 
@@ -117,6 +120,15 @@ function _isTypeIntroducerToken(tt) {
 		tt === T.INTERFACE ||
 		tt === T.STRUCT
 	);
+}
+
+function _isTypeBodyBrace(src, i) {
+	const prev = src[i - 1]?.type;
+	return prev === T.STRUCT || prev === T.INTERFACE;
+}
+
+function _isLiteralToken(tt) {
+	return tt === T.INT || tt === T.FLOAT || tt === T.STRING;
 }
 
 // Records the leftmost token of an expression on its node (unless the node
@@ -340,11 +352,17 @@ export const expressionParserMethods = {
 			if (tt === T.DOT && src[i + 1]?.type === T.LPAREN) return false;
 			// `uint(u)` / `f(x)`: a call or conversion is a value (a method
 			// signature inside `interface{ M() }` is the only type that has one).
-			if (tt === T.LBRACE) braces++;
-			else if (tt === T.RBRACE) braces--;
-			else if (_isCallParen(src, i, braces)) return false;
-			// Reject literals — it's an index expression
-			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
+			// Only `struct { ... }` and `interface { ... }` open `{` in a type;
+			// other `{` tokens (such as `S{1}`) start composite literals.
+			if (tt === T.LBRACE) {
+				if (!_isTypeBodyBrace(src, i)) return false;
+				braces++;
+			} else if (tt === T.RBRACE) {
+				if (braces === 0) return false;
+				braces--;
+			} else if (_isCallParen(src, i, braces)) return false;
+			// Reject literals outside struct/interface bodies — it's an index expression
+			if (braces === 0 && _isLiteralToken(tt)) return false;
 			// Reject binary operators that wouldn't appear in type args
 			if (_isDisallowedInTypeArgs(tt)) return false;
 			if (depth === 1) {
@@ -362,7 +380,7 @@ export const expressionParserMethods = {
 			}
 			i++;
 		}
-		if (depth !== 0) return false;
+		if (depth !== 0 || braces !== 0) return false;
 		// Check what follows ]
 		const after = src[i + 1];
 		if (!after) return false;
@@ -385,18 +403,14 @@ export const expressionParserMethods = {
 				// when they are NOT followed by { (which would make them composite literals).
 				// Needed for make(map[K]V), make([]T, n), new(T), etc.
 				const t = this.peek();
-				const isSliceOrArrayType =
-					t.type === T.LBRACKET &&
-					(this.peek2()?.type === T.RBRACKET || // []T
-						this.peek2()?.type === T.INT); // [n]T
 				if (
-					(t.type === T.MAP || isSliceOrArrayType) &&
+					this._looksLikeTypeLiteralStart() &&
 					!this.looksLikeCompositeLitArg()
 				) {
 					const start = this.pos;
 					const typeNode = this.parseType();
-					// `[]byte(s)` / `[]int(nil)` is a conversion: an ordinary
-					// operand that may be compared, spread or selected from.
+					// `[]byte(s)` / `[]int(nil)` / `struct{...}(v)` is a conversion:
+					// an ordinary operand that may be compared, spread or selected from.
 					if (this.check(T.LPAREN)) {
 						this.pos = start;
 						const arg = this.parseExpr();
@@ -429,6 +443,64 @@ export const expressionParserMethods = {
 			return false;
 		} finally {
 			this.pos = start;
+		}
+	},
+
+	// Parses `(typeLiteral)` when `)` immediately follows the type.  Restores
+	// `this.pos` and returns null otherwise so parenthesised expressions such
+	// as `([]int{1, 2})` fall back to `parseExpr`.
+	_tryParseParenTypeLiteral() {
+		if (!this._looksLikeTypeLiteralStart()) return null;
+		const start = this.pos;
+		let targetType;
+		try {
+			targetType = this.parseType();
+		} catch {
+			this.pos = start;
+			return null;
+		}
+		if (!this.check(T.RPAREN)) {
+			this.pos = start;
+			return null;
+		}
+		this.advance();
+		if (this.check(T.LBRACE)) {
+			this.err("cannot parenthesize type in composite literal");
+		}
+		if (this.check(T.LPAREN)) {
+			this.advance();
+			const expr = this.parseExpr();
+			this.expect(T.RPAREN);
+			return { kind: "TypeConversion", targetType, expr };
+		}
+		return { kind: "TypeExpr", type: targetType };
+	},
+
+	// Whether the current cursor starts a type literal (struct, slice/array,
+	// map, interface, func type without a body, or `*` followed by one of
+	// these).  Used after `(` in `_parsePrimary` and for `parseCall` args.
+	_looksLikeTypeLiteralStart() {
+		let i = this.pos;
+		const src = this.tokens;
+		while (src[i]?.type === T.STAR) i++;
+		const tt = src[i]?.type;
+		if (
+			tt === T.STRUCT ||
+			tt === T.LBRACKET ||
+			tt === T.MAP ||
+			tt === T.INTERFACE
+		)
+			return true;
+		if (tt !== T.FUNC) return false;
+		const saved = this.pos;
+		try {
+			this.pos = i;
+			this.parseFuncType();
+			return !this.check(T.LBRACE);
+		} catch {
+			return false;
+		} finally {
+			this.pos = saved;
 		}
 	},
 
@@ -505,9 +577,11 @@ export const expressionParserMethods = {
 			this.advance();
 			return { kind: "ImagLit", value: t.value };
 		}
-		// Parenthesised expression
+		// Parenthesised type literal conversion or parenthesised expression
 		if (t.type === T.LPAREN) {
 			this.advance();
+			const typeLit = this._tryParseParenTypeLiteral();
+			if (typeLit) return typeLit;
 			const expr = this.parseExpr();
 			this.expect(T.RPAREN);
 			return expr;
@@ -531,25 +605,15 @@ export const expressionParserMethods = {
 			return { kind: "RangeExpr", expr: this.parseExpr(0, true) };
 		}
 
-		// Builtin / identifier
+		// Builtin / identifier (type keywords included — `checkCall` turns an
+		// unshadowed 1-arg predeclared-type call into a TypeConversion so a
+		// value in scope of the same name wins).
 		if (
 			t.type === T.IDENT ||
 			this.isTypeKeyword(t) ||
 			this.isBuiltinKeyword(t)
 		) {
 			this.advance();
-			// Type conversion or composite lit: Type(expr) or Type{...}
-			if (this.isTypeKeyword(t) && this.check(T.LPAREN)) {
-				// type conversion: int(x), string(x), etc.
-				this.advance();
-				const expr = this.parseExpr();
-				this.expect(T.RPAREN);
-				return {
-					kind: "TypeConversion",
-					targetType: { kind: "TypeName", name: t.value },
-					expr,
-				};
-			}
 			return { kind: "Ident", name: t.value };
 		}
 
