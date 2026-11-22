@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertAllTargetsOutput,
 	assertEqual,
+	assertErrorContains,
 	assertProgramOutput,
 	compile,
 	Lexer,
@@ -179,6 +180,180 @@ func main() {
 }
 `,
 		"4\n4\n",
+	);
+});
+
+section("Parser — struct tags and array lengths inside generic type arguments");
+
+test("L2/L2p/L2h/L2f: struct tags inside generic type arguments compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+var pkgVar Box[struct{ X int \`json:"x"\` }]
+
+func Z[T any]() T {
+	var zero T
+	return zero
+}
+
+func main() {
+	var localVar Box[struct{ X int \`json:"x"\` }]
+	shortVar := Box[struct{ X int \`json:"x"\` }]{}
+	fnRes := Z[struct{ X int \`json:"x"\` }]()
+	fmt.Println(localVar.V.X, pkgVar.V.X, shortVar.V.X, fnRes.X)
+}
+`,
+		"0 0 0 0\n",
+	);
+});
+
+test("L2g: struct with array field inside generic type argument compiles and runs on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Z[T any]() T {
+	var zero T
+	return zero
+}
+
+func main() {
+	fmt.Println(Z[struct{ A [2]int }](), Z[[2]int]())
+}
+`,
+		"{[0 0]} [0 0]\n",
+	);
+});
+
+test("string index, composite-literal field index, and map string index stay IndexExpr", () => {
+	const ast = parse(`package main
+type S struct{ X int }
+func take(x int) int { return x }
+func f(xs []int, m map[string]int, i string) int {
+	a := m["k"]
+	b := xs[S{1}.X]
+	c := m[i]
+	d := take(xs[S{1}.X])
+	e := take(xs[struct{ X int }{1}.X])
+	return a + b + c + d + e
+}
+func g(fns []func() int, idx []int, m map[string]int) int {
+	return fns[idx[0]]() + fns[m["k"]]()
+}
+`);
+	const text = JSON.stringify(ast);
+	assertEqual(text.includes('"InstantiationExpr"'), false);
+});
+
+section("Parser — parenthesised type literals and new(<type literal>)");
+
+test("L3/L3c/L3e/L3p: parenthesised type-literal conversions compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ A [2]int }
+
+func main() {
+	var s S
+	u := (struct{ A [2]int })(s)
+	fmt.Println(u)
+	fmt.Println(([]int)(nil))
+	fmt.Println(len((map[string]int)(nil)), (func() int)(nil) == nil)
+	fmt.Println((*[]int)(nil) == nil, (*struct{ X int })(nil) == nil)
+}
+`,
+		"{[0 0]}\n[]\n0 true\ntrue true\n",
+	);
+});
+
+test("L3d: new(struct{...}) compiles and runs on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	p := new(struct{ A [2]int })
+	fmt.Println(p.A[0])
+}
+`,
+		"0\n",
+	);
+});
+
+test("L3f: parenthesised func, slice-of-func, and pointer-to-map conversions compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := func() {}
+	(func())(f)()
+	x := []func(){f}
+	fmt.Println(len(([]func())(x)))
+	fi := func() int { return 7 }
+	fmt.Println((func() int)(fi)())
+	var p *map[int]int
+	fmt.Println((*map[int]int)(p) == nil)
+}
+`,
+		"1\n7\ntrue\n",
+	);
+});
+
+test("parenthesised type in composite literal reports Go's error with line:col", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = ([]int){1, 2}
+}
+`);
+	assertErrorContains(errors, "cannot parenthesize type in composite literal");
+	assertErrorContains(errors, "3:");
+});
+
+test("bare parenthesised type literal is rejected as not an expression", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = ([]int)
+}
+`);
+	assertErrorContains(errors, "is not an expression");
+});
+
+test("parenthesised expressions, func literals, pointer derefs and named conversions stay unchanged", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ f int }
+
+func id(x int) int { return x }
+
+func main() {
+	f := func(x int) int { return x + 1 }
+	t := T{f: 4}
+	p := &t
+	x := 9
+	m := map[any]int{T{f: 3}: 11}
+	mi := map[int]int{3: 11}
+	fmt.Println((f)(1), (func() int { return 1 })(), (*p).f, (*T)(nil) == nil)
+	fmt.Println(([]int{1, 2}), ([]int{1, 2}[0]), (struct{ X int }{1}.X))
+	fmt.Println((map[string]int{"a": 1}["a"]), ([]byte("abc")[0]))
+	fmt.Println((struct{ X int }(struct{ X int }{7})).X)
+	fmt.Println(*([]*int{&x}[0]), *(struct{ P *int }{&x}.P))
+	fmt.Println(id(m[interface{}(T{f: 3})]), id(mi[struct{ f int }(T{f: 3}).f]))
+}
+`,
+		"2 1 4 true\n[1 2] 1 1\n1 97\n7\n9 9\n11 11\n",
 	);
 });
 

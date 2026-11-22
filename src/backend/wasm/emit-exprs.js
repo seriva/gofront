@@ -20,6 +20,7 @@ import {
 	getMapKeyValTypes,
 	isAnyType,
 	isArrayType,
+	isByteSlice,
 	isComplex,
 	isComplex64,
 	isFuncType,
@@ -3228,15 +3229,9 @@ export class ExprsEmitter {
 			return;
 		}
 
-		// A named byte slice (`type MyBytes []byte`) converts like `[]byte`.
-		const isByteElem = (t) => {
-			const elem = this._getSliceElemType(t);
-			return elem?.name === "byte" || elem?.name === "uint8";
-		};
 		if (
 			fromWType === "externref" &&
-			isSliceType(targetType, this.mod.checker) &&
-			isByteElem(targetType)
+			isByteSlice(targetType, this.mod.checker)
 		) {
 			this._emitStringToByteSlice({
 				kind: "slice",
@@ -3245,11 +3240,7 @@ export class ExprsEmitter {
 			return;
 		}
 
-		if (
-			toWType === "externref" &&
-			isSliceType(fromType, this.mod.checker) &&
-			isByteElem(fromType)
-		) {
+		if (toWType === "externref" && isByteSlice(fromType, this.mod.checker)) {
 			this._emitByteSliceToString({
 				kind: "slice",
 				elem: this._getSliceElemType(fromType),

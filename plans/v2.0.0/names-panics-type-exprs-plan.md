@@ -195,15 +195,15 @@ Root: where the parser or checker expects an expression, a type is recognised on
   - Done when: all pass
 
 ### Phase 4: Types in expression position (root `type-in-expression`)
-- [ ] Task 4.1: Struct tags inside generic type arguments parse (L2)
+- [x] Task 4.1: Struct tags inside generic type arguments parse (L2)
   - Files: `src/parser/types.js` (`_looksLikeTypeArgListInType`), `src/parser/expressions.js` (`looksLikeTypeArgList`)
   - Test: `test/unit/parser/generics.test.js`: L2, L2p, L2h, L2f → `0` and L2g → `{[0 0]}` with `assertAllTargetsOutput` (`wasm` needs [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Task 3.2; until it lands `assertJsTargetsOutput` with a note, which that task switches); `xs[i]` with a string index, `m["k"]`, `xs[S{1}.X]` and `Z[[2]int]()` still parse
   - Done when: all pass; existing parser generics tests green
-- [ ] Task 4.2: Parenthesised type literals in expressions and `new` (L3, L3f)
+- [x] Task 4.2: Parenthesised type literals in expressions and `new` (L3, L3f)
   - Files: `src/parser/expressions.js` (`_parsePrimary`, `parseCall`)
   - Test: `generics.test.js` (parser): L3 → `{[0 0]}`, L3c → `[]`, L3d → `0`, L3e → `0 true`, L3p → `true true`, L3f (`(func())(f)`, `([]func())(x)`, `(func() int)(f)`, `(*map[int]int)(p)`) with `assertAllTargetsOutput`; `([]int){1, 2}` → `cannot parenthesize type in composite literal` with line:col; controls `(f)(1)`, `(func() int { return 1 })()`, `(*p).f`, `(*T)(nil)` unchanged
   - Done when: all pass on every target
-- [ ] Task 4.3: Conversions through any type the callee names (L1, L1f)
+- [x] Task 4.3: Conversions through any type the callee names (L1, L1f)
   - Files: `src/typechecker/expressions.js` (conversion branch keys on `_isTypeRef`), `src/backend/js/expressions.js` (`_genTypeConversionCall` delegates basic, `[]rune` and array conversions to `_genTypeConversion`)
   - Test: `test/unit/types/checks.test.js`: L1 → `{1}`, L1c → `0`, L1d → `2`, L1e → `0 true`, L1f → `A 6 [97 98]` with `assertAllTargetsOutput`; generic alias control unchanged; `type A = struct{ X int }; A(1)` → `cannot convert`
   - Done when: all pass; no `Cannot call non-function type` for a type callee

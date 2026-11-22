@@ -69,9 +69,6 @@ const SELF_TEST = args.includes("--self-test");
 // run reports them like any other disagreement; listing them here keeps a
 // case the grid renders wrongly from hiding among them.
 const UNPARSED = [
-	/^conv:(value:func,|func:)/, // `(func())(x)`, `(func(T))(x)`
-	/^conv:ptr:(slice|array|map|func|struct),/, // `(*[]int)(x)`
-	/^conv:(array|slice|map):func,/, // `([]func())(x)`, `(map[string]func())(x)`
 	/^names:call:(predeclared-type|shadow-type-\w+|shadow-any)$/, // `int()`
 ];
 const unparsed = (key) => UNPARSED.some((re) => re.test(key));
