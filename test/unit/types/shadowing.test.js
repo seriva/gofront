@@ -3188,3 +3188,69 @@ func main() {
 `);
 	assertErrorContains(rnf.errors, "Cannot call non-function type int");
 });
+
+test("defer rejects predeclared, parenthesised and named type conversions", () => {
+	const cases = [
+		[
+			"predeclared int(x)",
+			"package main\nfunc main() { x := 1; defer int(x) }\n",
+		],
+		[
+			"parenthesised (int)(x)",
+			"package main\nfunc main() { x := 1; defer (int)(x) }\n",
+		],
+		[
+			"named type T(x)",
+			"package main\ntype T int\nfunc main() { x := 1; defer T(x) }\n",
+		],
+	];
+	for (const [label, src] of cases) {
+		for (const target of ["js", "both", "wasm"]) {
+			const res =
+				target === "wasm" ? compileWasm(src) : compile(src, { target });
+			assertErrorContains(
+				res.errors,
+				"defer requires a function call",
+				`${label} (${target})`,
+			);
+		}
+	}
+});
+
+test("defer allows calling a shadowed predeclared type name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	int := func(x int64) { fmt.Println(x) }
+	defer int(7)
+}
+`,
+		"7\n",
+	);
+});
+
+test("constant len() of array expressions with predeclared type conversions", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var a [len([2][3]int{}[int(0)])]int
+var b [len([3]int{int(1)})]int
+
+func main() {
+	fmt.Println(len(a), len(b))
+}
+`,
+		"3 3\n",
+	);
+	const bad = compile(`package main
+func idx() int { return 0 }
+var a [len([2][3]int{}[idx()])]int
+func main() { _ = a }
+`);
+	assertErrorContains(bad.errors, "invalid array length");
+});

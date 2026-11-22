@@ -401,12 +401,12 @@ export const constantCheckMethods = {
 	_constArrayLen(name, args, scope) {
 		if ((name !== "len" && name !== "cap") || args?.length !== 1) return null;
 		const arg = args[0];
-		if (hasCallOrReceive(arg)) return null;
 		let t = this._earlyPackageVarType(arg, scope);
 		if (!t) {
 			if (arg._type === undefined) this.checkExpr(arg, scope);
 			t = arg._type;
 		}
+		if (hasCallOrReceive(arg)) return null;
 		t = this.resolveType(t);
 		if (t?.kind === "pointer") t = this.resolveType(t.base);
 		t = this._deepUnderlying(t);
