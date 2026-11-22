@@ -2421,6 +2421,55 @@ func main() {
 	);
 });
 
+section("Type conversions through aliases and type expressions");
+
+test("L1/L1c/L1d/L1e/L1f: conversions through type aliases work on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type A = struct{ X int }
+type S struct{ X int }
+type L = []int
+type F = func() int
+type M = map[string]int
+type P = *int
+type Str = string
+type I64 = int64
+type R = []rune
+type Arr = [2]int
+type G[T any] struct{ V T }
+type GA = G[int]
+type B struct{ V int }
+
+func g() int { return 2 }
+
+func main() {
+	u := A(S{1})
+	var a2 [2]int = [2]int{4, 5}
+	fmt.Println(u, len(L(nil)), F(g)(), len(M(nil)), P(nil) == nil)
+	fmt.Println(Str(rune(65)), I64(5)+1, R("ab"), Arr(a2))
+	fmt.Println(GA(B{3}), (([]int))(nil))
+}
+`,
+		"{1} 0 2 0 true\nA 6 [97 98] [4 5]\n{3} []\n",
+	);
+});
+
+test("L1 negative: invalid alias conversion reports cannot convert, not non-function call", () => {
+	for (const target of ["js", "both", "wasm"]) {
+		const { errors } = compile(
+			`package main
+type A = struct{ X int }
+func main() { _ = A(1) }
+`,
+			{ target },
+		);
+		assertErrorContains(errors, "cannot convert");
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -2603,14 +2603,12 @@ export const expressionCheckMethods = {
 			return ANY;
 		}
 
-		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
-		// The callee is a type name, not a callable variable.
-		if (
-			(fnType.kind === "named" ||
-				fnType.kind === "pointer" ||
-				fnType.kind === "basic") &&
-			expr.func._isTypeRef
-		) {
+		// Any type named by the callee (`MyInt(x)`, `type A = []int; A(nil)`,
+		// `(([]int))(nil)`): type conversion rather than a function call.
+		if (expr.func._isTypeRef) {
+			if (fnType.kind === "typeParam") {
+				return this._checkTypeParamConversion(fnType, argTypes, expr, scope);
+			}
 			expr._isTypeConversion = true;
 			expr._conversionTargetType = fnType;
 			if (this._rejectConversionSpread(fnType, expr)) return fnType;
@@ -2623,10 +2621,6 @@ export const expressionCheckMethods = {
 			const argType = argTypes[0];
 			this._checkConversionValidity(argType, fnType, expr);
 			return fnType;
-		}
-
-		if (fnType.kind === "typeParam" && expr.func._isTypeRef) {
-			return this._checkTypeParamConversion(fnType, argTypes, expr, scope);
 		}
 
 		fnType = this._resolveCallFnType(fnType, argTypes, expr, scope);
