@@ -1,8 +1,9 @@
 package main
 
-import "js:./browser.d.ts"
 import "errors"
 import "slices"
+
+import "./utils"
 
 // ── Application state ─────────────────────────────────────────
 

@@ -116,7 +116,7 @@ Root: no selector, qualified type lookup, method expression or composite literal
   - Files: `src/compiler.js` (per-file `.d.ts` and local package binding; remove `seenLocalPaths` skip while keeping `depCache` dedupe), `src/link/stdlib.js` (`bindStdlibImport` binds in `p._filename`'s scope; `implicitImports` computed per file)
   - Test: `test/unit/compiler/imports.test.js` with `withTempDir` + `compileDir`: I1.2 → `Undefined: 'strings'` at `b.go`, I1.3 → `Undefined: 's'`, I1.8 → `strings.Builder`, `sub.Box[int]`, and bare `T` rejected at `b.go`, I1.9 → `js:` `.d.ts` values/types and dot-imported values/types rejected at `b.go`, I1.11 → same local path under two names compiles; controls: both files import `strings` → `b A`; exported `const` referencing a file-scoped import in `a.go` with `b.go` not importing it; a `_test.go` file and generated `gofront_gen.go` compile
   - Done when: all pass; `npm test` green apart from `example/simple` (Task 1.3)
-- [ ] Task 1.3: Migrate `example/simple` and any stdlib file to file-scoped imports
+- [x] Task 1.3: Migrate `example/simple` and any stdlib file to file-scoped imports
   - Files: `example/simple/src/main.go`, `example/simple/src/store.go`
   - Test: `node src/index.js check example/...` fails after 1.2 with `Undefined: 'errors'`/`'utils'`/`'sleep'` until `main.go` gains `errors`, `./utils`, `js:./browser.d.ts` and `store.go` gains `./utils` (dropping unused `js:./browser.d.ts`); the `example/simple` Playwright spec
   - Done when: `npm run check` and `npm run test:e2e` pass
