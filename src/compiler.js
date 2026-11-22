@@ -10,7 +10,8 @@
 //     pkgName:         string,
 //     js:              string,          // generated JS bundle (may include dep preamble)
 //     exportedSymbols: Map<name, type>, // for importers to build a namespace
-//     exportedTypes:   Map<name, type>,
+//     exportedTypes:   Map<name, type>, // the package's own declared types
+//     reachedTypes:    Map<name, type>, // types its imports registered (table only)
 //     exportedKinds:   Map<name, kind>, // what each name is declared as (see Scope)
 //   }
 //
@@ -706,6 +707,7 @@ function resolveImports(
 						consts: dep.exportedConsts,
 						kinds: dep.exportedKinds,
 						file: p._filename ?? null,
+						reached: dep.reachedTypes,
 					});
 					continue;
 				}
@@ -719,6 +721,7 @@ function resolveImports(
 					dep.exportedConsts,
 					dep.exportedKinds,
 					p._filename ?? null,
+					dep.reachedTypes,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -995,6 +998,7 @@ export function compileFiles(files, options = {}) {
 			checker.getExportedTypes(),
 			renamedTypes,
 		),
+		reachedTypes: checker.getReachedTypes(),
 		exportedConsts: checker.getExportedConsts(),
 		exportedKinds: checker.getExportedKinds(),
 		sourceFiles: merged.sourceFiles,

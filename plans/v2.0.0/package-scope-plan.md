@@ -126,7 +126,7 @@ Root: no selector, qualified type lookup, method expression or composite literal
   - Done when: all pass
 
 ### Phase 2: Exports and qualified names (roots `package-wide-imports`, `qualified-type-names`)
-- [ ] Task 2.1: Packages export only what they declare (I1.7, I1.10)
+- [x] Task 2.1: Packages export only what they declare (I1.7, I1.10)
   - Files: `src/typechecker/index.js` (`getExportedSymbols` and `getExportedTypes` read declared names/types only, excluding `.d.ts`, dot imports, and import aliases)
   - Test: `test/unit/compiler/packages.test.js` with a `node_modules/mydep` `.d.ts` and a `leaf` subpackage: I1.7 → missing-member error naming `Bar`; I1.10 → `sub.LeafFn` and `sub.Leaf` rejected; controls: `sub.Use()` and a declared `var Baz = 1` still compile and print
   - Done when: passes
