@@ -755,7 +755,9 @@ function signatureStr(f) {
 
 export function typeStr(t) {
 	if (!t) return "void";
-	if (t.kind === "basic" && t.alias) return t.alias;
+	// An unresolved `.d.ts` reference prints as the name written in Go
+	// (`dom.Node`), not as its internal `gofront/dom.Node` table key.
+	if (t.kind === "basic" && t.alias) return t.alias.replace(/^gofront\//, "");
 	switch (t.kind) {
 		case "basic":
 			return t.name;

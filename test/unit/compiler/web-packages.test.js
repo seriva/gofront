@@ -689,6 +689,59 @@ test("an unchanged declaration file is still parsed once", () => {
 	);
 });
 
+section("Declaration packages — unresolved references in composite types");
+
+const NODES = `
+interface Node { children: Node[]; appendChild(n: Node): Node; on(cb: (e: Node) => void): void; }
+`;
+
+test("a declaration slice or func type prints like its Go-source twin", () => {
+	const { res, errors } = build(
+		`package main
+
+import "gofront/dom"
+
+func main() {
+	var e dom.Node
+	var a any = e.children
+	var b any = e.appendChild
+	_, ok1 := a.([]dom.Node)
+	_, ok2 := b.(func(dom.Node) dom.Node)
+	println(ok1, ok2)
+}
+`,
+		{ stdlib: { "stdlib/gofront/dom/dom.d.ts": NODES } },
+	);
+	assertEqual(errors.length, 0);
+	assert(!res.js.includes("gofront/"), "leaked an internal type key");
+	assert(res.js.includes('"[]dom.Node"'), "slice descriptor");
+	assert(res.js.includes('"func(dom.Node) dom.Node"'), "func descriptor");
+	const types = [...res.js.matchAll(/__i?s?ty\([^"]*"([^"]*)"/g)].map(
+		(m) => m[1],
+	);
+	assertEqual(new Set(types).size, 2);
+});
+
+test("an error about a declaration func type does not show the internal key", () => {
+	const { errors } = build(
+		`package main
+
+import "gofront/dom"
+
+func main() {
+	var e dom.Node
+	var n int = e.appendChild
+	var m int = e.children
+	println(n, m)
+}
+`,
+		{ stdlib: { "stdlib/gofront/dom/dom.d.ts": NODES } },
+	);
+	assertErrorContains(errors, "func(dom.Node) dom.Node");
+	assertErrorContains(errors, "[]dom.Node");
+	for (const e of errors) assert(!e.message.includes("gofront/"), e.message);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
