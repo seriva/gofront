@@ -381,9 +381,6 @@ function wrapForJsOp(code, childOp, parentOp, isRight) {
 const WEB_PASCAL_ALIAS_TYPES = new Set([
 	"WebGLRenderingContext",
 	"WebGL2RenderingContext",
-	"GPUDevice",
-	"GPUQueue",
-	"GPUAdapter",
 ]);
 
 const INT_TYPE_NAMES = new Set([

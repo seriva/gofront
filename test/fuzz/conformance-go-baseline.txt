@@ -45,7 +45,6 @@ assign_unaddressable_names:22 # type-as-value-text
 assign_web_type_names:4 # excluded: gofront-only
 assign_web_type_names:5 # excluded: gofront-only
 assign_web_type_names:6 # excluded: gofront-only
-assign_web_type_names:7 # excluded: gofront-only
 block_type_used_outside:8 # undefined-text
 builtin_len_any:5 # any-operand-kind
 forwarded_tuple_arg_type:21 # any-operand-kind

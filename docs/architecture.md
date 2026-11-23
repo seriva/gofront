@@ -199,7 +199,7 @@ src/
   link/               bundle linking: source maps, wasm units into one app.wasm, Go-source stdlib
   lexer/              lexer.js and tokens.js (Go lexer with semicolon insertion and //gofront: directives), templ-lexer.js (.templ dual-mode lexer)
   parser/             declarations, statements, expressions, types (mixins on Parser); templ.js is the .templ parser
-  typechecker/        resolve, assignability, statements, expressions, termination; stdlib/ typings (`gofront/shared`, `gofront/simd`, WebGL/WebGPU/TypedArray globals, unsupported-member diagnostics)
+  typechecker/        resolve, assignability, statements, expressions, termination; stdlib/ typings (`gofront/shared`, `gofront/simd`, WebGL/TypedArray globals, unsupported-member diagnostics)
   lower/              backend-independent analyses stored as side tables
   backend/shared/     fmt type descriptors used by both backends
   backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, `gofront/shared` and `gofront/simd` calls
