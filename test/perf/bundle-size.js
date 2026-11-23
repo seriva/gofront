@@ -1,8 +1,9 @@
 // Bundle size budgets
 //
-// Builds a fixed set of small programs with `gofront build --release` and fails
-// when an `app.js` is larger than its ceiling in bundle-size.baseline.json.
-// The ceilings record what each import costs today, so growth shows up in `npm test`.
+// Builds a fixed set of small programs and every example app under example/
+// with `gofront build --release` and fails when an `app.js` is larger than its
+// ceiling in bundle-size.baseline.json.  The ceilings record what each import
+// costs today, so growth shows up in `npm test`.
 //
 //   node test/perf/bundle-size.js              check every fixture against its ceiling
 //   node test/perf/bundle-size.js --update     rewrite the ceilings (measured size x 1.05)
@@ -20,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { listExamples } from "../../scripts/build-examples.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASELINE = join(ROOT, "test/perf/bundle-size.baseline.json");
@@ -74,6 +76,55 @@ export const FIXTURES = {
 			`\tb, err := json.Marshal(Config{Name: "a", Size: 3})\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tprintln(string(b))`,
 			`type Config struct {\n\tName string \`json:"name"\`\n\tSize int    \`json:"size"\`\n}\n\n`,
 		),
+	},
+	// Unused functions, types and methods of the entry package and of a local
+	// package stay out of the bundle, and a user `Len`/`Reset` does not keep
+	// the `strings.Builder` methods of the same name.
+	"user-dce": {
+		"main.go": `package main
+
+import (
+	"strings"
+	"./util"
+)
+
+type Box struct{ n int }
+
+func (b *Box) Used() int         { return b.n }
+func (b *Box) UnusedMethod() int { return b.n * 2 }
+
+type UnusedType struct{ s string }
+
+func (u UnusedType) Describe() string { return u.s }
+
+func UnusedUserFunction() string { return strings.Repeat("x", 3) }
+
+type Counter struct{ n int }
+
+func (c *Counter) Len() int { return c.n }
+func (c *Counter) Reset()   { c.n = 0 }
+
+func main() {
+	var sb strings.Builder
+	sb.WriteString("hi")
+	c := &Counter{n: 2}
+	c.Reset()
+	b := &Box{n: 3}
+	println(sb.String(), b.Used(), c.Len(), util.Used())
+}
+`,
+		"util/util.go": `package util
+
+import "strings"
+
+func Used() int { return 1 }
+
+func Unused() string { return strings.ToUpper("unused") }
+
+type Pad struct{ w int }
+
+func (p Pad) Width() int { return p.w }
+`,
 	},
 	// Three packages: only cfg calls json.Marshal; world has structs and no JSON call.
 	multipackage: {
@@ -138,6 +189,29 @@ export function measureFixture(files, tmp) {
 	return statSync(join(out, "app.js")).size;
 }
 
+// The key of an example's case in the baseline.
+const exampleCase = (name) => `example-${name}`;
+
+// Every case the budget covers: the fixtures and the example apps.
+export function caseNames() {
+	return [...Object.keys(FIXTURES), ...listExamples(ROOT).map(exampleCase)];
+}
+
+// Builds example `name` from its project directory (so a vendored import
+// resolves as it does for its users) and returns the size of its app.js.
+export function measureExample(name, tmp) {
+	const out = join(tmp, "out");
+	const res = spawnSync(
+		process.execPath,
+		[join(ROOT, "src/index.js"), "build", ".", "-o", out, "--release"],
+		{ cwd: join(ROOT, "example", name), encoding: "utf8" },
+	);
+	if (res.status !== 0) {
+		throw new Error(`build failed:\n${res.stderr || res.stdout}`);
+	}
+	return statSync(join(out, "app.js")).size;
+}
+
 export function measureAll() {
 	const sizes = {};
 	for (const [name, files] of Object.entries(FIXTURES)) {
@@ -146,6 +220,15 @@ export function measureAll() {
 			sizes[name] = measureFixture(files, tmp);
 		} catch (e) {
 			throw new Error(`${name}: ${e.message}`);
+		}
+		rmSync(tmp, { recursive: true, force: true });
+	}
+	for (const name of listExamples(ROOT)) {
+		const tmp = mkdtempSync(join(tmpdir(), "gofront-size-"));
+		try {
+			sizes[exampleCase(name)] = measureExample(name, tmp);
+		} catch (e) {
+			throw new Error(`${exampleCase(name)}: ${e.message}`);
 		}
 		rmSync(tmp, { recursive: true, force: true });
 	}
@@ -195,26 +278,37 @@ function main() {
 	const arg = process.argv[2];
 
 	if (arg === "--self-test") {
-		const [name, files] = Object.entries(FIXTURES)[0];
-		const tmp = mkdtempSync(join(tmpdir(), "gofront-size-"));
-		let bytes;
-		try {
-			bytes = measureFixture(files, tmp);
-		} finally {
-			rmSync(tmp, { recursive: true, force: true });
+		// One fixture and one example, so both ways of building are exercised.
+		const [fixture, files] = Object.entries(FIXTURES)[0];
+		const [example] = listExamples(ROOT);
+		const cases = {
+			[fixture]: (tmp) => measureFixture(files, tmp),
+			[exampleCase(example)]: (tmp) => measureExample(example, tmp),
+		};
+		for (const [name, measure] of Object.entries(cases)) {
+			const tmp = mkdtempSync(join(tmpdir(), "gofront-size-"));
+			let bytes;
+			try {
+				bytes = measure(tmp);
+			} finally {
+				rmSync(tmp, { recursive: true, force: true });
+			}
+			const sizes = { [name]: bytes };
+			const problems = checkBudgets(sizes, { [name]: bytes - 1 });
+			if (
+				problems.length !== 1 ||
+				!problems[0].includes(`${name}: ${bytes} B`)
+			) {
+				console.error(`self-test: expected one violation for ${name}, got:`);
+				console.error(problems.join("\n") || "(none)");
+				process.exit(1);
+			}
+			if (checkBudgets(sizes, { [name]: bytes }).length !== 0) {
+				console.error("self-test: a ceiling equal to the size must pass");
+				process.exit(1);
+			}
+			console.log(`bundle-size self-test ok: ${problems[0]}`);
 		}
-		const sizes = { [name]: bytes };
-		const problems = checkBudgets(sizes, { [name]: bytes - 1 });
-		if (problems.length !== 1 || !problems[0].includes(`${name}: ${bytes} B`)) {
-			console.error(`self-test: expected one violation for ${name}, got:`);
-			console.error(problems.join("\n") || "(none)");
-			process.exit(1);
-		}
-		if (checkBudgets(sizes, { [name]: bytes }).length !== 0) {
-			console.error("self-test: a ceiling equal to the size must pass");
-			process.exit(1);
-		}
-		console.log(`bundle-size self-test ok: ${problems[0]}`);
 		return;
 	}
 

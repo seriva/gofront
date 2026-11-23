@@ -143,6 +143,8 @@ A file marked `//gofront:target js` (such as `stdlib/time/sleep_js.go`) is loade
 
 Function bodies in these packages are type-checked only when the program reaches them, and only reachable declarations are emitted, so an unused import adds nothing to `app.js` or `app.wasm`.
 
+The JavaScript backend applies the same reachability to your own packages: one closure over the user and standard library programs starts from `main` (or the exported declarations of a package without one, or the test driver under `gofront test`) and leaves out functions, types, `templ` and `css` declarations, constants, variables and methods that nothing reaches. A method is kept when it is selected on its own type, called through an interface or type parameter, promoted through embedding, or when values of its type reach JavaScript, so a user-defined `Len` does not keep `strings.Builder.Len`. The runtime helpers the remaining code needs are defined once per bundle, ahead of every package, rather than once per package. `app.wasm` is left to Binaryen in release builds.
+
 Two markers connect Go source to the backends:
 
 - `//gofront:native <name>` keeps the Go body as the specification and lets a backend replace calls with a faster host primitive (`indexOf` for `strings.Index`, `Math.clz32` or a WASM instruction for `math/bits`). A native may decline an instantiation, in which case the call runs the Go body. Names form a closed set in `src/typechecker/types.js`; implementations live in `src/backend/js/natives.js` and `src/backend/wasm/natives.js`. `test/unit/compiler/natives.test.js` fails when a name is missing from a registry (outside a short single-target list) or when a registry entry has no Go declaration.

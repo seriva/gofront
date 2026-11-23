@@ -96,7 +96,30 @@ One reachability closure over user and stdlib programs decides what the JS backe
   - Files: `src/backend/js/index.js` (`_helpers`, `_prependHelpers`), `src/link/stdlib.js` (`stdlibJs`, `spliceStdlibJs`), `src/link/sourcemap.js`, `src/compiler.js`
   - Test: `test/unit/compiler/shared-helpers.test.js`: each helper (including `HELPER_INJECT_STYLES`) defined once in a `fmt` hello world (277 definitions of 77 on 2026-11-17) and a multi-package program; a helper used by one package or only by stdlib is still emitted; ESM `jsImports` (`example/preact`) still run cleanly; source maps of the second chunk still point at the right lines; a warm `gofront dev` rebuild equals a cold build
   - Done when: no helper is defined twice in any `example/*` bundle and outputs are unchanged
-- [ ] Task 2.3: Re-measure and tighten the bundle budgets (former 4.6)
+- [x] Task 2.3: Re-measure and tighten the bundle budgets (former 4.6)
   - Files: `test/perf/bundle-size.js`, `test/perf/bundle-size.baseline.json`, `docs/architecture.md`
   - Test: `node test/perf/bundle-size.js` and `--self-test` with new cases for the user-DCE probe program and each JS `example/*` bundle (building `example/preact` from its project dir so vendored imports resolve); `docs/architecture.md` notes that unused user and stdlib code is left out
   - Done when: every budget is at or below its 1.9.2 value, new cases have budgets, and before/after numbers are recorded under this task
+  - Measured (`--release` `app.js` bytes; 1.9.2 = tag `1.9.2`, P1 = `6d3a7dc4` after Phase 1, now = after Task 2.2; ceiling = new budget, 1.05x now, old 1.9.2 budget in parens):
+
+    | fixture | 1.9.2 | P1 | now | ceiling (old) |
+    |---|---|---|---|---|
+    | println | 46 | 46 | 46 | 49 (49) |
+    | fmt-println | 168513 | 170951 | 116647 | 122480 (176939) |
+    | fmt-sprintf | 175795 | 178453 | 120437 | 126459 (184585) |
+    | strconv | 87828 | 89010 | 71218 | 74779 (92220) |
+    | strings | 21318 | 22061 | 16253 | 17066 (22384) |
+    | json-unmarshal | 266321 | 270266 | 154132 | 161839 (279638) |
+    | json-unmarshal-any | 279398 | 283787 | 166567 | 174896 (293368) |
+    | json-marshal | 40042 | 40430 | 31451 | 33024 (42045) |
+    | multipackage | 175757 | 43639 | 31511 | 33087 (184545) |
+    | user-dce (new) | 28632 | 16375 | 12918 | 13564 |
+    | example-simple (new) | 241065 | 244979 | 157876 | 165770 |
+    | example-gom (new) | 250891 | 256788 | 157162 | 165021 |
+    | example-templ (new) | 233722 | 238936 | 156509 | 164335 |
+    | example-hybrid (new) | 202516 | 205885 | 145434 | 152706 |
+    | example-preact (new) | 400009 | 394156 | 243774 | 255963 |
+    | example-webgl (new) | 14512 | 14580 | 14538 | 15265 |
+
+  - `example-webgl` is 26 B above 1.9.2 (14512): the bundle is almost all runtime and not investigated further; it is 42 B below Phase 1. Its budget is new, so no 1.9.2 budget is exceeded.
+  - Bundle helper definitions (non-release `fmt.Println("hello")`): 277 definitions of 77 helpers before Task 2.2, 76 of 76 after (`var __x =` helpers); no `example/*` bundle defines a helper twice.

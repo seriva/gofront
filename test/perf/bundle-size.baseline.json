@@ -1,11 +1,18 @@
 {
 	"println": 49,
-	"fmt-println": 176939,
-	"fmt-sprintf": 184585,
-	"strconv": 92220,
-	"strings": 22384,
-	"json-unmarshal": 279638,
-	"json-unmarshal-any": 293368,
-	"json-marshal": 42045,
-	"multipackage": 184545
+	"fmt-println": 122480,
+	"fmt-sprintf": 126459,
+	"strconv": 74779,
+	"strings": 17066,
+	"json-unmarshal": 161839,
+	"json-unmarshal-any": 174896,
+	"json-marshal": 33024,
+	"user-dce": 13564,
+	"multipackage": 33087,
+	"example-gom": 165021,
+	"example-hybrid": 152706,
+	"example-preact": 255963,
+	"example-simple": 165770,
+	"example-templ": 164335,
+	"example-webgl": 15265
 }
