@@ -1,12 +1,26 @@
 package main
 
-import "js:./browser.d.ts"
-import "strings"
+import (
+	"gofront/dom"
+	"js:./browser.d.ts"
+	"strconv"
+	"strings"
+)
 
 // ── Input handling ────────────────────────────────────────────
 
+// attrInt reads the integer attribute name of el, or 0 when it is missing.
+func attrInt(el dom.Element, name string) int {
+	n, _ := strconv.Atoi(el.getAttribute(name))
+	return n
+}
+
+func focusInput() {
+	document.querySelector(".todo-input").(dom.HTMLElement).focus()
+}
+
 async func submitInput() {
-	input := document.querySelector(".todo-input")
+	input := document.querySelector(".todo-input").(dom.HTMLInputElement)
 	text := strings.TrimSpace(input.value)
 
 	err := validateTodo(text)
@@ -16,7 +30,7 @@ async func submitInput() {
 		await sleep(2500)
 		errorMsg = ""
 		render()
-		document.querySelector(".todo-input").focus()
+		focusInput()
 		return
 	}
 
@@ -30,7 +44,7 @@ async func submitInput() {
 		highPriority = false
 	}
 	render()
-	document.querySelector(".todo-input").focus()
+	focusInput()
 	await triggerSave()
 }
 
@@ -40,15 +54,16 @@ func setupEvents() {
 	app := document.querySelector("#app")
 
 	// click — handles add, priority toggle, delete, filter, clear-completed, stats bar
-	app.addEventListener("click", func(e any) {
-		action := e.target.getAttribute("data-action")
+	app.addEventListener("click", func(e dom.MouseEvent) {
+		target := e.target.(dom.Element)
+		action := target.getAttribute("data-action")
 		if action == nil || action == "" {
-			btn := e.target.closest("[data-action]")
+			btn := target.closest("[data-action]")
 			if btn == nil {
 				return
 			}
 			action = btn.getAttribute("data-action")
-			e = map[string]any{"target": btn}
+			target = btn
 		}
 		switch action {
 		case "add":
@@ -57,11 +72,11 @@ func setupEvents() {
 			highPriority = !highPriority
 			render()
 		case "delete":
-			removeTodo(int(e.target.getAttribute("data-todo-id")))
+			removeTodo(attrInt(target, "data-todo-id"))
 			render()
 			triggerSave()
 		case "filter":
-			setFilter(int(e.target.getAttribute("data-filter")))
+			setFilter(attrInt(target, "data-filter"))
 			render()
 		case "clear-completed":
 			clearCompleted()
@@ -74,42 +89,43 @@ func setupEvents() {
 	})
 
 	// keydown — Enter in the input submits
-	app.addEventListener("keydown", func(e any) {
-		if e.target.matches(".todo-input") && e.key == "Enter" {
+	app.addEventListener("keydown", func(e dom.KeyboardEvent) {
+		if e.target.(dom.Element).matches(".todo-input") && e.key == "Enter" {
 			submitInput()
 		}
 	})
 
 	// change — checkbox toggle
-	app.addEventListener("change", func(e any) {
-		if e.target.getAttribute("data-action") == "toggle" {
-			toggleTodo(int(e.target.getAttribute("data-todo-id")))
+	app.addEventListener("change", func(e dom.Event) {
+		target := e.target.(dom.Element)
+		if target.getAttribute("data-action") == "toggle" {
+			toggleTodo(attrInt(target, "data-todo-id"))
 			render()
 			triggerSave()
 		}
 	})
 
 	// drag-and-drop — delegated to #app so it survives re-renders
-	app.addEventListener("dragstart", func(e any) {
-		li := e.target.closest("li")
+	app.addEventListener("dragstart", func(e dom.DragEvent) {
+		li := e.target.(dom.Element).closest("li")
 		if li == nil {
 			return
 		}
-		dragSrcId = int(li.getAttribute("data-id"))
+		dragSrcId = attrInt(li, "data-id")
 		li.classList.add("dragging")
 		e.dataTransfer.effectAllowed = "move"
 	})
 
-	app.addEventListener("dragover", func(e any) {
-		li := e.target.closest("li")
+	app.addEventListener("dragover", func(e dom.DragEvent) {
+		li := e.target.(dom.Element).closest("li")
 		if li == nil {
 			return
 		}
-		targetId := int(li.getAttribute("data-id"))
+		targetId := attrInt(li, "data-id")
 		if dragSrcId != targetId {
 			e.preventDefault()
 			rect := li.getBoundingClientRect()
-			dropAfter = e.clientY > rect.top+rect.height/2
+			dropAfter = float64(e.clientY) > rect.top+rect.height/2
 			li.classList.remove("drag-over-top", "drag-over-bottom")
 			if dropAfter {
 				li.classList.add("drag-over-bottom")
@@ -119,23 +135,23 @@ func setupEvents() {
 		}
 	})
 
-	app.addEventListener("dragleave", func(e any) {
-		li := e.target.closest("li")
+	app.addEventListener("dragleave", func(e dom.DragEvent) {
+		li := e.target.(dom.Element).closest("li")
 		if li == nil {
 			return
 		}
-		if !li.contains(e.relatedTarget) {
+		if !li.contains(e.relatedTarget.(dom.Node)) {
 			li.classList.remove("drag-over-top", "drag-over-bottom")
 		}
 	})
 
-	app.addEventListener("drop", func(e any) {
+	app.addEventListener("drop", func(e dom.DragEvent) {
 		e.preventDefault()
-		li := e.target.closest("li")
+		li := e.target.(dom.Element).closest("li")
 		if li == nil {
 			return
 		}
-		targetId := int(li.getAttribute("data-id"))
+		targetId := attrInt(li, "data-id")
 		if dragSrcId != targetId {
 			moveTodo(dragSrcId, targetId, dropAfter)
 			render()
@@ -143,8 +159,8 @@ func setupEvents() {
 		}
 	})
 
-	app.addEventListener("dragend", func(e any) {
-		li := e.target.closest("li")
+	app.addEventListener("dragend", func(e dom.DragEvent) {
+		li := e.target.(dom.Element).closest("li")
 		if li != nil {
 			li.classList.remove("dragging", "drag-over-top", "drag-over-bottom")
 		}
@@ -169,5 +185,5 @@ async func main() {
 	}
 
 	render()
-	document.querySelector(".todo-input").focus()
+	focusInput()
 }

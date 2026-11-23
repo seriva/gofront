@@ -164,7 +164,7 @@ func TestTemplMountDOM(t *testing.T) {
 		t.Fatalf("expected 1 child in container, got %d", container.children.length)
 	}
 
-	li := container.children[0]
+	li := container.children.item(0)
 	if !strings.Contains(li.className, "todo-item high") {
 		t.Errorf("expected class 'todo-item high', got %q", li.className)
 	}

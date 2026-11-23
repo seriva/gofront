@@ -124,7 +124,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Files: `stdlib/gom/gom.go`, `stdlib/time/sleep_js.go`
   - Test: `test/unit/builtins/gom.test.js`, `test/unit/builtins/dom.test.js`, `test/unit/stdlib/time.test.js`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: `stdlib/gom/gom.go` (unchanged emitted JS) and `stdlib/time/sleep_js.go` (`setTimeout` integer timeout and `clearTimeout` id) are valid against both untyped and generated global types
-- [ ] Task 4.2: Migrate the examples ahead of the flip (former 7.4b)
+- [x] Task 4.2: Migrate the examples ahead of the flip (former 7.4b)
   - Files: `example/*/src`
   - Test: the example `_test.go` files (`gofront test --dom example/...`) and `node src/index.js check example/...`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: every member chain on a Web API global in `example/` (including `_test.go` `children.item(0)`, attribute integer parsing and the S27 arithmetic sites under the strict numeric rules) is valid against both untyped and generated global types, and `.d.ts` interface assertions emit no runtime checks
