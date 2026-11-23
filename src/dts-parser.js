@@ -7,14 +7,36 @@
 // both a type alias (e.g. `export type mat4 = ...`) and a namespace
 // (e.g. `export namespace mat4 { function create(): mat4 }`).
 //
-// Complex TypeScript types (generics, unions, intersections, mapped types,
-// conditional types, etc.) are simplified to `any`.
+// Complex TypeScript types (generics, intersections, mapped types,
+// conditional types, etc.) are simplified to `any`. A few forms are kept:
+//   - `T | null` / `T | undefined`: T, marked `_nullable` (it may be `nil`).
+//   - `Promise<T>`: `{ kind: "promise", elem: T }`; `await` yields T.
+//   - `(a: A, b?: B) => R`: a `func` type marked `_dts` (a callback).
+//   - `name?: T` parameters: the `func` type records `minArgs`, the number of
+//     arguments a call must pass.
+//   - `int`, `uint32`, `float32`, ...: the GoFront type (`number` is float64).
 
 const ANY = { kind: "basic", name: "any" };
 const VOID = { kind: "basic", name: "void" };
 
 const TS_PRIMITIVES = {
+	// `number` is a float64; a declaration that returns or takes a whole
+	// number names the GoFront integer type instead.
 	number: { kind: "basic", name: "float64" },
+	int: { kind: "basic", name: "int" },
+	int8: { kind: "basic", name: "int8" },
+	int16: { kind: "basic", name: "int16" },
+	int32: { kind: "basic", name: "int32" },
+	int64: { kind: "basic", name: "int64" },
+	uint: { kind: "basic", name: "uint" },
+	uint8: { kind: "basic", name: "uint8" },
+	uint16: { kind: "basic", name: "uint16" },
+	uint32: { kind: "basic", name: "uint32" },
+	uint64: { kind: "basic", name: "uint64" },
+	byte: { kind: "basic", name: "uint8" },
+	rune: { kind: "basic", name: "int32" },
+	float32: { kind: "basic", name: "float32" },
+	float64: { kind: "basic", name: "float64" },
 	string: { kind: "basic", name: "string" },
 	boolean: { kind: "basic", name: "bool" },
 	bool: { kind: "basic", name: "bool" },
@@ -244,7 +266,26 @@ export class DtsParser {
 
 	// Parse a TypeScript type expression and return a GoFront type.
 	// Always returns something; falls back to ANY for complex types.
+	// A union keeps its first non-null member: `T | null` is T marked
+	// `_nullable`, any other union member is discarded.
 	parseType(inReturn = false) {
+		const first = this._parseTypeNoUnion(inReturn);
+		const members = [first];
+
+		// Union / intersection: T | U  or  T & U
+		// (skip() handles multi-line unions where | is on the next line)
+		this.skip();
+		while (!this.eof() && (this.ch() === "|" || this.ch() === "&")) {
+			const union = this.ch() === "|";
+			this.pos++;
+			const member = this._parseTypeNoUnion();
+			if (union) members.push(member);
+			this.skip();
+		}
+		return nullableUnion(members);
+	}
+
+	_parseTypeNoUnion(inReturn = false) {
 		this.skip();
 
 		// Skip modifiers
@@ -277,28 +318,31 @@ export class DtsParser {
 			};
 			this.skip();
 		}
-
-		// Union / intersection: T | U  or  T & U → simplify to first concrete type
-		// (skip() handles multi-line unions where | is on the next line)
-		this.skip();
-		while (!this.eof() && (this.ch() === "|" || this.ch() === "&")) {
-			this.pos++;
-			this.parseType(); // discard (already calls skip() at start)
-		}
-
 		return base;
 	}
 
+	// `(a: A, b?: B) => R` is a function type; a parenthesized type is `any`
+	// unless it groups a function type.
 	_parseParenType() {
+		const start = this.pos;
 		this.pos++;
 		this.skipTypeExpr(")");
 		this.consume(")");
 		this.skip();
-		if (this.startsWith("=>")) {
-			this.pos += 2;
-			this.parseType();
+		if (!this.startsWith("=>")) {
+			// `(() => void)`: the parentheses only group a function type.
+			const end = this.pos;
+			this.pos = start + 1;
+			const inner = this.parseType();
+			this.pos = end;
+			return inner.kind === "func" ? inner : ANY;
 		}
-		return ANY;
+		this.pos = start;
+		const params = this.parseParams();
+		this.skip();
+		this.pos += 2; // =>
+		const ret = this.parseType(true);
+		return { ...funcType(params, ret), _dts: true };
 	}
 
 	_parseTemplateLit() {
@@ -319,12 +363,25 @@ export class DtsParser {
 		}
 		if (name === "true" || name === "false")
 			return { kind: "basic", name: "bool" };
+		if (name === "Promise" && this.peek() === "<") return this._parsePromise();
 		this.skipGenerics();
+		// `pkg.T` names the type T of another declaration package or namespace.
+		let qualified = name;
 		while (this.ch() === ".") {
 			this.pos++;
-			this.readIdent();
+			qualified += `.${this.readIdent()}`;
 		}
-		return { kind: "basic", name: "any", alias: name };
+		return { kind: "basic", name: "any", alias: qualified };
+	}
+
+	// `Promise<T>`; `await` of it yields T.
+	_parsePromise() {
+		this.pos++; // <
+		const elem = this.parseType();
+		this.skip();
+		while (!this.eof() && this.ch() !== ">") this.pos++;
+		this.consume(">");
+		return { kind: "promise", elem };
 	}
 
 	_parseBaseType(inReturn = false) {
@@ -369,7 +426,7 @@ export class DtsParser {
 			// param name (may be followed by ? for optional)
 			const name = this.readIdent() || "_";
 			this.skip();
-			this.consume("?"); // optional marker
+			const optional = this.consume("?");
 
 			// Type annotation
 			let type = ANY;
@@ -379,7 +436,7 @@ export class DtsParser {
 				type = this.parseType();
 			}
 
-			params.push({ name, type, variadic: isRest });
+			params.push({ name, type, variadic: isRest, optional });
 
 			this.skip();
 			if (this.ch() !== ",") break;
@@ -443,23 +500,7 @@ export class DtsParser {
 			ret = this.parseType(true);
 		}
 		this.consume(";");
-		const isVariadic = params.some((p) => p.variadic);
-		return {
-			name,
-			val: {
-				kind: "func",
-				params: params.map((p) =>
-					p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
-				),
-				returns:
-					ret.kind === "tuple"
-						? ret.types.length > 0
-							? ret.types
-							: [VOID]
-						: [ret],
-				...(isVariadic ? { variadic: true } : {}),
-			},
-		};
+		return { name, val: funcType(params, ret) };
 	}
 
 	_parseMemberNewSig() {
@@ -644,20 +685,7 @@ export class DtsParser {
 				ret = this.parseType(true);
 			}
 			this.consume(";");
-			const isVariadic = params.some((p) => p.variadic);
-			out[name] = {
-				kind: "func",
-				params: params.map((p) =>
-					p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
-				),
-				returns:
-					ret.kind === "tuple"
-						? ret.types.length > 0
-							? ret.types
-							: [VOID]
-						: [ret],
-				...(isVariadic ? { variadic: true } : {}),
-			};
+			out[name] = funcType(params, ret);
 		} else if (this.ch() === ":") {
 			this.pos++;
 			const type = this.parseType();
@@ -792,6 +820,41 @@ export class DtsParser {
 				break;
 		}
 	}
+}
+
+// The `func` type of a signature with parameters `params` (parseParams) and
+// result `ret`. A call must pass the arguments before the first optional
+// parameter.
+function funcType(params, ret) {
+	const isVariadic = params.some((p) => p.variadic);
+	const firstOptional = params.findIndex((p) => p.optional);
+	return {
+		kind: "func",
+		params: params.map((p) =>
+			p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
+		),
+		returns:
+			ret.kind === "tuple"
+				? ret.types.length > 0
+					? ret.types
+					: [VOID]
+				: [ret],
+		...(isVariadic ? { variadic: true } : {}),
+		...(firstOptional >= 0 ? { minArgs: firstOptional } : {}),
+	};
+}
+
+// The type of the union `members`: its first member that is not `null` or
+// `undefined`, marked `_nullable` when the union has one of those. `any` and
+// a union of only `null` and `undefined` need no mark (they hold `nil`).
+function nullableUnion(members) {
+	const concrete = members.filter(
+		(t) => !(t.kind === "basic" && t.name === "nil"),
+	);
+	if (concrete.length === members.length || concrete.length === 0)
+		return members[0];
+	const t = concrete[0];
+	return t.kind === "basic" && t.name === "any" ? t : { ...t, _nullable: true };
 }
 
 // Binds the `extends` names of the interfaces and classes in `decls` that

@@ -403,7 +403,7 @@ export const expressionCheckMethods = {
 						expr,
 					);
 				}
-				return this.checkExpr(expr.expr, scope);
+				return this._awaitedType(this.checkExpr(expr.expr, scope));
 			}
 			case "InstantiationExpr":
 				return this._checkInstantiationExpr(expr, scope);
@@ -1954,6 +1954,14 @@ export const expressionCheckMethods = {
 		return targetType;
 	},
 
+	// What `await` yields: T for a `Promise<T>` from a `.d.ts` declaration (no
+	// value for `Promise<void>`), else the operand's own type (an `async`
+	// function's call already has its declared result).
+	_awaitedType(t) {
+		if (t?.kind !== "promise") return t;
+		return this.resolveType(t.elem);
+	},
+
 	// `x.(T)` with `x` a `.d.ts` interface or class value and `T` one too:
 	// JavaScript has no runtime type to test, so the assertion passes the
 	// value through (a GoFront package namespace is not such a type).
@@ -2802,17 +2810,22 @@ export const expressionCheckMethods = {
 	},
 
 	_checkArgCount(fnType, argTypes, expr) {
-		const minArgs = fnType.params.filter(
-			(_, i) => !fnType.variadic || i < fnType.params.length - 1,
-		).length;
+		// A `.d.ts` signature with optional parameters records how many a call
+		// must pass (`minArgs`).
+		const optional = fnType.minArgs !== undefined;
+		const minArgs =
+			fnType.minArgs ??
+			fnType.params.filter(
+				(_, i) => !fnType.variadic || i < fnType.params.length - 1,
+			).length;
 		if (argTypes.length < minArgs)
 			this.err(
-				`Too few arguments: expected ${fnType.params.length}, got ${argTypes.length}`,
+				`Too few arguments: expected ${optional ? "at least " : ""}${minArgs}, got ${argTypes.length}`,
 				expr,
 			);
 		if (!fnType.variadic && argTypes.length > fnType.params.length)
 			this.err(
-				`Too many arguments: expected ${fnType.params.length}, got ${argTypes.length}`,
+				`Too many arguments: expected ${optional ? "at most " : ""}${fnType.params.length}, got ${argTypes.length}`,
 				expr,
 			);
 	},

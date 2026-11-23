@@ -286,8 +286,14 @@ export class JsonCodecGen extends TypeSpeller {
 	encInterop(t, x) {
 		const u = under(t);
 		const fail = (name) => `\te.FailType(${q(name)})`;
-		if (u.kind === "namespace")
-			return [`if ${x} == nil {`, "\te.Null()", "} else {", fail(u.name), "}"];
+		if (isInteropValue(u))
+			return [
+				`if ${x} == nil {`,
+				"\te.Null()",
+				"} else {",
+				fail(interopTypeName(u)),
+				"}",
+			];
 		if (u.kind === "pointer")
 			return [
 				`if ${x} == nil {`,
@@ -456,7 +462,7 @@ export class JsonCodecGen extends TypeSpeller {
 		if (u.kind === "slice" || u.kind === "map") return `len(${x}) == 0`;
 		if (u.kind === "array") return u.size === 0 ? "true" : "false";
 		if (u.kind === "struct") return "false";
-		if (u.kind === "namespace") return `${x} == nil`;
+		if (isInteropValue(u)) return `${x} == nil`;
 		const n = unalias(u.name);
 		if (n === "bool") return `!${x}`;
 		if (n === "string") return `${x} == ""`;
@@ -939,7 +945,7 @@ export class JsonCodecGen extends TypeSpeller {
 			`func ${name}(v any) ([]byte, error) {`,
 			"\te := jsonrt.NewEnc()",
 		];
-		if (!argType || isInterface(argType)) {
+		if (dynamicEntryArg(argType)) {
 			this.flagDynamic();
 			lines.push(`\t${this.prefix}encAny(e, v)`);
 		} else {
@@ -967,7 +973,7 @@ export class JsonCodecGen extends TypeSpeller {
 			`func ${name}(v any, prefix, indent string) ([]byte, error) {`,
 			"\te := jsonrt.NewEnc()",
 		];
-		if (!argType || isInterface(argType)) {
+		if (dynamicEntryArg(argType)) {
 			this.flagDynamic();
 			lines.push(`\t${this.prefix}encAny(e, v)`);
 		} else {
@@ -998,7 +1004,7 @@ export class JsonCodecGen extends TypeSpeller {
 			"\t\treturn err",
 			"\t}",
 		];
-		if (argType?.kind === "pointer" && !isInterface(argType)) {
+		if (argType?.kind === "pointer" && !dynamicEntryArg(argType)) {
 			this.decTargets.push(argType);
 			lines.push(
 				`\tp, _ := v.(${this.spell(argType)})`,
@@ -1008,7 +1014,7 @@ export class JsonCodecGen extends TypeSpeller {
 				...this.rootDecode(argType, "p").map((l) => `\t${l}`),
 				"\treturn d.Done()",
 			);
-		} else if (!argType || isInterface(argType)) {
+		} else if (dynamicEntryArg(argType)) {
 			lines.push(`\treturn ${this.prefix}decAny(d, v)`);
 			this.dynamicDecode = true;
 		} else {
@@ -1034,7 +1040,7 @@ export class JsonCodecGen extends TypeSpeller {
 			"\te := jsonrt.NewEnc()",
 			"\te.EscapeHTML = enc.EscapeHTML()",
 		];
-		if (!argType || isInterface(argType)) {
+		if (dynamicEntryArg(argType)) {
 			this.flagDynamic();
 			lines.push(`\t${this.prefix}encAny(e, v)`);
 		} else {
@@ -1070,7 +1076,7 @@ export class JsonCodecGen extends TypeSpeller {
 			"\t}",
 			"\tdec.SetupDec(d)",
 		];
-		if (argType?.kind === "pointer" && !isInterface(argType)) {
+		if (argType?.kind === "pointer" && !dynamicEntryArg(argType)) {
 			this.decTargets.push(argType);
 			lines.push(
 				`\tp, _ := v.(${this.spell(argType)})`,
@@ -1080,7 +1086,7 @@ export class JsonCodecGen extends TypeSpeller {
 				...this.rootDecode(argType, "p").map((l) => `\t${l}`),
 				"\treturn d.Done()",
 			);
-		} else if (!argType || isInterface(argType)) {
+		} else if (dynamicEntryArg(argType)) {
 			lines.push(`\treturn ${this.prefix}decAny(d, v)`);
 			this.dynamicDecode = true;
 		} else {
@@ -1250,6 +1256,16 @@ export class JsonCodecGen extends TypeSpeller {
 const isTaggedSlice = (t) =>
 	under(t)?.kind === "slice" && isBasic(under(t).elem, SHARED_REPR);
 
+// A json entry point takes the dynamic path for a value whose type cannot be
+// written as Go source: an interface, or a JS-interop value (see
+// `reachesInterop`).
+const dynamicEntryArg = (t) => !t || isInterface(t) || holdsInterop(t);
+
+// A value of a `.d.ts` type: an interface or class, or a `Promise<T>`.
+const isInteropValue = (u) => u.kind === "namespace" || u.kind === "promise";
+
+const interopTypeName = (u) => (u.kind === "promise" ? "Promise" : u.name);
+
 // json.RawMessage and json.Number values can reach an interface from any
 // expression (a conversion, a field read).
 // True when `t` is, or holds through pointers, elements and struct fields, a
@@ -1260,6 +1276,7 @@ export function reachesInterop(t, seen = new Set(), viaStruct = true) {
 	const u = under(t) ?? t;
 	switch (u.kind) {
 		case "namespace":
+		case "promise":
 			return true;
 		case "pointer":
 			return reachesInterop(u.base, seen, viaStruct);
@@ -1288,7 +1305,7 @@ const holdsInterop = (t) => reachesInterop(t, new Set(), false);
 // The name of the JS-interop type that `t` is or wraps.
 function interopName(t) {
 	const u = under(t);
-	if (u.kind === "namespace") return u.name;
+	if (isInteropValue(u)) return interopTypeName(u);
 	if (u.kind === "map")
 		return interopName(holdsInterop(u.key) ? u.key : u.value);
 	return interopName(u.base ?? u.elem);

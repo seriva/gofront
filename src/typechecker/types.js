@@ -786,6 +786,8 @@ export function typeStr(t) {
 		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
+		case "promise":
+			return `Promise<${typeStr(t.elem)}>`;
 		case "named": {
 			const name = displayTypeName(t.name);
 			return t.typeArgs && t.typeArgs.length > 0
@@ -951,6 +953,8 @@ function identicalShape(a, b, seen) {
 			return identicalIn(a.base, b.base, seen);
 		case "tuple":
 			return sameList(a.types, b.types, seen);
+		case "promise":
+			return identicalIn(a.elem, b.elem, seen);
 		case "shared":
 			return a.shared === b.shared;
 		case "func":

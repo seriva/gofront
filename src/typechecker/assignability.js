@@ -874,7 +874,7 @@ export const assignabilityMethods = {
 		return (
 			u?.kind === "struct" ||
 			u?.kind === "array" ||
-			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name))
+			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name) && !u._nullable)
 		);
 	},
 
@@ -1734,10 +1734,68 @@ export const assignabilityMethods = {
 		const tFunc = this._deepUnderlying(target);
 		const sFunc = this._deepUnderlying(source);
 		if (tFunc?.kind === "func" && sFunc?.kind === "func") {
-			if (!this._implementsMethod(tFunc, sFunc)) mismatch();
+			const ok = tFunc._dts
+				? this._dtsCallbackOk(tFunc, sFunc)
+				: this._implementsMethod(tFunc, sFunc);
+			if (!ok) mismatch();
 			return true;
 		}
 		return false;
+	},
+
+	// Whether a Go func `source` may be passed where the `.d.ts` callback type
+	// `target` is wanted. JavaScript calls it with the target's arguments and
+	// ignores what it does not take, so `source` may take fewer parameters and
+	// may return nothing where the callback's result is `void`, `undefined`,
+	// `any`, nullable or a `Promise<void>`.
+	_dtsCallbackOk(target, source) {
+		const tp = target.params ?? [];
+		const sp = source.params ?? [];
+		if (sp.length > tp.length && !target.variadic) return false;
+		for (const [i, s] of sp.entries()) {
+			const t = tp[Math.min(i, tp.length - 1)];
+			if (!this._dtsCallbackParamOk(t, s)) return false;
+		}
+		return this._dtsCallbackResultOk(target, source);
+	},
+
+	// A parameter the callback's caller passes as `t` and `source` takes as
+	// `s`: the same type, a `.d.ts` interface on the same `extends` chain (so
+	// `func(e MouseEvent)` serves an `Event` callback), or `any` on either
+	// side.
+	_dtsCallbackParamOk(t, s) {
+		const target = this.resolveType(t);
+		const source = this.resolveType(s);
+		if (isAny(target) || isAny(source) || identical(target, source))
+			return true;
+		return (
+			this._dtsDerivesFrom(source, target) ||
+			this._dtsDerivesFrom(target, source)
+		);
+	},
+
+	_dtsCallbackResultOk(target, source) {
+		const results = (f) =>
+			this._unpackReturns(f.returns ?? []).filter(
+				(r) => r && !isVoid(r) && !isNil(r),
+			);
+		const want = results(target);
+		const got = results(source);
+		if (want.length === 0) return true;
+		if (got.length === 0) return want.every((t) => this._mayReturnNothing(t));
+		return (
+			want.length === got.length &&
+			want.every((t, i) =>
+				this._assignableQuietly(this._awaitedType(t), got[i]),
+			)
+		);
+	},
+
+	// Whether a callback result of type `t` may be left out: JavaScript yields
+	// `undefined`, which `any`, a nullable type and `Promise<void>` hold.
+	_mayReturnNothing(t) {
+		if (isAny(t) || t._nullable) return true;
+		return t.kind === "promise" && isVoid(this._awaitedType(t));
 	},
 
 	// ── Interface satisfaction ────────────────────────────────────────
