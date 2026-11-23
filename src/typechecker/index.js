@@ -188,10 +188,18 @@ export class TypeChecker {
 	addDefinitions(
 		types,
 		values,
-		{ external = true, consts = null, kinds = null, file = null } = {},
+		{
+			external = true,
+			consts = null,
+			kinds = null,
+			file = null,
+			reached = null,
+		} = {},
 	) {
 		const scope = this._fileScope(file);
 		for (const [name, type] of types) this._bindImportedType(file, name, type);
+		for (const [name, type] of reached ?? [])
+			this._bindImportedType(file, name, type, false);
 		for (const [name, type] of values) {
 			const kind = kinds?.get(name);
 			if (kinds ? kind === "type" : types.get(name) === type)
@@ -243,13 +251,14 @@ export class TypeChecker {
 	// Registers the type `type` an import of `file` names `key`: the type table
 	// (the build's registry, which backends and `resolveType` read) knows it,
 	// and only `file` resolves the name.
-	_bindImportedType(file, key, type) {
+	// `visible` false registers it for the table only: no file resolves the name.
+	_bindImportedType(file, key, type, visible = true) {
 		// A predeclared type (`error`) an importer's table also lists is no import.
 		if (this.types.get(key) === type && !this._importKeys.has(key)) return;
 		this.types.set(key, type);
 		this._importKeys.add(key);
 		this._importBound.add(type);
-		this._fileScope(file).importedTypes.set(key, type);
+		if (visible) this._fileScope(file).importedTypes.set(key, type);
 	}
 
 	// The generated Go names a local package by the qualifier an importing file
@@ -299,6 +308,7 @@ export class TypeChecker {
 		consts = null,
 		kinds = null,
 		file = null,
+		reached = null,
 	) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
@@ -312,7 +322,7 @@ export class TypeChecker {
 			_consts: consts,
 			_kinds: kinds,
 		});
-		for (const [name, type] of types) {
+		const register = (name, type, visible) => {
 			const prior = this.types.get(name);
 			if (prior && prior !== type && prior.kind === "named") {
 				this._ambiguousImported ??= new WeakSet();
@@ -328,9 +338,12 @@ export class TypeChecker {
 				this.types.set(name, type);
 				this._importKeys.add(name);
 			}
-			this._bindImportedType(file, `${pkgName}.${name}`, type);
+			this._bindImportedType(file, `${pkgName}.${name}`, type, visible);
 			this._importedTypes.add(type);
-		}
+		};
+		for (const [name, type] of types) register(name, type, true);
+		// Types the package reached through its own imports (see `getReachedTypes`).
+		for (const [name, type] of reached ?? []) register(name, type, false);
 	}
 
 	// Register an import for unused-import detection.
@@ -398,8 +411,29 @@ export class TypeChecker {
 		return out;
 	}
 
+	// The types the package declares. A type an import registered (`leaf.T`,
+	// or `T` through a dot import) belongs to the imported package, so an
+	// importer of this package does not see it by name; a local declaration of
+	// the same name replaces the entry in the table and stays.
 	getExportedTypes() {
-		return new Map(this.types);
+		const out = new Map();
+		for (const [key, type] of this.types)
+			if (!this._isImportRegistered(key, type)) out.set(key, type);
+		return out;
+	}
+
+	// The types an import registered in the table (see `getExportedTypes`). An
+	// importer keeps them in its own table, no file resolving them by name:
+	// the generated Go spells a type it reaches through this package from them.
+	getReachedTypes() {
+		const out = new Map();
+		for (const [key, type] of this.types)
+			if (this._isImportRegistered(key, type)) out.set(key, type);
+		return out;
+	}
+
+	_isImportRegistered(key, type) {
+		return this._importKeys.has(key) && this._importBound.has(type);
 	}
 
 	recordBlocker(category, item = null) {

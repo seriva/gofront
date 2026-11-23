@@ -17,6 +17,7 @@ import {
 	section,
 	summarize,
 	test,
+	toCompileResult,
 	withTempDir,
 } from "../helpers.js";
 
@@ -877,6 +878,134 @@ for (const [name, [files, want]] of Object.entries(PKG_CASES)) {
 		});
 	}
 }
+
+section("Packages export only what they declare");
+
+// Compiles `files` in a temp dir and returns the error messages.
+function packageErrors(files) {
+	return withTempDir(files, (dir) => {
+		const { errors } = toCompileResult(() => compileDir(dir));
+		return errors;
+	});
+}
+
+const MYDEP_FILES = {
+	"node_modules/mydep/package.json": '{"name":"mydep","types":"index.d.ts"}',
+	"node_modules/mydep/index.d.ts": "export declare const Bar: number;\n",
+};
+
+const LEAF_FILES = {
+	"leaf/leaf.go": `package leaf
+
+type Leaf struct{ N int }
+
+func LeafFn() int { return 7 }
+`,
+};
+
+test("a package does not export the values of a typed npm import (I1.7)", () => {
+	const errors = packageErrors({
+		...MYDEP_FILES,
+		"sub/sub.go": `package sub
+
+import "mydep"
+
+func Use() float64 { return Bar }
+`,
+		"main.go": `package main
+
+import "./sub"
+
+func main() { println(sub.Bar) }
+`,
+	});
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "No member 'Bar' in namespace sub");
+});
+
+for (const [name, imp, body, use, want] of [
+	[
+		"a dot-imported function",
+		'import . "../leaf"',
+		"return LeafFn()",
+		"println(sub.LeafFn())",
+		"No member 'LeafFn' in namespace sub",
+	],
+	[
+		"a dot-imported type",
+		'import . "../leaf"',
+		"var _ Leaf; return 1",
+		"var _ sub.Leaf",
+		"Unknown type 'sub.Leaf'",
+	],
+	[
+		"an import alias used as a type",
+		'import Leaf "../leaf"',
+		"var _ Leaf.Leaf; return 1",
+		"var _ sub.Leaf",
+		"Unknown type 'sub.Leaf'",
+	],
+	[
+		"a type of an imported package",
+		'import "../leaf"',
+		"var _ leaf.Leaf; return 1",
+		"var _ sub.Leaf",
+		"Unknown type 'sub.Leaf'",
+	],
+]) {
+	test(`a package does not export ${name} (I1.10)`, () => {
+		const errors = packageErrors({
+			...LEAF_FILES,
+			"sub/sub.go": `package sub
+
+${imp}
+
+func Use() int { ${body} }
+`,
+			"main.go": `package main
+
+import "./sub"
+
+func main() { ${use} }
+`,
+		});
+		assertErrorContains(errors, want);
+	});
+}
+
+test("a package still exports what it declares", () => {
+	withTempDir(
+		{
+			...MYDEP_FILES,
+			...LEAF_FILES,
+			"sub/sub.go": `package sub
+
+import (
+	"mydep"
+	. "../leaf"
+)
+
+var Baz = 1
+
+type Own struct{ V int }
+
+func Use() float64 { return float64(LeafFn()) }
+
+func Other() float64 { return Bar }
+`,
+			"main.go": `package main
+
+import "./sub"
+
+func main() {
+	o := sub.Own{V: 2}
+	println(sub.Use(), sub.Baz, o.V)
+}
+`,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "7 1 2"),
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

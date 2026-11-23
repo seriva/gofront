@@ -2492,6 +2492,101 @@ func main() { _ = A(1) }
 	}
 });
 
+section("Qualified type names resolve their qualifier first");
+
+const NPM = 'import "nope/zzz"\n';
+const qualifiedTypeCases = [
+	[
+		"a variable of a qualified type",
+		`${NPM}var x zzz.T\nfunc main() { _ = x }`,
+		3,
+		7,
+	],
+	["a composite literal", `${NPM}func main() { _ = zzz.T{} }`, 3, 19],
+	[
+		"an instantiated generic type",
+		`${NPM}var y zzz.T[int]\nfunc main() { _ = y }`,
+		3,
+		7,
+	],
+];
+
+for (const [name, body, line, col] of qualifiedTypeCases) {
+	for (const target of ["wasm", "both"]) {
+		test(`${name} of an untyped npm import is js-only in a ${target} package (I2.1)`, () => {
+			const { errors } = compile(`package main\n${body}\n`, { target });
+			assertErrorContains(errors, "'zzz.T' is only available in js packages");
+			assertErrorContains(errors, `at line ${line}:${col}`);
+			assertEqual(
+				errors.filter((e) => /Unknown struct|invalid composite/.test(e.message))
+					.length,
+				0,
+			);
+		});
+	}
+}
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, src] of [
+		["a browser global", "func main() { _ = console.T{} }"],
+		["a local variable", "func main() { v := 1; _ = v.T{} }"],
+		["a parameter", "func f(v int) { _ = v.T{} }\nfunc main() { f(1) }"],
+	]) {
+		test(`a composite literal of ${what} qualified type is not a type in a ${target} package (I2.2)`, () => {
+			const { errors } = compile(`package main\n${src}\n`, { target });
+			assertErrorContains(errors, ".T is not a type");
+			assertEqual(
+				errors.filter((e) => /int has no field/.test(e.message)).length,
+				0,
+			);
+		});
+	}
+}
+
+test("a variable of a local variable's qualified type is not a type (I2.2)", () => {
+	const { errors } = compile(
+		"package main\nfunc main() { v := 1; var x v.T; _ = x }\n",
+	);
+	assertErrorContains(errors, "v.T is not a type");
+});
+
+test("a variable of a browser global's qualified type stays an unknown type (control)", () => {
+	const { errors } = compile(
+		"package main\nfunc main() { var x console.T; _ = x }\n",
+	);
+	assertErrorContains(errors, "Unknown type 'console.T'");
+});
+
+test("a typed package's qualified type and literal still resolve (control)", () => {
+	const { js, errors } = compile(
+		`package main
+import "strings"
+func main() {
+	var b strings.Builder
+	b.WriteString("a")
+	_ = strings.Builder{}
+	println(b.String())
+}
+`,
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "a");
+});
+
+test("a local variable named like an import hides the package in a type (I2.2)", () => {
+	const { errors } = compile(
+		`package main
+import "strings"
+func main() {
+	strings := 1
+	var b strings.Builder
+	_, _ = strings, b
+}
+`,
+	);
+	assertErrorContains(errors, "strings.Builder is not a type");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
