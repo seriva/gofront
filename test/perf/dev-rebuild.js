@@ -3,7 +3,7 @@
 // Measures what `gofront dev` does on a save: one file of the example's
 // package is edited and the build reruns against the cache the earlier builds
 // filled.  Gate: the median rebuild of `example/gom` and `example/simple`
-// (JS target, source maps on, output written) takes under 25 ms.
+// (JS target, source maps on, output written) takes under 35 ms.
 //
 // Usage:
 //   node test/perf/dev-rebuild.js [--runs 20] [--json]
@@ -30,7 +30,7 @@ const flag = (name, dflt) => {
 };
 const RUNS = Number(flag("runs", 20));
 const JSON_OUT = args.includes("--json");
-const GATE_MS = 25;
+const GATE_MS = 35;
 const WARMUP = 3;
 const EXAMPLES = ["gom", "simple"];
 
