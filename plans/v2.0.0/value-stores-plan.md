@@ -126,11 +126,11 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
 > Scheduled from the assignment-semantics deferred follow-ups (re-probed 2026-11-17), L14 from the former `followup-fixes-plan.md`, and one `plans/follow-ups.md` entry.
 
 ### Phase 1: Differential fuzzer covers stores (root `fuzz-generator`)
-- [ ] Task 1.1: Valid batches and transitive conflict detection (V1.1, V1.2)
+- [x] Task 1.1: Valid batches and transitive conflict detection (V1.1, V1.2)
   - Files: `test/fuzz/difffuzz.js`
   - Test: `test/unit/cli/difffuzz.test.js` (Go-free): the generator's batch for `--case 6873:0` declares `ks` before `f0`; `stmtConflicts` rejects the V1.2 statement
   - Done when: both pass; `--mode order --stmts 12 --case 6873:0` compiles with Go (by hand)
-- [ ] Task 1.2: `--mode stores` generates the V3/V4 shapes (V1.3)
+- [x] Task 1.2: `--mode stores` generates the V3/V4 shapes (V1.3)
   - Files: `test/fuzz/difffuzz.js`, `docs/architecture.md` (*Differential fuzzer*: the new mode)
   - Test: `test/unit/cli/difffuzz.test.js`: a seeded `--mode stores` batch contains each shape (comma-ok into `*p` and generic targets, range-over-func `=`, `for` post, closure-captured struct, embedded field)
   - Done when: passes; a by-hand run reproduces at least V3.1 and V4.1 as findings before Phases 3–4
