@@ -252,6 +252,99 @@ func main() {
 	);
 });
 
+test("a struct reassigned to a variable a closure reads keeps its own copy (V4.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type V struct{ M, K int }
+
+func main() {
+	v := V{9, 5}
+	w := v
+	w = v
+	v.K = 7
+	fmt.Println(w)
+	func() { _ = w.M }()
+}
+`,
+		"{9 5}\n",
+	);
+});
+
+test("a struct stored into a variable a closure mutates is a copy (V4.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ M int }
+type V struct {
+	P
+	K int
+}
+
+func main() {
+	v := V{P{-4}, 7}
+	w := v
+	f := func() { v.M = 5 }
+	v = w
+	f()
+	fmt.Println(w, v)
+}
+`,
+		"{{-4} 7} {{5} 7}\n",
+	);
+});
+
+test("a captured struct whose address is taken is stored in place and copies its source", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func main() {
+	w := S{1}
+	src := S{2}
+	pw := &w
+	f := func() { w.N += 10 }
+	w = src
+	f()
+	fmt.Println(*pw, pw == &w, src)
+}
+`,
+		"{12} true {2}\n",
+	);
+});
+
+test("struct fields of a composite literal are copies (V4.2)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P2 struct{ A [2]int }
+type W struct{ Q P2 }
+
+func main() {
+	p := P2{[2]int{1, 2}}
+	var a W
+	pa := &a
+	*pa = W{Q: p}
+	pa.Q.A[0] = 9
+	fmt.Println(p, a)
+	b := W{Q: p}
+	b.Q.A[1] = 8
+	fmt.Println(p, b)
+}
+`,
+		"{[1 2]} {{[9 2]}}\n{[1 2]} {{[1 8]}}\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {
@@ -1556,7 +1649,13 @@ func main() {
 section("Whole-value stores");
 
 // Each body runs in `main`; `S` is `struct{ N int }`.
-const storeCase = (name, decls, body, want, assertFn = assertJsTargetsOutput) =>
+const storeCase = (
+	name,
+	decls,
+	body,
+	want,
+	assertFn = assertAllTargetsOutput,
+) =>
 	test(name, async () => {
 		await assertFn(
 			`package main
@@ -1909,4 +2008,22 @@ storeCase(
 	}
 	fmt.Println(sl)`,
 	"[5 6] true\n[7 8] true\n[9 10]\n",
+);
+
+storeCase(
+	"a store into an array of arrays keeps the slice views of its rows",
+	"type T struct{ M [2][2]int }",
+	`	m := [2][2]int{{1, 2}, {3, 4}}
+	sl := m[0][:]
+	p := &m
+	*p = [2][2]int{{5, 6}, {7, 8}}
+	fmt.Println(sl, m)
+	m = [2][2]int{{9, 10}, {11, 12}}
+	fmt.Println(sl, *p)
+	var t T
+	ts := t.M[1][:]
+	pt := &t
+	t = T{M: [2][2]int{{5, 6}, {7, 8}}}
+	fmt.Println(ts, *pt)`,
+	"[5 6] [[5 6] [7 8]]\n[9 10] [[9 10] [11 12]]\n[7 8] {[[5 6] [7 8]]}\n",
 );
