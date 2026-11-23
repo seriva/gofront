@@ -893,23 +893,18 @@ export class StmtsEmitter {
 		const elemGoType = this._getArrayElemType(goType);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const wType = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
-		if (this._isValueStruct(elemGoType)) {
-			this._emitStructElemsStoreInto(elemGoType, arrInfo, wType, r, emitDst);
-			return;
-		}
 		const dst = this.acquireTemp(wType);
+		const src = this.acquireTemp(wType);
 		emitDst();
-		this.pushInstruction({ op: "local.tee", index: dst });
-		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: dst });
 		this.emitExpr(r, wType);
-		this._emitCopyIfValue(r, goType, wType);
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.get", index: dst });
-		this.pushInstruction("array.len");
-		this.pushInstruction({
-			op: "array.copy",
-			typeIndex: arrInfo.typeIndex,
-		});
+		// An element that is an array may be a never-written (null) slot, and
+		// the copy keeps the source from aliasing what the store writes.
+		if (!this._isValueStruct(elemGoType))
+			this._emitCopyIfValue(r, goType, wType);
+		this.pushInstruction({ op: "local.set", index: src });
+		this._emitArrayElemsInto(goType, dst, src);
+		this.releaseTemp(src, wType);
 		this.releaseTemp(dst, wType);
 	}
 
@@ -926,21 +921,31 @@ export class StmtsEmitter {
 		);
 	}
 
-	// An array of structs holds element references, so `array.copy` would
-	// swap them and leave `&a[i]` pointing at the old element.  Copy each
-	// element's fields into the existing element struct instead.
-	_emitStructElemsStoreInto(elemGoType, arrInfo, wType, r, emitDst) {
-		const elemInfo = this._resolveStructInfo({ _type: elemGoType });
+	// Copies the elements of the array in the temp `src` into the array in the
+	// temp `dst`.  An array of structs or arrays holds element references, so
+	// `array.copy` would swap them and leave `&a[i]` and `a[i][:]` pointing at
+	// the old element: each element is copied into the existing one instead.
+	_emitArrayElemsInto(goType, dst, src) {
+		const elemGoType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const elemStruct = this._isValueStruct(elemGoType);
+		if (!elemStruct && !this._isValueArray(elemGoType)) {
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction("array.len");
+			this.pushInstruction({ op: "array.copy", typeIndex: arrInfo.typeIndex });
+			return;
+		}
+		const elemInfo = elemStruct
+			? this._resolveStructInfo({ _type: elemGoType })
+			: null;
 		const eType = arrInfo.elemWType;
-		const dst = this.acquireTemp(wType);
-		const src = this.acquireTemp(wType);
 		const i = this.acquireTemp("i32");
 		const d = this.acquireTemp(eType);
 		const s = this.acquireTemp(eType);
-		emitDst();
-		this.pushInstruction({ op: "local.set", index: dst });
-		this.emitExpr(r, wType);
-		this.pushInstruction({ op: "local.set", index: src });
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: i });
 		this.pushInstruction({ op: "block", blockType: "void" });
@@ -959,7 +964,8 @@ export class StmtsEmitter {
 			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
 			this.pushInstruction({ op: "local.set", index: tmp });
 		}
-		this._emitStructFieldsInto(elemInfo, d, s);
+		if (elemInfo) this._emitStructFieldsInto(elemInfo, d, s);
+		else this._emitArrayElemsInto(elemGoType, d, s);
 		this.pushInstruction({ op: "local.get", index: i });
 		this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction("i32.add");
@@ -970,8 +976,6 @@ export class StmtsEmitter {
 		this.releaseTemp(s, eType);
 		this.releaseTemp(d, eType);
 		this.releaseTemp(i, "i32");
-		this.releaseTemp(src, wType);
-		this.releaseTemp(dst, wType);
 	}
 
 	// Whole-value assignment to a variable (or a field of one) whose address
@@ -1074,23 +1078,20 @@ export class StmtsEmitter {
 			const f = info.fields[i];
 			const gt = f.goType;
 			if (gt && gt.kind !== "pointer" && this._isValueArray(gt)) {
-				const arrInfo = this.mod.getArrayType(this._getArrayElemType(gt));
+				const arrT = f.wType;
+				const d = this.acquireTemp(arrT);
+				const s = this.acquireTemp(arrT);
 				get(dst, i);
-				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction({ op: "local.set", index: d });
 				get(src, i);
+				// A never-written (null) element of the source reads as zero.
 				const elem = this._getArrayElemType(gt);
-				if (
-					isArrayType(elem, this.mod.checker) ||
-					isStructType(elem, this.mod.checker, this.mod)
-				)
+				if (this._isValueArray(elem) || this._isValueStruct(elem))
 					this.emitCopyArray(gt);
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				get(dst, i);
-				this.pushInstruction("array.len");
-				this.pushInstruction({
-					op: "array.copy",
-					typeIndex: arrInfo.typeIndex,
-				});
+				this.pushInstruction({ op: "local.set", index: s });
+				this._emitArrayElemsInto(gt, d, s);
+				this.releaseTemp(s, arrT);
+				this.releaseTemp(d, arrT);
 				continue;
 			}
 			const inner =

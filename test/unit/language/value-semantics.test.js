@@ -2009,3 +2009,21 @@ storeCase(
 	fmt.Println(sl)`,
 	"[5 6] true\n[7 8] true\n[9 10]\n",
 );
+
+storeCase(
+	"a store into an array of arrays keeps the slice views of its rows",
+	"type T struct{ M [2][2]int }",
+	`	m := [2][2]int{{1, 2}, {3, 4}}
+	sl := m[0][:]
+	p := &m
+	*p = [2][2]int{{5, 6}, {7, 8}}
+	fmt.Println(sl, m)
+	m = [2][2]int{{9, 10}, {11, 12}}
+	fmt.Println(sl, *p)
+	var t T
+	ts := t.M[1][:]
+	pt := &t
+	t = T{M: [2][2]int{{5, 6}, {7, 8}}}
+	fmt.Println(ts, *pt)`,
+	"[5 6] [[5 6] [7 8]]\n[9 10] [[9 10] [11 12]]\n[7 8] {[[5 6] [7 8]]}\n",
+);
