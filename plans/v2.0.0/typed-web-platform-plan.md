@@ -78,15 +78,15 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
 > Split from the former `web-platform-evolution-plan.md` Phases 6–7 (re-probed 2026-11-17). Former task IDs in parentheses.
 
 ### Phase 1: `.d.ts` path extensions
-- [ ] Task 1.1: Interface inheritance and `.d.ts` interface assertions (former 6.1)
+- [x] Task 1.1: Interface inheritance and `.d.ts` interface assertions (former 6.1)
   - Files: `src/dts-parser.js`, `src/typechecker/assignability.js`, `src/typechecker/expressions.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/dts-extends.test.js`: inherited members over one and two levels; `Child` assignable to `Base`; `Base` to `Child` rejected without assertion; `b.(Child)` on a resolved `Base` parameter (`func f(b Base)`) compiles as a pass-through (while a GoFront package namespace assertion `fmt.(int)` stays rejected); local variable named after a browser global with a `.d.ts` interface type still gets `$`-renamed; member errors carry line:col
   - Done when: inheritance and `.d.ts` interface assertions pass and existing `.d.ts` tests pass unchanged
-- [ ] Task 1.2: Optional parameters, nullable unions, `Promise<T>`, function types and integer types (former 6.2)
+- [x] Task 1.2: Optional parameters, nullable unions, `Promise<T>`, function types and integer types (former 6.2)
   - Files: `src/dts-parser.js`, `src/typechecker/expressions.js`, `src/typechecker/assignability.js`, `src/typechecker/types.js`
   - Test: `test/unit/types/dts-optional.test.js`: `opt(1)` and `opt(1, 2)` compile, `opt()` and `opt(1, 2, 3)` are rejected (with line:col); `string | null` return compares to `nil` (`raw == nil`) and works as `string`; `await` on `Promise<Response>` is `Response` (`Promise<void>` is `void`); `int`, `uint32`, `float32` accepted; arrow-function types `(e: Base) => void` and `() => undefined | (() => void)` parse to `func` types and accept `func()`, `func(any)`, `func(Base)` and `func(Child)` while rejecting `func(int)`
   - Done when: optional params, nullable primitives, `Promise<T>`, integer/`float32` types and `.d.ts` callback types all type-check and `node src/index.js check example/...` (including `example/preact`) passes
-- [ ] Task 1.3: Dictionary arguments (former 6.3)
+- [x] Task 1.3: Dictionary arguments (former 6.3)
   - Files: `src/dts-parser.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/dts-dictionary.test.js`: a dictionary parameter accepts `nil`, a `map[string]any` literal with member keys (including nested dictionary literals) and a field-only struct; unknown key or field is an error naming it; a wrong member type is rejected; an unmarked interface behaves as today
   - Done when: the marker syntax is documented in `src/dts-parser.js`
