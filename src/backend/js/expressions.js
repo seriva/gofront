@@ -24,6 +24,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+import { derefOf } from "../shared/deref-operand.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import { namedBase, namedUnderlying } from "../shared/named-underlying.js";
 import { jsBindingName, jsClassName, jsMemberName } from "./names.js";
@@ -1321,6 +1322,12 @@ export const expressionGenMethods = {
 		const op = expr.op === "^" ? "~" : expr.op; // bitwise NOT
 		// Address-of: &x
 		if (op === "&") {
+			// &(*p) is p itself, nil-checked: Go panics on a nil p.
+			const deref = derefOf(expr.operand);
+			if (deref) {
+				const js = this.genExpr(deref.operand);
+				return deref._nonNil ? js : this._genNilChecked(js);
+			}
 			if (expr.operand.kind === "Ident") {
 				// Mark so Ident codegen does NOT append .value
 				expr.operand._isAddressOf = true;

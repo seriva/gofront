@@ -171,11 +171,11 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
 
 ### Phase 5: Pointer identity (roots `deref-receiver`, `js-new-struct`)
 Two one-task roots, both about which object a pointer refers to; each fix is under ~40 production LOC.
-- [ ] Task 5.1: `&(*p)` and `(*p).M()` with a pointer receiver pass `p` (V5.1)
+- [x] Task 5.1: `&(*p)` and `(*p).M()` with a pointer receiver pass `p` (V5.1)
   - Files: `src/backend/js/expressions.js` (`_genUnaryExpr`), `src/backend/wasm/emit-exprs.js` (`_emitAddressOf`)
   - Test: `test/unit/language/value-semantics.test.js`: V5.1 → `1`; named slice/string `(*p).M()`; `q := &(*p)` identity for scalar and struct → `99 true`; `(*get()).Inc()` calls `get` once; `&(*nilPtr)` / `(*nilPtr).M()` panic; struct and array controls → `1`, with `assertAllTargetsOutput`
   - Done when: all pass on every target
-- [ ] Task 5.2: JS `new` of any struct type returns the struct object (V5.2, V5.3)
+- [x] Task 5.2: JS `new` of any struct type returns the struct object (V5.2, V5.3)
   - Files: `src/backend/js/expressions.js` (`new` builtin)
   - Test: `test/unit/language/structs.test.js`: V5.2 → `0`, V5.3 → `0`, `*p = T{…}` then `p.N`, with `assertAllTargetsOutput` (`new(struct{ N int })` is covered by [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) Task 4.2, L3, which runs in a parallel lane; add it here only if that task has already landed)
   - Done when: all pass; `bundle-size.js` passes (named structs emit the same JS)

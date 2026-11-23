@@ -17,6 +17,55 @@ import {
 	test,
 } from "../helpers.js";
 
+section("new of struct types");
+
+test("new of an alias of an anonymous struct returns the struct (V5.2, V5.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T = struct{ A [2]int }
+type U = struct{ N int }
+
+func main() {
+	p := new(T)
+	fmt.Println(p.A[0])
+	fmt.Println(new(U).N)
+	q := new(U)
+	*q = U{N: 7}
+	q.N++
+	fmt.Println(q.N, *q)
+	*p = T{A: [2]int{3, 4}}
+	fmt.Println(p.A, *p)
+}
+`,
+		"0\n0\n8 {8}\n[3 4] {[3 4]}\n",
+	);
+});
+
+test("new of a defined type over a struct returns the struct", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+type D S
+type E struct{ S }
+
+func main() {
+	d := new(D)
+	d.N = 4
+	e := new(E)
+	e.N = 5
+	fmt.Println(*d, *e, new(D).N)
+}
+`,
+		"{4} {{5}} 0\n",
+	);
+});
+
 section("Pointer receivers");
 
 test("new(T) zero-initialises struct fields", () => {
