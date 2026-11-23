@@ -472,6 +472,39 @@ func main() {
 	);
 });
 
+test("a field or element target mentioned by a later dereference binds it first", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type SP struct{ P *int }
+
+func main() {
+	sa, sb := 1, 2
+	sp := SP{P: &sa}
+	sp.P, *sp.P = &sb, 99
+	fmt.Println(sa, sb)
+
+	xa, xb := 1, 2
+	xs := []*int{&xa}
+	xs[0], *xs[0] = &xb, 99
+	fmt.Println(xa, xb)
+
+	fa, fb := 1, 2
+	fp := SP{P: &fa}
+	for k := 0; k < 1; fp.P, *fp.P, k = &fb, 99, k+1 {
+	}
+	fmt.Println(fa, fb)
+}
+`,
+		`99 2
+99 2
+99 2
+`,
+	);
+});
+
 test("plain-variable target operands are read after the right-hand call", async () => {
 	await assertAllTargetsOutput(
 		`package main

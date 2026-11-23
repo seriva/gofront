@@ -136,7 +136,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Done when: passes; a by-hand run reproduces at least V3.1 and V4.1 as findings before Phases 3–4
 
 ### Phase 2: Assignment target operands evaluated once (roots `lhs-operand-binds`, `complex-compound-path`)
-- [ ] Task 2.1: Non-`Ident` targets bind every target operand (V2.1, V2.2)
+- [x] Task 2.1: Non-`Ident` targets bind every target operand (V2.1, V2.2)
   - Files: `src/lower/assign-order.js`
   - Test: `test/unit/compiler/assign-order.test.js` (non-`Ident` target binds) and `test/unit/language/codegen-regressions.test.js` *Assignment order*: V2.1, V2.2 and a `for` post form → `99 2` with `assertAllTargetsOutput`; the three gc-order sections unmodified
   - Done when: passes on every target; `bundle-size.js` passes
