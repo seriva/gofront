@@ -1,7 +1,7 @@
 # Value Stores — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Schedules the review follow-ups that [`assignment-semantics-plan.md`](assignment-semantics-plan.md) deferred at completion (its *Review follow-ups found while executing this plan* row, 11 entries), L14 from the former `followup-fixes-plan.md`, and the `plans/follow-ups.md` entry *Pointer method on a dereferenced named scalar*, re-probed 2026-11-17 and grouped by root cause. Phase 4 starts after [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Phase 1 (one struct field list). Keeps the assignment plan's spec-only evaluation-order policy: nothing here changes output that the Go spec leaves unspecified.  
 **Release note:** Assignments keep Go's value semantics in more places on every target: `for x = range seq` and comma-ok assignments into a variable whose address was taken update it in place, `p.F, *p.F = …` stores through the old pointer, compound assignments on complex numbers evaluate each operand once (also in a `for` post statement), struct copies on WebAssembly no longer share arrays or embedded structs, and `(*p).Inc()` on a named number type changes the value `p` points to.  
