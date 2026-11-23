@@ -486,15 +486,48 @@ export class DtsParser {
 		return { name, type };
 	}
 
+	// `A`, `a.B` or `A<T>`: a heritage clause entry, as its dotted name.
+	_readHeritageName() {
+		let name = this.readIdent();
+		while (this.ch() === ".") {
+			this.pos++;
+			name += `.${this.readIdent()}`;
+		}
+		this.skipGenerics();
+		return name;
+	}
+
+	// `extends A, B` of an interface or class (`implements` is not inherited
+	// from); returns the names the declaration extends.
+	_parseExtends() {
+		const bases = [];
+		if (this.matchKw("extends")) {
+			do {
+				this.skip();
+				const base = this._readHeritageName();
+				if (base) bases.push(base);
+				this.skip();
+			} while (this.consume(","));
+		}
+		return bases;
+	}
+
+	// An interface or class: a namespace-kind type tagged `_dtsType` so it is
+	// told from a `declare namespace` (a value-only package) and from a
+	// GoFront package. `extends` lists the names it inherits members from.
 	_parseClassDecl() {
 		const name = this.readIdent();
 		this.skipGenerics();
+		this.skip();
+		const bases = this._parseExtends();
 		while (!this.eof() && this.ch() !== "{") this.pos++;
 		this.consume("{");
 		const body = this.parseBody();
 		this.consume("}");
 		this.consume(";");
-		return { name, ns: { kind: "namespace", name, members: body } };
+		const ns = { kind: "namespace", name, members: body, _dtsType: true };
+		if (bases.length > 0) ns.extends = bases;
+		return { name, ns };
 	}
 
 	_parseNamespaceDecl() {
@@ -505,6 +538,7 @@ export class DtsParser {
 		const body = this.parseBody(kinds);
 		this.consume("}");
 		this.consume(";");
+		linkBases(Object.values(body), (n) => body[n]);
 		return {
 			name,
 			ns: { kind: "namespace", name, members: body, _kinds: kinds },
@@ -696,6 +730,7 @@ export class DtsParser {
 			}
 		}
 
+		linkBases(types.values(), (n) => types.get(n));
 		return { types, values };
 	}
 
@@ -756,6 +791,19 @@ export class DtsParser {
 				this.consume(";");
 				break;
 		}
+	}
+}
+
+// Binds the `extends` names of the interfaces and classes in `decls` that
+// `lookup` finds in the same file or namespace as `_bases[i]`; a base declared
+// elsewhere stays null and is found by name when its members are read.
+function linkBases(decls, lookup) {
+	for (const d of decls) {
+		if (!d?._dtsType || !d.extends) continue;
+		d._bases = d.extends.map((n) => {
+			const b = lookup(n);
+			return b?._dtsType ? b : null;
+		});
 	}
 }
 

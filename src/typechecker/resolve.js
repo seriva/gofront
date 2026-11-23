@@ -1598,7 +1598,7 @@ export const resolveMethods = {
 	resolveType(t) {
 		if (!t) return ANY;
 		if (t.kind === "basic" && t.alias) {
-			const found = this.types.get(t.alias);
+			const found = this.types.get(t.alias) ?? this._dtsQualifiedType(t.alias);
 			if (found) return found;
 		}
 		if (
@@ -1892,6 +1892,60 @@ export const resolveMethods = {
 			: null;
 	},
 
+	// `ns.T` in a `.d.ts` declaration: the type `T` of the `.d.ts` namespace
+	// `ns`, or undefined.
+	_dtsQualifiedType(alias) {
+		const dot = alias.indexOf(".");
+		if (dot < 0) return undefined;
+		let cur = this.types.get(alias.slice(0, dot));
+		for (const part of alias.slice(dot + 1).split(".")) {
+			if (cur?.kind !== "namespace" || !Object.hasOwn(cur.members, part))
+				return undefined;
+			cur = cur.members[part];
+		}
+		return cur?.kind === "namespace" ? cur : undefined;
+	},
+
+	// The `.d.ts` interfaces and classes `ns` extends. A base the parser did
+	// not find in the declaring file is looked up by name in the type table.
+	_dtsBases(ns) {
+		if (!ns?.extends) return [];
+		const bases = [];
+		for (const [i, name] of ns.extends.entries()) {
+			const b = ns._bases?.[i] ?? this.resolveType(this._dtsTypeRef(name));
+			if (b?._dtsType && b !== ns) bases.push(b);
+		}
+		return bases;
+	},
+
+	// The member `field` of `ns` through its bases (nearest base first), or
+	// undefined.
+	_dtsInheritedMember(ns, field, seen = new Set()) {
+		if (seen.has(ns)) return undefined;
+		seen.add(ns);
+		for (const base of this._dtsBases(ns)) {
+			if (Object.hasOwn(base.members, field)) return base.members[field];
+			const found = this._dtsInheritedMember(base, field, seen);
+			if (found !== undefined) return found;
+		}
+		return undefined;
+	},
+
+	// Whether `.d.ts` type `ns` is `target` or extends it, through any number
+	// of levels.
+	_dtsDerivesFrom(ns, target, seen = new Set()) {
+		if (ns === target) return true;
+		if (!ns?._dtsType || seen.has(ns)) return false;
+		seen.add(ns);
+		return this._dtsBases(ns).some((b) =>
+			this._dtsDerivesFrom(b, target, seen),
+		);
+	},
+
+	_dtsTypeRef(name) {
+		return { kind: "basic", name: "any", alias: name };
+	},
+
 	_fieldTypeNamespace(base, field, node) {
 		const bad = this._namespaceMemberError(base, field, node);
 		if (bad) return bad;
@@ -1927,6 +1981,10 @@ export const resolveMethods = {
 			}
 			return base.members[field];
 		}
+		const inherited = base._dtsType
+			? this._dtsInheritedMember(base, field)
+			: undefined;
+		if (inherited !== undefined) return inherited;
 		const excluded = EXCLUDED_STDLIB_MEMBERS.get(`${base.name}.${field}`);
 		if (excluded)
 			return this.err(

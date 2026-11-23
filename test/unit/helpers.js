@@ -160,6 +160,17 @@ export function compile(
 		: { js: res.js, errors: [], warnings: res.warnings };
 }
 
+// Compiles `source` (the one Go file of a package) next to `types.d.ts`,
+// which the source imports as `js:./types.d.ts`.
+export function compileDts(dts, source, options = {}) {
+	return withTempDir({ "types.d.ts": dts, "main.go": source }, (dir) => {
+		const { res, errors } = toCompileResult(() => compileDir(dir, options));
+		return errors.length > 0
+			? { js: null, errors }
+			: { js: res.js, errors: [], warnings: res.warnings };
+	});
+}
+
 export function compileFile(path) {
 	return compile(readFileSync(path, "utf8"), { fromFile: path });
 }

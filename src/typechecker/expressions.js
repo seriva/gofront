@@ -355,7 +355,10 @@ export const expressionCheckMethods = {
 				// it so generated code keeps reaching the real global.  Package
 				// namespaces (`import console "./util"`) are never renamed: JS
 				// selects their members directly (bundledPackages).
-				if (shadowsJsGlobal(expr.name) && t.kind !== "namespace") {
+				if (
+					shadowsJsGlobal(expr.name) &&
+					(t.kind !== "namespace" || t._dtsType)
+				) {
 					const owner = scope.lookupScope(expr.name);
 					if (
 						owner !== this.universe &&
@@ -1934,6 +1937,7 @@ export const expressionCheckMethods = {
 		if (srcType && !isAny(srcType)) {
 			let underlying = this._deepUnderlying(srcType);
 			underlying = this.resolveType(underlying);
+			if (this._isDtsAssertion(underlying, targetType)) return targetType;
 			if (underlying?.kind !== "interface") {
 				this.err(
 					`invalid type assertion: ${typeStr(srcType)} is not an interface`,
@@ -1948,6 +1952,16 @@ export const expressionCheckMethods = {
 		}
 
 		return targetType;
+	},
+
+	// `x.(T)` with `x` a `.d.ts` interface or class value and `T` one too:
+	// JavaScript has no runtime type to test, so the assertion passes the
+	// value through (a GoFront package namespace is not such a type).
+	_isDtsAssertion(srcType, targetType) {
+		return (
+			srcType?._dtsType === true &&
+			this.resolveType(targetType)?._dtsType === true
+		);
 	},
 
 	// `x.(T)` with a concrete T can only succeed when T has every method of

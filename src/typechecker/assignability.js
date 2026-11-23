@@ -1087,7 +1087,13 @@ export const assignabilityMethods = {
 		if (this._checkTypedArrayAssignable(target, source, at, operand ?? at, ctx))
 			return;
 		if (this._checkFuncAssignable(target, source, mismatch)) return;
-		if (!identical(target, source)) mismatch();
+		if (!this._identicalOrDtsDerived(target, source)) mismatch();
+	},
+
+	// Identical types, or a `.d.ts` interface whose chain of `extends` reaches
+	// the target.
+	_identicalOrDtsDerived(target, source) {
+		return identical(target, source) || this._dtsDerivesFrom(source, target);
 	},
 
 	// The element of an array or the base of a pointer must be identical to
