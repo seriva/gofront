@@ -6,6 +6,7 @@
 // This pass specializes all generic templates reachable from code into concrete Go declarations
 // (e.g. Identity$int, Box$int, Stack$int.Push) and re-typechecks the monomorphised AST.
 
+import { declaredTypeNames } from "../../lower/walk.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import { embeddedFieldName, PackageScope } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
@@ -933,15 +934,20 @@ export function monomorphise(programs, checker) {
 	// are addressable, so a mangled instance name never reports one here.
 	monoChecker.receiversChecked = true;
 	if (checker?.types) {
-		const declared = new Set(
+		// Linking must not write to the types the packages stored, so what the
+		// programs declare gets types of its own here: a package-level type is
+		// collected afresh, and a function-local type (named by the generated
+		// code before the function that declares it is checked) starts from a
+		// copy that collecting then fills in.
+		const topLevel = new Set(
 			progs.flatMap((p) =>
 				p.decls.filter((d) => d.kind === "TypeDecl").map((d) => d.name),
 			),
 		);
+		const local = new Set(declaredTypeNames(progs));
 		for (const [name, type] of checker.types.entries()) {
-			if (!monoChecker.types.has(name) && !declared.has(name)) {
-				monoChecker.types.set(name, type);
-			}
+			if (monoChecker.types.has(name) || topLevel.has(name)) continue;
+			monoChecker.types.set(name, local.has(name) ? { ...type } : type);
 		}
 	}
 

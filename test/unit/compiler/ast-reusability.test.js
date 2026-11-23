@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import {
 	clearParseCache,
 	compileDir,
+	freezePackageCache,
 	freezeParseCache,
+	PackageCache,
+	resetPackageCache,
 } from "../../../src/compiler.js";
 import { lower } from "../../../src/lower/index.js";
 import { cloneAst } from "../../../src/lower/walk.js";
@@ -585,3 +588,85 @@ test("stdlib JS is memoized for an unchanged reached set", () => {
 	buildStd(STD_SECOND, "js", { stdlibCache, cacheStats });
 	assert(cacheStats.stdlibJsMisses > misses, "a larger reached set emits");
 });
+
+section("default package cache — stored units are never written again");
+
+// Runs `fn` on an empty default cache whose stored units are deep-frozen, so
+// a pass that writes to one throws instead of leaking into the next build.
+function withFrozenDefaultCache(fn) {
+	resetPackageCache();
+	freezePackageCache(true);
+	try {
+		return fn();
+	} finally {
+		freezePackageCache(false);
+		resetPackageCache();
+	}
+}
+
+const SHARED_APP = {
+	"main.go": `package main
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"sort"
+	"sync"
+	"./shape"
+)
+type Doc struct{ N int }
+func main() {
+	var mu sync.RWMutex
+	mu.RLock()
+	mu.RUnlock()
+	xs := []int{3, 1, 2}
+	sort.Ints(xs)
+	slices.Sort(xs)
+	b, _ := json.Marshal(Doc{N: len(xs)})
+	box := shape.Wrap(shape.Pt{X: 1, Y: 2})
+	fmt.Println(xs, string(b), box.Get().X, shape.Sum(xs))
+}
+`,
+	"shape/shape.go": `package shape
+type Pt struct{ X, Y int }
+type Box[T any] struct{ v T }
+func Wrap[T any](v T) Box[T] { return Box[T]{v: v} }
+func (b Box[T]) Get() T { return b.v }
+func Sum(xs []int) int {
+	type acc struct{ n int }
+	a := acc{}
+	for _, x := range xs { a.n += x }
+	return a.n
+}
+`,
+};
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`frozen default-cache units serve later builds (${target})`, () => {
+		withTempDir(
+			{
+				...SHARED_APP,
+				"main.go": `//gofront:target ${target}\n${SHARED_APP["main.go"]}`,
+				"shape/shape.go": `//gofront:target ${target === "js" ? "js" : "both"}\n${SHARED_APP["shape/shape.go"]}`,
+			},
+			(dir) => {
+				const build = (options = {}) => {
+					const res = compileDir(dir, options);
+					return {
+						js: res.js,
+						wasm: res.wasm ? Buffer.from(res.wasm).toString("hex") : "",
+					};
+				};
+				withFrozenDefaultCache(() => {
+					const first = build();
+					const again = build();
+					assertEqual(again.js, first.js);
+					assertEqual(again.wasm, first.wasm);
+					const cold = build({ packageCache: new PackageCache() });
+					assertEqual(cold.js, first.js);
+					assertEqual(cold.wasm, first.wasm);
+				});
+			},
+		);
+	});
+}

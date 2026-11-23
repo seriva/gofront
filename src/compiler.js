@@ -42,9 +42,13 @@ import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer/lexer.js";
 import {
+	defaultPackageCache,
 	embedSignature,
 	filesSignature,
+	freezePackageCache,
 	optionsSignature,
+	PackageCache,
+	resetPackageCache,
 	summaryHash,
 } from "./link/package-cache.js";
 import {
@@ -100,7 +104,17 @@ import {
 } from "./typechecker/types.js";
 
 // The parse cache lives in link/parse-cache.js; tests and the CLI reach it here.
-export { clearParseCache, evictParseCache, freezeParseCache, parseCacheSize };
+// The package cache lives in link/package-cache.js; tests and the CLI reach it
+// here.
+export {
+	clearParseCache,
+	evictParseCache,
+	freezePackageCache,
+	freezeParseCache,
+	PackageCache,
+	parseCacheSize,
+	resetPackageCache,
+};
 
 // A user-code diagnostic (parse, package or type errors) as opposed to a
 // compiler crash. `message` is the joined text the CLI prints; `errors`
@@ -869,9 +883,14 @@ export function compilePackageTestsWasm(dir, options = {}) {
 
 export function compileFiles(files, options = {}) {
 	const fromDir = options.fromDir ?? dirname(resolve(files[0]));
-	const cache = options.packageCache ?? null;
+	// The process-lifetime cache unless the caller brings its own (`null`: none).
+	const cache =
+		options.packageCache === undefined
+			? defaultPackageCache
+			: options.packageCache;
 	options = {
 		...options,
+		packageCache: cache,
 		wasmUnits: options.wasmUnits ?? [],
 		stdlibCache:
 			options.stdlibCache ?? cache?.stdlibFor(options.stdlibRoot) ?? new Map(),

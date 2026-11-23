@@ -9,7 +9,9 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { isExported } from "../typechecker/types.js";
+import * as typeTable from "../typechecker/types.js";
+
+const { isExported } = typeTable;
 
 // Keeps the cache bounded in long-lived processes (the unit-test workers
 // compile thousands of throwaway packages).
@@ -50,6 +52,7 @@ export class PackageCache {
 	}
 
 	setUnit(key, unit) {
+		if (freezeStored) freezeUnit(unit);
 		this.units.delete(key);
 		this.units.set(key, unit);
 		if (this.units.size > this.unitLimit)
@@ -78,6 +81,84 @@ export class PackageCache {
 
 // What `compileFiles` uses unless it is given another cache.
 export const defaultPackageCache = new PackageCache();
+
+// ── Freezing (a test flag) ───────────────────────────────────
+//
+// A stored unit is never written again.  With the flag on, every unit the
+// default cache stores from now on (and those it holds) is deep-frozen, so a
+// pass that writes to one throws instead of leaking into the next build.
+
+let freezeStored = false;
+let sharedTypeObjects = null;
+
+// Everything the type table exports (`error`, `any`, the untyped kinds, ...):
+// objects every compile in the process shares, which no unit owns.
+function sharedObjects() {
+	if (sharedTypeObjects) return sharedTypeObjects;
+	const shared = new Set();
+	const visit = (v) => {
+		if (!v || typeof v !== "object" || shared.has(v)) return;
+		shared.add(v);
+		if (v instanceof Map) for (const e of v.values()) visit(e);
+		else if (v instanceof Set) for (const e of v) visit(e);
+		else for (const k of Object.keys(v)) visit(v[k]);
+	};
+	for (const v of Object.values(typeTable)) visit(v);
+	sharedTypeObjects = shared;
+	return shared;
+}
+
+const FROZEN_PROTOTYPES = new Set([
+	Object.prototype,
+	Array.prototype,
+	Map.prototype,
+	Set.prototype,
+	null,
+]);
+
+// Freezes `value` and what it holds, entries of maps and sets included.
+// Class instances (a checker's scopes) are live checker state and stay as
+// they are.
+function deepFreeze(value, seen = new Set(sharedObjects())) {
+	if (!value || typeof value !== "object" || seen.has(value)) return;
+	seen.add(value);
+	if (!FROZEN_PROTOTYPES.has(Object.getPrototypeOf(value))) return;
+	Object.freeze(value);
+	if (value instanceof Map)
+		for (const [k, v] of value) {
+			deepFreeze(k, seen);
+			deepFreeze(v, seen);
+		}
+	else if (value instanceof Set) for (const v of value) deepFreeze(v, seen);
+	for (const k of Object.getOwnPropertyNames(value))
+		deepFreeze(Object.getOwnPropertyDescriptor(value, k).value, seen);
+}
+
+export function freezeUnit(unit) {
+	deepFreeze(unit);
+}
+
+// What a stored Go-source stdlib package hands to its importers.
+export function freezeStdlibPackage(pkg) {
+	deepFreeze(pkg.unit.programs);
+	deepFreeze(pkg.exportedTypes);
+	deepFreeze(pkg.namespace);
+}
+
+export function freezesStoredUnits() {
+	return freezeStored;
+}
+
+// Turns freezing on or off; turning it on freezes what the default cache
+// holds already.
+export function freezePackageCache(on) {
+	freezeStored = on;
+	if (!on) return;
+	for (const unit of defaultPackageCache.units.values()) freezeUnit(unit);
+	for (const table of defaultPackageCache.stdlibTables.values())
+		for (const pkg of table.values())
+			if (pkg && !(pkg instanceof Error)) freezeStdlibPackage(pkg);
+}
 
 // Empties the default cache (tests that need a cold start).
 export function resetPackageCache() {
@@ -170,7 +251,7 @@ export function summaryHash(res) {
 		if (v === null || v === undefined) return out.push(String(v));
 		const t = typeof v;
 		if (t === "function") return out.push("fn");
-		if (t !== "object") return out.push(`${t[0]}${JSON.stringify(v)}`);
+		if (t !== "object") return out.push(`${t[0]}${String(v)}`);
 		const seen = ids.get(v);
 		if (seen !== undefined) return out.push(`#${seen}`);
 		ids.set(v, ids.size);

@@ -21,7 +21,11 @@ import {
 import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
-import { filesSignature } from "./package-cache.js";
+import {
+	filesSignature,
+	freezeStdlibPackage,
+	freezesStoredUnits,
+} from "./package-cache.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export {
@@ -410,6 +414,7 @@ function loadStdlibPackage(
 	cache.set(v.key, null);
 	try {
 		const pkg = buildStdlibPackage(importPath, dir, options, deps, v);
+		if (options.packageCache && freezesStoredUnits()) freezeStdlibPackage(pkg);
 		cache.set(v.key, pkg);
 		checked?.add(v.key);
 		return pkg;
