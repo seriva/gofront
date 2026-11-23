@@ -4,7 +4,7 @@
 import { compileWasmModule } from "../backend/wasm/index.js";
 import { lower } from "../lower/index.js";
 import { reachableStdlibDecls } from "../lower/reachability.js";
-import { forEachChild } from "../lower/walk.js";
+import { cloneAst, forEachChild } from "../lower/walk.js";
 import { TypeCheckError, TypeChecker } from "../typechecker/index.js";
 import { UnsupportedError } from "../typechecker/types.js";
 
@@ -76,7 +76,10 @@ function linkWasmUnits(
 	);
 	for (const u of units) {
 		for (const b of u.bundledPackages) bundledPackages.add(b);
-		const copies = u.programs.map((p) => cloneAstForWasm(p));
+		// The WASM pipeline rewrites ASTs in place (package dequalification,
+		// monomorphisation, variadic desugaring), so the link works on a
+		// structural copy; side tables (`_type`, …) are shared by reference.
+		const copies = u.programs.map((p) => cloneAst(p));
 		programs.push(...copies);
 		if (u.key.startsWith("stdlib:")) stdlibPrograms.push(...copies);
 	}
@@ -108,26 +111,6 @@ function linkWasmUnits(
 		callMain: rootTarget === "wasm",
 		sourceMappingURL,
 	});
-}
-
-// The WASM pipeline rewrites ASTs in place (package dequalification,
-// monomorphisation, variadic desugaring).  Parsed ASTs are cached across
-// builds and shared with JS codegen, so the link works on a structural copy;
-// side tables (`_type`, …) are shared by reference.
-function cloneAstForWasm(node, seen = new Map()) {
-	if (!node || typeof node !== "object") return node;
-	const prev = seen.get(node);
-	if (prev) return prev;
-	const copy = Array.isArray(node) ? [] : {};
-	seen.set(node, copy);
-	if (Array.isArray(node)) {
-		for (const n of node) copy.push(cloneAstForWasm(n, seen));
-		return copy;
-	}
-	for (const [k, v] of Object.entries(node)) {
-		copy[k] = k.charCodeAt(0) === 95 ? v : cloneAstForWasm(v, seen);
-	}
-	return copy;
 }
 
 // Drops unreachable Go-source stdlib declarations from the link copy and

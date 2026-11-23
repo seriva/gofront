@@ -109,7 +109,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/import-cycles.test.js`: self-import, 2-package cycle (`a → b → a`, covering `checker-strictness-plan.md` S22), `a → b → c → a`, `compileSingleFile` (`main.go → ./a → ..`), and `compilePackageTests` (`_test.go` cycle) give `import cycle not allowed` with path and line:col (not `Maximum call stack size exceeded`); `gofront check` reports cycle members as failed rather than `skipped`; a three-layer diamond compiles each package once (counter)
   - Done when: all pass and `npm test` passes
-- [ ] Task 1.2: Boundary AST cloning for `_parseCache` and shared `cloneAst` (former 3.2, front-end half)
+- [x] Task 1.2: Boundary AST cloning for `_parseCache` and shared `cloneAst` (former 3.2, front-end half)
   - Files: `src/lower/walk.js`, `src/link/wasm.js`, `src/compiler.js`
   - Test: `test/unit/compiler/ast-reusability.test.js`: deep-freezing raw ASTs stored in `_parseCache` and compiling twice in one process with function-local types, cross-package colliding types (`type Pt`), folded array lengths, JS-reserved identifiers (`class := 1`), `defer`, forwarded multi-value calls (`g(f())`), and strict-mode slice indexing succeeds without mutation errors and leaves cached baseline ASTs untouched
   - Done when: `cloneAst` in `src/lower/walk.js` replaces `cloneAstForWasm` in `src/link/wasm.js:117`, `parseGoFrontFile` returns a structural clone from `_parseCache`, and deep-frozen `_parseCache` entries are never mutated

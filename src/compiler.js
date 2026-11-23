@@ -41,7 +41,13 @@ import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer/lexer.js";
-import { TemplLexer } from "./lexer/templ-lexer.js";
+import {
+	clearParseCache,
+	evictParseCache,
+	freezeParseCache,
+	parseCacheSize,
+	parseGoFrontFile,
+} from "./link/parse-cache.js";
 import {
 	attachSourceMap,
 	buildWasmMap,
@@ -64,7 +70,6 @@ import {
 } from "./link/wasm.js";
 import { lower, takesElementAddress } from "./lower/index.js";
 import { ParseError, Parser } from "./parser/index.js";
-import { TemplParser } from "./parser/templ.js";
 import {
 	bindUntypedImports,
 	isBuiltinPackage,
@@ -87,16 +92,8 @@ import {
 	WASM_SUPPORTED_STDLIB,
 } from "./typechecker/types.js";
 
-// ── Parse cache ──────────────────────────────────────────────
-
-// Map<filePath, { mtime: number, ast: object }>
-const _parseCache = new Map();
-
-// A cached AST keeps everything the build attached to it (checked types,
-// lowered stdlib programs), so a build of a Go-source stdlib importer pins
-// megabytes.  The cache is therefore bounded; the least recently used file goes
-// first.
-const PARSE_CACHE_LIMIT = 16;
+// The parse cache lives in link/parse-cache.js; tests and the CLI reach it here.
+export { clearParseCache, evictParseCache, freezeParseCache, parseCacheSize };
 
 // A user-code diagnostic (parse, package or type errors) as opposed to a
 // compiler crash. `message` is the joined text the CLI prints; `errors`
@@ -161,19 +158,6 @@ export function validateWasm(bytes) {
 	throw new InternalCompilerError(
 		new Error(`the generated WebAssembly is invalid: ${detail}`),
 	);
-}
-
-export function clearParseCache() {
-	_parseCache.clear();
-}
-
-// Drops one file, e.g. a throwaway source that was deleted after its build.
-export function evictParseCache(filePath) {
-	_parseCache.delete(resolve(filePath));
-}
-
-export function parseCacheSize() {
-	return _parseCache.size;
 }
 
 // ── //go:embed ───────────────────────────────────────────────
@@ -402,35 +386,6 @@ export function resolveEmbedFiles(programs) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────
-
-function parseGoFrontFile(filePath) {
-	const key = resolve(filePath);
-	const mtime = statSync(filePath).mtimeMs;
-	const cached = _parseCache.get(key);
-	if (cached && cached.mtime === mtime) {
-		_parseCache.delete(key);
-		_parseCache.set(key, cached);
-		return cached.ast;
-	}
-
-	const source = readFileSync(filePath, "utf8");
-	const filename = basename(filePath);
-	const isTempl = filePath.endsWith(".templ");
-	const tokens = isTempl
-		? new TemplLexer(source, filename).tokenize()
-		: new Lexer(source, filename).tokenize();
-	const ast = isTempl
-		? new TemplParser(tokens, filename, source).parse()
-		: new Parser(tokens, filename, source).parse();
-	ast._source = source;
-	ast._path = resolve(filePath);
-	// compileFiles overwrites `target` with the resolved one; keep the directive.
-	ast._declaredTarget = ast.target;
-	_parseCache.set(key, { mtime, ast });
-	if (_parseCache.size > PARSE_CACHE_LIMIT)
-		_parseCache.delete(_parseCache.keys().next().value);
-	return ast;
-}
 
 export function gwFilesIn(dir, { includeTests = false } = {}) {
 	return readdirSync(dir)
@@ -1164,7 +1119,8 @@ function importedNames(programs) {
 // Predeclared names besides the basic types that a declared type may shadow.
 const PREDECLARED_NAMES = ["error", "comparable", "true", "false", "nil"];
 
-// The renamed ASTs must not be reused from the parse cache by a later build.
+// Renames the programs' local types in place. They are this build's copies of
+// the cached ASTs, so a later build starts from the unrenamed baseline.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 	const predeclared = new Set([
 		...Object.keys(BASIC_TYPES),
@@ -1199,10 +1155,8 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 				for (const spec of d.decls ?? [])
 					for (const n of spec.names ?? []) foreign.add(n);
 		}
-	const locals = renameLocalTypes(programs, foreign);
+	renameLocalTypes(programs, foreign);
 	registerLocalTypeOwners(programs, pkgKey, owners);
-	if (renamed.size > 0 || locals)
-		for (const p of programs) _parseCache.delete(p._path);
 	return renamed;
 }
 
