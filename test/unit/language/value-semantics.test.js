@@ -252,6 +252,295 @@ func main() {
 	);
 });
 
+test("a struct reassigned to a variable a closure reads keeps its own copy (V4.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type V struct{ M, K int }
+
+func main() {
+	v := V{9, 5}
+	w := v
+	w = v
+	v.K = 7
+	fmt.Println(w)
+	func() { _ = w.M }()
+}
+`,
+		"{9 5}\n",
+	);
+});
+
+test("a struct stored into a variable a closure mutates is a copy (V4.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ M int }
+type V struct {
+	P
+	K int
+}
+
+func main() {
+	v := V{P{-4}, 7}
+	w := v
+	f := func() { v.M = 5 }
+	v = w
+	f()
+	fmt.Println(w, v)
+}
+`,
+		"{{-4} 7} {{5} 7}\n",
+	);
+});
+
+test("a captured struct whose address is taken is stored in place and copies its source", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func main() {
+	w := S{1}
+	src := S{2}
+	pw := &w
+	f := func() { w.N += 10 }
+	w = src
+	f()
+	fmt.Println(*pw, pw == &w, src)
+}
+`,
+		"{12} true {2}\n",
+	);
+});
+
+test("struct fields of a composite literal are copies (V4.2)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P2 struct{ A [2]int }
+type W struct{ Q P2 }
+
+func main() {
+	p := P2{[2]int{1, 2}}
+	var a W
+	pa := &a
+	*pa = W{Q: p}
+	pa.Q.A[0] = 9
+	fmt.Println(p, a)
+	b := W{Q: p}
+	b.Q.A[1] = 8
+	fmt.Println(p, b)
+}
+`,
+		"{[1 2]} {{[9 2]}}\n{[1 2]} {{[1 8]}}\n",
+	);
+});
+
+section("Pointer identity");
+
+test("a pointer-receiver call on (*p) of a named number changes the pointee (V5.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+func main() {
+	var x Num
+	p := &x
+	(*p).Inc()
+	(*p).Inc()
+	fmt.Println(x)
+}
+`,
+		"2\n",
+	);
+});
+
+test("a pointer-receiver call on (*p) of a named slice or string changes the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type L []int
+type Str string
+
+func (l *L) Add(n int) { *l = append(*l, n) }
+func (s *Str) Bang()   { *s += "!" }
+
+func main() {
+	var l L
+	pl := &l
+	(*pl).Add(1)
+	(*pl).Add(2)
+	var s Str = "hi"
+	ps := &s
+	(*ps).Bang()
+	fmt.Println(l, s)
+}
+`,
+		"[1 2] hi!\n",
+	);
+});
+
+test("&(*p) is p itself for scalars, structs and arrays", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+type S struct{ N int }
+type A [2]int
+
+func main() {
+	var x Num
+	p := &x
+	q := &(*p)
+	*q = 99
+	fmt.Println(x, q == p)
+
+	var s S
+	ps := &s
+	qs := &(*ps)
+	qs.N = 7
+	fmt.Println(s, qs == ps)
+
+	var a A
+	pa := &a
+	qa := &(*pa)
+	qa[1] = 5
+	fmt.Println(a, qa == pa)
+
+	var i int
+	pi := &i
+	qi := &((*pi))
+	*qi = 3
+	fmt.Println(i, qi == pi)
+}
+`,
+		"99 true\n{7} true\n[0 5] true\n3 true\n",
+	);
+});
+
+test("&(*p) through a pointer to a pointer is the inner pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+func main() {
+	var x Num
+	p := &x
+	pp := &p
+	(**pp).Inc()
+	q := &(**pp)
+	*q += 10
+	fmt.Println(x, q == p)
+}
+`,
+		"11 true\n",
+	);
+});
+
+test("struct and array pointer-receiver calls on (*p) still change the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+type A [2]int
+
+func (s *S) Inc() { s.N++ }
+func (a *A) Inc() { a[0]++ }
+
+func main() {
+	var s S
+	ps := &s
+	(*ps).Inc()
+	var a A
+	pa := &a
+	(*pa).Inc()
+	fmt.Println(s, a)
+}
+`,
+		"{1} [1 0]\n",
+	);
+});
+
+test("(*get()).Inc() calls get once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+func main() {
+	var x Num
+	calls := 0
+	get := func() *Num {
+		calls++
+		return &x
+	}
+	(*get()).Inc()
+	fmt.Println(x, calls)
+}
+`,
+		"1 1\n",
+	);
+});
+
+test("&(*p) and (*p).M() on a nil pointer panic", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+type S struct{ N int }
+
+func (n *Num) Inc() { *n++ }
+func (s *S) Inc()   { s.N++ }
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	var pn *Num
+	var ps *S
+	try(func() { (*pn).Inc() })
+	try(func() { _ = &(*pn) })
+	try(func() { (*ps).Inc() })
+	try(func() { _ = &(*ps) })
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\nruntime error: invalid memory address or nil pointer dereference\nruntime error: invalid memory address or nil pointer dereference\nruntime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {
@@ -1552,3 +1841,385 @@ func main() {
 		"none\na3\n",
 	);
 });
+
+section("Whole-value stores");
+
+// Each body runs in `main`; `S` is `struct{ N int }`.
+const storeCase = (
+	name,
+	decls,
+	body,
+	want,
+	assertFn = assertAllTargetsOutput,
+) =>
+	test(name, async () => {
+		await assertFn(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+${decls}
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+storeCase(
+	"a comma-ok map read into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	m := map[string]S{"k": {5}}
+	var ok bool
+	s, ok = m["k"]
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{5} true true\n",
+);
+
+storeCase(
+	"a comma-ok type assertion into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	var i any = S{6}
+	var ok bool
+	s, ok = i.(S)
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{6} true true\n",
+);
+
+storeCase(
+	"a comma-ok map read into a sliced array updates the slice view",
+	"",
+	`	var arr [2]int
+	sl := arr[:]
+	m := map[string][2]int{"k": {7, 8}}
+	var ok bool
+	arr, ok = m["k"]
+	fmt.Println(sl, ok)`,
+	"[7 8] true\n",
+);
+
+storeCase(
+	"a comma-ok type assertion into a sliced array updates the slice view",
+	"",
+	`	var arr [2]int
+	sl := arr[:]
+	var i any = [2]int{3, 4}
+	var ok bool
+	arr, ok = i.([2]int)
+	fmt.Println(sl, ok)`,
+	"[3 4] true\n",
+);
+
+storeCase(
+	"a missed comma-ok map read zeroes an address-taken struct in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	m := map[string]S{}
+	var ok bool
+	s, ok = m["k"]
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{0} true false\n",
+);
+
+storeCase(
+	"a comma-ok result into an address-taken bool updates it in place",
+	"",
+	`	var ok bool
+	pok := &ok
+	m := map[string]int{"k": 1}
+	_, ok = m["k"]
+	fmt.Println(*pok)`,
+	"true\n",
+);
+
+storeCase(
+	"a comma-ok map read through *p stores into the pointee",
+	"",
+	`	s := S{1}
+	p := &s
+	m := map[string]S{"k": {5}}
+	var ok bool
+	*p, ok = m["k"]
+	fmt.Println(s, ok)`,
+	"{5} true\n",
+);
+
+storeCase(
+	"a comma-ok type assertion through *p stores into the pointee",
+	"",
+	`	s := S{1}
+	p := &s
+	var i any = S{6}
+	var ok bool
+	*p, ok = i.(S)
+	fmt.Println(s, ok)`,
+	"{6} true\n",
+);
+
+const GENERIC_STORE = `func fromMap[T any](p *T, m map[string]T) bool {
+	var ok bool
+	*p, ok = m["k"]
+	return ok
+}
+
+func fromAssert[T any](p *T, a any) bool {
+	var ok bool
+	*p, ok = a.(T)
+	return ok
+}`;
+
+storeCase(
+	"a generic *T comma-ok map read and assertion store for struct, array and int",
+	GENERIC_STORE,
+	`	var s S
+	var arr [2]int
+	var n int
+	fmt.Println(fromMap(&s, map[string]S{"k": {5}}), s)
+	fmt.Println(fromMap(&arr, map[string][2]int{"k": {5, 6}}), arr)
+	fmt.Println(fromMap(&n, map[string]int{"k": 5}), n)
+	fmt.Println(fromAssert(&s, S{7}), s)
+	fmt.Println(fromAssert(&arr, [2]int{7, 8}), arr)
+	fmt.Println(fromAssert(&n, 7), n)
+	fmt.Println(fromAssert(&n, "x"), n)`,
+	"true {5}\ntrue [5 6]\ntrue 5\ntrue {7}\ntrue [7 8]\ntrue 7\nfalse 0\n",
+);
+
+storeCase(
+	"a generic *T comma-ok map read stores a copy, not the map's array",
+	GENERIC_STORE,
+	`	var arr [2]int
+	m := map[string][2]int{"k": {5, 6}}
+	fromMap(&arr, m)
+	arr[0] = 9
+	fmt.Println(m["k"], arr)`,
+	"[5 6] [9 6]\n",
+);
+
+section("Whole-value stores by range");
+
+storeCase(
+	"a slice or map range assigns through *p into the pointee",
+	"",
+	`	s := S{1}
+	p := &s
+	for _, *p = range []S{{5}} {
+	}
+	fmt.Println(s)
+	for _, *p = range map[int]S{1: {6}} {
+	}
+	fmt.Println(s)
+	var k int
+	for k, *p = range map[int]S{2: {7}} {
+	}
+	fmt.Println(k, s)`,
+	"{5}\n{6}\n2 {7}\n",
+	assertAllTargetsOutput,
+);
+
+storeCase(
+	"a slice or map range into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	for _, s = range []S{{2}} {
+	}
+	fmt.Println(*ps, ps == &s)
+	s = S{1}
+	for _, s = range map[int]S{1: {3}} {
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n{3} true\n",
+);
+
+storeCase(
+	"a slice or map range into a sliced array updates the slice view",
+	"",
+	`	var arr [2]int
+	sl := arr[:]
+	for _, arr = range [][2]int{{7, 8}} {
+	}
+	fmt.Println(sl)
+	for _, arr = range map[int][2]int{1: {5, 6}} {
+	}
+	fmt.Println(sl)`,
+	"[7 8]\n[5 6]\n",
+);
+
+storeCase(
+	"a range into a generic *T target stores struct, array and int values",
+	`func fromSlice[T any](p *T, xs []T) {
+	for _, *p = range xs {
+	}
+}
+
+func fromMap[T any](p *T, m map[string]T) {
+	for _, *p = range m {
+	}
+}`,
+	`	var s S
+	var arr [2]int
+	var n int
+	xs := [][2]int{{1, 2}}
+	fromSlice(&s, []S{{5}})
+	fromSlice(&arr, xs)
+	fromSlice(&n, []int{5})
+	fmt.Println(s, arr, n)
+	fromMap(&s, map[string]S{"a": {6}})
+	am := map[string][2]int{"a": {3, 4}}
+	fromMap(&arr, am)
+	fromMap(&n, map[string]int{"a": 6})
+	arr[0] = 9
+	fmt.Println(s, arr, n, xs, am)`,
+	"{5} [1 2] 5\n{6} [9 4] 6 [[1 2]] map[a:[3 4]]\n",
+	assertAllTargetsOutput,
+);
+
+storeCase(
+	"a tuple store mixes an address-taken struct and a *p target",
+	"",
+	`	a, b := S{1}, S{2}
+	pa, pb := &a, &b
+	q := &b
+	a, *q = S{3}, S{4}
+	fmt.Println(*pa, pa == &a, *pb, pb == &b)`,
+	"{3} true {4} true\n",
+	assertAllTargetsOutput,
+);
+
+section("Whole-value stores from calls and through array pointers");
+
+const PAIRS = `func pairS() (S, bool)      { return S{5}, true }
+func pairA() ([2]int, bool) { return [2]int{7, 8}, true }`;
+
+storeCase(
+	"a multi-value call into an address-taken struct updates it in place",
+	PAIRS,
+	`	s := S{1}
+	ps := &s
+	var ok bool
+	s, ok = pairS()
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{5} true true\n",
+);
+
+storeCase(
+	"a multi-value call into a sliced array updates the slice view",
+	PAIRS,
+	`	var arr [2]int
+	sl := arr[:]
+	var ok bool
+	arr, ok = pairA()
+	fmt.Println(sl, ok)`,
+	"[7 8] true\n",
+);
+
+storeCase(
+	"a multi-value call into an address-taken field and a map element stores both",
+	`func pairSI() (S, int) { return S{5}, 3 }`,
+	`	type W struct{ In S }
+	var w W
+	pin := &w.In
+	m := map[string]int{}
+	w.In, m["a"] = pairSI()
+	fmt.Println(*pin, m)`,
+	"{5} map[a:3]\n",
+);
+
+storeCase(
+	"a for post statement storing a multi-value call updates in place",
+	PAIRS,
+	`	var arr [2]int
+	sl := arr[:]
+	u := S{1}
+	pu := &u
+	var ok bool
+	for i := 0; i < 1; arr, ok = pairA() {
+		i++
+	}
+	fmt.Println(sl, ok)
+	for i := 0; i < 1; u, ok = pairS() {
+		i++
+	}
+	fmt.Println(*pu, pu == &u, ok)`,
+	"[7 8] true\n{5} true true\n",
+);
+
+storeCase(
+	"a multi-value call through *p of an array updates the slice view",
+	PAIRS,
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	p := &arr
+	var ok bool
+	*p, ok = pairA()
+	fmt.Println(sl, ok)`,
+	"[7 8] true\n",
+);
+
+storeCase(
+	"an assignment through *p of an array updates the slice view",
+	"type A [2]int",
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	p := &arr
+	*p = [2]int{3, 4}
+	fmt.Println(sl, arr)
+	var na A
+	nsl := na[:]
+	pn := &na
+	*pn = A{1, 1}
+	fmt.Println(nsl)
+	b := [2]int{5, 6}
+	*p = b
+	b[0] = 0
+	fmt.Println(sl, b)
+	*p, *pn = [2]int{2, 2}, A{3, 3}
+	fmt.Println(sl, nsl)`,
+	"[3 4] [3 4]\n[1 1]\n[5 6] [0 6]\n[2 2] [3 3]\n",
+);
+
+storeCase(
+	"a comma-ok map read, type assertion and range through *p of an array update the slice view",
+	"",
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	p := &arr
+	m := map[string][2]int{"k": {5, 6}}
+	var ok bool
+	*p, ok = m["k"]
+	fmt.Println(sl, ok)
+	var a any = [2]int{7, 8}
+	*p, ok = a.([2]int)
+	fmt.Println(sl, ok)
+	for _, *p = range [][2]int{{9, 10}} {
+	}
+	fmt.Println(sl)`,
+	"[5 6] true\n[7 8] true\n[9 10]\n",
+);
+
+storeCase(
+	"a store into an array of arrays keeps the slice views of its rows",
+	"type T struct{ M [2][2]int }",
+	`	m := [2][2]int{{1, 2}, {3, 4}}
+	sl := m[0][:]
+	p := &m
+	*p = [2][2]int{{5, 6}, {7, 8}}
+	fmt.Println(sl, m)
+	m = [2][2]int{{9, 10}, {11, 12}}
+	fmt.Println(sl, *p)
+	var t T
+	ts := t.M[1][:]
+	pt := &t
+	t = T{M: [2][2]int{{5, 6}, {7, 8}}}
+	fmt.Println(ts, *pt)`,
+	"[5 6] [[5 6] [7 8]]\n[9 10] [[9 10] [11 12]]\n[7 8] {[[5 6] [7 8]]}\n",
+);

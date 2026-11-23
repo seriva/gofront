@@ -472,6 +472,39 @@ func main() {
 	);
 });
 
+test("a field or element target mentioned by a later dereference binds it first", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type SP struct{ P *int }
+
+func main() {
+	sa, sb := 1, 2
+	sp := SP{P: &sa}
+	sp.P, *sp.P = &sb, 99
+	fmt.Println(sa, sb)
+
+	xa, xb := 1, 2
+	xs := []*int{&xa}
+	xs[0], *xs[0] = &xb, 99
+	fmt.Println(xa, xb)
+
+	fa, fb := 1, 2
+	fp := SP{P: &fa}
+	for k := 0; k < 1; fp.P, *fp.P, k = &fb, 99, k+1 {
+	}
+	fmt.Println(fa, fb)
+}
+`,
+		`99 2
+99 2
+99 2
+`,
+	);
+});
+
 test("plain-variable target operands are read after the right-hand call", async () => {
 	await assertAllTargetsOutput(
 		`package main
@@ -653,6 +686,88 @@ func main() {
 	);
 });
 
+test("complex += on a map element runs the key call once (V2.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	kn := 0
+	k := func() string { kn++; return "a" }
+	m := map[string]complex128{"a": complex(1, 2)}
+	z := complex(1, 1)
+	m[k()] += z
+	fmt.Println(m["a"], kn)
+}
+`,
+		"(2+3i) 1\n",
+	);
+});
+
+test("complex += works as a for post statement (V2.4)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex128
+	z := complex(1, 1)
+	for i := 0; i < 2; c += z {
+		i++
+	}
+	fmt.Println(c)
+}
+`,
+		"(2+2i)\n",
+	);
+});
+
+test("complex += through an address-taken variable keeps the pointer in sync (V2.5)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := func() complex128 { return complex(3, 4) }
+	c := complex(1, 2)
+	p := &c
+	c += f()
+	fmt.Println(c, *p)
+}
+`,
+		"(4+6i) (4+6i)\n",
+	);
+});
+
+test("complex compound assignment on elements, fields and complex64 runs each operand once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ c complex64 }
+
+func main() {
+	n := 0
+	idx := func() int { n++; return 1 }
+	xs := []complex128{complex(1, 1), complex(2, 2)}
+	z := complex(1, 2)
+	xs[idx()] *= z
+	xs[idx()] -= z
+	t := &T{complex(1, 0)}
+	t.c /= complex64(complex(0, 1))
+	var a [2]complex64
+	a[idx()] += complex64(z)
+	fmt.Println(xs, t.c, a, n)
+}
+`,
+		"[(1+1i) (-3+4i)] (0-1i) [(0+0i) (1+2i)] 3\n",
+	);
+});
+
 test("complex map and *= compound assignments run each call once", async () => {
 	await assertAllTargetsOutput(
 		`package main
@@ -673,3 +788,161 @@ func main() {
 		"(2+3i) (2+2i) 2 1\n",
 	);
 });
+
+section("Whole-value stores in for init and post statements");
+
+const forStoreCase = (
+	name,
+	decls,
+	body,
+	want,
+	assertFn = assertAllTargetsOutput,
+) =>
+	test(name, async () => {
+		await assertFn(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+${decls}
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+forStoreCase(
+	"a for init comma-ok map define runs the map and key calls once",
+	"",
+	`	n := 0
+	k := func() string { n++; return "k" }
+	m := map[string]int{"k": 5}
+	for v, ok := m[k()]; ok; ok = false {
+		fmt.Println(v, ok, n)
+	}`,
+	"5 true 1\n",
+);
+
+forStoreCase(
+	"a for init comma-ok map define of a struct value is a copy",
+	"",
+	`	m := map[string]S{"k": {5}}
+	for v, ok := m["k"]; ok; ok = false {
+		v.N = 9
+		fmt.Println(v, m["k"])
+	}`,
+	"{9} {5}\n",
+);
+
+forStoreCase(
+	"a for init comma-ok map define keeps one variable per iteration",
+	"",
+	`	m := map[string]int{"k": 5}
+	var fs []func() int
+	for v, ok := m["k"]; ok && v < 8; v++ {
+		fs = append(fs, func() int { return v })
+	}
+	fmt.Println(fs[0](), fs[1](), fs[2]())`,
+	"5 6 7\n",
+);
+
+forStoreCase(
+	"a for init comma-ok type assertion define",
+	"",
+	`	var a any = S{4}
+	for v, ok := a.(S); ok; ok = false {
+		fmt.Println(v, ok)
+	}`,
+	"{4} true\n",
+);
+
+forStoreCase(
+	"a for post comma-ok map assignment",
+	"",
+	`	m := map[string]int{"a": 5}
+	var v int
+	var ok bool
+	for i := 0; i < 1; v, ok = m["a"] {
+		i++
+	}
+	fmt.Println(v, ok)`,
+	"5 true\n",
+);
+
+forStoreCase(
+	"a for post comma-ok map assignment into an address-taken struct",
+	"",
+	`	m := map[string]S{"a": {5}}
+	s := S{1}
+	ps := &s
+	var ok bool
+	for i := 0; i < 1; s, ok = m["a"] {
+		i++
+	}
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{5} true true\n",
+);
+
+forStoreCase(
+	"a for post comma-ok type assertion assignment",
+	"",
+	`	var a any = S{6}
+	var s S
+	var ok bool
+	for i := 0; i < 1; s, ok = a.(S) {
+		i++
+	}
+	fmt.Println(s, ok)`,
+	"{6} true\n",
+);
+
+forStoreCase(
+	"a for post tuple store into a struct *p target",
+	"",
+	`	s := S{9}
+	p := &s
+	for i := 0; i < 2; i, *p = i+1, (S{i + 10}) {
+	}
+	fmt.Println(s)`,
+	"{11}\n",
+);
+
+forStoreCase(
+	"a for post store into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	for i := 0; i < 2; i, s = i+1, (S{i + 10}) {
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{11} true\n",
+);
+
+forStoreCase(
+	"a for post single store through a struct *p target",
+	"",
+	`	s := S{9}
+	p := &s
+	for i := 0; i < 2; *p = (S{i + 20}) {
+		i++
+	}
+	fmt.Println(s)`,
+	"{22}\n",
+);
+
+forStoreCase(
+	"a for post single store into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	for i := 0; i < 2; s = (S{i + 20}) {
+		i++
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{22} true\n",
+);

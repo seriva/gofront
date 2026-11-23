@@ -66,3 +66,34 @@ test("assign-order: a struct base is descended into, not bound", () => {
 		"IndexExpr.index:k",
 	]);
 });
+
+test("assign-order: a dereference of an assigned field binds the field", () => {
+	const b = binds(
+		"a, c := 1, 2\ntype SP struct{ P *int }\nsp := SP{P: &a}\nsp.P, *sp.P = &c, 99",
+	);
+	assert.deepStrictEqual(slotNames(b), ["UnaryExpr.operand"]);
+});
+
+test("assign-order: a dereference of an assigned element binds the element", () => {
+	const b = binds("a, c := 1, 2\nxs := []*int{&a}\nxs[0], *xs[0] = &c, 99");
+	assert.deepStrictEqual(slotNames(b), ["UnaryExpr.operand"]);
+});
+
+test("assign-order: callOnly still binds an operand that reads an assigned element", () => {
+	const b = binds("a, c := 1, 2\nxs := []*int{&a}\nxs[0], *xs[0] = &c, 99", {
+		callOnly: true,
+	});
+	assert.deepStrictEqual(slotNames(b), ["UnaryExpr.operand"]);
+});
+
+test("assign-order: swapping elements binds nothing", () => {
+	const b = binds(
+		"xs := []int{1, 2}\ni, j := 0, 1\nxs[i], xs[j] = xs[j], xs[i]",
+	);
+	assert.deepStrictEqual(b, []);
+});
+
+test("assign-order: a single target binds nothing", () => {
+	const b = binds("xs := []int{1, 2}\nxs[xs[0]] = 5", { single: true });
+	assert.deepStrictEqual(b, []);
+});

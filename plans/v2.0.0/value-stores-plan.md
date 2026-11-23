@@ -1,7 +1,7 @@
 # Value Stores — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-23)
 **Base branch:** main  
 **Related:** Schedules the review follow-ups that [`assignment-semantics-plan.md`](assignment-semantics-plan.md) deferred at completion (its *Review follow-ups found while executing this plan* row, 11 entries), L14 from the former `followup-fixes-plan.md`, and the `plans/follow-ups.md` entry *Pointer method on a dereferenced named scalar*, re-probed 2026-11-17 and grouped by root cause. Phase 4 starts after [`wasm-struct-types-plan.md`](wasm-struct-types-plan.md) Phase 1 (one struct field list). Keeps the assignment plan's spec-only evaluation-order policy: nothing here changes output that the Go spec leaves unspecified.  
 **Release note:** Assignments keep Go's value semantics in more places on every target: `for x = range seq` and comma-ok assignments into a variable whose address was taken update it in place, `p.F, *p.F = …` stores through the old pointer, compound assignments on complex numbers evaluate each operand once (also in a `for` post statement), struct copies on WebAssembly no longer share arrays or embedded structs, and `(*p).Inc()` on a named number type changes the value `p` points to.  
@@ -126,56 +126,56 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
 > Scheduled from the assignment-semantics deferred follow-ups (re-probed 2026-11-17), L14 from the former `followup-fixes-plan.md`, and one `plans/follow-ups.md` entry.
 
 ### Phase 1: Differential fuzzer covers stores (root `fuzz-generator`)
-- [ ] Task 1.1: Valid batches and transitive conflict detection (V1.1, V1.2)
+- [x] Task 1.1: Valid batches and transitive conflict detection (V1.1, V1.2)
   - Files: `test/fuzz/difffuzz.js`
   - Test: `test/unit/cli/difffuzz.test.js` (Go-free): the generator's batch for `--case 6873:0` declares `ks` before `f0`; `stmtConflicts` rejects the V1.2 statement
   - Done when: both pass; `--mode order --stmts 12 --case 6873:0` compiles with Go (by hand)
-- [ ] Task 1.2: `--mode stores` generates the V3/V4 shapes (V1.3)
+- [x] Task 1.2: `--mode stores` generates the V3/V4 shapes (V1.3)
   - Files: `test/fuzz/difffuzz.js`, `docs/architecture.md` (*Differential fuzzer*: the new mode)
   - Test: `test/unit/cli/difffuzz.test.js`: a seeded `--mode stores` batch contains each shape (comma-ok into `*p` and generic targets, range-over-func `=`, `for` post, closure-captured struct, embedded field)
   - Done when: passes; a by-hand run reproduces at least V3.1 and V4.1 as findings before Phases 3–4
 
 ### Phase 2: Assignment target operands evaluated once (roots `lhs-operand-binds`, `complex-compound-path`)
-- [ ] Task 2.1: Non-`Ident` targets bind every target operand (V2.1, V2.2)
+- [x] Task 2.1: Non-`Ident` targets bind every target operand (V2.1, V2.2)
   - Files: `src/lower/assign-order.js`
   - Test: `test/unit/compiler/assign-order.test.js` (non-`Ident` target binds) and `test/unit/language/codegen-regressions.test.js` *Assignment order*: V2.1, V2.2 and a `for` post form → `99 2` with `assertAllTargetsOutput`; the three gc-order sections unmodified
   - Done when: passes on every target; `bundle-size.js` passes
-- [ ] Task 2.2: Complex compound assignment uses the general compound path (V2.3–V2.5)
+- [x] Task 2.2: Complex compound assignment uses the general compound path (V2.3–V2.5)
   - Files: `src/backend/js/statements.js` (remove `_genComplexCompoundAssign`; complex operator in the compound path)
   - Test: `codegen-regressions.test.js`: V2.3 → `(2+3i) 1`, V2.4 → `(2+2i)`, V2.5 → `(4+6i) (4+6i)`, and C4 from the assignment plan unchanged
   - Done when: all pass on every target
 
 ### Phase 3: One JS store primitive (root `js-store-target`)
-- [ ] Task 3.1: `_storeInto` and comma-ok stores (V3.4, V3.5, V3.6)
+- [x] Task 3.1: `_storeInto` and comma-ok stores (V3.4, V3.5, V3.6)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/value-semantics.test.js` *Whole-value stores*: V3.4 → `{5} true`, V3.5 → `{6}`, V3.6 (`*p, ok = m["k"]` and `*p, ok = a.(T)`) with struct, array and `int` `T` → `true {5}` / Go's output, with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: passes on `js`/`both`; the comma-ok emitters contain no inline `Object.assign`
-- [ ] Task 3.2: `for ... = range` forms store through `_storeInto` (V3.1–V3.3, slice/map-range siblings)
+- [x] Task 3.2: `for ... = range` forms store through `_storeInto` (V3.1–V3.3, slice/map-range siblings)
   - Files: `src/backend/js/statements.js` (`_emitRangeVar`, `_rangeAssignTemps`, `genIteratorFor`)
   - Test: `test/unit/language/range-func.test.js`: V3.1 → `{5}`, V3.2 → `{2} true`, V3.3 → `[7 8]` with `assertAllTargetsOutput`; `test/unit/language/value-semantics.test.js`: slice/map-range `*p` and generic `*T` siblings with `assertAllTargetsOutput`, and slice/map-range address-taken struct / sliced array siblings with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: all pass on the tested targets
-- [ ] Task 3.3: Stores in `for` init and post contexts (V3.7)
+- [x] Task 3.3: Stores in `for` init and post contexts (V3.7)
   - Files: `src/backend/js/statements.js`
   - Test: `codegen-regressions.test.js`: V3.7 → `5 true 1`; the same comma-ok `=` form in a `for` post; a tuple store with a struct `*p` target in a `for` post
   - Done when: all pass; `grep -n "Object.assign(" src/backend/js/statements.js` lists only `_storeInto`
 
 ### Phase 4: One WASM value store (root `wasm-value-copy`; after `wasm-struct-types` Phase 1)
-- [ ] Task 4.1: `emitStoreValue` for plain and captured variables (V4.1, V4.3)
+- [x] Task 4.1: `emitStoreValue` for plain and captured variables (V4.1, V4.3)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js` (copy helper over the shared field list)
   - Test: `test/unit/language/value-semantics.test.js` *Struct value semantics*: V4.1 → `{9 5}`, V4.3 → `{{-4} 7} {{5} 7}`, and a captured, address-taken variant, with `assertAllTargetsOutput`
   - Done when: all pass on every target
-- [ ] Task 4.2: Literal fields, `range` `=` targets and comma-ok results store through `emitStoreValue` (V4.2, V4.4)
+- [x] Task 4.2: Literal fields, `range` `=` targets and comma-ok results store through `emitStoreValue` (V4.2, V4.4)
   - Files: `src/backend/wasm/emit-stmts.js` (`_bindRangeAssignTargets`, `_emitStoreLhsFromTemp`), `src/backend/wasm/emit-exprs.js` (`_emitFieldInit` composite-literal value-struct fields)
   - Test: `value-semantics.test.js`: V4.2 (`*pa = W{Q: p}` and `a := W{Q: p}`) → `{[1 2]} {{[9 2]}}`; Task 3.1's V3.4/V3.5 tests and Task 3.2's slice/map-range address-taken struct / sliced array tests switch to `assertAllTargetsOutput`
   - Done when: all pass; `zero-alloc.js` passes
 
 ### Phase 5: Pointer identity (roots `deref-receiver`, `js-new-struct`)
 Two one-task roots, both about which object a pointer refers to; each fix is under ~40 production LOC.
-- [ ] Task 5.1: `&(*p)` and `(*p).M()` with a pointer receiver pass `p` (V5.1)
+- [x] Task 5.1: `&(*p)` and `(*p).M()` with a pointer receiver pass `p` (V5.1)
   - Files: `src/backend/js/expressions.js` (`_genUnaryExpr`), `src/backend/wasm/emit-exprs.js` (`_emitAddressOf`)
   - Test: `test/unit/language/value-semantics.test.js`: V5.1 → `1`; named slice/string `(*p).M()`; `q := &(*p)` identity for scalar and struct → `99 true`; `(*get()).Inc()` calls `get` once; `&(*nilPtr)` / `(*nilPtr).M()` panic; struct and array controls → `1`, with `assertAllTargetsOutput`
   - Done when: all pass on every target
-- [ ] Task 5.2: JS `new` of any struct type returns the struct object (V5.2, V5.3)
+- [x] Task 5.2: JS `new` of any struct type returns the struct object (V5.2, V5.3)
   - Files: `src/backend/js/expressions.js` (`new` builtin)
   - Test: `test/unit/language/structs.test.js`: V5.2 → `0`, V5.3 → `0`, `*p = T{…}` then `p.N`, with `assertAllTargetsOutput` (`new(struct{ N int })` is covered by [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) Task 4.2, L3, which runs in a parallel lane; add it here only if that task has already landed)
   - Done when: all pass; `bundle-size.js` passes (named structs emit the same JS)

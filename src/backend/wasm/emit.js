@@ -1325,6 +1325,7 @@ export class FunctionEmitter {
 	// temporary (composite literal, call result, or a struct `*p` deref) or not
 	// a value type at all.
 	_emitCopyIfValue(node, goType, wType) {
+		if (node._fresh) return;
 		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker)) {
 			if (node.kind === "CompositeLit" || node._freshArray) return;
 			if (node.kind === "CallExpr" && !node._isTypeConversion) return;

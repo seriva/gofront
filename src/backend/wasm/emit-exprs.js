@@ -12,6 +12,7 @@ import {
 	compositeLitIndices,
 	compositeLitMaxIndex,
 } from "../../typechecker/types.js";
+import { derefOf } from "../shared/deref-operand.js";
 import { goTypeName } from "../shared/fmt-types.js";
 import { namedBase } from "../shared/named-underlying.js";
 import { emitWasmNative } from "./natives.js";
@@ -744,8 +745,7 @@ export class ExprsEmitter {
 	// A struct literal field initialiser; array values are copied in.
 	_emitFieldInit(value, f) {
 		this.emitExpr(value, f.wType);
-		if (f.goType?.kind !== "pointer" && isArrayType(f.goType, this.mod.checker))
-			this._emitCopyIfValue(value, f.goType, f.wType);
+		this._emitCopyIfValue(value, f.goType, f.wType);
 	}
 
 	// With a pointer on the stack, branches to the function's `nil` block
@@ -2046,6 +2046,14 @@ export class ExprsEmitter {
 	}
 
 	_emitAddressOf(operand) {
+		// &(*p) is p itself, nil-checked: Go panics on a nil p.
+		const deref = derefOf(operand);
+		if (deref) {
+			const ptrType = deref.operand._type;
+			this.emitExpr(deref.operand, this.toWasmType(ptrType));
+			this._emitNilCheck(ptrType);
+			return;
+		}
 		if (operand.kind === "Ident") {
 			const loc = this.resolveLocal(operand.name);
 			if (loc?.isBoxed) {

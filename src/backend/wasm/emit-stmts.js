@@ -523,6 +523,75 @@ export class StmtsEmitter {
 		this.locals.delete(tempName);
 	}
 
+	// The one store into a variable (a plain local, a boxed local that a
+	// closure captures or whose address is taken, or a global).  A struct or
+	// array value is copied unless `r` is already a fresh value, and written
+	// into the existing storage when the variable's address may be held, so
+	// every earlier pointer or slice view sees the new value.  Every
+	// statement that assigns to a variable ends here: assignment, tuple,
+	// comma-ok and range stores name their value as `r`.
+	emitStoreValue(l, r, localInfo, op = "=") {
+		if (
+			localInfo &&
+			op !== ":=" &&
+			this._needsStableStore(l, localInfo.goType)
+		) {
+			this._emitStableStore(localInfo.goType, r, () => {
+				this.pushInstruction({ op: "local.get", index: localInfo.index });
+				if (localInfo.isBoxed)
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: localInfo.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+			});
+			return;
+		}
+		const globalStable =
+			!localInfo && op !== ":=" && this.mod.resolveGlobal(l.name);
+		if (globalStable && this._needsStableStore(l, globalStable.goType)) {
+			this._emitStableStore(globalStable.goType, r, () => {
+				this.pushInstruction({ op: "global.get", index: globalStable.index });
+			});
+			return;
+		}
+		if (localInfo) {
+			if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
+				// Pointers to the array (`&a`) hold its reference: write in place.
+				this._emitArrayStoreInto(localInfo.goType, r, () => {
+					this.pushInstruction({ op: "local.get", index: localInfo.index });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: localInfo.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				});
+				return;
+			}
+			if (localInfo.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: localInfo.index });
+				this.emitExpr(r, localInfo.boxInfo.wType);
+				this._emitCopyIfValue(r, localInfo.goType, localInfo.boxInfo.wType);
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: localInfo.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				return;
+			}
+			this.emitExpr(r, localInfo.type);
+			this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
+			this.pushInstruction({ op: "local.set", index: localInfo.index });
+			return;
+		}
+		const globalInfo = this.mod.resolveGlobal(l.name);
+		if (globalInfo) {
+			this.emitExpr(r, globalInfo.type);
+			this._emitCopyIfValue(r, globalInfo.goType, globalInfo.type);
+			this.pushInstruction({ op: "global.set", index: globalInfo.index });
+		}
+	}
+
 	_emitAssignSingle(l, r, op) {
 		if (!r) return;
 		if (l.kind === "Ident") {
@@ -537,69 +606,7 @@ export class StmtsEmitter {
 				this.allocLocal(l.name, wType, r._type);
 				localInfo = this.locals.get(l.name);
 			}
-			if (
-				localInfo &&
-				op !== ":=" &&
-				this._needsStableStore(l, localInfo.goType)
-			) {
-				this._emitStableStore(localInfo.goType, r, () => {
-					this.pushInstruction({ op: "local.get", index: localInfo.index });
-					if (localInfo.isBoxed)
-						this.pushInstruction({
-							op: "struct.get",
-							typeIndex: localInfo.boxInfo.typeIndex,
-							fieldIndex: 0,
-						});
-				});
-				return;
-			}
-			const globalStable =
-				!localInfo && op !== ":=" && this.mod.resolveGlobal(l.name);
-			if (globalStable && this._needsStableStore(l, globalStable.goType)) {
-				this._emitStableStore(globalStable.goType, r, () => {
-					this.pushInstruction({ op: "global.get", index: globalStable.index });
-				});
-				return;
-			}
-			if (localInfo) {
-				if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
-					// Pointers to the array (`&a`) hold its reference: write in place.
-					this._emitArrayStoreInto(localInfo.goType, r, () => {
-						this.pushInstruction({ op: "local.get", index: localInfo.index });
-						this.pushInstruction({
-							op: "struct.get",
-							typeIndex: localInfo.boxInfo.typeIndex,
-							fieldIndex: 0,
-						});
-					});
-					return;
-				}
-				if (localInfo.isBoxed) {
-					this.pushInstruction({ op: "local.get", index: localInfo.index });
-					this.emitExpr(r, localInfo.boxInfo.wType);
-					if (isArrayType(localInfo.goType, this.mod.checker))
-						this._emitCopyIfValue(r, localInfo.goType, localInfo.boxInfo.wType);
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: localInfo.boxInfo.typeIndex,
-						fieldIndex: 0,
-					});
-					return;
-				}
-				this.emitExpr(r, localInfo.type);
-				this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
-				this.pushInstruction({ op: "local.set", index: localInfo.index });
-			} else {
-				const globalInfo = this.mod.resolveGlobal(l.name);
-				if (globalInfo) {
-					this.emitExpr(r, globalInfo.type);
-					this._emitCopyIfValue(r, globalInfo.goType, globalInfo.type);
-					this.pushInstruction({
-						op: "global.set",
-						index: globalInfo.index,
-					});
-				}
-			}
+			this.emitStoreValue(l, r, localInfo, op);
 			return;
 		}
 
@@ -748,8 +755,35 @@ export class StmtsEmitter {
 	// target is an interface, `valueGoType` is the Go type of the ranged
 	// element and the value is boxed into the interface representation;
 	// `emitValue` is then called with the wasm type of `valueGoType`.
-	_emitRangeAssignStore(name, info, emitValue, valueGoType = null) {
+	_emitRangeAssignStore(
+		name,
+		info,
+		emitValue,
+		valueGoType = null,
+		isAssign = false,
+	) {
 		const local = this.resolveLocal(name);
+		const destGoType = (local ?? this.mod.resolveGlobal(name))?.goType;
+		if (
+			isAssign &&
+			this._isAggregateType(valueGoType) &&
+			this._isAggregateType(destGoType)
+		) {
+			// `for _, s = range xs`: the element is already a copy; the store
+			// writes it into `s`'s existing storage when its address is held.
+			const tmpName = `__rangeval$${this.tempCounter++}`;
+			const wType = this.toWasmType(valueGoType);
+			const idx = this.allocLocal(tmpName, wType, valueGoType, true);
+			emitValue(wType);
+			this.pushInstruction({ op: "local.set", index: idx });
+			this.emitStoreValue(
+				{ kind: "Ident", name, _type: valueGoType },
+				{ kind: "Ident", name: tmpName, _type: valueGoType, _fresh: true },
+				local,
+			);
+			this.locals.delete(tmpName);
+			return;
+		}
 		const boxIface =
 			valueGoType && this._rangeStoreWType(name, info) === "anyref";
 		const pushValue = () => {
@@ -859,24 +893,23 @@ export class StmtsEmitter {
 		const elemGoType = this._getArrayElemType(goType);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const wType = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
-		if (this._isValueStruct(elemGoType)) {
-			this._emitStructElemsStoreInto(elemGoType, arrInfo, wType, r, emitDst);
-			return;
-		}
 		const dst = this.acquireTemp(wType);
+		const src = this.acquireTemp(wType);
 		emitDst();
-		this.pushInstruction({ op: "local.tee", index: dst });
-		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: dst });
 		this.emitExpr(r, wType);
-		this._emitCopyIfValue(r, goType, wType);
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.get", index: dst });
-		this.pushInstruction("array.len");
-		this.pushInstruction({
-			op: "array.copy",
-			typeIndex: arrInfo.typeIndex,
-		});
+		// An element that is an array may be a never-written (null) slot, and
+		// the copy keeps the source from aliasing what the store writes.
+		if (!this._isValueStruct(elemGoType))
+			this._emitCopyIfValue(r, goType, wType);
+		this.pushInstruction({ op: "local.set", index: src });
+		this._emitArrayElemsInto(goType, dst, src);
+		this.releaseTemp(src, wType);
 		this.releaseTemp(dst, wType);
+	}
+
+	_isAggregateType(goType) {
+		return this._isValueStruct(goType) || this._isValueArray(goType);
 	}
 
 	_isValueStruct(goType) {
@@ -888,21 +921,31 @@ export class StmtsEmitter {
 		);
 	}
 
-	// An array of structs holds element references, so `array.copy` would
-	// swap them and leave `&a[i]` pointing at the old element.  Copy each
-	// element's fields into the existing element struct instead.
-	_emitStructElemsStoreInto(elemGoType, arrInfo, wType, r, emitDst) {
-		const elemInfo = this._resolveStructInfo({ _type: elemGoType });
+	// Copies the elements of the array in the temp `src` into the array in the
+	// temp `dst`.  An array of structs or arrays holds element references, so
+	// `array.copy` would swap them and leave `&a[i]` and `a[i][:]` pointing at
+	// the old element: each element is copied into the existing one instead.
+	_emitArrayElemsInto(goType, dst, src) {
+		const elemGoType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const elemStruct = this._isValueStruct(elemGoType);
+		if (!elemStruct && !this._isValueArray(elemGoType)) {
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction("array.len");
+			this.pushInstruction({ op: "array.copy", typeIndex: arrInfo.typeIndex });
+			return;
+		}
+		const elemInfo = elemStruct
+			? this._resolveStructInfo({ _type: elemGoType })
+			: null;
 		const eType = arrInfo.elemWType;
-		const dst = this.acquireTemp(wType);
-		const src = this.acquireTemp(wType);
 		const i = this.acquireTemp("i32");
 		const d = this.acquireTemp(eType);
 		const s = this.acquireTemp(eType);
-		emitDst();
-		this.pushInstruction({ op: "local.set", index: dst });
-		this.emitExpr(r, wType);
-		this.pushInstruction({ op: "local.set", index: src });
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: i });
 		this.pushInstruction({ op: "block", blockType: "void" });
@@ -921,7 +964,8 @@ export class StmtsEmitter {
 			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
 			this.pushInstruction({ op: "local.set", index: tmp });
 		}
-		this._emitStructFieldsInto(elemInfo, d, s);
+		if (elemInfo) this._emitStructFieldsInto(elemInfo, d, s);
+		else this._emitArrayElemsInto(elemGoType, d, s);
 		this.pushInstruction({ op: "local.get", index: i });
 		this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction("i32.add");
@@ -932,8 +976,6 @@ export class StmtsEmitter {
 		this.releaseTemp(s, eType);
 		this.releaseTemp(d, eType);
 		this.releaseTemp(i, "i32");
-		this.releaseTemp(src, wType);
-		this.releaseTemp(dst, wType);
 	}
 
 	// Whole-value assignment to a variable (or a field of one) whose address
@@ -1036,23 +1078,20 @@ export class StmtsEmitter {
 			const f = info.fields[i];
 			const gt = f.goType;
 			if (gt && gt.kind !== "pointer" && this._isValueArray(gt)) {
-				const arrInfo = this.mod.getArrayType(this._getArrayElemType(gt));
+				const arrT = f.wType;
+				const d = this.acquireTemp(arrT);
+				const s = this.acquireTemp(arrT);
 				get(dst, i);
-				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction({ op: "local.set", index: d });
 				get(src, i);
+				// A never-written (null) element of the source reads as zero.
 				const elem = this._getArrayElemType(gt);
-				if (
-					isArrayType(elem, this.mod.checker) ||
-					isStructType(elem, this.mod.checker, this.mod)
-				)
+				if (this._isValueArray(elem) || this._isValueStruct(elem))
 					this.emitCopyArray(gt);
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				get(dst, i);
-				this.pushInstruction("array.len");
-				this.pushInstruction({
-					op: "array.copy",
-					typeIndex: arrInfo.typeIndex,
-				});
+				this.pushInstruction({ op: "local.set", index: s });
+				this._emitArrayElemsInto(gt, d, s);
+				this.releaseTemp(s, arrT);
+				this.releaseTemp(d, arrT);
 				continue;
 			}
 			const inner =
@@ -1196,11 +1235,24 @@ export class StmtsEmitter {
 		});
 	}
 
+	// A struct or array variable whose storage is written in place cannot take
+	// a result straight off the stack: it goes through `emitStoreValue`.
+	_hasStableTupleTarget(lhsNodes, tupleTypes) {
+		return lhsNodes.some(
+			(l, i) =>
+				l.kind === "Ident" &&
+				l.name !== "_" &&
+				this._isAggregateType(tupleTypes[i]) &&
+				this._needsStableStore(l, tupleTypes[i]),
+		);
+	}
+
 	_emitTupleAssign(lhsNodes, rhsNode, op) {
 		if (
 			op === "=" &&
 			(lhsNodes.some((l) => !this._isPlainTupleTarget(l)) ||
-				this._needsTupleConversion(lhsNodes, rhsNode._type.types))
+				this._needsTupleConversion(lhsNodes, rhsNode._type.types) ||
+				this._hasStableTupleTarget(lhsNodes, rhsNode._type.types))
 		) {
 			this._emitTupleViaTemps(
 				lhsNodes,
@@ -1343,15 +1395,24 @@ export class StmtsEmitter {
 		return this.mod.resolveGlobal(lhsNode.name)?.type ?? null;
 	}
 
+	// True when a comma-ok result goes through `_emitAssignSingle` rather than
+	// straight into a variable: an index, field or dereference target, a name
+	// `:=` redeclares, an interface-typed variable (`var x any; x, ok = m[k]`
+	// boxes a scalar or struct result), or a struct or array variable stored
+	// in place (its address or a slice of it may be held).
+	_commaOkNeedsAssign(lhsNode, wType, goType, isDefine) {
+		if (lhsNode.kind !== "Ident") return true;
+		if (isDefine) return !!(lhsNode._redecl && this.resolveLocal(lhsNode.name));
+		if (this._storeTargetWType(lhsNode) === "anyref" && wType !== "anyref")
+			return true;
+		return (
+			this._isAggregateType(goType) && this._needsStableStore(lhsNode, goType)
+		);
+	}
+
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
 		if (lhsNode.kind === "Ident" && lhsNode.name === "_") return;
-		const redeclared =
-			isDefine && lhsNode._redecl && this.resolveLocal(lhsNode.name);
-		// `var x any; x, ok = m[k]`: a scalar or struct result is boxed on the
-		// way into the interface-typed variable.
-		const target = isDefine ? null : this._storeTargetWType(lhsNode);
-		const boxesIntoAny = target === "anyref" && wType !== "anyref";
-		if (lhsNode.kind !== "Ident" || redeclared || boxesIntoAny) {
+		if (this._commaOkNeedsAssign(lhsNode, wType, goType, isDefine)) {
 			// An index, field or dereference target (or a name `:=` redeclares):
 			// assign from a named view of the temporary.
 			const name = `__ok_tmp_${this.tempCounter++}`;
@@ -2777,6 +2838,7 @@ export class StmtsEmitter {
 						this._emitCopyMapEntry(keyType, mapInfo.keyWType);
 					},
 					keyType,
+					isAssign,
 				);
 			}
 
@@ -2795,6 +2857,7 @@ export class StmtsEmitter {
 						this._emitCopyMapEntry(valType, mapInfo.valWType);
 					},
 					valType,
+					isAssign,
 				);
 			}
 
@@ -3012,6 +3075,7 @@ export class StmtsEmitter {
 					}
 				},
 				elemGoType,
+				isAssign,
 			);
 		}
 

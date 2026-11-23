@@ -617,6 +617,70 @@ func main() {
 	);
 });
 
+section("Range-over-func: assignment targets");
+
+const assignCase = (name, body, want) =>
+	test(name, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+assignCase(
+	"a range-over-func *p target stores into the pointee",
+	`	s := S{1}
+	p := &s
+	seq := func(yield func(S) bool) { yield(S{5}) }
+	for *p = range seq {
+	}
+	fmt.Println(s)`,
+	"{5}\n",
+);
+
+assignCase(
+	"a range-over-func target that is address-taken is updated in place",
+	`	s := S{1}
+	ps := &s
+	seq := func(yield func(S) bool) { yield(S{2}) }
+	for s = range seq {
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n",
+);
+
+assignCase(
+	"a range-over-func array target keeps the slice view of the array",
+	`	var arr [2]int
+	sl := arr[:]
+	seq := func(yield func([2]int) bool) { yield([2]int{7, 8}) }
+	for arr = range seq {
+	}
+	fmt.Println(sl)`,
+	"[7 8]\n",
+);
+
+assignCase(
+	"a two-value range-over-func stores a *p value target",
+	`	s := S{1}
+	p := &s
+	seq := func(yield func(int, S) bool) { yield(3, S{4}) }
+	var k int
+	for k, *p = range seq {
+	}
+	fmt.Println(k, s)`,
+	"3 {4}\n",
+);
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
