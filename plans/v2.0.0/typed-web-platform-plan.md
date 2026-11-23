@@ -1,7 +1,7 @@
 # Typed Web Platform — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phases 6–7) on 2026-11-17, re-probed that day. Starts after [`checker-go-rules-plan.md`](checker-go-rules-plan.md): Phase 1 here extends assignability, and Phase 4 types the globals that its Phase 3 classifies (`anyKind`: JS-dynamic `any` versus Go `any`), so the flip reuses that classifier instead of adding a second one. Ends `checker-strictness-plan.md` D3 permissiveness for the typed globals. [`gom-signals-plan.md`](gom-signals-plan.md) starts after this plan (`stdlib/gom/gom.go` is migrated in Phase 4). Motivating consumer: SimpleFPS' 1.9.2 adoption (`seriva/simplefps`), where the `any` rule forced hand-written `.d.ts` interfaces for every DOM and WebGPU value and the built-in `GPUDevice` assertion rejects every standard device.  
 **Release note:** **Breaking:** `document`, `window` and the other browser globals are typed, so reading a property that only a specific element type has needs a type assertion first (see the migration guide). The DOM, Canvas, Fetch, WebSocket and WebGPU APIs are type-checked through the new `gofront/dom`, `gofront/canvas`, `gofront/fetch`, `gofront/websocket` and `gofront/webgpu` packages, a misspelled member is a compile error, and `x.(webgpu.Device)` accepts a standard browser device.  
