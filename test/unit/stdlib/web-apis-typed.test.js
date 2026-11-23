@@ -239,6 +239,115 @@ func main() {}
 	assertEqual(errors.length, 0);
 });
 
+// A name that resolves to the browser global is not a use of the package
+// that happens to share it.
+function buildSource(source) {
+	return withTempDir({ "main.go": source }, (dir) =>
+		toCompileResult(() => compileDir(dir)),
+	);
+}
+
+test("calling only the global fetch leaves an unaliased import unused", () => {
+	const { errors } = buildSource(`package main
+
+import "gofront/fetch"
+
+func load(url string) {
+	_ = await fetch(url)
+}
+
+func main() {}
+`);
+	assertErrorContains(errors, "'fetch' imported and not used");
+});
+
+test("naming only the global fetch leaves the import unused", () => {
+	const { errors } = buildSource(`package main
+
+import "gofront/fetch"
+
+func main() {
+	println(fetch)
+}
+`);
+	assertErrorContains(errors, "'fetch' imported and not used");
+});
+
+test("a declaration package aliased to a global is unused when only the global is called", () => {
+	const { errors } = buildSource(`package main
+
+import fetch "gofront/dom"
+
+func load(url string) {
+	_ = await fetch(url)
+}
+
+func main() {}
+`);
+	assertErrorContains(errors, "'fetch' imported and not used");
+});
+
+test("the global fetch inside a closure does not use the import", () => {
+	const { errors } = buildSource(`package main
+
+import "gofront/fetch"
+
+func main() {
+	f := func(url string) {
+		_ = await fetch(url)
+	}
+	f("/x")
+}
+`);
+	assertErrorContains(errors, "'fetch' imported and not used");
+});
+
+test("a type assertion to a package type uses an import whose global is called", () => {
+	const { errors } = buildSource(`package main
+
+import "gofront/fetch"
+
+func load(url string) bool {
+	r, ok := (await fetch(url)).(fetch.Response)
+	_ = r
+	return ok
+}
+
+func main() {}
+`);
+	assertEqual(errors.length, 0);
+});
+
+test("a package type in a parameter uses an import whose global is called", () => {
+	const { errors } = buildSource(`package main
+
+import "gofront/fetch"
+
+func ok(r fetch.Response) bool { return r.ok }
+
+func load(url string) {
+	_ = await fetch(url)
+}
+
+func main() {}
+`);
+	assertEqual(errors.length, 0);
+});
+
+test("a parameter named like the package does not use the import", () => {
+	const { errors } = buildSource(`package main
+
+import "gofront/fetch"
+
+func f(fetch int) int { return fetch }
+
+func main() {
+	println(f(1))
+}
+`);
+	assertErrorContains(errors, "'fetch' imported and not used");
+});
+
 section("gofront/websocket");
 
 test("a socket sends and takes a typed listener", () => {
