@@ -13,8 +13,12 @@ import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
 import { restoredTypeName } from "../lower/gen-types.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
-import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
-import { forEachChild } from "../lower/walk.js";
+import {
+	checkedDecl,
+	reachableStdlibDecls,
+	StdlibReach,
+} from "../lower/reachability.js";
+import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
@@ -245,6 +249,12 @@ function probeStdlibPackage(_importPath, dir, options, deps, v) {
 // body name package scope, the body is mangled with them, and the mangled
 // body is checked.  `decl._ensure()` does all three once and returns the
 // error text, or null.
+//
+// The stored declarations stay as the build left them (a later build may
+// freeze them): the passes run on copies, and `decl._checked()` returns the
+// checked copy (the declaration itself until it has been checked).  A copy
+// carries no hooks of its own, so copies of it (a link copy, the JS emitter's
+// input) are plain finished ASTs.
 function installLazyBodies(info, programs, checker) {
 	const { probe, probePrograms } = info;
 	programs.forEach((p, pi) => {
@@ -252,15 +262,21 @@ function installLazyBodies(info, programs, checker) {
 			if (decl.kind !== "FuncDecl" && decl.kind !== "MethodDecl") return;
 			const probeDecl = probePrograms[pi].decls[di];
 			let result;
+			let checked = null;
+			decl._checked = () => checked ?? decl;
 			decl._ensure = () => {
 				if (result !== undefined) return result;
 				result = null; // a body that reaches itself is in progress
+				checked = cloneAst(decl);
+				delete checked._ensure;
+				delete checked._checked;
+				const probed = cloneAst(probeDecl);
 				const before = [probe.errors.length, checker.errors.length];
-				probe.checkBody(probeDecl);
+				probe.checkBody(probed, probeDecl);
 				if (probe.errors.length === before[0]) {
-					mangleBody(decl, p._filename, info);
-					checker.checkBody(decl);
-					lowerStdlibRefs(decl);
+					mangleBody(checked, p._filename, info);
+					checker.checkBody(checked, decl);
+					lowerStdlibRefs(checked);
 				}
 				const errors = [
 					...probe.errors.slice(before[0]),
@@ -400,6 +416,7 @@ function buildStdlibPackage(importPath, dir, options, deps, v) {
 		pkgName: info.pkgName,
 		namespace,
 		exportedTypes: stdlibExportedTypes(checker, info),
+		jsMemo: new Map(),
 		deps: programs
 			.flatMap((p) => p.imports.flatMap((imp) => imp.imports))
 			.map(({ path }) =>
@@ -429,17 +446,38 @@ function stdlibMarker(key) {
 	return `/*__GOFRONT_STDLIB:${key}*/`;
 }
 
-function stdlibJs(pkg, reached, natives) {
-	const programs = pkg.unit.programs.map((p) => ({
-		...p,
-		decls: p.decls.filter((d) => reached.has(d)),
-	}));
-	if (programs.every((p) => p.decls.length === 0)) return "";
-	return new CodeGen(pkg.checker, new Map(), new Set(), {
+// The package's emitted JS for a reached set, memoized per package by the
+// reached declarations and `natives`.  Stored declarations are frozen-safe:
+// code generation rewrites its input, so it gets a copy of the checked
+// declarations.  `stats` counts the memo's hits and misses when given.
+function stdlibJs(pkg, reached, natives, stats) {
+	const ids = [];
+	pkg.unit.programs.forEach((p, pi) => {
+		p.decls.forEach((d, di) => {
+			if (reached.has(d)) ids.push(`${pi}.${di}`);
+		});
+	});
+	if (ids.length === 0) return "";
+	const key = `${natives !== false}|${ids.join(",")}`;
+	const hit = pkg.jsMemo.get(key);
+	if (hit !== undefined) {
+		if (stats) stats.stdlibJsHits = (stats.stdlibJsHits ?? 0) + 1;
+		return hit;
+	}
+	if (stats) stats.stdlibJsMisses = (stats.stdlibJsMisses ?? 0) + 1;
+	const programs = cloneAst(
+		pkg.unit.programs.map((p) => ({
+			...p,
+			decls: p.decls.filter((d) => reached.has(d)).map(checkedDecl),
+		})),
+	);
+	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: pkg.checker.target,
 		strict: true,
 		natives,
 	}).generateAll(programs, { isTest: false });
+	pkg.jsMemo.set(key, js);
+	return js;
 }
 
 // The API a wasm package exposes to JS through the facade: exported func and
@@ -486,7 +524,9 @@ function spliceStdlibJs(merged, options) {
 		if (spliced.has(path)) continue;
 		spliced.add(path);
 		const pkg = options.stdlibCache.get(path);
-		const js = emitted(pkg) ? stdlibJs(pkg, reached, options.natives) : "";
+		const js = emitted(pkg)
+			? stdlibJs(pkg, reached, options.natives, options.cacheStats)
+			: "";
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
 		for (const m of merged.mappings)

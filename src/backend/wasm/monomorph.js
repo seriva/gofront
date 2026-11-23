@@ -933,8 +933,13 @@ export function monomorphise(programs, checker) {
 	// are addressable, so a mangled instance name never reports one here.
 	monoChecker.receiversChecked = true;
 	if (checker?.types) {
+		const declared = new Set(
+			progs.flatMap((p) =>
+				p.decls.filter((d) => d.kind === "TypeDecl").map((d) => d.name),
+			),
+		);
 		for (const [name, type] of checker.types.entries()) {
-			if (!monoChecker.types.has(name)) {
+			if (!monoChecker.types.has(name) && !declared.has(name)) {
 				monoChecker.types.set(name, type);
 			}
 		}

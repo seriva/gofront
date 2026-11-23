@@ -3,7 +3,7 @@
 
 import { compileWasmModule } from "../backend/wasm/index.js";
 import { lower } from "../lower/index.js";
-import { reachableStdlibDecls } from "../lower/reachability.js";
+import { checkedDecl, reachableStdlibDecls } from "../lower/reachability.js";
 import { cloneAst, forEachChild } from "../lower/walk.js";
 import { TypeCheckError, TypeChecker } from "../typechecker/index.js";
 import { UnsupportedError } from "../typechecker/types.js";
@@ -67,7 +67,8 @@ function linkWasmUnits(
 	const programs = [];
 	const stdlibPrograms = [];
 	// Check the stdlib bodies the linked code reaches before the ASTs are
-	// copied; lazily checked bodies are annotated and mangled in place.
+	// copied; a lazily checked body keeps its stored declaration and hands out
+	// a checked copy (`checkedDecl`).
 	reachableStdlibDecls(
 		units
 			.filter((u) => !u.key.startsWith("stdlib:"))
@@ -79,9 +80,12 @@ function linkWasmUnits(
 		// The WASM pipeline rewrites ASTs in place (package dequalification,
 		// monomorphisation, variadic desugaring), so the link works on a
 		// structural copy; side tables (`_type`, …) are shared by reference.
-		const copies = u.programs.map((p) => cloneAst(p));
+		const isStdlib = u.key.startsWith("stdlib:");
+		const copies = u.programs.map((p) =>
+			cloneAst(isStdlib ? { ...p, decls: p.decls.map(checkedDecl) } : p),
+		);
 		programs.push(...copies);
-		if (u.key.startsWith("stdlib:")) stdlibPrograms.push(...copies);
+		if (isStdlib) stdlibPrograms.push(...copies);
 	}
 	lowerStdlibRefs(programs);
 	dequalifyBundledRefs(programs, bundledPackages);

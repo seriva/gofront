@@ -119,7 +119,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
   - Done when: `localTypeCounter` and `iterStateCounter` reset per package / `lower()` call, and `instantiateGenericWithArgs` stores instantiation state in `TypeChecker`-owned maps
 
 ### Phase 2: Immutable `PackageCache` and cached stdlib JS
-- [ ] Task 2.1: Immutable stdlib units and memoized `stdlibJs` emission (former 3.2, stdlib/codegen half)
+- [x] Task 2.1: Immutable stdlib units and memoized `stdlibJs` emission (former 3.2, stdlib/codegen half)
   - Files: `src/link/stdlib.js`
   - Test: extend `test/unit/compiler/ast-reusability.test.js`: deep-freezing cached stdlib units (`programs`, `exportedTypes`, `namespace`) after compiling `sync.Mutex` + `fmt.Println` + `sort.Ints`, then compiling `sync.RWMutex`, `sort.Strings`, `slices.Sort`, and `encoding/json` (JS and `both`/`wasm`), succeeds without mutation errors and produces output byte-identical to cold builds; `stdlibJs` memoization counter hits on unchanged reached sets
   - Done when: `decl._ensure()` checks/mangles cloned declarations in a side map without mutating frozen `pkg.unit.programs`, `stdlibJs` clones filtered reached declarations on a memoization miss before `CodeGen.generateAll`, and `stdlibJs` memoizes emitted JS by `(pkg.key, reachedDeclIds, natives)`

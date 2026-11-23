@@ -56,6 +56,12 @@ function collectRefs(node, names, fields) {
 	forEachChild(node, (child) => collectRefs(child, names, fields));
 }
 
+// The declaration with its body checked and mangled: a lazily checked
+// declaration keeps its parsed form and hands out a checked copy.
+export function checkedDecl(d) {
+	return d._checked?.() ?? d;
+}
+
 function indexStdlib(stdlibPrograms) {
 	const byName = new Map(); // name -> decls
 	const methods = []; // { decl, recv }
@@ -78,7 +84,9 @@ function indexStdlib(stdlibPrograms) {
 // Incremental closure over one or more Go-source stdlib packages.  A
 // declaration's body may still be unchecked (lazy checking): `decl._ensure()`,
 // when present, checks and mangles it first and returns an error text on
-// failure, so the references collected from it are the mangled ones.  Failed
+// failure, so the references collected from its checked copy
+// (`checkedDecl`) are the mangled ones.  `reached` holds the stored
+// declarations.  Failed
 // declarations are listed in `failures`.
 export class StdlibReach {
 	constructor(stdlibPrograms) {
@@ -114,7 +122,7 @@ export class StdlibReach {
 		const failure = d._ensure?.();
 		if (failure) this.failures.push(failure);
 		const local = new Set();
-		collectRefs(d, local, this.fields);
+		collectRefs(checkedDecl(d), local, this.fields);
 		for (const n of local) this._name(n);
 	}
 
