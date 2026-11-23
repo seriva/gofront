@@ -55,8 +55,10 @@ export function runCompile(inputPath, isDir, options) {
 		targetOverrides = null,
 		rootDir = null,
 		checkTests = false,
+		packageCache,
 	} = options ?? {};
 	const targetOpts = { natives };
+	if (packageCache !== undefined) targetOpts.packageCache = packageCache;
 	if (forceTarget) targetOpts.forceTarget = forceTarget;
 	if (targetOverrides) targetOpts.targetOverrides = targetOverrides;
 	if (rootDir) targetOpts.rootDir = rootDir;
@@ -1234,8 +1236,10 @@ export function parseDevArgs(argv) {
 }
 
 // Compiles once and writes the output when an output file is configured.
-// Returns the build info; throws on compile errors.
-function runDevBuild(
+// Returns the build info; throws on compile errors.  Every build of a dev
+// session shares one package cache (`packageCache`, else the process-wide
+// one), so a rebuild compiles only the packages whose inputs changed.
+export function runDevBuild(
 	{
 		srcDir,
 		isDir,
@@ -1246,6 +1250,7 @@ function runDevBuild(
 		forceTarget,
 		targetOverrides,
 		rootDir,
+		packageCache,
 	},
 	changedFile = null,
 ) {
@@ -1256,6 +1261,7 @@ function runDevBuild(
 		forceTarget,
 		targetOverrides,
 		rootDir,
+		packageCache,
 	});
 	const js = maybeMinify(result.js, { minify, mangle, sourceMap });
 	const written = outputFile
@@ -1419,6 +1425,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 		minify: options.minify ?? false,
 		mangle: options.mangle ?? false,
 		forceTarget: options.forceTarget ?? null,
+		packageCache: options.packageCache,
 		...projectTargetOptions(project, options),
 		devServer,
 		onBuild: options.onBuild,

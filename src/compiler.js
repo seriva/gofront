@@ -49,7 +49,7 @@ import {
 	optionsSignature,
 	PackageCache,
 	resetPackageCache,
-	summaryHash,
+	unitSummary,
 } from "./link/package-cache.js";
 import {
 	clearParseCache,
@@ -1122,7 +1122,11 @@ export function compileFiles(files, options = {}) {
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
-		summary: unit.summary,
+		// Only an importer reads it, so a package nobody imports never pays
+		// for the digest.
+		get summary() {
+			return cache ? unitSummary(unit) : undefined;
+		},
 	};
 }
 
@@ -1283,13 +1287,6 @@ function compileOwnUnit(ctx) {
 		exportedConsts: checker.getExportedConsts(),
 		exportedKinds: checker.getExportedKinds(),
 	};
-	if (options.packageCache)
-		unit.summary = summaryHash({
-			pkgName,
-			target: pkgTarget,
-			elemAddrTaken: unit.elemAddrTaken,
-			...unit,
-		});
 	return unit;
 }
 

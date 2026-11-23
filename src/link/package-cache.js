@@ -297,3 +297,21 @@ export function summaryHash(res) {
 	]);
 	return createHash("sha1").update(out.join(",")).digest("hex");
 }
+
+// Keyed on the unit's link record, which every reuse of a stored unit shares.
+const summaries = new WeakMap();
+
+// The digest of a stored unit, computed when the first importer asks for it.
+export function unitSummary(unit) {
+	let summary = summaries.get(unit.link);
+	if (summary === undefined) {
+		summary = summaryHash({
+			pkgName: unit.link.pkgName,
+			target: unit.link.pkgTarget,
+			elemAddrTaken: unit.elemAddrTaken,
+			...unit,
+		});
+		summaries.set(unit.link, summary);
+	}
+	return summary;
+}

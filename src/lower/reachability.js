@@ -56,6 +56,37 @@ function collectRefs(node, names, fields) {
 	forEachChild(node, (child) => collectRefs(child, names, fields));
 }
 
+// What `node` uses, remembered per node: a stored unit's programs and a
+// stdlib declaration never change, so a later build reads their references
+// from here instead of walking them again.  A node is only passed in once
+// its tree is final (the emitted AST, after code generation).
+const refsMemo = new WeakMap();
+
+function refsOf(node) {
+	let refs = refsMemo.get(node);
+	if (!refs) {
+		const names = new Set();
+		const fields = new Set();
+		collectRefs(node, names, fields);
+		refs = { names, fields };
+		refsMemo.set(node, refs);
+	}
+	return refs;
+}
+
+// Adds the references under `node` (nested arrays of nodes) to `names` and
+// `fields`.
+function collectTopRefs(node, names, fields) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) collectTopRefs(n, names, fields);
+		return;
+	}
+	const refs = refsOf(node);
+	for (const n of refs.names) names.add(n);
+	for (const f of refs.fields) fields.add(f);
+}
+
 // The declaration with its body checked and mangled: a lazily checked
 // declaration keeps its parsed form and hands out a checked copy.
 export function checkedDecl(d) {
@@ -105,8 +136,11 @@ export class StdlibReach {
 	// Adds `rootNodes` (AST that is emitted) and closes over what they use.
 	add(rootNodes) {
 		const roots = new Set();
-		collectRefs(rootNodes, roots, this.fields);
+		const knownFields = this.fields.size;
+		collectTopRefs(rootNodes, roots, this.fields);
 		for (const n of roots) this._name(n);
+		// A reference to something already reached leaves the closure as it was.
+		if (this.pending.length === 0 && this.fields.size === knownFields) return;
 		this._close();
 	}
 
@@ -122,7 +156,7 @@ export class StdlibReach {
 		const failure = d._ensure?.();
 		if (failure) this.failures.push(failure);
 		const local = new Set();
-		collectRefs(checkedDecl(d), local, this.fields);
+		collectTopRefs(checkedDecl(d), local, this.fields);
 		for (const n of local) this._name(n);
 	}
 

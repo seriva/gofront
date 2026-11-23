@@ -500,6 +500,13 @@ function stdlibMarker(key) {
 	return `/*__GOFRONT_STDLIB:${key}*/`;
 }
 
+// The package key a marker line names, else undefined.
+function markerKey(line) {
+	return line.startsWith("/*__GOFRONT_STDLIB:")
+		? line.match(STDLIB_MARKER_RE)?.[1]
+		: undefined;
+}
+
 // The package's emitted JS for a reached set, memoized per package by the
 // reached declarations and `natives`.  Stored declarations are frozen-safe:
 // code generation rewrites its input, so it gets a copy of the checked
@@ -555,7 +562,7 @@ function wasmExportedSignatures(units) {
 function spliceStdlibJs(merged, options) {
 	const lines = merged.js.split("\n");
 	const pkgs = lines
-		.map((l) => l.match(STDLIB_MARKER_RE)?.[1])
+		.map(markerKey)
 		.filter(Boolean)
 		.map((key) => options.stdlibCache.get(key));
 	if (pkgs.length === 0) return;
@@ -570,7 +577,7 @@ function spliceStdlibJs(merged, options) {
 	const out = [];
 	const spliced = new Set();
 	for (const line of lines) {
-		const path = line.match(STDLIB_MARKER_RE)?.[1];
+		const path = markerKey(line);
 		if (!path) {
 			out.push(line);
 			continue;
