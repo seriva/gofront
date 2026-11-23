@@ -755,7 +755,9 @@ function signatureStr(f) {
 
 export function typeStr(t) {
 	if (!t) return "void";
-	if (t.kind === "basic" && t.alias) return t.alias;
+	// An unresolved `.d.ts` reference prints as the name written in Go
+	// (`dom.Node`), not as its internal `gofront/dom.Node` table key.
+	if (t.kind === "basic" && t.alias) return t.alias.replace(/^gofront\//, "");
 	switch (t.kind) {
 		case "basic":
 			return t.name;
@@ -776,7 +778,8 @@ export function typeStr(t) {
 		case "interface":
 			return t.name || literalTypeStr(t);
 		case "namespace":
-			return t.name || "namespace{...}";
+			// A declaration package's type shows its package (`dom.Element`).
+			return t._pkg ? `${t._pkg}.${t.name}` : t.name || "namespace{...}";
 		case "func": {
 			const retStr =
 				t.returns.length > 1
@@ -967,8 +970,11 @@ function identicalShape(a, b, seen) {
 			return identicalNamed(a, b, seen);
 		case "typeParam":
 		case "generic":
-		case "namespace":
 			return a.name === b.name;
+		case "namespace":
+			// A declaration package's type is its own: `p1.Buffer` is not `p2.Buffer`,
+			// nor a consumer `.d.ts` interface of the same bare name.
+			return a.name === b.name && a._pkg === b._pkg;
 		default:
 			return false;
 	}

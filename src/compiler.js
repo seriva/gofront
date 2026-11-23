@@ -82,8 +82,10 @@ import {
 import { lower, takesElementAddress } from "./lower/index.js";
 import { ParseError, Parser } from "./parser/index.js";
 import {
+	bindDeclarationImports,
 	bindUntypedImports,
 	isBuiltinPackage,
+	isDeclarationImport,
 	isLocalPath,
 	resolveAll,
 	resolveGwDir,
@@ -492,6 +494,17 @@ function resolveImports(
 			`npm:${path}:${info ? filesSignature([info.dtsPath]) : "none"}`,
 		);
 
+	// The declaration files of the typed web packages a build reads are part of
+	// what the package was compiled against.
+	const declarationFiles = bindDeclarationImports(
+		programs,
+		checker,
+		pkgTarget,
+		options.stdlibRoot,
+	);
+	for (const file of declarationFiles)
+		options.importTokens?.push(`decl:${file}:${filesSignature([file])}`);
+
 	// Validate target rules on non-local imports
 	if (pkgTarget === "wasm" || pkgTarget === "both") {
 		for (const p of programs) {
@@ -519,6 +532,7 @@ function resolveImports(
 						);
 					} else if (
 						!isLocalPath(path) &&
+						!isDeclarationImport(path) &&
 						!EXCLUDED_STDLIB_PACKAGES.has(path) &&
 						(isBuiltinPackage(path) ||
 							!resolveStdlibSource(path, options.stdlibRoot))

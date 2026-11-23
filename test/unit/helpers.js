@@ -21,7 +21,11 @@ import {
 	compileWasm as compileWasmSource,
 	evictParseCache,
 } from "../../src/compiler.js";
-import { DtsParser, parseDts } from "../../src/dts-parser.js";
+import {
+	DtsParser,
+	parseDeclarationPackage,
+	parseDts,
+} from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
 import { isBuiltinPackage, resolveStdlibSource } from "../../src/resolver.js";
@@ -34,6 +38,7 @@ export {
 	join,
 	Lexer,
 	Parser,
+	parseDeclarationPackage,
 	parseDts,
 };
 

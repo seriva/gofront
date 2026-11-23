@@ -92,15 +92,15 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Done when: the marker syntax is documented in `src/dts-parser.js`
 
 ### Phase 2: Declaration packages and the generator
-- [ ] Task 2.1: Scoped `.d.ts` package namespaces and cross-package type resolution (former 6.4a)
+- [x] Task 2.1: Scoped `.d.ts` package namespaces and cross-package type resolution (former 6.4a)
   - Files: `src/dts-parser.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`, `src/typechecker/types.js`
   - Test: `test/unit/compiler/web-packages.test.js`: registering a scoped declaration package exposes `dom.T` without polluting global `checker.types` (a user `type Buffer struct{}` does not collide with `webgpu.Buffer`); intra-package and qualified cross-package (`dom.EventTarget`) `.d.ts` type references resolve in members, `extends` and assertions
   - Done when: package-scoped `.d.ts` types resolve intra- and cross-package without bare-name leakage
-- [ ] Task 2.2: `gofront/*` declaration package resolution and lazy loading (former 6.4b)
+- [x] Task 2.2: `gofront/*` declaration package resolution and lazy loading (former 6.4b)
   - Files: `src/compiler.js`, `src/resolver.js`, `src/typechecker/index.js`
   - Test: `test/unit/compiler/web-packages.test.js` with a fixture declaration directory (`options.stdlibRoot`): `import "gofront/dom"` loads lazily, parsed at most once per process, and emits no JS `import`; import from `wasm`/`both` is a clear error; unknown `gofront/x` produces an unsupported-package error (not an untyped npm warning); a `println`-only program loads no declaration file (counter); `sentrux check` passes with no layer violation
   - Done when: `gofront/*` declarations are parsed at most once per process and loaded only when used
-- [ ] Task 2.3: The web-types generator (former 6.5)
+- [x] Task 2.3: The web-types generator (former 6.5)
   - Files: `scripts/gen-web-types.js`, `scripts/web-types-overrides/`, `package.json`, `biome.json`
   - Test: `test/unit/cli/gen-web-types.test.js`: deterministic output for a small IDL fixture (inheritance including cross-package, mixin, partial, optional and nullable members, union, dictionary, enum, callback, `Promise`, constant, constructor)
   - Done when: `@webref/idl` and `webidl2` are pinned devDependencies; two runs are byte-identical; `npm run check` runs `--check`; the mapping table is in the script header; generated files pass (or are excluded from) Biome

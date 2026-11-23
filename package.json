@@ -45,19 +45,22 @@
 		"bench": "node --expose-gc test/perf/raycast-bench.js && node test/perf/json-bench.js && node test/perf/fmt-bench.js && node --expose-gc test/perf/particle-bench.js && node test/perf/dev-rebuild.js",
 		"check:layers": "node scripts/check-layers.js",
 		"gen:pdq": "node scripts/gen-pdq.js",
+		"gen:web": "node scripts/gen-web-types.js",
 		"format": "biome format --write .",
-		"check": "biome check . && node scripts/gen-pdq.js --check && node scripts/check-layers.js && sentrux check && sentrux gate && node src/index.js check example/...",
+		"check": "biome check . && node scripts/gen-pdq.js --check && node scripts/gen-web-types.js --check && node scripts/check-layers.js && sentrux check && sentrux gate && node src/index.js check example/...",
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.6.6",
 		"@playwright/test": "^1.64.1",
+		"@webref/idl": "3.87.1",
 		"c8": "^12.0.0",
 		"esbuild": "^0.28.2",
 		"jsdom": "^30.1.2",
 		"lefthook": "^2.1.17",
 		"preact": "^11.0.1",
-		"serve": "^14.2.6"
+		"serve": "^14.2.6",
+		"webidl2": "24.5.0"
 	},
 	"optionalDependencies": {
 		"binaryen": "^132.0.0"
