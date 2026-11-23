@@ -1963,6 +1963,12 @@ export const resolveMethods = {
 				);
 			return base.members[field];
 		}
+		// A declaration package's value (`dom.document`) is a JS global: the
+		// backends emit its bare name.
+		if (base._dtsPackage && field in base.members) {
+			node._stdName = field;
+			return base.members[field];
+		}
 		if (field in base.members) {
 			if (
 				(this.target === "wasm" || this.target === "both") &&

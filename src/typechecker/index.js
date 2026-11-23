@@ -360,6 +360,27 @@ export class TypeChecker {
 		for (const [name, type] of reached ?? []) register(name, type, false);
 	}
 
+	// The compiler supplies how a declaration package is found: `loader(name)`
+	// returns the parsed package `name` (see `parseDeclarationPackage`) or null.
+	setDeclarationLoader(loader) {
+		this._declLoader = loader;
+	}
+
+	// The declaration package `name` and the packages it references, loaded
+	// through the declaration loader and registered on first use (see
+	// `addDeclarationPackage`); null when there is no such package.
+	useDeclarationPackage(name) {
+		this._declByName ??= new Map();
+		if (this._declByName.has(name)) return this._declByName.get(name);
+		const pkg = this._declLoader?.(name) ?? null;
+		this._declByName.set(name, pkg);
+		if (pkg) {
+			this.addDeclarationPackage(pkg);
+			for (const required of pkg.requires) this.useDeclarationPackage(required);
+		}
+		return pkg;
+	}
+
 	// Registers a declaration package (`gofront/dom`, see `parseDeclarationPackage`
 	// in dts-parser.js: `{ name, types, values }` whose type references are
 	// qualified) in the type table under `name.T`, once per checker. No file

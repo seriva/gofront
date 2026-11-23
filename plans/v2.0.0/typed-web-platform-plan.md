@@ -96,7 +96,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Files: `src/dts-parser.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`, `src/typechecker/types.js`
   - Test: `test/unit/compiler/web-packages.test.js`: registering a scoped declaration package exposes `dom.T` without polluting global `checker.types` (a user `type Buffer struct{}` does not collide with `webgpu.Buffer`); intra-package and qualified cross-package (`dom.EventTarget`) `.d.ts` type references resolve in members, `extends` and assertions
   - Done when: package-scoped `.d.ts` types resolve intra- and cross-package without bare-name leakage
-- [ ] Task 2.2: `gofront/*` declaration package resolution and lazy loading (former 6.4b)
+- [x] Task 2.2: `gofront/*` declaration package resolution and lazy loading (former 6.4b)
   - Files: `src/compiler.js`, `src/resolver.js`, `src/typechecker/index.js`
   - Test: `test/unit/compiler/web-packages.test.js` with a fixture declaration directory (`options.stdlibRoot`): `import "gofront/dom"` loads lazily, parsed at most once per process, and emits no JS `import`; import from `wasm`/`both` is a clear error; unknown `gofront/x` produces an unsupported-package error (not an untyped npm warning); a `println`-only program loads no declaration file (counter); `sentrux check` passes with no layer violation
   - Done when: `gofront/*` declarations are parsed at most once per process and loaded only when used

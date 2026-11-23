@@ -6,18 +6,23 @@
 // free for the user's own type, and one package names another's types by
 // qualified name.
 
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { Parser } from "../../../src/parser/index.js";
+import { declarationStats } from "../../../src/resolver.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	compileDir,
 	parseDeclarationPackage,
 	section,
 	summarize,
 	test,
+	toCompileResult,
+	withTempDir,
 } from "../helpers.js";
 
 const DOM = `
@@ -274,6 +279,260 @@ test("a reference to a package that is not registered stays untyped", () => {
 		[gpuPkg()],
 	);
 	assertEqual(errors.length, 0);
+});
+
+section("Declaration packages — import and lazy loading");
+
+// A stdlib tree holding the fixture packages, and a program importing them.
+const STDLIB = {
+	"stdlib/gofront/dom/dom.d.ts": DOM,
+	"stdlib/gofront/webgpu/webgpu.d.ts": WEBGPU,
+};
+
+// Compiles `main` (a package main file) against the fixture stdlib; `extra`
+// adds files. Returns the compile result and the declaration files parsed.
+function build(main, { extra = {}, stdlib = STDLIB, target } = {}) {
+	return withTempDir({ ...stdlib, "app/main.go": main, ...extra }, (dir) => {
+		const before = declarationStats.parsed;
+		const out = toCompileResult(() =>
+			compileDir(join(dir, "app"), {
+				stdlibRoot: join(dir, "stdlib"),
+				...(target ? { target } : {}),
+			}),
+		);
+		return { ...out, parsed: declarationStats.parsed - before };
+	});
+}
+
+const USES_DOM = `package main
+
+import "gofront/dom"
+
+func name(e dom.Element) string { return e.id }
+
+func main() {
+	println("ok")
+}
+`;
+
+test('import "gofront/dom" binds the package\'s types', () => {
+	const { errors } = build(USES_DOM);
+	assertEqual(errors.length, 0);
+});
+
+test("a declaration import emits no runtime code", () => {
+	const { res } = build(USES_DOM);
+	assert(!/\bimport\b/.test(res.js), "emitted an import");
+	assert(!res.js.includes("gofront/dom"), "mentions the package");
+	assert(!/\bdom\b/.test(res.js), "emitted the qualifier");
+});
+
+test("a declaration import emits the JS of the untyped program", () => {
+	const typed = build(`package main
+
+import "gofront/dom"
+
+func id(e dom.Element) dom.Element { return e }
+
+func main() {
+	var e dom.Element
+	id(e)
+	println("ok")
+}
+`);
+	const untyped = build(`package main
+
+func id(e any) any { return e }
+
+func main() {
+	var e any
+	id(e)
+	println("ok")
+}
+`);
+	assertEqual(typed.res.js, untyped.res.js);
+});
+
+test("an assertion to a package type emits no runtime check", () => {
+	const { res, errors } = build(`package main
+
+import "gofront/dom"
+
+func main() {
+	var e dom.Element
+	i := e.(dom.HTMLInputElement)
+	println(i.value)
+}
+`);
+	assertEqual(errors.length, 0);
+	assert(!res.js.includes("HTMLInputElement"), "emitted the type");
+});
+
+test("a package value is emitted as the JS global it declares", () => {
+	const { res, errors } = build(`package main
+
+import "gofront/dom"
+
+func main() {
+	println(dom.document.documentElement.id)
+	dom.requestIdleCallback(func() {})
+}
+`);
+	assertEqual(errors.length, 0);
+	assert(res.js.includes("document.documentElement.id"), res.js);
+	assert(res.js.includes("requestIdleCallback("), res.js);
+	assert(!/\bdom\./.test(res.js), "emitted the qualifier");
+});
+
+test("an unused declaration import is reported", () => {
+	const { errors } = build(`package main
+
+import "gofront/dom"
+
+func main() { println("x") }
+`);
+	assertErrorContains(errors, "'dom' imported and not used");
+});
+
+test("a declaration import can take an alias", () => {
+	const { errors } = build(`package main
+
+import d "gofront/dom"
+
+func main() {
+	var e d.Element
+	println(e == nil)
+}
+`);
+	assertEqual(errors.length, 0);
+});
+
+test("a declaration package is parsed once and only when used", () => {
+	const root = {
+		"stdlib/gofront/dom/dom.d.ts": DOM,
+		"stdlib/gofront/webgpu/webgpu.d.ts": WEBGPU,
+	};
+	withTempDir(
+		{ ...root, "app/main.go": USES_DOM, "other/main.go": USES_DOM },
+		(dir) => {
+			const options = { stdlibRoot: join(dir, "stdlib") };
+			const before = declarationStats.parsed;
+			compileDir(join(dir, "app"), options);
+			compileDir(join(dir, "other"), options);
+			compileDir(join(dir, "app"), options);
+			assertEqual(declarationStats.parsed - before, 1);
+		},
+	);
+});
+
+test("a program that uses no web package loads no declaration file", () => {
+	const { errors, parsed } = build(`package main
+
+func main() { println("hi") }
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(parsed, 0);
+});
+
+test("a package that references another loads both", () => {
+	const { errors, parsed } = build(`package main
+
+import "gofront/webgpu"
+
+func use(d webgpu.Device) {
+	d.addEventListener("x", func(e any) {})
+	_ = d.canvas.id
+}
+
+func main() {
+	var d webgpu.Device
+	use(d)
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(parsed, 2);
+});
+
+test("a declaration import from a wasm package is rejected", () => {
+	const { errors } = build(
+		`//gofront:target wasm
+package main
+
+import "gofront/dom"
+
+func main() { var e dom.Element; println(e == nil) }
+`,
+	);
+	assertErrorContains(errors, "'gofront/dom' is only available in js packages");
+});
+
+test("a declaration import from a both package is rejected", () => {
+	const { errors } = build(
+		`//gofront:target both
+package main
+
+import "gofront/dom"
+
+func main() { var e dom.Element; println(e == nil) }
+`,
+	);
+	assertErrorContains(errors, "'gofront/dom' is only available in js packages");
+});
+
+test("an unknown gofront package is an unsupported-package error", () => {
+	const { errors } = build(`package main
+
+import "gofront/unknown"
+
+func main() { println(unknown.X) }
+`);
+	assertErrorContains(errors, "unsupported package 'gofront/unknown'");
+});
+
+test("an unknown gofront package is rejected in a wasm package", () => {
+	const { errors } = build(
+		`//gofront:target wasm
+package main
+
+import "gofront/unknown"
+
+func main() { println(unknown.X) }
+`,
+	);
+	assertErrorContains(errors, "unsupported package 'gofront/unknown'");
+});
+
+test("a package missing from the stdlib tree is unsupported", () => {
+	const { errors } = build(USES_DOM, { stdlib: {} });
+	assertErrorContains(errors, "unsupported package 'gofront/dom'");
+});
+
+test("an unknown gofront package is not an untyped npm import", () => {
+	const warn = console.error;
+	const seen = [];
+	console.error = (...a) => seen.push(a.join(" "));
+	try {
+		build(`package main
+
+import "gofront/unknown"
+
+func main() {}
+`);
+	} finally {
+		console.error = warn;
+	}
+	assert(!seen.some((m) => m.includes("cannot find types")), seen.join("\n"));
+});
+
+test("gofront/shared is still a built-in package", () => {
+	const { errors } = build(`//gofront:target wasm
+package main
+
+import "gofront/shared"
+
+func main() { println(1) }
+`);
+	assert(!errors.some((e) => e.message.includes("unsupported package")));
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
