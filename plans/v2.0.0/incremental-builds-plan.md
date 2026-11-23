@@ -1,7 +1,7 @@
 # Incremental Builds — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 3 and Task 2.4) on 2026-11-17, re-probed that day and reviewed/tightened on 2026-11-19. Starts after [`go-embed-plan.md`](go-embed-plan.md) (embedded files are cache-key inputs and watch targets), [`package-scope-plan.md`](package-scope-plan.md) (rebinds imports per file in `src/compiler.js`/`typechecker/index.js`) and [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) Phase 1 (changes `mangleLocalTypes` in `src/compiler.js`). [`js-dead-code-elimination-plan.md`](js-dead-code-elimination-plan.md) builds on this cache. Fixes `test-harness-hardening-plan.md` G7 (shared `stdlibCache`) and `checker-strictness-plan.md` S22 (import cycles).  
 **Release note:** `gofront dev` now reuses unchanged packages on rebuilds so saves finish in a fraction of the time, and also reloads when an embedded file or `.d.ts` file changes. Import cycles are now reported as compile errors naming the cycle path instead of crashing.  
