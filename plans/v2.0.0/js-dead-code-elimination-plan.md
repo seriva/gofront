@@ -74,7 +74,7 @@ One reachability closure over user and stdlib programs decides what the JS backe
 > Split from the former `web-platform-evolution-plan.md` Phase 4 (re-probed 2026-11-17, review-tightened 2026-11-19). Former task IDs in parentheses.
 
 ### Phase 1: User-code reachability and pruning
-- [ ] Task 1.1: One package-scoped closure over user and stdlib programs with explicit roots (former 4.1)
+- [x] Task 1.1: One package-scoped closure over user and stdlib programs with explicit roots (former 4.1)
   - Files: `src/lower/reachability.js`, `src/link/stdlib.js`, `src/compiler.js`
   - Test: `test/unit/compiler/reachability-user.test.js`: the reached set for each root kind above, including multi-package local selectors (`util.Used`), qualified types (`util.Box`), dot-imports (`import . "./util"`), blank imports (`import _ "./sideeffect"`), `_genEntry` calls into `gofront_gen.go` plus conditional `fmtrt.Register`/`jsonrt.RegisterEncoder` retention, `.templ` non-enumerable expressions (`{ helper() }`, `@Comp()`, `if`/`for`/`switch`/`case`, `attr={}`), `CssDecl`, `GofrontRunTests`, and `checker._externalNames` / `anyKind === "dynamic"` escapes
   - Done when: one closure returns the reached declarations across user and stdlib packages (with `reachableStdlibDecls` unchanged for `src/link/wasm.js`); emitted output is still unchanged (nothing pruned yet)

@@ -686,6 +686,9 @@ function resolveImports(
 				}
 
 				if (alias === "_") continue;
+				// The reachability closure resolves `pkg.Name` and dot-imported
+				// names against this package.
+				noteLocalImport(p, alias ?? dep.pkgName, alias === ".", depKey);
 				if (alias === ".") {
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
@@ -720,6 +723,12 @@ function resolveImports(
 			}
 		}
 	}
+}
+
+// Records on `program` which local package a name or dot import stands for.
+function noteLocalImport(program, name, dot, depKey) {
+	if (dot) program._dotImports = [...(program._dotImports ?? []), depKey];
+	else program._localImports = new Map(program._localImports).set(name, depKey);
 }
 
 // The types `dep` reaches (table only) plus its unexported ones: a dot import
@@ -903,7 +912,8 @@ export function compileFiles(files, options = {}) {
 			options.stdlibCache ?? cache?.stdlibFor(options.stdlibRoot) ?? new Map(),
 		stdlibChecked: options.stdlibChecked ?? new Set(),
 		cacheStats: options.cacheStats ?? cache?.stats,
-		jsRootPrograms: options.jsRootPrograms ?? [],
+		userUnits: options.userUnits ?? [],
+		rootKey: options.rootKey ?? resolve(fromDir),
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
 		typeOwners: options.typeOwners ?? new Map(),
@@ -1084,7 +1094,7 @@ export function compileFiles(files, options = {}) {
 	// ── 4. Assemble the build's output ────────────────────────────
 	const merged = asInternalError(() => {
 		const chunks = mergeCompilationChunks([...preambles, unit.chunk]);
-		finishStdlibJs(chunks, options, unit.rootPrograms, unit.emitTarget);
+		finishStdlibJs(chunks, options, unit);
 		return chunks;
 	});
 	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(

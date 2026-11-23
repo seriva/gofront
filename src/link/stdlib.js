@@ -13,11 +13,7 @@ import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
 import { restoredTypeName } from "../lower/gen-types.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
-import {
-	checkedDecl,
-	reachableStdlibDecls,
-	StdlibReach,
-} from "../lower/reachability.js";
+import { BuildReach, checkedDecl, StdlibReach } from "../lower/reachability.js";
 import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
@@ -541,22 +537,6 @@ function stdlibJs(pkg, reached, natives, stats) {
 	return js;
 }
 
-// The API a wasm package exposes to JS through the facade: exported func and
-// method signatures and exported type declarations.
-function wasmExportedSignatures(units) {
-	const out = [];
-	for (const u of units) {
-		if (u.target !== "wasm" || u.key.startsWith("stdlib:")) continue;
-		for (const d of u.programs.flatMap((p) => p.decls ?? [])) {
-			if (!/^[A-Z]/.test(d.name ?? "")) continue;
-			if (d.kind === "TypeDecl") out.push(d.type);
-			else if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
-				out.push(d.params, d.returnType);
-		}
-	}
-	return out;
-}
-
 // Replaces each marker with the package's reachable code (no line at all when
 // nothing is reachable) and shifts the source-map lines that follow.
 function spliceStdlibJs(merged, options) {
@@ -570,10 +550,11 @@ function spliceStdlibJs(merged, options) {
 	const keys = new Set(pkgs.map((pkg) => pkg.key));
 	const emitted = (pkg) =>
 		pkg.key.endsWith("#shared") ? !keys.has(pkg.importPath) : true;
-	const reached = reachableStdlibDecls(
-		[options.jsRootPrograms, wasmExportedSignatures(options.wasmUnits)],
+	const reach = reachOfBuild(
+		options,
 		pkgs.filter(emitted).flatMap((pkg) => pkg.unit.programs),
 	);
+	const reached = reach.reached;
 	const out = [];
 	const spliced = new Set();
 	for (const line of lines) {
@@ -597,10 +578,30 @@ function spliceStdlibJs(merged, options) {
 	merged.js = out.join("\n");
 }
 
-// Records a package's JS-emitted programs as reachability roots; the root
-// compile then splices in the stdlib code they reach.
-export function finishStdlibJs(merged, options, programs, emitTarget) {
-	if (emitTarget !== "wasm") options.jsRootPrograms.push(...programs);
+// The closure over the build's local packages and the Go-source stdlib
+// packages `stdlibPrograms`; a reached body that fails its (lazy) check throws.
+// `options.userUnits` lists the local packages compiled so far; `prune` limits
+// the local packages to what the roots reach (else all of their code is).
+export function reachOfBuild(options, stdlibPrograms, { prune = false } = {}) {
+	const reach = new BuildReach(stdlibPrograms, options.userUnits, {
+		entry: options.rootKey,
+		isTest: options.isTest ?? false,
+		prune,
+	});
+	if (reach.failures.length > 0) throw new Error(reach.failures[0]);
+	return reach;
+}
+
+// Records a package as part of the build; the root compile then splices in
+// the stdlib code the local packages reach.
+export function finishStdlibJs(merged, options, unit) {
+	options.userUnits.push({
+		key: unit.link.key,
+		pkgName: unit.link.pkgName,
+		programs: unit.rootPrograms,
+		emitTarget: unit.emitTarget,
+		emitted: unit.emitTarget !== "wasm",
+	});
 	if (!options.isDependency) spliceStdlibJs(merged, options);
 }
 
