@@ -67,4 +67,4 @@ export const ALIASES = {
 // The packages whose generated file is committed under `stdlib/gofront/`.
 // `npm run check` verifies these are current; the others are generated in
 // memory only, so a mapping that stops working is noticed.
-export const PUBLISHED = [];
+export const PUBLISHED = ["dom"];

@@ -106,7 +106,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Done when: `@webref/idl` and `webidl2` are pinned devDependencies; two runs are byte-identical; `npm run check` runs `--check`; the mapping table is in the script header; generated files pass (or are excluded from) Biome
 
 ### Phase 3: Generated web packages
-- [ ] Task 3.1: `gofront/dom` (former 7.1)
+- [x] Task 3.1: `gofront/dom` (former 7.1)
   - Files: `stdlib/gofront/dom/dom.d.ts` (generated), `scripts/web-types-overrides/`
   - Test: `test/unit/stdlib/dom-typed.test.js`: `Document`, `Element`, `HTMLElement`, `HTMLInputElement`, `Event`, `MouseEvent`; `addEventListener("click", func(e dom.MouseEvent) {…})` and `addEventListener("click", func() {…})`; a misspelled member is rejected; emitted JS equals the untyped program's
   - Done when: `el.(dom.HTMLInputElement).value` is a `string`
