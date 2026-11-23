@@ -171,7 +171,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
 
 ### Phase 5: Pointer identity (roots `deref-receiver`, `js-new-struct`)
 Two one-task roots, both about which object a pointer refers to; each fix is under ~40 production LOC.
-- [ ] Task 5.1: `&(*p)` and `(*p).M()` with a pointer receiver pass `p` (V5.1)
+- [x] Task 5.1: `&(*p)` and `(*p).M()` with a pointer receiver pass `p` (V5.1)
   - Files: `src/backend/js/expressions.js` (`_genUnaryExpr`), `src/backend/wasm/emit-exprs.js` (`_emitAddressOf`)
   - Test: `test/unit/language/value-semantics.test.js`: V5.1 → `1`; named slice/string `(*p).M()`; `q := &(*p)` identity for scalar and struct → `99 true`; `(*get()).Inc()` calls `get` once; `&(*nilPtr)` / `(*nilPtr).M()` panic; struct and array controls → `1`, with `assertAllTargetsOutput`
   - Done when: all pass on every target

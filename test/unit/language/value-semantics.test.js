@@ -345,6 +345,202 @@ func main() {
 	);
 });
 
+section("Pointer identity");
+
+test("a pointer-receiver call on (*p) of a named number changes the pointee (V5.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+func main() {
+	var x Num
+	p := &x
+	(*p).Inc()
+	(*p).Inc()
+	fmt.Println(x)
+}
+`,
+		"2\n",
+	);
+});
+
+test("a pointer-receiver call on (*p) of a named slice or string changes the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type L []int
+type Str string
+
+func (l *L) Add(n int) { *l = append(*l, n) }
+func (s *Str) Bang()   { *s += "!" }
+
+func main() {
+	var l L
+	pl := &l
+	(*pl).Add(1)
+	(*pl).Add(2)
+	var s Str = "hi"
+	ps := &s
+	(*ps).Bang()
+	fmt.Println(l, s)
+}
+`,
+		"[1 2] hi!\n",
+	);
+});
+
+test("&(*p) is p itself for scalars, structs and arrays", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+type S struct{ N int }
+type A [2]int
+
+func main() {
+	var x Num
+	p := &x
+	q := &(*p)
+	*q = 99
+	fmt.Println(x, q == p)
+
+	var s S
+	ps := &s
+	qs := &(*ps)
+	qs.N = 7
+	fmt.Println(s, qs == ps)
+
+	var a A
+	pa := &a
+	qa := &(*pa)
+	qa[1] = 5
+	fmt.Println(a, qa == pa)
+
+	var i int
+	pi := &i
+	qi := &((*pi))
+	*qi = 3
+	fmt.Println(i, qi == pi)
+}
+`,
+		"99 true\n{7} true\n[0 5] true\n3 true\n",
+	);
+});
+
+test("&(*p) through a pointer to a pointer is the inner pointer", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+func main() {
+	var x Num
+	p := &x
+	pp := &p
+	(**pp).Inc()
+	q := &(**pp)
+	*q += 10
+	fmt.Println(x, q == p)
+}
+`,
+		"11 true\n",
+	);
+});
+
+test("struct and array pointer-receiver calls on (*p) still change the pointee", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+type A [2]int
+
+func (s *S) Inc() { s.N++ }
+func (a *A) Inc() { a[0]++ }
+
+func main() {
+	var s S
+	ps := &s
+	(*ps).Inc()
+	var a A
+	pa := &a
+	(*pa).Inc()
+	fmt.Println(s, a)
+}
+`,
+		"{1} [1 0]\n",
+	);
+});
+
+test("(*get()).Inc() calls get once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+func main() {
+	var x Num
+	calls := 0
+	get := func() *Num {
+		calls++
+		return &x
+	}
+	(*get()).Inc()
+	fmt.Println(x, calls)
+}
+`,
+		"1 1\n",
+	);
+});
+
+test("&(*p) and (*p).M() on a nil pointer panic", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+type S struct{ N int }
+
+func (n *Num) Inc() { *n++ }
+func (s *S) Inc()   { s.N++ }
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	var pn *Num
+	var ps *S
+	try(func() { (*pn).Inc() })
+	try(func() { _ = &(*pn) })
+	try(func() { (*ps).Inc() })
+	try(func() { _ = &(*ps) })
+}
+`,
+		"runtime error: invalid memory address or nil pointer dereference\nruntime error: invalid memory address or nil pointer dereference\nruntime error: invalid memory address or nil pointer dereference\nruntime error: invalid memory address or nil pointer dereference\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {
