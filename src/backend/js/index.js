@@ -1185,7 +1185,7 @@ export class CodeGen {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		const keep = this.keepMethods;
 		if (!keep || keep.escaped.has(name)) return stubs;
-		return stubs.filter((s) => keep.names.has(s.methodName));
+		return stubs.filter((s) => keep.keeps(name, s.methodName));
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {

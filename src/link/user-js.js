@@ -71,7 +71,7 @@ function promotionKey(emitter, reach) {
 		.map(([name, promoted]) =>
 			reach.escaped.has(name)
 				? `${name}*`
-				: `${name}:${promoted.filter((n) => reach.fields.has(n)).join("+")}`,
+				: `${name}:${promoted.filter((n) => reach.keeps(name, n)).join("+")}`,
 		)
 		.join(",");
 }

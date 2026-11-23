@@ -88,7 +88,7 @@ One reachability closure over user and stdlib programs decides what the JS backe
   - Done when: runtime interface assertions and embedded method calls give the same results as before
 
 ### Phase 2: Stdlib precision, shared helpers, budgets
-- [ ] Task 2.1: Receiver-qualified method reachability (former 4.4)
+- [x] Task 2.1: Receiver-qualified method reachability (former 4.4)
   - Files: `src/lower/reachability.js`, `src/link/stdlib.js` (`reachableStdlibDecls`)
   - Test: `test/unit/compiler/dce-stdlib-methods.test.js`: the re-probe (a user `Len`/`Reset` no longer keeps `strings.Builder.Len`/`Reset`); generic receiver calls (`Box[int].Val`) and method expressions (`T.M`/`(*T).M`) keep the method; promoted method calls propagate transitively to embedded receiver types; selections through interface, type-parameter and `any` receivers still keep the method on every reached type
   - Done when: passes with no output change in the stdlib and `wasm` suites
