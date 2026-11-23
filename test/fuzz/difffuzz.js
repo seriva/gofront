@@ -11,6 +11,8 @@
 //   node test/fuzz/difffuzz.js --case SEED:N [--mode ..] [--stmts N] [--anon-embed]
 //     regenerates case N of batch seed SEED and replays it; every finding
 //     header prints the exact command
+//   node test/fuzz/difffuzz.js --print [--case SEED:N | --seed N --cases N]
+//     prints the generated program without running it (needs no Go)
 //   node test/fuzz/difffuzz.js --self-test
 //     checks the generator without Go (run by the unit tests)
 //
@@ -73,6 +75,7 @@ const ANON_EMBED = args.includes("--anon-embed");
 const REPLAY = opt("replay", null);
 const CASE = opt("case", null);
 const SELF_TEST = args.includes("--self-test");
+const PRINT = args.includes("--print");
 if (!["order", "arith"].includes(MODE)) {
 	console.error(`unknown --mode ${MODE}`);
 	process.exit(2);
@@ -135,16 +138,34 @@ function groupsNamed(text) {
 	return groups;
 }
 
+const CALL = /(?<![.\w])(f\d+|ks|kf)\(/g;
+
+// Closures called by `text` that exist in `funcs`.
+function calledFuncs(text, funcs) {
+	return [...text.matchAll(CALL)]
+		.map((m) => funcs.find((f) => f.name === m[1]))
+		.filter(Boolean);
+}
+
+// Groups a closure may change, including those changed by the closures its
+// body calls, however deep.
+function closureGroups(fn, funcs, seen = new Set()) {
+	seen.add(fn.name);
+	const text = fn.muts.join(";");
+	const groups = groupsNamed(text);
+	for (const callee of calledFuncs(text, funcs))
+		if (!seen.has(callee.name))
+			for (const g of closureGroups(callee, funcs, seen)) groups.add(g);
+	return groups;
+}
+
 // True when `stmt` calls a closure that changes a group the statement also
-// names: Go leaves the result of such a statement unspecified.
+// names: Go leaves the result of such a statement unspecified. The check
+// follows calls made inside closure bodies.
 function stmtConflicts(stmt, funcs) {
 	const named = groupsNamed(stmt);
-	for (const m of stmt.matchAll(/(?<![.\w])(f\d+|ks)\(/g)) {
-		const fn = funcs.find((f) => f.name === m[1]);
-		if (!fn) continue;
-		for (const g of groupsNamed(fn.muts.join(";")))
-			if (named.has(g)) return true;
-	}
+	for (const fn of calledFuncs(stmt, funcs))
+		for (const g of closureGroups(fn, funcs)) if (named.has(g)) return true;
 	return false;
 }
 
@@ -218,9 +239,11 @@ function genOrderCase(r, nStmts) {
 	}
 
 	const ptrTarget = () => r.pick(["&a", "&b"]);
-	const sptrTarget = () => r.pick(["&s", "&s2", `&ss[${ie(0)}]`]);
+	// `calls` is false inside `ks`, which must not call itself.
+	const sptrTarget = (calls = true) =>
+		r.pick(["&s", "&s2", `&ss[${calls ? ie(0) : r.int(0, 1)}]`]);
 
-	const mutation = (n) =>
+	const mutation = (n, calls = true) =>
 		r.pick([
 			() => `a = ${n}`,
 			() => `i = ${n}`,
@@ -234,7 +257,7 @@ function genOrderCase(r, nStmts) {
 			() => `s.N = ${n}`,
 			() => `s.A[${r.int(0, 1)}] = ${n}`,
 			() => `s.M = ${n}`,
-			() => `ps = ${sptrTarget()}`,
+			() => `ps = ${sptrTarget(calls)}`,
 			() => `v.M = ${n}`,
 			() => `s = S{N: ${n}}`,
 		])();
@@ -259,11 +282,27 @@ function genOrderCase(r, nStmts) {
 		"_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = tr, a, b, i, j, xs, ys, arr, m, p, s, s2, ps, v, w, ss, ok",
 	];
 
-	const funcs = [];
+	// Closures are declared in order, so a body only calls earlier ones: `ks`
+	// comes first and `f0`-`f2` may call it.
+	const funcs = [
+		{
+			name: "ks",
+			muts: [mutation("n", false)],
+			render: (ms) =>
+				`ks := func(n int) string { ${["tr = append(tr, 10+n&1)", ...ms].join("; ")}; if n&1 == 0 { return "x" }; return "y" }`,
+		},
+	];
 	for (let k = 0; k < nFuncs; k++) {
 		const muts = [];
 		const nm = r.int(1, 2);
-		for (let q = 0; q < nm; q++) muts.push(mutation(r.pick(["n", lit()])));
+		for (let q = 0; q < nm; q++) {
+			// A mutation that reads what a closure it calls changes is
+			// unspecified, like a statement: fall back to a call-free one.
+			let mut = mutation(r.pick(["n", lit()]));
+			if (stmtConflicts(mut, funcs))
+				mut = mutation(r.pick(["n", lit()]), false);
+			muts.push(mut);
+		}
 		funcs.push({
 			name: `f${k}`,
 			muts,
@@ -271,12 +310,6 @@ function genOrderCase(r, nStmts) {
 				`f${k} := func(n int) int { ${[`tr = append(tr, ${k})`, ...ms].join("; ")}; return n + ${k} }`,
 		});
 	}
-	funcs.push({
-		name: "ks",
-		muts: [mutation("n")],
-		render: (ms) =>
-			`ks := func(n int) string { ${["tr = append(tr, 10+n&1)", ...ms].join("; ")}; if n&1 == 0 { return "x" }; return "y" }`,
-	});
 
 	function stmt(depth) {
 		const e = () => expr(2);
@@ -509,6 +542,11 @@ function renderProgram(cases) {
 	return out.join("\n");
 }
 
+const GENERATORS = {
+	order: genOrderCase,
+	arith: genArithCase,
+};
+
 function splitCases(text) {
 	const res = new Map();
 	let cur = null;
@@ -671,6 +709,21 @@ async function firstFailing(cands, sig) {
 	return -1;
 }
 
+// Closures the statements call, directly or through other closures, in
+// declaration order.
+function usedClosures(c) {
+	const used = new Set();
+	const visit = (text) => {
+		for (const fn of calledFuncs(text, c.funcs)) {
+			if (used.has(fn.name)) continue;
+			used.add(fn.name);
+			visit(fn.muts.join(";"));
+		}
+	};
+	visit(c.stmts.join(";"));
+	return c.funcs.filter((f) => used.has(f.name));
+}
+
 function candidates(c) {
 	const out = [];
 	for (let k = c.stmts.length - 1; k >= 0; k--)
@@ -712,7 +765,7 @@ function selfTest() {
 	for (let n = 0; n < 2000; n++) {
 		const c = genOrderCase(r, STMTS);
 		for (const st of c.stmts) {
-			if (/(?<![.\w])(f\d+|ks)\(/.test(st)) calls++;
+			if (calledFuncs(st, c.funcs).length > 0) calls++;
 			if (stmtConflicts(st, c.funcs))
 				fail(
 					`case ${n}: statement calls a closure that changes a variable it names: ${st}`,
@@ -720,6 +773,23 @@ function selfTest() {
 		}
 	}
 	if (calls === 0) fail("no generated statement calls a closure");
+	for (let n = 0; n < 2000; n++) {
+		const c = genOrderCase(r, STMTS);
+		c.funcs.forEach((fn, k) => {
+			for (const callee of calledFuncs(fn.muts.join(";"), c.funcs.slice(k)))
+				fail(`case ${n}: ${fn.name} calls ${callee.name}, declared later`);
+		});
+	}
+	// f1 only calls ks, and ks changes a: a statement that names a and calls
+	// f1 depends on an order the spec leaves open.
+	const nested = [
+		{ name: "ks", muts: ["a = n"] },
+		{ name: "f1", muts: ["ps = &ss[(m[ks(1)])&1]"] },
+	];
+	if (!stmtConflicts("xs[(f1(-4))&1] = ((a / 3) * -1)", nested))
+		fail("a call through f1 to ks is not seen as changing a");
+	if (stmtConflicts("xs[(f1(-4))&1] = ((j / 3) * -1)", nested))
+		fail("a statement that names nothing ks changes is rejected");
 	const text = (seed) => {
 		const q = rng(seed * 2654435761);
 		return renderProgram(
@@ -729,7 +799,9 @@ function selfTest() {
 	const first = text(7000);
 	if (first !== text(7000)) fail("seed 7000 is not deterministic");
 	if (first === text(7001)) fail("different seeds gave the same program");
-	console.log(`self-test ok (2000 cases, ${calls} statements with calls)`);
+	console.log(
+		`self-test ok (2000 cases, ${calls} statements with calls, transitive conflicts ok)`,
+	);
 	process.exit(0);
 }
 
@@ -750,7 +822,7 @@ async function replaySource(src, targets) {
 // Case n of the batch with this seed, regenerated from the seed alone.
 function regenerateCase(seed, n) {
 	const r = rng(seed * 2654435761);
-	const gen = MODE === "order" ? genOrderCase : genArithCase;
+	const gen = GENERATORS[MODE];
 	let c;
 	for (let k = 0; k <= n; k++) c = gen(r, STMTS);
 	return c;
@@ -782,7 +854,17 @@ if (CASE) {
 	}
 	const src = renderProgram([regenerateCase(Number(m[1]), Number(m[2]))]);
 	console.log(src);
+	if (PRINT) process.exit(0);
 	await replaySource(src, opt("targets", TARGETS.join(",")));
+	process.exit(0);
+}
+
+if (PRINT) {
+	const r = rng(SEED * 2654435761);
+	const gen = GENERATORS[MODE];
+	console.log(
+		renderProgram(Array.from({ length: CASES }, () => gen(r, STMTS))),
+	);
 	process.exit(0);
 }
 
@@ -800,7 +882,7 @@ console.log(
 for (let b = 0; b < BATCHES; b++) {
 	const seed = SEED + b;
 	const r = rng(seed * 2654435761);
-	const gen = MODE === "order" ? genOrderCase : genArithCase;
+	const gen = GENERATORS[MODE];
 	const cases = Array.from({ length: CASES }, () => gen(r, STMTS));
 	const res = await check(cases);
 	if (res.goError) {
@@ -818,9 +900,7 @@ for (let b = 0; b < BATCHES; b++) {
 		// targets the reduced case still fails on.
 		let c = cases[n];
 		if (REDUCE) c = await reduce(c, signature(entries[0]));
-		const usedFuncs = c.funcs.filter((f) =>
-			c.stmts.some((st) => st.includes(`${f.name}(`)),
-		);
+		const usedFuncs = usedClosures(c);
 		const key = `${c.stmts.join(";").replace(/-?\d+/g, "N")}|${usedFuncs.map((f) => f.muts.join(";")).join("|")}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
