@@ -3308,6 +3308,13 @@ export const expressionCheckMethods = {
 				continue;
 			}
 			const fieldType = base.fields.get(fieldName);
+			this._checkLiteralField(
+				base,
+				fieldName,
+				t,
+				elem,
+				"implicit assignment to",
+			);
 			const vt = this.checkExpr(elem, scope);
 			if (fieldType)
 				this.assertAssignable(
@@ -3325,6 +3332,20 @@ export const expressionCheckMethods = {
 		return t;
 	},
 
+	// A struct literal of a type another package declares cannot set a field
+	// that package does not export (`action` is "implicit assignment to" for a
+	// positional element, "cannot refer to" for a key).
+	_checkLiteralField(base, name, t, node, action) {
+		const owner = base._fieldOwner?.get(name);
+		if (owner === undefined || owner === this._pkgId) return;
+		if (!this._unexportedForeign(name)) return;
+		const type = t?._pkgName ? `${t._pkgName}.${typeStr(t)}` : typeStr(t);
+		this.err(
+			`${action} unexported field ${name} in struct literal of type ${type}`,
+			node,
+		);
+	},
+
 	_checkStructKeyedElems(expr, scope, t, base) {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
@@ -3333,6 +3354,7 @@ export const expressionCheckMethods = {
 					(f) => f.embedded && embeddedFieldName(f) === keyName,
 				)?.type;
 				if (embed) elem._isEmbedInit = true;
+				this._checkLiteralField(base, keyName, t, elem.key, "cannot refer to");
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
 					const vt = this.checkExpr(elem.value, scope);
