@@ -87,17 +87,35 @@ export const declarationStats = { parsed: 0 };
 
 // The parsed declaration package `name` (`gofront/<name>`, see
 // `parseDeclarationPackage`), or null when there is none. Parsed on first use.
-export function loadDeclarationPackage(name, root = null) {
+// `stamps`, when given, is a Map that records the file read and its stamp.
+export function loadDeclarationPackage(name, root = null, stamps = null) {
 	const file = resolveDeclarationFile(`gofront/${name}`, root);
 	if (!file) return null;
-	const st = statSync(file);
-	const stamp = `${st.mtimeMs}:${st.size}`;
+	const stamp = declarationStamp(file);
+	stamps?.set(file, stamp);
 	const cached = declarationCache.get(file);
 	if (cached?.stamp === stamp) return cached.pkg;
 	const pkg = parseDeclarationPackage(readFileSync(file, "utf8"), name);
 	declarationStats.parsed++;
 	declarationCache.set(file, { stamp, pkg });
 	return pkg;
+}
+
+// The state of a declaration file: its modification time and size, or
+// `missing`.
+function declarationStamp(file) {
+	try {
+		const st = statSync(file);
+		return `${st.mtimeMs}:${st.size}`;
+	} catch {
+		return "missing";
+	}
+}
+
+// Whether every declaration file of `stamps` (`[file, stamp]` pairs, as recorded by
+// `loadDeclarationPackage`) is still as it was read.
+export function declarationsCurrent(stamps) {
+	return stamps.every(([file, stamp]) => declarationStamp(file) === stamp);
 }
 
 // Resolve a local relative import path to an absolute directory of .go files.
@@ -200,7 +218,12 @@ function declarationFiles(name, root, out = new Set()) {
 // imported from a package that is not js-only. Returns the declaration files
 // the build read.
 export function bindDeclarationImports(programs, checker, target, root = null) {
-	checker.setDeclarationLoader((name) => loadDeclarationPackage(name, root));
+	// Every file the checker loads, now or lazily while it checks (a browser
+	// global such as `document`), is recorded for the cache key.
+	checker.declarationStamps ??= new Map();
+	checker.setDeclarationLoader((name) =>
+		loadDeclarationPackage(name, root, checker.declarationStamps),
+	);
 	const files = new Set();
 	for (const [p, spec] of importSpecs(programs)) {
 		const { path, alias, _line, _col, line, col } = spec;

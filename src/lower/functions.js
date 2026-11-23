@@ -199,6 +199,13 @@ function deferTempType(funcType, a, arg) {
 	return isNamedScalarParam(param) ? param : argType;
 }
 
+// Whether `type` is what a package name evaluates to (`pkg.F()`, `window.F()`
+// through an import), as opposed to a value of a `.d.ts` interface or class,
+// which is a namespace-kind type too.
+function isPackageQualifier(type) {
+	return type?.kind === "namespace" && type._dtsType !== true;
+}
+
 function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 	if (stmt.call?.kind !== "CallExpr") return 0;
 	const call = stmt.call;
@@ -230,7 +237,7 @@ function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 		parentList &&
 		index >= 0 &&
 		call.func?.kind === "SelectorExpr" &&
-		call.func.expr?._type?.kind !== "namespace" &&
+		!isPackageQualifier(call.func.expr?._type) &&
 		!recvIsAddressableValue
 	) {
 		const recv = call.func.expr;

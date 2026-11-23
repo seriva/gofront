@@ -821,7 +821,7 @@ for (const [name, src] of anyProducerCases) {
 test("a JS-dynamic any value stays assignable to int", () => {
 	const { errors } = compile(`package main
 func main() {
-  var n int = document.foo
+  var n int = JSON.foo
   _ = n
 }`);
 	assertEqual(errors.length, 0);

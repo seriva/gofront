@@ -120,6 +120,9 @@ function applyPromotions(methods, old, next, isOwn) {
 
 let nextPkgId = 0;
 
+// The declaration packages that declare the classes among the Web API globals.
+const WEB_CLASS_PACKAGES = ["dom", "fetch", "websocket"];
+
 export class TypeChecker {
 	constructor() {
 		// The identity of the package this checker checks: stamped on the
@@ -188,7 +191,9 @@ export class TypeChecker {
 	}
 
 	_setupGlobals() {
-		setupGlobals(this.universe, this.types);
+		setupGlobals(this.universe, this.types, (name) =>
+			this._webGlobalType(name),
+		);
 	}
 
 	// `external` marks values as real JS names (.d.ts / npm definitions) that
@@ -379,6 +384,28 @@ export class TypeChecker {
 			for (const required of pkg.requires) this.useDeclarationPackage(required);
 		}
 		return pkg;
+	}
+
+	// The type of the Web API global `name`: its `Window` member (`document`,
+	// `fetch`, `setTimeout`), `console`, or the class it names (`WebSocket`,
+	// `Response`), read from the generated declarations, which load now. Null
+	// when no declaration loader is set (a checker built without a compiler).
+	_webGlobalType(name) {
+		const dom = this._declLoader && this.useDeclarationPackage("dom");
+		if (!dom) return null;
+		const typeOf = (type) =>
+			dom.keys.has(type)
+				? this.resolveType(this._dtsTypeRef(dom.keys.get(type)))
+				: null;
+		const member = typeOf("Window")?.members[name];
+		if (member) return this.resolveType(member);
+		if (name === "console") return typeOf("Console");
+		for (const pkg of WEB_CLASS_PACKAGES) {
+			const declared = this.useDeclarationPackage(pkg);
+			if (declared?.keys.has(name))
+				return this.resolveType(this._dtsTypeRef(declared.keys.get(name)));
+		}
+		return null;
 	}
 
 	// Registers a declaration package (`gofront/dom`, see `parseDeclarationPackage`

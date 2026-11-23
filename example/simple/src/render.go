@@ -1,6 +1,7 @@
 package main
 
 import "./utils"
+import "gofront/dom"
 import "html"
 import "strings"
 
@@ -85,13 +86,13 @@ func render() {
     }
 
     // Badge
-    badge := document.querySelector(".high-badge")
+    badge := document.querySelector(".high-badge").(dom.HTMLElement)
     hc := highCount()
     if hc > 0 {
-        badge.style.display = "inline-block"
+        badge.style.setProperty("display", "inline-block")
         badge.textContent = String(hc) + " urgent"
     } else {
-        badge.style.display = "none"
+        badge.style.setProperty("display", "none")
         badge.textContent = ""
     }
 }

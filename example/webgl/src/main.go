@@ -1,6 +1,7 @@
 package main
 
 import (
+	"gofront/dom"
 	"math"
 )
 
@@ -231,7 +232,7 @@ func renderFrame(now float64) {
 }
 
 func main() {
-	canvas := document.getElementById("glcanvas")
+	canvas := document.getElementById("glcanvas").(dom.HTMLCanvasElement)
 	gl = canvas.getContext("webgl2")
 
 	gl.viewport(0, 0, 600, 600)

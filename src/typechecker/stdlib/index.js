@@ -4,7 +4,7 @@
 // Registers browser globals and built-in functions, then delegates to the
 // shared, simd and web sub-modules.
 
-import { ANY, BROWSER_GLOBALS, Scope } from "../types.js";
+import { ANY, BROWSER_GLOBALS, ES_BUILTIN_GLOBALS, Scope } from "../types.js";
 import { setupSharedGlobals } from "./shared.js";
 import { setupSimdGlobals } from "./simd.js";
 import { setupWebGlobals } from "./web.js";
@@ -19,8 +19,14 @@ export function universeTypeNames() {
 	return _universeTypeNames;
 }
 
-export function setupGlobals(globals, types) {
-	for (const g of BROWSER_GLOBALS) globals.define(g, ANY);
+// `webGlobalType(name)` supplies the type of a Web API global (null until the
+// declarations it reads are available); the ECMAScript built-ins stay `any`.
+export function setupGlobals(globals, types, webGlobalType = null) {
+	for (const g of BROWSER_GLOBALS) {
+		if (webGlobalType && !ES_BUILTIN_GLOBALS.has(g))
+			globals.defineLazy(g, () => webGlobalType(g), ANY);
+		else globals.define(g, ANY);
+	}
 	for (const name of [
 		"append",
 		"len",

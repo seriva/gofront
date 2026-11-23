@@ -120,15 +120,15 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Done when: SimpleFPS-style code can drop its `WebGPUDevice`/`GPUCanvasContext` interfaces and existing unit tests pass
 
 ### Phase 4: Migration and typed globals
-- [ ] Task 4.1: Migrate Go-source stdlib ahead of the flip (former 7.4a)
+- [x] Task 4.1: Migrate Go-source stdlib ahead of the flip (former 7.4a)
   - Files: `stdlib/gom/gom.go`, `stdlib/time/sleep_js.go`
   - Test: `test/unit/builtins/gom.test.js`, `test/unit/builtins/dom.test.js`, `test/unit/stdlib/time.test.js`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: `stdlib/gom/gom.go` (unchanged emitted JS) and `stdlib/time/sleep_js.go` (`setTimeout` integer timeout and `clearTimeout` id) are valid against both untyped and generated global types
-- [ ] Task 4.2: Migrate the examples ahead of the flip (former 7.4b)
+- [x] Task 4.2: Migrate the examples ahead of the flip (former 7.4b)
   - Files: `example/*/src`
   - Test: the example `_test.go` files (`gofront test --dom example/...`) and `node src/index.js check example/...`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: every member chain on a Web API global in `example/` (including `_test.go` `children.item(0)`, attribute integer parsing and the S27 arithmetic sites under the strict numeric rules) is valid against both untyped and generated global types, and `.d.ts` interface assertions emit no runtime checks
-- [ ] Task 4.3: Type the browser globals (former 7.5)
+- [x] Task 4.3: Type the browser globals (former 7.5)
   - Files: `src/typechecker/types.js` (`BROWSER_GLOBALS`), `src/typechecker/stdlib/index.js`, `docs/usage.md`
   - Test: `test/unit/types/browser-globals.test.js` (and update the 4 JS-dynamic `any` tests in `test/unit/fixtures/conformance/accept/browser_global_dynamic_use.go`, `builtin_len_js_dynamic.go`, `test/unit/types/dynamic-types.test.js:1629,1643` and `test/unit/types/checks.test.js:809` to read from an excluded ES built-in instead of fake `window`/`document` properties): `document.getElementById("x")` is typed; `resp := await fetch(url)` is `fetch.Response`; a misspelled member is rejected; `window == nil` compiles; `var w int = window.innerWidth` compiles while `var f float64 = window.innerWidth` and `window.innerWidth * 0.5` are rejected; `JSON.stringify` and arithmetic on `Math.random()` stay permissive (`anyKind === "dynamic"`); a `println`-only program loads no declaration file; `js-globals.test.js` unchanged; all `example/*` build with unchanged emitted JS relative to Task 4.2 and `npm run test:e2e` passes
   - Done when: no WebIDL-defined `BROWSER_GLOBALS` entry is `ANY`; the 18 ES built-ins that stay `any` are listed in `Excluded: deferred`; `docs/usage.md` has the migration section

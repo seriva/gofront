@@ -6,7 +6,7 @@
 // free for the user's own type, and one package names another's types by
 // qualified name.
 
-import { utimesSync, writeFileSync } from "node:fs";
+import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Lexer } from "../../../src/lexer/lexer.js";
@@ -20,6 +20,7 @@ import {
 	assertErrorContains,
 	compileDir,
 	parseDeclarationPackage,
+	runJs,
 	section,
 	summarize,
 	test,
@@ -667,6 +668,199 @@ func main() {}
 		const second = toCompileResult(() => compileDir(join(dir, "app"), options));
 		assertErrorContains(second.errors, "id");
 	});
+});
+
+// Compiles `app` on one cache, rewrites the declaration file `rel` of the
+// temporary stdlib with a newer modification time, and compiles again.
+function recompileAfterEdit(files, rel, from, to) {
+	let out;
+	withTempDir(files, (dir) => {
+		const options = {
+			stdlibRoot: join(dir, "stdlib"),
+			packageCache: new PackageCache(),
+		};
+		const first = compileDir(join(dir, "app"), options);
+		const path = join(dir, rel);
+		writeFileSync(path, readFileSync(path, "utf8").replace(from, to));
+		const later = new Date(Date.now() + 60000);
+		utimesSync(path, later, later);
+		const second = toCompileResult(() => compileDir(join(dir, "app"), options));
+		out = { first, second };
+	});
+	return out;
+}
+
+const GLOBAL_DOM = join("stdlib", "gofront", "dom", "dom.d.ts");
+const READS_TITLE = `package main
+
+func main() {
+	var s string = document.title
+	_ = s
+}
+`;
+
+test("an edited declaration read as a browser global is read again by a cached build", () => {
+	const { first, second } = recompileAfterEdit(
+		{
+			[GLOBAL_DOM]:
+				"interface Document { title: string; }\ninterface Window { document: Document; }\n",
+			"app/main.go": READS_TITLE,
+		},
+		GLOBAL_DOM,
+		"title: string",
+		"title: int",
+	);
+	assert(
+		first.watchedFiles.some((f) => f.endsWith("dom.d.ts")),
+		"the declaration file is watched",
+	);
+	assertErrorContains(second.errors, "cannot use");
+});
+
+test("a declaration a browser global's package references is part of the cache key", () => {
+	const fetchDts = join("stdlib", "gofront", "fetch", "fetch.d.ts");
+	const { first, second } = recompileAfterEdit(
+		{
+			[GLOBAL_DOM]: `/// <reference types="gofront/fetch" />
+interface Document { title: fetch.Title; }
+interface Window { document: Document; }
+`,
+			[fetchDts]: "interface Title { text: string; }\n",
+			"app/main.go": `package main
+
+func main() {
+	var s string = document.title.text
+	_ = s
+}
+`,
+		},
+		fetchDts,
+		"text: string",
+		"text: int",
+	);
+	assert(
+		first.watchedFiles.some((f) => f.endsWith("fetch.d.ts")),
+		"the referenced declaration file is watched",
+	);
+	assertErrorContains(second.errors, "cannot use");
+});
+
+test("a stdlib package reading a browser global is rebuilt when its declaration changes", () => {
+	const { second } = recompileAfterEdit(
+		{
+			[GLOBAL_DOM]:
+				"interface Document { title: string; }\ninterface Window { document: Document; }\n",
+			"stdlib/pg/pg.go": `//gofront:target js
+
+package pg
+
+func Title() string { return document.title }
+`,
+			"app/main.go": `package main
+
+import "pg"
+
+func main() { println(pg.Title()) }
+`,
+		},
+		GLOBAL_DOM,
+		"title: string",
+		"title: int",
+	);
+	assertErrorContains(second.errors, "cannot use");
+});
+
+test("a program that reads no browser global loads no declaration file", () => {
+	withTempDir(
+		{
+			"stdlib/gofront/dom/dom.d.ts": DOM,
+			"app/main.go": "package main\nfunc main() { println(1) }\n",
+		},
+		(dir) => {
+			const res = compileDir(join(dir, "app"), {
+				stdlibRoot: join(dir, "stdlib"),
+				packageCache: new PackageCache(),
+			});
+			assertEqual(res.watchedFiles.length, 0);
+		},
+	);
+});
+
+test("a deferred method of a declaration value keeps the receiver it had at the defer", () => {
+	const { res, errors } = build(
+		`package main
+
+import "gofront/dom"
+
+func main() {
+	el := document.getElementById("a").(dom.Field)
+	defer el.focus()
+	el = document.getElementById("b").(dom.Field)
+	println(el.id)
+}
+`,
+		{
+			stdlib: {
+				"stdlib/gofront/dom/dom.d.ts": `interface Element { id: string; }
+interface Field extends Element { focus(): void; }
+interface Document { getElementById(id: string): Element | null; }
+interface Window { document: Document; }
+`,
+			},
+		},
+	);
+	assertEqual(errors.length, 0);
+	const focused = [];
+	const out = runJs(res.js, {
+		document: {
+			getElementById: (id) => ({ id, focus: () => focused.push(id) }),
+		},
+	});
+	assertEqual(out, "b");
+	assertEqual(focused.join(), "a");
+});
+
+test("a struct or array passed to a typed browser call is not copied", () => {
+	const { res, errors } = build(
+		`package main
+
+import "gofront/dom"
+
+type P struct{ X int }
+
+func keep(ps ...P) {}
+
+func main() {
+	p := P{X: 1}
+	a := [2]int{1, 2}
+	console.log(p, a)
+	alert(p)
+	var t dom.Tokens
+	t.add(p, a)
+	keep(p)
+}
+`,
+		{
+			stdlib: {
+				"stdlib/gofront/dom/dom.d.ts": `interface Console { log(...data: any[]): void; }
+interface Tokens { add(...tokens: any[]): void; }
+interface Window { alert(...data: any[]): void; }
+`,
+			},
+		},
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	const calls = res.js.match(/\b(console\.log|alert|t\.add|keep)\(.*\);/g);
+	assertEqual(calls.length, 4);
+	for (const call of calls.slice(0, 3))
+		assert(
+			!/__clone|slice\(\)/.test(call),
+			`a typed browser call copied its argument: ${call}`,
+		);
+	assert(
+		calls[3].includes("__clone"),
+		"a Go variadic callee still gets a copy",
+	);
 });
 
 test("an unchanged declaration file is still parsed once", () => {

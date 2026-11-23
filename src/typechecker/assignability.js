@@ -1200,6 +1200,10 @@ export const assignabilityMethods = {
 		)
 			return;
 		if (target.kind === "typeParam") return;
+		// An `any` the generated Web API declarations spell (`console.log`'s
+		// argument, `setTimeout`'s handler) hands the value to the browser as
+		// it is, never as a Go interface value.
+		if (target._hostAny) return;
 		let tBase = this.resolveType(target);
 		tBase = this._deepUnderlying(tBase);
 		if (!isAny(target) && tBase?.kind !== "interface") return;

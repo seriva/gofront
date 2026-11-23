@@ -112,6 +112,30 @@ export const BROWSER_GLOBALS = new Set([
 	"TextDecoder",
 ]);
 
+// The ECMAScript built-ins among `BROWSER_GLOBALS`. WebIDL does not define
+// them, so they stay JS-dynamic `any`; every other entry is a Web API global
+// typed from the generated `gofront/*` declarations (see `_webGlobalType`).
+export const ES_BUILTIN_GLOBALS = new Set([
+	"Math",
+	"JSON",
+	"Date",
+	"RegExp",
+	"Promise",
+	"Error",
+	"Symbol",
+	"String",
+	"Number",
+	"Boolean",
+	"Array",
+	"Object",
+	"parseInt",
+	"parseFloat",
+	"isNaN",
+	"isFinite",
+	"encodeURIComponent",
+	"decodeURIComponent",
+]);
+
 // ES and host globals that generated code, runtime helpers and the wasm
 // loader read but that Go programs may legally declare (`func Map`, `NaN :=
 // 2.0`).  Rename-only: the names are never predeclared, so adding one cannot
@@ -1188,6 +1212,21 @@ export class Scope {
 	// Binds `name` to a value: a variable, parameter or result.
 	define(name, type) {
 		this._bind(name, "var", type);
+	}
+	// Binds `name` to a value whose type `typeOf()` supplies on first use, so a
+	// type that is costly to build is built only for a program that reads it.
+	// `typeOf` returns null while there is nothing to supply yet; the binding
+	// then reads as `fallback`.
+	defineLazy(name, typeOf, fallback) {
+		this._bind(name, "var", fallback);
+		const obj = this.objects.get(name);
+		let resolved = null;
+		Object.defineProperty(obj, "type", {
+			get() {
+				resolved ??= typeOf();
+				return resolved ?? fallback;
+			},
+		});
 	}
 	// Binds `name` to a predeclared function such as `len`.
 	defineBuiltin(name, type) {

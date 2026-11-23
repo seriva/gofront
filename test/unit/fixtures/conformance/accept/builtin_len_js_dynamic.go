@@ -3,6 +3,6 @@
 package main
 
 func main() {
-	_ = len(window.items)
-	_ = len(document.title)
+	_ = len(JSON.items)
+	_ = len(JSON.title)
 }

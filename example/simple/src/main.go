@@ -2,6 +2,7 @@ package main
 
 import (
     "errors"
+    "gofront/dom"
     "unicode/utf8"
 
     "./utils"
@@ -42,7 +43,7 @@ async func triggerSave() {
 
 // submitInput validates, adds, and saves a new todo.
 async func submitInput() {
-    input := document.querySelector(".todo-input")
+    input := document.querySelector(".todo-input").(dom.HTMLInputElement)
     defer input.focus()
 
     err := validateTodo(input.value)
