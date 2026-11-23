@@ -140,7 +140,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Files: `src/lower/assign-order.js`
   - Test: `test/unit/compiler/assign-order.test.js` (non-`Ident` target binds) and `test/unit/language/codegen-regressions.test.js` *Assignment order*: V2.1, V2.2 and a `for` post form → `99 2` with `assertAllTargetsOutput`; the three gc-order sections unmodified
   - Done when: passes on every target; `bundle-size.js` passes
-- [ ] Task 2.2: Complex compound assignment uses the general compound path (V2.3–V2.5)
+- [x] Task 2.2: Complex compound assignment uses the general compound path (V2.3–V2.5)
   - Files: `src/backend/js/statements.js` (remove `_genComplexCompoundAssign`; complex operator in the compound path)
   - Test: `codegen-regressions.test.js`: V2.3 → `(2+3i) 1`, V2.4 → `(2+2i)`, V2.5 → `(4+6i) (4+6i)`, and C4 from the assignment plan unchanged
   - Done when: all pass on every target

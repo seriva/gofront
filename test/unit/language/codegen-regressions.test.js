@@ -686,6 +686,88 @@ func main() {
 	);
 });
 
+test("complex += on a map element runs the key call once (V2.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	kn := 0
+	k := func() string { kn++; return "a" }
+	m := map[string]complex128{"a": complex(1, 2)}
+	z := complex(1, 1)
+	m[k()] += z
+	fmt.Println(m["a"], kn)
+}
+`,
+		"(2+3i) 1\n",
+	);
+});
+
+test("complex += works as a for post statement (V2.4)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var c complex128
+	z := complex(1, 1)
+	for i := 0; i < 2; c += z {
+		i++
+	}
+	fmt.Println(c)
+}
+`,
+		"(2+2i)\n",
+	);
+});
+
+test("complex += through an address-taken variable keeps the pointer in sync (V2.5)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := func() complex128 { return complex(3, 4) }
+	c := complex(1, 2)
+	p := &c
+	c += f()
+	fmt.Println(c, *p)
+}
+`,
+		"(4+6i) (4+6i)\n",
+	);
+});
+
+test("complex compound assignment on elements, fields and complex64 runs each operand once", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ c complex64 }
+
+func main() {
+	n := 0
+	idx := func() int { n++; return 1 }
+	xs := []complex128{complex(1, 1), complex(2, 2)}
+	z := complex(1, 2)
+	xs[idx()] *= z
+	xs[idx()] -= z
+	t := &T{complex(1, 0)}
+	t.c /= complex64(complex(0, 1))
+	var a [2]complex64
+	a[idx()] += complex64(z)
+	fmt.Println(xs, t.c, a, n)
+}
+`,
+		"[(1+1i) (-3+4i)] (0-1i) [(0+0i) (1+2i)] 3\n",
+	);
+});
+
 test("complex map and *= compound assignments run each call once", async () => {
 	await assertAllTargetsOutput(
 		`package main
