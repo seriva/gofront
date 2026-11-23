@@ -3,6 +3,7 @@
 // WebIDL goes in, `.d.ts`-form declarations come out: the same input gives the
 // same bytes, and the compiler's `.d.ts` parser reads what is generated.
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -274,6 +275,27 @@ test("overloads merge into one signature", () => {
 	assertContains(one, "h(a: int, b?: int): any;");
 });
 
+test("a rest parameter is the last parameter of a merged overload", () => {
+	const out = run(
+		{
+			t: "interface X { undefined m(long a, long... rest); undefined m(long a, long b, long c); };",
+		},
+		{ t: { specs: ["t"] } },
+	).get("t");
+	assertContains(out, "m(a: int, ...rest: int[]): void;");
+});
+
+test("an attribute that is not an identifier is not declared", () => {
+	const out = run(
+		{
+			t: "interface X { attribute DOMString margin-top; attribute long ok; };",
+		},
+		{ t: { specs: ["t"] } },
+	).get("t");
+	assertContains(out, "ok: int;");
+	assert(!out.includes("margin-top"), out);
+});
+
 test("static members and unnamed special operations are not declared", () => {
 	const one = run().get("one");
 	assert(!/\bs\(/.test(one), "declared a static operation");
@@ -349,8 +371,8 @@ section("Web declaration generator — the compiler reads the output");
 test("the generated declarations parse into the described types", () => {
 	const one = parseDeclarationPackage(run().get("one"), "one");
 	const node = one.types.get("Node");
-	assertEqual(node.extends[0], "one.EventTarget");
-	assertEqual(node.members.parentNode.alias, "one.Node");
+	assertEqual(node.extends[0], one.keys.get("EventTarget"));
+	assertEqual(node.members.parentNode.alias, one.keys.get("Node"));
 	assertEqual(node.members.load.kind, "func");
 	assertEqual(node.members.load.returns[0].kind, "promise");
 	assertEqual(node.members.many.variadic, true);
@@ -358,7 +380,7 @@ test("the generated declarations parse into the described types", () => {
 	assert(one.types.get("Init")._dictionary);
 	const two = parseDeclarationPackage(run().get("two"), "two");
 	assertEqual(two.requires[0], "one");
-	assertEqual(two.types.get("Device").extends[0], "one.EventTarget");
+	assertEqual(two.types.get("Device").extends[0], one.keys.get("EventTarget"));
 });
 
 section("Web declaration generator — WebIDL from @webref/idl");
@@ -403,6 +425,21 @@ test("keyword-named members of the real specs survive", () => {
 	const dom = parseDeclarationPackage(real.get("dom"), "dom").types;
 	assertEqual(dom.get("Event").members.type.name, "string");
 	assertEqual(dom.get("HTMLInputElement").members.type.name, "string");
+});
+
+test("no generated property of the real specs has a non-identifier name", () => {
+	for (const [pkg, text] of real)
+		assert(!/^\s+(readonly )?[\w$]*-[\w$-]*\??:/m.test(text), pkg);
+});
+
+test("--package without a name is an error", () => {
+	const r = spawnSync(
+		process.execPath,
+		[join(ROOT, "scripts", "gen-web-types.js"), "--package"],
+		{ encoding: "utf8" },
+	);
+	assertEqual(r.status, 1);
+	assertContains(r.stderr, "--package needs a package name");
 });
 
 test("each published package is committed and current", () => {

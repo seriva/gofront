@@ -382,17 +382,18 @@ export class TypeChecker {
 	}
 
 	// Registers a declaration package (`gofront/dom`, see `parseDeclarationPackage`
-	// in dts-parser.js: `{ name, types, values }` whose type references are
-	// qualified) in the type table under `name.T`, once per checker. No file
-	// resolves those names until `bindDeclarationPackage` binds the package; the
-	// package's own references (and another package's qualified ones) reach them
-	// through the table, so a bare `T` is never taken.
+	// in dts-parser.js: `{ name, types, values, keys }` whose type references
+	// are qualified) in the type table under `pkg.keys`, once per checker. The key cannot be a Go package's qualifier, so a program's own
+	// package named `dom` never replaces it. No file resolves those names until
+	// `bindDeclarationPackage` binds the package; the package's own references
+	// (and another package's qualified ones) reach them through the table, so a
+	// bare `T` is never taken.
 	addDeclarationPackage(pkg) {
 		this._declPackages ??= new Set();
 		if (this._declPackages.has(pkg)) return;
 		this._declPackages.add(pkg);
 		for (const [name, type] of pkg.types)
-			this._bindImportedType(null, `${pkg.name}.${name}`, type, false);
+			this._bindImportedType(null, pkg.keys.get(name), type, false);
 	}
 
 	// Binds the qualifier `as` of declaration package `pkg` in `file` (null:

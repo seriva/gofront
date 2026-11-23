@@ -968,8 +968,11 @@ function identicalShape(a, b, seen) {
 			return identicalNamed(a, b, seen);
 		case "typeParam":
 		case "generic":
-		case "namespace":
 			return a.name === b.name;
+		case "namespace":
+			// A declaration package's type is its own: `p1.Buffer` is not `p2.Buffer`,
+			// nor a consumer `.d.ts` interface of the same bare name.
+			return a.name === b.name && a._pkg === b._pkg;
 		default:
 			return false;
 	}

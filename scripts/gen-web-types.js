@@ -314,13 +314,27 @@ function mergeOverloads(sigs) {
 		b.params.length > a.params.length ? b : a,
 	);
 	const same = (xs) => (xs.every((x) => x === xs[0]) ? xs[0] : "any");
-	const params = longest.params.map((p, i) => {
+	// A rest parameter is last: it takes the place of every parameter from the
+	// earliest one any overload has as a rest parameter, which a call may omit.
+	const rest = Math.min(
+		...sigs
+			.map((s) => s.params.findIndex((p) => p.variadic))
+			.map((i) => (i < 0 ? Number.POSITIVE_INFINITY : i)),
+	);
+	const params = longest.params.slice(0, rest + 1).map((p, i) => {
 		const at = sigs.map((s) => s.params[i]);
+		if (i === rest)
+			return {
+				name: sigs.map((s) => s.params[rest]).find((a) => a?.variadic).name,
+				type: same(
+					sigs.flatMap((s) => s.params.slice(rest)).map((a) => a.type),
+				),
+				variadic: true,
+			};
 		return {
 			name: p.name,
 			type: same(at.filter(Boolean).map((a) => a.type)),
 			optional: at.some((a) => !a || a.optional),
-			variadic: at.some((a) => a?.variadic),
 		};
 	});
 	return { params, ret: same(sigs.map((s) => s.ret)) };
@@ -354,8 +368,11 @@ function memberNodes(defs, entry, name) {
 }
 
 // Adds member `m` to `out` (member name -> `{ line }`, or `{ sigs }` for the
-// overloads of an operation); a name an earlier member took stays with it.
+// overloads of an operation); a name an earlier member took stays with it. A
+// name that is not an identifier (the `margin-top` of `CSSPageDescriptors`)
+// cannot be written as a property of a declaration, so the member is left out.
 function addMember(out, m, tw) {
+	if (m.name && !/^[A-Za-z_$][\w$]*$/.test(m.name)) return;
 	if (m.type === "const") {
 		if (!out.has(m.name))
 			out.set(m.name, { line: `readonly ${m.name}: ${tw.type(m.idlType)};` });
@@ -508,11 +525,14 @@ function sync(pkg, text, check) {
 
 async function main(argv) {
 	const check = argv.includes("--check");
-	const only = argv.includes("--package")
-		? argv[argv.indexOf("--package") + 1]
-		: null;
-	if (only && !PACKAGES[only]) {
-		console.error(`gen-web-types: unknown package '${only}'`);
+	const at = argv.indexOf("--package");
+	const only = at >= 0 ? (argv[at + 1] ?? "") : null;
+	if (only !== null && !PACKAGES[only]) {
+		console.error(
+			only === ""
+				? "gen-web-types: --package needs a package name"
+				: `gen-web-types: unknown package '${only}'`,
+		);
 		return 1;
 	}
 	const { specs, version } = await loadWebref();

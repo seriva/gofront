@@ -32,10 +32,11 @@
 //
 // Declaration packages (`gofront/dom`, ...): `parseDeclarationPackage` parses a
 // package's declarations and qualifies the type references that name one of its
-// own types (`Node` becomes `dom.Node`), so the package keeps its own type table
-// and a name another package or the program declares never collides with it. A
-// reference written qualified (`dom.EventTarget`) names a type of another
-// package, which the package lists in a header comment:
+// own types (`Node` becomes `gofront/dom.Node`, see `declarationTypeKey`), so
+// the package keeps its own type table and a name another package or the
+// program declares never collides with it. A reference written qualified
+// (`dom.EventTarget`) names a type of another package, which the package lists
+// in a header comment:
 //
 //   /// <reference types="gofront/dom" />
 
@@ -536,7 +537,8 @@ export class DtsParser {
 	}
 
 	// Skips the modifier `mod` unless it is the name of a member (`readonly:
-	// boolean`, `static(): void`), which a `:`, `?` or `(` follows.
+	// boolean`, `static(): void`, `static<T>(x: T): T`), which a `:`, `?`, `(`
+	// or `<` follows.
 	_matchModifier(mod) {
 		const start = this.pos;
 		if (!this.matchKw(mod)) return false;
@@ -548,9 +550,11 @@ export class DtsParser {
 		return true;
 	}
 
-	// Whether the next character starts what follows a member's name.
-	_namesMember() {
-		return !this.eof() && ":?(".includes(this.ch());
+	// Whether the next character starts what follows a member's name. `new`
+	// followed by `(` or `<` is a construct signature, so it names a member only
+	// with `:` or `?` (`names` narrows the characters).
+	_namesMember(names = ":?(<") {
+		return !this.eof() && names.includes(this.ch());
 	}
 
 	_parseFuncDecl() {
@@ -695,7 +699,7 @@ export class DtsParser {
 		}
 		this.skip();
 		// A member named like a keyword (`type: string`, `class(): void`).
-		if (kw !== "new" && this._namesMember()) {
+		if (this._namesMember(kw === "new" ? ":?" : undefined)) {
 			this._parseMemberDefault(kw, out);
 			return;
 		}
@@ -952,25 +956,36 @@ export function parseDts(source) {
 	return parser.parse();
 }
 
-// Qualifies the references of `type` that name a type declared by the package
-// (`names`) as `pkg.Name`, in place: its members, parameters, results and
-// element types, and the `extends` names of a declaration. A name written
-// qualified already names another package and is left alone.
-function qualifyReferences(type, pkg, names, seen) {
+// The type-table key of type `name` of declaration package `pkg`. It holds a
+// `/`, which no Go package qualifier can, so a program's own package named
+// `dom` (or imported as `dom`) never takes the place of `gofront/dom`'s types.
+function declarationTypeKey(pkg, name) {
+	return `gofront/${pkg}.${name}`;
+}
+
+// Qualifies the references of `type` in place: its members, parameters,
+// results and element types, and the `extends` names of a declaration. A name
+// the package declares (`names`) becomes its `declarationTypeKey`; a name
+// written `other.T` for a package it references (`requires`) becomes that
+// package's key; any other name is left alone.
+function qualifyReferences(type, pkg, names, requires, seen) {
 	if (!type || typeof type !== "object" || seen.has(type)) return;
 	seen.add(type);
-	const walk = (t) => qualifyReferences(t, pkg, names, seen);
+	const walk = (t) => qualifyReferences(t, pkg, names, requires, seen);
+	const qualify = (n) => {
+		if (names.has(n)) return declarationTypeKey(pkg, n);
+		const dot = n.indexOf(".");
+		return dot > 0 && requires.has(n.slice(0, dot))
+			? declarationTypeKey(n.slice(0, dot), n.slice(dot + 1))
+			: n;
+	};
 	switch (type.kind) {
 		case "basic":
-			if (type.alias && names.has(type.alias))
-				type.alias = `${pkg}.${type.alias}`;
+			if (type.alias) type.alias = qualify(type.alias);
 			break;
 		case "namespace":
 			for (const m of Object.values(type.members)) walk(m);
-			if (type.extends)
-				type.extends = type.extends.map((n) =>
-					names.has(n) ? `${pkg}.${n}` : n,
-				);
+			if (type.extends) type.extends = type.extends.map(qualify);
 			break;
 		case "func":
 			type.params.forEach(walk);
@@ -995,17 +1010,21 @@ function referencedPackages(source) {
 }
 
 // Parses the declaration file of the package `name` (`gofront/<name>`):
-// `{ name, types, values, requires }`, where `requires` names the packages
-// its header comments reference. Its own type references are qualified (see
-// above), so the result is bound under `name.` in a checker's type table.
+// `{ name, types, values, keys, requires }`, where `keys` is each type's key in
+// a checker's type table and `requires` names the packages its header comments
+// reference. Its own type references are qualified (see above) with those keys.
 export function parseDeclarationPackage(source, name) {
 	const { types, values } = parseDts(source);
 	const names = new Set(types.keys());
+	const requires = referencedPackages(source);
+	const required = new Set(requires);
 	const seen = new Set();
 	for (const t of types.values()) {
 		if (t._dtsType) t._pkg = name;
-		qualifyReferences(t, name, names, seen);
+		qualifyReferences(t, name, names, required, seen);
 	}
-	for (const t of values.values()) qualifyReferences(t, name, names, seen);
-	return { name, types, values, requires: referencedPackages(source) };
+	for (const t of values.values())
+		qualifyReferences(t, name, names, required, seen);
+	const keys = new Map([...names].map((n) => [n, declarationTypeKey(name, n)]));
+	return { name, types, values, keys, requires };
 }

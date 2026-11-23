@@ -6,9 +6,11 @@
 // free for the user's own type, and one package names another's types by
 // qualified name.
 
+import { utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Lexer } from "../../../src/lexer/lexer.js";
+import { PackageCache } from "../../../src/link/package-cache.js";
 import { Parser } from "../../../src/parser/index.js";
 import { declarationStats } from "../../../src/resolver.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
@@ -145,11 +147,14 @@ test("a package bound under an alias uses the alias", () => {
 test("a registered package is registered once per checker", () => {
 	const checker = new TypeChecker();
 	const pkg = domPkg();
+	const key = pkg.keys.get("Element");
 	checker.addDeclarationPackage(pkg);
-	const element = checker.types.get("dom.Element");
+	const element = checker.types.get(key);
+	assert(element, "registered under its key");
+	assert(!checker.types.has("dom.Element"), "registered under the qualifier");
 	checker.addDeclarationPackage(pkg);
 	checker.bindDeclarationPackage(pkg, "dom", "main.go");
-	assert(checker.types.get("dom.Element") === element);
+	assert(checker.types.get(key) === element);
 });
 
 section("Declaration packages — references inside a package");
@@ -288,6 +293,7 @@ const STDLIB = {
 	"stdlib/gofront/dom/dom.d.ts": DOM,
 	"stdlib/gofront/webgpu/webgpu.d.ts": WEBGPU,
 };
+const STDLIB_FILES = STDLIB;
 
 // Compiles `main` (a package main file) against the fixture stdlib; `extra`
 // adds files. Returns the compile result and the declaration files parsed.
@@ -533,6 +539,154 @@ import "gofront/shared"
 func main() { println(1) }
 `);
 	assert(!errors.some((e) => e.message.includes("unsupported package")));
+});
+
+section("Declaration packages — same-named types and local packages");
+
+test("same-named types of two packages are different types", () => {
+	const p1 = parseDeclarationPackage("interface Buffer { n: int; }", "p1");
+	const p2 = parseDeclarationPackage("interface Buffer { n: int; }", "p2");
+	const { errors } = check(
+		`func takeP1(b p1.Buffer) {}
+
+func f(b p2.Buffer) { takeP1(b) }`,
+		[p1, p2],
+	);
+	assertErrorContains(errors, "p2.Buffer");
+});
+
+test("a consumer .d.ts type is not a package type of the same name", () => {
+	withTempDir(
+		{
+			...STDLIB_FILES,
+			"app/custom.d.ts": "export interface Element { custom: number; }\n",
+			"app/main.go": `package main
+
+import (
+	"gofront/dom"
+	"js:./custom.d.ts"
+)
+
+func f(e dom.Element) {
+	var c Element = e
+	_ = c
+}
+
+func main() {}
+`,
+		},
+		(dir) => {
+			const { errors } = toCompileResult(() =>
+				compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
+			);
+			assertErrorContains(errors, "cannot use");
+		},
+	);
+});
+
+test("a local package named like a declaration package keeps inheritance", () => {
+	const { errors } = build(
+		`package main
+
+import (
+	"./dom"
+	"gofront/webgpu"
+)
+
+func use(d webgpu.Device, e dom.EventTarget) {
+	d.addEventListener("x", func(e any) {})
+	_ = e.Custom
+}
+
+func main() {}
+`,
+		{
+			extra: {
+				"app/dom/dom.go": `package dom
+
+type EventTarget struct{ Custom int }
+`,
+			},
+		},
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a local package aliased like a declaration package keeps inheritance", () => {
+	const { errors } = build(
+		`package main
+
+import (
+	dom "./helper"
+	"gofront/webgpu"
+)
+
+func use(d webgpu.Device, e dom.EventTarget) {
+	d.addEventListener("x", func(e any) {})
+	_ = e.Custom
+}
+
+func main() {}
+`,
+		{
+			extra: {
+				"app/helper/helper.go": `package helper
+
+type EventTarget struct{ Custom int }
+`,
+			},
+		},
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("an edited declaration file is read again by a cached build", () => {
+	const stdlib = join("stdlib", "gofront", "dom", "dom.d.ts");
+	const files = {
+		[stdlib]: "interface Element { id: string; }\n",
+		"app/main.go": `package main
+
+import "gofront/dom"
+
+func name(e dom.Element) string { return e.id }
+
+func main() {}
+`,
+	};
+	withTempDir(files, (dir) => {
+		const options = {
+			stdlibRoot: join(dir, "stdlib"),
+			packageCache: new PackageCache(),
+		};
+		const first = toCompileResult(() => compileDir(join(dir, "app"), options));
+		assertEqual(first.errors.length, 0);
+		const path = join(dir, stdlib);
+		writeFileSync(path, "interface Element { nope: int; }\n");
+		const later = new Date(Date.now() + 60000);
+		utimesSync(path, later, later);
+		const second = toCompileResult(() => compileDir(join(dir, "app"), options));
+		assertErrorContains(second.errors, "id");
+	});
+});
+
+test("an unchanged declaration file is still parsed once", () => {
+	withTempDir(
+		{
+			"stdlib/gofront/dom/dom.d.ts": DOM,
+			"stdlib/gofront/webgpu/webgpu.d.ts": WEBGPU,
+			"app/main.go": USES_DOM,
+		},
+		(dir) => {
+			const options = {
+				stdlibRoot: join(dir, "stdlib"),
+				packageCache: new PackageCache(),
+			};
+			const before = declarationStats.parsed;
+			compileDir(join(dir, "app"), options);
+			compileDir(join(dir, "app"), options);
+			assertEqual(declarationStats.parsed - before, 1);
+		},
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

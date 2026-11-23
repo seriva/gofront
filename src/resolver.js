@@ -10,7 +10,7 @@
 //   dtsPath    — absolute path to the .d.ts file to parse
 //   importPath — the JS import path to emit in generated code (e.g. "gl-matrix")
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -80,7 +80,8 @@ export function resolveDeclarationFile(importPath, root = null) {
 	return existsSync(file) ? file : null;
 }
 
-// Declaration packages parsed so far, by file: one parse per process.
+// Declaration packages parsed so far, by file: one parse per process while the
+// file is unchanged (`{ stamp, pkg }`, the stamp being its mtime and size).
 const declarationCache = new Map();
 export const declarationStats = { parsed: 0 };
 
@@ -89,12 +90,13 @@ export const declarationStats = { parsed: 0 };
 export function loadDeclarationPackage(name, root = null) {
 	const file = resolveDeclarationFile(`gofront/${name}`, root);
 	if (!file) return null;
-	let pkg = declarationCache.get(file);
-	if (!pkg) {
-		pkg = parseDeclarationPackage(readFileSync(file, "utf8"), name);
-		declarationStats.parsed++;
-		declarationCache.set(file, pkg);
-	}
+	const st = statSync(file);
+	const stamp = `${st.mtimeMs}:${st.size}`;
+	const cached = declarationCache.get(file);
+	if (cached?.stamp === stamp) return cached.pkg;
+	const pkg = parseDeclarationPackage(readFileSync(file, "utf8"), name);
+	declarationStats.parsed++;
+	declarationCache.set(file, { stamp, pkg });
 	return pkg;
 }
 

@@ -55,6 +55,24 @@ test("a keyword-named method keeps its neighbours and its signature", () => {
 	}
 });
 
+test("a keyword-named generic method keeps its neighbours", () => {
+	for (const name of NAMES) {
+		const { types } = parseDts(
+			`interface E { a: int; ${name}<T>(x: T): T; z: int; }`,
+		);
+		const m = types.get("E").members;
+		assertEqual(Object.keys(m).join(","), `a,${name},z`);
+		assertEqual(m[name].kind, "func");
+	}
+});
+
+test("a member named new is read with a type or as optional", () => {
+	const { types } = parseDts(
+		"interface E { a: int; new: string; new?: int; z: int; new<T>(x: T): E; }",
+	);
+	assertEqual(Object.keys(types.get("E").members).join(","), "a,new,z");
+});
+
 test("a keyword-named member is optional like any other", () => {
 	const { types } = parseDts("interface E { type?: string; static?(): void; }");
 	assertEqual(Object.keys(types.get("E").members).join(","), "type,static");
