@@ -462,6 +462,26 @@ func Area(r Rect) int { return r.W * r.H }
 	);
 });
 
+test("what a wasm function calls is not reached on the JS side", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+import "./geo"
+func main() { println(geo.Pad(2)) }
+`,
+			"geo/g.go": `//gofront:target wasm
+package geo
+import "strings"
+func Pad(n int) int { return len(strings.Repeat("x", n)) }
+`,
+		},
+		(dir) => {
+			const { stdNames } = reachOf(dir);
+			assertEqual([...stdNames()].join(), "");
+		},
+	);
+});
+
 test("every declaration is reached when nothing is pruned", () => {
 	withTempDir(
 		{
@@ -479,7 +499,7 @@ func main() {}
 				rootKey: root,
 			};
 			compileDir(root, options);
-			const reach = reachOfBuild(options, []);
+			const reach = reachOfBuild(options, [], { prune: false });
 			assertEqual(reach.namesOf(root).join(), "dead,main");
 		},
 	);

@@ -335,13 +335,19 @@ function registration(item) {
 export class BuildReach extends StdlibReach {
 	/**
 	 * `units`: the local packages of the build, `{ key, pkgName, programs,
-	 * emitted }`; `entry`: the key of the package being built; `isTest`: the
+	 * emitted }`; `entry`: the key of the package being built; `roots`: names
+	 * of declarations (of any package) to keep as well; `isTest`: the
 	 * build runs the entry package's tests; `prune: false` roots every
 	 * declaration of the units that emit JS.
 	 */
-	constructor(stdlibPrograms, units, { entry, isTest = false, prune = true }) {
+	constructor(
+		stdlibPrograms,
+		units,
+		{ entry, isTest = false, prune = true, roots = [] },
+	) {
 		super(stdlibPrograms);
 		this.entry = entry;
+		this.extraRoots = roots;
 		this.isTest = isTest;
 		this.prune = prune;
 		this.units = new Map(units.map((u) => [u.key, indexUnit(u)]));
@@ -375,19 +381,25 @@ export class BuildReach extends StdlibReach {
 	_seed() {
 		const emitting = [...this.units.values()].filter((u) => u.emitted);
 		const entry = this.units.get(this.entry);
-		if (!this.prune || !entry?.emitted) {
-			for (const u of emitting) for (const item of u.items) this._item(item);
-		}
-		for (const u of emitting) {
-			for (const item of u.inits) this._item(item);
-			for (const item of u.items) {
-				if (item.spec && !item.program._generated && runsCode(item.node))
-					this._item(item);
-				else if (registration(item)) this.registrations.push(item);
-			}
-		}
+		const all = !this.prune || !entry?.emitted;
+		for (const u of emitting) this._seedUnit(u, all);
 		if (entry?.emitted) this._seedEntry(entry);
+		// A host that calls declarations by name names them in `roots`.
+		for (const u of emitting)
+			for (const name of this.extraRoots)
+				for (const item of u.byName.get(name) ?? []) this._item(item);
 		this._seedFacade();
+	}
+
+	// What every package runs: its `init`s and its calling initializers (all of
+	// its code when `all`).
+	_seedUnit(unit, all) {
+		for (const item of unit.items) {
+			if (all || unit.inits.includes(item)) this._item(item);
+			else if (item.spec && !item.program._generated && runsCode(item.node))
+				this._item(item);
+			else if (registration(item)) this.registrations.push(item);
+		}
 	}
 
 	// A test build runs `GofrontRunTests` of the driver; a program runs `main`;
@@ -427,7 +439,10 @@ export class BuildReach extends StdlibReach {
 		this._resolve(at, refs);
 	}
 
+	// A package that emits no JS (`wasm`) contributes its types only: the
+	// facade names them, while its functions run in the module.
 	_item(item) {
+		if (!item.unit.emitted && item.node.kind !== "TypeDecl") return;
 		if (this.reached.has(item.node)) return;
 		this.reached.add(item.node);
 		this.queue.push(item);
@@ -435,25 +450,29 @@ export class BuildReach extends StdlibReach {
 
 	// Reaches what `item` names by `refs.names` and `refs.quals`.
 	_resolve(item, refs) {
-		const { unit, program } = item;
-		for (const name of refs.names) {
-			for (const found of unit.byName.get(name) ?? []) this._item(found);
+		for (const name of refs.names) this._resolveName(item, name);
+		for (const qual of refs.quals) this._resolveQual(item, qual);
+	}
+
+	_resolveName({ unit, program }, name) {
+		for (const found of unit.byName.get(name) ?? []) this._item(found);
+		if (isExported(name))
 			for (const key of program._dotImports ?? [])
 				for (const found of this.units.get(key)?.byName.get(name) ?? [])
-					if (isExported(name)) this._item(found);
-			if (program._generated)
-				for (const found of this._typesNamed(name)) this._item(found);
-		}
-		for (const qual of refs.quals) {
-			const dot = qual.indexOf(".");
-			const dep = this.units.get(
-				program._localImports?.get(qual.slice(0, dot)),
-			);
-			if (!dep) continue;
-			const field = qual.slice(dot + 1);
-			for (const n of [field, `${field}$$${dep.pkgName}`])
-				for (const found of dep.byName.get(n) ?? []) this._item(found);
-		}
+					this._item(found);
+		if (program._generated)
+			for (const found of this._typesNamed(name)) this._item(found);
+	}
+
+	// `pkg.Name`, where `pkg` is a local package the file imports.
+	_resolveQual({ program }, qual) {
+		const dot = qual.indexOf(".");
+		const key = program._localImports?.get(qual.slice(0, dot));
+		const dep = this.units.get(key);
+		if (!dep) return;
+		const field = qual.slice(dot + 1);
+		for (const n of [field, `${field}$$${dep.pkgName}`])
+			for (const found of dep.byName.get(n) ?? []) this._item(found);
 	}
 
 	// The generated Go names a type of another local package by its bare name.

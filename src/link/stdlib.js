@@ -22,6 +22,7 @@ import {
 	freezeStdlibPackage,
 	freezesStoredUnits,
 } from "./package-cache.js";
+import { spliceUserChunk, userMarkerKey } from "./user-js.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export {
@@ -538,14 +539,17 @@ function stdlibJs(pkg, reached, natives, stats) {
 }
 
 // Replaces each marker with the package's reachable code (no line at all when
-// nothing is reachable) and shifts the source-map lines that follow.
+// nothing is reachable) and shifts the source-map lines that follow.  The
+// markers of local packages and of Go-source stdlib packages are replaced in
+// one pass, once the closure over all of them is known.
 function spliceStdlibJs(merged, options) {
 	const lines = merged.js.split("\n");
 	const pkgs = lines
 		.map(markerKey)
 		.filter(Boolean)
 		.map((key) => options.stdlibCache.get(key));
-	if (pkgs.length === 0) return;
+	const users = new Map(options.userUnits.map((u) => [u.key, u]));
+	if (pkgs.length === 0 && !lines.some(userMarkerKey)) return;
 	// The whole package carries everything its shared variant has.
 	const keys = new Set(pkgs.map((pkg) => pkg.key));
 	const emitted = (pkg) =>
@@ -554,38 +558,51 @@ function spliceStdlibJs(merged, options) {
 		options,
 		pkgs.filter(emitted).flatMap((pkg) => pkg.unit.programs),
 	);
-	const reached = reach.reached;
+	const css = [];
 	const out = [];
 	const spliced = new Set();
-	for (const line of lines) {
-		const path = markerKey(line);
-		if (!path) {
-			out.push(line);
-			continue;
-		}
-		if (spliced.has(path)) continue;
-		spliced.add(path);
-		const pkg = options.stdlibCache.get(path);
-		const js = emitted(pkg)
-			? stdlibJs(pkg, reached, options.natives, options.cacheStats)
-			: "";
-		const code = js === "" ? [] : js.split("\n");
+	const place = (code, mappings = []) => {
 		const delta = code.length - 1;
 		for (const m of merged.mappings)
 			if (m.genLine > out.length) m.genLine += delta;
+		for (const m of mappings)
+			merged.mappings.push({ ...m, genLine: m.genLine + out.length });
 		out.push(...code);
+	};
+	for (const line of lines) {
+		const path = markerKey(line);
+		const userKey = userMarkerKey(line);
+		if (!path && userKey === undefined) {
+			out.push(line);
+			continue;
+		}
+		if (spliced.has(path ?? userKey)) continue;
+		spliced.add(path ?? userKey);
+		if (path) {
+			const pkg = options.stdlibCache.get(path);
+			const js = emitted(pkg)
+				? stdlibJs(pkg, reach.reached, options.natives, options.cacheStats)
+				: "";
+			place(js === "" ? [] : js.split("\n"));
+			continue;
+		}
+		const chunk = spliceUserChunk(users.get(userKey), reach, merged, css);
+		if (userKey === options.rootKey) merged.rootWarnings = chunk.warnings;
+		place(chunk.lines, chunk.mappings);
 	}
 	merged.js = out.join("\n");
+	merged.css = css.join("\n\n");
 }
 
 // The closure over the build's local packages and the Go-source stdlib
 // packages `stdlibPrograms`; a reached body that fails its (lazy) check throws.
-// `options.userUnits` lists the local packages compiled so far; `prune` limits
-// the local packages to what the roots reach (else all of their code is).
-export function reachOfBuild(options, stdlibPrograms, { prune = false } = {}) {
+// `options.userUnits` lists the local packages compiled so far; `prune: false`
+// roots all of their code instead of what the entry package reaches.
+export function reachOfBuild(options, stdlibPrograms, { prune = true } = {}) {
 	const reach = new BuildReach(stdlibPrograms, options.userUnits, {
 		entry: options.rootKey,
 		isTest: options.isTest ?? false,
+		roots: options.jsRoots,
 		prune,
 	});
 	if (reach.failures.length > 0) throw new Error(reach.failures[0]);
@@ -601,6 +618,7 @@ export function finishStdlibJs(merged, options, unit) {
 		programs: unit.rootPrograms,
 		emitTarget: unit.emitTarget,
 		emitted: unit.emitTarget !== "wasm",
+		emitter: unit.emitter,
 	});
 	if (!options.isDependency) spliceStdlibJs(merged, options);
 }

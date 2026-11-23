@@ -1138,7 +1138,7 @@ section("templ — reserved-name parameters");
 for (const name of ["class", "function", "delete", "let", "this", "typeof"]) {
 	test(`a parameter named ${name} is renamed in the templ body`, () => {
 		const { js } = compilePkg({
-			"main.go": MAIN_GO,
+			"main.go": 'package main\nfunc main() { _ = V("x") }\n',
 			"v.templ": `package main
 templ V(${name} string) {
 	<p class={ ${name} }>{ ${name} }</p>

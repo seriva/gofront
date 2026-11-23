@@ -61,7 +61,7 @@ test("compileDir excludes *_test.go from production bundle", () => {
 		{
 			"main.go": `package main
 func ProdSecret() string { return "production-code" }
-func main() {}
+func main() { println(ProdSecret()) }
 `,
 			"main_test.go": `package main
 import "testing"

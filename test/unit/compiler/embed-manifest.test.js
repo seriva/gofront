@@ -277,7 +277,10 @@ var two embed.FS
 //go:embed a.txt
 var raw []byte
 `,
-			"println(len(raw))",
+			`a, _ := one.ReadFile("a.txt")
+b, _ := two.ReadFile("a.txt")
+c, _ := one.ReadFile("b.txt")
+println(len(raw), len(a), len(b), len(c))`,
 		),
 	);
 	assertEqual(js.split("var __emb_").length - 1, 2);

@@ -36,7 +36,6 @@ import {
 	resolve,
 	sep,
 } from "node:path";
-import { CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
@@ -74,6 +73,7 @@ import {
 	renameLocalTypes,
 	withOriginalTypeNames,
 } from "./link/stdlib.js";
+import { userEmitter, userMarker } from "./link/user-js.js";
 import {
 	linkIntoBundle,
 	registerPackageUnit,
@@ -447,11 +447,6 @@ function finishWasm(options, merged, pkgTarget, outputDir) {
 		if (opt.sourceMap) wasmSourceMap = opt.sourceMap;
 	}
 	return { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable };
-}
-
-// Prints non-fatal diagnostics (e.g. JS Number precision of a constant).
-function logWarnings(warnings) {
-	for (const w of warnings) log.warn(w);
 }
 
 // ── Import resolution ─────────────────────────────────────────
@@ -1108,17 +1103,13 @@ export function compileFiles(files, options = {}) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	const allCss = [...preambles.map((p) => p.css).filter(Boolean), unit.css]
-		.filter(Boolean)
-		.join("\n\n");
-
 	return {
 		pkgName,
 		target: pkgTarget,
-		warnings: unit.warnings,
+		warnings: [...unit.warnings, ...(merged.rootWarnings ?? [])],
 		elemAddrTaken: unit.elemAddrTaken,
 		js: merged.js,
-		css: allCss,
+		css: merged.css ?? "",
 		wasm,
 		wat,
 		wasmOptInfo,
@@ -1279,32 +1270,29 @@ function compileOwnUnit(ctx) {
 		registerPackageUnit(options, { ...link, bundledPackages }),
 	);
 
+	// The JS is generated at the root compile, once the build knows what its
+	// packages reach (see link/user-js.js); the chunk is a marker until then.
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
-	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
-		target: pkgTarget,
-		strict: isStrict,
-		natives: options.natives,
-	});
-	const mainJs =
+	const emitter =
 		emitTarget === "wasm"
-			? wasmMarker(pkgName)
-			: asInternalError(() =>
-					codegen.generateAll(rootPrograms, {
-						isTest: options.isTest ?? false,
-					}),
-				);
-	logWarnings(codegen.warnings);
+			? null
+			: userEmitter(checker, jsImports, bundledPackages, {
+					target: pkgTarget,
+					strict: isStrict,
+					natives: options.natives,
+					isTest: options.isTest ?? false,
+				});
 
 	const unit = {
 		emitTarget,
+		emitter,
 		chunk: {
-			js: mainJs,
+			js: emitTarget === "wasm" ? wasmMarker(pkgName) : userMarker(link.key),
 			sourceFiles: programs.map((p) => p._path),
 			sourcesContent: programs.map((p) => p._source),
-			mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
+			mappings: [],
 		},
-		css: codegen.getCss(),
-		warnings: [...checker.warnings, ...codegen.warnings],
+		warnings: [...checker.warnings],
 		elemAddrTaken:
 			checker.depElemAddrTaken === true ||
 			programs.some((p) => takesElementAddress(p.decls)),

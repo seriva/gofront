@@ -193,6 +193,7 @@ test("embed-lower: an embed.FS directive becomes an `fs` node with every file, s
 		(dir) => {
 			clearParseCache();
 			const { programs } = compileDir(dir);
+			lowerEmbeds(programs);
 			const main = programs.find((p) => p._filename === "main.go");
 			const [spec] = specs(main);
 			assertEqual(spec.value ?? null, null);
