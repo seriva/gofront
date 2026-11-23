@@ -822,7 +822,6 @@ templ Item() {
 test("css declaration exported across packages", () => {
 	const { js } = compilePkg({
 		"main.go": `package main
-import "./ui"
 func main() {
 	gom.Mount("#app", Card())
 }`,

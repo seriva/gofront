@@ -1099,6 +1099,27 @@ export function isMethodPromotedOverField(struct, name) {
 	return field !== null && promoted.depth < field.depth;
 }
 
+// Go's export rule: a name is exported when its first character is a Unicode
+// uppercase letter (`_` and `__Name` are not).
+export function isExported(name) {
+	return typeof name === "string" && /^\p{Lu}/u.test(name);
+}
+
+// The package (a checker's `_pkgId`) declaring each AST declaration. Shared by
+// every checker: an importing package resolves the declarations of imported
+// generic types, and their members belong to the package that wrote them.
+export const declPackages = new WeakMap();
+
+// A struct records the package that declared each of its fields in
+// `_fieldOwner`, promoted ones included, so an unexported field stays
+// unreachable from another package however it is reached.
+export function copyFieldOwner(struct, from, name) {
+	const owner = from._fieldOwner?.get(name);
+	if (owner === undefined) return;
+	struct._fieldOwner ??= new Map();
+	struct._fieldOwner.set(name, owner);
+}
+
 // A function-local type shadowed by another type is renamed `Name__L<n>`.
 export const LOCAL_TYPE_SUFFIX = /__L\d+/;
 

@@ -116,15 +116,25 @@ export function untypedImportName(path, alias = null) {
 	return /^[0-9]/.test(name) ? `_${name}` : name;
 }
 
-// Binds every import that `resolveAll` found no types for (a `null` entry) as
-// a JS-dynamic `any` global on `checker`.
-export function bindUntypedImports(imports, resolved, checker) {
-	for (const imp of imports) {
-		for (const { path, alias } of imp.imports) {
-			if (resolved.get(path) !== null) continue;
-			const name = untypedImportName(path, alias);
-			if (name) checker.defineUntypedImport(name);
-		}
+// The imports of `programs` as [program, spec] pairs.
+function* importSpecs(programs) {
+	for (const p of programs)
+		for (const imp of p.imports)
+			for (const spec of imp.imports) yield [p, spec];
+}
+
+// Binds every import of `programs` that `resolveAll` found no types for (a
+// `null` entry) as a JS-dynamic `any` global in its own file on `checker`, and
+// tracks it so an unused one is reported.
+export function bindUntypedImports(programs, resolved, checker) {
+	for (const [p, spec] of importSpecs(programs)) {
+		const { path, alias, _line, _col, line, col } = spec;
+		const name = alias === "_" ? null : untypedImportName(path, alias);
+		if (!name || resolved.get(path) !== null) continue;
+		checker.defineUntypedImport(name, p._filename ?? null, {
+			node: { _line, _col, line: line ?? _line, col: col ?? _col ?? 1 },
+			source: p._source,
+		});
 	}
 }
 

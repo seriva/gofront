@@ -10,12 +10,14 @@ import {
 	BASIC_TYPES,
 	COMPARABLE,
 	DECLARED_ANY,
+	declPackages,
 	defaultType,
 	displayTypeName,
 	identical,
 	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
+	isExported,
 	isMethodPromotedOverField,
 	isTypedArraySlice,
 	Scope,
@@ -177,6 +179,8 @@ const SUBSTITUTE_DISPATCH = {
 		async: type.async,
 		// A method copied from a generic embedded struct keeps its receiver kind.
 		...(Object.hasOwn(type, "_ptrRecv") && { _ptrRecv: type._ptrRecv }),
+		// ... and the package that declared it.
+		...(type._pkgId !== undefined && { _pkgId: type._pkgId }),
 	}),
 	struct: (s, type, map) => {
 		const fields = new Map();
@@ -189,6 +193,7 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
+			...(type._fieldOwner && { _fieldOwner: type._fieldOwner }),
 			// The JSON codecs read the field types from here.
 			_structFields: type._structFields?.map((f) => ({
 				...f,
@@ -256,7 +261,7 @@ export const resolveMethods = {
 					if (fromScope?.kind === "typeParam") return fromScope;
 					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
-				const named = this._visibleType(node.name, scope);
+				const named = this._typeOfName(node.name, node, scope);
 				if (named) {
 					this._useQualifiedTypeName(node, named);
 					return this._checkConstraintUse(named, node);
@@ -329,21 +334,11 @@ export const resolveMethods = {
 			case "SelectorExpr":
 				// `pkg.T{}` composite literal — the parser keeps the type as a
 				// SelectorExpr; resolve it like a qualified TypeName.
-				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
-					const qualified = `${node.expr.name}.${node.field}`;
-					if (this.types.has(qualified)) {
-						// Never reaches checkExpr: tag the qualifier as the package
-						// name it is so JS output does not rename it.
-						node.expr._isNamespace = true;
-						const inner = { kind: "TypeName", name: qualified };
-						this._inheritConstraintPos(node, inner);
-						const resolved = this.resolveTypeNode(inner, scope);
-						this._useQualifiedTypeName(node, resolved);
-						return resolved;
-					}
-				}
-				// `pv.X{}`: a field or method value stands where a type must.
-				return this._notATypeSelector(node, scope);
+				return (
+					this._resolveSelectorType(node, scope) ??
+					// `pv.X{}`: a field or method value stands where a type must.
+					this._notATypeSelector(node, scope)
+				);
 			case "ArrayType":
 				return this._resolveArrayTypeNode(node, scope);
 			case "FuncType":
@@ -515,6 +510,83 @@ export const resolveMethods = {
 		if (named.name?.includes("$$")) node._stdName = named.name;
 	},
 
+	// `pkg.T` as a composite literal's type (the parser keeps a SelectorExpr):
+	// the resolved or error type, or undefined when `node` names no type.
+	_resolveSelectorType(node, scope) {
+		if (node.expr?.kind !== "Ident" || typeof node.field !== "string") return;
+		const named = this._resolveQualifiedType(
+			node.expr.name,
+			node.field,
+			this._positioned(node),
+			scope,
+			true,
+		);
+		if (!named || named._tainted) return named;
+		// Never reaches checkExpr: tag the qualifier as the package name it is
+		// so JS output does not rename it.
+		node.expr._isNamespace = true;
+		const inner = { kind: "TypeName", name: `${node.expr.name}.${node.field}` };
+		this._inheritConstraintPos(node, inner);
+		const resolved = this.resolveTypeNode(inner, scope);
+		this._useQualifiedTypeName(node, resolved);
+		return resolved;
+	},
+
+	// The type `name` names in a type position: a qualified name is decided by
+	// what its qualifier is (see `_resolveQualifiedType`).
+	_typeOfName(name, node, scope) {
+		const dot = name.indexOf(".");
+		return dot > 0
+			? this._resolveQualifiedType(
+					name.slice(0, dot),
+					name.slice(dot + 1),
+					node,
+					scope,
+				)
+			: this._visibleType(name, scope);
+	},
+
+	// `qual.member` where a type is expected: what `qual` is in the file being
+	// checked decides the answer. A package resolves `member` among the types
+	// it declares (undefined when it has none); an untyped npm import is a
+	// js-only value in a wasm or both package; any other value is no type.
+	// Reports and returns the error type for the last two, else the type or
+	// undefined. `literal` (a composite literal's type) also counts a
+	// predeclared value such as `console`, which a type name leaves unknown.
+	_resolveQualifiedType(qual, member, node, scope, literal = false) {
+		const bad = this._qualifierNotAType(qual, member, node, scope, literal);
+		return bad ?? this._visibleType(`${qual}.${member}`, scope);
+	},
+
+	_errNotExported(pkg, name, node) {
+		return this.err(`name ${name} not exported by package ${pkg}`, node);
+	},
+
+	// Whether `name`, declared by another package, is hidden from this one. The
+	// generated Go (see `_ungated`) reaches into any package it names.
+	_unexportedForeign(name) {
+		return this._ungated === 0 && name.length > 0 && !isExported(name);
+	},
+
+	_qualifierNotAType(qual, member, node, scope, literal) {
+		if (this._ungated > 0) return null;
+		const here = scope ?? this.globals;
+		const owner = here.lookupScope(qual);
+		const bound = owner?.object(qual);
+		if (!bound || bound.type?.kind === "typeParam") return null;
+		here.lookup(qual);
+		if (this._isImportScope(owner) && this._untypedImports.has(qual))
+			return this.target === "wasm" || this.target === "both"
+				? this._errJsOnly(`${qual}.${member}`, node)
+				: null;
+		if (bound.type?._gofront && this._unexportedForeign(member))
+			return this._errNotExported(qual, member, node);
+		const isValue = !["pkg", "type"].includes(bound.kind);
+		if (isValue && (literal || owner !== this.universe))
+			return this.err(`${qual}.${member} is not a type`, node);
+		return null;
+	},
+
 	// `[N]T` with a named constant (or constant expression) length folds to a number.
 	_foldArrayLen(size, scope) {
 		const resolve = (name, depth = 0) => {
@@ -655,10 +727,11 @@ export const resolveMethods = {
 			qualified;
 		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
 		const base = name
-			? this._visibleType(name, scope)
+			? this._typeOfName(name, node, scope)
 			: node.expr
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
+		if (base?._tainted) return base;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
 		// `__G[int]{}`: the generic's name is an Ident that never reaches checkExpr.
 		if (!qualified && node.expr?.kind === "Ident") {
@@ -706,13 +779,65 @@ export const resolveMethods = {
 			scope.lookupObject(name)?.kind !== "type"
 		)
 			return undefined;
+		return this._typeNamed(name);
+	},
+
+	// The type the name `name` (a bare or `pkg.`-qualified type name written in
+	// source) stands for in the file being checked. A name an import
+	// registered resolves only in a file that binds it; the type table itself
+	// spans the build. Resolving a declaration from another package (see
+	// `_inDeclContext`) sees every name, as that package's own scope is not
+	// this checker's.
+	_typeNamed(name) {
+		if (this._ungated === 0 && this._importKeys.has(name)) {
+			const imported = this._importedType(this.globals.parent, name);
+			if (imported) return imported;
+			// No import of this file binds it: the package's own declaration of
+			// the name stands, which another file's import does not hide.
+			const own = this.types.get(name);
+			return this._importBound.has(own) ? undefined : own;
+		}
 		return this.types.get(name);
+	},
+
+	// Runs `fn` to resolve the type nodes of `declNode`: in the scope of the
+	// file that declares it, or with every import name visible when another
+	// package declares it.
+	_inDeclContext(declNode, fn) {
+		const ownerPkg = this._ownerPkg;
+		this._ownerPkg = declPackages.get(declNode) ?? this._pkgId;
+		try {
+			return this._inDeclFile(declNode, fn);
+		} finally {
+			this._ownerPkg = ownerPkg;
+		}
+	},
+
+	_inDeclFile(declNode, fn) {
+		const file = this._declFiles.get(declNode);
+		if (file === undefined) {
+			this._ungated++;
+			try {
+				return fn();
+			} finally {
+				this._ungated--;
+			}
+		}
+		return this._atFile(file, () => {
+			const ungated = this._ungated;
+			this._ungated = 0;
+			try {
+				return fn();
+			} finally {
+				this._ungated = ungated;
+			}
+		});
 	},
 
 	resolveTypeNodeName(node, scope) {
 		if (!node) return ANY;
 		if (node.kind === "TypeName" || node.kind === "GenericTypeName") {
-			const named = this._visibleType(node.name, scope);
+			const named = this._typeOfName(node.name, node, scope);
 			if (named) return named;
 		}
 		return this.resolveTypeNode(node, scope);
@@ -720,6 +845,7 @@ export const resolveMethods = {
 
 	_resolveStructType(node, scope) {
 		const fields = new Map();
+		const owners = new Map();
 		const embeds = [];
 		const structFields = [];
 		for (const f of node.fields) {
@@ -742,19 +868,31 @@ export const resolveMethods = {
 				)
 					.split(".")
 					.pop();
-				if (embedName) fields.set(embedName, ft);
+				if (embedName) {
+					fields.set(embedName, ft);
+					owners.set(embedName, this._ownerPkg);
+				}
 				const base = this._deepUnderlying(inner);
 				if (base?.kind === "struct") {
-					for (const [k, v] of base.fields.entries()) fields.set(k, v);
+					for (const [k, v] of base.fields.entries()) {
+						fields.set(k, v);
+						const owner = base._fieldOwner?.get(k);
+						if (owner === undefined) owners.delete(k);
+						else owners.set(k, owner);
+					}
 				}
 				embeds.push(ft);
 			} else {
-				for (const n of f.names) fields.set(n, ft);
+				for (const n of f.names) {
+					fields.set(n, ft);
+					owners.set(n, this._ownerPkg);
+				}
 			}
 		}
 		return {
 			kind: "struct",
 			fields,
+			_fieldOwner: owners,
 			methods: new Map(),
 			_embeds: embeds,
 			_structFields: structFields,
@@ -771,7 +909,7 @@ export const resolveMethods = {
 				: [VOID];
 			const isVariadic =
 				m.params.length > 0 && m.params[m.params.length - 1].variadic;
-			const mType = { kind: "func", params, returns };
+			const mType = { kind: "func", params, returns, _pkgId: this._ownerPkg };
 			if (isVariadic) mType.variadic = true;
 			methods.set(m.name, mType);
 		}
@@ -911,7 +1049,9 @@ export const resolveMethods = {
 		generic._buildSizes.push(size);
 		let instantiated;
 		try {
-			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
+			const underlying = this._inDeclContext(generic.declNode, () =>
+				this.resolveTypeNode(generic.declNode.type, typeScope),
+			);
 			instantiated = this.substituteType(underlying, map);
 			// `type W[T any] V[T]`: W[int]'s underlying type is V[int]'s.
 			if (instantiated.kind === "named")
@@ -983,7 +1123,9 @@ export const resolveMethods = {
 			}
 			aliasScope.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
 		}
-		return this.resolveTypeNode(declNode.type, aliasScope);
+		return this._inDeclContext(declNode, () =>
+			this.resolveTypeNode(declNode.type, aliasScope),
+		);
 	},
 
 	// `explicit` seeds the leading type arguments of a partial instantiation
@@ -1493,7 +1635,7 @@ export const resolveMethods = {
 		const param = this._typeParamOperand(baseType, field);
 		if (param) return this._fieldTypeTypeParam(param, baseType, field, node);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
-			return baseType.methods.get(field);
+			return this._methodOf(baseType.methods.get(field), field, node);
 		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
 	},
@@ -1539,7 +1681,8 @@ export const resolveMethods = {
 		const c = this._deepUnderlying(this.resolveType(param.constraint));
 		if (c?._tainted || c?._isOpen) return ANY;
 		if (baseType === param && c?.kind === "interface") {
-			if (c.methods?.has(field)) return c.methods.get(field);
+			if (c.methods?.has(field))
+				return this._methodOf(c.methods.get(field), field, node);
 		}
 		return this._errUndefinedSelector(baseType, field, node);
 	},
@@ -1579,23 +1722,21 @@ export const resolveMethods = {
 
 	_fieldTypeStruct(base, baseType, field, node) {
 		if (base.fields?.has(field) && isMethodPromotedOverField(base, field))
-			return base.methods.get(field);
+			return this._methodOf(base.methods.get(field), field, node);
 		if (base.fields?.has(field)) {
 			if (isAmbiguousFieldSelector(base, field))
 				return this._errAmbiguousSelector(baseType, field, node);
-			if (
-				field.startsWith("_") &&
-				(baseType?.name?.startsWith("strings.") ||
-					baseType?.name?.startsWith("bytes."))
-			) {
-				return this.err(
-					`Cannot refer to unexported field '${field}' on ${typeStr(baseType)}`,
+			return (
+				this._foreignMember(
+					base._fieldOwner?.get(field),
+					field,
+					"field",
 					node,
-				);
-			}
-			return base.fields.get(field);
+				) ?? base.fields.get(field)
+			);
 		}
-		if (base.methods?.has(field)) return base.methods.get(field);
+		if (base.methods?.has(field))
+			return this._methodOf(base.methods.get(field), field, node);
 		if (isAmbiguousPromotion(base, field))
 			return this._errAmbiguousSelector(baseType, field, node);
 		const typeName = baseType?.name || base.name;
@@ -1622,6 +1763,25 @@ export const resolveMethods = {
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},
 
+	// The method type `mType` of a selector `x.field`, or the error when another
+	// package declares it and does not export it.
+	_methodOf(mType, field, node) {
+		return this._foreignMember(mType?._pkgId, field, "method", node) ?? mType;
+	},
+
+	// The error for `x.field` when `field` (a "field" or a "method") was
+	// declared by the package `owner`, another package, and is unexported
+	// there; null when this package may use it, or `owner` is not known (types
+	// the checker was given rather than read from Go source).
+	_foreignMember(owner, field, kind, node) {
+		if (owner === undefined || owner === this._pkgId) return null;
+		if (!this._unexportedForeign(field)) return null;
+		return this.err(
+			`${exprText(node?.expr)}.${field} undefined (cannot refer to unexported ${kind} ${field})`,
+			node,
+		);
+	},
+
 	_errAmbiguousSelector(baseType, field, node) {
 		const text = exprText(node?.expr);
 		const recv = text === "expression" ? typeStr(baseType) : text;
@@ -1629,7 +1789,8 @@ export const resolveMethods = {
 	},
 
 	_fieldTypeInterface(base, baseType, field, node) {
-		if (base.methods?.has(field)) return base.methods.get(field);
+		if (base.methods?.has(field))
+			return this._methodOf(base.methods.get(field), field, node);
 		if (base.fields?.has(field)) return base.fields.get(field);
 		const typeName = baseType?.name || base.name;
 		if (typeName) {
@@ -1704,11 +1865,8 @@ export const resolveMethods = {
 	// An error for `field` when the namespace cannot offer it to this package:
 	// an unexported name, or a member of a `js` file in a wasm or both package.
 	_namespaceMemberError(base, field, node) {
-		if (base._gofront && field.length > 0 && field[0] >= "a" && field[0] <= "z")
-			return this.err(
-				`cannot refer to unexported name ${base.name}.${field}`,
-				node,
-			);
+		if (base._gofront && this._unexportedForeign(field))
+			return this._errNotExported(base.name, field, node);
 		const wasm = this.target === "wasm" || this.target === "both";
 		return wasm && base._jsOnly?.has(field)
 			? this._errJsOnly(`${base.name}.${field}`, node)
@@ -1756,6 +1914,10 @@ export const resolveMethods = {
 				`${base.name}.${field} is not available: ${excluded}`,
 				node,
 			);
+		// `pkg.T`, a type the import names: `_checkSelectorExpr` marks the node
+		// a type reference, so `pkg.T(x)` converts.
+		const named = this._typeNamed(`${base.name}.${field}`);
+		if (named) return named;
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 
@@ -1763,12 +1925,6 @@ export const resolveMethods = {
 		return resolveJsonFields(structType);
 	},
 };
-
-function isExported(name) {
-	if (!name || typeof name !== "string") return false;
-	const code = name.charCodeAt(0);
-	return code >= 65 && code <= 90;
-}
 
 function _processJsonField(
 	f,

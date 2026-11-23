@@ -10,6 +10,7 @@ import {
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
+	compileDir,
 	compileWasm,
 	Lexer,
 	Parser,
@@ -17,6 +18,8 @@ import {
 	section,
 	summarize,
 	test,
+	toCompileResult,
+	withTempDir,
 } from "../helpers.js";
 
 section("Type validation checks");
@@ -2491,6 +2494,164 @@ func main() { _ = A(1) }
 		assertErrorContains(errors, "cannot convert");
 	}
 });
+
+section("Qualified type names resolve their qualifier first");
+
+const NPM = 'import "nope/zzz"\n';
+const qualifiedTypeCases = [
+	[
+		"a variable of a qualified type",
+		`${NPM}var x zzz.T\nfunc main() { _ = x }`,
+		3,
+		7,
+	],
+	["a composite literal", `${NPM}func main() { _ = zzz.T{} }`, 3, 19],
+	[
+		"an instantiated generic type",
+		`${NPM}var y zzz.T[int]\nfunc main() { _ = y }`,
+		3,
+		7,
+	],
+];
+
+for (const [name, body, line, col] of qualifiedTypeCases) {
+	for (const target of ["wasm", "both"]) {
+		test(`${name} of an untyped npm import is js-only in a ${target} package (I2.1)`, () => {
+			const { errors } = compile(`package main\n${body}\n`, { target });
+			assertErrorContains(errors, "'zzz.T' is only available in js packages");
+			assertErrorContains(errors, `at line ${line}:${col}`);
+			assertEqual(
+				errors.filter((e) => /Unknown struct|invalid composite/.test(e.message))
+					.length,
+				0,
+			);
+		});
+	}
+}
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, src] of [
+		["a browser global", "func main() { _ = console.T{} }"],
+		["a local variable", "func main() { v := 1; _ = v.T{} }"],
+		["a parameter", "func f(v int) { _ = v.T{} }\nfunc main() { f(1) }"],
+	]) {
+		test(`a composite literal of ${what} qualified type is not a type in a ${target} package (I2.2)`, () => {
+			const { errors } = compile(`package main\n${src}\n`, { target });
+			assertErrorContains(errors, ".T is not a type");
+			assertEqual(
+				errors.filter((e) => /int has no field/.test(e.message)).length,
+				0,
+			);
+		});
+	}
+}
+
+test("a variable of a local variable's qualified type is not a type (I2.2)", () => {
+	const { errors } = compile(
+		"package main\nfunc main() { v := 1; var x v.T; _ = x }\n",
+	);
+	assertErrorContains(errors, "v.T is not a type");
+});
+
+test("a variable of a browser global's qualified type stays an unknown type (control)", () => {
+	const { errors } = compile(
+		"package main\nfunc main() { var x console.T; _ = x }\n",
+	);
+	assertErrorContains(errors, "Unknown type 'console.T'");
+});
+
+test("a typed package's qualified type and literal still resolve (control)", () => {
+	const { js, errors } = compile(
+		`package main
+import "strings"
+func main() {
+	var b strings.Builder
+	b.WriteString("a")
+	_ = strings.Builder{}
+	println(b.String())
+}
+`,
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "a");
+});
+
+test("a local variable named like an import hides the package in a type (I2.2)", () => {
+	const { errors } = compile(
+		`package main
+import "strings"
+func main() {
+	strings := 1
+	var b strings.Builder
+	_, _ = strings, b
+}
+`,
+	);
+	assertErrorContains(errors, "strings.Builder is not a type");
+});
+
+section("Struct literals of another package's types");
+
+const SUB_SRC = `package sub
+
+type S struct {
+	A int
+	b int
+}
+
+type hidden struct{ X int }
+
+type Pub struct{ hidden }
+
+func NewHidden() hidden { return hidden{1} }
+`;
+
+function subErrors(mainBody, target) {
+	return withTempDir(
+		{
+			"sub/sub.go": `//gofront:target ${target}\n${SUB_SRC}`,
+			"main.go": `package main\n\nimport "./sub"\n\nfunc main() {\n\t${mainBody}\n}\n`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)).errors,
+	);
+}
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		[
+			"a positional literal",
+			"_ = sub.S{1, 2}",
+			"implicit assignment to unexported field b in struct literal of type sub.S",
+		],
+		[
+			"a keyed literal",
+			"_ = sub.S{b: 2}",
+			"cannot refer to unexported field b in struct literal of type sub.S",
+		],
+		[
+			"a keyed literal of an unexported embedded field",
+			"_ = sub.Pub{hidden: sub.NewHidden()}",
+			"cannot refer to unexported field hidden in struct literal of type sub.Pub",
+		],
+		[
+			"a positional literal of an unexported embedded field",
+			"_ = sub.Pub{sub.NewHidden()}",
+			"implicit assignment to unexported field hidden in struct literal of type sub.Pub",
+		],
+	]) {
+		test(`${what} cannot set an unexported field of a ${target} package (E5)`, () => {
+			assertErrorContains(subErrors(body, target), want);
+		});
+	}
+
+	test(`a literal setting only exported fields of a ${target} package compiles (E5 control)`, () => {
+		const errors = subErrors(
+			"_ = sub.S{A: 1}\n\t_ = sub.Pub{}\n\t_ = sub.S{}",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

@@ -10,7 +10,8 @@
 //     pkgName:         string,
 //     js:              string,          // generated JS bundle (may include dep preamble)
 //     exportedSymbols: Map<name, type>, // for importers to build a namespace
-//     exportedTypes:   Map<name, type>,
+//     exportedTypes:   Map<name, type>, // the package's own declared types
+//     reachedTypes:    Map<name, type>, // types its imports registered (table only)
 //     exportedKinds:   Map<name, kind>, // what each name is declared as (see Scope)
 //   }
 //
@@ -79,6 +80,7 @@ import {
 } from "./typechecker/index.js";
 import {
 	BASIC_TYPES,
+	isExported,
 	JS_BUILTIN_CLASSES,
 	TypeCheckError,
 	UnsupportedError,
@@ -519,7 +521,7 @@ function resolveImports(
 			checker._currentFile = p._filename ?? null;
 			checker._currentSource = p._source ?? null;
 			for (const imp of p.imports) {
-				for (const { path, _line, _col, line, col } of imp.imports) {
+				for (const { path, alias, _line, _col, line, col } of imp.imports) {
 					const impNode = {
 						_line,
 						_col,
@@ -545,7 +547,11 @@ function resolveImports(
 					) {
 						// An npm package without types is a dynamic global: the
 						// checker reports it where the name is used.
-						if (!isBuiltinPackage(path) && resolved.get(path) === null) {
+						if (
+							!isBuiltinPackage(path) &&
+							resolved.get(path) === null &&
+							alias !== "."
+						) {
 							// deferred to Ident lookup
 						} else if (!isBuiltinPackage(path)) {
 							checker.recordBlocker("js: import", path);
@@ -567,29 +573,44 @@ function resolveImports(
 		}
 	}
 
-	// js: prefix — local .d.ts files
-	for (const imp of allImports) {
-		for (const { path, alias } of imp.imports) {
-			if (!path.startsWith("js:")) continue;
-			if (alias === "_") continue;
-			const dtsPath = join(fromDir, path.slice(3));
-			try {
-				const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
-				checker.addDefinitions(types, values);
-			} catch (e) {
-				throw new CompileError([
-					new Error(`Cannot read '${dtsPath}': ${e.message}`),
-				]);
+	// js: prefix — local .d.ts files, bound in the file that imports them
+	const localDts = new Map();
+	for (const p of programs) {
+		for (const imp of p.imports) {
+			for (const { path, alias } of imp.imports) {
+				if (!path.startsWith("js:") || alias === "_") continue;
+				const dtsPath = join(fromDir, path.slice(3));
+				if (!localDts.has(dtsPath)) {
+					try {
+						localDts.set(dtsPath, parseDts(readFileSync(dtsPath, "utf8")));
+					} catch (e) {
+						throw new CompileError([
+							new Error(`Cannot read '${dtsPath}': ${e.message}`),
+						]);
+					}
+				}
+				const { types, values } = localDts.get(dtsPath);
+				checker.addDefinitions(types, values, { file: p._filename ?? null });
 			}
 		}
 	}
 
+	// npm packages with types, likewise bound per importing file
 	for (const [path, info] of resolved) {
-		if (!info) continue;
-		checker.addDefinitions(info.types, info.values);
-		jsImports.set(path, [...info.values.keys()]);
+		if (info) jsImports.set(path, [...info.values.keys()]);
 	}
-	bindUntypedImports(allImportsNoSideEffect, resolved, checker);
+	for (const p of programs) {
+		for (const imp of p.imports) {
+			for (const { path, alias } of imp.imports) {
+				const info = alias === "_" ? null : resolved.get(path);
+				if (info)
+					checker.addDefinitions(info.types, info.values, {
+						file: p._filename ?? null,
+					});
+			}
+		}
+	}
+	bindUntypedImports(programs, resolved, checker);
 
 	importStdlibPackages(
 		programs,
@@ -600,13 +621,12 @@ function resolveImports(
 		STDLIB_DEPS,
 	);
 
-	// local GoFront packages (./subdir)
-	const seenLocalPaths = new Set();
+	// local GoFront packages (./subdir), bound in each file that imports them;
+	// a package reached through several files or paths is compiled once.
 	for (const p of programs) {
 		for (const imp of p.imports) {
 			for (const { path, alias, _line, _col, line, col } of imp.imports) {
-				if (!isLocalPath(path) || seenLocalPaths.has(path)) continue;
-				seenLocalPaths.add(path);
+				if (!isLocalPath(path)) continue;
 				const depDir = resolveGwDir(path, fromFile);
 				if (!depDir) {
 					log.warn(
@@ -683,11 +703,21 @@ function resolveImports(
 
 				if (alias === "_") continue;
 				if (alias === ".") {
-					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
-						external: false,
-						consts: dep.exportedConsts,
-						kinds: dep.exportedKinds,
-					});
+					// A dot import binds only what the package exports.
+					const bind = p._generated ? (m) => m : exportedEntries;
+					checker.addDefinitions(
+						bind(dep.exportedTypes),
+						bind(dep.exportedSymbols),
+						{
+							external: false,
+							consts: bind(dep.exportedConsts),
+							kinds: dep.exportedKinds,
+							file: p._filename ?? null,
+							reached: p._generated
+								? dep.reachedTypes
+								: withUnexportedTypes(dep),
+						},
+					);
 					continue;
 				}
 				const nameUsed = alias ?? dep.pkgName;
@@ -699,11 +729,26 @@ function resolveImports(
 					dep.target,
 					dep.exportedConsts,
 					dep.exportedKinds,
+					p._filename ?? null,
+					dep.reachedTypes,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
 		}
 	}
+}
+
+// The types `dep` reaches (table only) plus its unexported ones: a dot import
+// does not bind them, but the importer's generated Go names the unexported
+// type of a value an exported function returns.
+function withUnexportedTypes(dep) {
+	const hidden = [...dep.exportedTypes].filter(([name]) => !isExported(name));
+	return new Map([...hidden, ...dep.reachedTypes]);
+}
+
+// The entries of `map` whose name is exported (Go's export rule).
+function exportedEntries(map) {
+	return new Map([...map].filter(([name]) => isExported(name)));
 }
 
 // ── Main entry points ─────────────────────────────────────────
@@ -975,6 +1020,7 @@ export function compileFiles(files, options = {}) {
 			checker.getExportedTypes(),
 			renamedTypes,
 		),
+		reachedTypes: checker.getReachedTypes(),
 		exportedConsts: checker.getExportedConsts(),
 		exportedKinds: checker.getExportedKinds(),
 		sourceFiles: merged.sourceFiles,

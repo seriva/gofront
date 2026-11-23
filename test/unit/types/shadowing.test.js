@@ -9,6 +9,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertJsTargetsOutput,
+	assertOutput,
 	assertProgramOutput,
 	compile,
 	compileDir,
@@ -19,6 +20,7 @@ import {
 	runWasm,
 	section,
 	test,
+	toCompileResult,
 	withTempDir,
 } from "../helpers.js";
 
@@ -1412,7 +1414,7 @@ type T struct{ A int }
 
 func (t T) Get() int { return t.A }
 
-type __S struct{ B int }
+type S struct{ B int }
 
 type G[X any] struct{ V X }
 
@@ -1441,7 +1443,7 @@ ${importLine}
 
 func Main() int {
 	v := __u.T{A: 10}
-	s := __u.__S{B: 5}
+	s := __u.S{B: 5}
 	var a any = v
 	_, ok := a.(__u.T)
 	p := new(__u.T)
@@ -1464,15 +1466,15 @@ test("members of a __ prefixed package keep working", async () => {
 		{
 			"util/u.go": `package __u
 
-func __Answer() int { return 42 }
+func Answer() int { return 42 }
 
-var __V = 8
+var V = 8
 `,
 			"main.go": `package main
 
 import "./util"
 
-func Main() int { return __u.__Answer() + __u.__V }
+func Main() int { return __u.Answer() + __u.V }
 `,
 		},
 		{ exports: ["Main"] },
@@ -1480,51 +1482,51 @@ func Main() int { return __u.__Answer() + __u.__V }
 	assertEqual(mod.Main(), 50);
 });
 
-section("Dot-imported types that need a rename-safe name");
+section("Dot-imported exported types");
 
 const DOT_TYPES_UTIL = `package __u
 
-type __S struct{ B int }
+type S struct{ B int }
 
-type __G[X any] struct{ V X }
+type G[X any] struct{ V X }
 
-func (g __G[X]) Pick() X { return g.V }
+func (g G[X]) Pick() X { return g.V }
 
-func __Answer() int { return 42 }
+func Answer() int { return 42 }
 
-var __V = 8
+var V = 8
 `;
 
 for (const [label, body, want] of [
 	[
-		"composite literal, assertion and new of a __ type",
-		`	s := __S{B: 5}
+		"composite literal, assertion and new of an exported type",
+		`	s := S{B: 5}
 	var a any = s
-	_, ok := a.(__S)
-	p := new(__S)
+	_, ok := a.(S)
+	p := new(S)
 	if !ok {
 		return -1
 	}
-	return s.B + p.B + __Answer() + __V`,
+	return s.B + p.B + Answer() + V`,
 		55,
 	],
 	[
 		"a variable that shares its name with the dot-imported type",
-		`	__S := __S{42}
-	return __S.B`,
+		`	S := S{42}
+	return S.B`,
 		42,
 	],
 	[
-		"a generic __ type",
-		`	g := __G[int]{V: 9}
+		"a generic exported type",
+		`	g := G[int]{V: 9}
 	return g.Pick()`,
 		9,
 	],
 	[
 		"type switch case and conversion of dot-imported types",
-		`	var a any = __S{B: 3}
+		`	var a any = S{B: 3}
 	switch v := a.(type) {
-	case __S:
+	case S:
 		return v.B
 	}
 	return -1`,
@@ -1552,21 +1554,23 @@ ${body}
 
 section("Renames follow the binding a name resolves to");
 
-for (const [name, decl, read] of [
-	["Array", "type Array int", "int(Array)"],
-	["Map", "type Map int", "int(Map)"],
-	["Proxy", "type Proxy int", "int(Proxy)"],
-	["__n", "type __n int", "int(__n)"],
+// `typeName` is the imported type's name: another package can name only what
+// it exports, so a `__` name is read through an exported type.
+for (const [name, typeName, read] of [
+	["Array", "Array", "int(Array)"],
+	["Map", "Map", "int(Map)"],
+	["Proxy", "Proxy", "int(Proxy)"],
+	["__n", "N", "int(__n)"],
 ]) {
-	test(`package var ${name} of an imported type of the same name`, async () => {
+	test(`package var ${name} of an imported type ${name === typeName ? "of the same name" : "named differently"}`, async () => {
 		const { mod } = await compileHybridProject(
 			{
-				"util/u.go": `package util\n\n${decl}\n`,
+				"util/u.go": `package util\n\ntype ${typeName} int\n`,
 				"main.go": `package main
 
 import "./util"
 
-var ${name} util.${name} = 5
+var ${name} util.${typeName} = 5
 
 func Main() int { return ${read} }
 `,
@@ -1577,16 +1581,19 @@ func Main() int { return ${read} }
 	});
 }
 
-for (const name of ["__A", "Proxy"]) {
-	test(`package var ${name} of an imported struct type of the same name`, async () => {
+for (const [name, typeName] of [
+	["__A", "A"],
+	["Proxy", "Proxy"],
+]) {
+	test(`package var ${name} of an imported struct type ${name === typeName ? "of the same name" : "named differently"}`, async () => {
 		const { mod } = await compileHybridProject(
 			{
-				"util/u.go": `package util\n\ntype ${name} struct{ X int }\n`,
+				"util/u.go": `package util\n\ntype ${typeName} struct{ X int }\n`,
 				"main.go": `package main
 
 import "./util"
 
-var ${name} = util.${name}{X: 5}
+var ${name} = util.${typeName}{X: 5}
 
 func Main() int { return ${name}.X }
 `,
@@ -1682,7 +1689,7 @@ func Main() int { return g[int](4) }
 
 section("__ members of wasm package structs");
 
-test("a __ field and interface method of a wasm struct are reached from a js main", async () => {
+test("a __ field and interface method of a wasm struct are used through exported members from a js main", async () => {
 	const { mod } = await compileHybridProject(
 		{
 			"util/u.go": `//gofront:target wasm
@@ -1695,11 +1702,18 @@ type Rec struct {
 
 func (r Rec) __twice() int { return r.__t * 2 }
 
-type Sizer interface{ __twice() int }
+func (r Rec) Twice() int { return r.__twice() }
+
+type Sizer interface {
+	__twice() int
+	Twice() int
+}
 
 func New(t, n int) *Rec { return &Rec{__t: t, N: n} }
 
 func AsSizer(r *Rec) Sizer { return r }
+
+func (r *Rec) Set(t int) { r.__t = t }
 `,
 			"main.go": `package main
 
@@ -1710,15 +1724,15 @@ import (
 
 func Main() string {
 	r := util.New(7, 8)
-	r.__t = 9
+	r.Set(9)
 	s := util.AsSizer(r)
-	return fmt.Sprintf("%d %d %d", r.__t, r.N, s.__twice())
+	return fmt.Sprintf("%d %d %d", r.Twice(), r.N, s.Twice())
 }
 `,
 		},
 		{ exports: ["Main"] },
 	);
-	assertEqual(mod.Main(), "9 8 18");
+	assertEqual(mod.Main(), "18 8 18");
 });
 
 section("Class names that are JS strict-mode words");
@@ -3254,3 +3268,340 @@ func main() { _ = a }
 `);
 	assertErrorContains(bad.errors, "invalid array length");
 });
+
+section("Package visibility: another package's unexported names");
+
+// Compiles `main.go` (a js package importing `./util`) with `util` declared as
+// `utilSrc` for the given target; returns the compile errors.
+function foreignErrors(utilSrc, mainSrc, target) {
+	return withTempDir(
+		{
+			"util/util.go": `//gofront:target ${target}\npackage util\n\n${utilSrc}`,
+			"main.go": `package main\n\nimport "./util"\n\n${mainSrc}`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)).errors,
+	);
+}
+
+const FOREIGN_NAMES_UTIL = `
+func __Answer() int { return 42 }
+
+func Answer() int { return 42 }
+
+func Ä() int { return 1 }
+
+type secret struct{ N int }
+
+type box[T any] struct{ v T }
+
+func Make() secret { return secret{1} }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body] of [
+		["a function named with a double underscore", "_ = util.__Answer()"],
+		["a variable of an unexported type", "var x util.secret\n\t_ = x"],
+		["a composite literal of an unexported type", "_ = util.secret{}"],
+		[
+			"a variable of an unexported generic type",
+			"var g util.box[int]\n\t_ = g",
+		],
+	]) {
+		test(`${what} of a ${target} package is not exported (E1, E3, E6)`, () => {
+			const errors = foreignErrors(
+				FOREIGN_NAMES_UTIL,
+				`func main() {\n\t${body}\n}\n`,
+				target,
+			);
+			assertErrorContains(errors, "not exported by package util");
+		});
+	}
+
+	test(`a non-ASCII uppercase name of a ${target} package stays exported`, () => {
+		const errors = foreignErrors(
+			FOREIGN_NAMES_UTIL,
+			"func main() {\n\t_ = util.Ä()\n\t_ = util.Answer()\n}\n",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
+
+section("Package visibility: dot imports bind exported names only");
+
+// Compiles `main.go` (importing `./util` with `.`) with `util` declared as
+// `utilSrc` for the given target; returns the compile errors.
+function dotErrors(utilSrc, mainBody, target) {
+	return withTempDir(
+		{
+			"util/util.go": `//gofront:target ${target}\npackage util\n\n${utilSrc}`,
+			"main.go": `package main\n\nimport . "./util"\n\n${mainBody}`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)).errors,
+	);
+}
+
+const DOT_UTIL = `
+const hiddenC = 1
+
+const Shown = 2
+
+type box struct{ N int }
+
+type Boxed[T any] struct{ V T }
+
+type hiddenG[T any] struct{ v T }
+
+func secret() int { return 1 }
+
+func Pub() int { return Shown }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		["function", "_ = secret()", "Undefined: 'secret'"],
+		["type", "var b box\n\t_ = b", "Unknown type 'box'"],
+		["constant", "_ = hiddenC", "Undefined: 'hiddenC'"],
+		["generic type", "var g hiddenG[int]\n\t_ = g", "Unknown type 'hiddenG'"],
+	]) {
+		test(`a dot import of a ${target} package does not bind its unexported ${what}`, () => {
+			const errors = dotErrors(
+				DOT_UTIL,
+				`func main() {\n\t${body}\n}\n`,
+				target,
+			);
+			assertErrorContains(errors, want);
+		});
+	}
+
+	test(`a dot import of a ${target} package binds its exported names`, () => {
+		const errors = dotErrors(
+			DOT_UTIL,
+			"func main() {\n\tvar g Boxed[int]\n\t_ = g\n\tprintln(Pub(), Shown)\n}\n",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
+
+// A value of an unexported type an exported function returns reaches the
+// codecs (json, fmt) of the importing file, which the generated Go names
+// unqualified: it must resolve there, though user code cannot name it.
+const DOT_CODEC_UTIL = `package util
+
+type box struct{ N int }
+
+type pair[T any] struct{ A, B T }
+
+func NewBox() box { return box{1} }
+
+func NewPair() pair[int] { return pair[int]{2, 3} }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		[
+			"json.Marshal",
+			"b, _ := json.Marshal(NewBox())\n\tfmt.Println(string(b))",
+			'{"N":1}\n',
+		],
+		[
+			"json.Unmarshal",
+			'x := NewBox()\n\t_ = json.Unmarshal([]byte(`{"N":5}`), &x)\n\tfmt.Println(x)',
+			"{5}\n",
+		],
+		["fmt %v", 'fmt.Println(fmt.Sprintf("%v", NewBox()))', "{1}\n"],
+		["fmt %+v", 'fmt.Println(fmt.Sprintf("%+v", NewBox()))', "{N:1}\n"],
+		[
+			"json.Marshal of a generic type",
+			"b, _ := json.Marshal(NewPair())\n\tfmt.Println(string(b))",
+			'{"A":2,"B":3}\n',
+		],
+	]) {
+		test(`a dot import of a ${target} package passes an unexported type to ${what}`, async () => {
+			await assertOutput(
+				`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	. "./util"
+)
+
+var _ = fmt.Sprint(1)
+
+var _, _ = json.Marshal(1)
+
+func main() {
+	${body}
+}
+`,
+				want,
+				{
+					targets: [target],
+					files: { "util/util.go": DOT_CODEC_UTIL },
+				},
+			);
+		});
+	}
+
+	test(`a dot import of a ${target} package still hides an unexported type from user code`, () => {
+		const errors = dotErrors(
+			DOT_CODEC_UTIL.replace("package util\n", ""),
+			'import "encoding/json"\n\nfunc main() {\n\tb, _ := json.Marshal(NewBox())\n\t_ = b\n\tvar x box\n\t_ = x\n}\n',
+			target,
+		);
+		assertErrorContains(errors, "Unknown type 'box'");
+	});
+}
+
+section("Package visibility: fields, methods and method expressions");
+
+const FOREIGN_MEMBERS_UTIL = `
+type Rec struct {
+	m int
+	X int
+}
+
+func New(n int) Rec { return Rec{m: n, X: n} }
+
+func (r Rec) twice() int { return r.m * 2 }
+
+func (r Rec) Twice() int { return r.twice() }
+
+type N int
+
+func (n N) twice() int { return int(n) * 2 }
+
+type I interface {
+	secret() int
+	Pub() int
+}
+
+type Impl struct{}
+
+func (Impl) secret() int { return 1 }
+
+func (Impl) Pub() int { return 2 }
+
+func NewI() I { return Impl{} }
+
+func Make() struct{ a int } { return struct{ a int }{1} }
+
+type hidden struct{ X int }
+
+type Pub struct{ hidden }
+
+func NewPub() Pub { return Pub{hidden{3}} }
+
+type Box[T any] struct {
+	v T
+	V T
+}
+
+func (b Box[T]) get() T { return b.v }
+`;
+
+// [what, package-level declarations of main.go, body of main, member]
+const FOREIGN_MEMBER_USES = [
+	["an unexported method", "", "_ = util.New(7).twice()", "method twice"],
+	["an unexported field", "", "_ = util.New(7).m", "field m"],
+	[
+		"an unexported method of a named non-struct",
+		"",
+		"var n util.N = 1\n\t_ = n.twice()",
+		"method twice",
+	],
+	[
+		"an unexported method expression of a named non-struct",
+		"",
+		"_ = util.N.twice",
+		"method twice",
+	],
+	[
+		"an unexported interface method",
+		"",
+		"x := util.NewI()\n\t_ = x.secret()",
+		"method secret",
+	],
+	[
+		"an unexported method of an embedded foreign interface in a local interface",
+		"type LocalI interface{ util.I }",
+		"var x LocalI\n\t_ = x.secret()",
+		"method secret",
+	],
+	[
+		"an unexported method of an embedded foreign interface in a local struct",
+		"type LocalS struct{ util.I }",
+		"var x LocalS\n\t_ = x.secret()",
+		"method secret",
+	],
+	["a field of a foreign anonymous struct", "", "_ = util.Make().a", "field a"],
+	[
+		"an unexported field promoted from an embedded foreign struct",
+		"type Local struct{ util.Rec }",
+		"var l Local\n\t_ = l.m",
+		"field m",
+	],
+	[
+		"an unexported method promoted from an embedded foreign struct",
+		"type Local struct{ util.Rec }",
+		"var l Local\n\t_ = l.twice()",
+		"method twice",
+	],
+	[
+		"an unexported embedded field",
+		"",
+		"_ = util.NewPub().hidden",
+		"field hidden",
+	],
+	["an unexported method expression", "", "_ = util.Rec.twice", "method twice"],
+	[
+		"an unexported field of an instantiated generic type",
+		"",
+		"var b util.Box[int]\n\t_ = b.v",
+		"field v",
+	],
+	[
+		"an unexported method of an instantiated generic type",
+		"",
+		"var b util.Box[int]\n\t_ = b.get()",
+		"method get",
+	],
+];
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, decls, body, member] of FOREIGN_MEMBER_USES) {
+		test(`${what} of a ${target} package cannot be used (E2, E3, E4, E7)`, () => {
+			const errors = foreignErrors(
+				FOREIGN_MEMBERS_UTIL,
+				`${decls}\n\nfunc main() {\n\t${body}\n}\n`,
+				target,
+			);
+			assertErrorContains(errors, `cannot refer to unexported ${member}`);
+		});
+	}
+
+	test(`exported members of a ${target} package, also promoted through an unexported embed, still work`, () => {
+		const errors = foreignErrors(
+			FOREIGN_MEMBERS_UTIL,
+			`type Local struct{ util.Rec }
+
+func main() {
+	l := Local{util.New(2)}
+	_ = l.X
+	_ = l.Twice()
+	_ = util.New(7).Twice()
+	_ = util.NewPub().X
+	_ = util.Rec.Twice
+	x := util.NewI()
+	_ = x.Pub()
+	var b util.Box[int]
+	_ = b.V
+}
+`,
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}

@@ -1039,6 +1039,18 @@ type Rec struct {
 	__ref int
 	N     int
 }
+
+func New(t, ref, n int) Rec { return Rec{t, ref, n} }
+
+func Add(r Rec, t, ref int) Rec {
+	r.__t += t
+	r.__ref += ref
+	return r
+}
+
+func (r Rec) T() int { return r.__t }
+
+func (r Rec) Ref() int { return r.__ref }
 `,
 			"calc/calc.go": `//gofront:target wasm
 package calc
@@ -1046,8 +1058,7 @@ package calc
 import "../lib"
 
 func Bump(r lib.Rec) lib.Rec {
-	r.__t += 10
-	r.__ref += 20
+	r = lib.Add(r, 10, 20)
 	r.N += 1
 	return r
 }
@@ -1060,8 +1071,8 @@ import (
 )
 
 func Main() string {
-	r := calc.Bump(lib.Rec{1, 2, 3})
-	return string(rune('a'+r.__t)) + string(rune('a'+r.__ref)) + string(rune('a'+r.N))
+	r := calc.Bump(lib.New(1, 2, 3))
+	return string(rune('a'+r.T())) + string(rune('a'+r.Ref())) + string(rune('a'+r.N))
 }
 `,
 		},

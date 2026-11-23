@@ -359,7 +359,7 @@ export const expressionCheckMethods = {
 					const owner = scope.lookupScope(expr.name);
 					if (
 						owner !== this.universe &&
-						!(owner === this.globals && this._externalNames.has(expr.name))
+						!(this._isImportScope(owner) && this._externalNames.has(expr.name))
 					)
 						expr._shadowsGlobal = true;
 				}
@@ -370,7 +370,7 @@ export const expressionCheckMethods = {
 				if (
 					(this.target === "wasm" || this.target === "both") &&
 					this._untypedImports.has(expr.name) &&
-					scope.lookupScope(expr.name) === this.globals
+					this._isImportScope(scope.lookupScope(expr.name))
 				)
 					return this._errJsOnly(expr.name, expr);
 				if (
@@ -545,6 +545,12 @@ export const expressionCheckMethods = {
 		return k !== "struct" && k !== "array" && k !== "typeParam";
 	},
 
+	// Whether `scope` holds package-level names: the package's own declarations
+	// or the imports of one of its files.
+	_isPackageScope(scope) {
+		return scope === this.globals || this._isImportScope(scope);
+	},
+
 	// True when `operand` is a struct field, array/slice element or package-level
 	// variable holding a scalar, in a package compiled to wasm.
 	_isScalarInteriorOperand(operand, type, scope) {
@@ -553,9 +559,10 @@ export const expressionCheckMethods = {
 		while (node?.kind === "ParenExpr") node = node.expr;
 		if (!node) return false;
 		if (node.kind === "Ident") {
-			if (scope.lookupScope(node.name) !== this.globals) return false;
+			const owner = scope.lookupScope(node.name);
+			if (!this._isPackageScope(owner)) return false;
 			if (scope.isConst?.(node.name)) return false;
-			const sym = this.globals.get(node.name);
+			const sym = owner.get(node.name);
 			if (sym?.kind === "func" || sym?.kind === "namespace") return false;
 		} else if (node.kind !== "SelectorExpr" && node.kind !== "IndexExpr") {
 			return false;
@@ -976,6 +983,13 @@ export const expressionCheckMethods = {
 			);
 		}
 		if (!methodType) return null;
+		const hidden = this._foreignMember(
+			methodType._pkgId,
+			expr.field,
+			"method",
+			expr,
+		);
+		if (hidden) return hidden;
 		expr._isMethodExpr = true;
 		expr._methodExprRecv = baseType;
 		return {
@@ -1015,7 +1029,7 @@ export const expressionCheckMethods = {
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
 			return false;
-		return owner === this.globals || this.types.get(name) === t;
+		return this._isImportScope(owner) || this.types.get(name) === t;
 	},
 
 	// What a name that is no value says when it stands where a value does:
@@ -1108,7 +1122,7 @@ export const expressionCheckMethods = {
 		if (base?.kind === "SelectorExpr" && base.expr?.kind === "Ident") {
 			// `iter.Seq[int]`: a generic type behind a package qualifier.
 			if (scope.lookup(base.expr.name)?.kind !== "namespace") return null;
-			t = this.types.get(`${base.expr.name}.${base.field}`);
+			t = this._typeNamed(`${base.expr.name}.${base.field}`);
 			if (!t?._generic || t._generic.isAlias) return null;
 		} else {
 			if (base?.kind !== "Ident") return null;
@@ -3228,7 +3242,8 @@ export const expressionCheckMethods = {
 
 	// `int{}`, `T{}` for a type parameter without a core type.
 	_isInvalidLiteralType(expr, t, base, scope) {
-		if (!expr.typeExpr) return false;
+		// A type that already failed to resolve has its error.
+		if (!expr.typeExpr || t?._tainted) return false;
 		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
 		return !["struct", "array", "slice", "map", "simd", "namespace"].includes(
 			core?.kind,
@@ -3293,6 +3308,13 @@ export const expressionCheckMethods = {
 				continue;
 			}
 			const fieldType = base.fields.get(fieldName);
+			this._checkLiteralField(
+				base,
+				fieldName,
+				t,
+				elem,
+				"implicit assignment to",
+			);
 			const vt = this.checkExpr(elem, scope);
 			if (fieldType)
 				this.assertAssignable(
@@ -3310,6 +3332,20 @@ export const expressionCheckMethods = {
 		return t;
 	},
 
+	// A struct literal of a type another package declares cannot set a field
+	// that package does not export (`action` is "implicit assignment to" for a
+	// positional element, "cannot refer to" for a key).
+	_checkLiteralField(base, name, t, node, action) {
+		const owner = base._fieldOwner?.get(name);
+		if (owner === undefined || owner === this._pkgId) return;
+		if (!this._unexportedForeign(name)) return;
+		const type = t?._pkgName ? `${t._pkgName}.${typeStr(t)}` : typeStr(t);
+		this.err(
+			`${action} unexported field ${name} in struct literal of type ${type}`,
+			node,
+		);
+	},
+
 	_checkStructKeyedElems(expr, scope, t, base) {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
@@ -3318,6 +3354,7 @@ export const expressionCheckMethods = {
 					(f) => f.embedded && embeddedFieldName(f) === keyName,
 				)?.type;
 				if (embed) elem._isEmbedInit = true;
+				this._checkLiteralField(base, keyName, t, elem.key, "cannot refer to");
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
 					const vt = this.checkExpr(elem.value, scope);

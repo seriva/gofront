@@ -1,7 +1,7 @@
 # Package Scope: Imports and Exports — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-23)  
 **Base branch:** main  
 **Related:** Split out of the former `followup-fixes-plan.md` (now [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md)) on 2026-11-17 by root cause: its former Phase 7 (L6–L10) and export visibility (F5, F29, plus the ledger entry *Struct literals*), re-probed that day. Export visibility on every target is a user decision (2026-11-17). Must merge before [`incremental-builds-plan.md`](incremental-builds-plan.md), which restructures `src/compiler.js`. L4 (a local type named after an import) has the same root as `checker-go-rules-plan.md` R8 (`mangleLocalTypes` reserves too few names) and is scheduled there.  
 **Release note:** **Breaking:** an import now applies only to the file that declares it, as in Go, and an unused npm import is an error like any other unused import; add the import to each file that uses the package and remove unused ones. **Breaking:** a package can no longer use another package's unexported names, methods or fields (including positional struct literals that set them), on every target; export the name or move the code into that package. Packages now export only the names they declare, and using a type from an npm package in a WebAssembly package reports a clear error.  
@@ -108,43 +108,43 @@ Root: no selector, qualified type lookup, method expression or composite literal
 > Split from the former `followup-fixes-plan.md` Phases 1 and 7 (re-probed 2026-11-17; audited 2026-11-19).
 
 ### Phase 1: Imports are bound per file (root `package-wide-imports`)
-- [ ] Task 1.1: Per-file import scopes in the checker (I1.1–I1.3, I1.8–I1.9)
+- [x] Task 1.1: Per-file import scopes in the checker (I1.1–I1.3, I1.8–I1.9)
   - Files: `src/typechecker/index.js` (`fileScopes`, `_fileScope`, `_isImportScope`, chain `this.globals.parent` in `_setCurrentFile`, per-file `reportUnusedImports`, file-aware `getExportedConsts`), `src/typechecker/expressions.js` (`_isImportScope` in place of `owner === this.globals` at `:283`, `:294`, `:908`), `src/typechecker/resolve.js` (per-file type/qualified-type lookup in `resolveTypeNode`, `_resolveGenericTypeName`, `resolveTypeNodeName`, `_jsOnlyMember`, `_useQualifiedTypeName`)
   - Test: `test/unit/compiler/imports.test.js`: unit tests for file-scoped `addPackageNamespace`/`addDefinitions` (values and types) and per-file `reportUnusedImports`; `npm test` stays green while callers still pass default file
   - Done when: all pass and existing `npm test` is green
-- [ ] Task 1.2: Wire compiler and stdlib per-file import binding (I1.1–I1.3, I1.8–I1.9, I1.11)
+- [x] Task 1.2: Wire compiler and stdlib per-file import binding (I1.1–I1.3, I1.8–I1.9, I1.11)
   - Files: `src/compiler.js` (per-file `.d.ts` and local package binding; remove `seenLocalPaths` skip while keeping `depCache` dedupe), `src/link/stdlib.js` (`bindStdlibImport` binds in `p._filename`'s scope; `implicitImports` computed per file)
   - Test: `test/unit/compiler/imports.test.js` with `withTempDir` + `compileDir`: I1.2 → `Undefined: 'strings'` at `b.go`, I1.3 → `Undefined: 's'`, I1.8 → `strings.Builder`, `sub.Box[int]`, and bare `T` rejected at `b.go`, I1.9 → `js:` `.d.ts` values/types and dot-imported values/types rejected at `b.go`, I1.11 → same local path under two names compiles; controls: both files import `strings` → `b A`; exported `const` referencing a file-scoped import in `a.go` with `b.go` not importing it; a `_test.go` file and generated `gofront_gen.go` compile
   - Done when: all pass; `npm test` green apart from `example/simple` (Task 1.3)
-- [ ] Task 1.3: Migrate `example/simple` and any stdlib file to file-scoped imports
+- [x] Task 1.3: Migrate `example/simple` and any stdlib file to file-scoped imports
   - Files: `example/simple/src/main.go`, `example/simple/src/store.go`
   - Test: `node src/index.js check example/...` fails after 1.2 with `Undefined: 'errors'`/`'utils'`/`'sleep'` until `main.go` gains `errors`, `./utils`, `js:./browser.d.ts` and `store.go` gains `./utils` (dropping unused `js:./browser.d.ts`); the `example/simple` Playwright spec
   - Done when: `npm run check` and `npm run test:e2e` pass
-- [ ] Task 1.4: Untyped npm imports are file-scoped and tracked (I1.1, I1.4–I1.6)
+- [x] Task 1.4: Untyped npm imports are file-scoped and tracked (I1.1, I1.4–I1.6)
   - Files: `src/typechecker/index.js` (`defineUntypedImport` binds in the file scope and calls `trackImport`), `src/resolver.js` (`bindUntypedImports` takes per-file imports and passes the file), `src/compiler.js` (per-file `bindUntypedImports` and dot import of an untyped package in `wasm`/`both`)
   - Test: `test/unit/compiler/stdlib-go.test.js`: I1.1 → `Undefined: 'zzz'` at `b.go`, I1.4 and I1.6 → `'zzz' imported and not used`, I1.5 → `js: imports are not allowed in wasm packages`; update existing unused-import test at `:695` to reference `z`; the existing *rejected where it is used* tests stay green
   - Done when: all pass
 
 ### Phase 2: Exports and qualified names (roots `package-wide-imports`, `qualified-type-names`)
-- [ ] Task 2.1: Packages export only what they declare (I1.7, I1.10)
+- [x] Task 2.1: Packages export only what they declare (I1.7, I1.10)
   - Files: `src/typechecker/index.js` (`getExportedSymbols` and `getExportedTypes` read declared names/types only, excluding `.d.ts`, dot imports, and import aliases)
   - Test: `test/unit/compiler/packages.test.js` with a `node_modules/mydep` `.d.ts` and a `leaf` subpackage: I1.7 → missing-member error naming `Bar`; I1.10 → `sub.LeafFn` and `sub.Leaf` rejected; controls: `sub.Use()` and a declared `var Baz = 1` still compile and print
   - Done when: passes
-- [ ] Task 2.2: `X.T` resolves its qualifier first (I2.1, I2.2)
+- [x] Task 2.2: `X.T` resolves its qualifier first (I2.1, I2.2)
   - Files: `src/typechecker/resolve.js` (shared `_resolveQualifiedType` across `resolveTypeNode` `TypeName`/`SelectorExpr`, `_resolveGenericTypeName`, `resolveTypeNodeName`), `src/typechecker/expressions.js` (composite literal type and `_genericTypeRef`)
   - Test: `test/unit/types/checks.test.js`: I2.1 (`var x zzz.T`, `_ = zzz.T{}`, `var y zzz.T[int]`) → `'zzz.T' is only available in js packages` with line:col; I2.2 (`console.T{}` and local `v.T{}`) on `js`, `both`, `wasm` → `is not a type`; controls `pkg.T{}` and `var x console.T` unchanged
   - Done when: all pass; no `Unknown struct in CompositeLit` from the emitter
 
 ### Phase 3: Export visibility on every target (root `export-visibility`)
-- [ ] Task 3.1: Package-level names and types use Go's exported rule (E1, E3 names, E6)
+- [x] Task 3.1: Package-level names and types use Go's exported rule (E1, E3 names, E6)
   - Files: `src/typechecker/resolve.js` (update `isExported` to `/^\p{Lu}/u`, apply in `_namespaceMemberError` and `_resolveQualifiedType`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `util.__Answer()`, `var x util.secret`, `util.secret{}`, and `var g util.box[int]` from `js`, `both` and `wasm` packages → `assertErrorContains(…, "not exported by package util")`; `util.Ä()` stays exported; update existing assertion in `test/unit/compiler/imports.test.js:227` from `"cannot refer to unexported name"` to `"not exported by package"`
   - Done when: all pass
-- [ ] Task 3.2: Fields, methods and method expressions of foreign types (E2, E3 methods, E4, E7)
+- [x] Task 3.2: Fields, methods and method expressions of foreign types (E2, E3 methods, E4, E7)
   - Files: `src/typechecker/index.js` (stamp `_pkgId` on declared types/methods; preserve originating `_pkgId` on promoted fields/methods in `_offerStructEmbed` and `offerInterfaceMethods`), `src/typechecker/resolve.js` (stamp `_pkgId` on struct/interface literals; preserve `_pkgId` in `_resolveStructType` and `_mergeInterfaceEmbed`; `_checkForeignMember` in `fieldType`, `_fieldTypeStruct` removing the superseded `strings.*`/`bytes.*` `_`-prefix special case at `:1253-1262`, and `_fieldTypeInterface`), `src/typechecker/expressions.js` (`_checkForeignMember` in `_checkMethodExprSelector`)
   - Test: `test/unit/types/shadowing.test.js`: `util.New(7).twice()`, `util.New(7).m`, `util.N` unexported method (`n.twice()`, `util.N.twice`), `util.I` unexported method (`x.secret()`, `LocalI{ util.I }`, `LocalS{ util.I }`), `util.Make().a` (foreign anonymous struct), `Local{util.Rec}` accessing `l.m`/`l.twice()`, `util.Pub{}.hidden`, and `util.Rec.twice` from each target → `cannot refer to unexported`; control: promoted exported field/method through an embedded unexported foreign struct (`util.Pub{}.X`) still compiles
   - Done when: all pass
-- [ ] Task 3.3: Struct literals setting foreign unexported fields (E5); fix call sites and docs
+- [x] Task 3.3: Struct literals setting foreign unexported fields (E5); fix call sites and docs
   - Files: `src/typechecker/expressions.js` (composite literal keyed and positional checks for regular and embedded foreign fields), plus any `example/`/`stdlib/` file the rule rejects, plus `docs/usage.md`, `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Test: `test/unit/types/checks.test.js` with `compileHybridProject`: `sub.S{1, 2}`, `sub.S{b: 2}`, and `sub.Pub{hidden: …}` → `implicit assignment to unexported field` / `cannot refer to unexported field`; `sub.S{A: 1}` compiles; `npm run check` and the stdlib build pass; `docs/` updated for file-scoped imports, unused npm imports, and package visibility
   - Done when: all pass; the release note lists any migrated call site
