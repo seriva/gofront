@@ -751,6 +751,87 @@ function exportedEntries(map) {
 	return new Map([...map].filter(([name]) => isExported(name)));
 }
 
+// ── Package dependency graph ──────────────────────────────────
+
+// The local imports of the package in `pkgDir`: `{ dir, program, spec }` for
+// each import whose directory resolveImports will find.
+function* localImports(programs, pkgDir) {
+	const fromFile = join(pkgDir, "_dummy.go");
+	for (const program of programs)
+		for (const imp of program.imports ?? [])
+			for (const spec of imp.imports) {
+				if (!isLocalPath(spec.path)) continue;
+				const dir = resolveGwDir(spec.path, fromFile);
+				if (dir) yield { dir: resolve(dir), program, spec };
+			}
+}
+
+// The parsed files of the dependency in `dir`, as compileDir would read them;
+// null when it has none or does not parse (compiling it reports that).
+function parseDependency(dir, options) {
+	try {
+		const files = gwFilesIn(dir, {
+			includeTests: options.includeTests ?? false,
+		});
+		return files.length > 0 ? files.map(parseGoFrontFile) : null;
+	} catch {
+		return null;
+	}
+}
+
+// `import cycle not allowed` for the cycle `trail` (the packages from the
+// first member of the cycle down to the importer) closes by importing
+// `closing`. It is reported at the import that leaves the first member.
+function importCycleError(trail, closing, names, rootKey) {
+	const keys = [...trail.map((f) => f.key), closing];
+	const named = keys.map((k) => names.get(k));
+	const label =
+		new Set(named).size === new Set(keys).size
+			? named
+			: keys.map((k) => relative(rootKey, k).split(sep).join("/") || ".");
+	const { program, spec } = trail[0].via;
+	return new CompileError([
+		new TypeCheckError(
+			`import cycle not allowed: ${label.join(" imports ")}`,
+			{ line: spec.line ?? spec._line, col: spec.col ?? spec._col ?? 1 },
+			program._filename,
+			program._source,
+		),
+	]);
+}
+
+// The graph of the local packages `rootPrograms` (the package in `rootKey`)
+// imports, directly or not: `{ edges: Map<dir, Set<dir>> }`. Throws the
+// CompileError of the first import cycle, before any package is checked. The
+// root counts as a member, so a package that a dependency imports back is a
+// cycle even when the root's own test files start it. A package reached
+// through several paths is visited once.
+function buildPackageGraph(rootKey, rootPrograms, options) {
+	const edges = new Map();
+	const names = new Map();
+	const trail = [];
+	const visit = (key, programs) => {
+		const deps = new Set();
+		edges.set(key, deps);
+		names.set(key, programs[0]?.pkg?.name ?? basename(key));
+		const frame = { key, via: null };
+		trail.push(frame);
+		for (const imp of localImports(programs, key)) {
+			frame.via = imp;
+			const at = trail.findIndex((f) => f.key === imp.dir);
+			if (at >= 0)
+				throw importCycleError(trail.slice(at), imp.dir, names, rootKey);
+			deps.add(imp.dir);
+			if (edges.has(imp.dir)) continue;
+			const dep = parseDependency(imp.dir, options);
+			if (dep) visit(imp.dir, dep);
+		}
+		trail.pop();
+	};
+	visit(rootKey, rootPrograms);
+	return { edges };
+}
+
 // ── Main entry points ─────────────────────────────────────────
 
 // Package target after build-time overrides (Task H6.3): `forceTarget`
@@ -860,6 +941,22 @@ export function compileFiles(files, options = {}) {
 			new Error(`Mixed package names in ${fromDir}: ${pkgNames.join(", ")}`),
 		]);
 	const pkgName = pkgNames[0];
+
+	// The first compile of a build (the root) walks the local imports once;
+	// every dependency it compiles inherits the graph.  `packageCompiles`, when
+	// given, counts the compiles per package directory.
+	options.packageGraph ??= buildPackageGraph(
+		resolve(fromDir),
+		programs,
+		options,
+	);
+	if (options.packageCompiles) {
+		const key = resolve(fromDir);
+		options.packageCompiles.set(
+			key,
+			(options.packageCompiles.get(key) ?? 0) + 1,
+		);
+	}
 
 	// Validate target directives across files in this package
 	const declaredTargets = new Map();

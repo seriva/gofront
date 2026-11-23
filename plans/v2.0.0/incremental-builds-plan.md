@@ -105,7 +105,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
 > Split from the former `web-platform-evolution-plan.md` Phase 3 and Task 2.4 (re-probed 2026-11-17, reviewed/re-probed 2026-11-19). Former task IDs in parentheses.
 
 ### Phase 1: Package dependency graph and immutable ASTs
-- [ ] Task 1.1: Package dependency graph, import cycles, and diamond preservation (former 3.1, graph half)
+- [x] Task 1.1: Package dependency graph, import cycles, and diamond preservation (former 3.1, graph half)
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/import-cycles.test.js`: self-import, 2-package cycle (`a → b → a`, covering `checker-strictness-plan.md` S22), `a → b → c → a`, `compileSingleFile` (`main.go → ./a → ..`), and `compilePackageTests` (`_test.go` cycle) give `import cycle not allowed` with path and line:col (not `Maximum call stack size exceeded`); `gofront check` reports cycle members as failed rather than `skipped`; a three-layer diamond compiles each package once (counter)
   - Done when: all pass and `npm test` passes
