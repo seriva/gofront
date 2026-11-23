@@ -744,8 +744,7 @@ export class ExprsEmitter {
 	// A struct literal field initialiser; array values are copied in.
 	_emitFieldInit(value, f) {
 		this.emitExpr(value, f.wType);
-		if (f.goType?.kind !== "pointer" && isArrayType(f.goType, this.mod.checker))
-			this._emitCopyIfValue(value, f.goType, f.wType);
+		this._emitCopyIfValue(value, f.goType, f.wType);
 	}
 
 	// With a pointer on the stack, branches to the function's `nil` block

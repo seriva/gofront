@@ -886,7 +886,6 @@ forStoreCase(
 	}
 	fmt.Println(*ps, ps == &s, ok)`,
 	"{5} true true\n",
-	assertJsTargetsOutput,
 );
 
 forStoreCase(

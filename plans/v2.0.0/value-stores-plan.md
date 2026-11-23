@@ -164,7 +164,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js` (copy helper over the shared field list)
   - Test: `test/unit/language/value-semantics.test.js` *Struct value semantics*: V4.1 → `{9 5}`, V4.3 → `{{-4} 7} {{5} 7}`, and a captured, address-taken variant, with `assertAllTargetsOutput`
   - Done when: all pass on every target
-- [ ] Task 4.2: Literal fields, `range` `=` targets and comma-ok results store through `emitStoreValue` (V4.2, V4.4)
+- [x] Task 4.2: Literal fields, `range` `=` targets and comma-ok results store through `emitStoreValue` (V4.2, V4.4)
   - Files: `src/backend/wasm/emit-stmts.js` (`_bindRangeAssignTargets`, `_emitStoreLhsFromTemp`), `src/backend/wasm/emit-exprs.js` (`_emitFieldInit` composite-literal value-struct fields)
   - Test: `value-semantics.test.js`: V4.2 (`*pa = W{Q: p}` and `a := W{Q: p}`) → `{[1 2]} {{[9 2]}}`; Task 3.1's V3.4/V3.5 tests and Task 3.2's slice/map-range address-taken struct / sliced array tests switch to `assertAllTargetsOutput`
   - Done when: all pass; `zero-alloc.js` passes

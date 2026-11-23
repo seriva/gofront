@@ -527,7 +527,9 @@ export class StmtsEmitter {
 	// closure captures or whose address is taken, or a global).  A struct or
 	// array value is copied unless `r` is already a fresh value, and written
 	// into the existing storage when the variable's address may be held, so
-	// every earlier pointer or slice view sees the new value.
+	// every earlier pointer or slice view sees the new value.  Every
+	// statement that assigns to a variable ends here: assignment, tuple,
+	// comma-ok and range stores name their value as `r`.
 	emitStoreValue(l, r, localInfo, op = "=") {
 		if (
 			localInfo &&
@@ -753,8 +755,35 @@ export class StmtsEmitter {
 	// target is an interface, `valueGoType` is the Go type of the ranged
 	// element and the value is boxed into the interface representation;
 	// `emitValue` is then called with the wasm type of `valueGoType`.
-	_emitRangeAssignStore(name, info, emitValue, valueGoType = null) {
+	_emitRangeAssignStore(
+		name,
+		info,
+		emitValue,
+		valueGoType = null,
+		isAssign = false,
+	) {
 		const local = this.resolveLocal(name);
+		const destGoType = (local ?? this.mod.resolveGlobal(name))?.goType;
+		if (
+			isAssign &&
+			this._isAggregateType(valueGoType) &&
+			this._isAggregateType(destGoType)
+		) {
+			// `for _, s = range xs`: the element is already a copy; the store
+			// writes it into `s`'s existing storage when its address is held.
+			const tmpName = `__rangeval$${this.tempCounter++}`;
+			const wType = this.toWasmType(valueGoType);
+			const idx = this.allocLocal(tmpName, wType, valueGoType, true);
+			emitValue(wType);
+			this.pushInstruction({ op: "local.set", index: idx });
+			this.emitStoreValue(
+				{ kind: "Ident", name, _type: valueGoType },
+				{ kind: "Ident", name: tmpName, _type: valueGoType, _fresh: true },
+				local,
+			);
+			this.locals.delete(tmpName);
+			return;
+		}
 		const boxIface =
 			valueGoType && this._rangeStoreWType(name, info) === "anyref";
 		const pushValue = () => {
@@ -882,6 +911,10 @@ export class StmtsEmitter {
 			typeIndex: arrInfo.typeIndex,
 		});
 		this.releaseTemp(dst, wType);
+	}
+
+	_isAggregateType(goType) {
+		return this._isValueStruct(goType) || this._isValueArray(goType);
 	}
 
 	_isValueStruct(goType) {
@@ -1201,11 +1234,24 @@ export class StmtsEmitter {
 		});
 	}
 
+	// A struct or array variable whose storage is written in place cannot take
+	// a result straight off the stack: it goes through `emitStoreValue`.
+	_hasStableTupleTarget(lhsNodes, tupleTypes) {
+		return lhsNodes.some(
+			(l, i) =>
+				l.kind === "Ident" &&
+				l.name !== "_" &&
+				this._isAggregateType(tupleTypes[i]) &&
+				this._needsStableStore(l, tupleTypes[i]),
+		);
+	}
+
 	_emitTupleAssign(lhsNodes, rhsNode, op) {
 		if (
 			op === "=" &&
 			(lhsNodes.some((l) => !this._isPlainTupleTarget(l)) ||
-				this._needsTupleConversion(lhsNodes, rhsNode._type.types))
+				this._needsTupleConversion(lhsNodes, rhsNode._type.types) ||
+				this._hasStableTupleTarget(lhsNodes, rhsNode._type.types))
 		) {
 			this._emitTupleViaTemps(
 				lhsNodes,
@@ -1348,15 +1394,24 @@ export class StmtsEmitter {
 		return this.mod.resolveGlobal(lhsNode.name)?.type ?? null;
 	}
 
+	// True when a comma-ok result goes through `_emitAssignSingle` rather than
+	// straight into a variable: an index, field or dereference target, a name
+	// `:=` redeclares, an interface-typed variable (`var x any; x, ok = m[k]`
+	// boxes a scalar or struct result), or a struct or array variable stored
+	// in place (its address or a slice of it may be held).
+	_commaOkNeedsAssign(lhsNode, wType, goType, isDefine) {
+		if (lhsNode.kind !== "Ident") return true;
+		if (isDefine) return !!(lhsNode._redecl && this.resolveLocal(lhsNode.name));
+		if (this._storeTargetWType(lhsNode) === "anyref" && wType !== "anyref")
+			return true;
+		return (
+			this._isAggregateType(goType) && this._needsStableStore(lhsNode, goType)
+		);
+	}
+
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
 		if (lhsNode.kind === "Ident" && lhsNode.name === "_") return;
-		const redeclared =
-			isDefine && lhsNode._redecl && this.resolveLocal(lhsNode.name);
-		// `var x any; x, ok = m[k]`: a scalar or struct result is boxed on the
-		// way into the interface-typed variable.
-		const target = isDefine ? null : this._storeTargetWType(lhsNode);
-		const boxesIntoAny = target === "anyref" && wType !== "anyref";
-		if (lhsNode.kind !== "Ident" || redeclared || boxesIntoAny) {
+		if (this._commaOkNeedsAssign(lhsNode, wType, goType, isDefine)) {
 			// An index, field or dereference target (or a name `:=` redeclares):
 			// assign from a named view of the temporary.
 			const name = `__ok_tmp_${this.tempCounter++}`;
@@ -2782,6 +2837,7 @@ export class StmtsEmitter {
 						this._emitCopyMapEntry(keyType, mapInfo.keyWType);
 					},
 					keyType,
+					isAssign,
 				);
 			}
 
@@ -2800,6 +2856,7 @@ export class StmtsEmitter {
 						this._emitCopyMapEntry(valType, mapInfo.valWType);
 					},
 					valType,
+					isAssign,
 				);
 			}
 
@@ -3017,6 +3074,7 @@ export class StmtsEmitter {
 					}
 				},
 				elemGoType,
+				isAssign,
 			);
 		}
 

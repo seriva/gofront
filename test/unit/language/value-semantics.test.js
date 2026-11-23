@@ -320,6 +320,31 @@ func main() {
 	);
 });
 
+test("struct fields of a composite literal are copies (V4.2)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P2 struct{ A [2]int }
+type W struct{ Q P2 }
+
+func main() {
+	p := P2{[2]int{1, 2}}
+	var a W
+	pa := &a
+	*pa = W{Q: p}
+	pa.Q.A[0] = 9
+	fmt.Println(p, a)
+	b := W{Q: p}
+	b.Q.A[1] = 8
+	fmt.Println(p, b)
+}
+`,
+		"{[1 2]} {{[9 2]}}\n{[1 2]} {{[1 8]}}\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {
@@ -1624,7 +1649,13 @@ func main() {
 section("Whole-value stores");
 
 // Each body runs in `main`; `S` is `struct{ N int }`.
-const storeCase = (name, decls, body, want, assertFn = assertJsTargetsOutput) =>
+const storeCase = (
+	name,
+	decls,
+	body,
+	want,
+	assertFn = assertAllTargetsOutput,
+) =>
 	test(name, async () => {
 		await assertFn(
 			`package main
