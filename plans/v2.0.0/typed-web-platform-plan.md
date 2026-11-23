@@ -100,7 +100,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Files: `src/compiler.js`, `src/resolver.js`, `src/typechecker/index.js`
   - Test: `test/unit/compiler/web-packages.test.js` with a fixture declaration directory (`options.stdlibRoot`): `import "gofront/dom"` loads lazily, parsed at most once per process, and emits no JS `import`; import from `wasm`/`both` is a clear error; unknown `gofront/x` produces an unsupported-package error (not an untyped npm warning); a `println`-only program loads no declaration file (counter); `sentrux check` passes with no layer violation
   - Done when: `gofront/*` declarations are parsed at most once per process and loaded only when used
-- [ ] Task 2.3: The web-types generator (former 6.5)
+- [x] Task 2.3: The web-types generator (former 6.5)
   - Files: `scripts/gen-web-types.js`, `scripts/web-types-overrides/`, `package.json`, `biome.json`
   - Test: `test/unit/cli/gen-web-types.test.js`: deterministic output for a small IDL fixture (inheritance including cross-package, mixin, partial, optional and nullable members, union, dictionary, enum, callback, `Promise`, constant, constructor)
   - Done when: `@webref/idl` and `webidl2` are pinned devDependencies; two runs are byte-identical; `npm run check` runs `--check`; the mapping table is in the script header; generated files pass (or are excluded from) Biome

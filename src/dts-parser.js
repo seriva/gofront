@@ -526,13 +526,31 @@ export class DtsParser {
 			this.skip();
 			let found = false;
 			for (const mod of SKIP_MODIFIERS) {
-				if (this.matchKw(mod)) {
+				if (this._matchModifier(mod)) {
 					found = true;
 					break;
 				}
 			}
 			if (!found) break;
 		}
+	}
+
+	// Skips the modifier `mod` unless it is the name of a member (`readonly:
+	// boolean`, `static(): void`), which a `:`, `?` or `(` follows.
+	_matchModifier(mod) {
+		const start = this.pos;
+		if (!this.matchKw(mod)) return false;
+		this.skip();
+		if (this._namesMember()) {
+			this.pos = start;
+			return false;
+		}
+		return true;
+	}
+
+	// Whether the next character starts what follows a member's name.
+	_namesMember() {
+		return !this.eof() && ":?(".includes(this.ch());
 	}
 
 	_parseFuncDecl() {
@@ -676,6 +694,11 @@ export class DtsParser {
 			return;
 		}
 		this.skip();
+		// A member named like a keyword (`type: string`, `class(): void`).
+		if (kw !== "new" && this._namesMember()) {
+			this._parseMemberDefault(kw, out);
+			return;
+		}
 		switch (kw) {
 			case "function": {
 				const { name, val } = this._parseFuncDecl();

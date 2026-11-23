@@ -15,6 +15,7 @@
 			"!node_modules",
 			"!example/*/app.js",
 			"!example/*/vendor.js",
+			"!stdlib/gofront",
 			"!coverage",
 			"!test-results",
 			"!**/*.md",
