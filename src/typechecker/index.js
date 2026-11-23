@@ -23,7 +23,9 @@ import {
 	ANY,
 	anyKind,
 	BOOL,
+	copyFieldOwner,
 	copyType,
+	declPackages,
 	defaultType,
 	displayTypeName,
 	ERROR,
@@ -116,8 +118,18 @@ function applyPromotions(methods, old, next, isOwn) {
 	return changed;
 }
 
+let nextPkgId = 0;
+
 export class TypeChecker {
 	constructor() {
+		// The identity of the package this checker checks: stamped on the
+		// methods and struct fields it declares, so another package reading one
+		// can tell it is unexported there (see `_foreignMember`). Each checker
+		// has its own, also for two packages that share a name.
+		this._pkgId = ++nextPkgId;
+		// The package whose declaration is being resolved: this one, except
+		// while resolving a declaration of an imported generic type.
+		this._ownerPkg = this._pkgId;
 		this.types = new Map(); // named types
 		// Go's universe scope: builtins, browser globals and built-in package
 		// namespaces.  Package declarations live in `globals` above it, so they
@@ -832,7 +844,10 @@ export class TypeChecker {
 	_collectTypesPass(programs) {
 		for (const p of programs) {
 			for (const d of p.decls) {
-				if (d.kind === "TypeDecl") this._declFiles.set(d, p._filename ?? null);
+				if (d.kind === "TypeDecl") {
+					this._declFiles.set(d, p._filename ?? null);
+					declPackages.set(d, this._pkgId);
+				}
 				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
 					const placeholder = {
 						kind: "named",
@@ -1166,7 +1181,10 @@ export class TypeChecker {
 		// there when the embedder's fields were collected.
 		if (struct.fields)
 			for (const [k, v] of base.fields)
-				if (!struct.fields.has(k)) struct.fields.set(k, v);
+				if (!struct.fields.has(k)) {
+					struct.fields.set(k, v);
+					copyFieldOwner(struct, base, k);
+				}
 		const innerPromoted = promotedMethods.get(base);
 		for (const [mName, mType] of base.methods ?? []) {
 			const p = innerPromoted?.get(mName);
@@ -1185,6 +1203,7 @@ export class TypeChecker {
 
 	collectType(decl, scope = null) {
 		this._declFiles.set(decl, this._currentFile);
+		declPackages.set(decl, this._pkgId);
 		// `type N interface{ ~int }` and `type D N` declare constraints.
 		this._markConstraintPos(decl.type);
 		if (decl.typeParams && decl.isAlias) {
@@ -1519,6 +1538,7 @@ export class TypeChecker {
 	_attachMethod(decl, funcType) {
 		this._checkReceiverType(decl);
 		funcType._ptrRecv = Boolean(decl.recvPointer);
+		funcType._pkgId = this._pkgId;
 		funcType._decl = decl;
 		const recvNamedType = this.types.get(decl.recvType.name);
 		if (recvNamedType?._generic)

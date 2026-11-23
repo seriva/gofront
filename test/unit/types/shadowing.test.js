@@ -1688,7 +1688,7 @@ func Main() int { return g[int](4) }
 
 section("__ members of wasm package structs");
 
-test("a __ field and interface method of a wasm struct are reached from a js main", async () => {
+test("a __ field and interface method of a wasm struct are used through exported members from a js main", async () => {
 	const { mod } = await compileHybridProject(
 		{
 			"util/u.go": `//gofront:target wasm
@@ -1701,11 +1701,18 @@ type Rec struct {
 
 func (r Rec) __twice() int { return r.__t * 2 }
 
-type Sizer interface{ __twice() int }
+func (r Rec) Twice() int { return r.__twice() }
+
+type Sizer interface {
+	__twice() int
+	Twice() int
+}
 
 func New(t, n int) *Rec { return &Rec{__t: t, N: n} }
 
 func AsSizer(r *Rec) Sizer { return r }
+
+func (r *Rec) Set(t int) { r.__t = t }
 `,
 			"main.go": `package main
 
@@ -1716,15 +1723,15 @@ import (
 
 func Main() string {
 	r := util.New(7, 8)
-	r.__t = 9
+	r.Set(9)
 	s := util.AsSizer(r)
-	return fmt.Sprintf("%d %d %d", r.__t, r.N, s.__twice())
+	return fmt.Sprintf("%d %d %d", r.Twice(), r.N, s.Twice())
 }
 `,
 		},
 		{ exports: ["Main"] },
 	);
-	assertEqual(mod.Main(), "9 8 18");
+	assertEqual(mod.Main(), "18 8 18");
 });
 
 section("Class names that are JS strict-mode words");
@@ -3313,6 +3320,157 @@ for (const target of ["js", "both", "wasm"]) {
 		const errors = foreignErrors(
 			FOREIGN_NAMES_UTIL,
 			"func main() {\n\t_ = util.Ä()\n\t_ = util.Answer()\n}\n",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
+
+section("Package visibility: fields, methods and method expressions");
+
+const FOREIGN_MEMBERS_UTIL = `
+type Rec struct {
+	m int
+	X int
+}
+
+func New(n int) Rec { return Rec{m: n, X: n} }
+
+func (r Rec) twice() int { return r.m * 2 }
+
+func (r Rec) Twice() int { return r.twice() }
+
+type N int
+
+func (n N) twice() int { return int(n) * 2 }
+
+type I interface {
+	secret() int
+	Pub() int
+}
+
+type Impl struct{}
+
+func (Impl) secret() int { return 1 }
+
+func (Impl) Pub() int { return 2 }
+
+func NewI() I { return Impl{} }
+
+func Make() struct{ a int } { return struct{ a int }{1} }
+
+type hidden struct{ X int }
+
+type Pub struct{ hidden }
+
+func NewPub() Pub { return Pub{hidden{3}} }
+
+type Box[T any] struct {
+	v T
+	V T
+}
+
+func (b Box[T]) get() T { return b.v }
+`;
+
+// [what, package-level declarations of main.go, body of main, member]
+const FOREIGN_MEMBER_USES = [
+	["an unexported method", "", "_ = util.New(7).twice()", "method twice"],
+	["an unexported field", "", "_ = util.New(7).m", "field m"],
+	[
+		"an unexported method of a named non-struct",
+		"",
+		"var n util.N = 1\n\t_ = n.twice()",
+		"method twice",
+	],
+	[
+		"an unexported method expression of a named non-struct",
+		"",
+		"_ = util.N.twice",
+		"method twice",
+	],
+	[
+		"an unexported interface method",
+		"",
+		"x := util.NewI()\n\t_ = x.secret()",
+		"method secret",
+	],
+	[
+		"an unexported method of an embedded foreign interface in a local interface",
+		"type LocalI interface{ util.I }",
+		"var x LocalI\n\t_ = x.secret()",
+		"method secret",
+	],
+	[
+		"an unexported method of an embedded foreign interface in a local struct",
+		"type LocalS struct{ util.I }",
+		"var x LocalS\n\t_ = x.secret()",
+		"method secret",
+	],
+	["a field of a foreign anonymous struct", "", "_ = util.Make().a", "field a"],
+	[
+		"an unexported field promoted from an embedded foreign struct",
+		"type Local struct{ util.Rec }",
+		"var l Local\n\t_ = l.m",
+		"field m",
+	],
+	[
+		"an unexported method promoted from an embedded foreign struct",
+		"type Local struct{ util.Rec }",
+		"var l Local\n\t_ = l.twice()",
+		"method twice",
+	],
+	[
+		"an unexported embedded field",
+		"",
+		"_ = util.NewPub().hidden",
+		"field hidden",
+	],
+	["an unexported method expression", "", "_ = util.Rec.twice", "method twice"],
+	[
+		"an unexported field of an instantiated generic type",
+		"",
+		"var b util.Box[int]\n\t_ = b.v",
+		"field v",
+	],
+	[
+		"an unexported method of an instantiated generic type",
+		"",
+		"var b util.Box[int]\n\t_ = b.get()",
+		"method get",
+	],
+];
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, decls, body, member] of FOREIGN_MEMBER_USES) {
+		test(`${what} of a ${target} package cannot be used (E2, E3, E4, E7)`, () => {
+			const errors = foreignErrors(
+				FOREIGN_MEMBERS_UTIL,
+				`${decls}\n\nfunc main() {\n\t${body}\n}\n`,
+				target,
+			);
+			assertErrorContains(errors, `cannot refer to unexported ${member}`);
+		});
+	}
+
+	test(`exported members of a ${target} package, also promoted through an unexported embed, still work`, () => {
+		const errors = foreignErrors(
+			FOREIGN_MEMBERS_UTIL,
+			`type Local struct{ util.Rec }
+
+func main() {
+	l := Local{util.New(2)}
+	_ = l.X
+	_ = l.Twice()
+	_ = util.New(7).Twice()
+	_ = util.NewPub().X
+	_ = util.Rec.Twice
+	x := util.NewI()
+	_ = x.Pub()
+	var b util.Box[int]
+	_ = b.V
+}
+`,
 			target,
 		);
 		assertEqual(errors.length, 0);

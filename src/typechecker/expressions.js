@@ -983,6 +983,13 @@ export const expressionCheckMethods = {
 			);
 		}
 		if (!methodType) return null;
+		const hidden = this._foreignMember(
+			methodType._pkgId,
+			expr.field,
+			"method",
+			expr,
+		);
+		if (hidden) return hidden;
 		expr._isMethodExpr = true;
 		expr._methodExprRecv = baseType;
 		return {
