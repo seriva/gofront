@@ -21,9 +21,11 @@ import {
 import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
+import { filesSignature } from "./package-cache.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export {
+	declaredTypeNames,
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
 	renameLocalTypes,
@@ -64,12 +66,21 @@ function parseStdlibFiles(dir, deps, variant = "js", target = "both") {
 		.map((ast) => Object.assign(ast, { target }));
 }
 
-// Targets of the package's files, read without parsing.
+// Targets of the package's files, read without parsing.  The answer is kept
+// until a file of the package changes.
+const targetsMemo = new Map();
+
 function stdlibFileTargets(dir, deps) {
-	return deps.gwFilesIn(dir).map((f) => {
+	const files = deps.gwFilesIn(dir);
+	const sig = filesSignature(files);
+	const memo = targetsMemo.get(dir);
+	if (memo?.sig === sig) return memo.targets;
+	const targets = files.map((f) => {
 		const m = /^\/\/gofront:target\s+(\S+)/m.exec(readFileSync(f, "utf8"));
 		return m?.[1] ?? "both";
 	});
+	targetsMemo.set(dir, { sig, targets });
+	return targets;
 }
 
 // Exported names declared by the `js` files (what a `wasm` or `both` importer
@@ -196,6 +207,7 @@ function checkStdlibPrograms(programs, pkgName, options, deps, target) {
 	checker.pkgName = pkgName;
 	checker.isStdlib = true;
 	checker.lazyBodies = true;
+	// The package's own imports are not the importer's.
 	deps.resolveImports(
 		programs,
 		programs[0]._path,
@@ -204,7 +216,7 @@ function checkStdlibPrograms(programs, pkgName, options, deps, target) {
 		new Set(),
 		[],
 		new Set(),
-		options,
+		{ ...options, importTokens: null },
 	);
 	return checker;
 }
@@ -347,8 +359,25 @@ function stdlibVariant(importPath, dir, importerTarget, deps) {
 	return { key: `${importPath}#shared`, variant: "shared", target: "both" };
 }
 
+// Whether the stored package still matches its sources and the packages it was
+// built against.  `checked` holds the keys already vouched for in this build.
+function stdlibCurrent(pkg, table, deps, checked) {
+	if (checked.has(pkg.key)) return true;
+	const current =
+		pkg.sig === filesSignature(deps.gwFilesIn(pkg.dir)) &&
+		pkg.deps.every(
+			(d) => table.get(d.key) === d && stdlibCurrent(d, table, deps, checked),
+		);
+	if (current) checked.add(pkg.key);
+	return current;
+}
+
+let stdlibIds = 0;
+
 // Loads (once per build) and compiles the Go-source package at `dir`.  A
-// failure is cached too, so every importer reports it.
+// failure is cached too, so every importer reports it.  With a package cache
+// a stored package outlives the build: it is reused while its sources are
+// unchanged, and a failure is never carried into another build.
 function loadStdlibPackage(
 	importPath,
 	dir,
@@ -358,18 +387,35 @@ function loadStdlibPackage(
 ) {
 	const v = stdlibVariant(importPath, dir, importerTarget, deps);
 	const cache = options.stdlibCache;
-	const cached = cache.get(v.key);
+	const stats = options.cacheStats;
+	const checked = options.stdlibChecked;
+	let cached = cache.get(v.key);
+	if (cached && options.packageCache && !checked.has(v.key)) {
+		if (
+			cached instanceof Error ||
+			!stdlibCurrent(cached, cache, deps, checked)
+		) {
+			cache.delete(v.key);
+			cached = undefined;
+		} else checked.add(v.key);
+	}
 	if (cached === null)
 		throw new Error(`import cycle in Go-source stdlib: ${importPath}`);
 	if (cached instanceof Error) throw cached;
-	if (cached) return cached;
+	if (cached) {
+		if (stats) stats.stdlibHits++;
+		return cached;
+	}
+	if (stats) stats.stdlibMisses++;
 	cache.set(v.key, null);
 	try {
 		const pkg = buildStdlibPackage(importPath, dir, options, deps, v);
 		cache.set(v.key, pkg);
+		checked?.add(v.key);
 		return pkg;
 	} catch (e) {
 		cache.set(v.key, e);
+		checked?.add(v.key);
 		throw e;
 	}
 }
@@ -412,6 +458,9 @@ function buildStdlibPackage(importPath, dir, options, deps, v) {
 	const pkg = {
 		importPath,
 		key: v.key,
+		id: ++stdlibIds,
+		dir,
+		sig: filesSignature(deps.gwFilesIn(dir)),
 		checker,
 		pkgName: info.pkgName,
 		namespace,
@@ -772,6 +821,7 @@ function importStdlibSpec(
 		const msg = `internal stdlib error in ${spec.path}; please report`;
 		return errAtImport(checker, p, spec, msg, e.message);
 	}
+	options.importTokens?.push(`std:${pkg.key}@${pkg.id}`);
 	emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
 	bindStdlibImport(checker, p, spec, pkg);
 }

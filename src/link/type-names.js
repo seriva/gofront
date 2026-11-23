@@ -201,6 +201,20 @@ function declaredParams(fn) {
 // A package compiled later that declares a type this package only declares
 // inside a function is renamed by `mangleCollidingTypes`, so `Pt` of one package
 // and a local `Pt` of another never meet in the flat module.
+// The names of every type the programs declare, nested declarations
+// included, in source order.
+export function declaredTypeNames(programs) {
+	const names = [];
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) return node.forEach(visit);
+		if (node.kind === "TypeDecl") names.push(node.name);
+		forEachChild(node, visit);
+	};
+	for (const p of programs) visit(p.decls);
+	return names;
+}
+
 export function registerLocalTypeOwners(programs, pkgKey, owners) {
 	if (!owners) return;
 	const visit = (node) => {

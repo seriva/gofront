@@ -42,6 +42,12 @@ import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer/lexer.js";
 import {
+	embedSignature,
+	filesSignature,
+	optionsSignature,
+	summaryHash,
+} from "./link/package-cache.js";
+import {
 	clearParseCache,
 	evictParseCache,
 	freezeParseCache,
@@ -56,6 +62,7 @@ import {
 } from "./link/sourcemap.js";
 import {
 	checkGeneratedGo,
+	declaredTypeNames,
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
@@ -615,6 +622,7 @@ function resolveImports(
 					depCache.set(depKey, dep);
 				}
 				if (!alreadyBundled) preambles.push(dep);
+				options.importTokens?.push(`dep:${depKey}@${dep.summary}`);
 				// A dependency that hands out `&xs[i]` makes whole-element
 				// stores in this package write in place too.
 				if (dep.elemAddrTaken) checker.depElemAddrTaken = true;
@@ -861,10 +869,14 @@ export function compilePackageTestsWasm(dir, options = {}) {
 
 export function compileFiles(files, options = {}) {
 	const fromDir = options.fromDir ?? dirname(resolve(files[0]));
+	const cache = options.packageCache ?? null;
 	options = {
 		...options,
 		wasmUnits: options.wasmUnits ?? [],
-		stdlibCache: options.stdlibCache ?? new Map(),
+		stdlibCache:
+			options.stdlibCache ?? cache?.stdlibFor(options.stdlibRoot) ?? new Map(),
+		stdlibChecked: options.stdlibChecked ?? new Set(),
+		cacheStats: options.cacheStats ?? cache?.stats,
 		jsRootPrograms: options.jsRootPrograms ?? [],
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
@@ -905,13 +917,17 @@ export function compileFiles(files, options = {}) {
 		programs,
 		options,
 	);
-	if (options.packageCompiles) {
+	// With a package cache the count waits for the verdict: only a compile
+	// that was not served from the cache counts.
+	const countCompile = () => {
+		if (!options.packageCompiles) return;
 		const key = resolve(fromDir);
 		options.packageCompiles.set(
 			key,
 			(options.packageCompiles.get(key) ?? 0) + 1,
 		);
-	}
+	};
+	if (!cache) countCompile();
 
 	// Validate target directives across files in this package
 	const declaredTargets = new Map();
@@ -951,6 +967,10 @@ export function compileFiles(files, options = {}) {
 		options.typeOwners,
 		pkgTarget,
 	);
+	// The names the renaming left: a stored unit is only valid where they come
+	// out the same, which is how it notices a different set of packages that
+	// declare the same types.
+	const typeNames = cache ? declaredTypeNames(programs).join(",") : "";
 
 	// The test runner's driver is a source that exists only in memory: it is
 	// parsed and checked with the package but never written next to it.
@@ -967,6 +987,7 @@ export function compileFiles(files, options = {}) {
 	const jsImports = new Map(); // npm imports → exported names (for ESM emit)
 	const bundledPackages = new Set(); // package names whose code is inlined
 	const preambles = []; // JS code / chunks from compiled sub-packages
+	const importTokens = []; // the packages this one was compiled against
 
 	const dummyFromFile = join(fromDir, "_dummy.go");
 	resolveImports(
@@ -977,63 +998,66 @@ export function compileFiles(files, options = {}) {
 		bundledPackages,
 		preambles,
 		options.bundledDirs ?? new Set(),
-		{ ...options, depCache: options.depCache ?? new Map(), outputDir },
+		{
+			...options,
+			depCache: options.depCache ?? new Map(),
+			outputDir,
+			importTokens,
+		},
 	);
 
-	// ── 3. Type-check ─────────────────────────────────────────────
-	const errors = checker.checkAll(programs);
-	const codecs = checkGeneratedGo(
-		programs,
-		checker,
-		preambles,
-		options,
-		STDLIB_DEPS,
-	);
-	checker.reportUnusedImports();
-	if (errors.length > 0) {
-		throw new CompileError(errors);
-	}
-	for (const w of checker.warnings) log.warn(w);
-
-	// ── 4. Code generation ────────────────────────────────────────
-	const emitTarget = asInternalError(() =>
-		registerPackageUnit(options, {
-			key: resolve(fromDir),
+	// ── 3. Type-check and generate, or reuse the stored unit ──────
+	const unitKey = cache
+		? `${resolve(fromDir)}\0${optionsSignature(options, pkgTarget)}`
+		: null;
+	const stored = cache
+		? storedUnit(cache, unitKey, checker, {
+				sources: ownSignature(files, programs, fromDir),
+				typeNames,
+				imports: importTokens.join("|"),
+				json: `${options.jsonBuild.js}${options.jsonBuild.wasm}`,
+			})
+		: null;
+	const own = stored
+		? reuseUnit(stored, {
+				preambles,
+				bundledPackages,
+				options,
+				pkgName,
+				pkgTarget,
+			})
+		: null;
+	if (cache) cache.count(resolve(fromDir), own !== null);
+	const unit =
+		own ??
+		compileOwnUnit({
+			programs,
+			checker,
+			jsImports,
+			bundledPackages,
+			preambles,
+			options,
+			driver,
 			pkgName,
 			pkgTarget,
-			programs: [...programs, ...codecs],
-			types: checker.types,
-			bundledPackages,
-		}),
-	);
+			fromDir,
+			renamedTypes,
+			countCompile: cache ? countCompile : () => {},
+		});
+	if (cache && !own) {
+		unit.keys = {
+			sources: ownSignature(files, programs, fromDir),
+			typeNames,
+			imports: importTokens.join("|"),
+			json: unit.jsonBefore,
+		};
+		cache.setUnit(unitKey, unit);
+	}
 
-	const isStrict = Boolean(options.strict || pkgTarget === "both");
-	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
-		target: pkgTarget,
-		strict: isStrict,
-		natives: options.natives,
-	});
-	const mainJs =
-		emitTarget === "wasm"
-			? wasmMarker(pkgName)
-			: asInternalError(() =>
-					codegen.generateAll([...programs, ...codecs], {
-						isTest: options.isTest ?? false,
-					}),
-				);
-	logWarnings(codegen.warnings);
-	const warnings = [...checker.warnings, ...codegen.warnings];
-
-	const mainChunk = {
-		js: mainJs,
-		sourceFiles: programs.map((p) => p._path),
-		sourcesContent: programs.map((p) => p._source),
-		mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
-	};
-
+	// ── 4. Assemble the build's output ────────────────────────────
 	const merged = asInternalError(() => {
-		const chunks = mergeCompilationChunks([...preambles, mainChunk]);
-		finishStdlibJs(chunks, options, [...programs, ...codecs], emitTarget);
+		const chunks = mergeCompilationChunks([...preambles, unit.chunk]);
+		finishStdlibJs(chunks, options, unit.rootPrograms, unit.emitTarget);
 		return chunks;
 	});
 	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
@@ -1047,18 +1071,15 @@ export function compileFiles(files, options = {}) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	const mainCss = codegen.getCss();
-	const allCss = [...preambles.map((p) => p.css).filter(Boolean), mainCss]
+	const allCss = [...preambles.map((p) => p.css).filter(Boolean), unit.css]
 		.filter(Boolean)
 		.join("\n\n");
 
 	return {
 		pkgName,
 		target: pkgTarget,
-		warnings,
-		elemAddrTaken:
-			checker.depElemAddrTaken === true ||
-			programs.some((p) => takesElementAddress(p.decls)),
+		warnings: unit.warnings,
+		elemAddrTaken: unit.elemAddrTaken,
 		js: merged.js,
 		css: allCss,
 		wasm,
@@ -1066,6 +1087,166 @@ export function compileFiles(files, options = {}) {
 		wasmOptInfo,
 		wasmSourceMap,
 		stringTable,
+		programs: unit.programs,
+		exportedSymbols: unit.exportedSymbols,
+		exportedTypes: unit.exportedTypes,
+		reachedTypes: unit.reachedTypes,
+		exportedConsts: unit.exportedConsts,
+		exportedKinds: unit.exportedKinds,
+		sourceFiles: merged.sourceFiles,
+		sourcesContent: merged.sourcesContent,
+		mappings: merged.mappings,
+		summary: unit.summary,
+	};
+}
+
+// What a stored unit must still match for a build to reuse it: the files the
+// package is made of (`.d.ts` imports, embedded files and the in-memory test
+// driver included) and their state.
+function ownSignature(files, programs, fromDir) {
+	const paths = new Set(files.map((f) => resolve(f)));
+	const dts = [];
+	const memory = [];
+	for (const p of programs) {
+		if (!paths.has(p._path)) memory.push(p._source);
+		for (const imp of p.imports ?? [])
+			for (const { path, alias } of imp.imports)
+				if (path.startsWith("js:") && alias !== "_")
+					dts.push(join(fromDir, path.slice(3)));
+	}
+	return [
+		filesSignature([...paths]),
+		filesSignature(dts),
+		embedSignature(programs),
+		memory.join("\0"),
+	].join("\n");
+}
+
+// The stored unit of the package when it is valid for this build, else null.
+// `now` holds what the build has in common with the build that made it; the
+// packages it imports and the state of the build when it was checked (`json`)
+// are part of that.
+function storedUnit(cache, unitKey, checker, now) {
+	const unit = cache.getUnit(unitKey);
+	if (!unit || checker.errors.length > 0) return null;
+	for (const k of Object.keys(now)) if (unit.keys[k] !== now[k]) return null;
+	return unit;
+}
+
+// Makes the stored unit's effects on the build happen again: its messages,
+// the JSON use it noted, the stdlib packages its generated Go imports and its
+// link unit. Returns the unit, or null when a stdlib package it was checked
+// against was rebuilt since.
+function reuseUnit(unit, ctx) {
+	const { preambles, bundledPackages, options } = ctx;
+	if (unit.codecs.length > 0) {
+		const imports = [];
+		const scratch = new TypeChecker();
+		scratch.target = ctx.pkgTarget;
+		scratch.pkgName = ctx.pkgName;
+		importStdlibPackages(
+			unit.codecs,
+			scratch,
+			preambles,
+			options.bundledDirs ?? new Set(),
+			{ ...options, importTokens: imports },
+			STDLIB_DEPS,
+		);
+		if (imports.join("|") !== unit.generatedImports) return null;
+	}
+	for (const w of unit.warnings) log.warn(w);
+	for (const t of unit.jsonSet) options.jsonBuild[t] = true;
+	const emitTarget = asInternalError(() =>
+		registerPackageUnit(options, { ...unit.link, bundledPackages }),
+	);
+	return { ...unit, emitTarget };
+}
+
+// Type-checks and generates the package's own code: the part of a compile
+// that depends on nothing but its sources, its options, the packages it
+// imports and the build state `keys` records.
+function compileOwnUnit(ctx) {
+	const {
+		programs,
+		checker,
+		jsImports,
+		bundledPackages,
+		preambles,
+		options,
+		driver,
+		pkgName,
+		pkgTarget,
+		fromDir,
+		renamedTypes,
+	} = ctx;
+	ctx.countCompile();
+	const errors = checker.checkAll(programs);
+	const jsonBefore = `${options.jsonBuild.js}${options.jsonBuild.wasm}`;
+	const jsonFlags = { ...options.jsonBuild };
+	const generatedImports = [];
+	const codecs = checkGeneratedGo(
+		programs,
+		checker,
+		preambles,
+		{ ...options, importTokens: generatedImports },
+		STDLIB_DEPS,
+	);
+	checker.reportUnusedImports();
+	if (errors.length > 0) {
+		throw new CompileError(errors);
+	}
+	for (const w of checker.warnings) log.warn(w);
+
+	// ── Code generation ───────────────────────────────────────────
+	const rootPrograms = [...programs, ...codecs];
+	const link = {
+		key: resolve(fromDir),
+		pkgName,
+		pkgTarget,
+		programs: rootPrograms,
+		types: checker.types,
+	};
+	const emitTarget = asInternalError(() =>
+		registerPackageUnit(options, { ...link, bundledPackages }),
+	);
+
+	const isStrict = Boolean(options.strict || pkgTarget === "both");
+	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
+		target: pkgTarget,
+		strict: isStrict,
+		natives: options.natives,
+	});
+	const mainJs =
+		emitTarget === "wasm"
+			? wasmMarker(pkgName)
+			: asInternalError(() =>
+					codegen.generateAll(rootPrograms, {
+						isTest: options.isTest ?? false,
+					}),
+				);
+	logWarnings(codegen.warnings);
+
+	const unit = {
+		emitTarget,
+		chunk: {
+			js: mainJs,
+			sourceFiles: programs.map((p) => p._path),
+			sourcesContent: programs.map((p) => p._source),
+			mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
+		},
+		css: codegen.getCss(),
+		warnings: [...checker.warnings, ...codegen.warnings],
+		elemAddrTaken:
+			checker.depElemAddrTaken === true ||
+			programs.some((p) => takesElementAddress(p.decls)),
+		rootPrograms,
+		link,
+		codecs,
+		generatedImports: generatedImports.join("|"),
+		jsonSet: ["js", "wasm"].filter(
+			(t) => options.jsonBuild[t] && !jsonFlags[t],
+		),
+		jsonBefore,
 		programs: driver ? programs.filter((p) => p !== driver) : programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: withOriginalTypeNames(
@@ -1075,10 +1256,15 @@ export function compileFiles(files, options = {}) {
 		reachedTypes: checker.getReachedTypes(),
 		exportedConsts: checker.getExportedConsts(),
 		exportedKinds: checker.getExportedKinds(),
-		sourceFiles: merged.sourceFiles,
-		sourcesContent: merged.sourcesContent,
-		mappings: merged.mappings,
 	};
+	if (options.packageCache)
+		unit.summary = summaryHash({
+			pkgName,
+			target: pkgTarget,
+			elemAddrTaken: unit.elemAddrTaken,
+			...unit,
+		});
+	return unit;
 }
 
 // Parses the in-memory driver source `options.testDriver(programs, target)`
