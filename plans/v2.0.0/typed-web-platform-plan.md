@@ -120,7 +120,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Done when: SimpleFPS-style code can drop its `WebGPUDevice`/`GPUCanvasContext` interfaces and existing unit tests pass
 
 ### Phase 4: Migration and typed globals
-- [ ] Task 4.1: Migrate Go-source stdlib ahead of the flip (former 7.4a)
+- [x] Task 4.1: Migrate Go-source stdlib ahead of the flip (former 7.4a)
   - Files: `stdlib/gom/gom.go`, `stdlib/time/sleep_js.go`
   - Test: `test/unit/builtins/gom.test.js`, `test/unit/builtins/dom.test.js`, `test/unit/stdlib/time.test.js`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: `stdlib/gom/gom.go` (unchanged emitted JS) and `stdlib/time/sleep_js.go` (`setTimeout` integer timeout and `clearTimeout` id) are valid against both untyped and generated global types

@@ -19,7 +19,7 @@ async func Sleep(d Duration) {
 // The Timer type represents a single event. When the Timer expires, the
 // function passed to AfterFunc is called in its own goroutine.
 type Timer struct {
-	id     any
+	id     int
 	f      func()
 	active bool
 }
@@ -29,7 +29,7 @@ func (t *Timer) arm(d Duration) {
 	t.id = setTimeout(func() {
 		t.active = false
 		t.f()
-	}, float64((d+Millisecond/2)/Millisecond))
+	}, int((d+Millisecond/2)/Millisecond))
 }
 
 // AfterFunc waits for the duration to elapse and then calls f. It returns a
