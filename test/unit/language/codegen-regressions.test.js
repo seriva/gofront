@@ -788,3 +788,162 @@ func main() {
 		"(2+3i) (2+2i) 2 1\n",
 	);
 });
+
+section("Whole-value stores in for init and post statements");
+
+const forStoreCase = (
+	name,
+	decls,
+	body,
+	want,
+	assertFn = assertAllTargetsOutput,
+) =>
+	test(name, async () => {
+		await assertFn(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+${decls}
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+forStoreCase(
+	"a for init comma-ok map define runs the map and key calls once",
+	"",
+	`	n := 0
+	k := func() string { n++; return "k" }
+	m := map[string]int{"k": 5}
+	for v, ok := m[k()]; ok; ok = false {
+		fmt.Println(v, ok, n)
+	}`,
+	"5 true 1\n",
+);
+
+forStoreCase(
+	"a for init comma-ok map define of a struct value is a copy",
+	"",
+	`	m := map[string]S{"k": {5}}
+	for v, ok := m["k"]; ok; ok = false {
+		v.N = 9
+		fmt.Println(v, m["k"])
+	}`,
+	"{9} {5}\n",
+);
+
+forStoreCase(
+	"a for init comma-ok map define keeps one variable per iteration",
+	"",
+	`	m := map[string]int{"k": 5}
+	var fs []func() int
+	for v, ok := m["k"]; ok && v < 8; v++ {
+		fs = append(fs, func() int { return v })
+	}
+	fmt.Println(fs[0](), fs[1](), fs[2]())`,
+	"5 6 7\n",
+);
+
+forStoreCase(
+	"a for init comma-ok type assertion define",
+	"",
+	`	var a any = S{4}
+	for v, ok := a.(S); ok; ok = false {
+		fmt.Println(v, ok)
+	}`,
+	"{4} true\n",
+);
+
+forStoreCase(
+	"a for post comma-ok map assignment",
+	"",
+	`	m := map[string]int{"a": 5}
+	var v int
+	var ok bool
+	for i := 0; i < 1; v, ok = m["a"] {
+		i++
+	}
+	fmt.Println(v, ok)`,
+	"5 true\n",
+);
+
+forStoreCase(
+	"a for post comma-ok map assignment into an address-taken struct",
+	"",
+	`	m := map[string]S{"a": {5}}
+	s := S{1}
+	ps := &s
+	var ok bool
+	for i := 0; i < 1; s, ok = m["a"] {
+		i++
+	}
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{5} true true\n",
+	assertJsTargetsOutput,
+);
+
+forStoreCase(
+	"a for post comma-ok type assertion assignment",
+	"",
+	`	var a any = S{6}
+	var s S
+	var ok bool
+	for i := 0; i < 1; s, ok = a.(S) {
+		i++
+	}
+	fmt.Println(s, ok)`,
+	"{6} true\n",
+);
+
+forStoreCase(
+	"a for post tuple store into a struct *p target",
+	"",
+	`	s := S{9}
+	p := &s
+	for i := 0; i < 2; i, *p = i+1, (S{i + 10}) {
+	}
+	fmt.Println(s)`,
+	"{11}\n",
+);
+
+forStoreCase(
+	"a for post store into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	for i := 0; i < 2; i, s = i+1, (S{i + 10}) {
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{11} true\n",
+);
+
+forStoreCase(
+	"a for post single store through a struct *p target",
+	"",
+	`	s := S{9}
+	p := &s
+	for i := 0; i < 2; *p = (S{i + 20}) {
+		i++
+	}
+	fmt.Println(s)`,
+	"{22}\n",
+);
+
+forStoreCase(
+	"a for post single store into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	for i := 0; i < 2; s = (S{i + 20}) {
+		i++
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{22} true\n",
+);

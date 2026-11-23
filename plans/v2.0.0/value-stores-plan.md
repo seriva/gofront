@@ -146,15 +146,15 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Done when: all pass on every target
 
 ### Phase 3: One JS store primitive (root `js-store-target`)
-- [ ] Task 3.1: `_storeInto` and comma-ok stores (V3.4, V3.5, V3.6)
+- [x] Task 3.1: `_storeInto` and comma-ok stores (V3.4, V3.5, V3.6)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/value-semantics.test.js` *Whole-value stores*: V3.4 → `{5} true`, V3.5 → `{6}`, V3.6 (`*p, ok = m["k"]` and `*p, ok = a.(T)`) with struct, array and `int` `T` → `true {5}` / Go's output, with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: passes on `js`/`both`; the comma-ok emitters contain no inline `Object.assign`
-- [ ] Task 3.2: `for ... = range` forms store through `_storeInto` (V3.1–V3.3, slice/map-range siblings)
+- [x] Task 3.2: `for ... = range` forms store through `_storeInto` (V3.1–V3.3, slice/map-range siblings)
   - Files: `src/backend/js/statements.js` (`_emitRangeVar`, `_rangeAssignTemps`, `genIteratorFor`)
   - Test: `test/unit/language/range-func.test.js`: V3.1 → `{5}`, V3.2 → `{2} true`, V3.3 → `[7 8]` with `assertAllTargetsOutput`; `test/unit/language/value-semantics.test.js`: slice/map-range `*p` and generic `*T` siblings with `assertAllTargetsOutput`, and slice/map-range address-taken struct / sliced array siblings with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: all pass on the tested targets
-- [ ] Task 3.3: Stores in `for` init and post contexts (V3.7)
+- [x] Task 3.3: Stores in `for` init and post contexts (V3.7)
   - Files: `src/backend/js/statements.js`
   - Test: `codegen-regressions.test.js`: V3.7 → `5 true 1`; the same comma-ok `=` form in a `for` post; a tuple store with a struct `*p` target in a `for` post
   - Done when: all pass; `grep -n "Object.assign(" src/backend/js/statements.js` lists only `_storeInto`
