@@ -246,7 +246,7 @@ test("a socket does not take a listener with an unrelated parameter", () => {
 
 func main() {}`,
 	);
-	assert(errors.length > 0, "accepted func(int)");
+	assertErrorContains(errors, "as func(dom.Event) void value");
 });
 
 section("web packages — emitted code");

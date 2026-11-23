@@ -296,42 +296,6 @@ function createWebGLMethods(isWebGL2) {
 	return methods;
 }
 
-function createWebGPUMethods() {
-	const queueMethods = new Map();
-	const addQueue = (name, fn) => {
-		queueMethods.set(name, fn);
-		const camel = name[0].toLowerCase() + name.slice(1);
-		if (camel !== name) queueMethods.set(camel, fn);
-	};
-	addQueue("Submit", func([ANY]));
-	addQueue("WriteBuffer", func([ANY, INT, ANY]));
-
-	const deviceMethods = new Map();
-	const addDev = (name, fn) => {
-		deviceMethods.set(name, fn);
-		const camel = name[0].toLowerCase() + name.slice(1);
-		if (camel !== name) deviceMethods.set(camel, fn);
-	};
-	addDev("CreateBuffer", func([ANY], [ANY]));
-	addDev("CreateShaderModule", func([ANY], [ANY]));
-	addDev("CreateRenderPipeline", func([ANY], [ANY]));
-	addDev("CreateComputePipeline", func([ANY], [ANY]));
-	addDev("CreateCommandEncoder", optLast([ANY], [ANY]));
-	addDev("CreateBindGroup", func([ANY], [ANY]));
-	addDev("CreateBindGroupLayout", func([ANY], [ANY]));
-	addDev("CreatePipelineLayout", func([ANY], [ANY]));
-
-	const adapterMethods = new Map();
-	const addAdapt = (name, fn) => {
-		adapterMethods.set(name, fn);
-		const camel = name[0].toLowerCase() + name.slice(1);
-		if (camel !== name) adapterMethods.set(camel, fn);
-	};
-	addAdapt("RequestDevice", optLast([ANY], [ANY]));
-
-	return { queueMethods, deviceMethods, adapterMethods };
-}
-
 export function setupWebGlobals(globals, types) {
 	const arrayBuffer = buildArrayBufferType();
 	const dataView = buildDataViewType(arrayBuffer);
@@ -400,47 +364,4 @@ export function setupWebGlobals(globals, types) {
 	types.set("WebGL2RenderingContext", webgl2Context);
 	globals.defineType("WebGLRenderingContext", webglContext);
 	globals.defineType("WebGL2RenderingContext", webgl2Context);
-
-	// WebGPU types
-	const { queueMethods, deviceMethods, adapterMethods } = createWebGPUMethods();
-	const gpuQueue = {
-		kind: "named",
-		name: "GPUQueue",
-		underlying: {
-			kind: "interface",
-			name: "GPUQueue",
-			fields: new Map(),
-			methods: queueMethods,
-			_isOpen: true,
-		},
-	};
-	const gpuDevice = {
-		kind: "named",
-		name: "GPUDevice",
-		underlying: {
-			kind: "interface",
-			name: "GPUDevice",
-			fields: new Map([["queue", gpuQueue]]),
-			methods: deviceMethods,
-			_isOpen: true,
-		},
-	};
-	const gpuAdapter = {
-		kind: "named",
-		name: "GPUAdapter",
-		underlying: {
-			kind: "interface",
-			name: "GPUAdapter",
-			fields: new Map(),
-			methods: adapterMethods,
-			_isOpen: true,
-		},
-	};
-
-	types.set("GPUQueue", gpuQueue);
-	types.set("GPUDevice", gpuDevice);
-	types.set("GPUAdapter", gpuAdapter);
-	globals.defineType("GPUQueue", gpuQueue);
-	globals.defineType("GPUDevice", gpuDevice);
-	globals.defineType("GPUAdapter", gpuAdapter);
 }

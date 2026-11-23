@@ -1391,7 +1391,7 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 		{ target: pkgTarget, builtins: JS_BUILTIN_CLASSES },
 	);
 	// A local type named after a JS built-in would shadow it in the bundle.
-	// A local type named after a universe type (`GPUDevice`) must not reuse it.
+	// A local type named after a universe type (`WebGL2RenderingContext`) must not reuse it.
 	const foreign = new Set([...JS_BUILTIN_CLASSES, ...universeTypeNames()]);
 	// A local type that shadows a predeclared type (`type int32 = string`)
 	// gets its own name, so `int32` keeps meaning the predeclared type

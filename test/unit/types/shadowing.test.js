@@ -2584,8 +2584,8 @@ test("a generic use of an out-of-scope local type is an unknown type", () => {
 test("a local type named like a browser type leaves that type alone elsewhere", () => {
 	const { errors } = compile(
 		`package main
-func f() { type GPUDevice struct{ X int }; _ = GPUDevice{X: 1} }
-func main() { var d GPUDevice; _ = d.queue }
+func f() { type WebGL2RenderingContext struct{ X int }; _ = WebGL2RenderingContext{X: 1} }
+func main() { var d WebGL2RenderingContext; _ = d.getExtension("x") }
 `,
 		{ target: "js" },
 	);

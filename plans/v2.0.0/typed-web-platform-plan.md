@@ -114,7 +114,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Files: `stdlib/gofront/canvas/canvas.d.ts`, `stdlib/gofront/fetch/fetch.d.ts`, `stdlib/gofront/websocket/websocket.d.ts` (generated)
   - Test: `test/unit/stdlib/web-apis-typed.test.js`: canvas drawing calls without `any`; `var resp fetch.Response` / `resp := (await fetch(url)).(fetch.Response)` (global `fetch` flips in Phase 4) with `resp.ok` and `await resp.text()`; a `websocket.WebSocket` with `send` and a typed listener
   - Done when: the packages come from the generator and emit no runtime code
-- [ ] Task 3.3: `gofront/webgpu`; remove the hand-built GPU types (former 7.3)
+- [x] Task 3.3: `gofront/webgpu`; remove the hand-built GPU types (former 7.3)
   - Files: `stdlib/gofront/webgpu/webgpu.d.ts` (generated), `src/typechecker/stdlib/web.js` (`createWebGPUMethods` and the `GPUQueue`/`GPUDevice`/`GPUAdapter` entries), `src/backend/js/expressions.js` (`WEB_PASCAL_ALIAS_TYPES`)
   - Test: `test/unit/stdlib/webgpu-typed.test.js` (and update `test/unit/types/webgl.test.js` and `test/unit/fixtures/conformance/reject/assign_web_type_names.go` to drop the removed `GPUDevice` cases): `webgpu.CanvasContext`, `webgpu.Buffer`, `webgpu.Texture`, `device.createRenderPipeline(descriptor)` with a dictionary; a test double with only standard lowercase members passes `x.(webgpu.Device)` at run time; a misspelled member fails `gofront check`; `GPUDevice` is an unknown type
   - Done when: SimpleFPS-style code can drop its `WebGPUDevice`/`GPUCanvasContext` interfaces and existing unit tests pass

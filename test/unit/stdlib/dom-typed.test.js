@@ -151,7 +151,7 @@ test("addEventListener rejects a listener with an unrelated parameter", () => {
 }
 
 func main() {}`);
-	assert(errors.length > 0, "accepted func(int)");
+	assertErrorContains(errors, "as func(dom.Event) void value");
 });
 
 test("an event target is reached through Event.target", () => {
