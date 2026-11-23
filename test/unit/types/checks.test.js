@@ -10,6 +10,7 @@ import {
 	assertProgramOutput,
 	assertWasmProgramOutput,
 	compile,
+	compileDir,
 	compileWasm,
 	Lexer,
 	Parser,
@@ -17,6 +18,8 @@ import {
 	section,
 	summarize,
 	test,
+	toCompileResult,
+	withTempDir,
 } from "../helpers.js";
 
 section("Type validation checks");
@@ -2586,6 +2589,69 @@ func main() {
 	);
 	assertErrorContains(errors, "strings.Builder is not a type");
 });
+
+section("Struct literals of another package's types");
+
+const SUB_SRC = `package sub
+
+type S struct {
+	A int
+	b int
+}
+
+type hidden struct{ X int }
+
+type Pub struct{ hidden }
+
+func NewHidden() hidden { return hidden{1} }
+`;
+
+function subErrors(mainBody, target) {
+	return withTempDir(
+		{
+			"sub/sub.go": `//gofront:target ${target}\n${SUB_SRC}`,
+			"main.go": `package main\n\nimport "./sub"\n\nfunc main() {\n\t${mainBody}\n}\n`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)).errors,
+	);
+}
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		[
+			"a positional literal",
+			"_ = sub.S{1, 2}",
+			"implicit assignment to unexported field b in struct literal of type sub.S",
+		],
+		[
+			"a keyed literal",
+			"_ = sub.S{b: 2}",
+			"cannot refer to unexported field b in struct literal of type sub.S",
+		],
+		[
+			"a keyed literal of an unexported embedded field",
+			"_ = sub.Pub{hidden: sub.NewHidden()}",
+			"cannot refer to unexported field hidden in struct literal of type sub.Pub",
+		],
+		[
+			"a positional literal of an unexported embedded field",
+			"_ = sub.Pub{sub.NewHidden()}",
+			"implicit assignment to unexported field hidden in struct literal of type sub.Pub",
+		],
+	]) {
+		test(`${what} cannot set an unexported field of a ${target} package (E5)`, () => {
+			assertErrorContains(subErrors(body, target), want);
+		});
+	}
+
+	test(`a literal setting only exported fields of a ${target} package compiles (E5 control)`, () => {
+		const errors = subErrors(
+			"_ = sub.S{A: 1}\n\t_ = sub.Pub{}\n\t_ = sub.S{}",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

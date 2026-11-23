@@ -234,6 +234,8 @@ The compiler (`src/compiler.js`) orchestrates this:
    and local GoFront sub-packages (`import "./subpkg"`) which are compiled recursively.
 3. Run the type checker across all ASTs as a single unit — types, functions, and
    variables declared in one file are visible in all other files of the same package.
+   Imports are the exception: as in Go, an import applies only to the file that
+   declares it.
 4. Generate code for each AST and concatenate. Sub-package code is inlined as a preamble.
 
 ```
@@ -256,6 +258,69 @@ func main() {
     x := geometry.Add(1, 2)   // geometry package inlined into the bundle
 }
 ```
+
+### Imports belong to a file
+
+Each file lists the packages it uses. A file that uses `strings` without importing it
+reports `Undefined: 'strings'`, even when a sibling file imports it, and an import a
+file never uses is an error, for an npm package without types as well as for a
+standard-library or local one:
+
+```go
+// a.go
+package main
+
+import "strings"
+
+func Upper(s string) string { return strings.ToUpper(s) }
+
+// b.go
+package main
+
+func Lower(s string) string { return strings.ToLower(s) } // Undefined: 'strings'
+```
+
+A package exports only the names it declares: a name it imports, or dot-imports from
+another package, is not reachable through it (`sub.Leaf` is an error when `sub` only
+imports `leaf`). Import the package directly where you need it.
+
+### Visibility between packages
+
+As in Go, a name is exported when it starts with an uppercase letter (any Unicode
+uppercase letter; `_` and `__name` are not). Another package can use only exported
+names, on every target (`js`, `wasm` and `both`):
+
+```go
+// util/util.go
+package util
+
+type Rec struct {
+    X int
+    m int
+}
+
+func New(n int) Rec { return Rec{X: n, m: n} }
+func (r Rec) twice() int { return r.m * 2 }
+func secret() int { return 1 }
+```
+
+```go
+// main.go
+util.secret()           // name secret not exported by package util
+var r util.Rec = util.New(7)
+r.m                     // r.m undefined (cannot refer to unexported field m)
+r.twice()               // r.twice undefined (cannot refer to unexported method twice)
+util.Rec{1, 2}          // implicit assignment to unexported field m in struct literal of type util.Rec
+util.Rec{m: 2}          // cannot refer to unexported field m in struct literal of type util.Rec
+```
+
+The same applies to unexported types (`var x util.secret`), to fields and methods that
+reach you through an embedded struct or interface, to struct types written inline, and
+to method expressions (`util.Rec.twice`). An exported field or method promoted through
+an unexported embedded struct stays usable. Export the name, or move the code into the
+package that owns it. A dot import (`import . "./util"`) binds only the exported
+names, so `secret()` is undefined and `var b box` is an unknown type there. A package's own files, its `_test.go` files and the code the
+compiler generates for it can use its unexported names.
 
 ---
 

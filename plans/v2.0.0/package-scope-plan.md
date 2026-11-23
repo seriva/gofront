@@ -136,15 +136,15 @@ Root: no selector, qualified type lookup, method expression or composite literal
   - Done when: all pass; no `Unknown struct in CompositeLit` from the emitter
 
 ### Phase 3: Export visibility on every target (root `export-visibility`)
-- [ ] Task 3.1: Package-level names and types use Go's exported rule (E1, E3 names, E6)
+- [x] Task 3.1: Package-level names and types use Go's exported rule (E1, E3 names, E6)
   - Files: `src/typechecker/resolve.js` (update `isExported` to `/^\p{Lu}/u`, apply in `_namespaceMemberError` and `_resolveQualifiedType`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `util.__Answer()`, `var x util.secret`, `util.secret{}`, and `var g util.box[int]` from `js`, `both` and `wasm` packages → `assertErrorContains(…, "not exported by package util")`; `util.Ä()` stays exported; update existing assertion in `test/unit/compiler/imports.test.js:227` from `"cannot refer to unexported name"` to `"not exported by package"`
   - Done when: all pass
-- [ ] Task 3.2: Fields, methods and method expressions of foreign types (E2, E3 methods, E4, E7)
+- [x] Task 3.2: Fields, methods and method expressions of foreign types (E2, E3 methods, E4, E7)
   - Files: `src/typechecker/index.js` (stamp `_pkgId` on declared types/methods; preserve originating `_pkgId` on promoted fields/methods in `_offerStructEmbed` and `offerInterfaceMethods`), `src/typechecker/resolve.js` (stamp `_pkgId` on struct/interface literals; preserve `_pkgId` in `_resolveStructType` and `_mergeInterfaceEmbed`; `_checkForeignMember` in `fieldType`, `_fieldTypeStruct` removing the superseded `strings.*`/`bytes.*` `_`-prefix special case at `:1253-1262`, and `_fieldTypeInterface`), `src/typechecker/expressions.js` (`_checkForeignMember` in `_checkMethodExprSelector`)
   - Test: `test/unit/types/shadowing.test.js`: `util.New(7).twice()`, `util.New(7).m`, `util.N` unexported method (`n.twice()`, `util.N.twice`), `util.I` unexported method (`x.secret()`, `LocalI{ util.I }`, `LocalS{ util.I }`), `util.Make().a` (foreign anonymous struct), `Local{util.Rec}` accessing `l.m`/`l.twice()`, `util.Pub{}.hidden`, and `util.Rec.twice` from each target → `cannot refer to unexported`; control: promoted exported field/method through an embedded unexported foreign struct (`util.Pub{}.X`) still compiles
   - Done when: all pass
-- [ ] Task 3.3: Struct literals setting foreign unexported fields (E5); fix call sites and docs
+- [x] Task 3.3: Struct literals setting foreign unexported fields (E5); fix call sites and docs
   - Files: `src/typechecker/expressions.js` (composite literal keyed and positional checks for regular and embedded foreign fields), plus any `example/`/`stdlib/` file the rule rejects, plus `docs/usage.md`, `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Test: `test/unit/types/checks.test.js` with `compileHybridProject`: `sub.S{1, 2}`, `sub.S{b: 2}`, and `sub.Pub{hidden: …}` → `implicit assignment to unexported field` / `cannot refer to unexported field`; `sub.S{A: 1}` compiles; `npm run check` and the stdlib build pass; `docs/` updated for file-scoped imports, unused npm imports, and package visibility
   - Done when: all pass; the release note lists any migrated call site

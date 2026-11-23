@@ -231,7 +231,7 @@ test("unexported function from another package is rejected", () => {
 	} catch (e) {
 		errMsg = e.message;
 	}
-	assertContains(errMsg, "cannot refer to unexported name");
+	assertContains(errMsg, "not exported by package");
 });
 
 test("uppercase package member access is allowed", () => {

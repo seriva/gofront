@@ -191,6 +191,13 @@ import.
 Linked `wasm` packages share one namespace: a top-level name declared in two of them is a
 compile error.
 
+Visibility follows Go on every target: only exported (uppercase) names, fields and methods
+of a `wasm` package are on the facade, and Go code in another package cannot use the
+unexported ones either, so the compiler rejects a use that the facade could not serve
+(`name secret not exported by package util`) instead of failing when the program runs.
+A type from an npm import cannot be named in a `wasm` or `both` package: `var x zzz.T` for
+an untyped import reports `'zzz.T' is only available in js packages`.
+
 ### Type marshalling
 
 | Go type | Crossing JS → WASM / WASM → JS |

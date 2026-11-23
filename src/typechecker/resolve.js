@@ -10,12 +10,14 @@ import {
 	BASIC_TYPES,
 	COMPARABLE,
 	DECLARED_ANY,
+	declPackages,
 	defaultType,
 	displayTypeName,
 	identical,
 	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
+	isExported,
 	isMethodPromotedOverField,
 	isTypedArraySlice,
 	Scope,
@@ -177,6 +179,8 @@ const SUBSTITUTE_DISPATCH = {
 		async: type.async,
 		// A method copied from a generic embedded struct keeps its receiver kind.
 		...(Object.hasOwn(type, "_ptrRecv") && { _ptrRecv: type._ptrRecv }),
+		// ... and the package that declared it.
+		...(type._pkgId !== undefined && { _pkgId: type._pkgId }),
 	}),
 	struct: (s, type, map) => {
 		const fields = new Map();
@@ -189,6 +193,7 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
+			...(type._fieldOwner && { _fieldOwner: type._fieldOwner }),
 			// The JSON codecs read the field types from here.
 			_structFields: type._structFields?.map((f) => ({
 				...f,
@@ -553,6 +558,16 @@ export const resolveMethods = {
 		return bad ?? this._visibleType(`${qual}.${member}`, scope);
 	},
 
+	_errNotExported(pkg, name, node) {
+		return this.err(`name ${name} not exported by package ${pkg}`, node);
+	},
+
+	// Whether `name`, declared by another package, is hidden from this one. The
+	// generated Go (see `_ungated`) reaches into any package it names.
+	_unexportedForeign(name) {
+		return this._ungated === 0 && name.length > 0 && !isExported(name);
+	},
+
 	_qualifierNotAType(qual, member, node, scope, literal) {
 		if (this._ungated > 0) return null;
 		const here = scope ?? this.globals;
@@ -564,6 +579,8 @@ export const resolveMethods = {
 			return this.target === "wasm" || this.target === "both"
 				? this._errJsOnly(`${qual}.${member}`, node)
 				: null;
+		if (bound.type?._gofront && this._unexportedForeign(member))
+			return this._errNotExported(qual, member, node);
 		const isValue = !["pkg", "type"].includes(bound.kind);
 		if (isValue && (literal || owner !== this.universe))
 			return this.err(`${qual}.${member} is not a type`, node);
@@ -787,6 +804,16 @@ export const resolveMethods = {
 	// file that declares it, or with every import name visible when another
 	// package declares it.
 	_inDeclContext(declNode, fn) {
+		const ownerPkg = this._ownerPkg;
+		this._ownerPkg = declPackages.get(declNode) ?? this._pkgId;
+		try {
+			return this._inDeclFile(declNode, fn);
+		} finally {
+			this._ownerPkg = ownerPkg;
+		}
+	},
+
+	_inDeclFile(declNode, fn) {
 		const file = this._declFiles.get(declNode);
 		if (file === undefined) {
 			this._ungated++;
@@ -818,6 +845,7 @@ export const resolveMethods = {
 
 	_resolveStructType(node, scope) {
 		const fields = new Map();
+		const owners = new Map();
 		const embeds = [];
 		const structFields = [];
 		for (const f of node.fields) {
@@ -840,19 +868,31 @@ export const resolveMethods = {
 				)
 					.split(".")
 					.pop();
-				if (embedName) fields.set(embedName, ft);
+				if (embedName) {
+					fields.set(embedName, ft);
+					owners.set(embedName, this._ownerPkg);
+				}
 				const base = this._deepUnderlying(inner);
 				if (base?.kind === "struct") {
-					for (const [k, v] of base.fields.entries()) fields.set(k, v);
+					for (const [k, v] of base.fields.entries()) {
+						fields.set(k, v);
+						const owner = base._fieldOwner?.get(k);
+						if (owner === undefined) owners.delete(k);
+						else owners.set(k, owner);
+					}
 				}
 				embeds.push(ft);
 			} else {
-				for (const n of f.names) fields.set(n, ft);
+				for (const n of f.names) {
+					fields.set(n, ft);
+					owners.set(n, this._ownerPkg);
+				}
 			}
 		}
 		return {
 			kind: "struct",
 			fields,
+			_fieldOwner: owners,
 			methods: new Map(),
 			_embeds: embeds,
 			_structFields: structFields,
@@ -869,7 +909,7 @@ export const resolveMethods = {
 				: [VOID];
 			const isVariadic =
 				m.params.length > 0 && m.params[m.params.length - 1].variadic;
-			const mType = { kind: "func", params, returns };
+			const mType = { kind: "func", params, returns, _pkgId: this._ownerPkg };
 			if (isVariadic) mType.variadic = true;
 			methods.set(m.name, mType);
 		}
@@ -1595,7 +1635,7 @@ export const resolveMethods = {
 		const param = this._typeParamOperand(baseType, field);
 		if (param) return this._fieldTypeTypeParam(param, baseType, field, node);
 		if (baseType.kind === "named" && baseType.methods?.has(field))
-			return baseType.methods.get(field);
+			return this._methodOf(baseType.methods.get(field), field, node);
 		const base = this._deepUnderlying(baseType);
 		return this._dispatchFieldType(base, baseType, field, node);
 	},
@@ -1641,7 +1681,8 @@ export const resolveMethods = {
 		const c = this._deepUnderlying(this.resolveType(param.constraint));
 		if (c?._tainted || c?._isOpen) return ANY;
 		if (baseType === param && c?.kind === "interface") {
-			if (c.methods?.has(field)) return c.methods.get(field);
+			if (c.methods?.has(field))
+				return this._methodOf(c.methods.get(field), field, node);
 		}
 		return this._errUndefinedSelector(baseType, field, node);
 	},
@@ -1681,23 +1722,21 @@ export const resolveMethods = {
 
 	_fieldTypeStruct(base, baseType, field, node) {
 		if (base.fields?.has(field) && isMethodPromotedOverField(base, field))
-			return base.methods.get(field);
+			return this._methodOf(base.methods.get(field), field, node);
 		if (base.fields?.has(field)) {
 			if (isAmbiguousFieldSelector(base, field))
 				return this._errAmbiguousSelector(baseType, field, node);
-			if (
-				field.startsWith("_") &&
-				(baseType?.name?.startsWith("strings.") ||
-					baseType?.name?.startsWith("bytes."))
-			) {
-				return this.err(
-					`Cannot refer to unexported field '${field}' on ${typeStr(baseType)}`,
+			return (
+				this._foreignMember(
+					base._fieldOwner?.get(field),
+					field,
+					"field",
 					node,
-				);
-			}
-			return base.fields.get(field);
+				) ?? base.fields.get(field)
+			);
 		}
-		if (base.methods?.has(field)) return base.methods.get(field);
+		if (base.methods?.has(field))
+			return this._methodOf(base.methods.get(field), field, node);
 		if (isAmbiguousPromotion(base, field))
 			return this._errAmbiguousSelector(baseType, field, node);
 		const typeName = baseType?.name || base.name;
@@ -1724,6 +1763,25 @@ export const resolveMethods = {
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},
 
+	// The method type `mType` of a selector `x.field`, or the error when another
+	// package declares it and does not export it.
+	_methodOf(mType, field, node) {
+		return this._foreignMember(mType?._pkgId, field, "method", node) ?? mType;
+	},
+
+	// The error for `x.field` when `field` (a "field" or a "method") was
+	// declared by the package `owner`, another package, and is unexported
+	// there; null when this package may use it, or `owner` is not known (types
+	// the checker was given rather than read from Go source).
+	_foreignMember(owner, field, kind, node) {
+		if (owner === undefined || owner === this._pkgId) return null;
+		if (!this._unexportedForeign(field)) return null;
+		return this.err(
+			`${exprText(node?.expr)}.${field} undefined (cannot refer to unexported ${kind} ${field})`,
+			node,
+		);
+	},
+
 	_errAmbiguousSelector(baseType, field, node) {
 		const text = exprText(node?.expr);
 		const recv = text === "expression" ? typeStr(baseType) : text;
@@ -1731,7 +1789,8 @@ export const resolveMethods = {
 	},
 
 	_fieldTypeInterface(base, baseType, field, node) {
-		if (base.methods?.has(field)) return base.methods.get(field);
+		if (base.methods?.has(field))
+			return this._methodOf(base.methods.get(field), field, node);
 		if (base.fields?.has(field)) return base.fields.get(field);
 		const typeName = baseType?.name || base.name;
 		if (typeName) {
@@ -1806,11 +1865,8 @@ export const resolveMethods = {
 	// An error for `field` when the namespace cannot offer it to this package:
 	// an unexported name, or a member of a `js` file in a wasm or both package.
 	_namespaceMemberError(base, field, node) {
-		if (base._gofront && field.length > 0 && field[0] >= "a" && field[0] <= "z")
-			return this.err(
-				`cannot refer to unexported name ${base.name}.${field}`,
-				node,
-			);
+		if (base._gofront && this._unexportedForeign(field))
+			return this._errNotExported(base.name, field, node);
 		const wasm = this.target === "wasm" || this.target === "both";
 		return wasm && base._jsOnly?.has(field)
 			? this._errJsOnly(`${base.name}.${field}`, node)
@@ -1869,12 +1925,6 @@ export const resolveMethods = {
 		return resolveJsonFields(structType);
 	},
 };
-
-function isExported(name) {
-	if (!name || typeof name !== "string") return false;
-	const code = name.charCodeAt(0);
-	return code >= 65 && code <= 90;
-}
 
 function _processJsonField(
 	f,

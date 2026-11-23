@@ -80,6 +80,7 @@ import {
 } from "./typechecker/index.js";
 import {
 	BASIC_TYPES,
+	isExported,
 	JS_BUILTIN_CLASSES,
 	TypeCheckError,
 	UnsupportedError,
@@ -702,13 +703,21 @@ function resolveImports(
 
 				if (alias === "_") continue;
 				if (alias === ".") {
-					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
-						external: false,
-						consts: dep.exportedConsts,
-						kinds: dep.exportedKinds,
-						file: p._filename ?? null,
-						reached: dep.reachedTypes,
-					});
+					// A dot import binds only what the package exports.
+					const bind = p._generated ? (m) => m : exportedEntries;
+					checker.addDefinitions(
+						bind(dep.exportedTypes),
+						bind(dep.exportedSymbols),
+						{
+							external: false,
+							consts: bind(dep.exportedConsts),
+							kinds: dep.exportedKinds,
+							file: p._filename ?? null,
+							reached: p._generated
+								? dep.reachedTypes
+								: withUnexportedTypes(dep),
+						},
+					);
 					continue;
 				}
 				const nameUsed = alias ?? dep.pkgName;
@@ -727,6 +736,19 @@ function resolveImports(
 			}
 		}
 	}
+}
+
+// The types `dep` reaches (table only) plus its unexported ones: a dot import
+// does not bind them, but the importer's generated Go names the unexported
+// type of a value an exported function returns.
+function withUnexportedTypes(dep) {
+	const hidden = [...dep.exportedTypes].filter(([name]) => !isExported(name));
+	return new Map([...hidden, ...dep.reachedTypes]);
+}
+
+// The entries of `map` whose name is exported (Go's export rule).
+function exportedEntries(map) {
+	return new Map([...map].filter(([name]) => isExported(name)));
 }
 
 // ── Main entry points ─────────────────────────────────────────
