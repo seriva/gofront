@@ -1,7 +1,7 @@
 # JS Dead-Code Elimination — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-23)  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 4) on 2026-11-17, re-probed that day. Starts after [`incremental-builds-plan.md`](incremental-builds-plan.md): extends its `PackageCache` (which memoizes `stdlibJs` by reached decl set) to memoize pruned user/stdlib JS chunks and their helper sets by reached decl + kept-method set. Holds the deferred size work of `../v1.9.2/release-bundle-fixes-plan.md` and the shared runtime helpers of `../v1.9.3/js-codegen-fixes-plan.md`.  
 **Release note:** JavaScript bundles leave out functions, types and methods your program never uses, and each runtime helper appears once per bundle, so apps download less code.  
