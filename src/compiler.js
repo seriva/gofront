@@ -80,6 +80,7 @@ import {
 } from "./typechecker/index.js";
 import {
 	BASIC_TYPES,
+	isExported,
 	JS_BUILTIN_CLASSES,
 	TypeCheckError,
 	UnsupportedError,
@@ -702,13 +703,19 @@ function resolveImports(
 
 				if (alias === "_") continue;
 				if (alias === ".") {
-					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
-						external: false,
-						consts: dep.exportedConsts,
-						kinds: dep.exportedKinds,
-						file: p._filename ?? null,
-						reached: dep.reachedTypes,
-					});
+					// A dot import binds only what the package exports.
+					const bind = p._generated ? (m) => m : exportedEntries;
+					checker.addDefinitions(
+						bind(dep.exportedTypes),
+						bind(dep.exportedSymbols),
+						{
+							external: false,
+							consts: bind(dep.exportedConsts),
+							kinds: dep.exportedKinds,
+							file: p._filename ?? null,
+							reached: dep.reachedTypes,
+						},
+					);
 					continue;
 				}
 				const nameUsed = alias ?? dep.pkgName;
@@ -727,6 +734,11 @@ function resolveImports(
 			}
 		}
 	}
+}
+
+// The entries of `map` whose name is exported (Go's export rule).
+function exportedEntries(map) {
+	return new Map([...map].filter(([name]) => isExported(name)));
 }
 
 // ── Main entry points ─────────────────────────────────────────

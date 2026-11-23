@@ -318,7 +318,8 @@ The same applies to unexported types (`var x util.secret`), to fields and method
 reach you through an embedded struct or interface, to struct types written inline, and
 to method expressions (`util.Rec.twice`). An exported field or method promoted through
 an unexported embedded struct stays usable. Export the name, or move the code into the
-package that owns it. A package's own files, its `_test.go` files and the code the
+package that owns it. A dot import (`import . "./util"`) binds only the exported
+names, so `secret()` is undefined and `var b box` is an unknown type there. A package's own files, its `_test.go` files and the code the
 compiler generates for it can use its unexported names.
 
 ---

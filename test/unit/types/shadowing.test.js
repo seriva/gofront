@@ -1481,51 +1481,51 @@ func Main() int { return __u.Answer() + __u.V }
 	assertEqual(mod.Main(), 50);
 });
 
-section("Dot-imported types that need a rename-safe name");
+section("Dot-imported exported types");
 
 const DOT_TYPES_UTIL = `package __u
 
-type __S struct{ B int }
+type S struct{ B int }
 
-type __G[X any] struct{ V X }
+type G[X any] struct{ V X }
 
-func (g __G[X]) Pick() X { return g.V }
+func (g G[X]) Pick() X { return g.V }
 
-func __Answer() int { return 42 }
+func Answer() int { return 42 }
 
-var __V = 8
+var V = 8
 `;
 
 for (const [label, body, want] of [
 	[
-		"composite literal, assertion and new of a __ type",
-		`	s := __S{B: 5}
+		"composite literal, assertion and new of an exported type",
+		`	s := S{B: 5}
 	var a any = s
-	_, ok := a.(__S)
-	p := new(__S)
+	_, ok := a.(S)
+	p := new(S)
 	if !ok {
 		return -1
 	}
-	return s.B + p.B + __Answer() + __V`,
+	return s.B + p.B + Answer() + V`,
 		55,
 	],
 	[
 		"a variable that shares its name with the dot-imported type",
-		`	__S := __S{42}
-	return __S.B`,
+		`	S := S{42}
+	return S.B`,
 		42,
 	],
 	[
-		"a generic __ type",
-		`	g := __G[int]{V: 9}
+		"a generic exported type",
+		`	g := G[int]{V: 9}
 	return g.Pick()`,
 		9,
 	],
 	[
 		"type switch case and conversion of dot-imported types",
-		`	var a any = __S{B: 3}
+		`	var a any = S{B: 3}
 	switch v := a.(type) {
-	case __S:
+	case S:
 		return v.B
 	}
 	return -1`,
@@ -3320,6 +3320,63 @@ for (const target of ["js", "both", "wasm"]) {
 		const errors = foreignErrors(
 			FOREIGN_NAMES_UTIL,
 			"func main() {\n\t_ = util.Ä()\n\t_ = util.Answer()\n}\n",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
+
+section("Package visibility: dot imports bind exported names only");
+
+// Compiles `main.go` (importing `./util` with `.`) with `util` declared as
+// `utilSrc` for the given target; returns the compile errors.
+function dotErrors(utilSrc, mainBody, target) {
+	return withTempDir(
+		{
+			"util/util.go": `//gofront:target ${target}\npackage util\n\n${utilSrc}`,
+			"main.go": `package main\n\nimport . "./util"\n\n${mainBody}`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)).errors,
+	);
+}
+
+const DOT_UTIL = `
+const hiddenC = 1
+
+const Shown = 2
+
+type box struct{ N int }
+
+type Boxed[T any] struct{ V T }
+
+type hiddenG[T any] struct{ v T }
+
+func secret() int { return 1 }
+
+func Pub() int { return Shown }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		["function", "_ = secret()", "Undefined: 'secret'"],
+		["type", "var b box\n\t_ = b", "Unknown type 'box'"],
+		["constant", "_ = hiddenC", "Undefined: 'hiddenC'"],
+		["generic type", "var g hiddenG[int]\n\t_ = g", "Unknown type 'hiddenG'"],
+	]) {
+		test(`a dot import of a ${target} package does not bind its unexported ${what}`, () => {
+			const errors = dotErrors(
+				DOT_UTIL,
+				`func main() {\n\t${body}\n}\n`,
+				target,
+			);
+			assertErrorContains(errors, want);
+		});
+	}
+
+	test(`a dot import of a ${target} package binds its exported names`, () => {
+		const errors = dotErrors(
+			DOT_UTIL,
+			"func main() {\n\tvar g Boxed[int]\n\t_ = g\n\tprintln(Pub(), Shown)\n}\n",
 			target,
 		);
 		assertEqual(errors.length, 0);
