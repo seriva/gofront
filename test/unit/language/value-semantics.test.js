@@ -1799,3 +1799,114 @@ storeCase(
 	"{3} true {4} true\n",
 	assertAllTargetsOutput,
 );
+
+section("Whole-value stores from calls and through array pointers");
+
+const PAIRS = `func pairS() (S, bool)      { return S{5}, true }
+func pairA() ([2]int, bool) { return [2]int{7, 8}, true }`;
+
+storeCase(
+	"a multi-value call into an address-taken struct updates it in place",
+	PAIRS,
+	`	s := S{1}
+	ps := &s
+	var ok bool
+	s, ok = pairS()
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{5} true true\n",
+);
+
+storeCase(
+	"a multi-value call into a sliced array updates the slice view",
+	PAIRS,
+	`	var arr [2]int
+	sl := arr[:]
+	var ok bool
+	arr, ok = pairA()
+	fmt.Println(sl, ok)`,
+	"[7 8] true\n",
+);
+
+storeCase(
+	"a multi-value call into an address-taken field and a map element stores both",
+	`func pairSI() (S, int) { return S{5}, 3 }`,
+	`	type W struct{ In S }
+	var w W
+	pin := &w.In
+	m := map[string]int{}
+	w.In, m["a"] = pairSI()
+	fmt.Println(*pin, m)`,
+	"{5} map[a:3]\n",
+);
+
+storeCase(
+	"a for post statement storing a multi-value call updates in place",
+	PAIRS,
+	`	var arr [2]int
+	sl := arr[:]
+	u := S{1}
+	pu := &u
+	var ok bool
+	for i := 0; i < 1; arr, ok = pairA() {
+		i++
+	}
+	fmt.Println(sl, ok)
+	for i := 0; i < 1; u, ok = pairS() {
+		i++
+	}
+	fmt.Println(*pu, pu == &u, ok)`,
+	"[7 8] true\n{5} true true\n",
+);
+
+storeCase(
+	"a multi-value call through *p of an array updates the slice view",
+	PAIRS,
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	p := &arr
+	var ok bool
+	*p, ok = pairA()
+	fmt.Println(sl, ok)`,
+	"[7 8] true\n",
+);
+
+storeCase(
+	"an assignment through *p of an array updates the slice view",
+	"type A [2]int",
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	p := &arr
+	*p = [2]int{3, 4}
+	fmt.Println(sl, arr)
+	var na A
+	nsl := na[:]
+	pn := &na
+	*pn = A{1, 1}
+	fmt.Println(nsl)
+	b := [2]int{5, 6}
+	*p = b
+	b[0] = 0
+	fmt.Println(sl, b)
+	*p, *pn = [2]int{2, 2}, A{3, 3}
+	fmt.Println(sl, nsl)`,
+	"[3 4] [3 4]\n[1 1]\n[5 6] [0 6]\n[2 2] [3 3]\n",
+);
+
+storeCase(
+	"a comma-ok map read, type assertion and range through *p of an array update the slice view",
+	"",
+	`	arr := [2]int{1, 2}
+	sl := arr[:]
+	p := &arr
+	m := map[string][2]int{"k": {5, 6}}
+	var ok bool
+	*p, ok = m["k"]
+	fmt.Println(sl, ok)
+	var a any = [2]int{7, 8}
+	*p, ok = a.([2]int)
+	fmt.Println(sl, ok)
+	for _, *p = range [][2]int{{9, 10}} {
+	}
+	fmt.Println(sl)`,
+	"[5 6] true\n[7 8] true\n[9 10]\n",
+);

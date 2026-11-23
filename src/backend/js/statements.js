@@ -1119,6 +1119,10 @@ export const statementGenMethods = {
 	// A struct or array target whose storage must keep its identity: a pointer
 	// or slice taken from it sees the stored value.
 	_isStableStore(l) {
+		// `*p` of an array pointer: the pointee array keeps its identity, so
+		// every slice view of it sees the stored elements.
+		if (l.kind === "UnaryExpr" && l.op === "*")
+			return this._aggregateBase(l._type)?.kind === "array";
 		if (l.kind === "IndexExpr" && l._mapValueType) return false;
 		if (
 			l.kind !== "Ident" &&
@@ -1141,12 +1145,14 @@ export const statementGenMethods = {
 		return u?.kind === "slice" && !isTypedArraySlice(l.expr._type);
 	},
 
-	// `a, b = x, y` where a target is stored in place: every right-hand value
-	// is evaluated (and copied) first, then each target is assigned in order.
+	// `a, b = x, y` (or `a, b = f()`) where a target is stored in place: every
+	// right-hand value is evaluated (and copied) first, then each target is
+	// assigned in order.
 	_isStableTupleAssign(stmt) {
+		if (stmt.op !== "=" || stmt.lhs.length < 2) return false;
+		if (stmt.rhs.length === 1)
+			return stmt.lhs.some((l) => this._isStableStore(l));
 		return (
-			stmt.op === "=" &&
-			stmt.lhs.length > 1 &&
 			stmt.rhs.length === stmt.lhs.length &&
 			stmt.lhs.some((l, i) => this._isStableTarget(l, stmt.rhs[i]))
 		);
@@ -1160,11 +1166,18 @@ export const statementGenMethods = {
 			for (const l of hoisted?.lines ?? []) this.line(l);
 			const base = (this._tmpCounter ?? 0) + 1;
 			this._tmpCounter = base + stmt.lhs.length;
-			const val = (i) => `__s${base + i}`;
 			const dst = (i) => `__d${base + i}`;
-			stmt.rhs.forEach((r, i) => {
-				this.line(`const ${val(i)} = ${this.genValueExpr(r)};`);
-			});
+			let val = (i) => `__s${base + i}`;
+			if (stmt.rhs.length === 1) {
+				// One multi-value right-hand side: bind its tuple once.
+				const tuple = `__s${base}`;
+				this.line(`const ${tuple} = ${this.genExpr(stmt.rhs[0])};`);
+				val = (i) => `${tuple}[${i}]`;
+			} else {
+				stmt.rhs.forEach((r, i) => {
+					this.line(`const ${val(i)} = ${this.genValueExpr(r)};`);
+				});
+			}
 			// Every target operand is evaluated before the first store.
 			targets.forEach((t, i) => {
 				if (t.kind !== "stable") return;
@@ -1215,7 +1228,8 @@ export const statementGenMethods = {
 	// `_storeTarget`.  A
 	// blank target stores nothing; a `*p` of a struct (or of a type parameter
 	// that is one) copies into the pointee; an address-taken or sliced struct
-	// or array is copied element by element into its existing storage; any
+	// or array (and the array behind a `*p`) is copied element by element into
+	// its existing storage; any
 	// other target is assigned.  A plain store keeps `src` itself, so the
 	// caller passes a fresh copy of an aggregate there.
 	_storeInto(target, src) {
