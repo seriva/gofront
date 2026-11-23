@@ -835,10 +835,6 @@ export const statementGenMethods = {
 			this._genCompoundWithCall(stmt);
 			return;
 		}
-		if (this._isComplexCompoundAssign(stmt)) {
-			this._genComplexCompoundAssign(stmt);
-			return;
-		}
 		if (stmt._commaOkMap) {
 			this._genCommaOkMapIndex(stmt, stmt.rhs[0], false);
 			return;
@@ -875,10 +871,13 @@ export const statementGenMethods = {
 			return;
 		}
 		const paired = stmt.rhs.length === stmt.lhs.length && stmt.op === "=";
+		const complexOp = this._isComplexCompoundAssign(stmt);
 		const rhs = stmt.rhs.map((e, i) =>
 			paired && stmt.lhs[i].name !== "_"
 				? this.genValueExpr(e)
-				: this.genExpr(e),
+				: complexOp
+					? this._genComplexOperand(e)
+					: this.genExpr(e),
 		);
 		const hoisted = this._hoistLhsOperands(stmt, this._inForPost);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
@@ -917,22 +916,35 @@ export const statementGenMethods = {
 				const is64Val = is64BitInt(stmt.lhs[0]._mapValueType);
 				let rhsVal = active[0].r;
 				if (is64Val) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
-				const rhsExpr = is64Val
-					? this._gen64BitBinary(
-							binOp,
-							`(__m[__k] ?? ${zero})`,
-							rhsVal,
-							stmt.lhs[0]._mapValueType,
-						)
-					: `(__m[__k] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
-				const rhsExprDirect = is64Val
-					? this._gen64BitBinary(
-							binOp,
-							`(${base}[${idx}] ?? ${zero})`,
-							rhsVal,
-							stmt.lhs[0]._mapValueType,
-						)
-					: `(${base}[${idx}] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
+				const complexVal = complexOp
+					? (read) =>
+							this._genComplexArith(
+								binOp,
+								read,
+								rhsVal,
+								isComplex64(stmt.lhs[0]._type),
+							)
+					: null;
+				const rhsExpr = complexVal
+					? complexVal(`(__m[__k] ?? ${zero})`)
+					: is64Val
+						? this._gen64BitBinary(
+								binOp,
+								`(__m[__k] ?? ${zero})`,
+								rhsVal,
+								stmt.lhs[0]._mapValueType,
+							)
+						: `(__m[__k] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
+				const rhsExprDirect = complexVal
+					? complexVal(`(${base}[${idx}] ?? ${zero})`)
+					: is64Val
+						? this._gen64BitBinary(
+								binOp,
+								`(${base}[${idx}] ?? ${zero})`,
+								rhsVal,
+								stmt.lhs[0]._mapValueType,
+							)
+						: `(${base}[${idx}] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
 				if (
 					this._hasCallExpr(stmt.lhs[0].expr) ||
 					this._hasCallExpr(stmt.lhs[0].index)
@@ -945,6 +957,10 @@ export const statementGenMethods = {
 						`${this._genMapWriteBase(base)}[${idx}] = ${rhsExprDirect};`,
 					);
 				}
+				return;
+			}
+			if (complexOp) {
+				this._genComplexCompoundStore(stmt, active[0]);
 				return;
 			}
 			const is64 = is64BitInt(stmt.lhs[0]._type);
@@ -983,15 +999,35 @@ export const statementGenMethods = {
 		}
 	},
 
+	// Complex `target op= rhs`: the operator is `_genComplexArith`, the read
+	// and the store use the same generated target.
+	_genComplexCompoundStore(stmt, { l, r }) {
+		const baseOp = stmt.op.slice(0, -1);
+		if (!["+", "-", "*", "/"].includes(baseOp))
+			throw new Error(
+				`unsupported complex compound assignment operator: ${stmt.op}`,
+			);
+		const result = this._genComplexArith(
+			baseOp,
+			l,
+			r,
+			isComplex64(stmt.lhs[0]._type),
+		);
+		this.line(`${l} = ${result};`);
+	},
+
 	// `x op= f()` where `f` may change `x`: Go runs the call before it reads
-	// the target (`x = x op f()`), so the call's value is bound first.
+	// the target (`x = x op f()`), so the call's value is bound first.  A
+	// complex target that contains a call is bound the same way: the complex
+	// operator reads the target as well as storing to it.
 	_isCompoundWithCall(stmt) {
 		return (
 			stmt.op !== "=" &&
 			stmt.op !== ":=" &&
 			stmt.lhs.length === 1 &&
 			stmt.rhs.length === 1 &&
-			hasCallOrReceive(stmt.rhs)
+			(hasCallOrReceive(stmt.rhs) ||
+				(isComplex(stmt.lhs[0]._type) && hasCallOrReceive(stmt.lhs)))
 		);
 	},
 
@@ -1239,37 +1275,6 @@ export const statementGenMethods = {
 			if (derefs?.[i]) this.line(`Object.assign(${derefs[i]}, ${src});`);
 			else this.line(`${lhs[i]} ${stmt.op} ${src};`);
 		}
-	},
-
-	_genComplexCompoundAssign(stmt) {
-		const l = stmt.lhs[0];
-		let lhsTarget;
-		let lhsRead;
-		if (l.kind === "IndexExpr" && l._mapValueType) {
-			const wrapField = this._namedWrapperField(l.expr._type, l.expr);
-			const base = wrapField
-				? `${this.genExpr(l.expr)}.${wrapField}`
-				: this.genExpr(l.expr);
-			const idx = this.genExpr(l.index);
-			lhsTarget = `${this._genMapWriteBase(base)}[${idx}]`;
-			lhsRead = `(${base}[${idx}] ?? { re: 0, im: 0 })`;
-		} else {
-			lhsTarget = l.name ?? this.genExpr(l);
-			lhsRead = lhsTarget;
-		}
-		const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
-		const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
-		if (!["+", "-", "*", "/"].includes(baseOp))
-			throw new Error(
-				`unsupported complex compound assignment operator: ${stmt.op}`,
-			);
-		const result = this._genComplexArith(
-			baseOp,
-			lhsRead,
-			rhsExpr,
-			isComplex64(l._type),
-		);
-		this.line(`${lhsTarget} = ${result};`);
 	},
 
 	_genIteratorReturn(stmt) {

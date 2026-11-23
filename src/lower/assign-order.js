@@ -10,7 +10,9 @@ import { hasCallOrReceive, someChild } from "./walk.js";
 /**
  * Returns, in source order, the `{ node, key }` operand slots of `lhs` to
  * evaluate into temporaries before the right-hand side.  `node[key]` is the
- * operand expression.  Never mutates the AST.
+ * operand expression.  Never mutates the AST.  An operand is bound when it
+ * mentions a variable the statement assigns, or reads a field, element or
+ * dereference that an earlier target stores.
  *
  * - `single`: a one-target statement is still considered (default needs two).
  * - `callOnly`: plain-variable operands are read after the right-hand side;
@@ -30,11 +32,19 @@ export function lhsOperandBinds(
 	const assigned = new Set(
 		lhs.filter((l) => l.kind === "Ident" && l.name !== "_").map((l) => l.name),
 	);
-	if (assigned.size === 0 && !ordered) return [];
+	// Fields, elements and dereferences stored by the targets already visited:
+	// a later operand that reads one of them sees the new value in JS.
+	const fields = new Set();
+	let element = false;
+	let deref = false;
 	const mentions = (n) =>
 		!!n &&
 		typeof n === "object" &&
-		((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
+		((n.kind === "Ident" && assigned.has(n.name)) ||
+			(n.kind === "SelectorExpr" && fields.has(n.field)) ||
+			(n.kind === "IndexExpr" && element) ||
+			(n.kind === "UnaryExpr" && n.op === "*" && deref) ||
+			someChild(n, mentions));
 	const needsTemp = (n) => {
 		if (!ordered) return mentions(n);
 		if (callOnly) return hasCallOrReceive(n) || mentions(n);
@@ -57,6 +67,11 @@ export function lhsOperandBinds(
 			binds.push({ node: l, key });
 		}
 	};
-	for (const l of lhs) visit(l);
+	for (const l of lhs) {
+		visit(l);
+		if (l.kind === "SelectorExpr" && !l._isMethodExpr) fields.add(l.field);
+		else if (l.kind === "IndexExpr") element = true;
+		else if (l.kind === "UnaryExpr" && l.op === "*") deref = true;
+	}
 	return binds;
 }
