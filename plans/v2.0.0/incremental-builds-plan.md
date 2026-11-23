@@ -143,7 +143,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
   - Test: `test/unit/compiler/incremental-sourcemap.test.js`: mappings after three incremental edits equal a cold build's (cached unit mappings and `spliceStdlibJs` line shifts do not accumulate across rebuilds)
   - Done when: passes
   - Note 2026-11-23: already held after Phase 2 (`mergeCompilationChunks` copies every mapping; stored chunks are never shifted); the test passes on `feat/incremental-builds` too, so this task only adds it
-- [ ] Task 3.3: Watch embedded files and `.d.ts` imports in `gofront dev` and update docs (former 2.4)
+- [x] Task 3.3: Watch embedded files and `.d.ts` imports in `gofront dev` and update docs (former 2.4)
   - Files: `src/cli/cli-core.js` (`createSrcWatcher`, `setupDevWatchers`), `docs/usage.md`
   - Test: `test/unit/cli/dev-server-embed.test.js`: modifying an embedded file (any extension, e.g. `asset.txt` or an embedded `.css` file) or a `js:` `.d.ts` file triggers a rebuild that invalidates only its package
   - Done when: editing `asset.txt`, an embedded `.css` file, or a `js:` `.d.ts` file triggers a rebuild in `gofront dev`, and `docs/usage.md` describes the dev loop

@@ -1281,20 +1281,33 @@ function reportDevBuild({ written, outputFile, elapsedMs, changedFile }) {
 function buildDevOnce(config, changedFile = null) {
 	try {
 		const info = runDevBuild(config, changedFile);
+		config.watchedFiles = new Set(info.result.watchedFiles);
+		config.buildFailed = false;
 		(config.onBuild ?? reportDevBuild)(info);
 		config.devServer?.notify();
 	} catch (e) {
+		config.buildFailed = true;
 		if (config.onError) config.onError(e);
 		else log.error(e.message);
 		config.devServer?.notifyError(e);
 	}
 }
 
-function createSrcWatcher(watchTarget, onCss, onRebuild) {
+// `isInput(filename)` tells a file the last build read besides the Go sources
+// (an embedded file, a `.d.ts` file): it rebuilds whatever its extension, so
+// an embedded `.css` file is a rebuild and not a style reload.
+function createSrcWatcher(
+	watchTarget,
+	onCss,
+	onRebuild,
+	isInput = () => false,
+) {
 	try {
 		return watch(watchTarget, { recursive: true }, (_event, filename) => {
 			if (!filename) return;
-			if (filename.endsWith(".css")) {
+			if (isInput(filename)) {
+				onRebuild(filename);
+			} else if (filename.endsWith(".css")) {
 				onCss(filename);
 			} else if (filename.endsWith(".go") || filename.endsWith(".templ")) {
 				onRebuild(filename);
@@ -1348,6 +1361,11 @@ function setupDevWatchers(config) {
 			clearTimeout(debounce);
 			debounce = setTimeout(() => buildDevOnce(config, fn), 80);
 		},
+		// A failed build did not say what it read (an embed pattern may match
+		// nothing yet), so any file may be the fix.
+		(fn) =>
+			config.buildFailed ||
+			(config.watchedFiles?.has(resolve(config.watchTarget, fn)) ?? false),
 	);
 	if (srcWatcher) watchers.push(srcWatcher);
 
@@ -1436,10 +1454,12 @@ export async function handleDev(targetDir = ".", options = {}) {
 	let written = null;
 	try {
 		const info = runDevBuild(buildConfig);
+		buildConfig.watchedFiles = new Set(info.result.watchedFiles);
 		written = info.written;
 		options.onBuild?.(info);
 	} catch (err) {
 		initialError = err;
+		buildConfig.buildFailed = true;
 		options.onError?.(err);
 		devServer?.notifyError(err);
 	}

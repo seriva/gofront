@@ -1005,6 +1005,7 @@ export function compileFiles(files, options = {}) {
 
 	const embedErrors = resolveEmbedFiles(programs);
 	if (embedErrors.length > 0) throw new CompileError(embedErrors);
+	const inputs = watchedInputs(programs, fromDir);
 
 	// ── 2. Resolve imports ────────────────────────────────────────
 	const checker = new TypeChecker();
@@ -1122,6 +1123,13 @@ export function compileFiles(files, options = {}) {
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
+		// The non-Go files the build read, dependencies included.
+		watchedFiles: [
+			...new Set([
+				...preambles.flatMap((p) => p.watchedFiles ?? []),
+				...inputs,
+			]),
+		].sort(),
 		// Only an importer reads it, so a package nobody imports never pays
 		// for the digest.
 		get summary() {
@@ -1130,20 +1138,41 @@ export function compileFiles(files, options = {}) {
 	};
 }
 
+// The `.d.ts` files the package's `js:` imports name.
+function dtsInputs(programs, fromDir) {
+	const dts = [];
+	for (const p of programs)
+		for (const imp of p.imports ?? [])
+			for (const { path, alias } of imp.imports)
+				if (path.startsWith("js:") && alias !== "_")
+					dts.push(join(fromDir, path.slice(3)));
+	return dts;
+}
+
+// The files besides the Go sources a build of the package read: its `.d.ts`
+// files and the files its `//go:embed` directives matched.  `gofront dev`
+// rebuilds when one of them changes.
+function watchedInputs(programs, fromDir) {
+	const files = dtsInputs(programs, fromDir);
+	for (const p of programs)
+		for (const d of p.decls ?? []) {
+			if (d.kind !== "VarDecl") continue;
+			for (const spec of d.decls ?? [])
+				for (const directive of spec._embeds ?? [])
+					for (const f of directive._embedFiles ?? [])
+						files.push(resolve(dirname(p._path), f.path));
+		}
+	return files;
+}
+
 // What a stored unit must still match for a build to reuse it: the files the
 // package is made of (`.d.ts` imports, embedded files and the in-memory test
 // driver included) and their state.
 function ownSignature(files, programs, fromDir) {
 	const paths = new Set(files.map((f) => resolve(f)));
-	const dts = [];
 	const memory = [];
-	for (const p of programs) {
-		if (!paths.has(p._path)) memory.push(p._source);
-		for (const imp of p.imports ?? [])
-			for (const { path, alias } of imp.imports)
-				if (path.startsWith("js:") && alias !== "_")
-					dts.push(join(fromDir, path.slice(3)));
-	}
+	for (const p of programs) if (!paths.has(p._path)) memory.push(p._source);
+	const dts = dtsInputs(programs, fromDir);
 	return [
 		filesSignature([...paths]),
 		filesSignature(dts),
