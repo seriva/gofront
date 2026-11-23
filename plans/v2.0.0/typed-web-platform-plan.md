@@ -110,7 +110,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Files: `stdlib/gofront/dom/dom.d.ts` (generated), `scripts/web-types-overrides/`
   - Test: `test/unit/stdlib/dom-typed.test.js`: `Document`, `Element`, `HTMLElement`, `HTMLInputElement`, `Event`, `MouseEvent`; `addEventListener("click", func(e dom.MouseEvent) {…})` and `addEventListener("click", func() {…})`; a misspelled member is rejected; emitted JS equals the untyped program's
   - Done when: `el.(dom.HTMLInputElement).value` is a `string`
-- [ ] Task 3.2: `gofront/canvas`, `gofront/fetch`, `gofront/websocket` (former 7.2)
+- [x] Task 3.2: `gofront/canvas`, `gofront/fetch`, `gofront/websocket` (former 7.2)
   - Files: `stdlib/gofront/canvas/canvas.d.ts`, `stdlib/gofront/fetch/fetch.d.ts`, `stdlib/gofront/websocket/websocket.d.ts` (generated)
   - Test: `test/unit/stdlib/web-apis-typed.test.js`: canvas drawing calls without `any`; `var resp fetch.Response` / `resp := (await fetch(url)).(fetch.Response)` (global `fetch` flips in Phase 4) with `resp.ok` and `await resp.text()`; a `websocket.WebSocket` with `send` and a typed listener
   - Done when: the packages come from the generator and emit no runtime code
