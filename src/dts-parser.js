@@ -29,6 +29,15 @@
 // interface (or of one it extends), and a struct value whose fields are such
 // members; a member that is itself a dictionary is checked the same way. An
 // interface without the comment accepts none of these.
+//
+// Declaration packages (`gofront/dom`, ...): `parseDeclarationPackage` parses a
+// package's declarations and qualifies the type references that name one of its
+// own types (`Node` becomes `dom.Node`), so the package keeps its own type table
+// and a name another package or the program declares never collides with it. A
+// reference written qualified (`dom.EventTarget`) names a type of another
+// package, which the package lists in a header comment:
+//
+//   /// <reference types="gofront/dom" />
 
 const ANY = { kind: "basic", name: "any" };
 const VOID = { kind: "basic", name: "void" };
@@ -918,4 +927,62 @@ function linkBases(decls, lookup) {
 export function parseDts(source) {
 	const parser = new DtsParser(source);
 	return parser.parse();
+}
+
+// Qualifies the references of `type` that name a type declared by the package
+// (`names`) as `pkg.Name`, in place: its members, parameters, results and
+// element types, and the `extends` names of a declaration. A name written
+// qualified already names another package and is left alone.
+function qualifyReferences(type, pkg, names, seen) {
+	if (!type || typeof type !== "object" || seen.has(type)) return;
+	seen.add(type);
+	const walk = (t) => qualifyReferences(t, pkg, names, seen);
+	switch (type.kind) {
+		case "basic":
+			if (type.alias && names.has(type.alias))
+				type.alias = `${pkg}.${type.alias}`;
+			break;
+		case "namespace":
+			for (const m of Object.values(type.members)) walk(m);
+			if (type.extends)
+				type.extends = type.extends.map((n) =>
+					names.has(n) ? `${pkg}.${n}` : n,
+				);
+			break;
+		case "func":
+			type.params.forEach(walk);
+			type.returns.forEach(walk);
+			break;
+		case "slice":
+		case "promise":
+			walk(type.elem);
+			break;
+		case "tuple":
+			type.types.forEach(walk);
+			break;
+	}
+}
+
+// The packages a declaration file lists in its `/// <reference
+// types="gofront/x" />` header comments.
+function referencedPackages(source) {
+	return [
+		...source.matchAll(/^\/\/\/\s*<reference\s+types="gofront\/([a-z0-9]+)"/gm),
+	].map((m) => m[1]);
+}
+
+// Parses the declaration file of the package `name` (`gofront/<name>`):
+// `{ name, types, values, requires }`, where `requires` names the packages
+// its header comments reference. Its own type references are qualified (see
+// above), so the result is bound under `name.` in a checker's type table.
+export function parseDeclarationPackage(source, name) {
+	const { types, values } = parseDts(source);
+	const names = new Set(types.keys());
+	const seen = new Set();
+	for (const t of types.values()) {
+		if (t._dtsType) t._pkg = name;
+		qualifyReferences(t, name, names, seen);
+	}
+	for (const t of values.values()) qualifyReferences(t, name, names, seen);
+	return { name, types, values, requires: referencedPackages(source) };
 }

@@ -776,7 +776,8 @@ export function typeStr(t) {
 		case "interface":
 			return t.name || literalTypeStr(t);
 		case "namespace":
-			return t.name || "namespace{...}";
+			// A declaration package's type shows its package (`dom.Element`).
+			return t._pkg ? `${t._pkg}.${t.name}` : t.name || "namespace{...}";
 		case "func": {
 			const retStr =
 				t.returns.length > 1

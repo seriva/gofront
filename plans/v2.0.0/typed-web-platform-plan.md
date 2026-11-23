@@ -92,7 +92,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Done when: the marker syntax is documented in `src/dts-parser.js`
 
 ### Phase 2: Declaration packages and the generator
-- [ ] Task 2.1: Scoped `.d.ts` package namespaces and cross-package type resolution (former 6.4a)
+- [x] Task 2.1: Scoped `.d.ts` package namespaces and cross-package type resolution (former 6.4a)
   - Files: `src/dts-parser.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`, `src/typechecker/types.js`
   - Test: `test/unit/compiler/web-packages.test.js`: registering a scoped declaration package exposes `dom.T` without polluting global `checker.types` (a user `type Buffer struct{}` does not collide with `webgpu.Buffer`); intra-package and qualified cross-package (`dom.EventTarget`) `.d.ts` type references resolve in members, `extends` and assertions
   - Done when: package-scoped `.d.ts` types resolve intra- and cross-package without bare-name leakage
