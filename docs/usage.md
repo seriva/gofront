@@ -65,6 +65,26 @@ gofront: 3 packages — 1 ok, 1 failed, 1 skipped (20ms)
 
 No test function runs; `gofront test` does that.
 
+### The dev loop
+
+`gofront dev [dir]` compiles the project, serves it and rebuilds when you save. It keeps the
+packages it has compiled in memory, so a rebuild re-checks and re-emits only the package you
+edited and the packages that import something whose exported API changed. Editing a function
+body re-checks that package alone; the standard library is not rebuilt after the first build.
+The output is the same as a full build from scratch, source maps included.
+
+A rebuild starts when you change:
+
+- a `.go` or `.templ` file in the source directory;
+- a file that a `//go:embed` directive matched, whatever its extension (`asset.txt`, an
+  embedded `.css` file, a shader);
+- a `.d.ts` file that a `js:` import names.
+
+A `.css` file that nothing embeds only reloads the page's styles. Files outside the source
+directory are not watched. A file that a glob newly matches is read at the next rebuild, which
+a save of any `.go` file triggers; if the build is failing, any change in the source
+directory triggers one.
+
 ### Project configuration
 
 `gofront dev`, `build`, `prep`, `check` and `test` read optional settings from a `gofront.json`
