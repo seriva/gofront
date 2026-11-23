@@ -82,7 +82,7 @@ One reachability closure over user and stdlib programs decides what the JS backe
   - Files: `src/lower/reachability.js`, `src/backend/js/index.js`, `src/compiler.js`
   - Test: `test/unit/compiler/dce-funcs.test.js`: the re-probe's `UnusedUserFunction` and `UnusedType` are omitted; multi-package `util.Unused` is omitted while `util.Used` and dot-imported used symbols are kept; a function called only from a `.templ` body is kept; a pruned `CssDecl` emits no CSS; an `iota` `ConstDecl` group keeps correct values; side-effecting package-level `var`s in entry and imported packages are kept; a package without `main` keeps its exports; cross-package `json.Marshal(anyVal)` (`registerOnly`) and `fmt` function values still work; `test/unit/cli/incremental-build.test.js` gains add-then-remove-the-only-call equals a cold build
   - Done when: `gofront test` and every `example/*` print the same output as before
-- [ ] Task 1.3: Prune uncalled struct and named-type methods (former 4.3)
+- [x] Task 1.3: Prune uncalled struct and named-type methods (former 4.3)
   - Files: `src/backend/js/index.js`, `src/lower/reachability.js`, `src/lower/embedding.js`
   - Test: `test/unit/compiler/dce-methods.test.js`: an unselected method is absent from the class body, embedded stubs, `__vm` and `__pm`; kept when named by a reached interface, used as a method value/expression, promoted through embedding, or its type escapes to JavaScript; pruning an outer shadowing method never promotes the inner embedded method; a named non-struct type boxed into `any` with all methods pruned still emits its box class
   - Done when: runtime interface assertions and embedded method calls give the same results as before

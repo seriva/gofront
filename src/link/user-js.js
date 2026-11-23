@@ -27,8 +27,53 @@ export function userMarkerKey(line) {
 
 // What the code generator needs of a package besides its programs.  It lives
 // on the stored unit, so every build that reuses the unit shares the memo.
-export function userEmitter(checker, jsImports, bundledPackages, options) {
-	return { checker, jsImports, bundledPackages, options, memo: new Map() };
+export function userEmitter(
+	checker,
+	jsImports,
+	bundledPackages,
+	options,
+	programs,
+) {
+	return {
+		checker,
+		jsImports,
+		bundledPackages,
+		options,
+		embedders: embeddingTypes(checker, programs),
+		memo: new Map(),
+	};
+}
+
+// The struct types the programs declare that embed another type, with the
+// method names each could promote: `[name, names][]`.
+function embeddingTypes(checker, programs) {
+	const declared = new Set(
+		programs.flatMap((p) =>
+			p.decls.filter((d) => d.kind === "TypeDecl").map((d) => d.name),
+		),
+	);
+	const out = [];
+	for (const name of [...declared].sort()) {
+		const t = checker.types.get(name);
+		if (t?.kind !== "named" || !t.underlying?._embeds) continue;
+		const promoted = [...(t.underlying.methods?.keys() ?? [])].filter(
+			(n) => !t.methods?.has(n),
+		);
+		if (promoted.length > 0) out.push([name, promoted.sort()]);
+	}
+	return out;
+}
+
+// What of the build's method selection changes the promoted methods the
+// unit's embedding structs get.
+function promotionKey(emitter, reach) {
+	return emitter.embedders
+		.map(([name, promoted]) =>
+			reach.escaped.has(name)
+				? `${name}*`
+				: `${name}:${promoted.filter((n) => reach.fields.has(n)).join("+")}`,
+		)
+		.join(",");
 }
 
 // A malformed expression in a `templ` body is parsed leniently and raised by
@@ -94,7 +139,7 @@ function userJs(unit, reach) {
 	const emitter = unit.emitter;
 	const { programs, ids } = reachedPrograms(unit, reach);
 	if (ids.length === 0) return EMPTY;
-	const key = ids.join(",");
+	const key = `${ids.join(",")}|${promotionKey(emitter, reach)}`;
 	const hit = emitter.memo.get(key);
 	if (hit) return hit;
 	const { target, strict, natives, isTest } = emitter.options;
@@ -102,7 +147,7 @@ function userJs(unit, reach) {
 		emitter.checker,
 		emitter.jsImports,
 		emitter.bundledPackages,
-		{ target, strict, natives },
+		{ target, strict, natives, keepMethods: reach.keepMethods() },
 	);
 	const js = codegen.generateAll(cloneAst(programs), { isTest });
 	const out = {

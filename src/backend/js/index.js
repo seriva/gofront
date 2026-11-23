@@ -227,6 +227,9 @@ export class CodeGen {
 		this.target = options.target ?? "js";
 		this.strict = Boolean(options.strict || this.target === "both");
 		this.natives = options.natives !== false; // replace native calls with host code
+		// `{ names, escaped }`: the method names the build selects and the types
+		// whose values leave Go; null keeps every method (see lower/reachability.js).
+		this.keepMethods = options.keepMethods ?? null;
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
@@ -462,7 +465,7 @@ export class CodeGen {
 				d.type.kind === "StructType" ||
 				this._definedStructAst(d) ||
 				withMethods.has(d.name) ||
-				this._isPlainNamedBox(this.checker?.types.get(d.name))
+				this._namedBoxInfo(this.checker?.types.get(d.name))
 			)
 				names.add(d.name);
 		}
@@ -657,7 +660,8 @@ export class CodeGen {
 				d.kind === "TypeDecl" &&
 				d.type.kind !== "StructType" &&
 				d.type.kind !== "InterfaceType" &&
-				(methods.get(d.name) ?? []).length > 0
+				((methods.get(d.name) ?? []).length > 0 ||
+					this.checker?.types.get(d.name)?.methods?.size > 0)
 			) {
 				this.namedWrapperNames.add(d.name);
 			}
@@ -804,7 +808,7 @@ export class CodeGen {
 			this.line(`// interface ${decl.name} (compile-time only)`);
 		} else if (
 			methodDecls.length > 0 ||
-			this._isPlainNamedBox(this.checker?.types.get(decl.name))
+			this._namedBoxInfo(this.checker?.types.get(decl.name))
 		) {
 			// Named non-struct type with methods — emit an ES6 wrapper class.
 			if (methodDecls.length === 0)
@@ -1105,7 +1109,7 @@ export class CodeGen {
 		// held in an interface (see _ifaceMethodCheck).
 		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
 		// ...and so are those promoted from an embedded struct value.
-		for (const stub of computeEmbeddedStubs(name, methodDecls, this.checker))
+		for (const stub of this._embeddedStubs(name, methodDecls))
 			if (stub.ptrOnly) pm.push(stub.methodName);
 		if (pm.length > 0)
 			this.line(
@@ -1175,8 +1179,17 @@ export class CodeGen {
 			: `this.${field}.${jm}(...__a)`;
 	}
 
-	_genEmbeddedMethodStubs(name, methodDecls) {
+	// The methods an embedding struct promotes that the bundle keeps: all of
+	// them, unless the build names the ones its code selects (`options.keep`).
+	_embeddedStubs(name, methodDecls) {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
+		const keep = this.keepMethods;
+		if (!keep || keep.escaped.has(name)) return stubs;
+		return stubs.filter((s) => keep.names.has(s.methodName));
+	}
+
+	_genEmbeddedMethodStubs(name, methodDecls) {
+		const stubs = this._embeddedStubs(name, methodDecls);
 		for (const stub of stubs) {
 			this.blank();
 			this.line(

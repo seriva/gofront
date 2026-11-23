@@ -1276,12 +1276,18 @@ function compileOwnUnit(ctx) {
 	const emitter =
 		emitTarget === "wasm"
 			? null
-			: userEmitter(checker, jsImports, bundledPackages, {
-					target: pkgTarget,
-					strict: isStrict,
-					natives: options.natives,
-					isTest: options.isTest ?? false,
-				});
+			: userEmitter(
+					checker,
+					jsImports,
+					bundledPackages,
+					{
+						target: pkgTarget,
+						strict: isStrict,
+						natives: options.natives,
+						isTest: options.isTest ?? false,
+					},
+					rootPrograms,
+				);
 
 	const unit = {
 		emitTarget,

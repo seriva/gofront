@@ -9,6 +9,7 @@
 // its name is selected somewhere reachable, or is called implicitly.
 
 import { isExported } from "../typechecker/types.js";
+import { leavesGo, reachableTypeNames } from "./escapes.js";
 import { forEachChild } from "./walk.js";
 
 // Methods the runtime or emitter-backed stdlib call without a selector in
@@ -48,7 +49,8 @@ function forEachTemplExpr(node, fn) {
 }
 
 // Notes the name, field or qualifier `node` itself stands for.
-function noteRef(node, names, fields, quals) {
+function noteRef(node, acc) {
+	const { names, fields, quals } = acc;
 	if (node._stdName) names.add(node._stdName); // `cmp.Compare` in user code
 	// A call that the generated Go (`gofront_gen.go`) answers.
 	if (node._genEntry) names.add(node._genEntry);
@@ -70,20 +72,37 @@ function noteRef(node, names, fields, quals) {
 		case "InterfaceType":
 			for (const m of node.methods ?? []) fields.add(m.name);
 			break;
+		default:
+			noteHandOver(node, acc.sites);
 	}
 }
 
-// Names (identifiers and type names), selected fields and `pkg.Name`
-// qualifiers used under `node`.  A user build resolves a qualifier against
-// the local package the file imports under that name.
-function collectRefs(node, names, fields, quals) {
+// Notes where a Go value is handed over: as an argument of a call or as the
+// right-hand side of an assignment, with the callee or target it goes to.  A
+// build decides afterwards whether that leaves Go (see `BuildReach`).
+function noteHandOver(node, sites) {
+	if (node.kind === "CallExpr" && !node._isTypeConversion && node.args?.length)
+		sites.push({ to: node.func, types: node.args.map((a) => a._type) });
+	else if (node.kind === "AssignStmt" && node.lhs?.length === node.rhs?.length)
+		for (let i = 0; i < node.lhs.length; i++)
+			sites.push({
+				to: null,
+				dynamic: node.lhs[i],
+				types: [node.rhs[i]._type],
+			});
+}
+
+// Names (identifiers and type names), selected fields, `pkg.Name` qualifiers
+// and hand-over sites used under `node`.  A user build resolves a qualifier
+// against the local package the file imports under that name.
+function collectRefs(node, acc) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
-		for (const n of node) collectRefs(n, names, fields, quals);
+		for (const n of node) collectRefs(n, acc);
 		return;
 	}
-	noteRef(node, names, fields, quals);
-	const visit = (child) => collectRefs(child, names, fields, quals);
+	noteRef(node, acc);
+	const visit = (child) => collectRefs(child, acc);
 	forEachChild(node, visit);
 	forEachTemplExpr(node, visit);
 }
@@ -97,11 +116,8 @@ const refsMemo = new WeakMap();
 function refsOf(node) {
 	let refs = refsMemo.get(node);
 	if (!refs) {
-		const names = new Set();
-		const fields = new Set();
-		const quals = new Set();
-		collectRefs(node, names, fields, quals);
-		refs = { names, fields, quals };
+		refs = { names: new Set(), fields: new Set(), quals: new Set(), sites: [] };
+		collectRefs(node, refs);
 		refsMemo.set(node, refs);
 	}
 	return refs;
@@ -162,6 +178,7 @@ export class StdlibReach {
 		this.reached = new Set();
 		this.names = new Set();
 		this.fields = new Set(IMPLICIT_METHODS);
+		this.escaped = new Set(); // types whose values leave Go: all methods stay
 		this.pending = [];
 		this.failures = [];
 	}
@@ -201,7 +218,10 @@ export class StdlibReach {
 					this._reach(d);
 			const size = this.reached.size;
 			for (const m of this.methods)
-				if (this.names.has(m.recv) && this.fields.has(m.decl.name))
+				if (
+					this.names.has(m.recv) &&
+					(this.fields.has(m.decl.name) || this.escaped.has(m.recv))
+				)
 					this._reach(m.decl);
 			for (const p of this.programs)
 				if (p.decls.some((d) => this.reached.has(d)))
@@ -354,6 +374,14 @@ export class BuildReach extends StdlibReach {
 		this.queue = [];
 		this.registrations = [];
 		this.typesByBase = null;
+		this.external = new Set(); // names .d.ts and npm imports declare
+		this.goTypes = new Set();
+		for (const u of this.units.values()) {
+			for (const n of u.emitter?.checker?._externalNames ?? [])
+				this.external.add(n);
+			for (const item of u.items)
+				if (item.node.kind === "TypeDecl") this.goTypes.add(item.node.name);
+		}
 		this._seed();
 		this._closeBuild();
 	}
@@ -387,7 +415,7 @@ export class BuildReach extends StdlibReach {
 		// A host that calls declarations by name names them in `roots`.
 		for (const u of emitting)
 			for (const name of this.extraRoots)
-				for (const item of u.byName.get(name) ?? []) this._item(item);
+				for (const item of u.byName.get(name) ?? []) this._expose(item);
 		this._seedFacade();
 	}
 
@@ -413,7 +441,29 @@ export class BuildReach extends StdlibReach {
 			this._item(item);
 		if (driver.length > 0 || main.length > 0) return;
 		for (const [name, found] of entry.byName)
-			if (isExported(name)) for (const item of found) this._item(item);
+			if (isExported(name)) for (const item of found) this._expose(item);
+	}
+
+	// Reaches `item`, which code outside the build calls or reads by name: the
+	// types in its signature leave Go.
+	_expose(item) {
+		this._item(item);
+		const types = item.unit.emitter?.checker?.types;
+		const { node } = item;
+		if (!types) return;
+		const names = new Set();
+		if (node.kind === "TypeDecl") names.add(node.name);
+		else
+			collectRefs(
+				node.kind === "FuncDecl" ? [node.params, node.returnType] : node.type,
+				{
+					names,
+					fields: new Set(),
+					quals: new Set(),
+					sites: [],
+				},
+			);
+		for (const n of names) reachableTypeNames(types.get(n), this.escaped);
 	}
 
 	// The boundary facade names the types in the signatures a `wasm` package
@@ -434,7 +484,7 @@ export class BuildReach extends StdlibReach {
 
 	_sig(at, nodes) {
 		const refs = { names: new Set(), fields: this.fields, quals: new Set() };
-		collectRefs(nodes, refs.names, refs.fields, refs.quals);
+		collectRefs(nodes, { ...refs, sites: [] });
 		for (const n of refs.names) this._name(n);
 		this._resolve(at, refs);
 	}
@@ -445,6 +495,8 @@ export class BuildReach extends StdlibReach {
 		if (!item.unit.emitted && item.node.kind !== "TypeDecl") return;
 		if (this.reached.has(item.node)) return;
 		this.reached.add(item.node);
+		// The component code the backend emits calls `Mount` without a selector.
+		if (item.node.kind === "TemplDecl") this.fields.add("Mount");
 		this.queue.push(item);
 	}
 
@@ -491,13 +543,37 @@ export class BuildReach extends StdlibReach {
 		return this.typesByBase.get(name) ?? [];
 	}
 
-	// Whether a method of a reached type is emitted.
-	_keepsMethod(_item) {
-		return true;
+	// Whether a method of a reached type is emitted: its name is selected
+	// somewhere reached (a call, a method value or expression, a reached
+	// interface, or an implicit caller such as `fmt`), or its type's values
+	// leave Go (a package without `main` exports its types, so they do).
+	_keepsMethod({ node }) {
+		if (!this.prune || this.fields.has(node.name)) return true;
+		return this.escaped.has(node.recvType?.name);
+	}
+
+	// What the code generator needs to leave unselected methods out of what a
+	// struct promotes; null when every method is kept.
+	keepMethods() {
+		return this.prune ? { names: this.fields, escaped: this.escaped } : null;
 	}
 
 	_size() {
-		return this.reached.size + this.fields.size + this.pending.length;
+		return (
+			this.reached.size +
+			this.fields.size +
+			this.escaped.size +
+			this.pending.length
+		);
+	}
+
+	// Notes the types of the values `refs` hands to something that is not Go.
+	_noteHandOvers(refs) {
+		const isGoType = (n) => this.goTypes.has(n);
+		for (const site of refs.sites) {
+			if (!leavesGo(site, this.external, isGoType)) continue;
+			for (const t of site.types) reachableTypeNames(t, this.escaped);
+		}
 	}
 
 	_closeBuild() {
@@ -509,6 +585,7 @@ export class BuildReach extends StdlibReach {
 				const refs = refsOf(item.node);
 				for (const n of refs.names) this._name(n);
 				for (const f of refs.fields) this.fields.add(f);
+				this._noteHandOvers(refs);
 				this._resolve(item, refs);
 			}
 			this._close();
