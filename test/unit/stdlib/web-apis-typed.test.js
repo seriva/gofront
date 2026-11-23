@@ -19,14 +19,9 @@ import {
 } from "../helpers.js";
 
 // Compiles `body` (the declarations of a `package main`) importing `pkgs`
-// against the real stdlib. `fetch` is imported as `fapi`: the package name would
-// otherwise take the place of the global `fetch` function in the file.
+// against the real stdlib.
 function build(pkgs, body) {
-	const imports = pkgs
-		.map((p) =>
-			p === "fetch" ? `import fapi "gofront/fetch"` : `import "gofront/${p}"`,
-		)
-		.join("\n");
+	const imports = pkgs.map((p) => `import "gofront/${p}"`).join("\n");
 	return withTempDir(
 		{ "main.go": `package main\n\n${imports}\n\n${body}\n` },
 		(dir) => toCompileResult(() => compileDir(dir)),
@@ -109,7 +104,7 @@ test("a response is read through ok, status and text", () => {
 	const { errors } = build(
 		["fetch"],
 		`func load(url string) string {
-	resp := (await fetch(url)).(fapi.Response)
+	resp := (await fetch(url)).(fetch.Response)
 	if !resp.ok {
 		return ""
 	}
@@ -123,11 +118,11 @@ func main() {}`,
 	assertEqual(errors.length, 0);
 });
 
-test("var resp fapi.Response holds a response", () => {
+test("var resp fetch.Response holds a response", () => {
 	const { errors } = build(
 		["fetch"],
 		`func load(url string) bool {
-	var resp fapi.Response = (await fetch(url)).(fapi.Response)
+	var resp fetch.Response = (await fetch(url)).(fetch.Response)
 	return resp.ok
 }
 
@@ -139,7 +134,7 @@ func main() {}`,
 test("a response member that does not exist is rejected", () => {
 	const { errors } = build(
 		["fetch"],
-		`func f(r fapi.Response) bool {
+		`func f(r fetch.Response) bool {
 	return r.isOk
 }
 
@@ -151,7 +146,7 @@ func main() {}`,
 test("the text of a response is a string", () => {
 	const { errors } = build(
 		["fetch"],
-		`func f(r fapi.Response) int {
+		`func f(r fetch.Response) int {
 	var n int = await r.text()
 	return n
 }
@@ -164,7 +159,7 @@ func main() {}`,
 test("headers are read through get", () => {
 	const { errors } = build(
 		["fetch"],
-		`func f(r fapi.Response) string {
+		`func f(r fetch.Response) string {
 	v := r.headers.get("content-type")
 	if v == nil {
 		return ""
@@ -177,15 +172,63 @@ func main() {}`,
 	assertEqual(errors.length, 0);
 });
 
-test("an unaliased import shadows the global fetch function", () => {
-	const { errors } = withTempDir(
+test("an unaliased import still lets the global fetch be called", () => {
+	const { errors } = build(
+		["fetch"],
+		`func load(url string) fetch.Response {
+	return (await fetch(url)).(fetch.Response)
+}
+
+func main() {}`,
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("an unaliased import emits the global fetch call", () => {
+	const { res, errors } = withTempDir(
 		{
 			"main.go": `package main
 
 import "gofront/fetch"
 
-func load(url string) {
-	_ = await fetch(url)
+func load(url string) bool {
+	resp := (await fetch(url)).(fetch.Response)
+	return resp.ok
+}
+
+func main() {
+	println(load("/x"))
+}
+`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)),
+	);
+	assertEqual(errors.length, 0);
+	assert(/await fetch\(url\)/.test(res.js), res.js);
+});
+
+test("a member the unaliased fetch package lacks is rejected", () => {
+	const { errors } = build(
+		["fetch"],
+		`func f() {
+	var r fetch.NoSuchType
+	_ = r
+}
+
+func main() {}`,
+	);
+	assertErrorContains(errors, "NoSuchType");
+});
+
+test("an aliased import keeps fetch as the global function", () => {
+	const { errors } = withTempDir(
+		{
+			"main.go": `package main
+
+import fapi "gofront/fetch"
+
+func load(url string) fapi.Response {
+	return (await fetch(url)).(fapi.Response)
 }
 
 func main() {}
@@ -193,7 +236,7 @@ func main() {}
 		},
 		(dir) => toCompileResult(() => compileDir(dir)),
 	);
-	assertErrorContains(errors, "Cannot call non-function type fetch");
+	assertEqual(errors.length, 0);
 });
 
 section("gofront/websocket");
@@ -254,7 +297,7 @@ section("web packages — emitted code");
 test("the declarations emit no runtime code", () => {
 	const { res, errors } = build(
 		["canvas", "fetch", "websocket"],
-		`func f(ctx canvas.CanvasRenderingContext2D, r fapi.Response, ws websocket.WebSocket) bool {
+		`func f(ctx canvas.CanvasRenderingContext2D, r fetch.Response, ws websocket.WebSocket) bool {
 	ctx.fillRect(0, 0, 1, 1)
 	ws.send("x")
 	return r.ok
@@ -267,7 +310,7 @@ func main() {
 	assertEqual(errors.length, 0);
 	assert(!/\bimport\b/.test(res.js), "emitted an import");
 	assert(
-		!/gofront|canvas\.|fapi\.|websocket\./.test(res.js),
+		!/gofront|canvas\.|fetch\.|websocket\./.test(res.js),
 		"mentions a package",
 	);
 });

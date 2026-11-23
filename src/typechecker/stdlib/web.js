@@ -1,4 +1,4 @@
-// WebGL, WebGPU, and TypedArray standard library type definitions.
+// WebGL and TypedArray standard library type definitions.
 
 import {
 	ANY,

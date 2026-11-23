@@ -296,9 +296,24 @@ export const expressionCheckMethods = {
 			case "ImagLit":
 				return UNTYPED_COMPLEX;
 			case "Ident": {
-				const t = expr._universe
+				let t = expr._universe
 					? this.universe.lookup(expr.name)
 					: scope.lookup(expr.name);
+				// A declaration package named like a browser global
+				// (`import "gofront/fetch"`) is a qualifier, never the global:
+				// where no member is selected (`fetch(url)`) the name is the
+				// global again, so the import can supply types while the call
+				// keeps working.
+				if (
+					t?._dtsPackage &&
+					!expr._selectorBase &&
+					!expr._universe &&
+					BROWSER_GLOBALS.has(expr.name) &&
+					this.universe.lookup(expr.name)
+				) {
+					scope = this.universe;
+					t = this.universe.lookup(expr.name);
+				}
 				// Generated and stdlib Go resolves every property of the name
 				// from the universe, never from the user's scope.
 				if (expr._universe) scope = this.universe;
@@ -1055,6 +1070,7 @@ export const expressionCheckMethods = {
 
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
+		expr.expr._selectorBase = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?._tainted) return TAINTED_ANY;
 		const exclErr = this._checkExcludedSelectorExpr(expr, baseType);
