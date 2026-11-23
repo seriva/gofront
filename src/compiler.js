@@ -490,6 +490,13 @@ function resolveImports(
 		options.stdlibRoot,
 	);
 
+	// The typings of an npm import are part of what the package was compiled
+	// against.
+	for (const [path, info] of resolved)
+		options.importTokens?.push(
+			`npm:${path}:${info ? filesSignature([info.dtsPath]) : "none"}`,
+		);
+
 	// Validate target rules on non-local imports
 	if (pkgTarget === "wasm" || pkgTarget === "both") {
 		for (const p of programs) {

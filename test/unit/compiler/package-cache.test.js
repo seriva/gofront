@@ -260,6 +260,31 @@ func main() { println(helper()) }
 	);
 });
 
+test("the typings of an npm import are part of the key", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+import "mini"
+func main() { println(hello()) }
+`,
+			"node_modules/mini/package.json": `{ "name": "mini", "types": "index.d.ts" }`,
+			"node_modules/mini/index.d.ts":
+				"export declare function hello(): string;\n",
+		},
+		(dir) => {
+			const cache = new PackageCache();
+			checkedBuild(cache, dir);
+			assertEqual(checkedBuild(cache, dir).misses, 0);
+			write(
+				dir,
+				"node_modules/mini/index.d.ts",
+				"export declare function hello(): number;\n",
+			);
+			assertEqual(checkedBuild(cache, dir).misses, 1);
+		},
+	);
+});
+
 test("each output-changing option is part of the key", () => {
 	withTempDir(
 		{
