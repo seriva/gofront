@@ -138,10 +138,11 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
   - Test: `test/unit/cli/incremental-build.test.js`: a one-file edit re-checks only the edited package and importers whose dependency summary changed, re-checks no stdlib unit, and equals a cold build
   - Done when: the counters hold and `node test/perf/dev-rebuild.js` (added to `npm run bench`) reports < 25 ms median for `example/gom` and `example/simple`. If the budget is missed, stop and report the measured number; do not loosen it silently
   - Status 2026-11-23: counters hold; budget NOT met. After lazy `summary`, memoized reachability refs and marker scan: `gom` ~29-30 ms, `simple` ~31 ms median (was ~48 ms). Floor is the edited package's own check+codegen (~15-17 ms of `gom`/`simple`, whole package re-checked) plus ~13 ms fixed per-build work (parse clones ~2.4, stdlib source stat ~1.2, splice ~2, import binding ~2, walks in codec/fmt generators ~1.3, output write ~1.8). Box left unchecked pending a decision
-- [ ] Task 3.2: Source maps across incremental rebuilds (former 3.4)
+- [x] Task 3.2: Source maps across incremental rebuilds (former 3.4)
   - Files: `src/link/sourcemap.js`, `src/compiler.js`, `src/link/stdlib.js`
   - Test: `test/unit/compiler/incremental-sourcemap.test.js`: mappings after three incremental edits equal a cold build's (cached unit mappings and `spliceStdlibJs` line shifts do not accumulate across rebuilds)
   - Done when: passes
+  - Note 2026-11-23: already held after Phase 2 (`mergeCompilationChunks` copies every mapping; stored chunks are never shifted); the test passes on `feat/incremental-builds` too, so this task only adds it
 - [ ] Task 3.3: Watch embedded files and `.d.ts` imports in `gofront dev` and update docs (former 2.4)
   - Files: `src/cli/cli-core.js` (`createSrcWatcher`, `setupDevWatchers`), `docs/usage.md`
   - Test: `test/unit/cli/dev-server-embed.test.js`: modifying an embedded file (any extension, e.g. `asset.txt` or an embedded `.css` file) or a `js:` `.d.ts` file triggers a rebuild that invalidates only its package
