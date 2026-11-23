@@ -16,6 +16,7 @@ import {
 	isAmbiguousFieldSelector,
 	isAmbiguousPromotion,
 	isAny,
+	isExported,
 	isMethodPromotedOverField,
 	isTypedArraySlice,
 	Scope,
@@ -553,6 +554,16 @@ export const resolveMethods = {
 		return bad ?? this._visibleType(`${qual}.${member}`, scope);
 	},
 
+	_errNotExported(pkg, name, node) {
+		return this.err(`name ${name} not exported by package ${pkg}`, node);
+	},
+
+	// Whether `name`, declared by another package, is hidden from this one. The
+	// generated Go (see `_ungated`) reaches into any package it names.
+	_unexportedForeign(name) {
+		return this._ungated === 0 && name.length > 0 && !isExported(name);
+	},
+
 	_qualifierNotAType(qual, member, node, scope, literal) {
 		if (this._ungated > 0) return null;
 		const here = scope ?? this.globals;
@@ -564,6 +575,8 @@ export const resolveMethods = {
 			return this.target === "wasm" || this.target === "both"
 				? this._errJsOnly(`${qual}.${member}`, node)
 				: null;
+		if (bound.type?._gofront && this._unexportedForeign(member))
+			return this._errNotExported(qual, member, node);
 		const isValue = !["pkg", "type"].includes(bound.kind);
 		if (isValue && (literal || owner !== this.universe))
 			return this.err(`${qual}.${member} is not a type`, node);
@@ -1806,11 +1819,8 @@ export const resolveMethods = {
 	// An error for `field` when the namespace cannot offer it to this package:
 	// an unexported name, or a member of a `js` file in a wasm or both package.
 	_namespaceMemberError(base, field, node) {
-		if (base._gofront && field.length > 0 && field[0] >= "a" && field[0] <= "z")
-			return this.err(
-				`cannot refer to unexported name ${base.name}.${field}`,
-				node,
-			);
+		if (base._gofront && this._unexportedForeign(field))
+			return this._errNotExported(base.name, field, node);
 		const wasm = this.target === "wasm" || this.target === "both";
 		return wasm && base._jsOnly?.has(field)
 			? this._errJsOnly(`${base.name}.${field}`, node)
@@ -1869,12 +1879,6 @@ export const resolveMethods = {
 		return resolveJsonFields(structType);
 	},
 };
-
-function isExported(name) {
-	if (!name || typeof name !== "string") return false;
-	const code = name.charCodeAt(0);
-	return code >= 65 && code <= 90;
-}
 
 function _processJsonField(
 	f,

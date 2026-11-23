@@ -136,7 +136,7 @@ Root: no selector, qualified type lookup, method expression or composite literal
   - Done when: all pass; no `Unknown struct in CompositeLit` from the emitter
 
 ### Phase 3: Export visibility on every target (root `export-visibility`)
-- [ ] Task 3.1: Package-level names and types use Go's exported rule (E1, E3 names, E6)
+- [x] Task 3.1: Package-level names and types use Go's exported rule (E1, E3 names, E6)
   - Files: `src/typechecker/resolve.js` (update `isExported` to `/^\p{Lu}/u`, apply in `_namespaceMemberError` and `_resolveQualifiedType`)
   - Test: `test/unit/types/shadowing.test.js` with `compileHybridProject`: `util.__Answer()`, `var x util.secret`, `util.secret{}`, and `var g util.box[int]` from `js`, `both` and `wasm` packages → `assertErrorContains(…, "not exported by package util")`; `util.Ä()` stays exported; update existing assertion in `test/unit/compiler/imports.test.js:227` from `"cannot refer to unexported name"` to `"not exported by package"`
   - Done when: all pass

@@ -19,6 +19,7 @@ import {
 	runWasm,
 	section,
 	test,
+	toCompileResult,
 	withTempDir,
 } from "../helpers.js";
 
@@ -1412,7 +1413,7 @@ type T struct{ A int }
 
 func (t T) Get() int { return t.A }
 
-type __S struct{ B int }
+type S struct{ B int }
 
 type G[X any] struct{ V X }
 
@@ -1441,7 +1442,7 @@ ${importLine}
 
 func Main() int {
 	v := __u.T{A: 10}
-	s := __u.__S{B: 5}
+	s := __u.S{B: 5}
 	var a any = v
 	_, ok := a.(__u.T)
 	p := new(__u.T)
@@ -1464,15 +1465,15 @@ test("members of a __ prefixed package keep working", async () => {
 		{
 			"util/u.go": `package __u
 
-func __Answer() int { return 42 }
+func Answer() int { return 42 }
 
-var __V = 8
+var V = 8
 `,
 			"main.go": `package main
 
 import "./util"
 
-func Main() int { return __u.__Answer() + __u.__V }
+func Main() int { return __u.Answer() + __u.V }
 `,
 		},
 		{ exports: ["Main"] },
@@ -1552,21 +1553,23 @@ ${body}
 
 section("Renames follow the binding a name resolves to");
 
-for (const [name, decl, read] of [
-	["Array", "type Array int", "int(Array)"],
-	["Map", "type Map int", "int(Map)"],
-	["Proxy", "type Proxy int", "int(Proxy)"],
-	["__n", "type __n int", "int(__n)"],
+// `typeName` is the imported type's name: another package can name only what
+// it exports, so a `__` name is read through an exported type.
+for (const [name, typeName, read] of [
+	["Array", "Array", "int(Array)"],
+	["Map", "Map", "int(Map)"],
+	["Proxy", "Proxy", "int(Proxy)"],
+	["__n", "N", "int(__n)"],
 ]) {
-	test(`package var ${name} of an imported type of the same name`, async () => {
+	test(`package var ${name} of an imported type ${name === typeName ? "of the same name" : "named differently"}`, async () => {
 		const { mod } = await compileHybridProject(
 			{
-				"util/u.go": `package util\n\n${decl}\n`,
+				"util/u.go": `package util\n\ntype ${typeName} int\n`,
 				"main.go": `package main
 
 import "./util"
 
-var ${name} util.${name} = 5
+var ${name} util.${typeName} = 5
 
 func Main() int { return ${read} }
 `,
@@ -1577,16 +1580,19 @@ func Main() int { return ${read} }
 	});
 }
 
-for (const name of ["__A", "Proxy"]) {
-	test(`package var ${name} of an imported struct type of the same name`, async () => {
+for (const [name, typeName] of [
+	["__A", "A"],
+	["Proxy", "Proxy"],
+]) {
+	test(`package var ${name} of an imported struct type ${name === typeName ? "of the same name" : "named differently"}`, async () => {
 		const { mod } = await compileHybridProject(
 			{
-				"util/u.go": `package util\n\ntype ${name} struct{ X int }\n`,
+				"util/u.go": `package util\n\ntype ${typeName} struct{ X int }\n`,
 				"main.go": `package main
 
 import "./util"
 
-var ${name} = util.${name}{X: 5}
+var ${name} = util.${typeName}{X: 5}
 
 func Main() int { return ${name}.X }
 `,
@@ -3254,3 +3260,61 @@ func main() { _ = a }
 `);
 	assertErrorContains(bad.errors, "invalid array length");
 });
+
+section("Package visibility: another package's unexported names");
+
+// Compiles `main.go` (a js package importing `./util`) with `util` declared as
+// `utilSrc` for the given target; returns the compile errors.
+function foreignErrors(utilSrc, mainSrc, target) {
+	return withTempDir(
+		{
+			"util/util.go": `//gofront:target ${target}\npackage util\n\n${utilSrc}`,
+			"main.go": `package main\n\nimport "./util"\n\n${mainSrc}`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)).errors,
+	);
+}
+
+const FOREIGN_NAMES_UTIL = `
+func __Answer() int { return 42 }
+
+func Answer() int { return 42 }
+
+func Ä() int { return 1 }
+
+type secret struct{ N int }
+
+type box[T any] struct{ v T }
+
+func Make() secret { return secret{1} }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body] of [
+		["a function named with a double underscore", "_ = util.__Answer()"],
+		["a variable of an unexported type", "var x util.secret\n\t_ = x"],
+		["a composite literal of an unexported type", "_ = util.secret{}"],
+		[
+			"a variable of an unexported generic type",
+			"var g util.box[int]\n\t_ = g",
+		],
+	]) {
+		test(`${what} of a ${target} package is not exported (E1, E3, E6)`, () => {
+			const errors = foreignErrors(
+				FOREIGN_NAMES_UTIL,
+				`func main() {\n\t${body}\n}\n`,
+				target,
+			);
+			assertErrorContains(errors, "not exported by package util");
+		});
+	}
+
+	test(`a non-ASCII uppercase name of a ${target} package stays exported`, () => {
+		const errors = foreignErrors(
+			FOREIGN_NAMES_UTIL,
+			"func main() {\n\t_ = util.Ä()\n\t_ = util.Answer()\n}\n",
+			target,
+		);
+		assertEqual(errors.length, 0);
+	});
+}

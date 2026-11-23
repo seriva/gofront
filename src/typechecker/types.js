@@ -1099,6 +1099,12 @@ export function isMethodPromotedOverField(struct, name) {
 	return field !== null && promoted.depth < field.depth;
 }
 
+// Go's export rule: a name is exported when its first character is a Unicode
+// uppercase letter (`_` and `__Name` are not).
+export function isExported(name) {
+	return typeof name === "string" && /^\p{Lu}/u.test(name);
+}
+
 // A function-local type shadowed by another type is renamed `Name__L<n>`.
 export const LOCAL_TYPE_SUFFIX = /__L\d+/;
 
