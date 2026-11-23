@@ -386,5 +386,68 @@ declare function h(type: any, props?: any, ...children: any[]): VNode;
 count, setCount := useState(0) // assigning to a single variable is a compile error
 ```
 
+### Typed browser globals
+
+`document`, `window`, `fetch`, `console`, `localStorage`, `setTimeout`, `requestAnimationFrame`
+and the other Web API globals are typed from the browser's own API, so a misspelled member or a
+wrong argument is a compile error:
+
+```go
+document.getElementByID("app") // → No member 'getElementByID' in namespace Document
+var w int = window.innerWidth  // whole-number members are int
+resp := await fetch("/todos")  // resp is a fetch.Response
+ok := resp.ok                  // bool
+```
+
+Typed globals need no import and add nothing to the generated code. A program that uses no
+Web API never loads the declarations. Like any pointer or interface value they can be compared
+with `nil` (`if document == nil`), which keeps a package testable without a DOM.
+
+`document.querySelector` and `getElementById` return the generic `Element` (or `nil`), so a
+member that only a specific element has needs a type assertion first. Import the package that
+names the element types, and assert the type you expect; the assertion is free and emits no
+runtime check:
+
+```go
+import "gofront/dom"
+
+// before: input := document.querySelector(".todo-input")
+input := document.querySelector(".todo-input").(dom.HTMLInputElement)
+text := input.value
+input.focus()
+```
+
+The same applies to `getContext`, which returns one of several context types (import `gofront/canvas` for the 2D one):
+
+```go
+el := document.getElementById("game").(dom.HTMLCanvasElement)
+ctx := el.getContext("2d").(canvas.CanvasRenderingContext2D)
+```
+
+Event listeners take typed parameters, and a listener may leave parameters off:
+
+```go
+button.addEventListener("click", func(e dom.MouseEvent) { println(e.clientX) })
+button.addEventListener("click", func() { save() })
+```
+
+Migrating an existing program, fix what the compiler reports:
+
+- **A member the element type lacks** (`input.value`, `canvasEl.getContext`): assert the element type as above.
+- **A number read as `int` or `float64`**: whole-number members such as `window.innerWidth` and `event.clientX` are `int`, fractional ones such as `rect.width` are `float64`. Convert where you mix them (`float64(e.clientX) > rect.top`).
+- **An attribute or value parsed as a number** (`int(el.getAttribute("data-id"))`): the value is a string, so use `strconv.Atoi`.
+- **A property the browser does not declare** (a custom `window.myConfig`, or a CSS property such as `style.display`): declare it in a `.d.ts` file you import with `js:` and assert to it, or use the API form (`style.setProperty("display", "none")`).
+- **A library that adds globals** (PeerJS and similar): keep its `.d.ts` as before. Consumer declarations are unchanged.
+
+The ECMAScript built-ins among the globals (`Math`, `JSON`, `Date`, `RegExp`, `Promise`, `Error`,
+`Symbol`, `String`, `Number`, `Boolean`, `Array`, `Object`, `parseInt`, `parseFloat`, `isNaN`,
+`isFinite`, `encodeURIComponent` and `decodeURIComponent`) are not part of the Web API and stay
+dynamic: `JSON.stringify(todos)` and `Math.random() * 2` need
+no assertions.
+
+The types come from the `gofront/dom`, `gofront/canvas`, `gofront/fetch`, `gofront/websocket` and
+`gofront/webgpu` packages, which are for `js` packages only. Import one to name its types
+(`dom.HTMLInputElement`, `fetch.Response`, `websocket.WebSocket`, `webgpu.Device`).
+
 ---
 

@@ -1227,7 +1227,7 @@ func main() {
 });
 
 test("a slice, map or func compared with a JS-dynamic value is accepted in both operand orders", () => {
-	for (const dyn of ["document.foo", "document.foo.bar", 'JSON.parse("1")']) {
+	for (const dyn of ["JSON.foo", "JSON.foo.bar", 'JSON.parse("1")']) {
 		for (const v of ["s", "m", "f"]) {
 			for (const expr of [`${v} == ${dyn}`, `${dyn} == ${v}`]) {
 				const { errors } = compile(`package main

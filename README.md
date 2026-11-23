@@ -81,7 +81,8 @@ func addTodo(text string) {
 func main() {
     btn := document.getElementById("add-btn")
     btn.addEventListener("click", func() {
-        addTodo(document.getElementById("input").value)
+        input := document.getElementById("input").(dom.HTMLInputElement)
+        addTodo(input.value)
     })
 }
 ```

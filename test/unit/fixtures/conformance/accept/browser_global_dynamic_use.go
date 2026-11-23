@@ -3,7 +3,7 @@
 package main
 
 func main() {
-	x := window.something
+	x := JSON.something
 	x()
 	_ = x[0]
 	x["a"] = 1

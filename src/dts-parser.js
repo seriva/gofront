@@ -1009,6 +1009,39 @@ function referencedPackages(source) {
 	].map((m) => m[1]);
 }
 
+// Replaces the plain `any` in and under `type` with a copy tagged `_hostAny`,
+// mutating the containers. A declaration package speaks to the browser, so a
+// value that flows into such an `any` stays what it is in JavaScript: the
+// checker does not box it as a Go interface value (see `_markIfaceBox`).
+function markHostAny(type, seen) {
+	if (!type || typeof type !== "object") return type;
+	if (type.kind === "basic")
+		return type.name === "any" && !type.alias
+			? { ...type, _hostAny: true }
+			: type;
+	if (seen.has(type)) return type;
+	seen.add(type);
+	const walk = (t) => markHostAny(t, seen);
+	switch (type.kind) {
+		case "namespace":
+			for (const [k, m] of Object.entries(type.members))
+				type.members[k] = walk(m);
+			break;
+		case "func":
+			type.params = type.params.map(walk);
+			type.returns = type.returns.map(walk);
+			break;
+		case "slice":
+		case "promise":
+			type.elem = walk(type.elem);
+			break;
+		case "tuple":
+			type.types = type.types.map(walk);
+			break;
+	}
+	return type;
+}
+
 // Parses the declaration file of the package `name` (`gofront/<name>`):
 // `{ name, types, values, keys, requires }`, where `keys` is each type's key in
 // a checker's type table and `requires` names the packages its header comments
@@ -1025,6 +1058,9 @@ export function parseDeclarationPackage(source, name) {
 	}
 	for (const t of values.values())
 		qualifyReferences(t, name, names, required, seen);
+	const marked = new Set();
+	for (const [k, t] of types) types.set(k, markHostAny(t, marked));
+	for (const [k, t] of values) values.set(k, markHostAny(t, marked));
 	const keys = new Map([...names].map((n) => [n, declarationTypeKey(name, n)]));
 	return { name, types, values, keys, requires };
 }
