@@ -6,6 +6,12 @@ import { someChild } from "./walk.js";
 
 let iterStateCounter = 0;
 
+// Numbers a `lower()` call's iterator state variables from 1 again, so a
+// build's names do not depend on the compiles before it.
+export function resetIterStateCounter() {
+	iterStateCounter = 0;
+}
+
 export function isIteratorRangeFor(stmt) {
 	if (stmt?.kind !== "ForStmt") return false;
 	const rangeExpr =

@@ -25,6 +25,7 @@ import {
 } from "./functions.js";
 import { computeGlobalAnalysis, lowerEmbeds } from "./globals.js";
 import { OwnershipContext, takesElementAddress } from "./ownership.js";
+import { resetIterStateCounter } from "./range.js";
 
 export { takesElementAddress };
 
@@ -89,6 +90,7 @@ export function lower(programOrPrograms, checker = null) {
 		? programOrPrograms
 		: [programOrPrograms];
 
+	resetIterStateCounter();
 	splitForwardedTuples(programs);
 	normalizeDefers(programs);
 	lowerEmbeds(programs);

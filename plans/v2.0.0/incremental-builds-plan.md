@@ -113,7 +113,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
   - Files: `src/lower/walk.js`, `src/link/wasm.js`, `src/compiler.js`
   - Test: `test/unit/compiler/ast-reusability.test.js`: deep-freezing raw ASTs stored in `_parseCache` and compiling twice in one process with function-local types, cross-package colliding types (`type Pt`), folded array lengths, JS-reserved identifiers (`class := 1`), `defer`, forwarded multi-value calls (`g(f())`), and strict-mode slice indexing succeeds without mutation errors and leaves cached baseline ASTs untouched
   - Done when: `cloneAst` in `src/lower/walk.js` replaces `cloneAstForWasm` in `src/link/wasm.js:117`, `parseGoFrontFile` returns a structural clone from `_parseCache`, and deep-frozen `_parseCache` entries are never mutated
-- [ ] Task 1.3: Per-package synthetic counters and checker-owned generic instantiation state (former 3.2, counters/generics half)
+- [x] Task 1.3: Per-package synthetic counters and checker-owned generic instantiation state (former 3.2, counters/generics half)
   - Files: `src/link/type-names.js`, `src/lower/range.js`, `src/typechecker/resolve.js`
   - Test: extend `test/unit/compiler/ast-reusability.test.js` with function-local types, range-over-func, and a frozen exported generic type (`type Box[T any] struct{ V T }`) instantiated across two compiles: consecutive compiles in one process emit byte-identical synthetic names (`localTypeCounter`, `iterStateCounter`) and never write `_instances`/`_building`/`_buildSizes`/`_cycleReported` onto the frozen generic type descriptor
   - Done when: `localTypeCounter` and `iterStateCounter` reset per package / `lower()` call, and `instantiateGenericWithArgs` stores instantiation state in `TypeChecker`-owned maps

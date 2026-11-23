@@ -131,6 +131,8 @@ export class TypeChecker {
 		// while resolving a declaration of an imported generic type.
 		this._ownerPkg = this._pkgId;
 		this.types = new Map(); // named types
+		// Instantiation state per generic type (see `_instState`).
+		this._genericState = new Map();
 		// Go's universe scope: builtins, browser globals and built-in package
 		// namespaces.  Package declarations live in `globals` above it, so they
 		// shadow predeclared names (`func Array()`, `var document int`).
@@ -1101,7 +1103,8 @@ export class TypeChecker {
 		const structs = [];
 		for (const type of this.types.values()) {
 			structs.push(type.underlying);
-			for (const inst of type._generic?._instances?.values() ?? []) {
+			const instances = this._genericState.get(type._generic)?.instances;
+			for (const inst of instances?.values() ?? []) {
 				this._syncInstanceMethods(type._generic, inst);
 				structs.push(inst.underlying);
 			}
