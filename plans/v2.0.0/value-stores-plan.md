@@ -130,7 +130,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Files: `test/fuzz/difffuzz.js`
   - Test: `test/unit/cli/difffuzz.test.js` (Go-free): the generator's batch for `--case 6873:0` declares `ks` before `f0`; `stmtConflicts` rejects the V1.2 statement
   - Done when: both pass; `--mode order --stmts 12 --case 6873:0` compiles with Go (by hand)
-- [ ] Task 1.2: `--mode stores` generates the V3/V4 shapes (V1.3)
+- [x] Task 1.2: `--mode stores` generates the V3/V4 shapes (V1.3)
   - Files: `test/fuzz/difffuzz.js`, `docs/architecture.md` (*Differential fuzzer*: the new mode)
   - Test: `test/unit/cli/difffuzz.test.js`: a seeded `--mode stores` batch contains each shape (comma-ok into `*p` and generic targets, range-over-func `=`, `for` post, closure-captured struct, embedded field)
   - Done when: passes; a by-hand run reproduces at least V3.1 and V4.1 as findings before Phases 3–4

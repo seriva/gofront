@@ -71,3 +71,55 @@ test("--case rejects a malformed value", () => {
 	assertEqual(r.status, 2);
 	assertContains(r.stderr, "--case needs SEED:N");
 });
+
+section("Differential fuzzer: stores mode");
+
+let storesProgram = null;
+const storesBatch = () => {
+	storesProgram ??= fuzz(
+		"--mode",
+		"stores",
+		"--print",
+		"--seed",
+		"1",
+		"--cases",
+		"150",
+		"--stmts",
+		"12",
+	).stdout;
+	return storesProgram;
+};
+
+const STORE_SHAPES = {
+	"comma-ok map into *p": /\*ps2?, ok = ms\[/,
+	"comma-ok map into a generic target": /ok = setOK\(/,
+	"comma-ok assertion into *p": /\*ps2?, ok = ia\.\(S\)/,
+	"comma-ok assertion into a generic target": /ok = setAssert\(/,
+	"range-over-func =": /for [^;\n]* = range seq[SAPI]\(/,
+	"range-over-func = with a key": /for [^;\n]* = range kseq[SAPI]\(/,
+	"range = over a slice": /for _, [^;\n]* = range \[\]/,
+	"range = over a map": /for _, [^;\n]* = range map\[int\]/,
+	"generic range =": /setRange\(/,
+	"for init comma-ok :=": /for x, ok2 := m[sapi]\[kf\(\)\]; ok2; ok2 = false/,
+	"for post comma-ok": /for t := 0; t < 1; [^;\n]*, ok = m[sapi]\[/,
+	"for post struct tuple": /for t := 0; t < 2; \*?[\w.[\]]+, t = \(S\{/,
+	"for post complex +=": /for t := 0; t < 2; c \+= z/,
+	"closure-captured struct": /f\d := func\(\) \{[^}]*\b(v|w|s|wv)\b[.=]/,
+	"embedded field": /v\.P = s\.P/,
+	"literal value-struct field": /W\{Q: q\}/,
+	"address-taken sliced array": /sl := arr\[:\]/,
+};
+
+for (const [name, re] of Object.entries(STORE_SHAPES))
+	test(`--mode stores generates ${name}`, () => {
+		assert(re.test(storesBatch()), `no statement matches ${re}`);
+	});
+
+test("--mode stores is deterministic and differs between seeds", () => {
+	const a = fuzz("--mode", "stores", "--print", "--seed", "3", "--cases", "5");
+	const b = fuzz("--mode", "stores", "--print", "--seed", "3", "--cases", "5");
+	const c = fuzz("--mode", "stores", "--print", "--seed", "4", "--cases", "5");
+	assertEqual(a.status, 0, a.stderr);
+	assertEqual(a.stdout, b.stdout);
+	assert(a.stdout !== c.stdout, "seeds 3 and 4 gave the same program");
+});
