@@ -146,7 +146,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Done when: all pass on every target
 
 ### Phase 3: One JS store primitive (root `js-store-target`)
-- [ ] Task 3.1: `_storeInto` and comma-ok stores (V3.4, V3.5, V3.6)
+- [x] Task 3.1: `_storeInto` and comma-ok stores (V3.4, V3.5, V3.6)
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/value-semantics.test.js` *Whole-value stores*: V3.4 → `{5} true`, V3.5 → `{6}`, V3.6 (`*p, ok = m["k"]` and `*p, ok = a.(T)`) with struct, array and `int` `T` → `true {5}` / Go's output, with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: passes on `js`/`both`; the comma-ok emitters contain no inline `Object.assign`

@@ -1552,3 +1552,159 @@ func main() {
 		"none\na3\n",
 	);
 });
+
+section("Whole-value stores");
+
+// Each body runs in `main`; `S` is `struct{ N int }`.
+const storeCase = (name, decls, body, want, assertFn = assertJsTargetsOutput) =>
+	test(name, async () => {
+		await assertFn(
+			`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+${decls}
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+storeCase(
+	"a comma-ok map read into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	m := map[string]S{"k": {5}}
+	var ok bool
+	s, ok = m["k"]
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{5} true true\n",
+);
+
+storeCase(
+	"a comma-ok type assertion into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	var i any = S{6}
+	var ok bool
+	s, ok = i.(S)
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{6} true true\n",
+);
+
+storeCase(
+	"a comma-ok map read into a sliced array updates the slice view",
+	"",
+	`	var arr [2]int
+	sl := arr[:]
+	m := map[string][2]int{"k": {7, 8}}
+	var ok bool
+	arr, ok = m["k"]
+	fmt.Println(sl, ok)`,
+	"[7 8] true\n",
+);
+
+storeCase(
+	"a comma-ok type assertion into a sliced array updates the slice view",
+	"",
+	`	var arr [2]int
+	sl := arr[:]
+	var i any = [2]int{3, 4}
+	var ok bool
+	arr, ok = i.([2]int)
+	fmt.Println(sl, ok)`,
+	"[3 4] true\n",
+);
+
+storeCase(
+	"a missed comma-ok map read zeroes an address-taken struct in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	m := map[string]S{}
+	var ok bool
+	s, ok = m["k"]
+	fmt.Println(*ps, ps == &s, ok)`,
+	"{0} true false\n",
+);
+
+storeCase(
+	"a comma-ok result into an address-taken bool updates it in place",
+	"",
+	`	var ok bool
+	pok := &ok
+	m := map[string]int{"k": 1}
+	_, ok = m["k"]
+	fmt.Println(*pok)`,
+	"true\n",
+);
+
+storeCase(
+	"a comma-ok map read through *p stores into the pointee",
+	"",
+	`	s := S{1}
+	p := &s
+	m := map[string]S{"k": {5}}
+	var ok bool
+	*p, ok = m["k"]
+	fmt.Println(s, ok)`,
+	"{5} true\n",
+);
+
+storeCase(
+	"a comma-ok type assertion through *p stores into the pointee",
+	"",
+	`	s := S{1}
+	p := &s
+	var i any = S{6}
+	var ok bool
+	*p, ok = i.(S)
+	fmt.Println(s, ok)`,
+	"{6} true\n",
+);
+
+const GENERIC_STORE = `func fromMap[T any](p *T, m map[string]T) bool {
+	var ok bool
+	*p, ok = m["k"]
+	return ok
+}
+
+func fromAssert[T any](p *T, a any) bool {
+	var ok bool
+	*p, ok = a.(T)
+	return ok
+}`;
+
+storeCase(
+	"a generic *T comma-ok map read and assertion store for struct, array and int",
+	GENERIC_STORE,
+	`	var s S
+	var arr [2]int
+	var n int
+	fmt.Println(fromMap(&s, map[string]S{"k": {5}}), s)
+	fmt.Println(fromMap(&arr, map[string][2]int{"k": {5, 6}}), arr)
+	fmt.Println(fromMap(&n, map[string]int{"k": 5}), n)
+	fmt.Println(fromAssert(&s, S{7}), s)
+	fmt.Println(fromAssert(&arr, [2]int{7, 8}), arr)
+	fmt.Println(fromAssert(&n, 7), n)
+	fmt.Println(fromAssert(&n, "x"), n)`,
+	"true {5}\ntrue [5 6]\ntrue 5\ntrue {7}\ntrue [7 8]\ntrue 7\nfalse 0\n",
+);
+
+storeCase(
+	"a generic *T comma-ok map read stores a copy, not the map's array",
+	GENERIC_STORE,
+	`	var arr [2]int
+	m := map[string][2]int{"k": {5, 6}}
+	fromMap(&arr, m)
+	arr[0] = 9
+	fmt.Println(m["k"], arr)`,
+	"[5 6] [9 6]\n",
+);

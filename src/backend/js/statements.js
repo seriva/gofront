@@ -271,23 +271,20 @@ export const statementGenMethods = {
 		for (const l of hoisted?.lines ?? []) this.line(l);
 		const mapExpr = pre?.map ?? this.genExpr(rhsNode.expr);
 		const keyExpr = pre?.key ?? this.genExpr(rhsNode.index);
-		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-		const [vDeref, okDeref] = this._structDerefOperands(stmt);
+		const targets = stmt.lhs.map((l) => this._storeTarget(l));
 		hoisted?.restore();
-		// A name `:=` reuses is assigned, not declared again; an address-taken
-		// variable lives in a `{ value }` box.
-		const bind = (l, name, js, deref) => {
-			if (deref) return `Object.assign(${deref}, ${js});`;
-			const boxed = this._boxedVars.has(name);
-			if (isDefine && !l._redecl)
-				return `let ${name} = ${boxed ? `{ value: ${js} }` : js};`;
-			return `${name}${boxed ? ".value" : ""} = ${js};`;
+		// A name `:=` reuses is stored into, not declared again; an
+		// address-taken variable lives in a `{ value }` box.
+		const bind = (i, js) => {
+			const l = stmt.lhs[i];
+			if (!isDefine || l._redecl) return this._storeInto(targets[i], js);
+			const boxed = this._boxedVars.has(l.name);
+			this.line(`let ${l.name} = ${boxed ? `{ value: ${js} }` : js};`);
 		};
 		const [vL, okL] = stmt.lhs;
 		// A struct or array map value is a copy, not the stored value.
 		const valType = rhsNode._mapValueType;
-		const copyVal = (js) =>
-			this._aggregateBase(valType) ? this._cloneJs(valType, js) : js;
+		const copyVal = (js) => this._copyValueJs(valType, js);
 		if (isDefine && !this.strict) {
 			// Both reads use the map and key: a call in either runs once.
 			let m = mapExpr;
@@ -298,13 +295,9 @@ export const statementGenMethods = {
 				k = `__k${this._tmpCounter}`;
 				this.line(`const ${m} = ${mapExpr}, ${k} = ${keyExpr};`);
 			}
-			if (vName !== "_") {
-				const val = this._nonStrictMapRead(m, k, valType, copyVal);
-				this.line(bind(vL, vName, val, vDeref));
-			}
-			if (okName !== "_") {
-				this.line(bind(okL, okName, `(${k}) in ${m}`, okDeref));
-			}
+			if (vL.name !== "_")
+				bind(0, this._nonStrictMapRead(m, k, valType, copyVal));
+			if (okL.name !== "_") bind(1, `(${k}) in ${m}`);
 			return;
 		}
 		const zero = rhsNode._mapValueType
@@ -314,21 +307,20 @@ export const statementGenMethods = {
 		const mTmp = `__m${this._tmpCounter}`;
 		const kTmp = `__k${this._tmpCounter}`;
 		this.line(`const ${mTmp} = ${mapExpr}, ${kTmp} = ${keyExpr};`);
-		if (vName !== "_") {
-			this.line(
-				bind(
-					vL,
-					vName,
-					`(${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero}`,
-					vDeref,
-				),
+		if (vL.name !== "_")
+			bind(
+				0,
+				`(${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero}`,
 			);
-		}
-		if (okName !== "_") {
-			this.line(
-				bind(okL, okName, `Boolean(${mTmp} && (${kTmp} in ${mTmp}))`, okDeref),
-			);
-		}
+		if (okL.name !== "_") bind(1, `Boolean(${mTmp} && (${kTmp} in ${mTmp}))`);
+	},
+
+	// A copy of the value `js` of `type`: a struct or array (also one held by
+	// a type parameter) is a reference in JS.
+	_copyValueJs(type, js) {
+		return this._aggregateBase(type) || type?.kind === "typeParam"
+			? this._cloneJs(type, js)
+			: js;
 	},
 
 	genStmt(stmt) {
@@ -1111,26 +1103,12 @@ export const statementGenMethods = {
 		const hoisted = this._hoistLhsOperands(stmt, true);
 		for (const l of hoisted?.lines ?? []) this.line(l);
 		const val = this.genExpr(stmt.rhs[0]);
-		const [vName, okName] = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
-		const derefs = this._structDerefOperands(stmt);
+		const targets = stmt.lhs.map((l) => this._storeTarget(l));
 		hoisted?.restore();
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__ta${this._tmpCounter}`;
 		this.line(`const ${tmp} = ${val};`);
-		[vName, okName].forEach((name, i) => {
-			if (name === "_") return;
-			const js = `${tmp}[${i}]`;
-			this.line(
-				derefs[i] ? `Object.assign(${derefs[i]}, ${js});` : `${name} = ${js};`,
-			);
-		});
-	},
-
-	// For each target of `stmt`, the struct a `*p` target writes into, else null.
-	_structDerefOperands(stmt) {
-		return stmt.lhs.map((l) =>
-			this._isStructDerefTarget(l) ? this.genExpr(l.operand) : null,
-		);
+		for (const [i, t] of targets.entries()) this._storeInto(t, `${tmp}[${i}]`);
 	},
 
 	// `a = [3]int{...}` / `s = S{...}` on a variable whose address (or an
@@ -1146,6 +1124,12 @@ export const statementGenMethods = {
 	// program takes `&xs[i]` anywhere, an element of a slice does too: any
 	// callee may hold the pointer.
 	_isStableTarget(l, rhs) {
+		return this._isStableStore(l) && !!this._aggregateBase(rhs._type);
+	},
+
+	// A struct or array target whose storage must keep its identity: a pointer
+	// or slice taken from it sees the stored value.
+	_isStableStore(l) {
 		if (l.kind === "IndexExpr" && l._mapValueType) return false;
 		if (
 			l.kind !== "Ident" &&
@@ -1154,8 +1138,7 @@ export const statementGenMethods = {
 		)
 			return false;
 		if (l.kind === "Ident" && l.name === "_") return false;
-		if (!this._aggregateBase(l._type) || !this._aggregateBase(rhs._type))
-			return false;
+		if (!this._aggregateBase(l._type)) return false;
 		if (this._elemAddrTaken && this._isSliceElemTarget(l)) return true;
 		const root = this._rootIdentName(l);
 		return root !== null && this._fnMutates(root, true);
@@ -1220,6 +1203,69 @@ export const statementGenMethods = {
 		}
 		this._emitCopyInto(target, src, type);
 		this.line("}");
+	},
+
+	// How a whole-value store writes into the lvalue `l`, with the operand
+	// expressions generated now (after `_hoistLhsOperands` bound them), so the
+	// store itself can be emitted later by `_storeInto`.
+	_storeTarget(l) {
+		if (l.kind === "Ident" && l.name === "_") return { kind: "blank" };
+		if (l.kind === "UnaryExpr" && l.op === "*") {
+			if (l.operand?._type?.base?.kind === "typeParam")
+				return {
+					kind: "typeParamPtr",
+					ptr: this.genExpr(l.operand),
+					isStruct: this._typeParamIsStructJs(l.operand._type.base.name),
+				};
+			if (this._isStructPointerType(l.operand?._type))
+				return { kind: "structPtr", ptr: this.genExpr(l.operand) };
+		}
+		return {
+			kind: this._isStableStore(l) ? "stable" : "plain",
+			js: this._genAssignLhsExpr(l),
+			type: l._type,
+		};
+	},
+
+	// The one JS store primitive: writes `src`, a JS expression for a value
+	// of the target's type that is evaluated once, into a target from
+	// `_storeTarget`.  A
+	// blank target stores nothing; a `*p` of a struct (or of a type parameter
+	// that is one) copies into the pointee; an address-taken or sliced struct
+	// or array is copied element by element into its existing storage; any
+	// other target is assigned.  A plain store keeps `src` itself, so the
+	// caller passes a fresh copy of an aggregate there.
+	_storeInto(target, src) {
+		switch (target.kind) {
+			case "blank":
+				return;
+			case "structPtr":
+				this.line(`Object.assign(${target.ptr}, ${src});`);
+				return;
+			case "typeParamPtr":
+				this.line(
+					`((__p, __v) => { if (${target.isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
+				);
+				return;
+			case "stable": {
+				let from = src;
+				if (!/^[\w$.[\]]+$/.test(from)) {
+					this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+					from = `__s${this._tmpCounter}`;
+					this.line(`const ${from} = ${src};`);
+				}
+				let dst = target.js;
+				if (!/^[\w$.]+$/.test(dst)) {
+					this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+					dst = `__d${this._tmpCounter}`;
+					this.line(`const ${dst} = ${target.js};`);
+				}
+				this._emitCopyInto(dst, from, target.type);
+				return;
+			}
+			default:
+				this.line(`${target.js} = ${src};`);
+		}
 	},
 
 	// Copies aggregate `src` into the storage `dst` element by element, going
