@@ -2,7 +2,11 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ceilingsFor, checkBudgets, FIXTURES } from "../../perf/bundle-size.js";
+import {
+	caseNames,
+	ceilingsFor,
+	checkBudgets,
+} from "../../perf/bundle-size.js";
 import {
 	assert,
 	assertContains,
@@ -41,13 +45,13 @@ test("ceilings are the measured size plus 5 percent, rounded up", () => {
 	assertEqual(ceilingsFor({ a: 100, b: 1001 }).b, 1052);
 });
 
-test("the baseline file has a ceiling for every fixture", () => {
+test("the baseline file has a ceiling for every fixture and example", () => {
 	const baseline = JSON.parse(
 		readFileSync(join(ROOT, "test/perf/bundle-size.baseline.json"), "utf8"),
 	);
 	assertEqual(
 		Object.keys(baseline).sort().join(","),
-		Object.keys(FIXTURES).sort().join(","),
+		caseNames().sort().join(","),
 	);
 	for (const [name, ceiling] of Object.entries(baseline)) {
 		assert(Number.isInteger(ceiling) && ceiling > 0, `${name} ceiling`);

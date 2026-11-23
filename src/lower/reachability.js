@@ -48,6 +48,30 @@ function forEachTemplExpr(node, fn) {
 	fn(node.forStmt);
 }
 
+// A fresh set of references: names, selected fields, `pkg.Name` qualifiers,
+// method selections on a concrete type (`sels`) and hand-over sites.
+function newRefs() {
+	return {
+		names: new Set(),
+		fields: new Set(),
+		quals: new Set(),
+		sels: [],
+		sites: [],
+	};
+}
+
+// The named type a selection is made on when it is a concrete type (a
+// struct or other non-interface named type, or a pointer to one; a generic
+// instance counts as its base type), else null: a selection through an
+// interface, a type parameter or an unknown type names its method on every
+// type.
+function concreteReceiver(t) {
+	const named = t?.kind === "pointer" ? t.base : t;
+	if (named?.kind !== "named" || typeof named.name !== "string") return null;
+	const kind = named.underlying?.kind;
+	return kind && kind !== "interface" ? named : null;
+}
+
 // Notes the name, field or qualifier `node` itself stands for.
 function noteRef(node, acc) {
 	const { names, fields, quals } = acc;
@@ -63,11 +87,14 @@ function noteRef(node, acc) {
 			names.add(node.name);
 			if (node.name.includes(".")) quals.add(node.name);
 			break;
-		case "SelectorExpr":
-			fields.add(node.field);
+		case "SelectorExpr": {
+			const recv = concreteReceiver(node.expr?._type);
+			if (recv) acc.sels.push({ type: recv, field: node.field });
+			else fields.add(node.field);
 			if (node.expr?.kind === "Ident")
 				quals.add(`${node.expr.name}.${node.field}`);
 			break;
+		}
 		// A reached interface needs its methods on the types that satisfy it.
 		case "InterfaceType":
 			for (const m of node.methods ?? []) fields.add(m.name);
@@ -116,24 +143,39 @@ const refsMemo = new WeakMap();
 function refsOf(node) {
 	let refs = refsMemo.get(node);
 	if (!refs) {
-		refs = { names: new Set(), fields: new Set(), quals: new Set(), sites: [] };
+		refs = newRefs();
 		collectRefs(node, refs);
 		refsMemo.set(node, refs);
 	}
 	return refs;
 }
 
-// Adds the references under `node` (nested arrays of nodes) to `names` and
-// `fields`.
-function collectTopRefs(node, names, fields) {
+// Adds the references under `node` (nested arrays of nodes) to `names`,
+// `fields` and `sels`.
+function collectTopRefs(node, names, fields, sels) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
-		for (const n of node) collectTopRefs(n, names, fields);
+		for (const n of node) collectTopRefs(n, names, fields, sels);
 		return;
 	}
 	const refs = refsOf(node);
 	for (const n of refs.names) names.add(n);
 	for (const f of refs.fields) fields.add(f);
+	sels.push(...refs.sels);
+}
+
+// The type a method's receiver names, with a local alias (`type A = P`)
+// followed to its type; null when the alias leads out of the package.
+// `aliasOf(name)` is the alias declaration of `name`, if it is one.
+function canonicalRecv(recv, aliasOf) {
+	for (let hops = 0; hops < 16; hops++) {
+		const alias = aliasOf(recv);
+		if (!alias) return recv;
+		const target = alias.type;
+		if (!target?.name || target.name.includes(".")) return null;
+		recv = target.name;
+	}
+	return null;
 }
 
 // The declaration with its body checked and mangled: a lazily checked
@@ -158,6 +200,9 @@ function indexStdlib(stdlibPrograms) {
 			}
 		}
 	}
+	const aliasOf = (n) =>
+		(byName.get(n) ?? []).find((d) => d.kind === "TypeDecl" && d.isAlias);
+	for (const m of methods) m.canon = canonicalRecv(m.recv, aliasOf);
 	return { byName, methods, inits };
 }
 
@@ -177,7 +222,13 @@ export class StdlibReach {
 		this.inits = inits;
 		this.reached = new Set();
 		this.names = new Set();
+		// Method names selected on every type (through an interface, a type
+		// parameter or an unknown type, or called implicitly) ...
 		this.fields = new Set(IMPLICIT_METHODS);
+		// ... and per concrete type: type name -> method names selected on it.
+		this.selected = new Map();
+		this.selectedCount = 0;
+		this.typedNames = new Set(); // every name selected on some type
 		this.escaped = new Set(); // types whose values leave Go: all methods stay
 		this.pending = [];
 		this.failures = [];
@@ -186,12 +237,50 @@ export class StdlibReach {
 	// Adds `rootNodes` (AST that is emitted) and closes over what they use.
 	add(rootNodes) {
 		const roots = new Set();
-		const knownFields = this.fields.size;
-		collectTopRefs(rootNodes, roots, this.fields);
+		const sels = [];
+		const known = this._selections();
+		collectTopRefs(rootNodes, roots, this.fields, sels);
+		this._selectAll(sels);
 		for (const n of roots) this._name(n);
 		// A reference to something already reached leaves the closure as it was.
-		if (this.pending.length === 0 && this.fields.size === knownFields) return;
+		if (this.pending.length === 0 && this._selections() === known) return;
 		this._close();
+	}
+
+	_selections() {
+		return this.fields.size + this.selectedCount;
+	}
+
+	_selectAll(sels) {
+		for (const { type, field } of sels) this._select(type, field);
+	}
+
+	// Notes that method `field` is selected on the concrete type `type`, and so
+	// on the types it embeds, which promote it.
+	_select(type, field) {
+		let set = this.selected.get(type.name);
+		if (!set) {
+			set = new Set();
+			this.selected.set(type.name, set);
+		}
+		if (set.has(field)) return;
+		set.add(field);
+		this.selectedCount++;
+		this.typedNames.add(field);
+		for (const raw of type.underlying?._embeds ?? []) {
+			const embedded = concreteReceiver(raw);
+			// An embedded interface is called through the interface value.
+			if (embedded) this._select(embedded, field);
+			else this.fields.add(field);
+		}
+	}
+
+	// Whether method `name` of the type named `recv` is selected somewhere
+	// reached; `recv` is null for a receiver whose type is not known by name.
+	_selected(recv, name) {
+		if (this.fields.has(name)) return true;
+		if (recv === null) return this.typedNames.has(name);
+		return this.selected.get(recv)?.has(name) ?? false;
 	}
 
 	_name(n) {
@@ -206,7 +295,9 @@ export class StdlibReach {
 		const failure = d._ensure?.();
 		if (failure) this.failures.push(failure);
 		const local = new Set();
-		collectTopRefs(checkedDecl(d), local, this.fields);
+		const sels = [];
+		collectTopRefs(checkedDecl(d), local, this.fields, sels);
+		this._selectAll(sels);
 		for (const n of local) this._name(n);
 	}
 
@@ -220,7 +311,7 @@ export class StdlibReach {
 			for (const m of this.methods)
 				if (
 					this.names.has(m.recv) &&
-					(this.fields.has(m.decl.name) || this.escaped.has(m.recv))
+					(this._selected(m.canon, m.decl.name) || this.escaped.has(m.recv))
 				)
 					this._reach(m.decl);
 			for (const p of this.programs)
@@ -456,12 +547,7 @@ export class BuildReach extends StdlibReach {
 		else
 			collectRefs(
 				node.kind === "FuncDecl" ? [node.params, node.returnType] : node.type,
-				{
-					names,
-					fields: new Set(),
-					quals: new Set(),
-					sites: [],
-				},
+				{ ...newRefs(), names },
 			);
 		for (const n of names) reachableTypeNames(types.get(n), this.escaped);
 	}
@@ -483,8 +569,9 @@ export class BuildReach extends StdlibReach {
 	}
 
 	_sig(at, nodes) {
-		const refs = { names: new Set(), fields: this.fields, quals: new Set() };
-		collectRefs(nodes, { ...refs, sites: [] });
+		const refs = { ...newRefs(), fields: this.fields };
+		collectRefs(nodes, refs);
+		this._selectAll(refs.sels);
 		for (const n of refs.names) this._name(n);
 		this._resolve(at, refs);
 	}
@@ -547,21 +634,39 @@ export class BuildReach extends StdlibReach {
 	// somewhere reached (a call, a method value or expression, a reached
 	// interface, or an implicit caller such as `fmt`), or its type's values
 	// leave Go (a package without `main` exports its types, so they do).
-	_keepsMethod({ node }) {
-		if (!this.prune || this.fields.has(node.name)) return true;
-		return this.escaped.has(node.recvType?.name);
+	_keepsMethod({ node, unit }) {
+		if (!this.prune) return true;
+		const recv = node.recvType?.name;
+		const aliasOf = (n) =>
+			(unit.byName.get(n) ?? [])
+				.map((i) => i.node)
+				.find((d) => d.kind === "TypeDecl" && d.isAlias);
+		return (
+			this._selected(canonicalRecv(recv, aliasOf), node.name) ||
+			this.escaped.has(recv)
+		);
 	}
 
 	// What the code generator needs to leave unselected methods out of what a
-	// struct promotes; null when every method is kept.
+	// struct promotes (`keeps(type, method)`); null when every method is kept.
 	keepMethods() {
-		return this.prune ? { names: this.fields, escaped: this.escaped } : null;
+		return this.prune
+			? {
+					keeps: (type, name) => this._selected(type, name),
+					escaped: this.escaped,
+				}
+			: null;
+	}
+
+	// Whether method `name` of struct type `type` is kept in what it promotes.
+	keeps(type, name) {
+		return !this.prune || this.escaped.has(type) || this._selected(type, name);
 	}
 
 	_size() {
 		return (
 			this.reached.size +
-			this.fields.size +
+			this._selections() +
 			this.escaped.size +
 			this.pending.length
 		);
@@ -585,6 +690,7 @@ export class BuildReach extends StdlibReach {
 				const refs = refsOf(item.node);
 				for (const n of refs.names) this._name(n);
 				for (const f of refs.fields) this.fields.add(f);
+				this._selectAll(refs.sels);
 				this._noteHandOvers(refs);
 				this._resolve(item, refs);
 			}

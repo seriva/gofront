@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { CodeGen } from "../backend/js/index.js";
+import { CodeGen, helperPrelude } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
 import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
@@ -507,7 +507,9 @@ function markerKey(line) {
 // The package's emitted JS for a reached set, memoized per package by the
 // reached declarations and `natives`.  Stored declarations are frozen-safe:
 // code generation rewrites its input, so it gets a copy of the checked
-// declarations.  `stats` counts the memo's hits and misses when given.
+// declarations.  `stats` counts the memo's hits and misses when given.  The
+// result is `{ js, helpers }`: the runtime helpers the code needs are left to
+// the root compile (see `helperPrelude`).
 function stdlibJs(pkg, reached, natives, stats) {
 	const ids = [];
 	pkg.unit.programs.forEach((p, pi) => {
@@ -515,7 +517,7 @@ function stdlibJs(pkg, reached, natives, stats) {
 			if (reached.has(d)) ids.push(`${pi}.${di}`);
 		});
 	});
-	if (ids.length === 0) return "";
+	if (ids.length === 0) return NO_JS;
 	const key = `${natives !== false}|${ids.join(",")}`;
 	const hit = pkg.jsMemo.get(key);
 	if (hit !== undefined) {
@@ -529,14 +531,19 @@ function stdlibJs(pkg, reached, natives, stats) {
 			decls: p.decls.filter((d) => reached.has(d)).map(checkedDecl),
 		})),
 	);
-	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
+	const codegen = new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: pkg.checker.target,
 		strict: true,
 		natives,
-	}).generateAll(programs, { isTest: false });
-	pkg.jsMemo.set(key, js);
-	return js;
+		deferHelpers: true,
+	});
+	const js = codegen.generateAll(programs, { isTest: false });
+	const out = { js, helpers: codegen.helperNames() };
+	pkg.jsMemo.set(key, out);
+	return out;
 }
+
+const NO_JS = { js: "", helpers: [] };
 
 // Replaces each marker with the package's reachable code (no line at all when
 // nothing is reachable) and shifts the source-map lines that follow.  The
@@ -560,6 +567,7 @@ function spliceStdlibJs(merged, options) {
 	);
 	const css = [];
 	const out = [];
+	const helpers = new Set();
 	const spliced = new Set();
 	const place = (code, mappings = []) => {
 		const delta = code.length - 1;
@@ -580,17 +588,22 @@ function spliceStdlibJs(merged, options) {
 		spliced.add(path ?? userKey);
 		if (path) {
 			const pkg = options.stdlibCache.get(path);
-			const js = emitted(pkg)
+			const chunk = emitted(pkg)
 				? stdlibJs(pkg, reach.reached, options.natives, options.cacheStats)
-				: "";
-			place(js === "" ? [] : js.split("\n"));
+				: NO_JS;
+			for (const h of chunk.helpers) helpers.add(h);
+			place(chunk.js === "" ? [] : chunk.js.split("\n"));
 			continue;
 		}
 		const chunk = spliceUserChunk(users.get(userKey), reach, merged, css);
+		for (const h of chunk.helpers) helpers.add(h);
 		if (userKey === options.rootKey) merged.rootWarnings = chunk.warnings;
 		place(chunk.lines, chunk.mappings);
 	}
-	merged.js = out.join("\n");
+	// The runtime helpers every chunk needs, defined once ahead of them all.
+	const prelude = helperPrelude(helpers);
+	for (const m of merged.mappings) m.genLine += prelude.length;
+	merged.js = [...prelude, ...out].join("\n");
 	merged.css = css.join("\n\n");
 }
 
