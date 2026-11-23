@@ -92,7 +92,7 @@ One reachability closure over user and stdlib programs decides what the JS backe
   - Files: `src/lower/reachability.js`, `src/link/stdlib.js` (`reachableStdlibDecls`)
   - Test: `test/unit/compiler/dce-stdlib-methods.test.js`: the re-probe (a user `Len`/`Reset` no longer keeps `strings.Builder.Len`/`Reset`); generic receiver calls (`Box[int].Val`) and method expressions (`T.M`/`(*T).M`) keep the method; promoted method calls propagate transitively to embedded receiver types; selections through interface, type-parameter and `any` receivers still keep the method on every reached type
   - Done when: passes with no output change in the stdlib and `wasm` suites
-- [ ] Task 2.2: Each runtime helper once per bundle (former 4.5)
+- [x] Task 2.2: Each runtime helper once per bundle (former 4.5)
   - Files: `src/backend/js/index.js` (`_helpers`, `_prependHelpers`), `src/link/stdlib.js` (`stdlibJs`, `spliceStdlibJs`), `src/link/sourcemap.js`, `src/compiler.js`
   - Test: `test/unit/compiler/shared-helpers.test.js`: each helper (including `HELPER_INJECT_STYLES`) defined once in a `fmt` hello world (277 definitions of 77 on 2026-11-17) and a multi-package program; a helper used by one package or only by stdlib is still emitted; ESM `jsImports` (`example/preact`) still run cleanly; source maps of the second chunk still point at the right lines; a warm `gofront dev` rebuild equals a cold build
   - Done when: no helper is defined twice in any `example/*` bundle and outputs are unchanged

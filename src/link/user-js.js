@@ -131,10 +131,11 @@ function reachedPrograms(unit, reach) {
 	return { programs, ids };
 }
 
-const EMPTY = { js: "", css: "", warnings: [], mappings: [] };
+const EMPTY = { js: "", css: "", warnings: [], mappings: [], helpers: [] };
 
-// The JS, CSS, warnings and source-map lines (relative to the first line of
-// `js`) of `unit`'s reached code.
+// The JS, CSS, warnings, source-map lines (relative to the first line of
+// `js`) and runtime helpers (not part of `js`, see `helperPrelude`) of
+// `unit`'s reached code.
 function userJs(unit, reach) {
 	const emitter = unit.emitter;
 	const { programs, ids } = reachedPrograms(unit, reach);
@@ -147,7 +148,13 @@ function userJs(unit, reach) {
 		emitter.checker,
 		emitter.jsImports,
 		emitter.bundledPackages,
-		{ target, strict, natives, keepMethods: reach.keepMethods() },
+		{
+			target,
+			strict,
+			natives,
+			keepMethods: reach.keepMethods(),
+			deferHelpers: true,
+		},
 	);
 	const js = codegen.generateAll(cloneAst(programs), { isTest });
 	const out = {
@@ -155,6 +162,7 @@ function userJs(unit, reach) {
 		css: codegen.getCss(),
 		warnings: codegen.warnings,
 		mappings: codegen.getMappings(),
+		helpers: codegen.helperNames(),
 	};
 	emitter.memo.set(key, out);
 	return out;
@@ -162,7 +170,8 @@ function userJs(unit, reach) {
 
 // The code of the local package a marker names: `{ lines, mappings }` with
 // the mappings pointing into the bundle's source files, relative to the first
-// line.  The package's warnings are printed and its CSS is added to `css`.
+// line, and the `helpers` it needs.  The package's warnings are printed and
+// its CSS is added to `css`.
 export function spliceUserChunk(unit, reach, merged, css) {
 	const out = userJs(unit, reach);
 	for (const w of out.warnings) log.warn(w);
@@ -173,6 +182,7 @@ export function spliceUserChunk(unit, reach, merged, css) {
 	);
 	return {
 		warnings: out.warnings,
+		helpers: out.helpers,
 		lines: out.js === "" ? [] : out.js.split("\n"),
 		mappings: out.mappings.map((m) => ({
 			genLine: m.genLine,

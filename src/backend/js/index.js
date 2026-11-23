@@ -137,6 +137,22 @@ const HELPER_MAP = [
 	["simd", HELPER_SIMD],
 ];
 
+// The name of the helper that injects collected CSS (it has no `useHelper` key).
+export const HELPER_STYLES = "injectStyles";
+
+/**
+ * The lines that define the runtime helpers `names` (keys of the registry, or
+ * `HELPER_STYLES`), each once, in output order; none when there are no names.
+ */
+export function helperPrelude(names) {
+	const wanted = new Set(names);
+	const helpers = [];
+	if (wanted.has(HELPER_STYLES)) helpers.push(HELPER_INJECT_STYLES);
+	for (const [name, src] of HELPER_MAP) if (wanted.has(name)) helpers.push(src);
+	if (helpers.length === 0) return [];
+	return [...helpers.flatMap((h) => h.split("\n")), ""];
+}
+
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {
@@ -227,9 +243,13 @@ export class CodeGen {
 		this.target = options.target ?? "js";
 		this.strict = Boolean(options.strict || this.target === "both");
 		this.natives = options.natives !== false; // replace native calls with host code
-		// `{ names, escaped }`: the method names the build selects and the types
-		// whose values leave Go; null keeps every method (see lower/reachability.js).
+		// `{ keeps(type, method), escaped }`: which methods the build selects and
+		// the types whose values leave Go; null keeps every method (see
+		// lower/reachability.js).
 		this.keepMethods = options.keepMethods ?? null;
+		// A bundle's helpers are defined once by whoever links the chunks
+		// (`helperNames`, `helperPrelude`) instead of at the top of each chunk.
+		this.deferHelpers = options.deferHelpers ?? false;
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
@@ -692,19 +712,18 @@ export class CodeGen {
 		if (name === "sslice") this._helpers.add("slicefail");
 	}
 
+	/** The runtime helpers (names for `helperPrelude`) the output needs. */
+	helperNames() {
+		const names = [...this._helpers];
+		if (this.collectedCss.length > 0) names.push(HELPER_STYLES);
+		return names;
+	}
+
 	_prependHelpers(_isTest = false) {
-		const helpers = [];
-		if (this.collectedCss.length > 0) helpers.push(HELPER_INJECT_STYLES);
-		for (const [name, src] of HELPER_MAP) {
-			if (this._helpers.has(name)) helpers.push(src);
-		}
-		if (helpers.length > 0) {
-			const helperLines = helpers.flatMap((h) => h.split("\n"));
-			helperLines.push("");
-			this.out.unshift(...helperLines);
-			return helperLines.length;
-		}
-		return 0;
+		if (this.deferHelpers) return 0;
+		const helperLines = helperPrelude(this.helperNames());
+		this.out.unshift(...helperLines);
+		return helperLines.length;
 	}
 
 	// Generate a single bundle from multiple programs (same-package multi-file).
