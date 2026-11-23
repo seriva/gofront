@@ -5,7 +5,8 @@ import assert from "node:assert";
 import v8 from "node:v8";
 import { compile } from "../unit/helpers.js";
 
-const { js, errors } = compile(`package main
+const { js, errors } = compile(
+	`package main
 
 type Vec3 struct {
 	X float32
@@ -64,7 +65,9 @@ func BenchmarkSweep(iterations int, items []int) int {
 }
 
 func main() {}
-`);
+`,
+	{ jsRoots: ["BenchmarkSweep"] },
+);
 
 assert.strictEqual(
 	errors.length,

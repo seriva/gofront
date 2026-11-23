@@ -155,7 +155,11 @@ async function load() {
 		mkdirSync(join(root, "particles"));
 		writeFileSync(join(root, "particles", "particles.go"), SOURCE);
 		writeFileSync(join(root, "main.go"), MAIN);
-		const out = compileDir(root, { release: true, wasmOpt: true });
+		const out = compileDir(root, {
+			release: true,
+			wasmOpt: true,
+			jsRoots: ["Setup", "RunScalar", "RunSIMD", "Sum"],
+		});
 		const file = join(root, "bundle.mjs");
 		const js = out.js.replace(/^import .*$/gm, "");
 		writeFileSync(

@@ -158,7 +158,8 @@ section("codegen — type alias and interface comments");
 test("interface TypeDecl emits a compile-time-only comment", () => {
 	const { js } = compile(`package main
 type Runner interface { Run() }
-func main() { console.log("ok") }`);
+func use(r Runner) {}
+func main() { use(nil); console.log("ok") }`);
 	assertContains(js, "// interface Runner");
 });
 

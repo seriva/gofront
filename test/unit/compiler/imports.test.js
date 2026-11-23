@@ -122,11 +122,27 @@ test("import _ compiles without error", () => {
 	assertContains(js, "side-effect-only");
 });
 
+// A blank import is there for its side effects: the dependency's init and
+// calling package variables are bundled, while code nothing calls is not.
+const SIDE_EFFECT_PROJECT = {
+	"main.go": `package main
+import _ "./dep"
+func main() { println("main") }
+`,
+	"dep/dep.go": `package dep
+func Add(a, b int) int { return a + b }
+func init() { println("dep init") }
+`,
+};
+
 test("import _ bundles the dependency code", () => {
-	const dir = join(FIXTURES, "multifile/withsideeffectimport");
-	const { js } = compileDir(dir);
-	// mathpkg should be inlined even though it's a side-effect import
-	assertContains(js, "function Add(");
+	withTempDir(SIDE_EFFECT_PROJECT, (dir) => {
+		const { js } = compileDir(dir);
+		// dep is inlined even though it's a side-effect import
+		assertContains(js, "dep init");
+		assert(!js.includes("function Add("), "unused code is left out");
+		assertEqual(runJs(js).trim(), "dep init\nmain");
+	});
 });
 
 test("import _ runs correctly", () => {
@@ -187,9 +203,10 @@ test("used local package import is not an error", () => {
 });
 
 test("side-effect import _ is not flagged as unused", () => {
-	const dir = join(FIXTURES, "multifile/withsideeffectimport");
-	const { js } = compileDir(dir);
-	assertContains(js, "function Add(");
+	withTempDir(SIDE_EFFECT_PROJECT, (dir) => {
+		const { js } = compileDir(dir);
+		assertContains(js, "dep init");
+	});
 });
 
 section("Dot imports");

@@ -146,10 +146,12 @@ export function compile(
 		fromFile = join(FIXTURES, "_dummy.go"),
 		strict = false,
 		target = null,
+		jsRoots,
 	} = {},
 ) {
 	const { res, errors } = compileSourceFile(source, target, {
 		strict,
+		jsRoots,
 		fileName: basename(fromFile),
 		fromDir: dirname(resolve(fromFile)),
 	});
@@ -432,7 +434,8 @@ export async function compileHybridProject(
 			mkdirSync(dirname(full), { recursive: true });
 			writeFileSync(full, src);
 		}
-		const result = compileDir(root, compileOptions);
+		// The bundle re-exports `exports`, so the build keeps them.
+		const result = compileDir(root, { jsRoots: exports, ...compileOptions });
 		const parts = [];
 		if (result.wasm) {
 			assertValidWasm(result.wasm);

@@ -71,7 +71,11 @@ assert(
 );
 
 // ── JS ──
-const { js, errors } = compile(src, { strict: true, target: "both" });
+const { js, errors } = compile(src, {
+	strict: true,
+	target: "both",
+	jsRoots: ["SortFuncInts", "SortSlice"],
+});
 assert.strictEqual(errors.length, 0, errors[0]?.message);
 const fns = new Function(`${js}; return { SortFuncInts, SortSlice };`)();
 
