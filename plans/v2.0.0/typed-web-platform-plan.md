@@ -86,7 +86,7 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
   - Files: `src/dts-parser.js`, `src/typechecker/expressions.js`, `src/typechecker/assignability.js`, `src/typechecker/types.js`
   - Test: `test/unit/types/dts-optional.test.js`: `opt(1)` and `opt(1, 2)` compile, `opt()` and `opt(1, 2, 3)` are rejected (with line:col); `string | null` return compares to `nil` (`raw == nil`) and works as `string`; `await` on `Promise<Response>` is `Response` (`Promise<void>` is `void`); `int`, `uint32`, `float32` accepted; arrow-function types `(e: Base) => void` and `() => undefined | (() => void)` parse to `func` types and accept `func()`, `func(any)`, `func(Base)` and `func(Child)` while rejecting `func(int)`
   - Done when: optional params, nullable primitives, `Promise<T>`, integer/`float32` types and `.d.ts` callback types all type-check and `node src/index.js check example/...` (including `example/preact`) passes
-- [ ] Task 1.3: Dictionary arguments (former 6.3)
+- [x] Task 1.3: Dictionary arguments (former 6.3)
   - Files: `src/dts-parser.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/dts-dictionary.test.js`: a dictionary parameter accepts `nil`, a `map[string]any` literal with member keys (including nested dictionary literals) and a field-only struct; unknown key or field is an error naming it; a wrong member type is rejected; an unmarked interface behaves as today
   - Done when: the marker syntax is documented in `src/dts-parser.js`

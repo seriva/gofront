@@ -704,7 +704,8 @@ declare function useState(init: number): [number, (v: number) => void];
 	assertEqual(fn.kind, "func");
 	assertEqual(fn.returns.length, 2);
 	assertEqual(fn.returns[0].name, "float64");
-	assertEqual(fn.returns[1].name, "any");
+	assertEqual(fn.returns[1].kind, "func");
+	assertEqual(fn.returns[1].params[0].name, "float64");
 });
 
 test("parseDts: labelled tuple return maps to multi-value return", () => {
@@ -714,7 +715,8 @@ declare function useTuple(): [state: string, setter: (val: string) => void];
 	const fn = values.get("useTuple");
 	assertEqual(fn.returns.length, 2);
 	assertEqual(fn.returns[0].name, "string");
-	assertEqual(fn.returns[1].name, "any");
+	assertEqual(fn.returns[1].kind, "func");
+	assertEqual(fn.returns[1].params[0].name, "string");
 });
 
 test("parseDts: method with rest parameter propagates variadic: true", () => {

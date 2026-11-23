@@ -1087,13 +1087,90 @@ export const assignabilityMethods = {
 		if (this._checkTypedArrayAssignable(target, source, at, operand ?? at, ctx))
 			return;
 		if (this._checkFuncAssignable(target, source, mismatch)) return;
-		if (!this._identicalOrDtsDerived(target, source)) mismatch();
+		this._checkNominalAssignable(target, source, operand ?? node, mismatch);
 	},
 
-	// Identical types, or a `.d.ts` interface whose chain of `extends` reaches
-	// the target.
-	_identicalOrDtsDerived(target, source) {
-		return identical(target, source) || this._dtsDerivesFrom(source, target);
+	// Identical types, a `.d.ts` interface whose chain of `extends` reaches
+	// the target, or a value a `.d.ts` dictionary takes; anything else is a
+	// mismatch.
+	_checkNominalAssignable(target, source, operand, mismatch) {
+		if (identical(target, source) || this._dtsDerivesFrom(source, target))
+			return;
+		if (!this._checkDtsDictionary(target, source, operand)) mismatch();
+	},
+
+	// A `.d.ts` dictionary (see src/dts-parser.js) takes a `map[string]any`
+	// literal and a field-only struct whose names are its members. Returns
+	// false when `source` is neither, else checks the members (reporting
+	// what is wrong) and returns true.
+	_checkDtsDictionary(target, source, operand) {
+		if (!target?._dictionary) return false;
+		const src = this.resolveType(this._deepUnderlying(source));
+		let lit = operand;
+		while (lit?.kind === "ParenExpr") lit = lit.expr;
+		if (src?.kind === "map" && lit?.kind === "CompositeLit") {
+			this._checkDictionaryLiteral(target, lit);
+			return true;
+		}
+		if (src?.kind === "struct" && !this._structHasMethods(source)) {
+			this._checkDictionaryStruct(target, src, operand);
+			return true;
+		}
+		return false;
+	},
+
+	_structHasMethods(t) {
+		return t?.kind === "named" && (t.methods?.size ?? 0) > 0;
+	},
+
+	// The type of the member `name` of dictionary `dict`, its own or
+	// inherited; undefined when it has none.
+	_dictionaryMember(dict, name) {
+		if (Object.hasOwn(dict.members, name)) return dict.members[name];
+		return this._dtsInheritedMember(dict, name);
+	},
+
+	_checkDictionaryLiteral(dict, lit) {
+		for (const elem of lit.elems) {
+			if (elem.kind !== "KeyValueExpr") continue;
+			const key = elem.key._const;
+			if (typeof key?.v !== "string") {
+				this.err("dictionary key must be a constant string", elem.key);
+				continue;
+			}
+			const memberType = this._dictionaryMember(dict, key.v);
+			if (memberType === undefined) {
+				this.err(
+					`unknown member '${key.v}' in dictionary ${typeStr(dict)}`,
+					elem.key,
+				);
+				continue;
+			}
+			this.assertAssignable(
+				memberType,
+				elem.value._type,
+				elem.value,
+				`member ${key.v} of dictionary ${typeStr(dict)}`,
+			);
+		}
+	},
+
+	_checkDictionaryStruct(dict, struct, operand) {
+		for (const [name, fieldType] of struct.fields ?? []) {
+			const memberType = this._dictionaryMember(dict, name);
+			if (memberType === undefined) {
+				this.err(
+					`unknown field '${name}' in dictionary ${typeStr(dict)}`,
+					operand,
+				);
+				continue;
+			}
+			if (!this._assignableQuietly(memberType, fieldType))
+				this.err(
+					`cannot use field '${name}' (type ${typeStr(fieldType)}) as ${typeStr(this.resolveType(memberType))} in dictionary ${typeStr(dict)}`,
+					operand,
+				);
+		}
 	},
 
 	// The element of an array or the base of a pointer must be identical to

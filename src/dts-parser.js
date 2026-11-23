@@ -15,6 +15,20 @@
 //   - `name?: T` parameters: the `func` type records `minArgs`, the number of
 //     arguments a call must pass.
 //   - `int`, `uint32`, `float32`, ...: the GoFront type (`number` is float64).
+//   - `interface`/`class` declarations: a namespace-kind type tagged
+//     `_dtsType`, with `extends` (names) and `_bases` (resolved in the file).
+//
+// Dictionary marker: an options object (a WebIDL dictionary) is declared with
+// a `@dictionary` comment directly before its `interface`:
+//
+//   /** @dictionary */
+//   interface BufferDescriptor { size: number; label?: string; }
+//
+// The type is tagged `_dictionary`. A parameter or variable of that type takes
+// `nil`, a `map[string]any` literal whose constant keys are members of the
+// interface (or of one it extends), and a struct value whose fields are such
+// members; a member that is itself a dictionary is checked the same way. An
+// interface without the comment accepts none of these.
 
 const ANY = { kind: "basic", name: "any" };
 const VOID = { kind: "basic", name: "void" };
@@ -51,6 +65,8 @@ const TS_PRIMITIVES = {
 	bigint: ANY,
 };
 
+const DICTIONARY_MARK = "@dictionary";
+
 const SKIP_MODIFIERS = new Set([
 	"export",
 	"declare",
@@ -67,6 +83,7 @@ export class DtsParser {
 	constructor(source) {
 		this.src = source;
 		this.pos = 0;
+		this._dictEnd = null; // end of the last `@dictionary` comment
 	}
 
 	// ── Low-level helpers ────────────────────────────────────────
@@ -82,14 +99,34 @@ export class DtsParser {
 	}
 
 	_skipLineComment() {
+		const start = this.pos;
 		while (!this.eof() && this.ch() !== "\n") this.pos++;
+		this._noteComment(start);
 	}
 
 	_skipBlockComment() {
+		const start = this.pos;
 		this.pos += 2;
 		while (!this.eof() && !(this.ch() === "*" && this.ch1() === "/"))
 			this.pos++;
 		if (!this.eof()) this.pos += 2;
+		this._noteComment(start);
+	}
+
+	// Remembers where a `@dictionary` comment (see `_parseClassDecl`) ended.
+	_noteComment(start) {
+		if (this.src.slice(start, this.pos).includes(DICTIONARY_MARK))
+			this._dictEnd = this.pos;
+	}
+
+	// Whether the declaration starting at `declStart` follows a `@dictionary`
+	// comment with nothing but whitespace between them.
+	_followsDictMark(declStart) {
+		return (
+			this._dictEnd !== null &&
+			this._dictEnd <= declStart &&
+			/^\s*$/.test(this.src.slice(this._dictEnd, declStart))
+		);
 	}
 
 	skip() {
@@ -556,7 +593,11 @@ export class DtsParser {
 	// An interface or class: a namespace-kind type tagged `_dtsType` so it is
 	// told from a `declare namespace` (a value-only package) and from a
 	// GoFront package. `extends` lists the names it inherits members from.
-	_parseClassDecl() {
+	// A declaration directly after a `@dictionary` comment is a dictionary
+	// (`dictionary` true, tagged `_dictionary`): a parameter of that type
+	// takes `nil`, a `map[string]any` literal whose constant keys are members
+	// and a struct whose fields are members, as a JavaScript options object.
+	_parseClassDecl(dictionary = false) {
 		const name = this.readIdent();
 		this.skipGenerics();
 		this.skip();
@@ -567,6 +608,7 @@ export class DtsParser {
 		this.consume("}");
 		this.consume(";");
 		const ns = { kind: "namespace", name, members: body, _dtsType: true };
+		if (dictionary) ns._dictionary = true;
 		if (bases.length > 0) ns.extends = bases;
 		return { name, ns };
 	}
@@ -615,6 +657,7 @@ export class DtsParser {
 	_parseMember(out, kinds = null) {
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
+		const dictionary = this._followsDictMark(this.pos);
 		this._skipModifiers();
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
@@ -640,7 +683,7 @@ export class DtsParser {
 			}
 			case "interface":
 			case "class": {
-				const { name, ns } = this._parseClassDecl();
+				const { name, ns } = this._parseClassDecl(dictionary);
 				this._setTypeMember(out, kinds, name, ns, "type");
 				break;
 			}
@@ -731,6 +774,7 @@ export class DtsParser {
 			this.skip();
 			if (this.eof() || this.ch() === "}") break;
 
+			const dictionary = this._followsDictMark(this.pos);
 			this._skipModifiers();
 
 			this.skip();
@@ -745,7 +789,7 @@ export class DtsParser {
 			this.skip();
 			const savedPos = this.pos;
 			try {
-				this._parseTopLevelDecl(kw, types, values);
+				this._parseTopLevelDecl(kw, types, values, dictionary);
 			} catch (err) {
 				this.pos = savedPos;
 				// skip to next top-level boundary (;, }, or EOF) to resume parsing
@@ -762,7 +806,7 @@ export class DtsParser {
 		return { types, values };
 	}
 
-	_parseTopLevelDecl(kw, types, values) {
+	_parseTopLevelDecl(kw, types, values, dictionary = false) {
 		switch (kw) {
 			case "import":
 			case "export":
@@ -776,7 +820,7 @@ export class DtsParser {
 			}
 			case "interface":
 			case "class": {
-				const { name, ns } = this._parseClassDecl();
+				const { name, ns } = this._parseClassDecl(dictionary);
 				if (name) {
 					types.set(name, ns);
 					if (kw === "class") values.set(name, ns);
