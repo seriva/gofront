@@ -418,6 +418,25 @@ func main() {
 	assertContains(out, "null <nil>");
 });
 
+test("a qualified type name keeps its qualifier", () => {
+	const { values } = parseDts(`declare function f(t: dom.EventTarget): void;`);
+	assertEqual(values.get("f").params[0].alias, "dom.EventTarget");
+});
+
+test("a type of a .d.ts namespace is named as ns.T", () => {
+	const { errors } = compile(
+		`func main() {
+	var id float64 = mk().id
+	println(id)
+	println(mk().nope)
+}`,
+		`declare namespace N { interface T { id: number; } }
+declare function mk(): N.T;`,
+	);
+	assertErrorContains(errors, "No member 'nope' in namespace T");
+	assertEqual(errors.length, 1);
+});
+
 test("a parenthesized non-function type stays any", () => {
 	const { values } = parseDts(
 		`declare function f(x: (string | number)[]): void;`,
