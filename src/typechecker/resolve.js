@@ -256,7 +256,7 @@ export const resolveMethods = {
 					if (fromScope?.kind === "typeParam") return fromScope;
 					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
-				const named = this._visibleType(node.name, scope);
+				const named = this._typeOfName(node.name, node, scope);
 				if (named) {
 					this._useQualifiedTypeName(node, named);
 					return this._checkConstraintUse(named, node);
@@ -329,21 +329,11 @@ export const resolveMethods = {
 			case "SelectorExpr":
 				// `pkg.T{}` composite literal — the parser keeps the type as a
 				// SelectorExpr; resolve it like a qualified TypeName.
-				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
-					const qualified = `${node.expr.name}.${node.field}`;
-					if (this._typeNamed(qualified)) {
-						// Never reaches checkExpr: tag the qualifier as the package
-						// name it is so JS output does not rename it.
-						node.expr._isNamespace = true;
-						const inner = { kind: "TypeName", name: qualified };
-						this._inheritConstraintPos(node, inner);
-						const resolved = this.resolveTypeNode(inner, scope);
-						this._useQualifiedTypeName(node, resolved);
-						return resolved;
-					}
-				}
-				// `pv.X{}`: a field or method value stands where a type must.
-				return this._notATypeSelector(node, scope);
+				return (
+					this._resolveSelectorType(node, scope) ??
+					// `pv.X{}`: a field or method value stands where a type must.
+					this._notATypeSelector(node, scope)
+				);
 			case "ArrayType":
 				return this._resolveArrayTypeNode(node, scope);
 			case "FuncType":
@@ -515,6 +505,71 @@ export const resolveMethods = {
 		if (named.name?.includes("$$")) node._stdName = named.name;
 	},
 
+	// `pkg.T` as a composite literal's type (the parser keeps a SelectorExpr):
+	// the resolved or error type, or undefined when `node` names no type.
+	_resolveSelectorType(node, scope) {
+		if (node.expr?.kind !== "Ident" || typeof node.field !== "string") return;
+		const named = this._resolveQualifiedType(
+			node.expr.name,
+			node.field,
+			this._positioned(node),
+			scope,
+			true,
+		);
+		if (!named || named._tainted) return named;
+		// Never reaches checkExpr: tag the qualifier as the package name it is
+		// so JS output does not rename it.
+		node.expr._isNamespace = true;
+		const inner = { kind: "TypeName", name: `${node.expr.name}.${node.field}` };
+		this._inheritConstraintPos(node, inner);
+		const resolved = this.resolveTypeNode(inner, scope);
+		this._useQualifiedTypeName(node, resolved);
+		return resolved;
+	},
+
+	// The type `name` names in a type position: a qualified name is decided by
+	// what its qualifier is (see `_resolveQualifiedType`).
+	_typeOfName(name, node, scope) {
+		const dot = name.indexOf(".");
+		return dot > 0
+			? this._resolveQualifiedType(
+					name.slice(0, dot),
+					name.slice(dot + 1),
+					node,
+					scope,
+				)
+			: this._visibleType(name, scope);
+	},
+
+	// `qual.member` where a type is expected: what `qual` is in the file being
+	// checked decides the answer. A package resolves `member` among the types
+	// it declares (undefined when it has none); an untyped npm import is a
+	// js-only value in a wasm or both package; any other value is no type.
+	// Reports and returns the error type for the last two, else the type or
+	// undefined. `literal` (a composite literal's type) also counts a
+	// predeclared value such as `console`, which a type name leaves unknown.
+	_resolveQualifiedType(qual, member, node, scope, literal = false) {
+		const bad = this._qualifierNotAType(qual, member, node, scope, literal);
+		return bad ?? this._visibleType(`${qual}.${member}`, scope);
+	},
+
+	_qualifierNotAType(qual, member, node, scope, literal) {
+		if (this._ungated > 0) return null;
+		const here = scope ?? this.globals;
+		const owner = here.lookupScope(qual);
+		const bound = owner?.object(qual);
+		if (!bound || bound.type?.kind === "typeParam") return null;
+		here.lookup(qual);
+		if (this._isImportScope(owner) && this._untypedImports.has(qual))
+			return this.target === "wasm" || this.target === "both"
+				? this._errJsOnly(`${qual}.${member}`, node)
+				: null;
+		const isValue = !["pkg", "type"].includes(bound.kind);
+		if (isValue && (literal || owner !== this.universe))
+			return this.err(`${qual}.${member} is not a type`, node);
+		return null;
+	},
+
 	// `[N]T` with a named constant (or constant expression) length folds to a number.
 	_foldArrayLen(size, scope) {
 		const resolve = (name, depth = 0) => {
@@ -655,10 +710,11 @@ export const resolveMethods = {
 			qualified;
 		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
 		const base = name
-			? this._visibleType(name, scope)
+			? this._typeOfName(name, node, scope)
 			: node.expr
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
+		if (base?._tainted) return base;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
 		// `__G[int]{}`: the generic's name is an Ident that never reaches checkExpr.
 		if (!qualified && node.expr?.kind === "Ident") {
@@ -754,7 +810,7 @@ export const resolveMethods = {
 	resolveTypeNodeName(node, scope) {
 		if (!node) return ANY;
 		if (node.kind === "TypeName" || node.kind === "GenericTypeName") {
-			const named = this._visibleType(node.name, scope);
+			const named = this._typeOfName(node.name, node, scope);
 			if (named) return named;
 		}
 		return this.resolveTypeNode(node, scope);

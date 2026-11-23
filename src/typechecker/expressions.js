@@ -1115,7 +1115,7 @@ export const expressionCheckMethods = {
 		if (base?.kind === "SelectorExpr" && base.expr?.kind === "Ident") {
 			// `iter.Seq[int]`: a generic type behind a package qualifier.
 			if (scope.lookup(base.expr.name)?.kind !== "namespace") return null;
-			t = this.types.get(`${base.expr.name}.${base.field}`);
+			t = this._typeNamed(`${base.expr.name}.${base.field}`);
 			if (!t?._generic || t._generic.isAlias) return null;
 		} else {
 			if (base?.kind !== "Ident") return null;
@@ -3235,7 +3235,8 @@ export const expressionCheckMethods = {
 
 	// `int{}`, `T{}` for a type parameter without a core type.
 	_isInvalidLiteralType(expr, t, base, scope) {
-		if (!expr.typeExpr) return false;
+		// A type that already failed to resolve has its error.
+		if (!expr.typeExpr || t?._tainted) return false;
 		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
 		return !["struct", "array", "slice", "map", "simd", "namespace"].includes(
 			core?.kind,
