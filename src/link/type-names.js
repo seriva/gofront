@@ -8,6 +8,8 @@
 
 import { forEachChild } from "../lower/walk.js";
 
+export { declaredTypeNames } from "../lower/walk.js";
+
 function topLevelTypeDecls(programs) {
 	const decls = [];
 	for (const p of programs)

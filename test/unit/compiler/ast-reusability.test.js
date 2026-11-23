@@ -4,11 +4,15 @@ import { resolve } from "node:path";
 import {
 	clearParseCache,
 	compileDir,
+	freezePackageCache,
 	freezeParseCache,
+	PackageCache,
+	resetPackageCache,
 } from "../../../src/compiler.js";
 import { lower } from "../../../src/lower/index.js";
 import { cloneAst } from "../../../src/lower/walk.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
+import * as typeTable from "../../../src/typechecker/types.js";
 import {
 	assert,
 	assertEqual,
@@ -436,3 +440,233 @@ func main() { var t T[int]; _ = t }
 		},
 	);
 });
+
+section("stdlib units — frozen after their build");
+
+// Everything the type table exports (`error`, `any`, the untyped kinds, …):
+// objects every compile in the process shares, so a freeze must leave them.
+function sharedTypeObjects() {
+	const shared = new Set();
+	const visit = (v) => {
+		if (!v || typeof v !== "object" || shared.has(v)) return;
+		shared.add(v);
+		if (v instanceof Map) for (const e of v.values()) visit(e);
+		else if (v instanceof Set) for (const e of v) visit(e);
+		else for (const k of Object.keys(v)) visit(v[k]);
+	};
+	for (const v of Object.values(typeTable)) visit(v);
+	return shared;
+}
+
+const SHARED_TYPE_OBJECTS = sharedTypeObjects();
+
+// Freezes `value` and everything it holds, entries of maps and sets included.
+// Class instances (a checker's `Scope`, built-in classes) are live checker
+// state and stay as they are, like the shared type objects.
+function deepFreezeAll(value, seen = new Set(SHARED_TYPE_OBJECTS)) {
+	if (!value || typeof value !== "object" || seen.has(value)) return;
+	seen.add(value);
+	const proto = Object.getPrototypeOf(value);
+	const plain =
+		proto === Object.prototype ||
+		proto === Array.prototype ||
+		proto === Map.prototype ||
+		proto === Set.prototype ||
+		proto === null;
+	if (!plain) return;
+	Object.freeze(value);
+	if (value instanceof Map)
+		for (const [k, v] of value) {
+			deepFreezeAll(k, seen);
+			deepFreezeAll(v, seen);
+		}
+	else if (value instanceof Set) for (const v of value) deepFreezeAll(v, seen);
+	for (const k of Object.getOwnPropertyNames(value))
+		deepFreezeAll(Object.getOwnPropertyDescriptor(value, k).value, seen);
+}
+
+// Freezes what a stored Go-source stdlib unit hands to its importers.
+function freezeStdlibUnits(stdlibCache) {
+	for (const pkg of stdlibCache.values()) {
+		if (!pkg || pkg instanceof Error) continue;
+		deepFreezeAll(pkg.unit.programs);
+		deepFreezeAll(pkg.exportedTypes);
+		deepFreezeAll(pkg.namespace);
+	}
+}
+
+const STD_FIRST = `
+import (
+	"fmt"
+	"sort"
+	"sync"
+)
+func main() {
+	var mu sync.Mutex
+	mu.Lock()
+	mu.Unlock()
+	xs := []int{3, 1, 2}
+	sort.Ints(xs)
+	fmt.Println(xs)
+}
+`;
+
+const STD_SECOND = `
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"sort"
+	"sync"
+)
+type Doc struct{ N int }
+func main() {
+	var mu sync.RWMutex
+	mu.RLock()
+	mu.RUnlock()
+	ss := []string{"b", "a"}
+	sort.Strings(ss)
+	slices.Sort(ss)
+	b, _ := json.Marshal(Doc{N: 1})
+	fmt.Println(ss, string(b))
+}
+`;
+
+// Builds `source` as package main of `target`; the wasm bytes are returned as
+// hex so two builds compare with assertEqual.
+function buildStd(source, target, options) {
+	return withTempDir(
+		{ "main.go": `//gofront:target ${target}\npackage main\n${source}` },
+		(dir) => {
+			const res = compileDir(dir, options);
+			return {
+				js: res.js,
+				wasm: res.wasm ? Buffer.from(res.wasm).toString("hex") : "",
+			};
+		},
+	);
+}
+
+for (const target of ["js", "both"]) {
+	test(`frozen stdlib units serve later builds (${target})`, () => {
+		const stdlibCache = new Map();
+		buildStd(STD_FIRST, target, { stdlibCache });
+		freezeStdlibUnits(stdlibCache);
+		const warm = buildStd(STD_SECOND, target, { stdlibCache });
+		freezeStdlibUnits(stdlibCache);
+		const again = buildStd(STD_SECOND, target, { stdlibCache });
+		assertEqual(again.js, warm.js);
+		assertEqual(again.wasm, warm.wasm);
+		const cold = buildStd(STD_SECOND, target, { stdlibCache: new Map() });
+		assertEqual(warm.js, cold.js);
+		assertEqual(warm.wasm, cold.wasm);
+		assert(warm.js.includes("RLock"), "the RWMutex code is emitted");
+	});
+}
+
+test("wasm stdlib units are never mutated by a later link", () => {
+	const stdlibCache = new Map();
+	buildStd(STD_FIRST, "wasm", { stdlibCache });
+	freezeStdlibUnits(stdlibCache);
+	const warm = buildStd(STD_SECOND, "wasm", { stdlibCache });
+	const cold = buildStd(STD_SECOND, "wasm", { stdlibCache: new Map() });
+	assertEqual(warm.wasm, cold.wasm);
+	assert(warm.wasm.length > 0, "a module was linked");
+});
+
+test("stdlib JS is memoized for an unchanged reached set", () => {
+	const stdlibCache = new Map();
+	const cacheStats = {};
+	const first = buildStd(STD_FIRST, "js", { stdlibCache, cacheStats });
+	assert((cacheStats.stdlibJsMisses ?? 0) > 0, "the first build emits");
+	assertEqual(cacheStats.stdlibJsHits ?? 0, 0);
+	const misses = cacheStats.stdlibJsMisses;
+	const second = buildStd(STD_FIRST, "js", { stdlibCache, cacheStats });
+	assertEqual(second.js, first.js);
+	assertEqual(cacheStats.stdlibJsMisses, misses);
+	assertEqual(cacheStats.stdlibJsHits, misses);
+	buildStd(STD_SECOND, "js", { stdlibCache, cacheStats });
+	assert(cacheStats.stdlibJsMisses > misses, "a larger reached set emits");
+});
+
+section("default package cache — stored units are never written again");
+
+// Runs `fn` on an empty default cache whose stored units are deep-frozen, so
+// a pass that writes to one throws instead of leaking into the next build.
+function withFrozenDefaultCache(fn) {
+	resetPackageCache();
+	freezePackageCache(true);
+	try {
+		return fn();
+	} finally {
+		freezePackageCache(false);
+		resetPackageCache();
+	}
+}
+
+const SHARED_APP = {
+	"main.go": `package main
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"sort"
+	"sync"
+	"./shape"
+)
+type Doc struct{ N int }
+func main() {
+	var mu sync.RWMutex
+	mu.RLock()
+	mu.RUnlock()
+	xs := []int{3, 1, 2}
+	sort.Ints(xs)
+	slices.Sort(xs)
+	b, _ := json.Marshal(Doc{N: len(xs)})
+	box := shape.Wrap(shape.Pt{X: 1, Y: 2})
+	fmt.Println(xs, string(b), box.Get().X, shape.Sum(xs))
+}
+`,
+	"shape/shape.go": `package shape
+type Pt struct{ X, Y int }
+type Box[T any] struct{ v T }
+func Wrap[T any](v T) Box[T] { return Box[T]{v: v} }
+func (b Box[T]) Get() T { return b.v }
+func Sum(xs []int) int {
+	type acc struct{ n int }
+	a := acc{}
+	for _, x := range xs { a.n += x }
+	return a.n
+}
+`,
+};
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`frozen default-cache units serve later builds (${target})`, () => {
+		withTempDir(
+			{
+				...SHARED_APP,
+				"main.go": `//gofront:target ${target}\n${SHARED_APP["main.go"]}`,
+				"shape/shape.go": `//gofront:target ${target === "js" ? "js" : "both"}\n${SHARED_APP["shape/shape.go"]}`,
+			},
+			(dir) => {
+				const build = (options = {}) => {
+					const res = compileDir(dir, options);
+					return {
+						js: res.js,
+						wasm: res.wasm ? Buffer.from(res.wasm).toString("hex") : "",
+					};
+				};
+				withFrozenDefaultCache(() => {
+					const first = build();
+					const again = build();
+					assertEqual(again.js, first.js);
+					assertEqual(again.wasm, first.wasm);
+					const cold = build({ packageCache: new PackageCache() });
+					assertEqual(cold.js, first.js);
+					assertEqual(cold.wasm, first.wasm);
+				});
+			},
+		);
+	});
+}

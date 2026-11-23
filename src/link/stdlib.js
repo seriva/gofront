@@ -13,13 +13,23 @@ import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
 import { restoredTypeName } from "../lower/gen-types.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
-import { reachableStdlibDecls, StdlibReach } from "../lower/reachability.js";
-import { forEachChild } from "../lower/walk.js";
+import {
+	checkedDecl,
+	reachableStdlibDecls,
+	StdlibReach,
+} from "../lower/reachability.js";
+import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
+import {
+	filesSignature,
+	freezeStdlibPackage,
+	freezesStoredUnits,
+} from "./package-cache.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export {
+	declaredTypeNames,
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
 	renameLocalTypes,
@@ -60,12 +70,21 @@ function parseStdlibFiles(dir, deps, variant = "js", target = "both") {
 		.map((ast) => Object.assign(ast, { target }));
 }
 
-// Targets of the package's files, read without parsing.
+// Targets of the package's files, read without parsing.  The answer is kept
+// until a file of the package changes.
+const targetsMemo = new Map();
+
 function stdlibFileTargets(dir, deps) {
-	return deps.gwFilesIn(dir).map((f) => {
+	const files = deps.gwFilesIn(dir);
+	const sig = filesSignature(files);
+	const memo = targetsMemo.get(dir);
+	if (memo?.sig === sig) return memo.targets;
+	const targets = files.map((f) => {
 		const m = /^\/\/gofront:target\s+(\S+)/m.exec(readFileSync(f, "utf8"));
 		return m?.[1] ?? "both";
 	});
+	targetsMemo.set(dir, { sig, targets });
+	return targets;
 }
 
 // Exported names declared by the `js` files (what a `wasm` or `both` importer
@@ -192,6 +211,7 @@ function checkStdlibPrograms(programs, pkgName, options, deps, target) {
 	checker.pkgName = pkgName;
 	checker.isStdlib = true;
 	checker.lazyBodies = true;
+	// The package's own imports are not the importer's.
 	deps.resolveImports(
 		programs,
 		programs[0]._path,
@@ -200,7 +220,7 @@ function checkStdlibPrograms(programs, pkgName, options, deps, target) {
 		new Set(),
 		[],
 		new Set(),
-		options,
+		{ ...options, importTokens: null },
 	);
 	return checker;
 }
@@ -245,6 +265,12 @@ function probeStdlibPackage(_importPath, dir, options, deps, v) {
 // body name package scope, the body is mangled with them, and the mangled
 // body is checked.  `decl._ensure()` does all three once and returns the
 // error text, or null.
+//
+// The stored declarations stay as the build left them (a later build may
+// freeze them): the passes run on copies, and `decl._checked()` returns the
+// checked copy (the declaration itself until it has been checked).  A copy
+// carries no hooks of its own, so copies of it (a link copy, the JS emitter's
+// input) are plain finished ASTs.
 function installLazyBodies(info, programs, checker) {
 	const { probe, probePrograms } = info;
 	programs.forEach((p, pi) => {
@@ -252,15 +278,21 @@ function installLazyBodies(info, programs, checker) {
 			if (decl.kind !== "FuncDecl" && decl.kind !== "MethodDecl") return;
 			const probeDecl = probePrograms[pi].decls[di];
 			let result;
+			let checked = null;
+			decl._checked = () => checked ?? decl;
 			decl._ensure = () => {
 				if (result !== undefined) return result;
 				result = null; // a body that reaches itself is in progress
+				checked = cloneAst(decl);
+				delete checked._ensure;
+				delete checked._checked;
+				const probed = cloneAst(probeDecl);
 				const before = [probe.errors.length, checker.errors.length];
-				probe.checkBody(probeDecl);
+				probe.checkBody(probed, probeDecl);
 				if (probe.errors.length === before[0]) {
-					mangleBody(decl, p._filename, info);
-					checker.checkBody(decl);
-					lowerStdlibRefs(decl);
+					mangleBody(checked, p._filename, info);
+					checker.checkBody(checked, decl);
+					lowerStdlibRefs(checked);
 				}
 				const errors = [
 					...probe.errors.slice(before[0]),
@@ -331,8 +363,25 @@ function stdlibVariant(importPath, dir, importerTarget, deps) {
 	return { key: `${importPath}#shared`, variant: "shared", target: "both" };
 }
 
+// Whether the stored package still matches its sources and the packages it was
+// built against.  `checked` holds the keys already vouched for in this build.
+function stdlibCurrent(pkg, table, deps, checked) {
+	if (checked.has(pkg.key)) return true;
+	const current =
+		pkg.sig === filesSignature(deps.gwFilesIn(pkg.dir)) &&
+		pkg.deps.every(
+			(d) => table.get(d.key) === d && stdlibCurrent(d, table, deps, checked),
+		);
+	if (current) checked.add(pkg.key);
+	return current;
+}
+
+let stdlibIds = 0;
+
 // Loads (once per build) and compiles the Go-source package at `dir`.  A
-// failure is cached too, so every importer reports it.
+// failure is cached too, so every importer reports it.  With a package cache
+// a stored package outlives the build: it is reused while its sources are
+// unchanged, and a failure is never carried into another build.
 function loadStdlibPackage(
 	importPath,
 	dir,
@@ -342,18 +391,36 @@ function loadStdlibPackage(
 ) {
 	const v = stdlibVariant(importPath, dir, importerTarget, deps);
 	const cache = options.stdlibCache;
-	const cached = cache.get(v.key);
+	const stats = options.cacheStats;
+	const checked = options.stdlibChecked;
+	let cached = cache.get(v.key);
+	if (cached && options.packageCache && !checked.has(v.key)) {
+		if (
+			cached instanceof Error ||
+			!stdlibCurrent(cached, cache, deps, checked)
+		) {
+			cache.delete(v.key);
+			cached = undefined;
+		} else checked.add(v.key);
+	}
 	if (cached === null)
 		throw new Error(`import cycle in Go-source stdlib: ${importPath}`);
 	if (cached instanceof Error) throw cached;
-	if (cached) return cached;
+	if (cached) {
+		if (stats) stats.stdlibHits++;
+		return cached;
+	}
+	if (stats) stats.stdlibMisses++;
 	cache.set(v.key, null);
 	try {
 		const pkg = buildStdlibPackage(importPath, dir, options, deps, v);
+		if (options.packageCache && freezesStoredUnits()) freezeStdlibPackage(pkg);
 		cache.set(v.key, pkg);
+		checked?.add(v.key);
 		return pkg;
 	} catch (e) {
 		cache.set(v.key, e);
+		checked?.add(v.key);
 		throw e;
 	}
 }
@@ -396,10 +463,14 @@ function buildStdlibPackage(importPath, dir, options, deps, v) {
 	const pkg = {
 		importPath,
 		key: v.key,
+		id: ++stdlibIds,
+		dir,
+		sig: filesSignature(deps.gwFilesIn(dir)),
 		checker,
 		pkgName: info.pkgName,
 		namespace,
 		exportedTypes: stdlibExportedTypes(checker, info),
+		jsMemo: new Map(),
 		deps: programs
 			.flatMap((p) => p.imports.flatMap((imp) => imp.imports))
 			.map(({ path }) =>
@@ -429,17 +500,38 @@ function stdlibMarker(key) {
 	return `/*__GOFRONT_STDLIB:${key}*/`;
 }
 
-function stdlibJs(pkg, reached, natives) {
-	const programs = pkg.unit.programs.map((p) => ({
-		...p,
-		decls: p.decls.filter((d) => reached.has(d)),
-	}));
-	if (programs.every((p) => p.decls.length === 0)) return "";
-	return new CodeGen(pkg.checker, new Map(), new Set(), {
+// The package's emitted JS for a reached set, memoized per package by the
+// reached declarations and `natives`.  Stored declarations are frozen-safe:
+// code generation rewrites its input, so it gets a copy of the checked
+// declarations.  `stats` counts the memo's hits and misses when given.
+function stdlibJs(pkg, reached, natives, stats) {
+	const ids = [];
+	pkg.unit.programs.forEach((p, pi) => {
+		p.decls.forEach((d, di) => {
+			if (reached.has(d)) ids.push(`${pi}.${di}`);
+		});
+	});
+	if (ids.length === 0) return "";
+	const key = `${natives !== false}|${ids.join(",")}`;
+	const hit = pkg.jsMemo.get(key);
+	if (hit !== undefined) {
+		if (stats) stats.stdlibJsHits = (stats.stdlibJsHits ?? 0) + 1;
+		return hit;
+	}
+	if (stats) stats.stdlibJsMisses = (stats.stdlibJsMisses ?? 0) + 1;
+	const programs = cloneAst(
+		pkg.unit.programs.map((p) => ({
+			...p,
+			decls: p.decls.filter((d) => reached.has(d)).map(checkedDecl),
+		})),
+	);
+	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: pkg.checker.target,
 		strict: true,
 		natives,
 	}).generateAll(programs, { isTest: false });
+	pkg.jsMemo.set(key, js);
+	return js;
 }
 
 // The API a wasm package exposes to JS through the facade: exported func and
@@ -486,7 +578,9 @@ function spliceStdlibJs(merged, options) {
 		if (spliced.has(path)) continue;
 		spliced.add(path);
 		const pkg = options.stdlibCache.get(path);
-		const js = emitted(pkg) ? stdlibJs(pkg, reached, options.natives) : "";
+		const js = emitted(pkg)
+			? stdlibJs(pkg, reached, options.natives, options.cacheStats)
+			: "";
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
 		for (const m of merged.mappings)
@@ -732,6 +826,7 @@ function importStdlibSpec(
 		const msg = `internal stdlib error in ${spec.path}; please report`;
 		return errAtImport(checker, p, spec, msg, e.message);
 	}
+	options.importTokens?.push(`std:${pkg.key}@${pkg.id}`);
 	emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
 	bindStdlibImport(checker, p, spec, pkg);
 }

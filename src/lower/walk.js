@@ -15,6 +15,22 @@ export function forEachChild(node, fn) {
 	}
 }
 
+/**
+ * The names of every type the programs declare, nested declarations (a type
+ * declared in a function) included, in source order.
+ */
+export function declaredTypeNames(programs) {
+	const names = [];
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) return node.forEach(visit);
+		if (node.kind === "TypeDecl") names.push(node.name);
+		forEachChild(node, visit);
+	};
+	for (const p of programs) visit(p.decls);
+	return names;
+}
+
 /** True when `pred(child)` holds for some non-side-table property of `node`. */
 export function someChild(node, pred) {
 	for (const key of Object.keys(node)) {
@@ -43,6 +59,10 @@ function isOpaque(value) {
 	return ArrayBuffer.isView(value) || OPAQUE.some((c) => value instanceof c);
 }
 
+// Side-table keys that hold AST the passes rewrite in place (the parser's
+// named results), so a copy owns them like any child.
+const STRUCTURAL_SIDE_KEYS = new Set(["_namedReturns"]);
+
 /**
  * A structural copy of `node`: fresh shells for every node and list, so a
  * pass that rewrites the copy in place never touches the original. A node
@@ -69,7 +89,7 @@ export function cloneAst(node, { cloneSide = false } = {}, seen = new Map()) {
 	for (const k of Object.getOwnPropertyNames(node)) {
 		const d = Object.getOwnPropertyDescriptor(node, k);
 		const v =
-			isSideTableKey(k) && !cloneSide
+			isSideTableKey(k) && !cloneSide && !STRUCTURAL_SIDE_KEYS.has(k)
 				? d.value
 				: cloneAst(d.value, { cloneSide }, seen);
 		if (d.enumerable) copy[k] = v;

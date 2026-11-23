@@ -1097,11 +1097,12 @@ export const resolveMethods = {
 	// up the methods declared since.
 	_syncInstanceMethods(generic, named) {
 		const methods = named.methods;
-		if (!methods || !named._instMap || named._syncing) return;
+		this._syncing ??= new WeakSet(); // kept off the (stored) instance type
+		if (!methods || !named._instMap || this._syncing.has(named)) return;
 		// A method signature that names the instance reaches this again.
 		// `func (s Stack[T]) Wrap() Stack[[]T]` makes every instance's methods
 		// ask for a larger instance: count the nesting to diagnose it.
-		named._syncing = true;
+		this._syncing.add(named);
 		const state = this._instState(generic);
 		state.syncDepth++;
 		try {
@@ -1112,7 +1113,7 @@ export const resolveMethods = {
 			this._promoteEmbeddedInto(named.underlying);
 		} finally {
 			state.syncDepth--;
-			named._syncing = false;
+			this._syncing.delete(named);
 		}
 	},
 
@@ -2051,11 +2052,15 @@ function compareIndex(a, b) {
 	return a.length - b.length;
 }
 
+// The fields json encodes for a struct type, by the struct (kept off the type,
+// which a package cache may have frozen).
+const jsonFieldsMemo = new WeakMap();
+
 export function resolveJsonFields(structType) {
 	if (!structType) return [];
 	const underlying = underlyingOf(structType);
 	if (underlying?.kind !== "struct") return [];
-	if (underlying._jsonFields) return underlying._jsonFields;
+	if (jsonFieldsMemo.has(underlying)) return jsonFieldsMemo.get(underlying);
 
 	const queue = [
 		{
@@ -2081,6 +2086,6 @@ export function resolveJsonFields(structType) {
 	}
 
 	const winning = _resolveCandidateCollisions(candidates);
-	underlying._jsonFields = winning;
+	jsonFieldsMemo.set(underlying, winning);
 	return winning;
 }

@@ -774,8 +774,6 @@ export const expressionCheckMethods = {
 		}
 		if (expr.operand.kind === "Ident") {
 			expr.operand._addressTaken = true;
-			const sym = scope.lookup(expr.operand.name);
-			if (sym) sym._addressTaken = true;
 		}
 		return { kind: "pointer", base: ot };
 	},
@@ -929,8 +927,6 @@ export const expressionCheckMethods = {
 		}
 		if (expr.expr.kind !== "Ident") return;
 		expr.expr._addressTaken = true;
-		const sym = scope.lookup(expr.expr.name);
-		if (sym) sym._addressTaken = true;
 	},
 
 	// Resolved per file from the import path, so a local package sharing an

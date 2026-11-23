@@ -119,15 +119,15 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
   - Done when: `localTypeCounter` and `iterStateCounter` reset per package / `lower()` call, and `instantiateGenericWithArgs` stores instantiation state in `TypeChecker`-owned maps
 
 ### Phase 2: Immutable `PackageCache` and cached stdlib JS
-- [ ] Task 2.1: Immutable stdlib units and memoized `stdlibJs` emission (former 3.2, stdlib/codegen half)
+- [x] Task 2.1: Immutable stdlib units and memoized `stdlibJs` emission (former 3.2, stdlib/codegen half)
   - Files: `src/link/stdlib.js`
   - Test: extend `test/unit/compiler/ast-reusability.test.js`: deep-freezing cached stdlib units (`programs`, `exportedTypes`, `namespace`) after compiling `sync.Mutex` + `fmt.Println` + `sort.Ints`, then compiling `sync.RWMutex`, `sort.Strings`, `slices.Sort`, and `encoding/json` (JS and `both`/`wasm`), succeeds without mutation errors and produces output byte-identical to cold builds; `stdlibJs` memoization counter hits on unchanged reached sets
   - Done when: `decl._ensure()` checks/mangles cloned declarations in a side map without mutating frozen `pkg.unit.programs`, `stdlibJs` clones filtered reached declarations on a memoization miss before `CodeGen.generateAll`, and `stdlibJs` memoizes emitted JS by `(pkg.key, reachedDeclIds, natives)`
-- [ ] Task 2.2: `PackageCache` with complete cache key and `typeOwners` tracking (former 3.1, cache half)
+- [x] Task 2.2: `PackageCache` with complete cache key and `typeOwners` tracking (former 3.1, cache half)
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `test/unit/compiler/package-cache.test.js`: hit/miss counters; key covers source files (`mtimeMs + size`), `js:` `.d.ts` imports, embedded files, resolved target, output options (`sourceMap`, `forceTarget`, `targetOverrides`, `natives`, `stdlibRoot`, `strict`, `isTest`, `wasmTests`, `includeTests`, `testDriver`), dependency summary hashes (`elemAddrTaken`), and `typeOwners` collisions; file added, removed, or renamed; failed compile is never stored
   - Done when: `PackageCache` holds user and Go-source stdlib units, exports a reset helper for tests, and cached builds are byte-identical to cold builds
-- [ ] Task 2.3: Switch `compileFiles` default to process-lifetime `PackageCache` and verify G7
+- [x] Task 2.3: Switch `compileFiles` default to process-lifetime `PackageCache` and verify G7
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `test/unit/compiler/ast-reusability.test.js` with deep-freeze flag enabled on the default cache; run G7 unit tests (`test/unit/stdlib/sync.test.js`, `test/unit/stdlib/sort.test.js`, full `npm test`)
   - Done when: `compileFiles` uses `PackageCache` by default (replacing `stdlibCache: options.stdlibCache ?? new Map()` at `src/compiler.js:542`), deep-freeze checks pass, and `npm test` passes with zero G7 failures
