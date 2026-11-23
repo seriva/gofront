@@ -985,14 +985,33 @@ export const resolveMethods = {
 		return this.instantiateGenericWithArgs(generic, typeArgs);
 	},
 
+	// The instantiation state this checker keeps for `generic`. A generic type
+	// of an imported package is shared with every checker that imports it (and
+	// is immutable once its package is cached), so none of the state is
+	// written onto the descriptor.
+	_instState(generic) {
+		let state = this._genericState.get(generic);
+		if (!state) {
+			state = {
+				instances: new Map(),
+				building: [],
+				buildSizes: [],
+				cycleReported: false,
+				syncDepth: 0,
+			};
+			this._genericState.set(generic, state);
+		}
+		return state;
+	},
+
 	// One instance per type-argument list.  The instance is cached before its
 	// fields are resolved, so a field that names the instance again (`Next
 	// *List[T]`, `Children []Tree[T]`, or a cycle through another generic type)
 	// reaches the same object instead of recursing forever.
 	instantiateGenericWithArgs(generic, typeArgs) {
 		const key = typeArgs.map(instanceKey).join(",");
-		generic._instances ??= new Map();
-		const cached = generic._instances.get(key);
+		const state = this._instState(generic);
+		const cached = state.instances.get(key);
 		if (cached) {
 			this._syncInstanceMethods(generic, cached);
 			return cached;
@@ -1000,14 +1019,12 @@ export const resolveMethods = {
 		// `type T[X any] struct{ n *T[[]X] }` asks for T[[]X], then T[[][]X], and
 		// so on: an instance still being built that keeps asking for a larger
 		// one never settles.
-		generic._building ??= [];
-		generic._buildSizes ??= [];
-		const building = generic._building;
+		const building = state.building;
 		const size = typeArgs.reduce((n, a) => n + typeSize(a), 0);
 		// A request for a larger instance while one is being built never
 		// settles (`T[X]` containing `T[[]X]`), and doubling forms such as
 		// `T[Pair[X, X]]` blow up long before a depth limit is reached.
-		const top = generic._buildSizes[generic._buildSizes.length - 1];
+		const top = state.buildSizes[state.buildSizes.length - 1];
 		// Inside a method of `G[T]`, `G[[]T]` makes every instance ask for a
 		// larger one, even if the method is never called.
 		const growsReceiver =
@@ -1016,11 +1033,11 @@ export const resolveMethods = {
 		if (
 			growsReceiver ||
 			building.length >= MAX_INSTANTIATION_DEPTH ||
-			(generic._syncDepth ?? 0) >= MAX_INSTANTIATION_DEPTH ||
+			state.syncDepth >= MAX_INSTANTIATION_DEPTH ||
 			(top !== undefined && size > top)
 		) {
-			if (!generic._cycleReported) {
-				generic._cycleReported = true;
+			if (!state.cycleReported) {
+				state.cycleReported = true;
 				this.err(
 					`instantiation cycle: ${generic.declNode.name} instantiates itself with ever larger type arguments`,
 					generic.declNode,
@@ -1040,13 +1057,13 @@ export const resolveMethods = {
 			underlying: null,
 			_genericOf: generic,
 		};
-		generic._instances.set(key, named);
+		state.instances.set(key, named);
 		// Resolve the declaration with its type params in scope (as typeParams,
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
 		for (const tp of generic.typeParams) typeScope.defineType(tp.name, tp);
 		building.push(key);
-		generic._buildSizes.push(size);
+		state.buildSizes.push(size);
 		let instantiated;
 		try {
 			const underlying = this._inDeclContext(generic.declNode, () =>
@@ -1062,7 +1079,7 @@ export const resolveMethods = {
 			);
 		} finally {
 			building.pop();
-			generic._buildSizes.pop();
+			state.buildSizes.pop();
 		}
 		if (instantiated.kind === "struct") {
 			instantiated.name = generic.declNode.name;
@@ -1080,12 +1097,14 @@ export const resolveMethods = {
 	// up the methods declared since.
 	_syncInstanceMethods(generic, named) {
 		const methods = named.methods;
-		if (!methods || !named._instMap || named._syncing) return;
+		this._syncing ??= new WeakSet(); // kept off the (stored) instance type
+		if (!methods || !named._instMap || this._syncing.has(named)) return;
 		// A method signature that names the instance reaches this again.
 		// `func (s Stack[T]) Wrap() Stack[[]T]` makes every instance's methods
 		// ask for a larger instance: count the nesting to diagnose it.
-		named._syncing = true;
-		generic._syncDepth = (generic._syncDepth ?? 0) + 1;
+		this._syncing.add(named);
+		const state = this._instState(generic);
+		state.syncDepth++;
 		try {
 			for (const [mName, mType] of generic.methods ?? [])
 				if (!methods.has(mName))
@@ -1093,8 +1112,8 @@ export const resolveMethods = {
 			// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
 			this._promoteEmbeddedInto(named.underlying);
 		} finally {
-			generic._syncDepth--;
-			named._syncing = false;
+			state.syncDepth--;
+			this._syncing.delete(named);
 		}
 	},
 
@@ -2033,11 +2052,15 @@ function compareIndex(a, b) {
 	return a.length - b.length;
 }
 
+// The fields json encodes for a struct type, by the struct (kept off the type,
+// which a package cache may have frozen).
+const jsonFieldsMemo = new WeakMap();
+
 export function resolveJsonFields(structType) {
 	if (!structType) return [];
 	const underlying = underlyingOf(structType);
 	if (underlying?.kind !== "struct") return [];
-	if (underlying._jsonFields) return underlying._jsonFields;
+	if (jsonFieldsMemo.has(underlying)) return jsonFieldsMemo.get(underlying);
 
 	const queue = [
 		{
@@ -2063,6 +2086,6 @@ export function resolveJsonFields(structType) {
 	}
 
 	const winning = _resolveCandidateCollisions(candidates);
-	underlying._jsonFields = winning;
+	jsonFieldsMemo.set(underlying, winning);
 	return winning;
 }

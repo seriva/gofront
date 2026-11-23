@@ -131,6 +131,8 @@ export class TypeChecker {
 		// while resolving a declaration of an imported generic type.
 		this._ownerPkg = this._pkgId;
 		this.types = new Map(); // named types
+		// Instantiation state per generic type (see `_instState`).
+		this._genericState = new Map();
 		// Go's universe scope: builtins, browser globals and built-in package
 		// namespaces.  Package declarations live in `globals` above it, so they
 		// shadow predeclared names (`func Array()`, `var document int`).
@@ -1078,16 +1080,25 @@ export class TypeChecker {
 	_deferBody(decl, program) {
 		if (decl.intrinsic) this._checkIntrinsic(decl);
 		if (decl.native) this._checkNative(decl);
+		// The constraints are part of the signature: importers resolve these
+		// nodes through the function's type, so they are settled now rather
+		// than when the body is first checked (on a copy of the declaration).
+		if (decl.kind === "FuncDecl")
+			this._injectTypeParams(decl, new Scope(this.globals), this.globals);
 		this._lazyBodies.set(decl, program);
 	}
 
 	// Types the body of a function or method deferred by `lazyBodies`; a
-	// declaration checked already (or not deferred) is left alone.
-	checkBody(decl) {
-		const program = this._lazyBodies.get(decl);
+	// declaration checked already (or not deferred) is left alone.  `decl` may
+	// be a copy of the deferred declaration `key`, so the original stays as
+	// parsed.
+	checkBody(decl, key = decl) {
+		const program = this._lazyBodies.get(key);
 		if (!program) return;
-		this._lazyBodies.delete(decl);
+		this._lazyBodies.delete(key);
 		this._setCurrentFile(program);
+		// Constraint positions are marked per node, so a copy needs its own.
+		if (decl !== key) this._markConstraintPositions([{ decls: [decl] }]);
 		this.checkTopDecl(decl, this.globals);
 	}
 
@@ -1101,7 +1112,8 @@ export class TypeChecker {
 		const structs = [];
 		for (const type of this.types.values()) {
 			structs.push(type.underlying);
-			for (const inst of type._generic?._instances?.values() ?? []) {
+			const instances = this._genericState.get(type._generic)?.instances;
+			for (const inst of instances?.values() ?? []) {
 				this._syncInstanceMethods(type._generic, inst);
 				structs.push(inst.underlying);
 			}

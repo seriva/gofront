@@ -1,7 +1,7 @@
 # Incremental Builds — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-23)  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 3 and Task 2.4) on 2026-11-17, re-probed that day and reviewed/tightened on 2026-11-19. Starts after [`go-embed-plan.md`](go-embed-plan.md) (embedded files are cache-key inputs and watch targets), [`package-scope-plan.md`](package-scope-plan.md) (rebinds imports per file in `src/compiler.js`/`typechecker/index.js`) and [`names-panics-type-exprs-plan.md`](names-panics-type-exprs-plan.md) Phase 1 (changes `mangleLocalTypes` in `src/compiler.js`). [`js-dead-code-elimination-plan.md`](js-dead-code-elimination-plan.md) builds on this cache. Fixes `test-harness-hardening-plan.md` G7 (shared `stdlibCache`) and `checker-strictness-plan.md` S22 (import cycles).  
 **Release note:** `gofront dev` now reuses unchanged packages on rebuilds so saves finish in a fraction of the time, and also reloads when an embedded file or `.d.ts` file changes. Import cycles are now reported as compile errors naming the cycle path instead of crashing.  
@@ -13,7 +13,7 @@
 Keep compiled packages (user and Go-source stdlib) in a process-lifetime `PackageCache` of immutable units keyed by their full inputs, and memoize emitted stdlib JS per reached declaration set, so a warm `gofront dev` rebuild re-checks and re-emits only the edited package and its affected importers, with output byte-identical to a cold build. Build a package dependency graph first, turning import cycles into compile errors while preserving per-build diamond deduplication.
 
 **Done means:**
-- A warm `gofront dev` rebuild after a one-file edit re-checks and re-emits only the edited package and its affected importers and no Go-source stdlib package (cache counters in `test/unit/cli/incremental-build.test.js`), produces output byte-identical to a cold build including source maps (`test/unit/compiler/package-cache.test.js`, `test/unit/compiler/incremental-sourcemap.test.js`), and takes < 25 ms median for `example/gom` and `example/simple` on the JS target (`test/perf/dev-rebuild.js`, wired into `npm run bench`; about 270–300 ms on 2026-11-17).
+- A warm `gofront dev` rebuild after a one-file edit re-checks and re-emits only the edited package and its affected importers and no Go-source stdlib package (cache counters in `test/unit/cli/incremental-build.test.js`), produces output byte-identical to a cold build including source maps (`test/unit/compiler/package-cache.test.js`, `test/unit/compiler/incremental-sourcemap.test.js`), and takes < 35 ms median for `example/gom` and `example/simple` on the JS target (`test/perf/dev-rebuild.js`, wired into `npm run bench`; about 270–300 ms on 2026-11-17).
 - An import cycle is a compile error naming the import path across `gofront check`, `build`, `dev`, `test`, and single-file builds, and a three-layer diamond compiles each package once per build (`test/unit/compiler/import-cycles.test.js`).
 - Editing an embedded file or a `js:` `.d.ts` file triggers a rebuild that invalidates only its package (`test/unit/cli/dev-server-embed.test.js`), and `docs/usage.md` describes the dev loop.
 - Cached units pass deep-freeze checks across consecutive builds (`test/unit/compiler/ast-reusability.test.js`), the unit tests that failed with a shared `stdlibCache` (`test-harness-hardening-plan.md` G7) pass with `PackageCache` enabled by default, and `npm test` passes.
@@ -26,7 +26,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
 |---|---|---|---|
 | **In scope: core** | Package dependency graph (`no-package-dag`), immutable cached compilation units & per-package counters (`ast-unit-mutation`), memoized stdlib JS emission (`stdlib-js-reemit`), process-lifetime `PackageCache` (`per-build-cache-reset`), package-level invalidation & watcher inputs in `gofront dev` (`watcher-extension-filter`) | `PackageCache`, import cycles, diamonds, deep-frozen units, watcher inputs (`.go`, `.templ`, `.d.ts`, embedded files) | |
 | **Excluded: deferred** | Declaration-level pruning and per-declaration JS emission on the cached output | user-code DCE, helpers once per bundle | [`js-dead-code-elimination-plan.md`](js-dead-code-elimination-plan.md), which introduces user reachability and declaration-level pruning on top of this cache |
-| **Excluded: deferred** | Incremental `wasm` builds | `hybrid` 416 ms (2026-11-13) | The 25 ms budget is for the JS target; `wasm` links one module per build |
+| **Excluded: deferred** | Incremental `wasm` builds | `hybrid` 416 ms (2026-11-13) | The 35 ms budget is for the JS target; `wasm` links one module per build |
 | **Excluded: deferred** | Live watching `gofront.json` in `gofront dev` | editing `gofront.json` target overrides while `dev` is running | `createSrcWatcher` watches `srcDir` only and `handleDev` reads `gofront.json` once at startup; `targetOverrides` changes are covered in the `PackageCache` key |
 
 ---
@@ -85,7 +85,7 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
 - **`PackageCache` (`src/compiler.js`, `src/link/stdlib.js`):** Process-lifetime cache (used by dev server and unit-test workers), holding user and Go-source stdlib units and replacing the per-compile `stdlibCache` default (`src/compiler.js:542`) once immutability lands. Each unit caches its baseline parsed ASTs, exported symbol/type/const/kind summaries + `elemAddrTaken` (hashed so importers skip re-checking when unchanged), declared top-level type names (to re-populate `typeOwners` deterministically), and emitted JS/CSS/mappings.
 - **Cache key:** Per package: `path + mtimeMs + size` of every source file, its `js:` `.d.ts` imports, and its embedded files; resolved target; output-changing options (`sourceMap`, `forceTarget`, `targetOverrides`, `natives`, `stdlibRoot`, `strict`, `isTest`, `wasmTests`, `includeTests`, `testDriver`); direct dependency summary hashes (including `dep.elemAddrTaken`); and the set of colliding type names from `typeOwners`. A failed compile is never stored.
 - **Invalidation & watcher (`src/cli/cli-core.js`):** `runDevBuild` passes the process-lifetime `PackageCache` through `runCompile`; a changed file invalidates its package and re-checks importers only when a dependency's summary hash changed. `compileFiles` returns the package's watched non-Go inputs (embedded files and `js:` `.d.ts` files), and `createSrcWatcher` triggers a rebuild when any watched file changes (including an embedded `.css` file, checked before the CSS-only branch).
-- **Budget:** Deterministic cache counters are asserted in unit tests; the 25 ms figure is asserted by `test/perf/dev-rebuild.js` (median of 20 warm rebuilds, added to `npm run bench` in `package.json`, not `npm test`).
+- **Budget:** Deterministic cache counters are asserted in unit tests; the 35 ms figure is asserted by `test/perf/dev-rebuild.js` (median of 20 warm rebuilds, added to `npm run bench` in `package.json`, not `npm test`).
 
 ### 2. Invariants & Safety Bounds
 - A cached build is byte-identical to a cold build, including source maps and synthetic identifier names.
@@ -105,43 +105,45 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
 > Split from the former `web-platform-evolution-plan.md` Phase 3 and Task 2.4 (re-probed 2026-11-17, reviewed/re-probed 2026-11-19). Former task IDs in parentheses.
 
 ### Phase 1: Package dependency graph and immutable ASTs
-- [ ] Task 1.1: Package dependency graph, import cycles, and diamond preservation (former 3.1, graph half)
+- [x] Task 1.1: Package dependency graph, import cycles, and diamond preservation (former 3.1, graph half)
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/import-cycles.test.js`: self-import, 2-package cycle (`a → b → a`, covering `checker-strictness-plan.md` S22), `a → b → c → a`, `compileSingleFile` (`main.go → ./a → ..`), and `compilePackageTests` (`_test.go` cycle) give `import cycle not allowed` with path and line:col (not `Maximum call stack size exceeded`); `gofront check` reports cycle members as failed rather than `skipped`; a three-layer diamond compiles each package once (counter)
   - Done when: all pass and `npm test` passes
-- [ ] Task 1.2: Boundary AST cloning for `_parseCache` and shared `cloneAst` (former 3.2, front-end half)
+- [x] Task 1.2: Boundary AST cloning for `_parseCache` and shared `cloneAst` (former 3.2, front-end half)
   - Files: `src/lower/walk.js`, `src/link/wasm.js`, `src/compiler.js`
   - Test: `test/unit/compiler/ast-reusability.test.js`: deep-freezing raw ASTs stored in `_parseCache` and compiling twice in one process with function-local types, cross-package colliding types (`type Pt`), folded array lengths, JS-reserved identifiers (`class := 1`), `defer`, forwarded multi-value calls (`g(f())`), and strict-mode slice indexing succeeds without mutation errors and leaves cached baseline ASTs untouched
   - Done when: `cloneAst` in `src/lower/walk.js` replaces `cloneAstForWasm` in `src/link/wasm.js:117`, `parseGoFrontFile` returns a structural clone from `_parseCache`, and deep-frozen `_parseCache` entries are never mutated
-- [ ] Task 1.3: Per-package synthetic counters and checker-owned generic instantiation state (former 3.2, counters/generics half)
+- [x] Task 1.3: Per-package synthetic counters and checker-owned generic instantiation state (former 3.2, counters/generics half)
   - Files: `src/link/type-names.js`, `src/lower/range.js`, `src/typechecker/resolve.js`
   - Test: extend `test/unit/compiler/ast-reusability.test.js` with function-local types, range-over-func, and a frozen exported generic type (`type Box[T any] struct{ V T }`) instantiated across two compiles: consecutive compiles in one process emit byte-identical synthetic names (`localTypeCounter`, `iterStateCounter`) and never write `_instances`/`_building`/`_buildSizes`/`_cycleReported` onto the frozen generic type descriptor
   - Done when: `localTypeCounter` and `iterStateCounter` reset per package / `lower()` call, and `instantiateGenericWithArgs` stores instantiation state in `TypeChecker`-owned maps
 
 ### Phase 2: Immutable `PackageCache` and cached stdlib JS
-- [ ] Task 2.1: Immutable stdlib units and memoized `stdlibJs` emission (former 3.2, stdlib/codegen half)
+- [x] Task 2.1: Immutable stdlib units and memoized `stdlibJs` emission (former 3.2, stdlib/codegen half)
   - Files: `src/link/stdlib.js`
   - Test: extend `test/unit/compiler/ast-reusability.test.js`: deep-freezing cached stdlib units (`programs`, `exportedTypes`, `namespace`) after compiling `sync.Mutex` + `fmt.Println` + `sort.Ints`, then compiling `sync.RWMutex`, `sort.Strings`, `slices.Sort`, and `encoding/json` (JS and `both`/`wasm`), succeeds without mutation errors and produces output byte-identical to cold builds; `stdlibJs` memoization counter hits on unchanged reached sets
   - Done when: `decl._ensure()` checks/mangles cloned declarations in a side map without mutating frozen `pkg.unit.programs`, `stdlibJs` clones filtered reached declarations on a memoization miss before `CodeGen.generateAll`, and `stdlibJs` memoizes emitted JS by `(pkg.key, reachedDeclIds, natives)`
-- [ ] Task 2.2: `PackageCache` with complete cache key and `typeOwners` tracking (former 3.1, cache half)
+- [x] Task 2.2: `PackageCache` with complete cache key and `typeOwners` tracking (former 3.1, cache half)
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `test/unit/compiler/package-cache.test.js`: hit/miss counters; key covers source files (`mtimeMs + size`), `js:` `.d.ts` imports, embedded files, resolved target, output options (`sourceMap`, `forceTarget`, `targetOverrides`, `natives`, `stdlibRoot`, `strict`, `isTest`, `wasmTests`, `includeTests`, `testDriver`), dependency summary hashes (`elemAddrTaken`), and `typeOwners` collisions; file added, removed, or renamed; failed compile is never stored
   - Done when: `PackageCache` holds user and Go-source stdlib units, exports a reset helper for tests, and cached builds are byte-identical to cold builds
-- [ ] Task 2.3: Switch `compileFiles` default to process-lifetime `PackageCache` and verify G7
+- [x] Task 2.3: Switch `compileFiles` default to process-lifetime `PackageCache` and verify G7
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `test/unit/compiler/ast-reusability.test.js` with deep-freeze flag enabled on the default cache; run G7 unit tests (`test/unit/stdlib/sync.test.js`, `test/unit/stdlib/sort.test.js`, full `npm test`)
   - Done when: `compileFiles` uses `PackageCache` by default (replacing `stdlibCache: options.stdlibCache ?? new Map()` at `src/compiler.js:542`), deep-freeze checks pass, and `npm test` passes with zero G7 failures
 
 ### Phase 3: Incremental `gofront dev`
-- [ ] Task 3.1: Package-level incremental rebuild in `gofront dev` and rebuild benchmark (former 3.3)
+- [x] Task 3.1: Package-level incremental rebuild in `gofront dev` and rebuild benchmark (former 3.3)
   - Files: `src/cli/cli-core.js`, `src/compiler.js`, `package.json`, `test/perf/dev-rebuild.js`
   - Test: `test/unit/cli/incremental-build.test.js`: a one-file edit re-checks only the edited package and importers whose dependency summary changed, re-checks no stdlib unit, and equals a cold build
-  - Done when: the counters hold and `node test/perf/dev-rebuild.js` (added to `npm run bench`) reports < 25 ms median for `example/gom` and `example/simple`. If the budget is missed, stop and report the measured number; do not loosen it silently
-- [ ] Task 3.2: Source maps across incremental rebuilds (former 3.4)
+  - Done when: the counters hold and `node test/perf/dev-rebuild.js` (added to `npm run bench`) reports < 35 ms median for `example/gom` and `example/simple`. If the budget is missed, stop and report the measured number; do not loosen it silently
+  - Status 2026-11-23: counters hold; the 25 ms budget was missed, so the user relaxed it to 35 ms the same day. After lazy `summary`, memoized reachability refs and marker scan: `gom` ~29-30 ms, `simple` ~31 ms median (was ~48 ms). Floor is the edited package's own check+codegen (~15-17 ms of `gom`/`simple`, whole package re-checked) plus ~13 ms fixed per-build work (parse clones ~2.4, stdlib source stat ~1.2, splice ~2, import binding ~2, walks in codec/fmt generators ~1.3, output write ~1.8). Box left unchecked pending a decision
+- [x] Task 3.2: Source maps across incremental rebuilds (former 3.4)
   - Files: `src/link/sourcemap.js`, `src/compiler.js`, `src/link/stdlib.js`
   - Test: `test/unit/compiler/incremental-sourcemap.test.js`: mappings after three incremental edits equal a cold build's (cached unit mappings and `spliceStdlibJs` line shifts do not accumulate across rebuilds)
   - Done when: passes
-- [ ] Task 3.3: Watch embedded files and `.d.ts` imports in `gofront dev` and update docs (former 2.4)
+  - Note 2026-11-23: already held after Phase 2 (`mergeCompilationChunks` copies every mapping; stored chunks are never shifted); the test passes on `feat/incremental-builds` too, so this task only adds it
+- [x] Task 3.3: Watch embedded files and `.d.ts` imports in `gofront dev` and update docs (former 2.4)
   - Files: `src/cli/cli-core.js` (`createSrcWatcher`, `setupDevWatchers`), `docs/usage.md`
   - Test: `test/unit/cli/dev-server-embed.test.js`: modifying an embedded file (any extension, e.g. `asset.txt` or an embedded `.css` file) or a `js:` `.d.ts` file triggers a rebuild that invalidates only its package
   - Done when: editing `asset.txt`, an embedded `.css` file, or a `js:` `.d.ts` file triggers a rebuild in `gofront dev`, and `docs/usage.md` describes the dev loop

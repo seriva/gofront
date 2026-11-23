@@ -409,6 +409,7 @@ function splitForwardsIn(node) {
 			const item = node[i];
 			splitForwardsIn(item);
 			const defines = splitForwardsInStmt(item);
+			if (defines.length === 0) continue;
 			node.splice(i, 0, ...defines);
 			i += defines.length;
 		}
