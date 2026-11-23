@@ -9,6 +9,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	assertJsTargetsOutput,
+	assertOutput,
 	assertProgramOutput,
 	compile,
 	compileDir,
@@ -3380,6 +3381,77 @@ for (const target of ["js", "both", "wasm"]) {
 			target,
 		);
 		assertEqual(errors.length, 0);
+	});
+}
+
+// A value of an unexported type an exported function returns reaches the
+// codecs (json, fmt) of the importing file, which the generated Go names
+// unqualified: it must resolve there, though user code cannot name it.
+const DOT_CODEC_UTIL = `package util
+
+type box struct{ N int }
+
+type pair[T any] struct{ A, B T }
+
+func NewBox() box { return box{1} }
+
+func NewPair() pair[int] { return pair[int]{2, 3} }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		[
+			"json.Marshal",
+			"b, _ := json.Marshal(NewBox())\n\tfmt.Println(string(b))",
+			'{"N":1}\n',
+		],
+		[
+			"json.Unmarshal",
+			'x := NewBox()\n\t_ = json.Unmarshal([]byte(`{"N":5}`), &x)\n\tfmt.Println(x)',
+			"{5}\n",
+		],
+		["fmt %v", 'fmt.Println(fmt.Sprintf("%v", NewBox()))', "{1}\n"],
+		["fmt %+v", 'fmt.Println(fmt.Sprintf("%+v", NewBox()))', "{N:1}\n"],
+		[
+			"json.Marshal of a generic type",
+			"b, _ := json.Marshal(NewPair())\n\tfmt.Println(string(b))",
+			'{"A":2,"B":3}\n',
+		],
+	]) {
+		test(`a dot import of a ${target} package passes an unexported type to ${what}`, async () => {
+			await assertOutput(
+				`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	. "./util"
+)
+
+var _ = fmt.Sprint(1)
+
+var _, _ = json.Marshal(1)
+
+func main() {
+	${body}
+}
+`,
+				want,
+				{
+					targets: [target],
+					files: { "util/util.go": DOT_CODEC_UTIL },
+				},
+			);
+		});
+	}
+
+	test(`a dot import of a ${target} package still hides an unexported type from user code`, () => {
+		const errors = dotErrors(
+			DOT_CODEC_UTIL.replace("package util\n", ""),
+			'import "encoding/json"\n\nfunc main() {\n\tb, _ := json.Marshal(NewBox())\n\t_ = b\n\tvar x box\n\t_ = x\n}\n',
+			target,
+		);
+		assertErrorContains(errors, "Unknown type 'box'");
 	});
 }
 

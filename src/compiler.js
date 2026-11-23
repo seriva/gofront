@@ -713,7 +713,9 @@ function resolveImports(
 							consts: bind(dep.exportedConsts),
 							kinds: dep.exportedKinds,
 							file: p._filename ?? null,
-							reached: dep.reachedTypes,
+							reached: p._generated
+								? dep.reachedTypes
+								: withUnexportedTypes(dep),
 						},
 					);
 					continue;
@@ -734,6 +736,14 @@ function resolveImports(
 			}
 		}
 	}
+}
+
+// The types `dep` reaches (table only) plus its unexported ones: a dot import
+// does not bind them, but the importer's generated Go names the unexported
+// type of a value an exported function returns.
+function withUnexportedTypes(dep) {
+	const hidden = [...dep.exportedTypes].filter(([name]) => !isExported(name));
+	return new Map([...hidden, ...dep.reachedTypes]);
 }
 
 // The entries of `map` whose name is exported (Go's export rule).
