@@ -105,15 +105,15 @@ Keep compiled packages (user and Go-source stdlib) in a process-lifetime `Packag
 > Split from the former `web-platform-evolution-plan.md` Phase 3 and Task 2.4 (re-probed 2026-11-17, reviewed/re-probed 2026-11-19). Former task IDs in parentheses.
 
 ### Phase 1: Package dependency graph and immutable ASTs
-- [ ] Task 1.1: Package dependency graph, import cycles, and diamond preservation (former 3.1, graph half)
+- [x] Task 1.1: Package dependency graph, import cycles, and diamond preservation (former 3.1, graph half)
   - Files: `src/compiler.js`
   - Test: `test/unit/compiler/import-cycles.test.js`: self-import, 2-package cycle (`a → b → a`, covering `checker-strictness-plan.md` S22), `a → b → c → a`, `compileSingleFile` (`main.go → ./a → ..`), and `compilePackageTests` (`_test.go` cycle) give `import cycle not allowed` with path and line:col (not `Maximum call stack size exceeded`); `gofront check` reports cycle members as failed rather than `skipped`; a three-layer diamond compiles each package once (counter)
   - Done when: all pass and `npm test` passes
-- [ ] Task 1.2: Boundary AST cloning for `_parseCache` and shared `cloneAst` (former 3.2, front-end half)
+- [x] Task 1.2: Boundary AST cloning for `_parseCache` and shared `cloneAst` (former 3.2, front-end half)
   - Files: `src/lower/walk.js`, `src/link/wasm.js`, `src/compiler.js`
   - Test: `test/unit/compiler/ast-reusability.test.js`: deep-freezing raw ASTs stored in `_parseCache` and compiling twice in one process with function-local types, cross-package colliding types (`type Pt`), folded array lengths, JS-reserved identifiers (`class := 1`), `defer`, forwarded multi-value calls (`g(f())`), and strict-mode slice indexing succeeds without mutation errors and leaves cached baseline ASTs untouched
   - Done when: `cloneAst` in `src/lower/walk.js` replaces `cloneAstForWasm` in `src/link/wasm.js:117`, `parseGoFrontFile` returns a structural clone from `_parseCache`, and deep-frozen `_parseCache` entries are never mutated
-- [ ] Task 1.3: Per-package synthetic counters and checker-owned generic instantiation state (former 3.2, counters/generics half)
+- [x] Task 1.3: Per-package synthetic counters and checker-owned generic instantiation state (former 3.2, counters/generics half)
   - Files: `src/link/type-names.js`, `src/lower/range.js`, `src/typechecker/resolve.js`
   - Test: extend `test/unit/compiler/ast-reusability.test.js` with function-local types, range-over-func, and a frozen exported generic type (`type Box[T any] struct{ V T }`) instantiated across two compiles: consecutive compiles in one process emit byte-identical synthetic names (`localTypeCounter`, `iterStateCounter`) and never write `_instances`/`_building`/`_buildSizes`/`_cycleReported` onto the frozen generic type descriptor
   - Done when: `localTypeCounter` and `iterStateCounter` reset per package / `lower()` call, and `instantiateGenericWithArgs` stores instantiation state in `TypeChecker`-owned maps

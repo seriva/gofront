@@ -41,7 +41,13 @@ import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer/lexer.js";
-import { TemplLexer } from "./lexer/templ-lexer.js";
+import {
+	clearParseCache,
+	evictParseCache,
+	freezeParseCache,
+	parseCacheSize,
+	parseGoFrontFile,
+} from "./link/parse-cache.js";
 import {
 	attachSourceMap,
 	buildWasmMap,
@@ -64,7 +70,6 @@ import {
 } from "./link/wasm.js";
 import { lower, takesElementAddress } from "./lower/index.js";
 import { ParseError, Parser } from "./parser/index.js";
-import { TemplParser } from "./parser/templ.js";
 import {
 	bindUntypedImports,
 	isBuiltinPackage,
@@ -87,16 +92,8 @@ import {
 	WASM_SUPPORTED_STDLIB,
 } from "./typechecker/types.js";
 
-// ── Parse cache ──────────────────────────────────────────────
-
-// Map<filePath, { mtime: number, ast: object }>
-const _parseCache = new Map();
-
-// A cached AST keeps everything the build attached to it (checked types,
-// lowered stdlib programs), so a build of a Go-source stdlib importer pins
-// megabytes.  The cache is therefore bounded; the least recently used file goes
-// first.
-const PARSE_CACHE_LIMIT = 16;
+// The parse cache lives in link/parse-cache.js; tests and the CLI reach it here.
+export { clearParseCache, evictParseCache, freezeParseCache, parseCacheSize };
 
 // A user-code diagnostic (parse, package or type errors) as opposed to a
 // compiler crash. `message` is the joined text the CLI prints; `errors`
@@ -161,19 +158,6 @@ export function validateWasm(bytes) {
 	throw new InternalCompilerError(
 		new Error(`the generated WebAssembly is invalid: ${detail}`),
 	);
-}
-
-export function clearParseCache() {
-	_parseCache.clear();
-}
-
-// Drops one file, e.g. a throwaway source that was deleted after its build.
-export function evictParseCache(filePath) {
-	_parseCache.delete(resolve(filePath));
-}
-
-export function parseCacheSize() {
-	return _parseCache.size;
 }
 
 // ── //go:embed ───────────────────────────────────────────────
@@ -402,35 +386,6 @@ export function resolveEmbedFiles(programs) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────
-
-function parseGoFrontFile(filePath) {
-	const key = resolve(filePath);
-	const mtime = statSync(filePath).mtimeMs;
-	const cached = _parseCache.get(key);
-	if (cached && cached.mtime === mtime) {
-		_parseCache.delete(key);
-		_parseCache.set(key, cached);
-		return cached.ast;
-	}
-
-	const source = readFileSync(filePath, "utf8");
-	const filename = basename(filePath);
-	const isTempl = filePath.endsWith(".templ");
-	const tokens = isTempl
-		? new TemplLexer(source, filename).tokenize()
-		: new Lexer(source, filename).tokenize();
-	const ast = isTempl
-		? new TemplParser(tokens, filename, source).parse()
-		: new Parser(tokens, filename, source).parse();
-	ast._source = source;
-	ast._path = resolve(filePath);
-	// compileFiles overwrites `target` with the resolved one; keep the directive.
-	ast._declaredTarget = ast.target;
-	_parseCache.set(key, { mtime, ast });
-	if (_parseCache.size > PARSE_CACHE_LIMIT)
-		_parseCache.delete(_parseCache.keys().next().value);
-	return ast;
-}
 
 export function gwFilesIn(dir, { includeTests = false } = {}) {
 	return readdirSync(dir)
@@ -751,6 +706,87 @@ function exportedEntries(map) {
 	return new Map([...map].filter(([name]) => isExported(name)));
 }
 
+// ── Package dependency graph ──────────────────────────────────
+
+// The local imports of the package in `pkgDir`: `{ dir, program, spec }` for
+// each import whose directory resolveImports will find.
+function* localImports(programs, pkgDir) {
+	const fromFile = join(pkgDir, "_dummy.go");
+	for (const program of programs)
+		for (const imp of program.imports ?? [])
+			for (const spec of imp.imports) {
+				if (!isLocalPath(spec.path)) continue;
+				const dir = resolveGwDir(spec.path, fromFile);
+				if (dir) yield { dir: resolve(dir), program, spec };
+			}
+}
+
+// The parsed files of the dependency in `dir`, as compileDir would read them;
+// null when it has none or does not parse (compiling it reports that).
+function parseDependency(dir, options) {
+	try {
+		const files = gwFilesIn(dir, {
+			includeTests: options.includeTests ?? false,
+		});
+		return files.length > 0 ? files.map(parseGoFrontFile) : null;
+	} catch {
+		return null;
+	}
+}
+
+// `import cycle not allowed` for the cycle `trail` (the packages from the
+// first member of the cycle down to the importer) closes by importing
+// `closing`. It is reported at the import that leaves the first member.
+function importCycleError(trail, closing, names, rootKey) {
+	const keys = [...trail.map((f) => f.key), closing];
+	const named = keys.map((k) => names.get(k));
+	const label =
+		new Set(named).size === new Set(keys).size
+			? named
+			: keys.map((k) => relative(rootKey, k).split(sep).join("/") || ".");
+	const { program, spec } = trail[0].via;
+	return new CompileError([
+		new TypeCheckError(
+			`import cycle not allowed: ${label.join(" imports ")}`,
+			{ line: spec.line ?? spec._line, col: spec.col ?? spec._col ?? 1 },
+			program._filename,
+			program._source,
+		),
+	]);
+}
+
+// The graph of the local packages `rootPrograms` (the package in `rootKey`)
+// imports, directly or not: `{ edges: Map<dir, Set<dir>> }`. Throws the
+// CompileError of the first import cycle, before any package is checked. The
+// root counts as a member, so a package that a dependency imports back is a
+// cycle even when the root's own test files start it. A package reached
+// through several paths is visited once.
+function buildPackageGraph(rootKey, rootPrograms, options) {
+	const edges = new Map();
+	const names = new Map();
+	const trail = [];
+	const visit = (key, programs) => {
+		const deps = new Set();
+		edges.set(key, deps);
+		names.set(key, programs[0]?.pkg?.name ?? basename(key));
+		const frame = { key, via: null };
+		trail.push(frame);
+		for (const imp of localImports(programs, key)) {
+			frame.via = imp;
+			const at = trail.findIndex((f) => f.key === imp.dir);
+			if (at >= 0)
+				throw importCycleError(trail.slice(at), imp.dir, names, rootKey);
+			deps.add(imp.dir);
+			if (edges.has(imp.dir)) continue;
+			const dep = parseDependency(imp.dir, options);
+			if (dep) visit(imp.dir, dep);
+		}
+		trail.pop();
+	};
+	visit(rootKey, rootPrograms);
+	return { edges };
+}
+
 // ── Main entry points ─────────────────────────────────────────
 
 // Package target after build-time overrides (Task H6.3): `forceTarget`
@@ -860,6 +896,22 @@ export function compileFiles(files, options = {}) {
 			new Error(`Mixed package names in ${fromDir}: ${pkgNames.join(", ")}`),
 		]);
 	const pkgName = pkgNames[0];
+
+	// The first compile of a build (the root) walks the local imports once;
+	// every dependency it compiles inherits the graph.  `packageCompiles`, when
+	// given, counts the compiles per package directory.
+	options.packageGraph ??= buildPackageGraph(
+		resolve(fromDir),
+		programs,
+		options,
+	);
+	if (options.packageCompiles) {
+		const key = resolve(fromDir);
+		options.packageCompiles.set(
+			key,
+			(options.packageCompiles.get(key) ?? 0) + 1,
+		);
+	}
 
 	// Validate target directives across files in this package
 	const declaredTargets = new Map();
@@ -1067,7 +1119,8 @@ function importedNames(programs) {
 // Predeclared names besides the basic types that a declared type may shadow.
 const PREDECLARED_NAMES = ["error", "comparable", "true", "false", "nil"];
 
-// The renamed ASTs must not be reused from the parse cache by a later build.
+// Renames the programs' local types in place. They are this build's copies of
+// the cached ASTs, so a later build starts from the unrenamed baseline.
 function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 	const predeclared = new Set([
 		...Object.keys(BASIC_TYPES),
@@ -1102,10 +1155,8 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 				for (const spec of d.decls ?? [])
 					for (const n of spec.names ?? []) foreign.add(n);
 		}
-	const locals = renameLocalTypes(programs, foreign);
+	renameLocalTypes(programs, foreign);
 	registerLocalTypeOwners(programs, pkgKey, owners);
-	if (renamed.size > 0 || locals)
-		for (const p of programs) _parseCache.delete(p._path);
 	return renamed;
 }
 

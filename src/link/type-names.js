@@ -72,10 +72,12 @@ export function mangleCollidingTypes(
 	const renamed = new Map();
 	const decls = topLevelTypeDecls(programs);
 	const methodTypes = methodReceiverTypes(programs);
+	let taken = null;
 	for (const decl of decls) {
 		const { name } = decl;
 		if (predeclared.has(name)) {
-			renamed.set(name, `${name}__L${++localTypeCounter}`);
+			taken ??= new Set([...owners.keys(), ...decls.map((d) => d.name)]);
+			renamed.set(name, freshLocalName(name, taken));
 			continue;
 		}
 		const clash = jsBuiltinClash(decl, decls, methodTypes, shadows);
@@ -91,6 +93,20 @@ export function mangleCollidingTypes(
 	return renamed;
 }
 
+// The first `Name__L<n>` (n counting up from 1) that is not in `taken`, which
+// it joins. The number depends only on the names in play, never on how many
+// packages this process compiled before, so a build is reproducible; `taken`
+// holds the names of this package and of the other packages' types, so two
+// packages never mint the same name in the flat module.
+function freshLocalName(name, taken) {
+	for (let n = 1; ; n++) {
+		const candidate = `${name}__L${n}`;
+		if (taken.has(candidate)) continue;
+		taken.add(candidate);
+		return candidate;
+	}
+}
+
 // Function-local types are scoped to their block, but the checker and both
 // backends key types by bare name.  A local type whose name another type of the
 // package also uses (a package-level type or a local of another function)
@@ -100,8 +116,6 @@ export function mangleCollidingTypes(
 // the imported type in the flat module.  It also holds the package-level
 // var, const and func names: a local type spelled like one is renamed so it
 // cannot take that value over inside its function.  Returns whether anything was renamed.
-let localTypeCounter = 0;
-
 export function renameLocalTypes(programs, reserved = new Set()) {
 	const counts = new Map();
 	const count = (node) => {
@@ -115,6 +129,7 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 	const dup = new Set(
 		[...counts].filter(([k, n]) => n > 1 || reserved.has(k)).map(([k]) => k),
 	);
+	const taken = new Set([...counts.keys(), ...reserved]);
 	let changed = false;
 	// Inner scopes first, so an outer rename never touches a nested
 	// declaration that already has its own name.  `visible` holds the value
@@ -135,9 +150,7 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 						(s, j) => j > i && declaresValue(s, d.name),
 					);
 					if (dup.has(d.name) || seen.has(d.name) || stop >= 0) {
-						const renamed = new Map([
-							[d.name, `${d.name}__L${++localTypeCounter}`],
-						]);
+						const renamed = new Map([[d.name, freshLocalName(d.name, taken)]]);
 						const end = stop >= 0 ? stop : node.length - 1;
 						renames.push(() => {
 							for (let j = i; j <= end; j++) {

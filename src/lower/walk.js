@@ -35,3 +35,51 @@ export function hasCallOrReceive(node) {
 	if (node.kind === "UnaryExpr" && node.op === "<-") return true;
 	return someChild(node, hasCallOrReceive);
 }
+
+// Built-in objects with internal state that a property copy would lose.
+const OPAQUE = [Error, Map, Set, WeakMap, WeakSet, RegExp, Date, ArrayBuffer];
+
+function isOpaque(value) {
+	return ArrayBuffer.isView(value) || OPAQUE.some((c) => value instanceof c);
+}
+
+/**
+ * A structural copy of `node`: fresh shells for every node and list, so a
+ * pass that rewrites the copy in place never touches the original. A node
+ * reached twice stays one node in the copy. Side-table values (`_type`, …)
+ * are shared by reference, unless `cloneSide` asks for them to be copied as
+ * well (the parse-time structures of a pristine AST, e.g. `_embeds`). Values
+ * that hold internal state (an `Error`, a `Map`, …) are shared; other class
+ * instances (tokens) are copied with their prototype.
+ */
+export function cloneAst(node, { cloneSide = false } = {}, seen = new Map()) {
+	if (!node || typeof node !== "object") return node;
+	const prev = seen.get(node);
+	if (prev) return prev;
+	const isArray = Array.isArray(node);
+	if (!isArray && isOpaque(node)) return node;
+	const copy = isArray ? [] : Object.create(Object.getPrototypeOf(node));
+	seen.set(node, copy);
+	if (isArray) {
+		for (const n of node) copy.push(cloneAst(n, { cloneSide }, seen));
+		return copy;
+	}
+	// Own non-enumerable properties (templ nodes keep their parsed Go
+	// expressions there) are copied too, and stay hidden.
+	for (const k of Object.getOwnPropertyNames(node)) {
+		const d = Object.getOwnPropertyDescriptor(node, k);
+		const v =
+			isSideTableKey(k) && !cloneSide
+				? d.value
+				: cloneAst(d.value, { cloneSide }, seen);
+		if (d.enumerable) copy[k] = v;
+		else
+			Object.defineProperty(copy, k, {
+				value: v,
+				enumerable: false,
+				writable: true,
+				configurable: true,
+			});
+	}
+	return copy;
+}
