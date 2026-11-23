@@ -265,7 +265,9 @@ export const statementGenMethods = {
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
 	// `pre` carries the map and key already evaluated (a shadowing declaration
 	// reads them before its names exist).
-	_genCommaOkMapIndex(stmt, rhsNode, isDefine, pre = null) {
+	// With `collect`, the `[index, value JS]` of each binding is pushed there
+	// instead of being emitted (a `for` initializer declares them itself).
+	_genCommaOkMapIndex(stmt, rhsNode, isDefine, pre = null, collect = null) {
 		// Go evaluates the target operands before the map and key.
 		const hoisted = isDefine ? null : this._hoistLhsOperands(stmt, true);
 		for (const l of hoisted?.lines ?? []) this.line(l);
@@ -277,6 +279,7 @@ export const statementGenMethods = {
 		// address-taken variable lives in a `{ value }` box.
 		const bind = (i, js) => {
 			const l = stmt.lhs[i];
+			if (collect) return collect.push([i, js]);
 			if (!isDefine || l._redecl) return this._storeInto(targets[i], js);
 			const boxed = this._boxedVars.has(l.name);
 			this.line(`let ${l.name} = ${boxed ? `{ value: ${js} }` : js};`);
@@ -626,15 +629,7 @@ export const statementGenMethods = {
 				);
 			}
 			stmt.lhs.forEach((l, i) => {
-				if (l.name === "_") return;
-				if (this._isTypeParamDerefTarget(l)) {
-					const isStruct = this._typeParamIsStructJs(l.operand._type.base.name);
-					this.line(
-						`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${this.genExpr(l.operand)}, ${names[i]});`,
-					);
-				} else {
-					this.line(`${this._genAssignLhsExpr(l)} = ${names[i]};`);
-				}
+				this._storeInto(this._storeTarget(l), names[i]);
 			});
 		});
 		this.line("}");
@@ -836,14 +831,8 @@ export const statementGenMethods = {
 			return;
 		}
 		if (this._isTypeParamDerefAssign(stmt)) {
-			const ptr = this.genExpr(stmt.lhs[0].operand);
-			const val = this.genValueExpr(stmt.rhs[0]);
-			const isStruct = this._typeParamIsStructJs(
-				stmt.lhs[0].operand._type.base.name,
-			);
-			this.line(
-				`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${ptr}, ${val});`,
-			);
+			const target = this._storeTarget(stmt.lhs[0]);
+			this._storeInto(target, this.genValueExpr(stmt.rhs[0]));
 			return;
 		}
 		if (this._hasTypeParamDerefTarget(stmt)) {
@@ -1165,7 +1154,7 @@ export const statementGenMethods = {
 
 	_genStableTupleAssign(stmt) {
 		const hoisted = this._hoistLhsOperands(stmt);
-		const stable = stmt.lhs.map((l, i) => this._isStableTarget(l, stmt.rhs[i]));
+		const targets = stmt.lhs.map((l) => this._storeTarget(l));
 		this.line("{");
 		this.indented(() => {
 			for (const l of hoisted?.lines ?? []) this.line(l);
@@ -1176,14 +1165,14 @@ export const statementGenMethods = {
 			stmt.rhs.forEach((r, i) => {
 				this.line(`const ${val(i)} = ${this.genValueExpr(r)};`);
 			});
-			stmt.lhs.forEach((l, i) => {
-				if (stable[i])
-					this.line(`const ${dst(i)} = ${this._genAssignLhsExpr(l)};`);
+			// Every target operand is evaluated before the first store.
+			targets.forEach((t, i) => {
+				if (t.kind !== "stable") return;
+				this.line(`const ${dst(i)} = ${t.js};`);
+				t.js = dst(i);
 			});
-			stmt.lhs.forEach((l, i) => {
-				if (stable[i]) this._emitCopyInto(dst(i), val(i), l._type);
-				else if (!(l.kind === "Ident" && l.name === "_"))
-					this.line(`${this._genAssignLhsExpr(l)} = ${val(i)};`);
+			targets.forEach((t, i) => {
+				this._storeInto(t, val(i));
 			});
 		});
 		this.line("}");
@@ -1191,17 +1180,11 @@ export const statementGenMethods = {
 	},
 
 	_genStableWholeAssign(stmt) {
-		let target = this._genAssignLhsExpr(stmt.lhs[0]);
-		const type = stmt.lhs[0]._type;
+		const target = this._storeTarget(stmt.lhs[0]);
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const src = `__s${this._tmpCounter}`;
 		this.line(`{ const ${src} = ${this.genExpr(stmt.rhs[0])};`);
-		if (stmt.lhs[0].kind === "IndexExpr") {
-			// Evaluate the element reference once.
-			target = `__d${this._tmpCounter}`;
-			this.line(`const ${target} = ${this._genAssignLhsExpr(stmt.lhs[0])};`);
-		}
-		this._emitCopyInto(target, src, type);
+		this._storeInto(target, src);
 		this.line("}");
 	},
 
@@ -1292,7 +1275,7 @@ export const statementGenMethods = {
 	},
 
 	_genStructDerefAssign(stmt) {
-		const target = this.genExpr(stmt.lhs[0].operand);
+		const target = this._storeTarget(stmt.lhs[0]);
 		const rhsNode = stmt.rhs[0];
 		const fields = this._aggregateBase(rhsNode._type)?.fields;
 		const shallowOk =
@@ -1301,7 +1284,7 @@ export const statementGenMethods = {
 		const source = shallowOk
 			? this.genExpr(rhsNode)
 			: this.genValueExpr(rhsNode);
-		this.line(`Object.assign(${target}, ${source});`);
+		this._storeInto(target, source);
 	},
 
 	_genMultiAssignWithBlanks(stmt, lhs, rhsStr) {
@@ -1318,7 +1301,8 @@ export const statementGenMethods = {
 		for (let i = 0; i < lhs.length; i++) {
 			if (lhs[i] === "_") continue;
 			const src = `${tmp}[${i}]`;
-			if (derefs?.[i]) this.line(`Object.assign(${derefs[i]}, ${src});`);
+			if (derefs?.[i])
+				this._storeInto({ kind: "structPtr", ptr: derefs[i] }, src);
 			else this.line(`${lhs[i]} ${stmt.op} ${src};`);
 		}
 	},
@@ -2241,7 +2225,34 @@ export const statementGenMethods = {
 		return syncs ? `${js}, ${syncs.join(", ")}` : js;
 	},
 
+	// `for v, ok := m[k]; ...`: the reads (and the temporaries they need, run
+	// in an arrow) become declarators of the `for` initializer.
+	_inlineCommaOkMapDefine(stmt) {
+		const mark = this.out.length;
+		const reads = [];
+		this._genCommaOkMapIndex(stmt, stmt.rhs[0], true, null, reads);
+		const temps = this.out.splice(mark).map((l) => l.trim());
+		// An `in` test must be parenthesised in a `for` initializer.
+		const decl = (i, js) => {
+			const name = stmt.lhs[i].name;
+			return `${name} = ${this._boxedVars.has(name) ? `{ value: ${js} }` : `(${js})`}`;
+		};
+		if (temps.length === 0)
+			return `let ${reads.map(([i, js]) => decl(i, js)).join(", ")}`;
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const all = `__c${this._tmpCounter}`;
+		const values = [0, 1].map(
+			(i) => reads.find(([j]) => j === i)?.[1] ?? "undefined",
+		);
+		return `let ${[
+			`${all} = (() => { ${temps.join(" ")} return [${values.join(", ")}]; })()`,
+			...reads.map(([i]) => decl(i, `${all}[${i}]`)),
+		].join(", ")}`;
+	},
+
 	_inlineDefine(stmt, pre = null) {
+		if (!pre && this._isCommaOkMapExpr(stmt, stmt.rhs[0]))
+			return this._inlineCommaOkMapDefine(stmt);
 		const boxed =
 			stmt.lhs.length === 1 &&
 			stmt.rhs.length === 1 &&
@@ -2302,8 +2313,41 @@ export const statementGenMethods = {
 		return js.startsWith("{") ? `(() => ${js})()` : js;
 	},
 
+	// A store that needs statements (temporaries, a copy into existing
+	// storage) rather than a JS assignment expression.
+	_needsStatementStore(stmt) {
+		if (stmt.op !== "=") return false;
+		return (
+			!!stmt._commaOkMap ||
+			this._isCommaOkAssertStmt(stmt) ||
+			this._isTypeParamDerefAssign(stmt) ||
+			this._hasTypeParamDerefTarget(stmt) ||
+			this._isStructDerefAssign(stmt) ||
+			this._isStableWholeAssign(stmt) ||
+			this._isStableTupleAssign(stmt) ||
+			stmt.lhs.some((l) => this._isStructDerefTarget(l))
+		);
+	},
+
+	// `_genAssignStmt` lifted into an immediately-invoked arrow, as
+	// `_inlineStrictCompound` does for a `for` post statement.
+	_inlineStatementAssign(stmt) {
+		const mark = this.out.length;
+		const prev = this._inForPost;
+		this._inForPost = true;
+		try {
+			this._genAssignStmt(stmt);
+		} finally {
+			this._inForPost = prev;
+		}
+		const body = this.out.splice(mark).map((l) => l.trim());
+		return `(() => { ${body.join(" ")} })()`;
+	},
+
 	_inlineAssign(stmt) {
 		this._markIndexLvalues(stmt.lhs);
+		if (this._needsStatementStore(stmt))
+			return this._inlineStatementAssign(stmt);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
 			// `_ = x`: only the right-hand side runs, as in `_genAssignStmt`.
@@ -2337,18 +2381,7 @@ export const statementGenMethods = {
 		// into an immediately-invoked arrow, as `_inlineStrictCompound` does.
 		const hoisted = this._hoistLhsOperands(stmt, true);
 		hoisted?.restore();
-		if (hoisted || stmt.lhs.some((l) => this._isStructDerefTarget(l))) {
-			const mark = this.out.length;
-			const prev = this._inForPost;
-			this._inForPost = true;
-			try {
-				this._genAssignStmt(stmt);
-			} finally {
-				this._inForPost = prev;
-			}
-			const body = this.out.splice(mark).map((l) => l.trim());
-			return `(() => { ${body.join(" ")} })()`;
-		}
+		if (hoisted) return this._inlineStatementAssign(stmt);
 		// `i, j = i+1, j-1`: every right-hand side is evaluated first.
 		const lhs = stmt.lhs.map((e) =>
 			e.name === "_" ? "" : this._genAssignLhsExpr(e),

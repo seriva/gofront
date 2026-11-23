@@ -1787,3 +1787,15 @@ func fromMap[T any](p *T, m map[string]T) {
 	"{5} [1 2] 5\n{6} [9 4] 6 [[1 2]] map[a:[3 4]]\n",
 	assertAllTargetsOutput,
 );
+
+storeCase(
+	"a tuple store mixes an address-taken struct and a *p target",
+	"",
+	`	a, b := S{1}, S{2}
+	pa, pb := &a, &b
+	q := &b
+	a, *q = S{3}, S{4}
+	fmt.Println(*pa, pa == &a, *pb, pb == &b)`,
+	"{3} true {4} true\n",
+	assertAllTargetsOutput,
+);
