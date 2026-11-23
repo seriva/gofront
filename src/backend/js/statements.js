@@ -1625,15 +1625,11 @@ export const statementGenMethods = {
 		return isStringRangeType(iterType);
 	},
 
-	_rangeVarTarget(e, isAssign) {
-		if (e.kind === "Ident") {
-			if (e.name === "_") return null;
-			const boxed = this._boxedVars.has(e.name);
-			if (isAssign) return boxed ? `${e.name}.value = ` : `${e.name} = `;
-			return boxed ? { name: e.name, boxed } : { name: e.name };
-		}
-		this._markIndexLvalues([e]);
-		return `${this._genAssignLhsExpr(e)} = `;
+	// The `let` binding a range declaration makes for `e`, or null for a blank.
+	_rangeVarTarget(e) {
+		if (e.name === "_") return null;
+		const boxed = this._boxedVars.has(e.name);
+		return boxed ? { name: e.name, boxed } : { name: e.name };
 	},
 
 	// The value a range assignment stores into an interface-typed variable,
@@ -1653,13 +1649,13 @@ export const statementGenMethods = {
 
 	_emitRangeVar(e, valueJs, isAssign) {
 		if (!e) return;
-		const target = this._rangeVarTarget(e, isAssign);
-		if (target === null) return;
-		if (isAssign) valueJs = this._boxRangeAssigned(e, valueJs);
-		if (typeof target === "string") {
-			this.line(`${target}${valueJs};`);
+		if (isAssign) {
+			this._markIndexLvalues([e]);
+			this._storeInto(this._storeTarget(e), this._boxRangeAssigned(e, valueJs));
 			return;
 		}
+		const target = this._rangeVarTarget(e);
+		if (target === null) return;
 		const v = target.boxed ? `{ value: ${valueJs} }` : valueJs;
 		this.line(`let ${target.name} = ${v};`);
 	},
@@ -1810,9 +1806,9 @@ export const statementGenMethods = {
 		this._loopDepth--;
 	},
 
-	// `for _, v = range m` into an address-taken variable (or an element or
-	// field) cannot destructure into the target: bind temporaries and store
-	// through the variable's box after decoding.  Fills `stores` with the
+	// `for _, v = range m` into an address-taken variable (or an element,
+	// field or `*p`) cannot destructure into the target: bind temporaries and
+	// store through `_storeInto` after decoding.  Fills `stores` with the
 	// [target, temporary] pairs and returns the names to bind.
 	_rangeAssignTemps(init, names, stores) {
 		if (init.kind !== "AssignStmt") return names;
@@ -1820,10 +1816,11 @@ export const statementGenMethods = {
 		// all the others go through temporaries too.
 		const needs = (n, i) => {
 			const e = init.lhs[i];
-			return (
-				n !== "_" &&
-				(e._rangeBox || !(e.kind === "Ident" && !this._boxedVars.has(e.name)))
-			);
+			const plain =
+				e.kind === "Ident" &&
+				!this._boxedVars.has(e.name) &&
+				!this._isStableStore(e);
+			return n !== "_" && (e._rangeBox || !plain);
 		};
 		const any = names.some(needs);
 		return names.map((n, i) => {
@@ -1930,9 +1927,10 @@ export const statementGenMethods = {
 		if (!name || name === "_" || !this._isMapRangeType(iterType)) return;
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const valType = base?.value ?? base?.elem;
-		if (!this._aggregateBase(valType)) return;
+		const copy = this._copyValueJs(valType, name);
+		if (copy === name) return;
 		if (init.kind !== "AssignStmt" && !this._fnMutates(name)) return;
-		this.line(`${name} = ${this._cloneJs(valType, name)};`);
+		this.line(`${name} = ${copy};`);
 	},
 
 	genRangeFor(stmt) {

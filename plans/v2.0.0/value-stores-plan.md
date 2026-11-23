@@ -150,7 +150,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Files: `src/backend/js/statements.js`
   - Test: `test/unit/language/value-semantics.test.js` *Whole-value stores*: V3.4 → `{5} true`, V3.5 → `{6}`, V3.6 (`*p, ok = m["k"]` and `*p, ok = a.(T)`) with struct, array and `int` `T` → `true {5}` / Go's output, with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: passes on `js`/`both`; the comma-ok emitters contain no inline `Object.assign`
-- [ ] Task 3.2: `for ... = range` forms store through `_storeInto` (V3.1–V3.3, slice/map-range siblings)
+- [x] Task 3.2: `for ... = range` forms store through `_storeInto` (V3.1–V3.3, slice/map-range siblings)
   - Files: `src/backend/js/statements.js` (`_emitRangeVar`, `_rangeAssignTemps`, `genIteratorFor`)
   - Test: `test/unit/language/range-func.test.js`: V3.1 → `{5}`, V3.2 → `{2} true`, V3.3 → `[7 8]` with `assertAllTargetsOutput`; `test/unit/language/value-semantics.test.js`: slice/map-range `*p` and generic `*T` siblings with `assertAllTargetsOutput`, and slice/map-range address-taken struct / sliced array siblings with `assertJsTargetsOutput` (wasm half in Phase 4)
   - Done when: all pass on the tested targets

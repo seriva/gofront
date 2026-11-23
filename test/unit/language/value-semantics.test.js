@@ -1708,3 +1708,82 @@ storeCase(
 	fmt.Println(m["k"], arr)`,
 	"[5 6] [9 6]\n",
 );
+
+section("Whole-value stores by range");
+
+storeCase(
+	"a slice or map range assigns through *p into the pointee",
+	"",
+	`	s := S{1}
+	p := &s
+	for _, *p = range []S{{5}} {
+	}
+	fmt.Println(s)
+	for _, *p = range map[int]S{1: {6}} {
+	}
+	fmt.Println(s)
+	var k int
+	for k, *p = range map[int]S{2: {7}} {
+	}
+	fmt.Println(k, s)`,
+	"{5}\n{6}\n2 {7}\n",
+	assertAllTargetsOutput,
+);
+
+storeCase(
+	"a slice or map range into an address-taken struct updates it in place",
+	"",
+	`	s := S{1}
+	ps := &s
+	for _, s = range []S{{2}} {
+	}
+	fmt.Println(*ps, ps == &s)
+	s = S{1}
+	for _, s = range map[int]S{1: {3}} {
+	}
+	fmt.Println(*ps, ps == &s)`,
+	"{2} true\n{3} true\n",
+);
+
+storeCase(
+	"a slice or map range into a sliced array updates the slice view",
+	"",
+	`	var arr [2]int
+	sl := arr[:]
+	for _, arr = range [][2]int{{7, 8}} {
+	}
+	fmt.Println(sl)
+	for _, arr = range map[int][2]int{1: {5, 6}} {
+	}
+	fmt.Println(sl)`,
+	"[7 8]\n[5 6]\n",
+);
+
+storeCase(
+	"a range into a generic *T target stores struct, array and int values",
+	`func fromSlice[T any](p *T, xs []T) {
+	for _, *p = range xs {
+	}
+}
+
+func fromMap[T any](p *T, m map[string]T) {
+	for _, *p = range m {
+	}
+}`,
+	`	var s S
+	var arr [2]int
+	var n int
+	xs := [][2]int{{1, 2}}
+	fromSlice(&s, []S{{5}})
+	fromSlice(&arr, xs)
+	fromSlice(&n, []int{5})
+	fmt.Println(s, arr, n)
+	fromMap(&s, map[string]S{"a": {6}})
+	am := map[string][2]int{"a": {3, 4}}
+	fromMap(&arr, am)
+	fromMap(&n, map[string]int{"a": 6})
+	arr[0] = 9
+	fmt.Println(s, arr, n, xs, am)`,
+	"{5} [1 2] 5\n{6} [9 4] 6 [[1 2]] map[a:[3 4]]\n",
+	assertAllTargetsOutput,
+);
