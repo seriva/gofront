@@ -44,8 +44,11 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 
 	// A method two embeds declare at the same depth is in neither method set:
 	// no stub, so the value does not satisfy an interface that needs it.
+	// The type's own methods come from the checker as well: a method the
+	// backend left out must still shadow what an embedded type promotes.
 	const declared = new Set([
 		...methodDecls.map((m) => m.name),
+		...(checker.types.get(name)?.methods?.keys() ?? []),
 		...ambiguousPromotions(resolvedType),
 	]);
 	const stubs = [];

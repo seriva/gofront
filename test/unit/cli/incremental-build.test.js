@@ -248,3 +248,39 @@ test("a failed edit is reported and the fix rebuilds only the edited package", (
 		assertSameBuild(fixed.info, cold(config));
 	});
 });
+
+test("adding and removing the only call to a function equals a cold build", () => {
+	const files = {
+		"src/main.go": `package main
+import "./a"
+func main() { println(a.Used()) }
+`,
+		"src/a/a.go": `package a
+func Used() int { return 2 }
+func Extra() int { return Used() + 1 }
+`,
+	};
+	withTempDir(files, (dir) => {
+		const config = setup(dir);
+		const first = counted(config, dir);
+		assert(!first.info.js.includes("function Extra"), "unused code is out");
+		write(
+			dir,
+			"src/main.go",
+			`package main
+import "./a"
+func main() { println(a.Extra()) }
+`,
+		);
+		const added = counted(config, dir);
+		assertEqual(added.rebuilt.join(), ".");
+		assert(added.info.js.includes("function Extra"), "the new call keeps it");
+		assert(added.info.js.includes("function Used"), "and what it calls");
+		assertSameBuild(added.info, cold(config));
+		write(dir, "src/main.go", files["src/main.go"]);
+		const removed = counted(config, dir);
+		assert(!removed.info.js.includes("function Extra"), "removing it drops it");
+		assertSameBuild(removed.info, cold(config));
+		assertEqual(removed.info.js, first.info.js);
+	});
+});

@@ -137,6 +137,22 @@ const HELPER_MAP = [
 	["simd", HELPER_SIMD],
 ];
 
+// The name of the helper that injects collected CSS (it has no `useHelper` key).
+export const HELPER_STYLES = "injectStyles";
+
+/**
+ * The lines that define the runtime helpers `names` (keys of the registry, or
+ * `HELPER_STYLES`), each once, in output order; none when there are no names.
+ */
+export function helperPrelude(names) {
+	const wanted = new Set(names);
+	const helpers = [];
+	if (wanted.has(HELPER_STYLES)) helpers.push(HELPER_INJECT_STYLES);
+	for (const [name, src] of HELPER_MAP) if (wanted.has(name)) helpers.push(src);
+	if (helpers.length === 0) return [];
+	return [...helpers.flatMap((h) => h.split("\n")), ""];
+}
+
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {
@@ -227,6 +243,13 @@ export class CodeGen {
 		this.target = options.target ?? "js";
 		this.strict = Boolean(options.strict || this.target === "both");
 		this.natives = options.natives !== false; // replace native calls with host code
+		// `{ keeps(type, method), escaped }`: which methods the build selects and
+		// the types whose values leave Go; null keeps every method (see
+		// lower/reachability.js).
+		this.keepMethods = options.keepMethods ?? null;
+		// A bundle's helpers are defined once by whoever links the chunks
+		// (`helperNames`, `helperPrelude`) instead of at the top of each chunk.
+		this.deferHelpers = options.deferHelpers ?? false;
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
@@ -462,7 +485,7 @@ export class CodeGen {
 				d.type.kind === "StructType" ||
 				this._definedStructAst(d) ||
 				withMethods.has(d.name) ||
-				this._isPlainNamedBox(this.checker?.types.get(d.name))
+				this._namedBoxInfo(this.checker?.types.get(d.name))
 			)
 				names.add(d.name);
 		}
@@ -657,7 +680,8 @@ export class CodeGen {
 				d.kind === "TypeDecl" &&
 				d.type.kind !== "StructType" &&
 				d.type.kind !== "InterfaceType" &&
-				(methods.get(d.name) ?? []).length > 0
+				((methods.get(d.name) ?? []).length > 0 ||
+					this.checker?.types.get(d.name)?.methods?.size > 0)
 			) {
 				this.namedWrapperNames.add(d.name);
 			}
@@ -688,19 +712,18 @@ export class CodeGen {
 		if (name === "sslice") this._helpers.add("slicefail");
 	}
 
+	/** The runtime helpers (names for `helperPrelude`) the output needs. */
+	helperNames() {
+		const names = [...this._helpers];
+		if (this.collectedCss.length > 0) names.push(HELPER_STYLES);
+		return names;
+	}
+
 	_prependHelpers(_isTest = false) {
-		const helpers = [];
-		if (this.collectedCss.length > 0) helpers.push(HELPER_INJECT_STYLES);
-		for (const [name, src] of HELPER_MAP) {
-			if (this._helpers.has(name)) helpers.push(src);
-		}
-		if (helpers.length > 0) {
-			const helperLines = helpers.flatMap((h) => h.split("\n"));
-			helperLines.push("");
-			this.out.unshift(...helperLines);
-			return helperLines.length;
-		}
-		return 0;
+		if (this.deferHelpers) return 0;
+		const helperLines = helperPrelude(this.helperNames());
+		this.out.unshift(...helperLines);
+		return helperLines.length;
 	}
 
 	// Generate a single bundle from multiple programs (same-package multi-file).
@@ -804,7 +827,7 @@ export class CodeGen {
 			this.line(`// interface ${decl.name} (compile-time only)`);
 		} else if (
 			methodDecls.length > 0 ||
-			this._isPlainNamedBox(this.checker?.types.get(decl.name))
+			this._namedBoxInfo(this.checker?.types.get(decl.name))
 		) {
 			// Named non-struct type with methods — emit an ES6 wrapper class.
 			if (methodDecls.length === 0)
@@ -1105,7 +1128,7 @@ export class CodeGen {
 		// held in an interface (see _ifaceMethodCheck).
 		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
 		// ...and so are those promoted from an embedded struct value.
-		for (const stub of computeEmbeddedStubs(name, methodDecls, this.checker))
+		for (const stub of this._embeddedStubs(name, methodDecls))
 			if (stub.ptrOnly) pm.push(stub.methodName);
 		if (pm.length > 0)
 			this.line(
@@ -1175,8 +1198,17 @@ export class CodeGen {
 			: `this.${field}.${jm}(...__a)`;
 	}
 
-	_genEmbeddedMethodStubs(name, methodDecls) {
+	// The methods an embedding struct promotes that the bundle keeps: all of
+	// them, unless the build names the ones its code selects (`options.keep`).
+	_embeddedStubs(name, methodDecls) {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
+		const keep = this.keepMethods;
+		if (!keep || keep.escaped.has(name)) return stubs;
+		return stubs.filter((s) => keep.keeps(name, s.methodName));
+	}
+
+	_genEmbeddedMethodStubs(name, methodDecls) {
+		const stubs = this._embeddedStubs(name, methodDecls);
 		for (const stub of stubs) {
 			this.blank();
 			this.line(

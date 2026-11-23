@@ -36,7 +36,6 @@ import {
 	resolve,
 	sep,
 } from "node:path";
-import { CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
@@ -74,6 +73,7 @@ import {
 	renameLocalTypes,
 	withOriginalTypeNames,
 } from "./link/stdlib.js";
+import { userEmitter, userMarker } from "./link/user-js.js";
 import {
 	linkIntoBundle,
 	registerPackageUnit,
@@ -449,11 +449,6 @@ function finishWasm(options, merged, pkgTarget, outputDir) {
 	return { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable };
 }
 
-// Prints non-fatal diagnostics (e.g. JS Number precision of a constant).
-function logWarnings(warnings) {
-	for (const w of warnings) log.warn(w);
-}
-
 // ── Import resolution ─────────────────────────────────────────
 
 // What link/stdlib.js needs from this module.  Injected rather than imported
@@ -686,6 +681,9 @@ function resolveImports(
 				}
 
 				if (alias === "_") continue;
+				// The reachability closure resolves `pkg.Name` and dot-imported
+				// names against this package.
+				noteLocalImport(p, alias ?? dep.pkgName, alias === ".", depKey);
 				if (alias === ".") {
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
@@ -720,6 +718,12 @@ function resolveImports(
 			}
 		}
 	}
+}
+
+// Records on `program` which local package a name or dot import stands for.
+function noteLocalImport(program, name, dot, depKey) {
+	if (dot) program._dotImports = [...(program._dotImports ?? []), depKey];
+	else program._localImports = new Map(program._localImports).set(name, depKey);
 }
 
 // The types `dep` reaches (table only) plus its unexported ones: a dot import
@@ -903,7 +907,8 @@ export function compileFiles(files, options = {}) {
 			options.stdlibCache ?? cache?.stdlibFor(options.stdlibRoot) ?? new Map(),
 		stdlibChecked: options.stdlibChecked ?? new Set(),
 		cacheStats: options.cacheStats ?? cache?.stats,
-		jsRootPrograms: options.jsRootPrograms ?? [],
+		userUnits: options.userUnits ?? [],
+		rootKey: options.rootKey ?? resolve(fromDir),
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
 		typeOwners: options.typeOwners ?? new Map(),
@@ -1084,7 +1089,7 @@ export function compileFiles(files, options = {}) {
 	// ── 4. Assemble the build's output ────────────────────────────
 	const merged = asInternalError(() => {
 		const chunks = mergeCompilationChunks([...preambles, unit.chunk]);
-		finishStdlibJs(chunks, options, unit.rootPrograms, unit.emitTarget);
+		finishStdlibJs(chunks, options, unit);
 		return chunks;
 	});
 	const { wasm, wat, wasmOptInfo, wasmSourceMap, stringTable } = finishWasm(
@@ -1098,17 +1103,13 @@ export function compileFiles(files, options = {}) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	const allCss = [...preambles.map((p) => p.css).filter(Boolean), unit.css]
-		.filter(Boolean)
-		.join("\n\n");
-
 	return {
 		pkgName,
 		target: pkgTarget,
-		warnings: unit.warnings,
+		warnings: [...unit.warnings, ...(merged.rootWarnings ?? [])],
 		elemAddrTaken: unit.elemAddrTaken,
 		js: merged.js,
-		css: allCss,
+		css: merged.css ?? "",
 		wasm,
 		wat,
 		wasmOptInfo,
@@ -1269,32 +1270,35 @@ function compileOwnUnit(ctx) {
 		registerPackageUnit(options, { ...link, bundledPackages }),
 	);
 
+	// The JS is generated at the root compile, once the build knows what its
+	// packages reach (see link/user-js.js); the chunk is a marker until then.
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
-	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
-		target: pkgTarget,
-		strict: isStrict,
-		natives: options.natives,
-	});
-	const mainJs =
+	const emitter =
 		emitTarget === "wasm"
-			? wasmMarker(pkgName)
-			: asInternalError(() =>
-					codegen.generateAll(rootPrograms, {
+			? null
+			: userEmitter(
+					checker,
+					jsImports,
+					bundledPackages,
+					{
+						target: pkgTarget,
+						strict: isStrict,
+						natives: options.natives,
 						isTest: options.isTest ?? false,
-					}),
+					},
+					rootPrograms,
 				);
-	logWarnings(codegen.warnings);
 
 	const unit = {
 		emitTarget,
+		emitter,
 		chunk: {
-			js: mainJs,
+			js: emitTarget === "wasm" ? wasmMarker(pkgName) : userMarker(link.key),
 			sourceFiles: programs.map((p) => p._path),
 			sourcesContent: programs.map((p) => p._source),
-			mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
+			mappings: [],
 		},
-		css: codegen.getCss(),
-		warnings: [...checker.warnings, ...codegen.warnings],
+		warnings: [...checker.warnings],
 		elemAddrTaken:
 			checker.depElemAddrTaken === true ||
 			programs.some((p) => takesElementAddress(p.decls)),

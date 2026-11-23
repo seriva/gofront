@@ -1,7 +1,7 @@
 # JS Dead-Code Elimination — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-23)  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 4) on 2026-11-17, re-probed that day. Starts after [`incremental-builds-plan.md`](incremental-builds-plan.md): extends its `PackageCache` (which memoizes `stdlibJs` by reached decl set) to memoize pruned user/stdlib JS chunks and their helper sets by reached decl + kept-method set. Holds the deferred size work of `../v1.9.2/release-bundle-fixes-plan.md` and the shared runtime helpers of `../v1.9.3/js-codegen-fixes-plan.md`.  
 **Release note:** JavaScript bundles leave out functions, types and methods your program never uses, and each runtime helper appears once per bundle, so apps download less code.  
@@ -74,29 +74,52 @@ One reachability closure over user and stdlib programs decides what the JS backe
 > Split from the former `web-platform-evolution-plan.md` Phase 4 (re-probed 2026-11-17, review-tightened 2026-11-19). Former task IDs in parentheses.
 
 ### Phase 1: User-code reachability and pruning
-- [ ] Task 1.1: One package-scoped closure over user and stdlib programs with explicit roots (former 4.1)
+- [x] Task 1.1: One package-scoped closure over user and stdlib programs with explicit roots (former 4.1)
   - Files: `src/lower/reachability.js`, `src/link/stdlib.js`, `src/compiler.js`
   - Test: `test/unit/compiler/reachability-user.test.js`: the reached set for each root kind above, including multi-package local selectors (`util.Used`), qualified types (`util.Box`), dot-imports (`import . "./util"`), blank imports (`import _ "./sideeffect"`), `_genEntry` calls into `gofront_gen.go` plus conditional `fmtrt.Register`/`jsonrt.RegisterEncoder` retention, `.templ` non-enumerable expressions (`{ helper() }`, `@Comp()`, `if`/`for`/`switch`/`case`, `attr={}`), `CssDecl`, `GofrontRunTests`, and `checker._externalNames` / `anyKind === "dynamic"` escapes
   - Done when: one closure returns the reached declarations across user and stdlib packages (with `reachableStdlibDecls` unchanged for `src/link/wasm.js`); emitted output is still unchanged (nothing pruned yet)
-- [ ] Task 1.2: Prune unreferenced functions, templ/css decls, constants, variables and types (former 4.2)
+- [x] Task 1.2: Prune unreferenced functions, templ/css decls, constants, variables and types (former 4.2)
   - Files: `src/lower/reachability.js`, `src/backend/js/index.js`, `src/compiler.js`
   - Test: `test/unit/compiler/dce-funcs.test.js`: the re-probe's `UnusedUserFunction` and `UnusedType` are omitted; multi-package `util.Unused` is omitted while `util.Used` and dot-imported used symbols are kept; a function called only from a `.templ` body is kept; a pruned `CssDecl` emits no CSS; an `iota` `ConstDecl` group keeps correct values; side-effecting package-level `var`s in entry and imported packages are kept; a package without `main` keeps its exports; cross-package `json.Marshal(anyVal)` (`registerOnly`) and `fmt` function values still work; `test/unit/cli/incremental-build.test.js` gains add-then-remove-the-only-call equals a cold build
   - Done when: `gofront test` and every `example/*` print the same output as before
-- [ ] Task 1.3: Prune uncalled struct and named-type methods (former 4.3)
+- [x] Task 1.3: Prune uncalled struct and named-type methods (former 4.3)
   - Files: `src/backend/js/index.js`, `src/lower/reachability.js`, `src/lower/embedding.js`
   - Test: `test/unit/compiler/dce-methods.test.js`: an unselected method is absent from the class body, embedded stubs, `__vm` and `__pm`; kept when named by a reached interface, used as a method value/expression, promoted through embedding, or its type escapes to JavaScript; pruning an outer shadowing method never promotes the inner embedded method; a named non-struct type boxed into `any` with all methods pruned still emits its box class
   - Done when: runtime interface assertions and embedded method calls give the same results as before
 
 ### Phase 2: Stdlib precision, shared helpers, budgets
-- [ ] Task 2.1: Receiver-qualified method reachability (former 4.4)
+- [x] Task 2.1: Receiver-qualified method reachability (former 4.4)
   - Files: `src/lower/reachability.js`, `src/link/stdlib.js` (`reachableStdlibDecls`)
   - Test: `test/unit/compiler/dce-stdlib-methods.test.js`: the re-probe (a user `Len`/`Reset` no longer keeps `strings.Builder.Len`/`Reset`); generic receiver calls (`Box[int].Val`) and method expressions (`T.M`/`(*T).M`) keep the method; promoted method calls propagate transitively to embedded receiver types; selections through interface, type-parameter and `any` receivers still keep the method on every reached type
   - Done when: passes with no output change in the stdlib and `wasm` suites
-- [ ] Task 2.2: Each runtime helper once per bundle (former 4.5)
+- [x] Task 2.2: Each runtime helper once per bundle (former 4.5)
   - Files: `src/backend/js/index.js` (`_helpers`, `_prependHelpers`), `src/link/stdlib.js` (`stdlibJs`, `spliceStdlibJs`), `src/link/sourcemap.js`, `src/compiler.js`
   - Test: `test/unit/compiler/shared-helpers.test.js`: each helper (including `HELPER_INJECT_STYLES`) defined once in a `fmt` hello world (277 definitions of 77 on 2026-11-17) and a multi-package program; a helper used by one package or only by stdlib is still emitted; ESM `jsImports` (`example/preact`) still run cleanly; source maps of the second chunk still point at the right lines; a warm `gofront dev` rebuild equals a cold build
   - Done when: no helper is defined twice in any `example/*` bundle and outputs are unchanged
-- [ ] Task 2.3: Re-measure and tighten the bundle budgets (former 4.6)
+- [x] Task 2.3: Re-measure and tighten the bundle budgets (former 4.6)
   - Files: `test/perf/bundle-size.js`, `test/perf/bundle-size.baseline.json`, `docs/architecture.md`
   - Test: `node test/perf/bundle-size.js` and `--self-test` with new cases for the user-DCE probe program and each JS `example/*` bundle (building `example/preact` from its project dir so vendored imports resolve); `docs/architecture.md` notes that unused user and stdlib code is left out
   - Done when: every budget is at or below its 1.9.2 value, new cases have budgets, and before/after numbers are recorded under this task
+  - Measured (`--release` `app.js` bytes; 1.9.2 = tag `1.9.2`, P1 = `6d3a7dc4` after Phase 1, now = after Task 2.2; ceiling = new budget, 1.05x now, old 1.9.2 budget in parens):
+
+    | fixture | 1.9.2 | P1 | now | ceiling (old) |
+    |---|---|---|---|---|
+    | println | 46 | 46 | 46 | 49 (49) |
+    | fmt-println | 168513 | 170951 | 116647 | 122480 (176939) |
+    | fmt-sprintf | 175795 | 178453 | 120437 | 126459 (184585) |
+    | strconv | 87828 | 89010 | 71218 | 74779 (92220) |
+    | strings | 21318 | 22061 | 16253 | 17066 (22384) |
+    | json-unmarshal | 266321 | 270266 | 154132 | 161839 (279638) |
+    | json-unmarshal-any | 279398 | 283787 | 166567 | 174896 (293368) |
+    | json-marshal | 40042 | 40430 | 31451 | 33024 (42045) |
+    | multipackage | 175757 | 43639 | 31511 | 33087 (184545) |
+    | user-dce (new) | 28632 | 16375 | 12918 | 13564 |
+    | example-simple (new) | 241065 | 244979 | 157876 | 165770 |
+    | example-gom (new) | 250891 | 256788 | 157162 | 165021 |
+    | example-templ (new) | 233722 | 238936 | 156509 | 164335 |
+    | example-hybrid (new) | 202516 | 205885 | 145434 | 152706 |
+    | example-preact (new) | 400009 | 394156 | 243774 | 255963 |
+    | example-webgl (new) | 14512 | 14580 | 14538 | 15265 |
+
+  - `example-webgl` is 26 B above 1.9.2 (14512): the bundle is almost all runtime and not investigated further; it is 42 B below Phase 1. Its budget is new, so no 1.9.2 budget is exceeded.
+  - Bundle helper definitions (non-release `fmt.Println("hello")`): 277 definitions of 77 helpers before Task 2.2, 76 of 76 after (`var __x =` helpers); no `example/*` bundle defines a helper twice.

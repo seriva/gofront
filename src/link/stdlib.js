@@ -7,17 +7,13 @@
 
 import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { CodeGen } from "../backend/js/index.js";
+import { CodeGen, helperPrelude } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
 import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
 import { restoredTypeName } from "../lower/gen-types.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
-import {
-	checkedDecl,
-	reachableStdlibDecls,
-	StdlibReach,
-} from "../lower/reachability.js";
+import { BuildReach, checkedDecl, StdlibReach } from "../lower/reachability.js";
 import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import { isLocalPath, resolveStdlibSource } from "../resolver.js";
@@ -26,6 +22,7 @@ import {
 	freezeStdlibPackage,
 	freezesStoredUnits,
 } from "./package-cache.js";
+import { spliceUserChunk, userMarkerKey } from "./user-js.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
 export {
@@ -510,7 +507,9 @@ function markerKey(line) {
 // The package's emitted JS for a reached set, memoized per package by the
 // reached declarations and `natives`.  Stored declarations are frozen-safe:
 // code generation rewrites its input, so it gets a copy of the checked
-// declarations.  `stats` counts the memo's hits and misses when given.
+// declarations.  `stats` counts the memo's hits and misses when given.  The
+// result is `{ js, helpers }`: the runtime helpers the code needs are left to
+// the root compile (see `helperPrelude`).
 function stdlibJs(pkg, reached, natives, stats) {
 	const ids = [];
 	pkg.unit.programs.forEach((p, pi) => {
@@ -518,7 +517,7 @@ function stdlibJs(pkg, reached, natives, stats) {
 			if (reached.has(d)) ids.push(`${pi}.${di}`);
 		});
 	});
-	if (ids.length === 0) return "";
+	if (ids.length === 0) return NO_JS;
 	const key = `${natives !== false}|${ids.join(",")}`;
 	const hit = pkg.jsMemo.get(key);
 	if (hit !== undefined) {
@@ -532,75 +531,108 @@ function stdlibJs(pkg, reached, natives, stats) {
 			decls: p.decls.filter((d) => reached.has(d)).map(checkedDecl),
 		})),
 	);
-	const js = new CodeGen(pkg.checker, new Map(), new Set(), {
+	const codegen = new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: pkg.checker.target,
 		strict: true,
 		natives,
-	}).generateAll(programs, { isTest: false });
-	pkg.jsMemo.set(key, js);
-	return js;
-}
-
-// The API a wasm package exposes to JS through the facade: exported func and
-// method signatures and exported type declarations.
-function wasmExportedSignatures(units) {
-	const out = [];
-	for (const u of units) {
-		if (u.target !== "wasm" || u.key.startsWith("stdlib:")) continue;
-		for (const d of u.programs.flatMap((p) => p.decls ?? [])) {
-			if (!/^[A-Z]/.test(d.name ?? "")) continue;
-			if (d.kind === "TypeDecl") out.push(d.type);
-			else if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
-				out.push(d.params, d.returnType);
-		}
-	}
+		deferHelpers: true,
+	});
+	const js = codegen.generateAll(programs, { isTest: false });
+	const out = { js, helpers: codegen.helperNames() };
+	pkg.jsMemo.set(key, out);
 	return out;
 }
 
+const NO_JS = { js: "", helpers: [] };
+
 // Replaces each marker with the package's reachable code (no line at all when
-// nothing is reachable) and shifts the source-map lines that follow.
+// nothing is reachable) and shifts the source-map lines that follow.  The
+// markers of local packages and of Go-source stdlib packages are replaced in
+// one pass, once the closure over all of them is known.
 function spliceStdlibJs(merged, options) {
 	const lines = merged.js.split("\n");
 	const pkgs = lines
 		.map(markerKey)
 		.filter(Boolean)
 		.map((key) => options.stdlibCache.get(key));
-	if (pkgs.length === 0) return;
+	const users = new Map(options.userUnits.map((u) => [u.key, u]));
+	if (pkgs.length === 0 && !lines.some(userMarkerKey)) return;
 	// The whole package carries everything its shared variant has.
 	const keys = new Set(pkgs.map((pkg) => pkg.key));
 	const emitted = (pkg) =>
 		pkg.key.endsWith("#shared") ? !keys.has(pkg.importPath) : true;
-	const reached = reachableStdlibDecls(
-		[options.jsRootPrograms, wasmExportedSignatures(options.wasmUnits)],
+	const reach = reachOfBuild(
+		options,
 		pkgs.filter(emitted).flatMap((pkg) => pkg.unit.programs),
 	);
+	const css = [];
 	const out = [];
+	const helpers = new Set();
 	const spliced = new Set();
-	for (const line of lines) {
-		const path = markerKey(line);
-		if (!path) {
-			out.push(line);
-			continue;
-		}
-		if (spliced.has(path)) continue;
-		spliced.add(path);
-		const pkg = options.stdlibCache.get(path);
-		const js = emitted(pkg)
-			? stdlibJs(pkg, reached, options.natives, options.cacheStats)
-			: "";
-		const code = js === "" ? [] : js.split("\n");
+	const place = (code, mappings = []) => {
 		const delta = code.length - 1;
 		for (const m of merged.mappings)
 			if (m.genLine > out.length) m.genLine += delta;
+		for (const m of mappings)
+			merged.mappings.push({ ...m, genLine: m.genLine + out.length });
 		out.push(...code);
+	};
+	for (const line of lines) {
+		const path = markerKey(line);
+		const userKey = userMarkerKey(line);
+		if (!path && userKey === undefined) {
+			out.push(line);
+			continue;
+		}
+		if (spliced.has(path ?? userKey)) continue;
+		spliced.add(path ?? userKey);
+		if (path) {
+			const pkg = options.stdlibCache.get(path);
+			const chunk = emitted(pkg)
+				? stdlibJs(pkg, reach.reached, options.natives, options.cacheStats)
+				: NO_JS;
+			for (const h of chunk.helpers) helpers.add(h);
+			place(chunk.js === "" ? [] : chunk.js.split("\n"));
+			continue;
+		}
+		const chunk = spliceUserChunk(users.get(userKey), reach, merged, css);
+		for (const h of chunk.helpers) helpers.add(h);
+		if (userKey === options.rootKey) merged.rootWarnings = chunk.warnings;
+		place(chunk.lines, chunk.mappings);
 	}
-	merged.js = out.join("\n");
+	// The runtime helpers every chunk needs, defined once ahead of them all.
+	const prelude = helperPrelude(helpers);
+	for (const m of merged.mappings) m.genLine += prelude.length;
+	merged.js = [...prelude, ...out].join("\n");
+	merged.css = css.join("\n\n");
 }
 
-// Records a package's JS-emitted programs as reachability roots; the root
-// compile then splices in the stdlib code they reach.
-export function finishStdlibJs(merged, options, programs, emitTarget) {
-	if (emitTarget !== "wasm") options.jsRootPrograms.push(...programs);
+// The closure over the build's local packages and the Go-source stdlib
+// packages `stdlibPrograms`; a reached body that fails its (lazy) check throws.
+// `options.userUnits` lists the local packages compiled so far; `prune: false`
+// roots all of their code instead of what the entry package reaches.
+export function reachOfBuild(options, stdlibPrograms, { prune = true } = {}) {
+	const reach = new BuildReach(stdlibPrograms, options.userUnits, {
+		entry: options.rootKey,
+		isTest: options.isTest ?? false,
+		roots: options.jsRoots,
+		prune,
+	});
+	if (reach.failures.length > 0) throw new Error(reach.failures[0]);
+	return reach;
+}
+
+// Records a package as part of the build; the root compile then splices in
+// the stdlib code the local packages reach.
+export function finishStdlibJs(merged, options, unit) {
+	options.userUnits.push({
+		key: unit.link.key,
+		pkgName: unit.link.pkgName,
+		programs: unit.rootPrograms,
+		emitTarget: unit.emitTarget,
+		emitted: unit.emitTarget !== "wasm",
+		emitter: unit.emitter,
+	});
 	if (!options.isDependency) spliceStdlibJs(merged, options);
 }
 

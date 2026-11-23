@@ -26,7 +26,9 @@ func BenchmarkInt64(n int) int64 {
 func main() {}
 `;
 
-const { js, errors } = compile(src);
+const { js, errors } = compile(src, {
+	jsRoots: ["BenchmarkInt", "BenchmarkInt64"],
+});
 assert.strictEqual(errors.length, 0, "Compilation should have no errors");
 
 const fn = new Function(`${js}; return { BenchmarkInt, BenchmarkInt64 };`);
