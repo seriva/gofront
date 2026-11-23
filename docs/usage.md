@@ -420,6 +420,11 @@ input.focus()
 The same applies to `getContext`, which returns one of several context types (import `gofront/canvas` for the 2D one):
 
 ```go
+import (
+	"gofront/canvas"
+	"gofront/dom"
+)
+
 el := document.getElementById("game").(dom.HTMLCanvasElement)
 ctx := el.getContext("2d").(canvas.CanvasRenderingContext2D)
 ```
@@ -435,6 +440,7 @@ Migrating an existing program, fix what the compiler reports:
 
 - **A member the element type lacks** (`input.value`, `canvasEl.getContext`): assert the element type as above.
 - **A number read as `int` or `float64`**: whole-number members such as `window.innerWidth` and `event.clientX` are `int`, fractional ones such as `rect.width` are `float64`. Convert where you mix them (`float64(e.clientX) > rect.top`).
+- **A fractional timer delay** (`setTimeout(f, 10.5)`, or a `float64` variable): the delay of `setTimeout` and `setInterval` is an `int` number of milliseconds, so pass a whole number or convert with `int(delay)`.
 - **An attribute or value parsed as a number** (`int(el.getAttribute("data-id"))`): the value is a string, so use `strconv.Atoi`.
 - **A property the browser does not declare** (a custom `window.myConfig`, or a CSS property such as `style.display`): declare it in a `.d.ts` file you import with `js:` and assert to it, or use the API form (`style.setProperty("display", "none")`).
 - **A library that adds globals** (PeerJS and similar): keep its `.d.ts` as before. Consumer declarations are unchanged.

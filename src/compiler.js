@@ -84,6 +84,7 @@ import { ParseError, Parser } from "./parser/index.js";
 import {
 	bindDeclarationImports,
 	bindUntypedImports,
+	declarationsCurrent,
 	isBuiltinPackage,
 	isDeclarationImport,
 	isLocalPath,
@@ -1143,6 +1144,7 @@ export function compileFiles(files, options = {}) {
 			...new Set([
 				...preambles.flatMap((p) => p.watchedFiles ?? []),
 				...inputs,
+				...unit.declarations.map(([file]) => file),
 			]),
 		].sort(),
 		// Only an importer reads it, so a package nobody imports never pays
@@ -1204,6 +1206,9 @@ function storedUnit(cache, unitKey, checker, now) {
 	const unit = cache.getUnit(unitKey);
 	if (!unit || checker.errors.length > 0) return null;
 	for (const k of Object.keys(now)) if (unit.keys[k] !== now[k]) return null;
+	// A browser global the package reads loads its declaration file while the
+	// package is checked, so the files are known only once it has been.
+	if (!declarationsCurrent(unit.declarations)) return null;
 	return unit;
 }
 
@@ -1324,6 +1329,8 @@ function compileOwnUnit(ctx) {
 			(t) => options.jsonBuild[t] && !jsonFlags[t],
 		),
 		jsonBefore,
+		// Every declaration file the check read, as `[file, stamp]` pairs.
+		declarations: [...(checker.declarationStamps ?? [])],
 		programs: driver ? programs.filter((p) => p !== driver) : programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: withOriginalTypeNames(

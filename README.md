@@ -65,6 +65,8 @@ With built-in support for declarative DOM rendering via the [`gom`](https://www.
 ```go
 package main
 
+import "gofront/dom"
+
 type Todo struct {
     id   int
     text string

@@ -16,7 +16,11 @@ import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { BuildReach, checkedDecl, StdlibReach } from "../lower/reachability.js";
 import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
-import { isLocalPath, resolveStdlibSource } from "../resolver.js";
+import {
+	declarationsCurrent,
+	isLocalPath,
+	resolveStdlibSource,
+} from "../resolver.js";
 import {
 	filesSignature,
 	freezeStdlibPackage,
@@ -366,6 +370,7 @@ function stdlibCurrent(pkg, table, deps, checked) {
 	if (checked.has(pkg.key)) return true;
 	const current =
 		pkg.sig === filesSignature(deps.gwFilesIn(pkg.dir)) &&
+		declarationsCurrent([...(pkg.checker.declarationStamps ?? [])]) &&
 		pkg.deps.every(
 			(d) => table.get(d.key) === d && stdlibCurrent(d, table, deps, checked),
 		);
