@@ -160,7 +160,7 @@ Root: on `wasm`, 18 occurrences (16 call sites) decide separately whether a stru
   - Done when: all pass; `grep -n "Object.assign(" src/backend/js/statements.js` lists only `_storeInto`
 
 ### Phase 4: One WASM value store (root `wasm-value-copy`; after `wasm-struct-types` Phase 1)
-- [ ] Task 4.1: `emitStoreValue` for plain and captured variables (V4.1, V4.3)
+- [x] Task 4.1: `emitStoreValue` for plain and captured variables (V4.1, V4.3)
   - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js` (copy helper over the shared field list)
   - Test: `test/unit/language/value-semantics.test.js` *Struct value semantics*: V4.1 → `{9 5}`, V4.3 → `{{-4} 7} {{5} 7}`, and a captured, address-taken variant, with `assertAllTargetsOutput`
   - Done when: all pass on every target

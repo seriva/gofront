@@ -523,6 +523,73 @@ export class StmtsEmitter {
 		this.locals.delete(tempName);
 	}
 
+	// The one store into a variable (a plain local, a boxed local that a
+	// closure captures or whose address is taken, or a global).  A struct or
+	// array value is copied unless `r` is already a fresh value, and written
+	// into the existing storage when the variable's address may be held, so
+	// every earlier pointer or slice view sees the new value.
+	emitStoreValue(l, r, localInfo, op = "=") {
+		if (
+			localInfo &&
+			op !== ":=" &&
+			this._needsStableStore(l, localInfo.goType)
+		) {
+			this._emitStableStore(localInfo.goType, r, () => {
+				this.pushInstruction({ op: "local.get", index: localInfo.index });
+				if (localInfo.isBoxed)
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: localInfo.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+			});
+			return;
+		}
+		const globalStable =
+			!localInfo && op !== ":=" && this.mod.resolveGlobal(l.name);
+		if (globalStable && this._needsStableStore(l, globalStable.goType)) {
+			this._emitStableStore(globalStable.goType, r, () => {
+				this.pushInstruction({ op: "global.get", index: globalStable.index });
+			});
+			return;
+		}
+		if (localInfo) {
+			if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
+				// Pointers to the array (`&a`) hold its reference: write in place.
+				this._emitArrayStoreInto(localInfo.goType, r, () => {
+					this.pushInstruction({ op: "local.get", index: localInfo.index });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: localInfo.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				});
+				return;
+			}
+			if (localInfo.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: localInfo.index });
+				this.emitExpr(r, localInfo.boxInfo.wType);
+				this._emitCopyIfValue(r, localInfo.goType, localInfo.boxInfo.wType);
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: localInfo.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				return;
+			}
+			this.emitExpr(r, localInfo.type);
+			this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
+			this.pushInstruction({ op: "local.set", index: localInfo.index });
+			return;
+		}
+		const globalInfo = this.mod.resolveGlobal(l.name);
+		if (globalInfo) {
+			this.emitExpr(r, globalInfo.type);
+			this._emitCopyIfValue(r, globalInfo.goType, globalInfo.type);
+			this.pushInstruction({ op: "global.set", index: globalInfo.index });
+		}
+	}
+
 	_emitAssignSingle(l, r, op) {
 		if (!r) return;
 		if (l.kind === "Ident") {
@@ -537,69 +604,7 @@ export class StmtsEmitter {
 				this.allocLocal(l.name, wType, r._type);
 				localInfo = this.locals.get(l.name);
 			}
-			if (
-				localInfo &&
-				op !== ":=" &&
-				this._needsStableStore(l, localInfo.goType)
-			) {
-				this._emitStableStore(localInfo.goType, r, () => {
-					this.pushInstruction({ op: "local.get", index: localInfo.index });
-					if (localInfo.isBoxed)
-						this.pushInstruction({
-							op: "struct.get",
-							typeIndex: localInfo.boxInfo.typeIndex,
-							fieldIndex: 0,
-						});
-				});
-				return;
-			}
-			const globalStable =
-				!localInfo && op !== ":=" && this.mod.resolveGlobal(l.name);
-			if (globalStable && this._needsStableStore(l, globalStable.goType)) {
-				this._emitStableStore(globalStable.goType, r, () => {
-					this.pushInstruction({ op: "global.get", index: globalStable.index });
-				});
-				return;
-			}
-			if (localInfo) {
-				if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
-					// Pointers to the array (`&a`) hold its reference: write in place.
-					this._emitArrayStoreInto(localInfo.goType, r, () => {
-						this.pushInstruction({ op: "local.get", index: localInfo.index });
-						this.pushInstruction({
-							op: "struct.get",
-							typeIndex: localInfo.boxInfo.typeIndex,
-							fieldIndex: 0,
-						});
-					});
-					return;
-				}
-				if (localInfo.isBoxed) {
-					this.pushInstruction({ op: "local.get", index: localInfo.index });
-					this.emitExpr(r, localInfo.boxInfo.wType);
-					if (isArrayType(localInfo.goType, this.mod.checker))
-						this._emitCopyIfValue(r, localInfo.goType, localInfo.boxInfo.wType);
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: localInfo.boxInfo.typeIndex,
-						fieldIndex: 0,
-					});
-					return;
-				}
-				this.emitExpr(r, localInfo.type);
-				this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
-				this.pushInstruction({ op: "local.set", index: localInfo.index });
-			} else {
-				const globalInfo = this.mod.resolveGlobal(l.name);
-				if (globalInfo) {
-					this.emitExpr(r, globalInfo.type);
-					this._emitCopyIfValue(r, globalInfo.goType, globalInfo.type);
-					this.pushInstruction({
-						op: "global.set",
-						index: globalInfo.index,
-					});
-				}
-			}
+			this.emitStoreValue(l, r, localInfo, op);
 			return;
 		}
 

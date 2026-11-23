@@ -252,6 +252,74 @@ func main() {
 	);
 });
 
+test("a struct reassigned to a variable a closure reads keeps its own copy (V4.1)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type V struct{ M, K int }
+
+func main() {
+	v := V{9, 5}
+	w := v
+	w = v
+	v.K = 7
+	fmt.Println(w)
+	func() { _ = w.M }()
+}
+`,
+		"{9 5}\n",
+	);
+});
+
+test("a struct stored into a variable a closure mutates is a copy (V4.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ M int }
+type V struct {
+	P
+	K int
+}
+
+func main() {
+	v := V{P{-4}, 7}
+	w := v
+	f := func() { v.M = 5 }
+	v = w
+	f()
+	fmt.Println(w, v)
+}
+`,
+		"{{-4} 7} {{5} 7}\n",
+	);
+});
+
+test("a captured struct whose address is taken is stored in place and copies its source", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ N int }
+
+func main() {
+	w := S{1}
+	src := S{2}
+	pw := &w
+	f := func() { w.N += 10 }
+	w = src
+	f()
+	fmt.Println(*pw, pw == &w, src)
+}
+`,
+		"{12} true {2}\n",
+	);
+});
+
 section("Interfaces holding T vs *T");
 
 test("type switch distinguishes T from *T", () => {
