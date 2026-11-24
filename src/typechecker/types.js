@@ -639,6 +639,19 @@ export function isComplexOrNumeric(t) {
 export function isAny(t) {
 	return t?.kind === "basic" && t.name === "any";
 }
+
+// `gom.Signal[T]` and `gom.Computed[T]`, whose value `.templ` bindings read
+// through `Get`. `signalOf(t)` is `{ kind, elem }` for a signal or computed
+// value or a pointer to one (aliases are already resolved), else null.
+const SIGNAL_TYPES = new Map([
+	["Signal$$gom", "Signal"],
+	["Computed$$gom", "Computed"],
+]);
+export function signalOf(t) {
+	const named = t?.kind === "pointer" ? t.base : t;
+	const kind = named?.kind === "named" ? SIGNAL_TYPES.get(named.name) : null;
+	return kind ? { kind, elem: named.typeArgs?.[0] ?? null } : null;
+}
 // How an empty interface behaves.  "dynamic": a JS-dynamic value (browser
 // global, ECMAScript built-in, `.d.ts` value) that every operation accepts;
 // "go": a Go `any` (written as `any`, `interface{}`, or a defined type over

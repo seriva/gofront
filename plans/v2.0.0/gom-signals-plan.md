@@ -87,7 +87,7 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
   - Done when: re-rendering through `gom.Mount` does not accumulate effects or collide across DOM roots
 
 ### Phase 2: Reactive `.templ`
-- [ ] Task 2.1: Templ reachability and reactive expression detection (former 8.2)
+- [x] Task 2.1: Templ reachability and reactive expression detection (former 8.2)
   - Files: `src/lower/reachability.js`, `src/typechecker/index.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-detect.test.js`: `{ sig.Get() }`, a compound expression reading a signal, a bare signal/computed value (`{ sig }`, `{ comp }`, `disabled?={ boolSig }`, `disabled?={ boolComp }`) even when `.Get()` is never called in `.go`, and a `Signal.Get()` or stdlib function called only inside `.templ` are detected and kept reachable (including `Effect$$gom` and `Get`); a non-signal `Get` is not flagged; non-bool bare signal in `cond-bool` is rejected
   - Done when: templates without signals emit the same JS as before and templ-only stdlib calls and bare-signal `.Get()` are never pruned

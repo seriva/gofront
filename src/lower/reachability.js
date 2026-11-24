@@ -48,6 +48,11 @@ function forEachTemplExpr(node, fn) {
 	fn(node.forStmt);
 }
 
+// Stands in `names` for a reached `templ` component. The code generated for
+// a component that reads a `gom.Signal` or `gom.Computed` calls `Get` on it
+// and `gom.Effect`, which no Go source names.
+const TEMPL_REF = "$templ";
+
 // A fresh set of references: names, selected fields, `pkg.Name` qualifiers,
 // method selections on a concrete type (`sels`) and hand-over sites.
 function newRefs() {
@@ -78,6 +83,7 @@ function noteRef(node, acc) {
 	if (node._stdName) names.add(node._stdName); // `cmp.Compare` in user code
 	// A call that the generated Go (`gofront_gen.go`) answers.
 	if (node._genEntry) names.add(node._genEntry);
+	if (node.kind === "TemplDecl") names.add(TEMPL_REF);
 	switch (node.kind) {
 		case "Ident":
 			names.add(node.name);
@@ -301,9 +307,21 @@ export class StdlibReach {
 		for (const n of local) this._name(n);
 	}
 
+	// A reached component binds `Signal` and `Computed` values in the DOM
+	// through `Effect` and their `Get`, which it calls without naming them.
+	_reachSignalBindings() {
+		if (!this.names.has(TEMPL_REF)) return;
+		for (const type of ["Signal$$gom", "Computed$$gom"]) {
+			if (!this.names.has(type)) continue;
+			this._name("Effect$$gom");
+			this._select({ name: type }, "Get");
+		}
+	}
+
 	_close() {
 		let changed = true;
 		while (changed) {
+			this._reachSignalBindings();
 			while (this.pending.length > 0)
 				for (const d of this.byName.get(this.pending.pop()) ?? [])
 					this._reach(d);

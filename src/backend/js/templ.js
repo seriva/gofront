@@ -2,9 +2,40 @@
 // Mounts an HTML/expression tree onto a parent DOM node by emitting plain
 // document.createElement / appendChild / setAttribute calls.
 
-import { UnsupportedError } from "../../typechecker/types.js";
+import { forEachChild } from "../../lower/walk.js";
+import { signalOf, UnsupportedError } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+// Whether evaluating `node` calls `Get` on a `gom.Signal` or `gom.Computed`.
+// A function literal is only declared, not run, by the expression holding it.
+function readsSignal(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(readsSignal);
+	if (node.kind === "FuncLit") return false;
+	if (
+		node.kind === "CallExpr" &&
+		node.func?.kind === "SelectorExpr" &&
+		node.func.field === "Get" &&
+		signalOf(node.func.expr?._type)
+	)
+		return true;
+	let found = false;
+	forEachChild(node, (child) => {
+		found ||= readsSignal(child);
+	});
+	return found;
+}
+
+/**
+ * How a checked `.templ` expression depends on signals: "bare" when its value
+ * is itself a `gom.Signal` or `gom.Computed` (read through `Get`), "reads"
+ * when it calls `Get` on one, null when it reads none.
+ */
+export function templReactivity(expr) {
+	if (signalOf(expr?._type)) return "bare";
+	return readsSignal(expr) ? "reads" : null;
+}
 
 /** @type {ThisType<CodeGen>} */
 export const templGenMethods = {
