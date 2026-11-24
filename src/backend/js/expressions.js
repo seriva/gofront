@@ -1473,15 +1473,15 @@ export const expressionGenMethods = {
 		return sel;
 	},
 
-	// `el.method` or `window.fn` read as a value: a method of a `.d.ts` object
-	// (a callback-typed property is read as it is).
+	// `el.method`, `window.fn` or `MyNS.fn` read as a value: a function of a
+	// `.d.ts` object or namespace (a callback-typed property is read as it is).
 	_isHostMethodValue(expr) {
 		const t = expr._type;
 		return (
 			!expr._callee &&
 			t?._hostFunc === true &&
 			!t._dts &&
-			expr.expr?._type?._dtsType === true
+			expr.expr?._type?.kind === "namespace"
 		);
 	},
 
@@ -1489,7 +1489,8 @@ export const expressionGenMethods = {
 	// host lacks stays `undefined`, so `window.matchMedia != nil` still tests
 	// for it.
 	_genHostMethodValue(sel, base) {
-		if (/^[\w$.]+$/.test(base)) return `${sel}?.bind(${base})`;
+		// A plain name is read twice harmlessly; a member chain may be a getter.
+		if (/^[\w$]+$/.test(base)) return `${sel}?.bind(${base})`;
 		const m = sel.slice(base.length);
 		return `((__r) => __r${m}?.bind(__r))(${base})`;
 	},
@@ -1501,6 +1502,8 @@ export const expressionGenMethods = {
 	_isStdlibFuncValue(expr) {
 		const t = expr._type;
 		if (expr._callee || t?.kind !== "func" || expr._isMethodExpr) return false;
+		// A function a `.d.ts` declares is JavaScript, never inlined.
+		if (t._hostFunc) return false;
 		const ns = expr.expr;
 		if (
 			ns?.kind !== "Ident" ||
@@ -1727,13 +1730,13 @@ export const expressionGenMethods = {
 	},
 
 	// `f(xs...)`: a Go-compiled variadic callee receives the slice itself in a
-	// marker (its prologue unwraps it); other callees get a JS spread.
+	// marker (its prologue unwraps it); other callees get a JS spread, where a
+	// nil slice spreads to no operands as it does in Go.
 	_genSpreadArg(call, arg) {
 		const js = this.genExpr(arg);
-		// A variadic function of a Go-source package (`fmt.Println`): a nil
-		// slice spreads to no operands.
-		if (call.func._stdName) return `...(${js} ?? [])`;
-		return this._calleeIsGoVariadic(call) ? `{ __sp: ${js} }` : `...${js}`;
+		if (!call.func._stdName && this._calleeIsGoVariadic(call))
+			return `{ __sp: ${js} }`;
+		return `...(${js} ?? [])`;
 	},
 
 	_calleeIsGoVariadic(call) {

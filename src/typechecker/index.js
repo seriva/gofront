@@ -13,6 +13,7 @@
 import { assignabilityMethods } from "./assignability.js";
 import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
+import { assignedNames, goFuncType } from "./host-func.js";
 import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
 import { newLabelScope, statementCheckMethods } from "./statements.js";
@@ -655,6 +656,8 @@ export class TypeChecker {
 	}
 
 	checkAll(programs) {
+		this._programs = programs;
+		this._programAssigned = null;
 		for (const p of programs) {
 			const d = p._targetDirective;
 			if (!d) continue;
@@ -2006,9 +2009,12 @@ export class TypeChecker {
 	_runFuncBody(decl, inner, returnType) {
 		const savedDefer = this._deferCount;
 		const savedLabels = this._labels;
+		const savedAssigned = this._bodyAssigned;
 		this._deferCount = 0;
 		this._labels = newLabelScope();
+		this._bodyAssigned = assignedNames(decl.body);
 		this.checkBlock(decl.body, inner, returnType);
+		this._bodyAssigned = savedAssigned;
 		this._reportUnused(inner, decl);
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
@@ -2038,6 +2044,24 @@ export class TypeChecker {
 		return true;
 	}
 
+	// The type of a variable declared without one from a value of type `t`.
+	// One that holds a function JavaScript implements keeps calling it as
+	// JavaScript does only while nothing else is assigned to it.
+	_inferredVarType(t, name, scope) {
+		if (t?._hostFunc !== true) return t;
+		const inBody = scope !== this.globals && this._bodyAssigned;
+		return (inBody ? this._bodyAssigned : this._assignedInPackage()).has(name)
+			? goFuncType(t)
+			: t;
+	}
+
+	_assignedInPackage() {
+		this._programAssigned ??= assignedNames(
+			(this._programs ?? []).map((p) => p.decls),
+		);
+		return this._programAssigned;
+	}
+
 	checkVarDecl(decl, scope) {
 		const savedSharedAlloc = this._sharedAllocOk;
 		this._sharedAllocOk = scope === this.globals;
@@ -2055,7 +2079,10 @@ export class TypeChecker {
 						this._rejectUntypedNil(vt, spec.value[i], "variable declaration")
 					)
 						vt = ANY;
-					const varType = type ?? defaultType(vt) ?? ANY;
+					const varType =
+						type ??
+						this._inferredVarType(defaultType(vt), spec.names[i], scope) ??
+						ANY;
 					if (!type && spec.names.length === spec.value.length)
 						this._checkConstDefault(vt, spec.value[i], "variable declaration");
 					if (type)

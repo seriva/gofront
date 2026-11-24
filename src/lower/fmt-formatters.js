@@ -132,6 +132,54 @@ function hasNamespace(t, pred, depth = 0) {
 // A type of a local declaration file, which the generated file cannot import.
 const isLocalNamespace = (t) => !t._pkg;
 
+// Whether the generated file spells `t` differently from the Go type it is: a
+// type built from a local declaration file's types (`[]Plain`, `func(Plain)`)
+// is spelled with `any` for them. A bare one is not: it is only ever passed on
+// as a value.
+function spellsApart(t) {
+	return t?.kind !== "namespace" && mentionsLocalNamespace(t, 0);
+}
+
+function mentionsLocalNamespace(t, depth) {
+	if (!t || depth > 8) return false;
+	const sub = (x) => mentionsLocalNamespace(x, depth + 1);
+	switch (t.kind) {
+		case "namespace":
+			return isLocalNamespace(t);
+		case "pointer":
+			return sub(t.base);
+		case "slice":
+		case "array":
+			return sub(t.elem);
+		case "map":
+			return sub(t.key) || sub(t.value);
+		case "func":
+			return t.params.some(sub) || results(t).some(sub);
+		case "struct":
+			return (t._structFields ?? []).some((f) => sub(f.type));
+		default:
+			return false;
+	}
+}
+
+// The types a type of the package spells through, which the generated file
+// reaches by the real Go type of the value that holds them.
+function memberTypes(u) {
+	switch (u?.kind) {
+		case "struct":
+			return (u._structFields ?? []).map((f) => f.type);
+		case "pointer":
+			return [u.base];
+		case "slice":
+		case "array":
+			return [u.elem];
+		case "map":
+			return [u.key, u.value];
+		default:
+			return [];
+	}
+}
+
 // Whether a type built from `.d.ts` types can be a case of the lookup: a
 // slice or map of them is told apart by the tag it gets on entering an
 // interface, so only one that does is a case. A host object itself carries no
@@ -142,10 +190,10 @@ function isLookupCase(t, boxed) {
 	return boxed && !isHostLeaf(t) && !hasNamespace(t, isLocalNamespace);
 }
 
-// A `.d.ts` type, or a pointer to one: a host object no run-time tag tells
-// from another, so a type switch case for it would match any value.
-const isHostLeaf = (t) =>
-	t?.kind === "namespace" || (t?.kind === "pointer" && isHostLeaf(t.base));
+// A `.d.ts` type: a host object no run-time tag tells from another, so a type
+// switch case for it would match any value. A pointer to one is a Go value (a
+// wrapper around the object) that is tagged on entering an interface.
+const isHostLeaf = (t) => t?.kind === "namespace";
 
 const isInterface = (t) =>
 	t?.kind === "nil" ||
@@ -303,6 +351,10 @@ class FmtGen extends TypeSpeller {
 		// A named struct is as spellable as its fields (a type may hold itself).
 		const u = under(t);
 		if (u?.kind === "namespace") return false;
+		// The builder of a named type reads its members as the real Go types, so
+		// one spelled `any` for a local declaration file's type would not take
+		// them.
+		if (memberTypes(u).some(spellsApart)) return false;
 		if (u?.kind !== "struct" || seen.has(t)) return true;
 		seen.add(t);
 		return this.spellableStruct(u, ok);
@@ -314,7 +366,8 @@ class FmtGen extends TypeSpeller {
 	}
 
 	// A `.d.ts` type is described by its name, and the generated file only
-	// carries it as a value (see `spell`).
+	// carries it as a value (see `spell`). A named type that holds one in a
+	// slice, map or func is not spellable (see `spellableNamed`).
 	spellableNamespace() {
 		return true;
 	}
