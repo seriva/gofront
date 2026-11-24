@@ -1096,6 +1096,8 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		if (expr.expr._isTypeRef) {
+			const valueErr = this._checkDtsTypeSelector(expr, baseType);
+			if (valueErr) return valueErr;
 			const mExpr = this._checkMethodExprSelector(expr, baseType);
 			if (mExpr) return mExpr;
 			if (
@@ -1119,6 +1121,16 @@ export const expressionCheckMethods = {
 				return this.err(`${exprText(expr)} (type) is not an expression`, expr);
 		}
 		return ft;
+	},
+
+	// `dom.Element.id`: a `.d.ts` type has no methods or fields to select, it is
+	// not a value.
+	_checkDtsTypeSelector(expr, baseType) {
+		if (baseType?.kind !== "namespace" || !baseType._dtsType) return null;
+		return this.err(
+			`${exprText(expr.expr)} (type) is not an expression`,
+			expr.expr,
+		);
 	},
 
 	// `S.X` where X is a struct field: a type has methods, not fields.
@@ -3295,9 +3307,12 @@ export const expressionCheckMethods = {
 		// A type that already failed to resolve has its error.
 		if (!expr.typeExpr || t?._tainted) return false;
 		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
-		return !["struct", "array", "slice", "map", "simd", "namespace"].includes(
-			core?.kind,
-		);
+		return !["struct", "array", "slice", "map", "simd"].includes(core?.kind);
+	},
+
+	// An elided `{...}` cannot stand for a basic or `.d.ts` type.
+	_isNonLiteralHint(base) {
+		return base?.kind === "basic" || base?.kind === "namespace";
 	},
 
 	checkCompositeLit(expr, scope, hintType = null) {
@@ -3307,7 +3322,7 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
-		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
+		if (expr.typeExpr === null && hintType && this._isNonLiteralHint(base)) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
 		}

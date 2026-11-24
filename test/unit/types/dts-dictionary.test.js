@@ -337,6 +337,30 @@ test("a dictionary literal runs as a plain object", () => {
 	assertEqual(out.trim(), "5");
 });
 
+section(".d.ts — a type is not a value");
+
+test("a composite literal of a declared interface or dictionary is rejected", () => {
+	const { errors } = compile(`func main() {
+	_ = Plain{}
+	_ = Desc{}
+	_ = []Plain{{}}
+}`);
+	assertErrorContains(errors, "invalid composite literal type Plain");
+	assertErrorContains(errors, "invalid composite literal type Desc");
+	assertEqual(errors.length, 3);
+});
+
+test("a Go struct literal and a map-built dictionary still compile", () => {
+	const { errors } = compile(`type S struct{ a int }
+
+func main() {
+	_ = S{a: 1}
+	_ = []S{{a: 1}}
+	println(create(map[string]any{"size": 1}))
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -153,7 +153,7 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
   - Done when: all 5 parenthesised union array fields in `stdlib/gofront/webgpu/webgpu.d.ts` parse to their element types, `dev.createRenderPipeline` compiles with 0 errors, and `"targets": []any{...}` is rejected
 
 ### Phase 2: Checker Soundness for `.d.ts` Types, Operators & Unused Imports (roots `dts-type-accepted-as-value`, `import-used-universe-fallback`, `namespace-operand-kind-loose`)
-- [ ] Task 2.1: Reject `.d.ts` types in composite literals and value member selectors (T3.1–T3.2)
+- [x] Task 2.1: Reject `.d.ts` types in composite literals and value member selectors (T3.1–T3.2)
   - Files: `src/typechecker/expressions.js` (`_isInvalidLiteralType`, `_checkSelectorExpr`)
   - Test: `test/unit/compiler/web-packages.test.js`, `test/unit/types/dts-dictionary.test.js`: negative `assertErrorContains` tests for `fetch.Response{}`, `dom.Element{}`, `&dom.Element{}`, elided `[]dom.Element{{}}` and `map[string]dom.Element{"a": {}}`, `webgpu.BufferDescriptor{}`, local `Plain{}`, `fetch.Response.clone`, `webgpu.Device.createBuffer`, `dom.Element.tagName`; controls for bare universe `Response`, `strings.Builder{}`, `declare namespace N`
   - Done when: every `.d.ts` type in composite-literal (typed or elided) or value-selector position fails at compile time with clear diagnostics

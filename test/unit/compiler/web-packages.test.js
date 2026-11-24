@@ -1180,6 +1180,103 @@ declare function getN(): N.NAlias | null;`,
 	assertEqual(errors.length, 4);
 });
 
+section("Declaration packages — types are not values");
+
+const FETCH = `
+declare class Response { ok: boolean; clone(): Response; }
+declare function fetch(url: string): Promise<Response>;
+`;
+const fetchPkg = () => parseDeclarationPackage(FETCH, "fetch");
+
+const typeAsValue = (body, pkgs = [domPkg(), gpuPkg(), fetchPkg()]) =>
+	check(`func f() {\n${body}\n}`, pkgs);
+
+for (const [name, body, want] of [
+	[
+		"a composite literal of a package interface",
+		"_ = fetch.Response{}",
+		"invalid composite literal type fetch.Response",
+	],
+	[
+		"a composite literal of a package class",
+		"_ = dom.Element{}",
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"the address of a composite literal of a package type",
+		"_ = &dom.Element{}",
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"an elided slice element of a package type",
+		"_ = []dom.Element{{}}",
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"an elided map value of a package type",
+		'_ = map[string]dom.Element{"a": {}}',
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"a composite literal of a package dictionary",
+		"_ = webgpu.BufferDescriptor{}",
+		"invalid composite literal type webgpu.BufferDescriptor",
+	],
+	[
+		"a method selected from a package type",
+		"_ = fetch.Response.clone",
+		"fetch.Response (type) is not an expression",
+	],
+	[
+		"a device method selected from a package type",
+		"_ = webgpu.Device.createBuffer",
+		"webgpu.Device (type) is not an expression",
+	],
+	[
+		"a field selected from a package type",
+		"_ = dom.Element.id",
+		"dom.Element (type) is not an expression",
+	],
+]) {
+	test(`${name} is rejected`, () => {
+		const { errors } = typeAsValue(body);
+		assertErrorContains(errors, want);
+		assertEqual(errors.length, 1);
+	});
+}
+
+test("a composite literal of a local declaration type is rejected", () => {
+	const local = parseDeclarationPackage(
+		"interface Plain { id: number; }",
+		"loc",
+	);
+	const { errors } = check("func f() { _ = loc.Plain{} }", [local]);
+	assertErrorContains(errors, "invalid composite literal type loc.Plain");
+});
+
+test("a bare declaration global, a Go struct literal and a package type name keep working", () => {
+	const { errors } = typeAsValue(
+		`_ = fetch.Response
+	_ = Response`,
+	);
+	assertErrorContains(errors, "fetch.Response (type) is not an expression");
+	assertEqual(errors.length, 1);
+	const ok = check(
+		`type S struct{ a int }
+
+func g(r fetch.Response, e dom.Element, d webgpu.Device) {
+	_ = S{a: 1}
+	_ = []S{{a: 1}}
+	_ = r.clone()
+	_ = e.id
+	_ = d.createBuffer(map[string]any{"size": 4})
+	_ = []dom.Element{e}
+}`,
+		[domPkg(), gpuPkg(), fetchPkg()],
+	);
+	assertEqual(ok.errors.map((e) => e.message).join(), "");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
