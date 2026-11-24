@@ -1,7 +1,7 @@
 # `gom` Signals — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 8) on 2026-11-17, re-checked that day. Starts after [`typed-web-platform-plan.md`](typed-web-platform-plan.md) Phase 4, which migrates `stdlib/gom/gom.go` to the typed globals. Independent of the checker, `wasm` and value-store plans.  
 **Release note:** `.templ` text and attributes bound to a `gom.Signal` update in place when the signal changes, without re-rendering the page or diffing a virtual DOM.  
