@@ -210,21 +210,23 @@ export const templGenMethods = {
 				);
 			}
 		} else if (attr.kind === "expr") {
-			const exprJs = this._genTemplExpr(attr, '""');
-			if (name === "class") {
-				this.line(setClass(exprJs));
-			} else {
-				this.line(
-					`${el}.setAttribute(${JSON.stringify(name)}, String(${exprJs}));`,
-				);
-			}
+			const { js, reactive } = this._genTemplValue(attr, '""');
+			const assign =
+				name === "class"
+					? setClass(js)
+					: `${el}.setAttribute(${JSON.stringify(name)}, String(${js}));`;
+			if (reactive) this._genTemplEffect(assign);
+			else this.line(assign);
 		} else if (attr.kind === "bool") {
 			this.line(`${el}.setAttribute(${JSON.stringify(name)}, "");`);
 		} else if (attr.kind === "cond-bool") {
-			const exprJs = this._genTemplExpr(attr, '""');
-			this.line(
-				`if(${exprJs})${el}.setAttribute(${JSON.stringify(name)}, "");`,
-			);
+			const { js, reactive } = this._genTemplValue(attr, '""');
+			if (reactive)
+				this._genTemplEffect(
+					`${el}.toggleAttribute(${JSON.stringify(name)}, !!(${js}));`,
+				);
+			else
+				this.line(`if(${js})${el}.setAttribute(${JSON.stringify(name)}, "");`);
 		}
 	},
 

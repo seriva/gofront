@@ -95,7 +95,7 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-text.test.js`: `{ sig.Get() }`, compound text expressions, multiple reactive text nodes in the same element (`<p>{ a.Get() } { b.Get() }</p>`), and bare `{ sig }` / `{ comp }` update `.data` on `Set` with the same text node and parent before and after
   - Done when: dynamic text updates without recreating parents
-- [ ] Task 2.3: Surgical attribute bindings (former 8.4)
+- [x] Task 2.3: Surgical attribute bindings (former 8.4)
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-attr.test.js`: `class={ … }` and other `expr` attributes (including bare `{ sig }` / `{ comp }`) update on HTML and SVG elements; `disabled?={ sig.Get() }`, `disabled?={ boolSig }` and `disabled?={ boolComp }` toggle through `toggleAttribute`
   - Done when: attribute expressions that read a signal update in place
