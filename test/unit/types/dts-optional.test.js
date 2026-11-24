@@ -437,12 +437,13 @@ declare function mk(): N.T;`,
 	assertEqual(errors.length, 1);
 });
 
-test("a parenthesized non-function type stays any", () => {
+test("a parenthesized non-function type is the type it groups", () => {
 	const { values } = parseDts(
-		`declare function f(x: (string | number)[]): void;`,
+		`declare function f(x: (string | number)[], y: string | number): void;`,
 	);
-	assertEqual(values.get("f").params[0].kind, "slice");
-	assert(values.get("f").params[0].elem.name === "any");
+	const { params } = values.get("f");
+	assertEqual(params[0].kind, "slice");
+	assertEqual(params[0].elem.name, params[1].name);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

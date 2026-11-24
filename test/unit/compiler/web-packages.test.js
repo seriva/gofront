@@ -1028,6 +1028,7 @@ interface Device {
 	queue: Queue;
 	createCommandEncoder(): CommandEncoder;
 	createBindGroupLayout(d: BindGroupLayoutDescriptor): void;
+	createFragment(f: FragmentState): void;
 }
 `;
 
@@ -1091,6 +1092,40 @@ test("a dictionary member of the declared element type still checks its keys", (
 
 func main() {}`);
 	assertErrorContains(errors, "unknown member 'bindin'");
+});
+
+test("a parenthesised union list member takes a slice of its element type", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []webgpu.ColorTargetState{map[string]any{"format": "bgra8unorm"}, nil},
+	})
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a parenthesised union list member checks the keys of its elements", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []webgpu.ColorTargetState{map[string]any{"formt": "bgra8unorm"}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "unknown member 'formt'");
+});
+
+test("a parenthesised union list member rejects a slice of any", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []any{map[string]any{"format": "bgra8unorm"}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "as []webgpu.ColorTargetState value");
+	assertErrorContains(errors, "member targets");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

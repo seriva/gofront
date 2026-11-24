@@ -81,6 +81,48 @@ test("a dictionary inside a namespace is marked", () => {
 	assertEqual(members.E._dictionary, undefined);
 });
 
+section(".d.ts — parenthesised types");
+
+// The type of the parameter `x` of `declare function f(x: <type>): void`.
+const paramOf = (type) => {
+	const { values } = parseDts(`declare function f(x: ${type}): void;`);
+	return values.get("f").params[0];
+};
+
+test("a parenthesised union of a type and null keeps the type", () => {
+	const t = paramOf("(Foo | null)[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.alias, "Foo");
+});
+
+test("a nested parenthesis still keeps the type", () => {
+	const t = paramOf("((Foo | null))[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.alias, "Foo");
+});
+
+test("a parenthesised primitive union keeps its first member", () => {
+	const t = paramOf("(string | null)[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.name, "string");
+	assertEqual(t.elem._nullable, true);
+	assertEqual(paramOf("(string | number)[]").elem.name, "string");
+});
+
+test("a parenthesised type name is that type", () => {
+	assertEqual(paramOf("(Foo)").alias, "Foo");
+	assertEqual(paramOf("(string)").name, "string");
+});
+
+test("a parenthesised function type is still a function", () => {
+	const t = paramOf("((x: number) => void)[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.kind, "func");
+	const nullable = paramOf("(() => void) | null");
+	assertEqual(nullable.kind, "func");
+	assertEqual(nullable._nullable, true);
+});
+
 section(".d.ts — dictionary arguments");
 
 test("a dictionary parameter takes nil", () => {

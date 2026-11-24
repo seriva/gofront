@@ -5,12 +5,14 @@
 // Assertions to those types are pass-throughs: a standard browser device, or a
 // test double with only some members, passes `x.(webgpu.Device)`.
 
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
 	assertErrorContains,
 	compileDir,
+	parseDts,
 	runJs,
 	section,
 	summarize,
@@ -48,7 +50,50 @@ func main() {}`,
 	assertEqual(errors.length, 0);
 });
 
+test("the parenthesised union lists parse to their element types", () => {
+	const { types } = parseDts(
+		readFileSync(
+			new URL("../../../stdlib/gofront/webgpu/webgpu.d.ts", import.meta.url),
+			"utf8",
+		),
+	);
+	const elem = (iface, member) => {
+		const t = types.get(iface).members[member];
+		assertEqual(t.kind, "slice");
+		return t.elem;
+	};
+	assertEqual(elem("FragmentState", "targets").alias, "ColorTargetState");
+	assertEqual(
+		elem("PipelineLayoutDescriptor", "bindGroupLayouts").alias,
+		"BindGroupLayout",
+	);
+	assertEqual(
+		elem("RenderPassDescriptor", "colorAttachments").alias,
+		"RenderPassColorAttachment",
+	);
+	assertEqual(elem("RenderPassLayout", "colorFormats").name, "string");
+	assertEqual(elem("VertexState", "buffers").alias, "VertexBufferLayout");
+});
+
 test("createRenderPipeline takes a dictionary", () => {
+	const { errors } = build(
+		`func pipeline(dev webgpu.Device, mod webgpu.ShaderModule) webgpu.RenderPipeline {
+	return dev.createRenderPipeline(map[string]any{
+		"layout": "auto",
+		"vertex": map[string]any{"module": mod, "entryPoint": "vs"},
+		"fragment": map[string]any{
+			"module":  mod,
+			"targets": []webgpu.ColorTargetState{map[string]any{"format": "bgra8unorm"}},
+		},
+	})
+}
+
+func main() {}`,
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("createRenderPipeline rejects targets that are a slice of any", () => {
 	const { errors } = build(
 		`func pipeline(dev webgpu.Device, mod webgpu.ShaderModule) webgpu.RenderPipeline {
 	return dev.createRenderPipeline(map[string]any{
@@ -63,7 +108,25 @@ test("createRenderPipeline takes a dictionary", () => {
 
 func main() {}`,
 	);
-	assertEqual(errors.length, 0);
+	assertErrorContains(errors, "as []webgpu.ColorTargetState value");
+});
+
+test("createRenderPipeline checks the keys of each target", () => {
+	const { errors } = build(
+		`func pipeline(dev webgpu.Device, mod webgpu.ShaderModule) webgpu.RenderPipeline {
+	return dev.createRenderPipeline(map[string]any{
+		"layout": "auto",
+		"vertex": map[string]any{"module": mod, "entryPoint": "vs"},
+		"fragment": map[string]any{
+			"module":  mod,
+			"targets": []webgpu.ColorTargetState{map[string]any{"formt": "bgra8unorm"}},
+		},
+	})
+}
+
+func main() {}`,
+	);
+	assertErrorContains(errors, "formt");
 });
 
 test("queue.submit takes a slice of command buffers", () => {

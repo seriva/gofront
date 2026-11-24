@@ -368,8 +368,8 @@ export class DtsParser {
 		return base;
 	}
 
-	// `(a: A, b?: B) => R` is a function type; a parenthesized type is `any`
-	// unless it groups a function type.
+	// `(a: A, b?: B) => R` is a function type; any other parenthesized type
+	// only groups the type inside it.
 	_parseParenType() {
 		const start = this.pos;
 		this.pos++;
@@ -377,12 +377,12 @@ export class DtsParser {
 		this.consume(")");
 		this.skip();
 		if (!this.startsWith("=>")) {
-			// `(() => void)`: the parentheses only group a function type.
+			// `(T | null)`, `(() => void)`: the parentheses only group a type.
 			const end = this.pos;
 			this.pos = start + 1;
 			const inner = this.parseType();
 			this.pos = end;
-			return inner.kind === "func" ? inner : ANY;
+			return inner;
 		}
 		this.pos = start;
 		const params = this.parseParams();
