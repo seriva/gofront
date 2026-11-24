@@ -1007,6 +1007,57 @@ func main() {
 	);
 });
 
+test("importing a local package does not hide universe types (simd.F32x4, shared.Float32)", () => {
+	withTempDir(
+		{
+			"sub/sub.go": `package sub
+
+func One() float32 { return 1 }
+`,
+			"main.go": `package main
+
+import (
+	"gofront/shared"
+	"gofront/simd"
+	"./sub"
+)
+
+type box struct {
+	v simd.F32x4
+	s shared.Float32
+}
+
+var buf = shared.NewFloat32(2)
+
+func main() {
+	b := box{v: simd.Splat(sub.One()), s: buf}
+	println(b.v.Lane(0), len(b.s))
+}
+`,
+		},
+		(dir) => assertEqual(runJs(compileDir(dir).js).trim(), "1 2"),
+	);
+});
+
+test("a package does not export predeclared universe types", () => {
+	const errors = packageErrors({
+		"sub/sub.go": `package sub
+
+func One() int { return 1 }
+`,
+		"main.go": `package main
+
+import "./sub"
+
+func main() {
+	var _ sub.Float32Array
+	println(sub.One())
+}
+`,
+	});
+	assertErrorContains(errors, "Unknown type 'sub.Float32Array'");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

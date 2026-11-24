@@ -189,6 +189,9 @@ export class TypeChecker {
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
+		// Predeclared universe types (error, simd.*, shared.*, web globals)
+		// are not declared by this package and must not be exported.
+		this._universeTypes = new Map(this.types);
 	}
 
 	_setupGlobals() {
@@ -510,8 +513,10 @@ export class TypeChecker {
 	// the same name replaces the entry in the table and stays.
 	getExportedTypes() {
 		const out = new Map();
-		for (const [key, type] of this.types)
+		for (const [key, type] of this.types) {
+			if (this._universeTypes.get(key) === type) continue;
 			if (!this._isImportRegistered(key, type)) out.set(key, type);
+		}
 		return out;
 	}
 
