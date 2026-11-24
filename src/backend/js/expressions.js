@@ -1473,11 +1473,18 @@ export const expressionGenMethods = {
 
 	// `pkg.Fn` used as a value (not called): a stdlib function is inlined at
 	// its call sites, so a value is an arrow function that makes that call.
+	// `.d.ts` declaration values (`_dtsType`) are real JS objects, not inlined
+	// stdlib packages, so `window.matchMedia != nil` must read the property.
 	_isStdlibFuncValue(expr) {
 		const t = expr._type;
 		if (expr._callee || t?.kind !== "func" || expr._isMethodExpr) return false;
 		const ns = expr.expr;
-		if (ns?.kind !== "Ident" || ns._type?.kind !== "namespace") return false;
+		if (
+			ns?.kind !== "Ident" ||
+			ns._type?.kind !== "namespace" ||
+			ns._type._dtsType
+		)
+			return false;
 		return !this.bundledPackages.has(ns.name) && !hasTypeParamType(t);
 	},
 
@@ -1965,9 +1972,13 @@ export const expressionGenMethods = {
 	},
 
 	// `csv.ParseError` names the class of the bundled Go-source package type.
+	// Declaration-package (`.d.ts`) namespaces are host interfaces, never Go
+	// structs, even when a Go struct in the build shares the unqualified name.
 	_qualifiedStructName(name) {
 		if (!name.includes(".") || this.structNames.has(name)) return name;
-		const cls = this.checker?.types.get(name)?.name;
+		const t = this.checker?.types.get(name);
+		if (!t || t.kind === "namespace" || t._dtsType) return name;
+		const cls = t.name;
 		return cls && this.structNames.has(cls) ? cls : name;
 	},
 

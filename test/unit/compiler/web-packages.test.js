@@ -936,6 +936,80 @@ func main() {
 	for (const e of errors) assert(!e.message.includes("gofront/"), e.message);
 });
 
+test("a declaration-package assertion does not collide with a Go struct of the same name", () => {
+	const { res, errors } = build(
+		`package main
+
+import (
+	"gofront/webgpu"
+	"./fakegpu"
+)
+
+func accept(d any) webgpu.Device {
+	return d.(webgpu.Device)
+}
+
+func main() {
+	var raw any = &fakegpu.Device{Label: "fake"}
+	dev := accept(raw)
+	switch dev.(type) {
+	case webgpu.Device:
+		println("ok")
+	}
+}
+`,
+		{
+			extra: {
+				"app/fakegpu/fakegpu.go": `package fakegpu
+
+type Device struct {
+	Label string
+}
+`,
+			},
+			stdlib: {
+				"stdlib/gofront/webgpu/webgpu.d.ts": `interface Device { destroy(): void; }`,
+			},
+		},
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	assertEqual(runJs(res.js).trim(), "ok");
+});
+
+test("feature-detecting a browser method against nil reads the property directly", () => {
+	const { res, errors } = build(
+		`package main
+
+func main() {
+	if window != nil && window.matchMedia != nil {
+		println("has")
+		return
+	}
+	println("missing")
+}
+`,
+		{
+			stdlib: {
+				"stdlib/gofront/dom/dom.d.ts": `interface MediaQueryList { matches: boolean; }
+interface Window { matchMedia(query: string): MediaQueryList; }
+`,
+			},
+		},
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	assert(
+		!res.js.includes("=> window.matchMedia("),
+		`expected direct property read, got:\n${res.js}`,
+	);
+	assertEqual(runJs(res.js, { window: {} }).trim(), "missing");
+	assertEqual(
+		runJs(res.js, {
+			window: { matchMedia: () => ({ matches: true }) },
+		}).trim(),
+		"has",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
