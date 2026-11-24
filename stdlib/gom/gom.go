@@ -123,17 +123,90 @@ func refOf(refs []any) any {
 	return nil
 }
 
-// Mount replaces the content of the element matching the selector with node.
-// The optional refs map receives the elements of templ `ref` attributes.
-func Mount(sel string, node Node, refs ...any) {
-	el := document.querySelector(sel)
-	el.innerHTML = ""
+// A mountRoot is a DOM element that has been mounted into, with the stop
+// functions of the effects created while doing so.
+type mountRoot struct {
+	el        any
+	disposers []func()
+}
+
+var (
+	mountRoots []*mountRoot
+	// mountScopes is the stack of roots being mounted into; the last one owns
+	// the effects created at that moment.
+	mountScopes []*mountRoot
+)
+
+// rootFor is the mountRoot of el, which it creates when el has none. Elements
+// are matched by identity, not by selector, so "#app" and "div#app" share a
+// root and two roots never share one.
+func rootFor(el any) *mountRoot {
+	for _, r := range mountRoots {
+		if r.el == el {
+			return r
+		}
+	}
+	r := &mountRoot{el: el}
+	mountRoots = append(mountRoots, r)
+	return r
+}
+
+// stopRoot stops the effects of r.
+func stopRoot(r *mountRoot) {
+	stops := r.disposers
+	r.disposers = nil
+	for _, stop := range stops {
+		stop()
+	}
+}
+
+// resetRoot stops the effects of the element el that is about to be cleared,
+// and those of the roots inside it, which the clearing destroys.
+func resetRoot(el any) {
+	kept := make([]*mountRoot, 0, len(mountRoots))
+	for _, r := range mountRoots {
+		if r.el != el && el.contains(r.el) {
+			stopRoot(r)
+		} else {
+			kept = append(kept, r)
+		}
+	}
+	mountRoots = kept
+	stopRoot(rootFor(el))
+}
+
+// addToMountScope hands the stop function of an effect to the root being
+// mounted into, if there is one.
+func addToMountScope(stop func()) {
+	if n := len(mountScopes); n > 0 {
+		r := mountScopes[n-1]
+		r.disposers = append(r.disposers, stop)
+	}
+}
+
+// mountInto mounts node into el with el as the root of the effects it creates.
+func mountInto(el any, node Node, refs []any) {
+	mountScopes = append(mountScopes, rootFor(el))
+	defer func() {
+		mountScopes = mountScopes[:len(mountScopes)-1]
+	}()
 	node.Mount(el, refOf(refs))
 }
 
-// MountTo is like Mount but keeps the existing content.
+// Mount replaces the content of the element matching the selector with node.
+// The optional refs map receives the elements of templ `ref` attributes.
+// Effects created by an earlier Mount or MountTo of the same element stop first.
+func Mount(sel string, node Node, refs ...any) {
+	el := document.querySelector(sel)
+	resetRoot(el)
+	el.innerHTML = ""
+	mountInto(el, node, refs)
+}
+
+// MountTo is like Mount but keeps the existing content, and the effects of
+// earlier mounts.
 func MountTo(sel string, node Node, refs ...any) {
-	node.Mount(document.querySelector(sel), refOf(refs))
+	mountInto(document.querySelector(sel), node, refs)
 }
 
 // Elements.

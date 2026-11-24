@@ -77,11 +77,11 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
 > Split from the former `web-platform-evolution-plan.md` Phase 8. Former task IDs in parentheses.
 
 ### Phase 1: Signals and disposal in `gom`
-- [ ] Task 1.1: `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` (former 8.1)
+- [x] Task 1.1: `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` (former 8.1)
   - Files: `stdlib/gom/signals.go`
   - Test: `test/unit/builtins/gom-signals.test.js`: `NewSignal`/`Get`/`Set`/`Subscribe` and its unsubscribe, `NewComputed` lazy derivations (zero evaluations before `Get`, cached across repeated `Get`, re-evaluated on `Set`, and `Computed.Subscribe` / dependent `Effect` notified only when the derived value changes), `Effect` dependency tracking (including duplicate reads in one run and branch dependency cleanup) and disposal, no notification on `Object.is`-equal values (including `NaN`), slice/struct signal values, and the bounded-recursion panic
   - Done when: a `Set` runs subscribers and dependent effects synchronously
-- [ ] Task 1.2: Dispose effects when a root is mounted again (former 8.5)
+- [x] Task 1.2: Dispose effects when a root is mounted again (former 8.5)
   - Files: `stdlib/gom/gom.go`, `stdlib/gom/signals.go`
   - Test: `test/unit/builtins/gom-signals.test.js`: using `gom.NodeFunc` + `gom.Effect`, after a second `gom.Mount("#app", …)` (and after `gom.MountTo` followed by `gom.Mount`, plus equivalent selectors `"#app"` / `"div#app"`, two distinct sibling roots `"#a"` / `"#b"` confirming mounting `"#b"` does not dispose `"#a"`, and nested mounts), a `Set` runs no effect of the first mount and only the current mount's effects remain subscribed
   - Done when: re-rendering through `gom.Mount` does not accumulate effects or collide across DOM roots

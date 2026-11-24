@@ -146,6 +146,9 @@ function instanceKey(t) {
 	}
 }
 
+// The copies of named types made by one substitution, by substitution map.
+const SUBSTITUTED_NAMED = new WeakMap();
+
 const SUBSTITUTE_DISPATCH = {
 	basic: (_s, type) => type,
 	untyped: (_s, type) => type,
@@ -232,17 +235,32 @@ const SUBSTITUTE_DISPATCH = {
 				type._genericOf,
 				type.typeArgs.map((t) => s.substituteType(t, map)),
 			);
-		return {
+		// One copy per substitution, so a type that refers to itself (a node
+		// that holds slices of pointers to itself) does not recurse forever.
+		let copies = SUBSTITUTED_NAMED.get(map);
+		if (!copies) {
+			copies = new Map();
+			SUBSTITUTED_NAMED.set(map, copies);
+		}
+		const done = copies.get(type);
+		if (done) return done;
+		const copy = {
 			kind: "named",
 			name: type.name,
 			...(type._pkgName && { _pkgName: type._pkgName }),
+			...(type._target !== undefined && { _target: type._target }),
+			// A non-generic type's methods do not depend on the substitution, so
+			// the copy shares the declaration's map (methods declared later too).
+			...(type.methods && { methods: type.methods }),
 			// A copy is still the declaration it came from (see `identical`).
 			_substOf: type._substOf ?? type,
 			...(type.typeArgs && {
 				typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
 			}),
-			underlying: s.substituteType(type.underlying, map),
 		};
+		copies.set(type, copy);
+		copy.underlying = s.substituteType(type.underlying, map);
+		return copy;
 	},
 };
 

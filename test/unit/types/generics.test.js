@@ -28,6 +28,21 @@ import {
 
 section("Generics — Lexer & Parser");
 
+test("a method of a non-generic named field is callable inside a generic struct", () => {
+	assertJsProgramOutput(
+		`package main
+type Counter int
+func (c Counter) Double() int { return int(c) * 2 }
+type Holder[T any] struct { c Counter; v T }
+func main() {
+	h := Holder[string]{c: 3, v: "ok"}
+	fn := h.c.Double
+	println(h.c.Double(), h.v, fn())
+}`,
+		"6 ok 6\n",
+	);
+});
+
 test("lexer emits TILDE token for ~", () => {
 	const tokens = new Lexer("package main\nvar x = ~0", "test.go").tokenize();
 	const tilde = tokens.find((t) => t.value === "~");
@@ -3632,6 +3647,41 @@ func main() {
 }`,
 		"3 2 1 1\n",
 	);
+});
+
+test("a generic struct can hold a non-generic type that refers to itself", () => {
+	const { js, errors } = compile(`package main
+type tree struct {
+	kids []*tree
+	n    int
+}
+type Holder[T any] struct {
+	root *tree
+	val  T
+}
+func main() {
+	h := &Holder[string]{root: &tree{n: 1}, val: "x"}
+	h.root.kids = append(h.root.kids, &tree{n: 2})
+	console.log(h.root.kids[0].n, h.val)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2 x");
+});
+
+test("a generic struct holding mutually recursive types type-checks per instance", () => {
+	const { errors } = compile(`package main
+type a struct{ b *b }
+type b struct{ as []*a }
+type H[T any] struct{ x a; v T }
+func main() {
+	var i H[int]
+	var s H[string]
+	i.x.b = &b{}
+	s.x.b = i.x.b
+	s.v = "ok"
+	console.log(s.v)
+}`);
+	assertEqual(errors.length, 0);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
