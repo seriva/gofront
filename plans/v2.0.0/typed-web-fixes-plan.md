@@ -171,7 +171,7 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
   - Files: `src/backend/shared/fmt-types.js` (`goTypeName`), `src/lower/gen-types.js` (`TypeSpeller.spellable`)
   - Test: `test/unit/compiler/web-packages.test.js`: unit assertions for `goTypeName` on `namespace`, `[]namespace`, and `basic.alias`, plus runtime assertion panic `a.([]webgpu.Device)` printing `not []webgpu.Device`
   - Done when: `goTypeName` never prints `interface {}` for `.d.ts` namespace types or aliases
-- [ ] Task 3.2: Support `.d.ts` namespace types in `FmtGen` and bind declaration imports in `gofront_gen.go` (T6.1, T6.2)
+- [x] Task 3.2: Support `.d.ts` namespace types in `FmtGen` and bind declaration imports in `gofront_gen.go` (T6.1, T6.2)
   - Files: `src/lower/fmt-formatters.js` (`key`, `typeName`, `spellable`/`spell`, `describe`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/compiler/web-packages.test.js`: `fmt.Sprintf("%T", ...)` on `e.children`, boxed `var a any = e.children`, `el`, `[]dom.Element{}`, `map[string]dom.Element{}`, `&el`, and local `.d.ts` `Plain`, plus failed assertion `a.([]webgpu.Device)` printing `is []dom.NotRestoredReasons, not []webgpu.Device`
   - Done when: direct and `any`-boxed `fmt.Sprintf("%T", ...)` print the real `.d.ts` type names instead of `""` or `[]interface {}`

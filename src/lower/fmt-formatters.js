@@ -112,6 +112,41 @@ function isUnexportedForeign(name) {
 // *testing.T never describes the test state itself.
 const HOST_TYPE = /^testing\.|\$\$testing$/;
 
+// A `.d.ts` type as `%T` prints it: `dom.Element`, or the bare name of a type
+// a local declaration file declares.
+const nsName = (t) => (t._pkg ? `${t._pkg}.${t.name}` : t.name);
+
+// Whether `t` is, or is built from, a `.d.ts` type that satisfies `pred`.
+function hasNamespace(t, pred, depth = 0) {
+	if (!t || depth > 8) return false;
+	if (t.kind === "namespace") return pred(t);
+	const parts = {
+		pointer: [t.base],
+		slice: [t.elem],
+		array: [t.elem],
+		map: [t.key, t.value],
+	}[t.kind];
+	return (parts ?? []).some((x) => hasNamespace(x, pred, depth + 1));
+}
+
+// A type of a local declaration file, which the generated file cannot import.
+const isLocalNamespace = (t) => !t._pkg;
+
+// Whether a type built from `.d.ts` types can be a case of the lookup: a
+// slice or map of them is told apart by the tag it gets on entering an
+// interface, so only one that does is a case. A host object itself carries no
+// tag (a case for it would match any value), and a local declaration file's
+// type is spelled `any`.
+function isLookupCase(t, boxed) {
+	if (!hasNamespace(t, () => true)) return true;
+	return boxed && !isHostLeaf(t) && !hasNamespace(t, isLocalNamespace);
+}
+
+// A `.d.ts` type, or a pointer to one: a host object no run-time tag tells
+// from another, so a type switch case for it would match any value.
+const isHostLeaf = (t) =>
+	t?.kind === "namespace" || (t?.kind === "pointer" && isHostLeaf(t.base));
+
 const isInterface = (t) =>
 	t?.kind === "nil" ||
 	(t?.kind === "basic" && (t.name === "nil" || t.name === "any")) ||
@@ -185,6 +220,7 @@ class FmtGen extends TypeSpeller {
 			struct: () => this.structKey(t),
 			interface: () => (isEmptyIface(t) ? "any" : `iface:${t.name ?? ""}`),
 			func: () => this.funcString(t, k),
+			namespace: () => `ns:${nsName(t)}`,
 		};
 		return (byKind[t.kind] ?? (() => `?${t.kind}`))();
 	}
@@ -228,6 +264,8 @@ class FmtGen extends TypeSpeller {
 			case "interface":
 				// `error` is the universe interface; see RESULT.
 				return t.name === "error" || t.name ? t.name : "interface {}";
+			case "namespace":
+				return nsName(t);
 			case "func":
 				return this.funcString(t, n).replace(/^func\(/, "func(");
 			case "struct": {
@@ -273,6 +311,21 @@ class FmtGen extends TypeSpeller {
 	spellableInterface(t) {
 		// `error` is the universe interface; see RESULT.
 		return t.name === "error" || isEmptyIface(t);
+	}
+
+	// A `.d.ts` type is described by its name, and the generated file only
+	// carries it as a value (see `spell`).
+	spellableNamespace() {
+		return true;
+	}
+
+	// A type of a declaration package (`gofront/dom`) is imported by the
+	// generated file; one a local declaration file declares has no Go name, so
+	// its values are carried as `any`.
+	spellNamespace(t) {
+		return t._pkg
+			? `${this.qualifierFor(`gofront/${t._pkg}`)}.${t.name}`
+			: "any";
 	}
 
 	// A field of an interface type is described by its value.
@@ -345,6 +398,9 @@ class FmtGen extends TypeSpeller {
 	describe(t, x) {
 		t = defaultType(t);
 		const T = q(this.typeName(t));
+		// A host object tells nothing of its own type: the description names it.
+		if (t?.kind === "namespace")
+			return `fmtrt.Arg{K: fmtrt.KInterface, T: ${T}, V: ${x}}`;
 		if (isInterface(t) || t?.kind === "typeParam") {
 			if (this.formatted || !isMethodOnly(t)) this.needsLookup = true;
 			return `fmtrt.Arg{K: fmtrt.KInterface, V: ${x}}`;
@@ -552,8 +608,8 @@ class FmtGen extends TypeSpeller {
 	// package's expressions, its named types, and a pointer to each.
 	candidateTypes() {
 		const found = new Map();
-		const add = (t) => {
-			if (!t || !this.usable(t)) return;
+		const add = (t, boxed = true) => {
+			if (!this.lookupCase(t, boxed)) return;
 			found.set(this.key(t), t);
 			if (t.kind === "named" && under(t)?.kind !== "func")
 				found.set(this.key({ kind: "pointer", base: t }), {
@@ -568,7 +624,7 @@ class FmtGen extends TypeSpeller {
 			// A member of a package (fmt.Println) is no value of its own.
 			if (via === "expr" && node.expr?._type?.kind === "namespace") continue;
 			if (via === "declared" && !this.topLevel.has(type.name)) continue;
-			add(type);
+			add(type, via === "boxed");
 		}
 		// Only instances of generic types (and pointers to them), and maps, slices and
 		// arrays a generic body boxes into an interface: they are the types a package
@@ -580,7 +636,7 @@ class FmtGen extends TypeSpeller {
 				(boxed && isMapSliceOrArray(type)) ||
 				(base.kind === "named" && base.typeArgs?.length > 0)
 			)
-				add(type);
+				add(type, Boolean(boxed));
 		}
 		return [...found.values()];
 	}
@@ -647,6 +703,10 @@ class FmtGen extends TypeSpeller {
 			id: `${decl.name}|${sub.map((a) => this.key(a)).join(",")}`,
 			map: new Map(generic.typeParams.map((tp, i) => [tp.name, sub[i]])),
 		};
+	}
+
+	lookupCase(t, boxed) {
+		return Boolean(t) && this.usable(t) && isLookupCase(t, boxed);
 	}
 
 	usable(t) {

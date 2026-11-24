@@ -205,6 +205,7 @@ export class TypeSpeller {
 			// name is the universe interface and the spelling cannot be shadowed.
 			interface: () => (t.name === "error" ? "error" : "any"),
 			func: () => this.funcString(t, sp),
+			namespace: () => this.spellNamespace(t),
 		};
 		if (!byKind[t.kind])
 			throw new Error(`json: cannot spell type kind ${t.kind}`);
@@ -330,7 +331,7 @@ export class TypeSpeller {
 			basic: () => t.name !== "void" && t.name !== "nil" && !t.alias,
 			named: () => this.spellableNamed(t, ok, seen),
 			// A JS-interop (.d.ts) type has no Go source to write.
-			namespace: () => false,
+			namespace: () => this.spellableNamespace(t),
 			promise: () => false,
 			pointer: () => ok(t.base),
 			slice: () => ok(t.elem),
@@ -345,6 +346,14 @@ export class TypeSpeller {
 
 	spellableInterface(_t) {
 		return true;
+	}
+
+	spellableNamespace(_t) {
+		return false;
+	}
+
+	spellNamespace(_t) {
+		throw new Error("json: cannot spell type kind namespace");
 	}
 
 	spellableStruct(t, ok) {
