@@ -143,11 +143,11 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
 
 ### Phase 1: `.d.ts` Alias Resolution & Parser Parenthesised Types (roots `dts-unresolved-alias-leak`, `namespace-missing-notrangeable`, `dts-paren-type-collapses-non-func`)
 *Scheduled from review follow-ups (2026-11-24). Unblocks real WebGPU usage (`dev.queue.submit`, `dev.createRenderPipeline`).*
-- [ ] Task 1.1: Resolve `.d.ts` aliases recursively in `resolveType`, resolve at expression boundaries, and reject `for range` on namespaces (T1.1–T1.5)
+- [x] Task 1.1: Resolve `.d.ts` aliases recursively in `resolveType`, resolve at expression boundaries, and reject `for range` on namespaces (T1.1–T1.5)
   - Files: `src/typechecker/resolve.js` (`resolveType`, `_fieldTypeNamespace`), `src/typechecker/expressions.js` (`Ident`, `_checkCallExpr`, `_notRangeable`)
   - Test: `test/unit/types/dts-extends.test.js`, `test/unit/types/browser-globals.test.js`, `test/unit/compiler/web-packages.test.js`: T1.1–T1.6 (`Plain[]`, `[]webgpu.CommandBuffer`, `[]dom.NotRestoredReasons`, `Promise<Plain[]>`, `(xs: Plain[]) => void`, `plainArr`, dictionary member `"entries": []webgpu.BindGroupLayoutEntry{}`, negative T1.6 `submit([]any{...})` / `"entries": []any{...}` asserting `as []webgpu.`, plus negative `assertErrorContains` cases for indexing, slicing, calling, `len`/`cap`/`append`/`delete`, deref, type assertion, `for range`, `if`/`for` on call/member results and resolved params) + controls
   - Done when: all T1.1–T1.2 cases compile with 0 errors, all T1.3–T1.6 cases fail with Go/GoFront diagnostics, and `example/` + `stdlib/` stay green
-- [ ] Task 1.2: Preserve parenthesised non-function types in `DtsParser._parseParenType` (T2.1–T2.2)
+- [x] Task 1.2: Preserve parenthesised non-function types in `DtsParser._parseParenType` (T2.1–T2.2)
   - Files: `src/dts-parser.js` (`_parseParenType`)
   - Test: `test/unit/types/dts-dictionary.test.js`, `test/unit/compiler/web-packages.test.js`, `test/unit/stdlib/webgpu-typed.test.js`: T2.2 (`(ColorTargetState | null)[]`, `(string | null)[]`, `((ColorTargetState | null))[]`, `(Foo)`, `(string | number)[]`, callback controls) and full WebGPU T2.1 `dev.createRenderPipeline(...)` with `targets: []webgpu.ColorTargetState{}`; migrate the existing `createRenderPipeline takes a dictionary` case (`webgpu-typed.test.js:59`, `"targets": []any{map[string]any{...}}`) to `[]webgpu.ColorTargetState{map[string]any{...}}` and add the `[]any` form as a negative case (T1.6), listed under `### Tests Changed`
   - Done when: all 5 parenthesised union array fields in `stdlib/gofront/webgpu/webgpu.d.ts` parse to their element types, `dev.createRenderPipeline` compiles with 0 errors, and `"targets": []any{...}` is rejected

@@ -1010,6 +1010,176 @@ interface Window { matchMedia(query: string): MediaQueryList; }
 	);
 });
 
+section("Declaration packages — list parameters and dictionary members");
+
+const GPU_LISTS = `
+interface CommandBuffer { label: string; }
+interface CommandEncoder { finish(): CommandBuffer; }
+/** @dictionary */
+interface BindGroupLayoutEntry { binding: int; }
+/** @dictionary */
+interface BindGroupLayoutDescriptor { entries: BindGroupLayoutEntry[]; label?: string; }
+/** @dictionary */
+interface ColorTargetState { format: string; }
+/** @dictionary */
+interface FragmentState { targets: (ColorTargetState | null)[]; }
+interface Queue { submit(commandBuffers: CommandBuffer[]): void; }
+interface Device {
+	queue: Queue;
+	createCommandEncoder(): CommandEncoder;
+	createBindGroupLayout(d: BindGroupLayoutDescriptor): void;
+	createFragment(f: FragmentState): void;
+}
+`;
+
+const gpuLists = (body) =>
+	build(`package main\n\nimport "gofront/webgpu"\n\n${body}\n`, {
+		stdlib: { "stdlib/gofront/webgpu/webgpu.d.ts": GPU_LISTS },
+	});
+
+test("a slice of the declared element type is a list parameter", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	enc := dev.createCommandEncoder()
+	dev.queue.submit([]webgpu.CommandBuffer{enc.finish()})
+	var cmds []webgpu.CommandBuffer = []webgpu.CommandBuffer{}
+	dev.queue.submit(cmds)
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a dictionary member that is a list takes a slice of its element type", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a list parameter rejects a slice of any", () => {
+	const { errors } =
+		gpuLists(`func f(dev webgpu.Device, enc webgpu.CommandEncoder) {
+	dev.queue.submit([]any{enc.finish()})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "[]any");
+	assertErrorContains(errors, "as []webgpu.CommandBuffer value");
+});
+
+test("a dictionary member that is a list rejects a slice of any", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []any{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "as []webgpu.BindGroupLayoutEntry value");
+	assertErrorContains(errors, "member entries");
+});
+
+test("a dictionary member of the declared element type still checks its keys", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"bindin": 0}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "unknown member 'bindin'");
+});
+
+test("a parenthesised union list member takes a slice of its element type", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []webgpu.ColorTargetState{map[string]any{"format": "bgra8unorm"}, nil},
+	})
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a parenthesised union list member checks the keys of its elements", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []webgpu.ColorTargetState{map[string]any{"formt": "bgra8unorm"}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "unknown member 'formt'");
+});
+
+test("a parenthesised union list member rejects a slice of any", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []any{map[string]any{"format": "bgra8unorm"}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "as []webgpu.ColorTargetState value");
+	assertErrorContains(errors, "member targets");
+});
+
+const GPU_ALIASES = `
+interface ColorTargetState { format: string; }
+type TargetAlias = ColorTargetState;
+`;
+
+test("a package type alias in a struct field is the type it names", () => {
+	const { errors } = build(
+		`package main
+
+import "gofront/webgpu"
+
+type S struct { T webgpu.TargetAlias }
+
+func f(s S, c webgpu.ColorTargetState) {
+	c = s.T
+	_ = s.T[0]
+}
+
+func main() {}
+`,
+		{ stdlib: { "stdlib/gofront/webgpu/webgpu.d.ts": GPU_ALIASES } },
+	);
+	assertErrorContains(errors, "Cannot index type webgpu.ColorTargetState");
+	assertEqual(errors.length, 1);
+});
+
+test("a type alias in a package namespace is the type it names", () => {
+	const ns = parseDeclarationPackage(
+		`declare namespace N {
+	interface NPlain { id: number; }
+	type NAlias = N.NPlain;
+	type NList = N.NPlain[];
+}
+declare function getP(): N.NPlain;
+declare function getA(): N.NAlias;
+declare function getL(): N.NList;
+declare function getN(): N.NAlias | null;`,
+		"nsp",
+	);
+	const { errors } = check(
+		`func f() {
+	_ = nsp.getP()[0]
+	_ = nsp.getA()[0]
+	_ = nsp.getL()[0][0]
+	_ = nsp.getN()[0]
+}`,
+		[ns],
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 4);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

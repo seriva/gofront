@@ -5,7 +5,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
@@ -437,12 +436,39 @@ declare function mk(): N.T;`,
 	assertEqual(errors.length, 1);
 });
 
-test("a parenthesized non-function type stays any", () => {
+test("a parenthesized non-function type is the type it groups", () => {
 	const { values } = parseDts(
-		`declare function f(x: (string | number)[]): void;`,
+		`declare function f(x: (string | number)[], y: string | number): void;`,
 	);
-	assertEqual(values.get("f").params[0].kind, "slice");
-	assert(values.get("f").params[0].elem.name === "any");
+	const { params } = values.get("f");
+	assertEqual(params[0].kind, "slice");
+	assertEqual(params[0].elem.name, params[1].name);
+});
+
+test("a parenthesized tuple in a return position stays a tuple", () => {
+	const { values } = parseDts(`declare function g(): ([string, number]);`);
+	assertEqual(
+		JSON.stringify(values.get("g").returns),
+		JSON.stringify([
+			{ kind: "basic", name: "string" },
+			{ kind: "basic", name: "float64" },
+		]),
+	);
+});
+
+test("a nullable tuple in a return position stays a tuple", () => {
+	const want = JSON.stringify([
+		{ kind: "basic", name: "string" },
+		{ kind: "basic", name: "float64" },
+	]);
+	for (const ret of [
+		"(null | [string, number])",
+		"null | [string, number]",
+		"([string, number] | null)",
+	]) {
+		const { values } = parseDts(`declare function g(): ${ret};`);
+		assertEqual(JSON.stringify(values.get("g").returns), want);
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
