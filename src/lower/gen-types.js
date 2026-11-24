@@ -326,7 +326,8 @@ export class TypeSpeller {
 		if (!t || depth > 8) return false;
 		const ok = (x) => this.spellable(x, depth + 1, seen);
 		const byKind = {
-			basic: () => t.name !== "void" && t.name !== "nil",
+			// An unresolved `.d.ts` reference is a type no Go source names.
+			basic: () => t.name !== "void" && t.name !== "nil" && !t.alias,
 			named: () => this.spellableNamed(t, ok, seen),
 			// A JS-interop (.d.ts) type has no Go source to write.
 			namespace: () => false,

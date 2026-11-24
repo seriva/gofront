@@ -9,6 +9,7 @@
 import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { goTypeName } from "../../../src/backend/shared/fmt-types.js";
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { PackageCache } from "../../../src/link/package-cache.js";
 import { Parser } from "../../../src/parser/index.js";
@@ -16,6 +17,7 @@ import { declarationStats } from "../../../src/resolver.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	compileDir,
@@ -1462,6 +1464,64 @@ func f() {
 	g[[]int]()
 }`);
 	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+section("Declaration packages — runtime type names");
+
+test("goTypeName spells a declaration type with its package", () => {
+	const gpu = gpuPkg();
+	const device = gpu.types.get("Device");
+	assertEqual(goTypeName(device), "webgpu.Device");
+	assertEqual(goTypeName({ kind: "slice", elem: device }), "[]webgpu.Device");
+	assertEqual(
+		goTypeName({
+			kind: "map",
+			key: { kind: "basic", name: "string" },
+			value: { kind: "pointer", base: device },
+		}),
+		"map[string]*webgpu.Device",
+	);
+});
+
+test("goTypeName spells an unresolved declaration reference by its name", () => {
+	const ref = (alias) => ({ kind: "basic", name: "any", alias });
+	assertEqual(goTypeName(ref("gofront/dom.Node")), "dom.Node");
+	assertEqual(
+		goTypeName({ kind: "slice", elem: ref("gofront/dom.Node") }),
+		"[]dom.Node",
+	);
+	assertEqual(goTypeName(ref("Plain")), "Plain");
+	assertEqual(goTypeName({ kind: "basic", name: "any" }), "interface {}");
+});
+
+test("a failed assertion to a slice of declaration types names it", () => {
+	const { res, errors } = withTempDir(
+		{
+			"main.go": `package main
+
+import (
+	"gofront/dom"
+	"gofront/webgpu"
+)
+
+func main() {
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	var a any = n.children
+	defer func() { println(recover()) }()
+	_ = a.([]webgpu.Device)
+}
+`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)),
+	);
+	assertEqual(errors.length, 0);
+	const out = runJs(res.js, {
+		document: { getElementById: () => ({ children: [] }) },
+	});
+	assertContains(
+		out,
+		"interface {} is []dom.NotRestoredReasons, not []webgpu.Device",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

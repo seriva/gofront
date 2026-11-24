@@ -44,6 +44,10 @@ const PREDECLARED = new Set([
 	"error",
 ]);
 
+// A `.d.ts` type reference that is not resolved yet (`gofront/dom.Node`, or the
+// bare `Plain` of a local declaration file) as `%T` prints the type.
+const declarationTypeName = (alias) => alias.slice(alias.lastIndexOf("/") + 1);
+
 /**
  * Go's `reflect` spelling of a type used as a type argument: `int`,
  * `main.Foo`, `[]main.Foo`.  Takes checker types and parsed type nodes;
@@ -58,7 +62,11 @@ export function goTypeName(t, specialized = null, qualifyNames = true) {
 		qualifyNames ? qualify(name, pkgName) : unqualify(name);
 	switch (t?.kind) {
 		case "basic":
+			if (t.alias) return declarationTypeName(t.alias);
 			return t.name === "any" ? "interface {}" : t.name;
+		case "namespace":
+			// A `.d.ts` type shows its package (`dom.Element`).
+			return t._pkg ? `${t._pkg}.${t.name}` : t.name;
 		case "untyped":
 			return t.base;
 		case "TypeName":

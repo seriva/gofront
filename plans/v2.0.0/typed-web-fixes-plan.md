@@ -167,7 +167,7 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
   - Done when: arithmetic, ordering, logical, unary, and constant-equality ops on `.d.ts` values fail at compile time while `nil` and same/derived-type reference equality keep passing
 
 ### Phase 3: Runtime Type Names & Stored Browser Func Values (roots `dts-type-name-missing-namespace`, `dts-func-value-treated-as-go-variadic`)
-- [ ] Task 3.1: Format `.d.ts` namespace types and aliases in `goTypeName` and block unresolved aliases in `TypeSpeller.spellable` (T6.1, T6.3)
+- [x] Task 3.1: Format `.d.ts` namespace types and aliases in `goTypeName` and block unresolved aliases in `TypeSpeller.spellable` (T6.1, T6.3)
   - Files: `src/backend/shared/fmt-types.js` (`goTypeName`), `src/lower/gen-types.js` (`TypeSpeller.spellable`)
   - Test: `test/unit/compiler/web-packages.test.js`: unit assertions for `goTypeName` on `namespace`, `[]namespace`, and `basic.alias`, plus runtime assertion panic `a.([]webgpu.Device)` printing `not []webgpu.Device`
   - Done when: `goTypeName` never prints `interface {}` for `.d.ts` namespace types or aliases
