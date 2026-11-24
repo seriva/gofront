@@ -444,6 +444,188 @@ test("only gom is needed: Signal types can be named in declarations", () => {
 	assertEqual(lines.join(","), "n=1,n=2");
 });
 
+section("gom signals — disposal on mount");
+
+const MOUNT_DECLS = `
+var runs = map[string]int{}
+func watch(name string, s *gom.Signal[int]) gom.Node {
+	return gom.NodeFunc(func(parent any) {
+		gom.Effect(func() { s.Get(); runs[name]++ })
+	})
+}`;
+
+test("mounting a root again disposes the effects of the first mount", () => {
+	const lines = run({
+		decls: MOUNT_DECLS,
+		main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#app", watch("first", s))
+	gom.Mount("#app", watch("second", s))
+	s.Set(1)
+	println(runs["first"], runs["second"])`,
+	});
+	assertEqual(lines.join(","), "1 2");
+});
+
+test("repeated mounts do not accumulate effects", () => {
+	const lines = run({
+		decls: MOUNT_DECLS,
+		main: `
+	s := gom.NewSignal(0)
+	for i := 0; i < 5; i++ {
+		gom.Mount("#app", watch("w", s))
+	}
+	s.Set(1)
+	println(runs["w"])`,
+	});
+	assertEqual(lines.join(","), "6");
+});
+
+test("Mount after MountTo disposes the effects of both", () => {
+	const lines = run({
+		decls: MOUNT_DECLS,
+		main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#app", watch("a", s))
+	gom.MountTo("#app", watch("b", s))
+	s.Set(1)
+	println(runs["a"], runs["b"])
+	gom.Mount("#app", watch("c", s))
+	s.Set(2)
+	println(runs["a"], runs["b"], runs["c"])`,
+	});
+	assertEqual(lines.join(","), "2 2,2 2 2");
+});
+
+test("MountTo keeps the effects of earlier mounts", () => {
+	const lines = run({
+		decls: MOUNT_DECLS,
+		main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#app", watch("a", s))
+	gom.MountTo("#app", watch("b", s))
+	gom.MountTo("#app", watch("c", s))
+	s.Set(1)
+	println(runs["a"], runs["b"], runs["c"])`,
+	});
+	assertEqual(lines.join(","), "2 2 2");
+});
+
+test("equivalent selectors share one root", () => {
+	const lines = run({
+		decls: MOUNT_DECLS,
+		main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#app", watch("first", s))
+	gom.Mount("div#app", watch("second", s))
+	s.Set(1)
+	println(runs["first"], runs["second"])`,
+	});
+	assertEqual(lines.join(","), "1 2");
+});
+
+test("mounting one sibling root does not dispose the other", () => {
+	const lines = run(
+		{
+			decls: MOUNT_DECLS,
+			main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#a", watch("a", s))
+	gom.Mount("#b", watch("b1", s))
+	gom.Mount("#b", watch("b2", s))
+	s.Set(1)
+	println(runs["a"], runs["b1"], runs["b2"])`,
+		},
+		'<div id="a"></div><div id="b"></div>',
+	);
+	assertEqual(lines.join(","), "2 1 2");
+});
+
+test("a nested Mount puts its effects in its own root", () => {
+	const lines = run(
+		{
+			decls: `${MOUNT_DECLS}
+func outer(s *gom.Signal[int]) gom.Node {
+	return gom.NodeFunc(func(parent any) {
+		gom.Effect(func() { s.Get(); runs["outer"]++ })
+		d := document.createElement("div")
+		d.id = "inner"
+		parent.appendChild(d)
+		gom.Mount("#inner", watch("inner", s))
+		gom.Effect(func() { s.Get(); runs["outer2"]++ })
+	})
+}`,
+			main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#outer", outer(s))
+	s.Set(1)
+	println(runs["outer"], runs["outer2"], runs["inner"])
+	gom.Mount("#inner", watch("inner2", s))
+	s.Set(2)
+	println(runs["outer"], runs["outer2"], runs["inner"], runs["inner2"])`,
+		},
+		'<div id="outer"></div>',
+	);
+	assertEqual(lines.join(","), "2 2 2,3 3 2 2");
+});
+
+test("mounting an outer root disposes the roots inside it", () => {
+	const lines = run(
+		{
+			decls: MOUNT_DECLS,
+			main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#inner", watch("inner", s))
+	gom.Mount("#outer", watch("outer", s))
+	s.Set(1)
+	println(runs["inner"], runs["outer"])`,
+		},
+		'<div id="outer"><div id="inner"></div></div>',
+	);
+	assertEqual(lines.join(","), "1 2");
+});
+
+test("the outer scope is restored after a nested Mount, even on panic", () => {
+	const lines = run(
+		{
+			decls: `${MOUNT_DECLS}
+func boom() gom.Node {
+	return gom.NodeFunc(func(parent any) { panic("boom") })
+}`,
+			main: `
+	s := gom.NewSignal(0)
+	gom.Mount("#app", gom.NodeFunc(func(parent any) {
+		func() {
+			defer func() { recover() }()
+			gom.Mount("#other", boom())
+		}()
+		gom.Effect(func() { s.Get(); runs["app"]++ })
+	}))
+	gom.Mount("#other", watch("other", s))
+	s.Set(1)
+	println(runs["app"], runs["other"])
+	gom.Mount("#app", gom.Text("x"))
+	s.Set(2)
+	println(runs["app"], runs["other"])`,
+		},
+		'<div id="app"></div><div id="other"></div>',
+	);
+	assertEqual(lines.join(","), "2 2,2 3");
+});
+
+test("an Effect outside any Mount lives until it is disposed", () => {
+	const lines = run({
+		decls: MOUNT_DECLS,
+		main: `
+	s := gom.NewSignal(0)
+	gom.Effect(func() { s.Get(); runs["free"]++ })
+	gom.Mount("#app", gom.Text("x"))
+	s.Set(1)
+	println(runs["free"])`,
+	});
+	assertEqual(lines.join(","), "2");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

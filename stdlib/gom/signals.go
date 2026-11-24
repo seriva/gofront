@@ -327,10 +327,13 @@ func (c *Computed[T]) Subscribe(fn func(T)) func() {
 
 // Effect runs fn now and again whenever a signal or Computed it read changes.
 // What it reads is recorded afresh on every run, so only the dependencies of
-// the latest run count. It returns the function that stops it.
+// the latest run count. It returns the function that stops it. An Effect
+// created while a gom.Mount or gom.MountTo runs also stops when that element
+// is mounted again.
 func Effect(fn func()) func() {
 	o := &observer{tracks: true, fn: fn}
 	stop := func() { dispose(o) }
+	addToMountScope(stop)
 	evaluate(o)
 	return stop
 }
