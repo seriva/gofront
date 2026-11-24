@@ -65,6 +65,9 @@ const NOT_RANGEABLE_KINDS = new Set([
 	"namespace",
 ]);
 
+// Scope binding kinds that name a value, not a type.
+const VALUE_KINDS = new Set(["var", "const", "func"]);
+
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -1050,10 +1053,18 @@ export const expressionCheckMethods = {
 	_namesType(name, t, scope) {
 		if (!this.types.has(name)) return false;
 		const owner = scope.lookupScope(name);
-		if (owner?.object(name).kind === "type") return true;
+		const kind = owner?.object(name).kind;
+		if (kind === "type") return true;
+		// An import that declares a variable, constant or function beside a
+		// type of that name (`declare var Foo: Foo`) binds the value.
+		if (this._isImportScope(owner) && VALUE_KINDS.has(kind)) return false;
 		// A binding the source declared as a variable, constant, function,
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
+			return false;
+		// An imported name keeps meaning the type only where the import bound it:
+		// a local variable of that type (`var Widget Widget`) is a value too.
+		if (owner && owner !== this.universe && !this._isImportScope(owner))
 			return false;
 		return this._isImportScope(owner) || this.types.get(name) === t;
 	},
@@ -1096,6 +1107,8 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		if (expr.expr._isTypeRef) {
+			const valueErr = this._checkDtsTypeSelector(expr, baseType);
+			if (valueErr) return valueErr;
 			const mExpr = this._checkMethodExprSelector(expr, baseType);
 			if (mExpr) return mExpr;
 			if (
@@ -1119,6 +1132,25 @@ export const expressionCheckMethods = {
 				return this.err(`${exprText(expr)} (type) is not an expression`, expr);
 		}
 		return ft;
+	},
+
+	// `dom.Element.id`: a `.d.ts` type has no methods or fields to select, it is
+	// not a value. `(*MyEl).id` over a defined type of one has no method either.
+	_checkDtsTypeSelector(expr, baseType) {
+		const viaPointer = baseType?.kind === "pointer";
+		const base = this._deepUnderlying(
+			viaPointer ? this.resolveType(baseType.base) : baseType,
+		);
+		if (base?.kind !== "namespace" || !base._dtsType) return null;
+		if (viaPointer)
+			return this.err(
+				`${exprText(expr)} undefined (type ${typeStr(baseType)} has no method ${expr.field})`,
+				expr,
+			);
+		return this.err(
+			`${exprText(expr.expr)} (type) is not an expression`,
+			expr.expr,
+		);
 	},
 
 	// `S.X` where X is a struct field: a type has methods, not fields.
@@ -3290,42 +3322,64 @@ export const expressionCheckMethods = {
 		return t ?? ANY;
 	},
 
-	// `int{}`, `T{}` for a type parameter without a core type.
-	_isInvalidLiteralType(expr, t, base, scope) {
-		// A type that already failed to resolve has its error.
-		if (!expr.typeExpr || t?._tainted) return false;
-		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
-		return !["struct", "array", "slice", "map", "simd", "namespace"].includes(
-			core?.kind,
-		);
+	// The type a literal builds, as the struct, array, slice, map or simd type
+	// that holds its elements (`lit`) with the type to name in a diagnostic
+	// (`type`). An elided `{...}` stands for its hint, or for what a hint of
+	// `*T` points at (one level: `[]**T{{}}` has no literal to elide). A type
+	// parameter stands for its core type. A basic, `.d.ts`, func or interface
+	// type is not one of those and yields `lit: null`, as does a type that
+	// already failed to resolve (it has its error).
+	_literalType(expr, t, scope) {
+		let type = t;
+		let base = this._deepUnderlying(t);
+		if (expr.typeExpr === null && base?.kind === "pointer") {
+			type = this.resolveType(base.base);
+			base = this._deepUnderlying(type);
+		}
+		const lit = base?.kind === "typeParam" ? this._coreType(base, scope) : base;
+		if (["struct", "array", "slice", "map", "simd"].includes(lit?.kind))
+			return { type, lit };
+		return { type, lit: null, tainted: !!(t?._tainted || base?._tainted) };
+	},
+
+	// Go gives an elided literal its type from the element or key type of the
+	// enclosing array, slice or map literal only. Anywhere else (a struct
+	// field, a call argument) there is none to take.
+	_checkUntypedCompositeLit(expr, scope) {
+		this.err("missing type in composite literal", expr);
+		return this._checkUnknownCompositeLit(expr, scope, TAINTED_ANY);
 	},
 
 	checkCompositeLit(expr, scope, hintType = null) {
+		if (expr.typeExpr === null && !hintType)
+			return this._checkUntypedCompositeLit(expr, scope);
 		const t =
 			expr.typeExpr === null
-				? (hintType ?? ANY)
+				? hintType
 				: this.resolveTypeNode(expr.typeExpr, scope);
-		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
-		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
-			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
-			return t;
-		}
-		if (this._isInvalidLiteralType(expr, t, base, scope)) {
+		const { type, lit: base, tainted } = this._literalType(expr, t, scope);
+		if (tainted) return this._checkUnknownCompositeLit(expr, scope, t);
+		if (!base) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
 		}
 		if (this._isSliceOrArray(base)) this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
-		if (base?.kind === "struct")
-			return this._checkStructCompositeLit(expr, scope, t, base);
-		if (base?.kind === "simd")
-			return this._checkSimdCompositeLit(expr, scope, t, base);
-		if (this._isSliceOrArray(base))
-			return this._checkSliceArrayCompositeLit(expr, scope, t, base, typeNode);
-		if (base?.kind === "map")
-			return this._checkMapCompositeLit(expr, scope, t, base);
-		return this._checkUnknownCompositeLit(expr, scope, t);
+		this._checkLiteralElems(expr, scope, type, base, typeNode);
+		return t;
+	},
+
+	// Checks the elements of a literal of `type` (its holder is `base`) and
+	// leaves the type the literal was given to the caller.
+	_checkLiteralElems(expr, scope, type, base, typeNode) {
+		if (base.kind === "struct")
+			this._checkStructCompositeLit(expr, scope, type, base);
+		else if (base.kind === "simd")
+			this._checkSimdCompositeLit(expr, scope, type, base);
+		else if (this._isSliceOrArray(base))
+			this._checkSliceArrayCompositeLit(expr, scope, type, base, typeNode);
+		else this._checkMapCompositeLit(expr, scope, type, base);
 	},
 
 	_checkSimdCompositeLit(expr, scope, t, base) {

@@ -153,15 +153,15 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
   - Done when: all 5 parenthesised union array fields in `stdlib/gofront/webgpu/webgpu.d.ts` parse to their element types, `dev.createRenderPipeline` compiles with 0 errors, and `"targets": []any{...}` is rejected
 
 ### Phase 2: Checker Soundness for `.d.ts` Types, Operators & Unused Imports (roots `dts-type-accepted-as-value`, `import-used-universe-fallback`, `namespace-operand-kind-loose`)
-- [ ] Task 2.1: Reject `.d.ts` types in composite literals and value member selectors (T3.1–T3.2)
+- [x] Task 2.1: Reject `.d.ts` types in composite literals and value member selectors (T3.1–T3.2)
   - Files: `src/typechecker/expressions.js` (`_isInvalidLiteralType`, `_checkSelectorExpr`)
   - Test: `test/unit/compiler/web-packages.test.js`, `test/unit/types/dts-dictionary.test.js`: negative `assertErrorContains` tests for `fetch.Response{}`, `dom.Element{}`, `&dom.Element{}`, elided `[]dom.Element{{}}` and `map[string]dom.Element{"a": {}}`, `webgpu.BufferDescriptor{}`, local `Plain{}`, `fetch.Response.clone`, `webgpu.Device.createBuffer`, `dom.Element.tagName`; controls for bare universe `Response`, `strings.Builder{}`, `declare namespace N`
   - Done when: every `.d.ts` type in composite-literal (typed or elided) or value-selector position fails at compile time with clear diagnostics
-- [ ] Task 2.2: Restrict `_importUsed` to the importing file's scope (T4.1–T4.2)
+- [x] Task 2.2: Restrict `_importUsed` to the importing file's scope (T4.1–T4.2)
   - Files: `src/typechecker/index.js` (`_importUsed`)
   - Test: `test/unit/compiler/imports.test.js`, `test/unit/compiler/web-packages.test.js`: T4.1 (`import len "./sub"` + sibling `len("abc")`, `import "gofront/fetch"` + sibling `fetch("/x")`), T4.2 (`import console "./sub"` + sibling `console.log`), plus controls (`fetch.Response` type-only use, same-file value use, `gofront/simd`/`gofront/shared`)
   - Done when: unused imports matching universe bindings are reported even when a sibling file uses the universe binding
-- [ ] Task 2.3: Classify `.d.ts` namespaces out of `"loose"` in operators and untyped-constant conversion (T5.1–T5.2)
+- [x] Task 2.3: Classify `.d.ts` namespaces out of `"loose"` in operators and untyped-constant conversion (T5.1–T5.2)
   - Files: `src/typechecker/operators.js` (`operandKindOf`, `COMPARABLE_KINDS`), `src/typechecker/assignability.js` (`CONST_REJECTING_KINDS`)
   - Test: `test/unit/types/browser-globals.test.js`, `test/unit/types/numeric-operands.test.js`: negative `assertErrorContains` tests for `window + 1`, `w + 1`, `w += 1`, `w + w`, `w - 1`, `w * 2`, `w < w`, `w == 1`, `w == "x"`, `w && true`, `w || false`, `!w`, `-w`, `+w`, `^w`; controls for `w == nil`, `w != nil`, `w == w2`, `e == n`, `w == d`
   - Done when: arithmetic, ordering, logical, unary, and constant-equality ops on `.d.ts` values fail at compile time while `nil` and same/derived-type reference equality keep passing

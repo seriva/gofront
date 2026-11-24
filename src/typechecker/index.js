@@ -465,9 +465,7 @@ export class TypeChecker {
 	}
 
 	_importUsed(name, filename) {
-		return (
-			this._fileScope(filename)._used.has(name) || this.universe._used.has(name)
-		);
+		return this._fileScope(filename)._used.has(name);
 	}
 
 	// Return a snapshot of all user-defined globals (excludes built-ins).

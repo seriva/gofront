@@ -337,6 +337,55 @@ test("a dictionary literal runs as a plain object", () => {
 	assertEqual(out.trim(), "5");
 });
 
+section(".d.ts — a type is not a value");
+
+test("a composite literal of a declared interface or dictionary is rejected", () => {
+	const { errors } = compile(`func main() {
+	_ = Plain{}
+	_ = Desc{}
+	_ = []Plain{{}}
+}`);
+	assertErrorContains(errors, "invalid composite literal type Plain");
+	assertErrorContains(errors, "invalid composite literal type Desc");
+	assertEqual(errors.length, 3);
+});
+
+test("a Go struct literal and a map-built dictionary still compile", () => {
+	const { errors } = compile(`type S struct{ a int }
+
+func main() {
+	_ = S{a: 1}
+	_ = []S{{a: 1}}
+	println(create(map[string]any{"size": 1}))
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a variable that shares its name with a declared type is a value", () => {
+	const { js, errors } = compileDts(
+		`interface Foo { x: number; }
+declare var Foo: Foo;`,
+		`package main
+import "js:./types.d.ts"
+func main() { _ = Foo.x }`,
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	assert(js.includes("Foo.x"));
+});
+
+test("an elided literal is missing its type in a field and cannot stand for a pointer to a basic type", () => {
+	const { errors } = compile(`type S struct{ x int }
+
+func main() {
+	_ = S{x: {}}
+	_ = S{{}}
+	_ = []*int{{}}
+}`);
+	assertErrorContains(errors, "missing type in composite literal");
+	assertErrorContains(errors, "invalid composite literal type *int");
+	assertEqual(errors.length, 3);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
