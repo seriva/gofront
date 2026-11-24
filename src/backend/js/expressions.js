@@ -1461,6 +1461,8 @@ export const expressionGenMethods = {
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}${this._promotedPath(expr)}.${this._jsMemberName(expr)}`;
+		if (this._isHostMethodValue(expr))
+			return this._genHostMethodValue(sel, base);
 		if (expr._isMethodValue && !expr._callee) {
 			// A value receiver is copied when the method value is evaluated.
 			const t = expr.expr._type;
@@ -1469,6 +1471,27 @@ export const expressionGenMethods = {
 			return `${sel}.bind(${base})`;
 		}
 		return sel;
+	},
+
+	// `el.method` or `window.fn` read as a value: a method of a `.d.ts` object
+	// (a callback-typed property is read as it is).
+	_isHostMethodValue(expr) {
+		const t = expr._type;
+		return (
+			!expr._callee &&
+			t?._hostFunc === true &&
+			!t._dts &&
+			expr.expr?._type?._dtsType === true
+		);
+	},
+
+	// The method bound to its object, which is evaluated once. A member the
+	// host lacks stays `undefined`, so `window.matchMedia != nil` still tests
+	// for it.
+	_genHostMethodValue(sel, base) {
+		if (/^[\w$.]+$/.test(base)) return `${sel}?.bind(${base})`;
+		const m = sel.slice(base.length);
+		return `((__r) => __r${m}?.bind(__r))(${base})`;
 	},
 
 	// `pkg.Fn` used as a value (not called): a stdlib function is inlined at
@@ -1715,6 +1738,7 @@ export const expressionGenMethods = {
 
 	_calleeIsGoVariadic(call) {
 		const f = call.func;
+		if (f._type?._hostFunc === true) return false;
 		if (f.kind === "Ident") {
 			if (this.variadicFns?.has(f.name)) return true;
 			// A local func value (closure or parameter) compiled from Go source.
@@ -1754,6 +1778,8 @@ export const expressionGenMethods = {
 	// rest array or type parameter to protect from the caller's aggregates.
 	_calleeIsBrowserApi(call) {
 		const f = call.func;
+		// A stored one (`fn := console.log; fn(x)`) is still JavaScript.
+		if (f._type?._hostFunc === true) return true;
 		if (f.kind === "Ident")
 			return BROWSER_GLOBALS.has(f.name) && !this.variadicFns?.has(f.name);
 		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;

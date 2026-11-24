@@ -19,10 +19,12 @@ import {
 } from "../../../src/typechecker/types.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	compile,
 	compileDir,
+	runJs,
 	section,
 	summarize,
 	test,
@@ -453,6 +455,115 @@ func g(k map[dom.Element]int) {}`),
 	assertErrorContains(errors, "non-numeric type dom.Window");
 	assertErrorContains(errors, "cannot convert 1");
 	assertEqual(errors.length, 4);
+});
+
+section("Typed browser globals — stored function values");
+
+const compiled = (src) => {
+	const { js, errors } = compile(body(src));
+	assertEqual(errors.map((e) => e.message).join(), "");
+	return js;
+};
+
+const absent = (js, text) =>
+	assert(!js.includes(text), `unexpected ${text} in the output`);
+
+test("a stored browser function binds its receiver and copies nothing", () => {
+	const js = compiled(`type P struct{ X int }
+
+func main() {
+	p := P{1}
+	arr := [2]int{1, 2}
+	fn := console.log
+	fn(p)
+	fn(arr)
+}`);
+	assertContains(js, "console.log?.bind(console)");
+	assertContains(js, "fn(p);");
+	assertContains(js, "fn(arr);");
+	absent(js, "p.__clone()");
+	absent(js, "arr?.slice()");
+});
+
+test("a stored browser function spreads a slice as a JavaScript spread", () => {
+	const js = compiled(`func main() {
+	fn := console.log
+	xs := []any{1, 2}
+	fn(xs...)
+}`);
+	assertContains(js, "fn(...xs)");
+	absent(js, "__sp");
+});
+
+test("a stored browser method keeps its receiver and takes any argument count", () => {
+	const js = compiled(`func main() {
+	st := window.setTimeout
+	st(func() {}, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+	ce := document.createElement
+	el := ce("div")
+	println(el.tagName)
+}`);
+	absent(js, "too many arguments");
+	const out = runJs(js, {
+		window: { setTimeout() {} },
+		document: {
+			createElement(tag) {
+				if (this?.tag !== "doc") throw new Error("lost receiver");
+				return { tagName: tag };
+			},
+			tag: "doc",
+		},
+	});
+	assertEqual(out, "div");
+});
+
+test("a method value of a browser object evaluates its receiver once", () => {
+	const js = compiled(`func main() {
+	fn := document.getElementById("a").getAttribute
+	println(fn("k"))
+}`);
+	const looked = [];
+	const out = runJs(js, {
+		document: {
+			getElementById(id) {
+				looked.push(id);
+				return {
+					id,
+					getAttribute(name) {
+						return `${this.id}-${name}`;
+					},
+				};
+			},
+		},
+	});
+	assertEqual(looked.join(), "a");
+	assertEqual(out, "a-k");
+});
+
+test("a nil check of a missing browser method still reads the property", () => {
+	const js = compiled(`func main() {
+	println(window.matchMedia != nil)
+}`);
+	assertEqual(runJs(js, { window: {} }), "false");
+	assertEqual(runJs(js, { window: { matchMedia() {} } }), "true");
+});
+
+test("a Go variadic function value keeps its interface boxing", () => {
+	const js = compiled(`type P struct{ X int }
+
+func keep(xs ...any) {}
+
+func main() {
+	p := P{1}
+	k := keep
+	k(p)
+	var g func(...any) = console.log
+	g(p)
+	console.log(p)
+}`);
+	assertContains(js, "k(__ifv(p));");
+	assertContains(js, "g(__ifv(p));");
+	assertContains(js, "console.log(p);");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
