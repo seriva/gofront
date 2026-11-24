@@ -716,6 +716,159 @@ func main() {
 	);
 });
 
+test("a stored browser function assigned other browser functions stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	fn = console.warn
+	other := console.error
+	fn = other
+	fn = nil
+	fn = console.info
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertContains(js, "fn(x);");
+	const seen = [];
+	runJs(js, {
+		console: { info: (...a) => seen.push(JSON.stringify(a)) },
+	});
+	assertEqual(seen.join(), "[5]");
+});
+
+test("a stored browser function assigned a method of a local browser object stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	c := console
+	fn := console.log
+	fn = c.warn
+	fn = console.info
+	fn(x)
+}`);
+	absent(js, "__ifv");
+});
+
+test("a stored browser function assigned a Go function after a browser one is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	fn = console.warn
+	fn = func(a ...any) { kept = a }
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0])
+}`);
+	assertEqual(runJs(js), "true 1");
+});
+
+test("a stored browser function assigned a variable that holds a Go function is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	fn := console.log
+	other := console.error
+	other = func(a ...any) { kept = a }
+	fn = other
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function assigned a browser function of a Go value is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ log func(...any) }
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	l := L{func(a ...any) { kept = a }}
+	fn := console.log
+	fn = l.log
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function a short variable redeclaration assigns is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func getFn(kept *[]any) (func(...any), int) {
+	return func(a ...any) { *kept = a }, 1
+}
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	fn, n := getFn(&kept)
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0], n)
+}`);
+	assertEqual(runJs(js), "true 1 1");
+});
+
+test("a stored browser function written through a pointer is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	p := &fn
+	*p = func(a ...any) { kept = a }
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0])
+}`);
+	assertEqual(runJs(js), "true 1");
+});
+
+test("a declared function with an optional parameter, stored and assigned a Go function, needs the argument", () => {
+	const dts = "declare function foo(a?: number): void;\n";
+	const ok = compileDts(
+		dts,
+		body(`import "js:./types.d.ts"
+
+func main() {
+	fn := foo
+	fn()
+}`),
+	);
+	assertEqual(ok.errors.map((e) => e.message).join(), "");
+	const { errors } = compileDts(
+		dts,
+		body(`import "js:./types.d.ts"
+
+func main() {
+	fn := foo
+	fn = func(a float64) { println(a) }
+	fn()
+}`),
+	);
+	assertErrorContains(errors, "Too few arguments: expected 1, got 0");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
