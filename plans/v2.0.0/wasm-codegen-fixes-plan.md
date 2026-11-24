@@ -152,7 +152,7 @@ Roots:
   - Done when: `real(a[0])` prints `0` for every W2.5 program with no null-pointer trap
 
 ### Phase 2: Monomorphised Local Types (root `wasm-monomorph-local-type-collision`)
-- [ ] Task 2.1: Move `renameLocalTypes` to the `lower` layer
+- [x] Task 2.1: Move `renameLocalTypes` to the `lower` layer
   - Files: `src/lower/local-types.js` (new), `src/link/type-names.js` (re-export)
   - Test: `test/unit/types/identity.test.js`: new case importing `renameLocalTypes` from `src/lower/local-types.js` that renames two same-named local `TypeDecl`s in two `FuncDecl`s to distinct `__L<n>` names (fails first: module missing); existing `src/link/type-names.js` import keeps passing
   - Done when: `renameLocalTypes` is defined only in `src/lower/local-types.js`, existing callers are unchanged, and `npm run check` passes
