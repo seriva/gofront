@@ -370,6 +370,91 @@ test("a member of an element read from a call is still read", () => {
 	assertEqual(errors.length, 0);
 });
 
+section("Typed browser globals — operators");
+
+const OPS_PRELUDE = `import "gofront/dom"
+
+func f(w dom.Window, w2 dom.Window, e dom.Element, n dom.Node, d dom.Document) {`;
+
+for (const [op, want] of [
+	["_ = window + 1", "mismatched types dom.Window and untyped int"],
+	["_ = w + 1", "mismatched types dom.Window and untyped int"],
+	["w += 1", "mismatched types dom.Window and untyped int"],
+	["_ = w + w", "operator + not defined on w"],
+	["_ = w - 1", "mismatched types dom.Window and untyped int"],
+	["_ = w * 2", "mismatched types dom.Window and untyped int"],
+	["_ = w < w", "operator < not defined on dom.Window"],
+	["_ = w == 1", "mismatched types dom.Window and untyped int"],
+	["_ = 1 == w", "mismatched types untyped int and dom.Window"],
+	['_ = w == "x"', "mismatched types dom.Window and untyped string"],
+	["_ = w && true", "mismatched types dom.Window and untyped bool"],
+	["_ = w || false", "mismatched types dom.Window and untyped bool"],
+	["_ = !w", "operator ! not defined on w"],
+	["_ = -w", "operator - not defined on w"],
+	["_ = +w", "operator + not defined on w"],
+	["_ = ^w", "operator ^ not defined on w"],
+	["_ = w == d", "mismatched types dom.Window and dom.Document"],
+]) {
+	test(`${op} on a browser value is rejected`, () => {
+		const { errors } = compile(
+			body(`${OPS_PRELUDE}
+	${op}
+}`),
+		);
+		assertErrorContains(errors, "invalid operation");
+		assertErrorContains(errors, want);
+		assertEqual(errors.length, 1);
+	});
+}
+
+test("the window global is not a number", () => {
+	const { errors } = compile(
+		body(`func main() {
+	_ = window + 1
+}`),
+	);
+	assertErrorContains(errors, "mismatched types dom.Window and untyped int");
+});
+
+test("a browser value still compares by reference and against nil", () => {
+	const { errors } = compile(
+		body(`${OPS_PRELUDE}
+	_ = w == nil
+	_ = w != nil
+	_ = nil == w
+	_ = w == w2
+	_ = e == n
+	_ = n != e
+	if window == nil {
+		return
+	}
+}
+
+func g(a dom.Element, b dom.Element) bool { return a == b }`),
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a browser value keeps its other operator errors", () => {
+	const { errors } = compile(
+		body(`${OPS_PRELUDE}
+	_ = w << 1
+	_ = 1 << w
+	w++
+	switch w {
+	case 1:
+	}
+}
+
+func g(k map[dom.Element]int) {}`),
+	);
+	assertErrorContains(errors, "shifted operand w");
+	assertErrorContains(errors, "invalid shift count");
+	assertErrorContains(errors, "non-numeric type dom.Window");
+	assertErrorContains(errors, "cannot convert 1");
+	assertEqual(errors.length, 4);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

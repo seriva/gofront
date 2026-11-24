@@ -161,7 +161,7 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
   - Files: `src/typechecker/index.js` (`_importUsed`)
   - Test: `test/unit/compiler/imports.test.js`, `test/unit/compiler/web-packages.test.js`: T4.1 (`import len "./sub"` + sibling `len("abc")`, `import "gofront/fetch"` + sibling `fetch("/x")`), T4.2 (`import console "./sub"` + sibling `console.log`), plus controls (`fetch.Response` type-only use, same-file value use, `gofront/simd`/`gofront/shared`)
   - Done when: unused imports matching universe bindings are reported even when a sibling file uses the universe binding
-- [ ] Task 2.3: Classify `.d.ts` namespaces out of `"loose"` in operators and untyped-constant conversion (T5.1–T5.2)
+- [x] Task 2.3: Classify `.d.ts` namespaces out of `"loose"` in operators and untyped-constant conversion (T5.1–T5.2)
   - Files: `src/typechecker/operators.js` (`operandKindOf`, `COMPARABLE_KINDS`), `src/typechecker/assignability.js` (`CONST_REJECTING_KINDS`)
   - Test: `test/unit/types/browser-globals.test.js`, `test/unit/types/numeric-operands.test.js`: negative `assertErrorContains` tests for `window + 1`, `w + 1`, `w += 1`, `w + w`, `w - 1`, `w * 2`, `w < w`, `w == 1`, `w == "x"`, `w && true`, `w || false`, `!w`, `-w`, `+w`, `^w`; controls for `w == nil`, `w != nil`, `w == w2`, `e == n`, `w == d`
   - Done when: arithmetic, ordering, logical, unary, and constant-equality ops on `.d.ts` values fail at compile time while `nil` and same/derived-type reference equality keep passing

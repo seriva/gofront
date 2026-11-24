@@ -1055,6 +1055,10 @@ export const expressionCheckMethods = {
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
 			return false;
+		// An imported name keeps meaning the type only where the import bound it:
+		// a local variable of that type (`var Widget Widget`) is a value too.
+		if (owner && owner !== this.universe && !this._isImportScope(owner))
+			return false;
 		return this._isImportScope(owner) || this.types.get(name) === t;
 	},
 

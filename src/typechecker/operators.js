@@ -31,6 +31,7 @@ const COMPARABLE_KINDS = set(
 	"array",
 	"interface",
 	"chan",
+	"namespace",
 );
 
 /** Operator → operand kinds it is defined on (binary form). */
@@ -67,7 +68,8 @@ export const UNARY_OPERAND_KINDS = {
 /**
  * Operand kind of a type: `integer`, `float`, `complex`, `string`, `bool`,
  * `pointer`, `struct`, `array`, `slice`, `map`, `func`, `chan`, `interface`,
- * `nil`, `typeParam`, or `loose` for a JS-dynamic or recovered type and the
+ * `namespace` (a `.d.ts` interface or class, compared by reference), `nil`,
+ * `typeParam`, or `loose` for a JS-dynamic or recovered type and the
  * kinds the checker models loosely (every operator accepts those).
  * `under` resolves a defined type to its underlying type.
  */
@@ -97,6 +99,7 @@ export function operandKindOf(t, under = underlyingOf) {
 		case "func":
 		case "chan":
 		case "interface":
+		case "namespace":
 			return u.kind;
 		default:
 			return "loose";
