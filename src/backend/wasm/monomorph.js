@@ -6,7 +6,7 @@
 // This pass specializes all generic templates reachable from code into concrete Go declarations
 // (e.g. Identity$int, Box$int, Stack$int.Push) and re-typechecks the monomorphised AST.
 
-import { renameLocalTypes } from "../../lower/local-types.js";
+import { renameLocalTypes, TYPE_REF_KINDS } from "../../lower/local-types.js";
 import { declaredTypeNames, forEachChild } from "../../lower/walk.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import { embeddedFieldName, PackageScope } from "../../typechecker/types.js";
@@ -974,18 +974,18 @@ export function monomorphise(programs, checker) {
 function sharedLocalTypeNames(progs) {
 	const apart = new Set();
 	const shared = new Map();
-	for (const [name, texts] of localTypeCopies(progs)) {
-		if (texts.length < 2) continue;
-		if (texts.every((t) => t === texts[0])) shared.set(name, texts[0]);
+	for (const [name, copies] of localTypeCopies(progs)) {
+		if (copies.length < 2) continue;
+		if (copies.every((c) => c.text === copies[0].text))
+			shared.set(name, copies[0].refs);
 		else apart.add(name);
 	}
 	// A type spelled with one that is renamed per copy differs between copies
 	// once that name does.
 	for (let moved = true; moved; ) {
 		moved = false;
-		for (const [name, text] of shared) {
-			if (![...apart].some((o) => text.includes(`"name":${JSON.stringify(o)}`)))
-				continue;
+		for (const [name, refs] of shared) {
+			if (![...apart].some((o) => refs.has(o))) continue;
 			shared.delete(name);
 			apart.add(name);
 			moved = true;
@@ -994,9 +994,22 @@ function sharedLocalTypeNames(progs) {
 	return new Set(shared.keys());
 }
 
-// Name -> the source text of every function-local declaration of that name.
+// Name -> the source text of every function-local declaration of that name,
+// and the type names that declaration refers to.  Only type references count:
+// a field, method or parameter spelled like a type is not one.
 function localTypeCopies(progs) {
 	const bare = (k, v) => (k.startsWith("_") ? undefined : v);
+	const refsOf = (node, refs = new Set()) => {
+		if (!node || typeof node !== "object") return refs;
+		if (Array.isArray(node)) {
+			for (const n of node) refsOf(n, refs);
+			return refs;
+		}
+		if (TYPE_REF_KINDS.has(node.kind) && typeof node.name === "string")
+			refs.add(node.name);
+		forEachChild(node, (c) => refsOf(c, refs));
+		return refs;
+	};
 	const copies = new Map();
 	const visit = (node, top) => {
 		if (!node || typeof node !== "object") return;
@@ -1006,7 +1019,7 @@ function localTypeCopies(progs) {
 		}
 		if (node.kind === "TypeDecl" && !top) {
 			const list = copies.get(node.name) ?? [];
-			list.push(JSON.stringify(node, bare));
+			list.push({ text: JSON.stringify(node, bare), refs: refsOf(node) });
 			copies.set(node.name, list);
 		}
 		forEachChild(node, (c) => visit(c, false));

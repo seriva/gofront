@@ -209,6 +209,32 @@ func main() {
 	);
 });
 
+test("a local type is not renamed onto a sibling local value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() {
+	type Q struct{ Y string }
+	Q__L1 := 42
+	fmt.Println(Q{"a"}.Y, Q__L1)
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	g()
+	f()
+}
+`,
+		"a 42\n1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

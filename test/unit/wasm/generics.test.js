@@ -2012,3 +2012,114 @@ func main() {
 		"5\nhi\n",
 	);
 });
+
+test("a per-instantiation local type does not take the name of a package func", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func Q__L1() int { return 42 }
+
+func g[T any](v T) {
+	type Q struct{ X T }
+	fmt.Println(Q{v}.X, Q__L1())
+}
+
+func main() {
+	g(5)
+	g("hi")
+}
+`,
+		"5 42\nhi 42\n",
+	);
+});
+
+test("a per-instantiation local type does not take the name of a package var", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var Q__L1 = 42
+
+func g[T any](v T) {
+	type Q struct{ X T }
+	fmt.Println(Q{v}.X, Q__L1)
+}
+
+func main() {
+	g(5)
+	g("hi")
+}
+`,
+		"5 42\nhi 42\n",
+	);
+});
+
+test("a per-instantiation local type does not take the name of a local variable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) {
+	type Q struct{ X T }
+	Q__L1 := 42
+	fmt.Println(Q{v}.X, Q__L1)
+}
+
+func main() {
+	g(5)
+	g("hi")
+}
+`,
+		"5 42\nhi 42\n",
+	);
+});
+
+test("an interface method named like a per-instantiation type keeps an independent local type shared", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type impl struct{}
+
+func (impl) A() int { return 9 }
+
+func g[T any](v T) any {
+	type A struct{ X T }
+	_ = A{v}
+	type B struct{ X interface{ A() int }; N int }
+	return B{impl{}, 3}
+}
+
+func main() {
+	fmt.Printf("%v %T\\n", g(1), g("x"))
+}
+`,
+		"{{} 3} main.B\n",
+	);
+});
+
+test("a func parameter named like a per-instantiation type keeps an independent local type shared", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) any {
+	type A struct{ X T }
+	_ = A{v}
+	type Map struct{ N int; F func(A int) }
+	return Map{3, nil}
+}
+
+func main() {
+	fmt.Printf("%v %T\\n", g(1), g("x"))
+}
+`,
+		"{3 <nil>} main.Map\n",
+	);
+});

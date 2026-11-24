@@ -39,11 +39,17 @@ export function renameLocalTypes(
 	keep = new Set(),
 ) {
 	const counts = new Map();
+	// Names of values (funcs, vars, consts, parameters, locals): a fresh type
+	// name must not spell one, or it would take that value over.
+	const values = new Set();
 	const count = (node) => {
 		if (!node || typeof node !== "object") return;
 		if (Array.isArray(node)) return node.forEach(count);
 		if (node.kind === "TypeDecl")
 			counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
+		if ((node.kind === "FuncDecl" || node.kind === "Ident") && node.name)
+			values.add(node.name);
+		for (const n of declaredNames(node)) values.add(n);
 		forEachChild(node, count);
 	};
 	for (const p of programs) count(p.decls);
@@ -52,7 +58,7 @@ export function renameLocalTypes(
 			.filter(([k, n]) => (n > 1 && !keep.has(k)) || reserved.has(k))
 			.map(([k]) => k),
 	);
-	const taken = new Set([...counts.keys(), ...reserved]);
+	const taken = new Set([...counts.keys(), ...reserved, ...values]);
 	let changed = false;
 	// Inner scopes first, so an outer rename never touches a nested
 	// declaration that already has its own name.  `visible` holds the value
@@ -171,7 +177,7 @@ function withTypeParams(node, tparams) {
 	return new Set([...tparams, ...node.typeParams.map((t) => t.name)]);
 }
 
-const TYPE_REF_KINDS = new Set([
+export const TYPE_REF_KINDS = new Set([
 	"TypeDecl",
 	"TypeName",
 	"GenericTypeName",
