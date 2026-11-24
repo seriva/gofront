@@ -1635,7 +1635,7 @@ type MyAny any
 
 func main() {
 	var v MyAny = 2
-	_ = window.x + v
+	_ = JSON.x + v
 }
 `,
 		{ target: "js" },
@@ -1649,7 +1649,7 @@ test("a JS-dynamic value indexes a slice on js", () => {
 
 func main() {
 	xs := []int{1, 2}
-	_ = xs[window.i]
+	_ = xs[JSON.i]
 }
 `,
 		{ target: "js" },

@@ -296,9 +296,28 @@ export const expressionCheckMethods = {
 			case "ImagLit":
 				return UNTYPED_COMPLEX;
 			case "Ident": {
-				const t = expr._universe
-					? this.universe.lookup(expr.name)
-					: scope.lookup(expr.name);
+				// A declaration package named like a browser global
+				// (`import "gofront/fetch"`) is a qualifier, never the global:
+				// where no member is selected (`fetch(url)`) the name is the
+				// global again, so the import can supply types while the call
+				// keeps working. That name is not a use of the package, so the
+				// global is read without marking the file scope's name used.
+				const globalObj =
+					!expr._universe &&
+					!expr._selectorBase &&
+					BROWSER_GLOBALS.has(expr.name) &&
+					scope.lookupObject(expr.name)?.type?._dtsPackage
+						? this.universe.object(expr.name)
+						: null;
+				let t;
+				if (globalObj) {
+					scope = this.universe;
+					t = globalObj.type;
+				} else {
+					t = expr._universe
+						? this.universe.lookup(expr.name)
+						: scope.lookup(expr.name);
+				}
 				// Generated and stdlib Go resolves every property of the name
 				// from the universe, never from the user's scope.
 				if (expr._universe) scope = this.universe;
@@ -355,7 +374,10 @@ export const expressionCheckMethods = {
 				// it so generated code keeps reaching the real global.  Package
 				// namespaces (`import console "./util"`) are never renamed: JS
 				// selects their members directly (bundledPackages).
-				if (shadowsJsGlobal(expr.name) && t.kind !== "namespace") {
+				if (
+					shadowsJsGlobal(expr.name) &&
+					(t.kind !== "namespace" || t._dtsType)
+				) {
 					const owner = scope.lookupScope(expr.name);
 					if (
 						owner !== this.universe &&
@@ -400,7 +422,7 @@ export const expressionCheckMethods = {
 						expr,
 					);
 				}
-				return this.checkExpr(expr.expr, scope);
+				return this._awaitedType(this.checkExpr(expr.expr, scope));
 			}
 			case "InstantiationExpr":
 				return this._checkInstantiationExpr(expr, scope);
@@ -1052,6 +1074,7 @@ export const expressionCheckMethods = {
 
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
+		expr.expr._selectorBase = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?._tainted) return TAINTED_ANY;
 		const exclErr = this._checkExcludedSelectorExpr(expr, baseType);
@@ -1934,6 +1957,7 @@ export const expressionCheckMethods = {
 		if (srcType && !isAny(srcType)) {
 			let underlying = this._deepUnderlying(srcType);
 			underlying = this.resolveType(underlying);
+			if (this._isDtsAssertion(underlying, targetType)) return targetType;
 			if (underlying?.kind !== "interface") {
 				this.err(
 					`invalid type assertion: ${typeStr(srcType)} is not an interface`,
@@ -1948,6 +1972,24 @@ export const expressionCheckMethods = {
 		}
 
 		return targetType;
+	},
+
+	// What `await` yields: T for a `Promise<T>` from a `.d.ts` declaration (no
+	// value for `Promise<void>`), else the operand's own type (an `async`
+	// function's call already has its declared result).
+	_awaitedType(t) {
+		if (t?.kind !== "promise") return t;
+		return this.resolveType(t.elem);
+	},
+
+	// `x.(T)` with `x` a `.d.ts` interface or class value and `T` one too:
+	// JavaScript has no runtime type to test, so the assertion passes the
+	// value through (a GoFront package namespace is not such a type).
+	_isDtsAssertion(srcType, targetType) {
+		return (
+			srcType?._dtsType === true &&
+			this.resolveType(targetType)?._dtsType === true
+		);
 	},
 
 	// `x.(T)` with a concrete T can only succeed when T has every method of
@@ -2788,17 +2830,22 @@ export const expressionCheckMethods = {
 	},
 
 	_checkArgCount(fnType, argTypes, expr) {
-		const minArgs = fnType.params.filter(
-			(_, i) => !fnType.variadic || i < fnType.params.length - 1,
-		).length;
+		// A `.d.ts` signature with optional parameters records how many a call
+		// must pass (`minArgs`).
+		const optional = fnType.minArgs !== undefined;
+		const minArgs =
+			fnType.minArgs ??
+			fnType.params.filter(
+				(_, i) => !fnType.variadic || i < fnType.params.length - 1,
+			).length;
 		if (argTypes.length < minArgs)
 			this.err(
-				`Too few arguments: expected ${fnType.params.length}, got ${argTypes.length}`,
+				`Too few arguments: expected ${optional ? "at least " : ""}${minArgs}, got ${argTypes.length}`,
 				expr,
 			);
 		if (!fnType.variadic && argTypes.length > fnType.params.length)
 			this.err(
-				`Too many arguments: expected ${fnType.params.length}, got ${argTypes.length}`,
+				`Too many arguments: expected ${optional ? "at most " : ""}${fnType.params.length}, got ${argTypes.length}`,
 				expr,
 			);
 	},

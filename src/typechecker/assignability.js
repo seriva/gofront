@@ -874,7 +874,7 @@ export const assignabilityMethods = {
 		return (
 			u?.kind === "struct" ||
 			u?.kind === "array" ||
-			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name))
+			(u?.kind === "basic" && !NIL_LOOSE_BASICS.has(u.name) && !u._nullable)
 		);
 	},
 
@@ -1087,7 +1087,90 @@ export const assignabilityMethods = {
 		if (this._checkTypedArrayAssignable(target, source, at, operand ?? at, ctx))
 			return;
 		if (this._checkFuncAssignable(target, source, mismatch)) return;
-		if (!identical(target, source)) mismatch();
+		this._checkNominalAssignable(target, source, operand ?? node, mismatch);
+	},
+
+	// Identical types, a `.d.ts` interface whose chain of `extends` reaches
+	// the target, or a value a `.d.ts` dictionary takes; anything else is a
+	// mismatch.
+	_checkNominalAssignable(target, source, operand, mismatch) {
+		if (identical(target, source) || this._dtsDerivesFrom(source, target))
+			return;
+		if (!this._checkDtsDictionary(target, source, operand)) mismatch();
+	},
+
+	// A `.d.ts` dictionary (see src/dts-parser.js) takes a `map[string]any`
+	// literal and a field-only struct whose names are its members. Returns
+	// false when `source` is neither, else checks the members (reporting
+	// what is wrong) and returns true.
+	_checkDtsDictionary(target, source, operand) {
+		if (!target?._dictionary) return false;
+		const src = this.resolveType(this._deepUnderlying(source));
+		let lit = operand;
+		while (lit?.kind === "ParenExpr") lit = lit.expr;
+		if (src?.kind === "map" && lit?.kind === "CompositeLit") {
+			this._checkDictionaryLiteral(target, lit);
+			return true;
+		}
+		if (src?.kind === "struct" && !this._structHasMethods(source)) {
+			this._checkDictionaryStruct(target, src, operand);
+			return true;
+		}
+		return false;
+	},
+
+	_structHasMethods(t) {
+		return t?.kind === "named" && (t.methods?.size ?? 0) > 0;
+	},
+
+	// The type of the member `name` of dictionary `dict`, its own or
+	// inherited; undefined when it has none.
+	_dictionaryMember(dict, name) {
+		if (Object.hasOwn(dict.members, name)) return dict.members[name];
+		return this._dtsInheritedMember(dict, name);
+	},
+
+	_checkDictionaryLiteral(dict, lit) {
+		for (const elem of lit.elems) {
+			if (elem.kind !== "KeyValueExpr") continue;
+			const key = elem.key._const;
+			if (typeof key?.v !== "string") {
+				this.err("dictionary key must be a constant string", elem.key);
+				continue;
+			}
+			const memberType = this._dictionaryMember(dict, key.v);
+			if (memberType === undefined) {
+				this.err(
+					`unknown member '${key.v}' in dictionary ${typeStr(dict)}`,
+					elem.key,
+				);
+				continue;
+			}
+			this.assertAssignable(
+				memberType,
+				elem.value._type,
+				elem.value,
+				`member ${key.v} of dictionary ${typeStr(dict)}`,
+			);
+		}
+	},
+
+	_checkDictionaryStruct(dict, struct, operand) {
+		for (const [name, fieldType] of struct.fields ?? []) {
+			const memberType = this._dictionaryMember(dict, name);
+			if (memberType === undefined) {
+				this.err(
+					`unknown field '${name}' in dictionary ${typeStr(dict)}`,
+					operand,
+				);
+				continue;
+			}
+			if (!this._assignableQuietly(memberType, fieldType))
+				this.err(
+					`cannot use field '${name}' (type ${typeStr(fieldType)}) as ${typeStr(this.resolveType(memberType))} in dictionary ${typeStr(dict)}`,
+					operand,
+				);
+		}
 	},
 
 	// The element of an array or the base of a pointer must be identical to
@@ -1117,6 +1200,10 @@ export const assignabilityMethods = {
 		)
 			return;
 		if (target.kind === "typeParam") return;
+		// An `any` the generated Web API declarations spell (`console.log`'s
+		// argument, `setTimeout`'s handler) hands the value to the browser as
+		// it is, never as a Go interface value.
+		if (target._hostAny) return;
 		let tBase = this.resolveType(target);
 		tBase = this._deepUnderlying(tBase);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
@@ -1728,10 +1815,68 @@ export const assignabilityMethods = {
 		const tFunc = this._deepUnderlying(target);
 		const sFunc = this._deepUnderlying(source);
 		if (tFunc?.kind === "func" && sFunc?.kind === "func") {
-			if (!this._implementsMethod(tFunc, sFunc)) mismatch();
+			const ok = tFunc._dts
+				? this._dtsCallbackOk(tFunc, sFunc)
+				: this._implementsMethod(tFunc, sFunc);
+			if (!ok) mismatch();
 			return true;
 		}
 		return false;
+	},
+
+	// Whether a Go func `source` may be passed where the `.d.ts` callback type
+	// `target` is wanted. JavaScript calls it with the target's arguments and
+	// ignores what it does not take, so `source` may take fewer parameters and
+	// may return nothing where the callback's result is `void`, `undefined`,
+	// `any`, nullable or a `Promise<void>`.
+	_dtsCallbackOk(target, source) {
+		const tp = target.params ?? [];
+		const sp = source.params ?? [];
+		if (sp.length > tp.length && !target.variadic) return false;
+		for (const [i, s] of sp.entries()) {
+			const t = tp[Math.min(i, tp.length - 1)];
+			if (!this._dtsCallbackParamOk(t, s)) return false;
+		}
+		return this._dtsCallbackResultOk(target, source);
+	},
+
+	// A parameter the callback's caller passes as `t` and `source` takes as
+	// `s`: the same type, a `.d.ts` interface on the same `extends` chain (so
+	// `func(e MouseEvent)` serves an `Event` callback), or `any` on either
+	// side.
+	_dtsCallbackParamOk(t, s) {
+		const target = this.resolveType(t);
+		const source = this.resolveType(s);
+		if (isAny(target) || isAny(source) || identical(target, source))
+			return true;
+		return (
+			this._dtsDerivesFrom(source, target) ||
+			this._dtsDerivesFrom(target, source)
+		);
+	},
+
+	_dtsCallbackResultOk(target, source) {
+		const results = (f) =>
+			this._unpackReturns(f.returns ?? []).filter(
+				(r) => r && !isVoid(r) && !isNil(r),
+			);
+		const want = results(target);
+		const got = results(source);
+		if (want.length === 0) return true;
+		if (got.length === 0) return want.every((t) => this._mayReturnNothing(t));
+		return (
+			want.length === got.length &&
+			want.every((t, i) =>
+				this._assignableQuietly(this._awaitedType(t), got[i]),
+			)
+		);
+	},
+
+	// Whether a callback result of type `t` may be left out: JavaScript yields
+	// `undefined`, which `any`, a nullable type and `Promise<void>` hold.
+	_mayReturnNothing(t) {
+		if (isAny(t) || t._nullable) return true;
+		return t.kind === "promise" && isVoid(this._awaitedType(t));
 	},
 
 	// ── Interface satisfaction ────────────────────────────────────────

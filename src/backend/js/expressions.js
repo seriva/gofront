@@ -381,9 +381,6 @@ function wrapForJsOp(code, childOp, parentOp, isRight) {
 const WEB_PASCAL_ALIAS_TYPES = new Set([
 	"WebGLRenderingContext",
 	"WebGL2RenderingContext",
-	"GPUDevice",
-	"GPUQueue",
-	"GPUAdapter",
 ]);
 
 const INT_TYPE_NAMES = new Set([
@@ -1735,12 +1732,25 @@ export const expressionGenMethods = {
 		const argT = expr.args[i]._type;
 		if (!this._aggregateBase(argT) && !this._typeParamClone(argT, ""))
 			return false;
+		if (this._calleeIsBrowserApi(expr)) return false;
 		let ft = expr.func?._type ?? expr.func?.expr?._type;
 		if (ft?.kind === "generic") ft = ft.underlying;
 		if (ft?.kind !== "func") return false;
 		const params = ft.params ?? [];
 		if (ft.variadic && i >= params.length - 1) return true;
 		return params[i]?.kind === "typeParam";
+	},
+
+	// A call of a browser API the `gofront/*` declarations type: a global
+	// (`alert`), or a method of a value of a declared interface or class
+	// (`console.log`, `el.classList.add`). Its callee is JavaScript, so it has no
+	// rest array or type parameter to protect from the caller's aggregates.
+	_calleeIsBrowserApi(call) {
+		const f = call.func;
+		if (f.kind === "Ident")
+			return BROWSER_GLOBALS.has(f.name) && !this.variadicFns?.has(f.name);
+		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;
+		return f.expr?._type?._dtsType === true;
 	},
 
 	_genPointerSelectorField(expr, base) {

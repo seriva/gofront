@@ -1,4 +1,4 @@
-// GoFront test suite — WebGL2, WebGPU, and TypedArray typings (Phase 5)
+// GoFront test suite — WebGL2 and TypedArray typings (Phase 5)
 
 import {
 	assert,
@@ -10,7 +10,7 @@ import {
 	test,
 } from "../helpers.js";
 
-section("WebGL2 & WebGPU Typings (Phase 5)");
+section("WebGL2 & TypedArray Typings (Phase 5)");
 
 test("ArrayBuffer and DataView types and members compile without error", () => {
 	const { errors, js } = compile(`package main
@@ -191,22 +191,6 @@ func main() {
 	_ = ext
 }`);
 	assertEqual(errors.length, 0);
-});
-
-test("WebGPU device and queue typings compile without error", () => {
-	const { errors, js } = compile(`package main
-
-func main() {
-	var dev GPUDevice
-	q := dev.queue
-	q.Submit(nil)
-	buf := dev.CreateBuffer(nil)
-	_ = buf
-}`);
-	assertEqual(errors.length, 0);
-	assert(js.includes("dev.queue"));
-	assert(js.includes("q.submit"));
-	assert(js.includes("dev.createBuffer"));
 });
 
 test("TypedArray buffer manipulation executes correctly at runtime", () => {

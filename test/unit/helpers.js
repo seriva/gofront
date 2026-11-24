@@ -21,7 +21,11 @@ import {
 	compileWasm as compileWasmSource,
 	evictParseCache,
 } from "../../src/compiler.js";
-import { DtsParser, parseDts } from "../../src/dts-parser.js";
+import {
+	DtsParser,
+	parseDeclarationPackage,
+	parseDts,
+} from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
 import { isBuiltinPackage, resolveStdlibSource } from "../../src/resolver.js";
@@ -34,6 +38,7 @@ export {
 	join,
 	Lexer,
 	Parser,
+	parseDeclarationPackage,
 	parseDts,
 };
 
@@ -158,6 +163,17 @@ export function compile(
 	return errors.length > 0
 		? { js: null, errors }
 		: { js: res.js, errors: [], warnings: res.warnings };
+}
+
+// Compiles `source` (the one Go file of a package) next to `types.d.ts`,
+// which the source imports as `js:./types.d.ts`.
+export function compileDts(dts, source, options = {}) {
+	return withTempDir({ "types.d.ts": dts, "main.go": source }, (dir) => {
+		const { res, errors } = toCompileResult(() => compileDir(dir, options));
+		return errors.length > 0
+			? { js: null, errors }
+			: { js: res.js, errors: [], warnings: res.warnings };
+	});
 }
 
 export function compileFile(path) {

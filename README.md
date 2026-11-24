@@ -65,6 +65,8 @@ With built-in support for declarative DOM rendering via the [`gom`](https://www.
 ```go
 package main
 
+import "gofront/dom"
+
 type Todo struct {
     id   int
     text string
@@ -81,7 +83,8 @@ func addTodo(text string) {
 func main() {
     btn := document.getElementById("add-btn")
     btn.addEventListener("click", func() {
-        addTodo(document.getElementById("input").value)
+        input := document.getElementById("input").(dom.HTMLInputElement)
+        addTodo(input.value)
     })
 }
 ```

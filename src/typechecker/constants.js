@@ -351,7 +351,9 @@ export const constantCheckMethods = {
 			return v ? this._convertConstTo(v, target) : null;
 		}
 		const fn = expr.func;
-		if (fn?.kind !== "Ident" || scope.lookup(fn.name)?.kind !== "builtin")
+		// Only asks what the name is: folding is not a use of an import or a
+		// local that merely shares it.
+		if (fn?.kind !== "Ident" || scope.lookupObject(fn.name)?.kind !== "builtin")
 			return null;
 		const arrayLen = this._constArrayLen(fn.name, expr.args, scope);
 		if (arrayLen !== null) return intConst(BigInt(arrayLen));

@@ -159,8 +159,7 @@ type Quiet struct{ n int }
 func (q *Quiet) Dead() int { return q.n }
 func main() {
 	h := &Handler{}
-	el := document.getElementById("x")
-	el.addEventListener("click", h)
+	Object.freeze(h)
 	q := &Quiet{}
 	println(q.n)
 }

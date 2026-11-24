@@ -112,6 +112,30 @@ export const BROWSER_GLOBALS = new Set([
 	"TextDecoder",
 ]);
 
+// The ECMAScript built-ins among `BROWSER_GLOBALS`. WebIDL does not define
+// them, so they stay JS-dynamic `any`; every other entry is a Web API global
+// typed from the generated `gofront/*` declarations (see `_webGlobalType`).
+export const ES_BUILTIN_GLOBALS = new Set([
+	"Math",
+	"JSON",
+	"Date",
+	"RegExp",
+	"Promise",
+	"Error",
+	"Symbol",
+	"String",
+	"Number",
+	"Boolean",
+	"Array",
+	"Object",
+	"parseInt",
+	"parseFloat",
+	"isNaN",
+	"isFinite",
+	"encodeURIComponent",
+	"decodeURIComponent",
+]);
+
 // ES and host globals that generated code, runtime helpers and the wasm
 // loader read but that Go programs may legally declare (`func Map`, `NaN :=
 // 2.0`).  Rename-only: the names are never predeclared, so adding one cannot
@@ -755,7 +779,9 @@ function signatureStr(f) {
 
 export function typeStr(t) {
 	if (!t) return "void";
-	if (t.kind === "basic" && t.alias) return t.alias;
+	// An unresolved `.d.ts` reference prints as the name written in Go
+	// (`dom.Node`), not as its internal `gofront/dom.Node` table key.
+	if (t.kind === "basic" && t.alias) return t.alias.replace(/^gofront\//, "");
 	switch (t.kind) {
 		case "basic":
 			return t.name;
@@ -776,7 +802,8 @@ export function typeStr(t) {
 		case "interface":
 			return t.name || literalTypeStr(t);
 		case "namespace":
-			return t.name || "namespace{...}";
+			// A declaration package's type shows its package (`dom.Element`).
+			return t._pkg ? `${t._pkg}.${t.name}` : t.name || "namespace{...}";
 		case "func": {
 			const retStr =
 				t.returns.length > 1
@@ -786,6 +813,8 @@ export function typeStr(t) {
 		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
+		case "promise":
+			return `Promise<${typeStr(t.elem)}>`;
 		case "named": {
 			const name = displayTypeName(t.name);
 			return t.typeArgs && t.typeArgs.length > 0
@@ -951,6 +980,8 @@ function identicalShape(a, b, seen) {
 			return identicalIn(a.base, b.base, seen);
 		case "tuple":
 			return sameList(a.types, b.types, seen);
+		case "promise":
+			return identicalIn(a.elem, b.elem, seen);
 		case "shared":
 			return a.shared === b.shared;
 		case "func":
@@ -963,8 +994,11 @@ function identicalShape(a, b, seen) {
 			return identicalNamed(a, b, seen);
 		case "typeParam":
 		case "generic":
-		case "namespace":
 			return a.name === b.name;
+		case "namespace":
+			// A declaration package's type is its own: `p1.Buffer` is not `p2.Buffer`,
+			// nor a consumer `.d.ts` interface of the same bare name.
+			return a.name === b.name && a._pkg === b._pkg;
 		default:
 			return false;
 	}
@@ -1178,6 +1212,21 @@ export class Scope {
 	// Binds `name` to a value: a variable, parameter or result.
 	define(name, type) {
 		this._bind(name, "var", type);
+	}
+	// Binds `name` to a value whose type `typeOf()` supplies on first use, so a
+	// type that is costly to build is built only for a program that reads it.
+	// `typeOf` returns null while there is nothing to supply yet; the binding
+	// then reads as `fallback`.
+	defineLazy(name, typeOf, fallback) {
+		this._bind(name, "var", fallback);
+		const obj = this.objects.get(name);
+		let resolved = null;
+		Object.defineProperty(obj, "type", {
+			get() {
+				resolved ??= typeOf();
+				return resolved ?? fallback;
+			},
+		});
 	}
 	// Binds `name` to a predeclared function such as `len`.
 	defineBuiltin(name, type) {

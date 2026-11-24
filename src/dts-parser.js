@@ -7,14 +7,60 @@
 // both a type alias (e.g. `export type mat4 = ...`) and a namespace
 // (e.g. `export namespace mat4 { function create(): mat4 }`).
 //
-// Complex TypeScript types (generics, unions, intersections, mapped types,
-// conditional types, etc.) are simplified to `any`.
+// Complex TypeScript types (generics, intersections, mapped types,
+// conditional types, etc.) are simplified to `any`. A few forms are kept:
+//   - `T | null` / `T | undefined`: T, marked `_nullable` (it may be `nil`).
+//   - `Promise<T>`: `{ kind: "promise", elem: T }`; `await` yields T.
+//   - `(a: A, b?: B) => R`: a `func` type marked `_dts` (a callback).
+//   - `name?: T` parameters: the `func` type records `minArgs`, the number of
+//     arguments a call must pass.
+//   - `int`, `uint32`, `float32`, ...: the GoFront type (`number` is float64).
+//   - `interface`/`class` declarations: a namespace-kind type tagged
+//     `_dtsType`, with `extends` (names) and `_bases` (resolved in the file).
+//
+// Dictionary marker: an options object (a WebIDL dictionary) is declared with
+// a `@dictionary` comment directly before its `interface`:
+//
+//   /** @dictionary */
+//   interface BufferDescriptor { size: number; label?: string; }
+//
+// The type is tagged `_dictionary`. A parameter or variable of that type takes
+// `nil`, a `map[string]any` literal whose constant keys are members of the
+// interface (or of one it extends), and a struct value whose fields are such
+// members; a member that is itself a dictionary is checked the same way. An
+// interface without the comment accepts none of these.
+//
+// Declaration packages (`gofront/dom`, ...): `parseDeclarationPackage` parses a
+// package's declarations and qualifies the type references that name one of its
+// own types (`Node` becomes `gofront/dom.Node`, see `declarationTypeKey`), so
+// the package keeps its own type table and a name another package or the
+// program declares never collides with it. A reference written qualified
+// (`dom.EventTarget`) names a type of another package, which the package lists
+// in a header comment:
+//
+//   /// <reference types="gofront/dom" />
 
 const ANY = { kind: "basic", name: "any" };
 const VOID = { kind: "basic", name: "void" };
 
 const TS_PRIMITIVES = {
+	// `number` is a float64; a declaration that returns or takes a whole
+	// number names the GoFront integer type instead.
 	number: { kind: "basic", name: "float64" },
+	int: { kind: "basic", name: "int" },
+	int8: { kind: "basic", name: "int8" },
+	int16: { kind: "basic", name: "int16" },
+	int32: { kind: "basic", name: "int32" },
+	int64: { kind: "basic", name: "int64" },
+	uint: { kind: "basic", name: "uint" },
+	uint8: { kind: "basic", name: "uint8" },
+	uint16: { kind: "basic", name: "uint16" },
+	uint32: { kind: "basic", name: "uint32" },
+	uint64: { kind: "basic", name: "uint64" },
+	byte: { kind: "basic", name: "uint8" },
+	rune: { kind: "basic", name: "int32" },
+	float32: { kind: "basic", name: "float32" },
+	float64: { kind: "basic", name: "float64" },
 	string: { kind: "basic", name: "string" },
 	boolean: { kind: "basic", name: "bool" },
 	bool: { kind: "basic", name: "bool" },
@@ -28,6 +74,8 @@ const TS_PRIMITIVES = {
 	symbol: ANY,
 	bigint: ANY,
 };
+
+const DICTIONARY_MARK = "@dictionary";
 
 const SKIP_MODIFIERS = new Set([
 	"export",
@@ -45,6 +93,7 @@ export class DtsParser {
 	constructor(source) {
 		this.src = source;
 		this.pos = 0;
+		this._dictEnd = null; // end of the last `@dictionary` comment
 	}
 
 	// ── Low-level helpers ────────────────────────────────────────
@@ -60,14 +109,34 @@ export class DtsParser {
 	}
 
 	_skipLineComment() {
+		const start = this.pos;
 		while (!this.eof() && this.ch() !== "\n") this.pos++;
+		this._noteComment(start);
 	}
 
 	_skipBlockComment() {
+		const start = this.pos;
 		this.pos += 2;
 		while (!this.eof() && !(this.ch() === "*" && this.ch1() === "/"))
 			this.pos++;
 		if (!this.eof()) this.pos += 2;
+		this._noteComment(start);
+	}
+
+	// Remembers where a `@dictionary` comment (see `_parseClassDecl`) ended.
+	_noteComment(start) {
+		if (this.src.slice(start, this.pos).includes(DICTIONARY_MARK))
+			this._dictEnd = this.pos;
+	}
+
+	// Whether the declaration starting at `declStart` follows a `@dictionary`
+	// comment with nothing but whitespace between them.
+	_followsDictMark(declStart) {
+		return (
+			this._dictEnd !== null &&
+			this._dictEnd <= declStart &&
+			/^\s*$/.test(this.src.slice(this._dictEnd, declStart))
+		);
 	}
 
 	skip() {
@@ -244,7 +313,26 @@ export class DtsParser {
 
 	// Parse a TypeScript type expression and return a GoFront type.
 	// Always returns something; falls back to ANY for complex types.
+	// A union keeps its first non-null member: `T | null` is T marked
+	// `_nullable`, any other union member is discarded.
 	parseType(inReturn = false) {
+		const first = this._parseTypeNoUnion(inReturn);
+		const members = [first];
+
+		// Union / intersection: T | U  or  T & U
+		// (skip() handles multi-line unions where | is on the next line)
+		this.skip();
+		while (!this.eof() && (this.ch() === "|" || this.ch() === "&")) {
+			const union = this.ch() === "|";
+			this.pos++;
+			const member = this._parseTypeNoUnion();
+			if (union) members.push(member);
+			this.skip();
+		}
+		return nullableUnion(members);
+	}
+
+	_parseTypeNoUnion(inReturn = false) {
 		this.skip();
 
 		// Skip modifiers
@@ -277,28 +365,31 @@ export class DtsParser {
 			};
 			this.skip();
 		}
-
-		// Union / intersection: T | U  or  T & U → simplify to first concrete type
-		// (skip() handles multi-line unions where | is on the next line)
-		this.skip();
-		while (!this.eof() && (this.ch() === "|" || this.ch() === "&")) {
-			this.pos++;
-			this.parseType(); // discard (already calls skip() at start)
-		}
-
 		return base;
 	}
 
+	// `(a: A, b?: B) => R` is a function type; a parenthesized type is `any`
+	// unless it groups a function type.
 	_parseParenType() {
+		const start = this.pos;
 		this.pos++;
 		this.skipTypeExpr(")");
 		this.consume(")");
 		this.skip();
-		if (this.startsWith("=>")) {
-			this.pos += 2;
-			this.parseType();
+		if (!this.startsWith("=>")) {
+			// `(() => void)`: the parentheses only group a function type.
+			const end = this.pos;
+			this.pos = start + 1;
+			const inner = this.parseType();
+			this.pos = end;
+			return inner.kind === "func" ? inner : ANY;
 		}
-		return ANY;
+		this.pos = start;
+		const params = this.parseParams();
+		this.skip();
+		this.pos += 2; // =>
+		const ret = this.parseType(true);
+		return { ...funcType(params, ret), _dts: true };
 	}
 
 	_parseTemplateLit() {
@@ -319,12 +410,25 @@ export class DtsParser {
 		}
 		if (name === "true" || name === "false")
 			return { kind: "basic", name: "bool" };
+		if (name === "Promise" && this.peek() === "<") return this._parsePromise();
 		this.skipGenerics();
+		// `pkg.T` names the type T of another declaration package or namespace.
+		let qualified = name;
 		while (this.ch() === ".") {
 			this.pos++;
-			this.readIdent();
+			qualified += `.${this.readIdent()}`;
 		}
-		return { kind: "basic", name: "any", alias: name };
+		return { kind: "basic", name: "any", alias: qualified };
+	}
+
+	// `Promise<T>`; `await` of it yields T.
+	_parsePromise() {
+		this.pos++; // <
+		const elem = this.parseType();
+		this.skip();
+		while (!this.eof() && this.ch() !== ">") this.pos++;
+		this.consume(">");
+		return { kind: "promise", elem };
 	}
 
 	_parseBaseType(inReturn = false) {
@@ -369,7 +473,7 @@ export class DtsParser {
 			// param name (may be followed by ? for optional)
 			const name = this.readIdent() || "_";
 			this.skip();
-			this.consume("?"); // optional marker
+			const optional = this.consume("?");
 
 			// Type annotation
 			let type = ANY;
@@ -379,7 +483,7 @@ export class DtsParser {
 				type = this.parseType();
 			}
 
-			params.push({ name, type, variadic: isRest });
+			params.push({ name, type, variadic: isRest, optional });
 
 			this.skip();
 			if (this.ch() !== ",") break;
@@ -423,13 +527,34 @@ export class DtsParser {
 			this.skip();
 			let found = false;
 			for (const mod of SKIP_MODIFIERS) {
-				if (this.matchKw(mod)) {
+				if (this._matchModifier(mod)) {
 					found = true;
 					break;
 				}
 			}
 			if (!found) break;
 		}
+	}
+
+	// Skips the modifier `mod` unless it is the name of a member (`readonly:
+	// boolean`, `static(): void`, `static<T>(x: T): T`), which a `:`, `?`, `(`
+	// or `<` follows.
+	_matchModifier(mod) {
+		const start = this.pos;
+		if (!this.matchKw(mod)) return false;
+		this.skip();
+		if (this._namesMember()) {
+			this.pos = start;
+			return false;
+		}
+		return true;
+	}
+
+	// Whether the next character starts what follows a member's name. `new`
+	// followed by `(` or `<` is a construct signature, so it names a member only
+	// with `:` or `?` (`names` narrows the characters).
+	_namesMember(names = ":?(<") {
+		return !this.eof() && names.includes(this.ch());
 	}
 
 	_parseFuncDecl() {
@@ -443,23 +568,7 @@ export class DtsParser {
 			ret = this.parseType(true);
 		}
 		this.consume(";");
-		const isVariadic = params.some((p) => p.variadic);
-		return {
-			name,
-			val: {
-				kind: "func",
-				params: params.map((p) =>
-					p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
-				),
-				returns:
-					ret.kind === "tuple"
-						? ret.types.length > 0
-							? ret.types
-							: [VOID]
-						: [ret],
-				...(isVariadic ? { variadic: true } : {}),
-			},
-		};
+		return { name, val: funcType(params, ret) };
 	}
 
 	_parseMemberNewSig() {
@@ -486,15 +595,53 @@ export class DtsParser {
 		return { name, type };
 	}
 
-	_parseClassDecl() {
+	// `A`, `a.B` or `A<T>`: a heritage clause entry, as its dotted name.
+	_readHeritageName() {
+		let name = this.readIdent();
+		while (this.ch() === ".") {
+			this.pos++;
+			name += `.${this.readIdent()}`;
+		}
+		this.skipGenerics();
+		return name;
+	}
+
+	// `extends A, B` of an interface or class (`implements` is not inherited
+	// from); returns the names the declaration extends.
+	_parseExtends() {
+		const bases = [];
+		if (this.matchKw("extends")) {
+			do {
+				this.skip();
+				const base = this._readHeritageName();
+				if (base) bases.push(base);
+				this.skip();
+			} while (this.consume(","));
+		}
+		return bases;
+	}
+
+	// An interface or class: a namespace-kind type tagged `_dtsType` so it is
+	// told from a `declare namespace` (a value-only package) and from a
+	// GoFront package. `extends` lists the names it inherits members from.
+	// A declaration directly after a `@dictionary` comment is a dictionary
+	// (`dictionary` true, tagged `_dictionary`): a parameter of that type
+	// takes `nil`, a `map[string]any` literal whose constant keys are members
+	// and a struct whose fields are members, as a JavaScript options object.
+	_parseClassDecl(dictionary = false) {
 		const name = this.readIdent();
 		this.skipGenerics();
+		this.skip();
+		const bases = this._parseExtends();
 		while (!this.eof() && this.ch() !== "{") this.pos++;
 		this.consume("{");
 		const body = this.parseBody();
 		this.consume("}");
 		this.consume(";");
-		return { name, ns: { kind: "namespace", name, members: body } };
+		const ns = { kind: "namespace", name, members: body, _dtsType: true };
+		if (dictionary) ns._dictionary = true;
+		if (bases.length > 0) ns.extends = bases;
+		return { name, ns };
 	}
 
 	_parseNamespaceDecl() {
@@ -505,6 +652,7 @@ export class DtsParser {
 		const body = this.parseBody(kinds);
 		this.consume("}");
 		this.consume(";");
+		linkBases(Object.values(body), (n) => body[n]);
 		return {
 			name,
 			ns: { kind: "namespace", name, members: body, _kinds: kinds },
@@ -540,6 +688,7 @@ export class DtsParser {
 	_parseMember(out, kinds = null) {
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
+		const dictionary = this._followsDictMark(this.pos);
 		this._skipModifiers();
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
@@ -549,6 +698,11 @@ export class DtsParser {
 			return;
 		}
 		this.skip();
+		// A member named like a keyword (`type: string`, `class(): void`).
+		if (this._namesMember(kw === "new" ? ":?" : undefined)) {
+			this._parseMemberDefault(kw, out);
+			return;
+		}
 		switch (kw) {
 			case "function": {
 				const { name, val } = this._parseFuncDecl();
@@ -565,7 +719,7 @@ export class DtsParser {
 			}
 			case "interface":
 			case "class": {
-				const { name, ns } = this._parseClassDecl();
+				const { name, ns } = this._parseClassDecl(dictionary);
 				this._setTypeMember(out, kinds, name, ns, "type");
 				break;
 			}
@@ -610,20 +764,7 @@ export class DtsParser {
 				ret = this.parseType(true);
 			}
 			this.consume(";");
-			const isVariadic = params.some((p) => p.variadic);
-			out[name] = {
-				kind: "func",
-				params: params.map((p) =>
-					p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
-				),
-				returns:
-					ret.kind === "tuple"
-						? ret.types.length > 0
-							? ret.types
-							: [VOID]
-						: [ret],
-				...(isVariadic ? { variadic: true } : {}),
-			};
+			out[name] = funcType(params, ret);
 		} else if (this.ch() === ":") {
 			this.pos++;
 			const type = this.parseType();
@@ -669,6 +810,7 @@ export class DtsParser {
 			this.skip();
 			if (this.eof() || this.ch() === "}") break;
 
+			const dictionary = this._followsDictMark(this.pos);
 			this._skipModifiers();
 
 			this.skip();
@@ -683,7 +825,7 @@ export class DtsParser {
 			this.skip();
 			const savedPos = this.pos;
 			try {
-				this._parseTopLevelDecl(kw, types, values);
+				this._parseTopLevelDecl(kw, types, values, dictionary);
 			} catch (err) {
 				this.pos = savedPos;
 				// skip to next top-level boundary (;, }, or EOF) to resume parsing
@@ -696,10 +838,11 @@ export class DtsParser {
 			}
 		}
 
+		linkBases(types.values(), (n) => types.get(n));
 		return { types, values };
 	}
 
-	_parseTopLevelDecl(kw, types, values) {
+	_parseTopLevelDecl(kw, types, values, dictionary = false) {
 		switch (kw) {
 			case "import":
 			case "export":
@@ -713,7 +856,7 @@ export class DtsParser {
 			}
 			case "interface":
 			case "class": {
-				const { name, ns } = this._parseClassDecl();
+				const { name, ns } = this._parseClassDecl(dictionary);
 				if (name) {
 					types.set(name, ns);
 					if (kw === "class") values.set(name, ns);
@@ -759,8 +902,165 @@ export class DtsParser {
 	}
 }
 
+// The `func` type of a signature with parameters `params` (parseParams) and
+// result `ret`. A call must pass the arguments before the first optional
+// parameter.
+function funcType(params, ret) {
+	const isVariadic = params.some((p) => p.variadic);
+	const firstOptional = params.findIndex((p) => p.optional);
+	return {
+		kind: "func",
+		params: params.map((p) =>
+			p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
+		),
+		returns:
+			ret.kind === "tuple"
+				? ret.types.length > 0
+					? ret.types
+					: [VOID]
+				: [ret],
+		...(isVariadic ? { variadic: true } : {}),
+		...(firstOptional >= 0 ? { minArgs: firstOptional } : {}),
+	};
+}
+
+// The type of the union `members`: its first member that is not `null` or
+// `undefined`, marked `_nullable` when the union has one of those. `any` and
+// a union of only `null` and `undefined` need no mark (they hold `nil`).
+function nullableUnion(members) {
+	const concrete = members.filter(
+		(t) => !(t.kind === "basic" && t.name === "nil"),
+	);
+	if (concrete.length === members.length || concrete.length === 0)
+		return members[0];
+	const t = concrete[0];
+	return t.kind === "basic" && t.name === "any" ? t : { ...t, _nullable: true };
+}
+
+// Binds the `extends` names of the interfaces and classes in `decls` that
+// `lookup` finds in the same file or namespace as `_bases[i]`; a base declared
+// elsewhere stays null and is found by name when its members are read.
+function linkBases(decls, lookup) {
+	for (const d of decls) {
+		if (!d?._dtsType || !d.extends) continue;
+		d._bases = d.extends.map((n) => {
+			const b = lookup(n);
+			return b?._dtsType ? b : null;
+		});
+	}
+}
+
 // Helper: parse a .d.ts file and return { types, values } Maps
 export function parseDts(source) {
 	const parser = new DtsParser(source);
 	return parser.parse();
+}
+
+// The type-table key of type `name` of declaration package `pkg`. It holds a
+// `/`, which no Go package qualifier can, so a program's own package named
+// `dom` (or imported as `dom`) never takes the place of `gofront/dom`'s types.
+function declarationTypeKey(pkg, name) {
+	return `gofront/${pkg}.${name}`;
+}
+
+// Qualifies the references of `type` in place: its members, parameters,
+// results and element types, and the `extends` names of a declaration. A name
+// the package declares (`names`) becomes its `declarationTypeKey`; a name
+// written `other.T` for a package it references (`requires`) becomes that
+// package's key; any other name is left alone.
+function qualifyReferences(type, pkg, names, requires, seen) {
+	if (!type || typeof type !== "object" || seen.has(type)) return;
+	seen.add(type);
+	const walk = (t) => qualifyReferences(t, pkg, names, requires, seen);
+	const qualify = (n) => {
+		if (names.has(n)) return declarationTypeKey(pkg, n);
+		const dot = n.indexOf(".");
+		return dot > 0 && requires.has(n.slice(0, dot))
+			? declarationTypeKey(n.slice(0, dot), n.slice(dot + 1))
+			: n;
+	};
+	switch (type.kind) {
+		case "basic":
+			if (type.alias) type.alias = qualify(type.alias);
+			break;
+		case "namespace":
+			for (const m of Object.values(type.members)) walk(m);
+			if (type.extends) type.extends = type.extends.map(qualify);
+			break;
+		case "func":
+			type.params.forEach(walk);
+			type.returns.forEach(walk);
+			break;
+		case "slice":
+		case "promise":
+			walk(type.elem);
+			break;
+		case "tuple":
+			type.types.forEach(walk);
+			break;
+	}
+}
+
+// The packages a declaration file lists in its `/// <reference
+// types="gofront/x" />` header comments.
+function referencedPackages(source) {
+	return [
+		...source.matchAll(/^\/\/\/\s*<reference\s+types="gofront\/([a-z0-9]+)"/gm),
+	].map((m) => m[1]);
+}
+
+// Replaces the plain `any` in and under `type` with a copy tagged `_hostAny`,
+// mutating the containers. A declaration package speaks to the browser, so a
+// value that flows into such an `any` stays what it is in JavaScript: the
+// checker does not box it as a Go interface value (see `_markIfaceBox`).
+function markHostAny(type, seen) {
+	if (!type || typeof type !== "object") return type;
+	if (type.kind === "basic")
+		return type.name === "any" && !type.alias
+			? { ...type, _hostAny: true }
+			: type;
+	if (seen.has(type)) return type;
+	seen.add(type);
+	const walk = (t) => markHostAny(t, seen);
+	switch (type.kind) {
+		case "namespace":
+			for (const [k, m] of Object.entries(type.members))
+				type.members[k] = walk(m);
+			break;
+		case "func":
+			type.params = type.params.map(walk);
+			type.returns = type.returns.map(walk);
+			break;
+		case "slice":
+		case "promise":
+			type.elem = walk(type.elem);
+			break;
+		case "tuple":
+			type.types = type.types.map(walk);
+			break;
+	}
+	return type;
+}
+
+// Parses the declaration file of the package `name` (`gofront/<name>`):
+// `{ name, types, values, keys, requires }`, where `keys` is each type's key in
+// a checker's type table and `requires` names the packages its header comments
+// reference. Its own type references are qualified (see above) with those keys.
+export function parseDeclarationPackage(source, name) {
+	const { types, values } = parseDts(source);
+	const names = new Set(types.keys());
+	const requires = referencedPackages(source);
+	const required = new Set(requires);
+	const seen = new Set();
+	for (const t of types.values()) {
+		if (t._dtsType) t._pkg = name;
+		qualifyReferences(t, name, names, required, seen);
+	}
+	for (const t of values.values())
+		qualifyReferences(t, name, names, required, seen);
+	const marked = new Set();
+	for (const [k, t] of types) types.set(k, markHostAny(t, marked));
+	for (const [k, t] of values) values.set(k, markHostAny(t, marked));
+	const keys = new Map([...names].map((n) => [n, declarationTypeKey(name, n)]));
+	return { name, types, values, keys, requires };
 }

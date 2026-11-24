@@ -330,6 +330,7 @@ export class TypeSpeller {
 			named: () => this.spellableNamed(t, ok, seen),
 			// A JS-interop (.d.ts) type has no Go source to write.
 			namespace: () => false,
+			promise: () => false,
 			pointer: () => ok(t.base),
 			slice: () => ok(t.elem),
 			array: () => ok(t.elem),

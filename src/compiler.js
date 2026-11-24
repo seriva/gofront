@@ -82,8 +82,11 @@ import {
 import { lower, takesElementAddress } from "./lower/index.js";
 import { ParseError, Parser } from "./parser/index.js";
 import {
+	bindDeclarationImports,
 	bindUntypedImports,
+	declarationsCurrent,
 	isBuiltinPackage,
+	isDeclarationImport,
 	isLocalPath,
 	resolveAll,
 	resolveGwDir,
@@ -492,6 +495,17 @@ function resolveImports(
 			`npm:${path}:${info ? filesSignature([info.dtsPath]) : "none"}`,
 		);
 
+	// The declaration files of the typed web packages a build reads are part of
+	// what the package was compiled against.
+	const declarationFiles = bindDeclarationImports(
+		programs,
+		checker,
+		pkgTarget,
+		options.stdlibRoot,
+	);
+	for (const file of declarationFiles)
+		options.importTokens?.push(`decl:${file}:${filesSignature([file])}`);
+
 	// Validate target rules on non-local imports
 	if (pkgTarget === "wasm" || pkgTarget === "both") {
 		for (const p of programs) {
@@ -519,6 +533,7 @@ function resolveImports(
 						);
 					} else if (
 						!isLocalPath(path) &&
+						!isDeclarationImport(path) &&
 						!EXCLUDED_STDLIB_PACKAGES.has(path) &&
 						(isBuiltinPackage(path) ||
 							!resolveStdlibSource(path, options.stdlibRoot))
@@ -1129,6 +1144,7 @@ export function compileFiles(files, options = {}) {
 			...new Set([
 				...preambles.flatMap((p) => p.watchedFiles ?? []),
 				...inputs,
+				...unit.declarations.map(([file]) => file),
 			]),
 		].sort(),
 		// Only an importer reads it, so a package nobody imports never pays
@@ -1190,6 +1206,9 @@ function storedUnit(cache, unitKey, checker, now) {
 	const unit = cache.getUnit(unitKey);
 	if (!unit || checker.errors.length > 0) return null;
 	for (const k of Object.keys(now)) if (unit.keys[k] !== now[k]) return null;
+	// A browser global the package reads loads its declaration file while the
+	// package is checked, so the files are known only once it has been.
+	if (!declarationsCurrent(unit.declarations)) return null;
 	return unit;
 }
 
@@ -1310,6 +1329,8 @@ function compileOwnUnit(ctx) {
 			(t) => options.jsonBuild[t] && !jsonFlags[t],
 		),
 		jsonBefore,
+		// Every declaration file the check read, as `[file, stamp]` pairs.
+		declarations: [...(checker.declarationStamps ?? [])],
 		programs: driver ? programs.filter((p) => p !== driver) : programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: withOriginalTypeNames(
@@ -1377,7 +1398,7 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 		{ target: pkgTarget, builtins: JS_BUILTIN_CLASSES },
 	);
 	// A local type named after a JS built-in would shadow it in the bundle.
-	// A local type named after a universe type (`GPUDevice`) must not reuse it.
+	// A local type named after a universe type (`WebGL2RenderingContext`) must not reuse it.
 	const foreign = new Set([...JS_BUILTIN_CLASSES, ...universeTypeNames()]);
 	// A local type that shadows a predeclared type (`type int32 = string`)
 	// gets its own name, so `int32` keeps meaning the predeclared type

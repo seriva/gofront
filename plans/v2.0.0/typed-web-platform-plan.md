@@ -1,7 +1,7 @@
 # Typed Web Platform — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-23)  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phases 6–7) on 2026-11-17, re-probed that day. Starts after [`checker-go-rules-plan.md`](checker-go-rules-plan.md): Phase 1 here extends assignability, and Phase 4 types the globals that its Phase 3 classifies (`anyKind`: JS-dynamic `any` versus Go `any`), so the flip reuses that classifier instead of adding a second one. Ends `checker-strictness-plan.md` D3 permissiveness for the typed globals. [`gom-signals-plan.md`](gom-signals-plan.md) starts after this plan (`stdlib/gom/gom.go` is migrated in Phase 4). Motivating consumer: SimpleFPS' 1.9.2 adoption (`seriva/simplefps`), where the `any` rule forced hand-written `.d.ts` interfaces for every DOM and WebGPU value and the built-in `GPUDevice` assertion rejects every standard device.  
 **Release note:** **Breaking:** `document`, `window` and the other browser globals are typed, so reading a property that only a specific element type has needs a type assertion first (see the migration guide). The DOM, Canvas, Fetch, WebSocket and WebGPU APIs are type-checked through the new `gofront/dom`, `gofront/canvas`, `gofront/fetch`, `gofront/websocket` and `gofront/webgpu` packages, a misspelled member is a compile error, and `x.(webgpu.Device)` accepts a standard browser device.  
@@ -78,57 +78,57 @@ Remove `any` from the Web API globals and ship typed declaration packages for DO
 > Split from the former `web-platform-evolution-plan.md` Phases 6–7 (re-probed 2026-11-17). Former task IDs in parentheses.
 
 ### Phase 1: `.d.ts` path extensions
-- [ ] Task 1.1: Interface inheritance and `.d.ts` interface assertions (former 6.1)
+- [x] Task 1.1: Interface inheritance and `.d.ts` interface assertions (former 6.1)
   - Files: `src/dts-parser.js`, `src/typechecker/assignability.js`, `src/typechecker/expressions.js`, `src/typechecker/resolve.js`
   - Test: `test/unit/types/dts-extends.test.js`: inherited members over one and two levels; `Child` assignable to `Base`; `Base` to `Child` rejected without assertion; `b.(Child)` on a resolved `Base` parameter (`func f(b Base)`) compiles as a pass-through (while a GoFront package namespace assertion `fmt.(int)` stays rejected); local variable named after a browser global with a `.d.ts` interface type still gets `$`-renamed; member errors carry line:col
   - Done when: inheritance and `.d.ts` interface assertions pass and existing `.d.ts` tests pass unchanged
-- [ ] Task 1.2: Optional parameters, nullable unions, `Promise<T>`, function types and integer types (former 6.2)
+- [x] Task 1.2: Optional parameters, nullable unions, `Promise<T>`, function types and integer types (former 6.2)
   - Files: `src/dts-parser.js`, `src/typechecker/expressions.js`, `src/typechecker/assignability.js`, `src/typechecker/types.js`
   - Test: `test/unit/types/dts-optional.test.js`: `opt(1)` and `opt(1, 2)` compile, `opt()` and `opt(1, 2, 3)` are rejected (with line:col); `string | null` return compares to `nil` (`raw == nil`) and works as `string`; `await` on `Promise<Response>` is `Response` (`Promise<void>` is `void`); `int`, `uint32`, `float32` accepted; arrow-function types `(e: Base) => void` and `() => undefined | (() => void)` parse to `func` types and accept `func()`, `func(any)`, `func(Base)` and `func(Child)` while rejecting `func(int)`
   - Done when: optional params, nullable primitives, `Promise<T>`, integer/`float32` types and `.d.ts` callback types all type-check and `node src/index.js check example/...` (including `example/preact`) passes
-- [ ] Task 1.3: Dictionary arguments (former 6.3)
+- [x] Task 1.3: Dictionary arguments (former 6.3)
   - Files: `src/dts-parser.js`, `src/typechecker/assignability.js`
   - Test: `test/unit/types/dts-dictionary.test.js`: a dictionary parameter accepts `nil`, a `map[string]any` literal with member keys (including nested dictionary literals) and a field-only struct; unknown key or field is an error naming it; a wrong member type is rejected; an unmarked interface behaves as today
   - Done when: the marker syntax is documented in `src/dts-parser.js`
 
 ### Phase 2: Declaration packages and the generator
-- [ ] Task 2.1: Scoped `.d.ts` package namespaces and cross-package type resolution (former 6.4a)
+- [x] Task 2.1: Scoped `.d.ts` package namespaces and cross-package type resolution (former 6.4a)
   - Files: `src/dts-parser.js`, `src/typechecker/index.js`, `src/typechecker/resolve.js`, `src/typechecker/types.js`
   - Test: `test/unit/compiler/web-packages.test.js`: registering a scoped declaration package exposes `dom.T` without polluting global `checker.types` (a user `type Buffer struct{}` does not collide with `webgpu.Buffer`); intra-package and qualified cross-package (`dom.EventTarget`) `.d.ts` type references resolve in members, `extends` and assertions
   - Done when: package-scoped `.d.ts` types resolve intra- and cross-package without bare-name leakage
-- [ ] Task 2.2: `gofront/*` declaration package resolution and lazy loading (former 6.4b)
+- [x] Task 2.2: `gofront/*` declaration package resolution and lazy loading (former 6.4b)
   - Files: `src/compiler.js`, `src/resolver.js`, `src/typechecker/index.js`
   - Test: `test/unit/compiler/web-packages.test.js` with a fixture declaration directory (`options.stdlibRoot`): `import "gofront/dom"` loads lazily, parsed at most once per process, and emits no JS `import`; import from `wasm`/`both` is a clear error; unknown `gofront/x` produces an unsupported-package error (not an untyped npm warning); a `println`-only program loads no declaration file (counter); `sentrux check` passes with no layer violation
   - Done when: `gofront/*` declarations are parsed at most once per process and loaded only when used
-- [ ] Task 2.3: The web-types generator (former 6.5)
+- [x] Task 2.3: The web-types generator (former 6.5)
   - Files: `scripts/gen-web-types.js`, `scripts/web-types-overrides/`, `package.json`, `biome.json`
   - Test: `test/unit/cli/gen-web-types.test.js`: deterministic output for a small IDL fixture (inheritance including cross-package, mixin, partial, optional and nullable members, union, dictionary, enum, callback, `Promise`, constant, constructor)
   - Done when: `@webref/idl` and `webidl2` are pinned devDependencies; two runs are byte-identical; `npm run check` runs `--check`; the mapping table is in the script header; generated files pass (or are excluded from) Biome
 
 ### Phase 3: Generated web packages
-- [ ] Task 3.1: `gofront/dom` (former 7.1)
+- [x] Task 3.1: `gofront/dom` (former 7.1)
   - Files: `stdlib/gofront/dom/dom.d.ts` (generated), `scripts/web-types-overrides/`
   - Test: `test/unit/stdlib/dom-typed.test.js`: `Document`, `Element`, `HTMLElement`, `HTMLInputElement`, `Event`, `MouseEvent`; `addEventListener("click", func(e dom.MouseEvent) {…})` and `addEventListener("click", func() {…})`; a misspelled member is rejected; emitted JS equals the untyped program's
   - Done when: `el.(dom.HTMLInputElement).value` is a `string`
-- [ ] Task 3.2: `gofront/canvas`, `gofront/fetch`, `gofront/websocket` (former 7.2)
+- [x] Task 3.2: `gofront/canvas`, `gofront/fetch`, `gofront/websocket` (former 7.2)
   - Files: `stdlib/gofront/canvas/canvas.d.ts`, `stdlib/gofront/fetch/fetch.d.ts`, `stdlib/gofront/websocket/websocket.d.ts` (generated)
   - Test: `test/unit/stdlib/web-apis-typed.test.js`: canvas drawing calls without `any`; `var resp fetch.Response` / `resp := (await fetch(url)).(fetch.Response)` (global `fetch` flips in Phase 4) with `resp.ok` and `await resp.text()`; a `websocket.WebSocket` with `send` and a typed listener
   - Done when: the packages come from the generator and emit no runtime code
-- [ ] Task 3.3: `gofront/webgpu`; remove the hand-built GPU types (former 7.3)
+- [x] Task 3.3: `gofront/webgpu`; remove the hand-built GPU types (former 7.3)
   - Files: `stdlib/gofront/webgpu/webgpu.d.ts` (generated), `src/typechecker/stdlib/web.js` (`createWebGPUMethods` and the `GPUQueue`/`GPUDevice`/`GPUAdapter` entries), `src/backend/js/expressions.js` (`WEB_PASCAL_ALIAS_TYPES`)
   - Test: `test/unit/stdlib/webgpu-typed.test.js` (and update `test/unit/types/webgl.test.js` and `test/unit/fixtures/conformance/reject/assign_web_type_names.go` to drop the removed `GPUDevice` cases): `webgpu.CanvasContext`, `webgpu.Buffer`, `webgpu.Texture`, `device.createRenderPipeline(descriptor)` with a dictionary; a test double with only standard lowercase members passes `x.(webgpu.Device)` at run time; a misspelled member fails `gofront check`; `GPUDevice` is an unknown type
   - Done when: SimpleFPS-style code can drop its `WebGPUDevice`/`GPUCanvasContext` interfaces and existing unit tests pass
 
 ### Phase 4: Migration and typed globals
-- [ ] Task 4.1: Migrate Go-source stdlib ahead of the flip (former 7.4a)
+- [x] Task 4.1: Migrate Go-source stdlib ahead of the flip (former 7.4a)
   - Files: `stdlib/gom/gom.go`, `stdlib/time/sleep_js.go`
   - Test: `test/unit/builtins/gom.test.js`, `test/unit/builtins/dom.test.js`, `test/unit/stdlib/time.test.js`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: `stdlib/gom/gom.go` (unchanged emitted JS) and `stdlib/time/sleep_js.go` (`setTimeout` integer timeout and `clearTimeout` id) are valid against both untyped and generated global types
-- [ ] Task 4.2: Migrate the examples ahead of the flip (former 7.4b)
+- [x] Task 4.2: Migrate the examples ahead of the flip (former 7.4b)
   - Files: `example/*/src`
   - Test: the example `_test.go` files (`gofront test --dom example/...`) and `node src/index.js check example/...`, passing on this commit (globals still `any`) and on Task 4.3
   - Done when: every member chain on a Web API global in `example/` (including `_test.go` `children.item(0)`, attribute integer parsing and the S27 arithmetic sites under the strict numeric rules) is valid against both untyped and generated global types, and `.d.ts` interface assertions emit no runtime checks
-- [ ] Task 4.3: Type the browser globals (former 7.5)
+- [x] Task 4.3: Type the browser globals (former 7.5)
   - Files: `src/typechecker/types.js` (`BROWSER_GLOBALS`), `src/typechecker/stdlib/index.js`, `docs/usage.md`
   - Test: `test/unit/types/browser-globals.test.js` (and update the 4 JS-dynamic `any` tests in `test/unit/fixtures/conformance/accept/browser_global_dynamic_use.go`, `builtin_len_js_dynamic.go`, `test/unit/types/dynamic-types.test.js:1629,1643` and `test/unit/types/checks.test.js:809` to read from an excluded ES built-in instead of fake `window`/`document` properties): `document.getElementById("x")` is typed; `resp := await fetch(url)` is `fetch.Response`; a misspelled member is rejected; `window == nil` compiles; `var w int = window.innerWidth` compiles while `var f float64 = window.innerWidth` and `window.innerWidth * 0.5` are rejected; `JSON.stringify` and arithmetic on `Math.random()` stay permissive (`anyKind === "dynamic"`); a `println`-only program loads no declaration file; `js-globals.test.js` unchanged; all `example/*` build with unchanged emitted JS relative to Task 4.2 and `npm run test:e2e` passes
   - Done when: no WebIDL-defined `BROWSER_GLOBALS` entry is `ANY`; the 18 ES built-ins that stay `any` are listed in `Excluded: deferred`; `docs/usage.md` has the migration section
