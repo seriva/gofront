@@ -138,15 +138,15 @@ Roots:
 
 ### Phase 1: Package Globals & Resolved Pointer/Zero Types (roots `wasm-global-const-init-type-mismatch`, `wasm-backend-unresolved-typename`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Guard Wasm global constant initializers by `wType` and pass declared `goType` to `__init_globals` (W1.1–W1.3)
+- [x] Task 1.1: Guard Wasm global constant initializers by `wType` and pass declared `goType` to `__init_globals` (W1.1–W1.3)
   - Files: `src/backend/wasm/globals.js` (`_collectPackageGlobals`, `_makeGlobalInitFunc`)
   - Test: `test/unit/wasm/strings_any.test.js` (W1.1–W1.2 `any` globals incl. no-`fmt` assertion), `test/unit/wasm/scalars.test.js` (W1.3 float globals incl. `(1)`, `'a'`, defined `F`), `test/unit/wasm/complex.test.js` (W1.3 `complex128`/`complex64` globals) + W1 controls
   - Done when: every W1 program prints Go's output on `wasm` and the W1 controls still pass
-- [ ] Task 1.2: Add `resolvedType` and box func and defined complex pointees in `isReplaceableRef` (W2.1–W2.4)
+- [x] Task 1.2: Add `resolvedType` and box func and defined complex pointees in `isReplaceableRef` (W2.1–W2.4)
   - Files: `src/backend/wasm/types.js` (`resolvedType`, `isReplaceableRef`)
   - Test: `test/unit/wasm/pointers.test.js` (W2.1–W2.2: `new(F)`, `new(func() int)`, `*pf = fn; (*pf)()`, `struct{ P *F }`), `test/unit/wasm/complex.test.js` (W2.4: `var p *C = new(C)`, `func mk() *C`, `func box(p *C) any`, `struct{ P *C }`), `test/unit/wasm/fmt-any.test.js` (W2.3–W2.4: `C`, `C64`, `C2` in `any` → `Println` and `%T`) + W2 controls
   - Done when: W2.1–W2.4 build valid modules with Go's output; `&f` still reports `cannot take the address of a variable of func type`
-- [ ] Task 1.3: Zero-fill `[N]C` arrays with complex zeros in locals, fields and globals (W2.5)
+- [x] Task 1.3: Zero-fill `[N]C` arrays with complex zeros in locals, fields and globals (W2.5)
   - Files: `src/backend/wasm/emit.js` (`emitZeroValue`), `src/backend/wasm/globals.js` (`_zeroArrayConst`)
   - Test: `test/unit/wasm/complex.test.js`: `var a [2]C`, `var g [2]C`, `type C2 C; var g [2]C2`, `type s struct{ A [2]C }` zero value, `complex64` variant; control `var g [2]complex128`
   - Done when: `real(a[0])` prints `0` for every W2.5 program with no null-pointer trap

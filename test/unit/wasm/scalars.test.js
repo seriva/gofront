@@ -879,3 +879,49 @@ func main() {
 		"8 214748364\n8 922337203685477580\n",
 	);
 });
+
+section("WASM Scalars — package-level float globals with integer literals");
+
+test("package-level float variables take int, rune, parenthesised and defined-type literals", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type F float64
+
+var f float64 = 1
+var g float64 = -1
+var h float64 = 'a'
+var p float64 = (1)
+var q float32 = 1
+var x F = 1
+var y float64 = 2.5
+var z float32 = -2.5
+var r F = (3)
+
+func main() { fmt.Println(f, g, h, p, q, x, y, z, r) }
+`,
+		"1 -1 97 1 1 1 2.5 -2.5 3\n",
+	);
+});
+
+test("package-level initializers that are not literals keep their declared type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func foo() int { return 4 }
+
+var a any = foo()
+var b any = 2 + 3
+var c complex128 = 1 + 2
+var d float64 = 1 << 3
+var e int = 1_000
+
+func main() { fmt.Println(a, b, c, d, e) }
+`,
+		"4 5 (3+0i) 8 1000\n",
+	);
+});

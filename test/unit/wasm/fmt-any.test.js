@@ -608,4 +608,44 @@ func Main() int { return 1 }
 	assert(WebAssembly.validate(wasm), "invalid wasm module");
 });
 
+section("fmt on WASM: defined complex types in an any");
+
+test("a defined complex128 in an any prints and reports its type", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+func main() {
+	var r any = C(3 + 4i)
+	fmt.Println(r)
+	fmt.Printf("%T\\n", r)
+}
+`,
+		"(3+4i)\nmain.C\n",
+	);
+});
+test("defined complex64 and a type defined from a complex type in an any", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type C64 complex64
+type C complex128
+type C2 C
+
+func main() {
+	var a any = C64(1 + 2i)
+	var b any = C2(5 + 6i)
+	fmt.Println(a, b)
+	fmt.Printf("%T %T\\n", a, b)
+}
+`,
+		"(1+2i) (5+6i)\nmain.C64 main.C2\n",
+	);
+});
+
 summarize();
