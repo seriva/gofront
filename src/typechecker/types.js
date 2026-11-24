@@ -652,6 +652,37 @@ export function signalOf(t) {
 	const kind = named?.kind === "named" ? SIGNAL_TYPES.get(named.name) : null;
 	return kind ? { kind, elem: named.typeArgs?.[0] ?? null } : null;
 }
+// Whether `x.Get()` on a value of type `t` calls the `Get` of a `gom.Signal`
+// or `gom.Computed`: `t` is one, or its method set promotes `Get` from one
+// (embedded by value or pointer, at any depth). A `Get` the type declares
+// itself, or a field named `Get`, is not.
+export function callsSignalGet(t) {
+	if (signalOf(t)) return true;
+	const named = t?.kind === "pointer" ? t.base : t;
+	const struct = underlyingOf(named);
+	if (struct?.kind !== "struct") return false;
+	const promoted = promotedMethods.get(struct)?.get("Get");
+	if (!promoted || promoted.ambiguous) return false;
+	if (struct.methods?.get("Get") !== promoted.mType) return false;
+	if (declaresField(struct, "Get")) return false;
+	return embedsSignalAt(struct, promoted.depth);
+}
+
+// Whether an embedded field `depth` levels down from `struct` is a signal or
+// computed.
+function embedsSignalAt(struct, depth) {
+	for (const e of struct._embeds ?? []) {
+		const inner = e?.kind === "pointer" ? e.base : e;
+		if (depth === 1) {
+			if (signalOf(inner)) return true;
+			continue;
+		}
+		const st = underlyingOf(inner);
+		if (st?.kind === "struct" && embedsSignalAt(st, depth - 1)) return true;
+	}
+	return false;
+}
+
 // How an empty interface behaves.  "dynamic": a JS-dynamic value (browser
 // global, ECMAScript built-in, `.d.ts` value) that every operation accepts;
 // "go": a Go `any` (written as `any`, `interface{}`, or a defined type over

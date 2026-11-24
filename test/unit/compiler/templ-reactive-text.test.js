@@ -53,6 +53,55 @@ test("{ sig.Get() } updates the same text node on Set", () => {
 	assertContains(js, "Effect$$gom(");
 });
 
+test("a Get promoted from an embedded signal updates on Set", () => {
+	const { lines } = run(
+		`type PtrBox struct{ *gom.Signal[int] }
+type ValBox struct{ gom.Signal[int] }
+var pb = PtrBox{gom.NewSignal(5)}
+var vb ValBox`,
+		`templ View() {
+	<p>{ pb.Get() }</p><i>{ vb.Get() }</i>
+}`,
+		`	p := document.querySelector("#app p")
+	i := document.querySelector("#app i")
+	println(p.textContent, i.textContent)
+	pb.Set(9)
+	vb.Set(4)
+	println(p.textContent, i.textContent)`,
+	);
+	assertEqual(lines.join("|"), "5 0|9 4");
+});
+
+test("a Get that shadows an embedded signal's stays unbound", () => {
+	const { lines, js } = run(
+		`type Own struct{ *gom.Signal[int] }
+func (o Own) Get() int { return 100 }
+var own = Own{gom.NewSignal(5)}`,
+		`templ View() {
+	<p>{ own.Get() }</p>
+}`,
+		`	p := document.querySelector("#app p")
+	own.Set(9)
+	println(p.textContent)`,
+	);
+	assertEqual(lines.join("|"), "100");
+	assert(!js.includes("Effect$$gom(function"), "no Effect for a plain Get");
+});
+
+test("a function literal called in the expression follows its signals", () => {
+	const { lines } = run(
+		`var sig = gom.NewSignal(1)`,
+		`templ View() {
+	<p>{ func() int { return sig.Get() }() }</p>
+}`,
+		`	p := document.querySelector("#app p")
+	println(p.textContent)
+	sig.Set(2)
+	println(p.textContent)`,
+	);
+	assertEqual(lines.join("|"), "1|2");
+});
+
 test("a compound expression re-evaluates as a whole", () => {
 	const { lines } = run(
 		`var count = gom.NewSignal(1)

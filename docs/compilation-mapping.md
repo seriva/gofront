@@ -87,7 +87,7 @@ templ Counter() {
 // count.Set(count.Get() + 1) updates the label and disables the button at 10.
 ```
 
-An expression is bound to the signal when it calls `Get` on a `gom.Signal` or `gom.Computed`, or when its value is one: `{ count }` shows the current value, `class={ cls }` sets the class from it and `disabled?={ busy }` follows a `gom.Signal[bool]` or `gom.Computed[bool]`. The whole expression runs again on every change, so `{ fmt.Sprintf("%d items", count.Get()) }` works too. An expression that reads no signal compiles exactly as before.
+An expression is bound to the signal when it calls `Get` on a `gom.Signal` or `gom.Computed`, or when its value is one: `{ count }` shows the current value, `class={ cls }` sets the class from it and `disabled?={ busy }` follows a `gom.Signal[bool]` or `gom.Computed[bool]`. The whole expression runs again on every change, so `{ fmt.Sprintf("%d items", count.Get()) }` works too. A `Get` that a struct promotes by embedding a `gom.Signal` or `gom.Computed` counts too, and so does a function literal the expression calls on the spot (`{ func() int { return count.Get() }() }`), while one it only passes along does not. An expression that reads no signal compiles exactly as before.
 
 | `.templ` | JavaScript |
 |---|---|

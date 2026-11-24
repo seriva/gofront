@@ -3,12 +3,18 @@
 // document.createElement / appendChild / setAttribute calls.
 
 import { forEachChild } from "../../lower/walk.js";
-import { signalOf, UnsupportedError } from "../../typechecker/types.js";
+import {
+	callsSignalGet,
+	signalOf,
+	UnsupportedError,
+} from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
-// Whether evaluating `node` calls `Get` on a `gom.Signal` or `gom.Computed`.
-// A function literal is only declared, not run, by the expression holding it.
+// Whether evaluating `node` calls `Get` on a `gom.Signal` or `gom.Computed`,
+// directly or through a `Get` an embedded one promotes. A function literal
+// is only declared, not run, by the expression holding it, unless that
+// expression calls it on the spot.
 function readsSignal(node) {
 	if (!node || typeof node !== "object") return false;
 	if (Array.isArray(node)) return node.some(readsSignal);
@@ -17,9 +23,22 @@ function readsSignal(node) {
 		node.kind === "CallExpr" &&
 		node.func?.kind === "SelectorExpr" &&
 		node.func.field === "Get" &&
-		signalOf(node.func.expr?._type)
+		callsSignalGet(node.func.expr?._type)
 	)
 		return true;
+	let found = false;
+	forEachChild(node, (child) => {
+		found ||=
+			node.kind === "CallExpr" &&
+			child === node.func &&
+			child?.kind === "FuncLit"
+				? readsChildren(child)
+				: readsSignal(child);
+	});
+	return found;
+}
+
+function readsChildren(node) {
 	let found = false;
 	forEachChild(node, (child) => {
 		found ||= readsSignal(child);

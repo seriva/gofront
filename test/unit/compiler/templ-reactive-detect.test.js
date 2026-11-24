@@ -111,17 +111,87 @@ templ View() {
 	assertEqual(reactivityOf(seen, "comp"), "bare");
 });
 
-test("a Get inside a function literal is not a read of the expression", () => {
+test("a function literal that is only declared is not a read of the expression", () => {
+	const { seen } = probe({
+		"main.go": `package main
+var sig = gom.NewSignal(1)
+func call(f func() int) int { return f() }
+${MAIN}`,
+		"view.templ": `package main
+templ View() {
+	<p>{ call(func() int { return sig.Get() }) }</p>
+}`,
+	});
+	assertEqual(reactivityOf(seen, "call(func()int{returnsig.Get()})"), null);
+});
+
+test("a function literal called in the expression reads what it reads", () => {
 	const { seen } = probe({
 		"main.go": `package main
 var sig = gom.NewSignal(1)
 ${MAIN}`,
 		"view.templ": `package main
 templ View() {
-	<p>{ func() int { return sig.Get() }() }</p>
+	<p>{ func() int { return sig.Get() }() }{ func() int { return 1 }() }</p>
 }`,
 	});
-	assertEqual(reactivityOf(seen, "func()int{returnsig.Get()}()"), null);
+	assertEqual(reactivityOf(seen, "func()int{returnsig.Get()}()"), "reads");
+	assertEqual(reactivityOf(seen, "func()int{return1}()"), null);
+});
+
+test("a Get promoted from an embedded signal or computed is reactive", () => {
+	const { seen } = probe({
+		"main.go": `package main
+type PtrBox struct{ *gom.Signal[int] }
+type ValBox struct{ gom.Signal[int] }
+type CompBox struct{ *gom.Computed[int] }
+type Inner struct{ *gom.Signal[int] }
+type Deep struct{ Inner }
+var pb = PtrBox{gom.NewSignal(1)}
+var vb ValBox
+var cb = CompBox{gom.NewComputed(func() int { return 2 })}
+var deep = Deep{Inner{gom.NewSignal(3)}}
+var pp = &pb
+${MAIN}`,
+		"view.templ": `package main
+templ View() {
+	<p>{ pb.Get() }{ vb.Get() }{ cb.Get() }{ deep.Get() }{ pp.Get() }</p>
+}`,
+	});
+	for (const src of [
+		"pb.Get()",
+		"vb.Get()",
+		"cb.Get()",
+		"deep.Get()",
+		"pp.Get()",
+	])
+		assertEqual(reactivityOf(seen, src), "reads", src);
+});
+
+test("a Get that shadows or sits beside an embedded signal is not a read", () => {
+	const { seen } = probe({
+		"main.go": `package main
+type Own struct{ *gom.Signal[int] }
+func (o Own) Get() int { return 100 }
+type Field struct {
+	Get func() int
+	*gom.Signal[int]
+}
+type Plain struct{ N int }
+func (p Plain) Get() int { return p.N }
+type Holder struct{ Plain }
+var own = Own{gom.NewSignal(1)}
+var field = Field{func() int { return 7 }, gom.NewSignal(1)}
+var holder = Holder{Plain{4}}
+${MAIN}`,
+		"view.templ": `package main
+templ View() {
+	<p>{ own.Get() }{ field.Get() }{ holder.Get() }</p>
+}`,
+	});
+	assertEqual(reactivityOf(seen, "own.Get()"), null);
+	assertEqual(reactivityOf(seen, "field.Get()"), null);
+	assertEqual(reactivityOf(seen, "holder.Get()"), null);
 });
 
 section("templ reactivity — reachability");
