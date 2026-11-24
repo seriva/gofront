@@ -80,11 +80,13 @@ templ Footer(todos []Todo, activeFilter int) {
 
 // ── Header ────────────────────────────────────────────────────
 
-templ SyncStatus(msg string, cls string) {
-	<span class={ syncStatusClass(cls) }>{ msg }</span>
+// SyncStatus reads the syncMsg and syncCls signals, so setSyncStatus updates
+// this span in place without a render().
+templ SyncStatus() {
+	<span class={ syncStatusClass(syncCls.Get()) }>{ syncMsg }</span>
 }
 
-templ Header(hc int, msg string, cls string) {
+templ Header(hc int) {
 	<header class="header">
 		<div class="header-top">
 			<div class="header-icon">✓</div>
@@ -92,7 +94,7 @@ templ Header(hc int, msg string, cls string) {
 			if hc > 0 {
 				<span class="high-badge">{ hc } urgent</span>
 			}
-			@SyncStatus(msg, cls)
+			@SyncStatus()
 		</div>
 		<p class="tagline">Built with <a href="https://github.com/seriva/gofront" target="_blank"><strong>GoFront</strong></a> — Go compiled to JS</p>
 	</header>
@@ -125,7 +127,7 @@ templ StatsBar(n int) {
 
 templ AppView() {
 	<div class={ "card " + cardStyle() }>
-		@Header(highCount(), syncMsg, syncCls)
+		@Header(highCount())
 		@InputRow(highPriority, errorMsg)
 		<div class="list-divider"></div>
 		@TodoList(visibleTodos())

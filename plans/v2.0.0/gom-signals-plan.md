@@ -1,7 +1,7 @@
 # `gom` Signals — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-24)  
 **Base branch:** main  
 **Related:** Split out of the former `web-platform-evolution-plan.md` (its Phase 8) on 2026-11-17, re-checked that day. Starts after [`typed-web-platform-plan.md`](typed-web-platform-plan.md) Phase 4, which migrates `stdlib/gom/gom.go` to the typed globals. Independent of the checker, `wasm` and value-store plans.  
 **Release note:** `.templ` text and attributes bound to a `gom.Signal` update in place when the signal changes, without re-rendering the page or diffing a virtual DOM.  
@@ -77,29 +77,29 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
 > Split from the former `web-platform-evolution-plan.md` Phase 8. Former task IDs in parentheses.
 
 ### Phase 1: Signals and disposal in `gom`
-- [ ] Task 1.1: `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` (former 8.1)
+- [x] Task 1.1: `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` (former 8.1)
   - Files: `stdlib/gom/signals.go`
   - Test: `test/unit/builtins/gom-signals.test.js`: `NewSignal`/`Get`/`Set`/`Subscribe` and its unsubscribe, `NewComputed` lazy derivations (zero evaluations before `Get`, cached across repeated `Get`, re-evaluated on `Set`, and `Computed.Subscribe` / dependent `Effect` notified only when the derived value changes), `Effect` dependency tracking (including duplicate reads in one run and branch dependency cleanup) and disposal, no notification on `Object.is`-equal values (including `NaN`), slice/struct signal values, and the bounded-recursion panic
   - Done when: a `Set` runs subscribers and dependent effects synchronously
-- [ ] Task 1.2: Dispose effects when a root is mounted again (former 8.5)
+- [x] Task 1.2: Dispose effects when a root is mounted again (former 8.5)
   - Files: `stdlib/gom/gom.go`, `stdlib/gom/signals.go`
   - Test: `test/unit/builtins/gom-signals.test.js`: using `gom.NodeFunc` + `gom.Effect`, after a second `gom.Mount("#app", …)` (and after `gom.MountTo` followed by `gom.Mount`, plus equivalent selectors `"#app"` / `"div#app"`, two distinct sibling roots `"#a"` / `"#b"` confirming mounting `"#b"` does not dispose `"#a"`, and nested mounts), a `Set` runs no effect of the first mount and only the current mount's effects remain subscribed
   - Done when: re-rendering through `gom.Mount` does not accumulate effects or collide across DOM roots
 
 ### Phase 2: Reactive `.templ`
-- [ ] Task 2.1: Templ reachability and reactive expression detection (former 8.2)
+- [x] Task 2.1: Templ reachability and reactive expression detection (former 8.2)
   - Files: `src/lower/reachability.js`, `src/typechecker/index.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-detect.test.js`: `{ sig.Get() }`, a compound expression reading a signal, a bare signal/computed value (`{ sig }`, `{ comp }`, `disabled?={ boolSig }`, `disabled?={ boolComp }`) even when `.Get()` is never called in `.go`, and a `Signal.Get()` or stdlib function called only inside `.templ` are detected and kept reachable (including `Effect$$gom` and `Get`); a non-signal `Get` is not flagged; non-bool bare signal in `cond-bool` is rejected
   - Done when: templates without signals emit the same JS as before and templ-only stdlib calls and bare-signal `.Get()` are never pruned
-- [ ] Task 2.2: Surgical text bindings (former 8.3)
+- [x] Task 2.2: Surgical text bindings (former 8.3)
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-text.test.js`: `{ sig.Get() }`, compound text expressions, multiple reactive text nodes in the same element (`<p>{ a.Get() } { b.Get() }</p>`), and bare `{ sig }` / `{ comp }` update `.data` on `Set` with the same text node and parent before and after
   - Done when: dynamic text updates without recreating parents
-- [ ] Task 2.3: Surgical attribute bindings (former 8.4)
+- [x] Task 2.3: Surgical attribute bindings (former 8.4)
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-attr.test.js`: `class={ … }` and other `expr` attributes (including bare `{ sig }` / `{ comp }`) update on HTML and SVG elements; `disabled?={ sig.Get() }`, `disabled?={ boolSig }` and `disabled?={ boolComp }` toggle through `toggleAttribute`
   - Done when: attribute expressions that read a signal update in place
-- [ ] Task 2.4: Docs and the `templ` example (former 8.6, signal part)
+- [x] Task 2.4: Docs and the `templ` example (former 8.6, signal part)
   - Files: `docs/language-support.md`, `docs/compilation-mapping.md`, `README.md`, `example/templ/src/render.templ`, `example/templ/src/store.go`
   - Test: `test/e2e/templ.spec.js`: `syncMsg`/`syncCls` (`SyncStatus` in `example/templ/src/render.templ`, updated by `setSyncStatus`/`triggerSave` in `example/templ/src/store.go` without calling `render()`) updates `.sync-status` text and class in place while its element stays the same DOM node
   - Done when: `docs/` describes `gom.Signal`, `gom.Computed` and `gom.Effect`; all Playwright E2E tests pass
