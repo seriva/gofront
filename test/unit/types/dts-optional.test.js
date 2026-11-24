@@ -456,6 +456,21 @@ test("a parenthesized tuple in a return position stays a tuple", () => {
 	);
 });
 
+test("a nullable tuple in a return position stays a tuple", () => {
+	const want = JSON.stringify([
+		{ kind: "basic", name: "string" },
+		{ kind: "basic", name: "float64" },
+	]);
+	for (const ret of [
+		"(null | [string, number])",
+		"null | [string, number]",
+		"([string, number] | null)",
+	]) {
+		const { values } = parseDts(`declare function g(): ${ret};`);
+		assertEqual(JSON.stringify(values.get("g").returns), want);
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

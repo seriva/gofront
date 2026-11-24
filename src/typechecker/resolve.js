@@ -1967,9 +1967,14 @@ export const resolveMethods = {
 	},
 
 	// `ns.T` in a `.d.ts` declaration: the type `T` of the `.d.ts` namespace
-	// `ns`, or undefined.
+	// `ns` (an interface, class, nested namespace or `type` alias), or
+	// undefined.
 	_dtsQualifiedType(alias) {
-		const dot = alias.indexOf(".");
+		// A declaration package's key (`gofront/pkg.ns`) holds a dot of its own.
+		const dot = alias.indexOf(
+			".",
+			alias.startsWith("gofront/") ? alias.indexOf(".") + 1 : 0,
+		);
 		if (dot < 0) return undefined;
 		let cur = this.types.get(alias.slice(0, dot));
 		for (const part of alias.slice(dot + 1).split(".")) {
@@ -1977,7 +1982,7 @@ export const resolveMethods = {
 				return undefined;
 			cur = cur.members[part];
 		}
-		return cur?.kind === "namespace" ? cur : undefined;
+		return cur;
 	},
 
 	// The `.d.ts` interfaces and classes `ns` extends. A base the parser did

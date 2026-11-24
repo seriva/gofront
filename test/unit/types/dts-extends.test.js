@@ -480,6 +480,52 @@ test("a nullable .d.ts parameter takes a derived value and nil", () => {
 	assertEqual(errors.length, 0);
 });
 
+const NS_ALIAS_DTS = `
+declare namespace N {
+	interface NPlain { id: number; }
+	type NAlias = N.NPlain;
+	type NList = N.NPlain[];
+}
+declare function topGetT(): N.NPlain;
+declare function topGetA(): N.NAlias;
+declare function topGetL(): N.NList;
+declare function topGetN(): N.NAlias | null;
+declare function takeA(a: N.NAlias): void;
+`;
+
+test("a type alias declared in a .d.ts namespace is the type it names", () => {
+	const { errors } = compile(
+		`func main() {
+	_ = topGetT()[0]
+	_ = topGetA()[0]
+	_ = topGetL()[0][0]
+	_ = topGetN()[0]
+}`,
+		NS_ALIAS_DTS,
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 4);
+});
+
+test("a namespaced .d.ts alias works as a member and a parameter", () => {
+	const { errors } = compile(
+		`func main() {
+	h := topHolder()
+	takeA(topGetT())
+	takeL(topGetL())
+	takeL(h.l)
+	_ = h.a[0]
+	_ = h.l[0][0]
+}`,
+		`${NS_ALIAS_DTS}
+interface Holder { a: N.NAlias; l: N.NList; }
+declare function topHolder(): Holder;
+declare function takeL(l: N.NList): void;`,
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 2);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

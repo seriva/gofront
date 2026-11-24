@@ -325,7 +325,7 @@ export class DtsParser {
 		while (!this.eof() && (this.ch() === "|" || this.ch() === "&")) {
 			const union = this.ch() === "|";
 			this.pos++;
-			const member = this._parseTypeNoUnion();
+			const member = this._parseTypeNoUnion(inReturn);
 			if (union) members.push(member);
 			this.skip();
 		}
@@ -971,14 +971,17 @@ function declarationTypeKey(pkg, name) {
 // results and element types, and the `extends` names of a declaration. A name
 // the package declares (`names`) becomes its `declarationTypeKey`; a name
 // written `other.T` for a package it references (`requires`) becomes that
-// package's key; any other name is left alone.
+// package's key; any other name is left alone. A name `ns.T` of a namespace
+// the package declares becomes the key of `ns` followed by `.T`.
 function qualifyReferences(type, pkg, names, requires, seen) {
 	if (!type || typeof type !== "object" || seen.has(type)) return;
 	seen.add(type);
 	const walk = (t) => qualifyReferences(t, pkg, names, requires, seen);
 	const qualify = (n) => {
-		if (names.has(n)) return declarationTypeKey(pkg, n);
 		const dot = n.indexOf(".");
+		// `ns.T` of a namespace this package declares.
+		if (names.has(n) || (dot > 0 && names.has(n.slice(0, dot))))
+			return declarationTypeKey(pkg, n);
 		return dot > 0 && requires.has(n.slice(0, dot))
 			? declarationTypeKey(n.slice(0, dot), n.slice(dot + 1))
 			: n;

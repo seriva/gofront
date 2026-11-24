@@ -1154,6 +1154,32 @@ func main() {}
 	assertEqual(errors.length, 1);
 });
 
+test("a type alias in a package namespace is the type it names", () => {
+	const ns = parseDeclarationPackage(
+		`declare namespace N {
+	interface NPlain { id: number; }
+	type NAlias = N.NPlain;
+	type NList = N.NPlain[];
+}
+declare function getP(): N.NPlain;
+declare function getA(): N.NAlias;
+declare function getL(): N.NList;
+declare function getN(): N.NAlias | null;`,
+		"nsp",
+	);
+	const { errors } = check(
+		`func f() {
+	_ = nsp.getP()[0]
+	_ = nsp.getA()[0]
+	_ = nsp.getL()[0][0]
+	_ = nsp.getN()[0]
+}`,
+		[ns],
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 4);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
