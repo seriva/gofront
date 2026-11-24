@@ -77,7 +77,7 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
 > Split from the former `web-platform-evolution-plan.md` Phase 8. Former task IDs in parentheses.
 
 ### Phase 1: Signals and disposal in `gom`
-- [ ] Task 1.1: `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` (former 8.1)
+- [x] Task 1.1: `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` (former 8.1)
   - Files: `stdlib/gom/signals.go`
   - Test: `test/unit/builtins/gom-signals.test.js`: `NewSignal`/`Get`/`Set`/`Subscribe` and its unsubscribe, `NewComputed` lazy derivations (zero evaluations before `Get`, cached across repeated `Get`, re-evaluated on `Set`, and `Computed.Subscribe` / dependent `Effect` notified only when the derived value changes), `Effect` dependency tracking (including duplicate reads in one run and branch dependency cleanup) and disposal, no notification on `Object.is`-equal values (including `NaN`), slice/struct signal values, and the bounded-recursion panic
   - Done when: a `Set` runs subscribers and dependent effects synchronously
