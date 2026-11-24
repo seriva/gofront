@@ -626,6 +626,88 @@ test("an Effect outside any Mount lives until it is disposed", () => {
 	assertEqual(lines.join(","), "2");
 });
 
+section("gom signals — recovered panics and disposal mid-run");
+
+test("observers downstream of a Computed that panicked keep updating", () => {
+	const lines = run(`
+	s := gom.NewSignal(1)
+	c := gom.NewComputed(func() int {
+		if s.Get() == 0 {
+			panic("zero")
+		}
+		return 10 / s.Get()
+	})
+	gom.Effect(func() { println("eff", c.Get()) })
+	func() {
+		defer func() { recover() }()
+		s.Set(0)
+	}()
+	s.Set(2)`);
+	assertEqual(lines.join(","), "eff 10,eff 5");
+});
+
+test("an Effect after a sibling that panicked keeps updating", () => {
+	const lines = run(`
+	s := gom.NewSignal(1)
+	c := gom.NewComputed(func() int { return s.Get() * 10 })
+	gom.Effect(func() {
+		if s.Get() == 0 {
+			panic("zero")
+		}
+	})
+	gom.Effect(func() { println("eff2", c.Get()) })
+	func() {
+		defer func() { recover() }()
+		s.Set(0)
+	}()
+	s.Set(2)`);
+	assertEqual(lines.join(","), "eff2 10,eff2 20");
+});
+
+test("a chained Computed whose dependency did not change is not evaluated", () => {
+	const lines = run(`
+	s := gom.NewSignal(1)
+	parity := gom.NewComputed(func() int { return s.Get() % 2 })
+	n := 0
+	label := gom.NewComputed(func() string {
+		n++
+		if parity.Get() == 0 {
+			return "even"
+		}
+		return "odd"
+	})
+	gom.Effect(func() { label.Get() })
+	s.Set(3)
+	s.Set(5)
+	println(n)
+	s.Set(6)
+	println(n, label.Get())`);
+	assertEqual(lines.join(","), "1,2 even");
+});
+
+test("an Effect disposed while it runs does not run again", () => {
+	const lines = run(`
+	s0 := gom.NewSignal(0)
+	s1 := gom.NewSignal(0)
+	var stop func()
+	s1.Subscribe(func(int) { stop() })
+	runs := 0
+	stop = gom.Effect(func() {
+		runs++
+		println(runs, s0.Get())
+		if runs == 2 {
+			s0.Set(2)
+			s1.Set(1)
+			_ = s0.Get()
+			s0.Set(3)
+		}
+	})
+	s0.Set(1)
+	s0.Set(4)
+	println("end", runs)`);
+	assertEqual(lines.join(","), "1 0,2 1,end 2");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

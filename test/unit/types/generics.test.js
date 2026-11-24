@@ -28,6 +28,21 @@ import {
 
 section("Generics — Lexer & Parser");
 
+test("a method of a non-generic named field is callable inside a generic struct", () => {
+	assertJsProgramOutput(
+		`package main
+type Counter int
+func (c Counter) Double() int { return int(c) * 2 }
+type Holder[T any] struct { c Counter; v T }
+func main() {
+	h := Holder[string]{c: 3, v: "ok"}
+	fn := h.c.Double
+	println(h.c.Double(), h.v, fn())
+}`,
+		"6 ok 6\n",
+	);
+});
+
 test("lexer emits TILDE token for ~", () => {
 	const tokens = new Lexer("package main\nvar x = ~0", "test.go").tokenize();
 	const tilde = tokens.find((t) => t.value === "~");

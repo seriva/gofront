@@ -42,9 +42,13 @@ type observer struct {
 	tracks bool
 	// own is the dep of the Computed this observer evaluates; nil otherwise.
 	own *dep
-	// stale marks a Computed that must be evaluated before its next read; it
-	// stays set if the evaluation panics.
-	stale    bool
+	// stale marks a Computed whose dependencies may have changed since it was
+	// evaluated; it stays set if the evaluation panics.
+	stale bool
+	// must marks a Computed that has to be evaluated on its next read whether
+	// or not a dependency changed: it was never evaluated, stopped listening,
+	// or its last evaluation panicked.
+	must     bool
 	running  bool
 	// again is set when the observer is triggered while it runs.
 	again    bool
@@ -65,7 +69,7 @@ var (
 // track records that the running observer read d.
 func track(d *dep) {
 	o := current
-	if o == nil {
+	if o == nil || o.disposed {
 		return
 	}
 	for _, have := range o.deps {
@@ -105,10 +109,17 @@ func dispose(o *observer) {
 	untrack(o)
 }
 
-// refresh brings the Computed that owns d up to date.
+// refresh brings the Computed that owns d up to date. It evaluates it only
+// when it has to or a dependency changed.
 func refresh(d *dep) {
-	if o := d.owner; o != nil && o.stale {
+	o := d.owner
+	if o == nil || !o.stale {
+		return
+	}
+	if o.must || changed(o) {
 		evaluate(o)
+	} else {
+		o.stale = false
 	}
 }
 
@@ -121,7 +132,7 @@ func evaluate(o *observer) {
 			panic(loopMessage)
 		}
 		evaluateOnce(o)
-		if !o.again {
+		if !o.again || o.disposed {
 			return
 		}
 		o.again = false
@@ -141,6 +152,7 @@ func evaluateOnce(o *observer) {
 	depth++
 	prev := current
 	o.running = true
+	o.must = true
 	untrack(o)
 	current = o
 	defer func() {
@@ -150,6 +162,7 @@ func evaluateOnce(o *observer) {
 	}()
 	o.fn()
 	o.stale = false
+	o.must = false
 }
 
 // collect gathers the effects and callbacks that depend on d, marking the
@@ -166,12 +179,14 @@ func collect(d *dep, found []*observer, r int) []*observer {
 			}
 			continue
 		}
-		if o.stale {
+		if o.queued == r {
 			continue
 		}
+		o.queued = r
 		o.stale = true
 		if len(o.own.subs) == 0 {
 			// Nobody watches it: stop listening until it is read again.
+			o.must = true
 			untrack(o)
 		} else {
 			found = collect(o.own, found, r)
@@ -294,7 +309,7 @@ type Computed[T any] struct {
 // NewComputed is a Computed whose value is fn. fn must only read, not Set.
 func NewComputed[T any](fn func() T) *Computed[T] {
 	c := &Computed[T]{}
-	c.o = &observer{tracks: true, stale: true, own: &c.d}
+	c.o = &observer{tracks: true, stale: true, must: true, own: &c.d}
 	c.d.owner = c.o
 	c.o.fn = func() {
 		v := fn()

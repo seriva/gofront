@@ -248,6 +248,10 @@ const SUBSTITUTE_DISPATCH = {
 			kind: "named",
 			name: type.name,
 			...(type._pkgName && { _pkgName: type._pkgName }),
+			...(type._target !== undefined && { _target: type._target }),
+			// A non-generic type's methods do not depend on the substitution, so
+			// the copy shares the declaration's map (methods declared later too).
+			...(type.methods && { methods: type.methods }),
 			// A copy is still the declaration it came from (see `identical`).
 			_substOf: type._substOf ?? type,
 			...(type.typeArgs && {
