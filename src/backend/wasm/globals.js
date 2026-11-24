@@ -7,8 +7,11 @@ import { orderPackageInits } from "../../typechecker/init-order.js";
 import { namedUnderlying } from "../shared/named-underlying.js";
 import { _someNode } from "./prescan.js";
 import {
+	isComplex,
+	isComplex64,
 	isStringType,
 	isStructType,
+	resolvedType,
 	toWasmType,
 	variadicAsSlice,
 } from "./types.js";
@@ -139,6 +142,16 @@ function _arrayShape(t, checker) {
 	return null;
 }
 
+// Constant-expression zero value of a complex number (`0+0i`).
+function _zeroComplexConst(is64, mod) {
+	const info = mod.getComplexType(is64 ? "complex64" : "complex128");
+	return [
+		{ op: `${info.elemWType}.const`, value: 0 },
+		{ op: `${info.elemWType}.const`, value: 0 },
+		{ op: "struct.new", typeIndex: info.typeIndex },
+	];
+}
+
 // Constant-expression zero value of a package-level array global (a null ref
 // would trap on the first element access); null when it cannot be built.
 function _zeroArrayConst(goType, mod, depth = 0) {
@@ -165,6 +178,8 @@ function _zeroArrayConst(goType, mod, depth = 0) {
 		if (!info) return null;
 		one = _zeroStructConst(info, mod);
 		if (!one) return null;
+	} else if (isComplex(resolvedType(elem, checker))) {
+		one = _zeroComplexConst(isComplex64(resolvedType(elem, checker)), mod);
 	}
 	if (!one)
 		return [

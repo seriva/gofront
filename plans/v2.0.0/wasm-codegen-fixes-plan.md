@@ -146,7 +146,7 @@ Roots:
   - Files: `src/backend/wasm/types.js` (`resolvedType`, `isReplaceableRef`)
   - Test: `test/unit/wasm/pointers.test.js` (W2.1–W2.2: `new(F)`, `new(func() int)`, `*pf = fn; (*pf)()`, `struct{ P *F }`), `test/unit/wasm/complex.test.js` (W2.4: `var p *C = new(C)`, `func mk() *C`, `func box(p *C) any`, `struct{ P *C }`), `test/unit/wasm/fmt-any.test.js` (W2.3–W2.4: `C`, `C64`, `C2` in `any` → `Println` and `%T`) + W2 controls
   - Done when: W2.1–W2.4 build valid modules with Go's output; `&f` still reports `cannot take the address of a variable of func type`
-- [ ] Task 1.3: Zero-fill `[N]C` arrays with complex zeros in locals, fields and globals (W2.5)
+- [x] Task 1.3: Zero-fill `[N]C` arrays with complex zeros in locals, fields and globals (W2.5)
   - Files: `src/backend/wasm/emit.js` (`emitZeroValue`), `src/backend/wasm/globals.js` (`_zeroArrayConst`)
   - Test: `test/unit/wasm/complex.test.js`: `var a [2]C`, `var g [2]C`, `type C2 C; var g [2]C2`, `type s struct{ A [2]C }` zero value, `complex64` variant; control `var g [2]complex128`
   - Done when: `real(a[0])` prints `0` for every W2.5 program with no null-pointer trap

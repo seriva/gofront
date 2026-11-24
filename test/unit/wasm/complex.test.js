@@ -744,3 +744,186 @@ func main() {
 		"(3+1i)\n*main.C\ntrue\ntrue\n",
 	);
 });
+
+section("WASM Complex — zero-filled arrays of defined complex types");
+
+test("a local [2]C array of a defined complex type starts at zero", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+func main() {
+	var a [2]C
+	fmt.Println(real(a[0]), imag(a[1]), a)
+	a[1] = 3 + 4i
+	fmt.Println(a)
+}
+`,
+		"0 0 [(0+0i) (0+0i)]\n[(0+0i) (3+4i)]\n",
+	);
+});
+test("a package-level [2]C array starts at zero and is writable", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+var g [2]C
+
+func main() {
+	fmt.Println(real(g[0]), g)
+	g[0] = 1 + 2i
+	fmt.Println(g)
+}
+`,
+		"0 [(0+0i) (0+0i)]\n[(1+2i) (0+0i)]\n",
+	);
+});
+test("a package-level array of a type defined from a defined complex type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+type C2 C
+
+var g [2]C2
+
+func main() {
+	fmt.Println(real(g[1]), g)
+}
+`,
+		"0 [(0+0i) (0+0i)]\n",
+	);
+});
+test("a struct field of type [2]C starts at zero", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+type s struct{ A [2]C }
+
+func main() {
+	var v s
+	fmt.Println(real(v.A[0]), v)
+	v.A[1] = 7
+	fmt.Println(v.A[1])
+	w := s{}
+	fmt.Println(imag(w.A[0]))
+}
+`,
+		"0 {[(0+0i) (0+0i)]}\n(7+0i)\n0\n",
+	);
+});
+test("complex64 arrays of a defined type are zero-filled in locals, globals and fields", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex64
+
+var g [2]C
+
+type s struct{ A [2]C }
+
+func main() {
+	var a [2]C
+	var v s
+	fmt.Println(real(a[0]), real(g[1]), real(v.A[0]), a, g, v)
+	var b [2]complex64
+	fmt.Println(real(b[0]), b)
+}
+`,
+		"0 0 0 [(0+0i) (0+0i)] [(0+0i) (0+0i)] {[(0+0i) (0+0i)]}\n0 [(0+0i) (0+0i)]\n",
+	);
+});
+test("complex128 arrays stay zero-filled in locals, globals and fields", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+var g [2]complex128
+
+type s struct{ A [2]complex128 }
+
+func main() {
+	var a [2]complex128
+	var v s
+	fmt.Println(real(g[0]), real(a[1]), real(v.A[0]), g, a, v)
+}
+`,
+		"0 0 0 [(0+0i) (0+0i)] [(0+0i) (0+0i)] {[(0+0i) (0+0i)]}\n",
+	);
+});
+test("nested arrays of a defined complex type are zero-filled", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+var g [2][2]C
+
+type s struct{ A [2][3]C }
+
+func main() {
+	var a [2][2]C
+	var v s
+	fmt.Println(real(g[1][1]), real(a[1][0]), real(v.A[1][2]), g, a, v)
+}
+`,
+		"0 0 0 [[(0+0i) (0+0i)] [(0+0i) (0+0i)]] [[(0+0i) (0+0i)] [(0+0i) (0+0i)]] {[[(0+0i) (0+0i) (0+0i)] [(0+0i) (0+0i) (0+0i)]]}\n",
+	);
+});
+test("a struct field of type [2]complex128 starts at zero", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type s struct{ A [2]complex128 }
+
+func main() {
+	var v s
+	fmt.Println(real(v.A[0]))
+}
+`,
+		"0\n",
+	);
+});
+test("complex values in package-level structs, big arrays and array literals", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+type s struct{ c C }
+
+var g s
+var h struct{ c complex128 }
+var big [100]C
+var gs [2]s
+
+func main() {
+	fmt.Println(real(g.c), real(h.c), real(big[99]), real(gs[1].c), g, h, gs)
+	a := [2]C{}
+	b := [3]C{1, 2}
+	fmt.Println(a, b, len(big))
+}
+`,
+		"0 0 0 0 {(0+0i)} {(0+0i)} [{(0+0i)} {(0+0i)}]\n[(0+0i) (0+0i)] [(1+0i) (2+0i) (0+0i)] 100\n",
+	);
+});

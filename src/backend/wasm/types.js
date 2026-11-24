@@ -94,11 +94,16 @@ export function toWasmType(goType, checker = null, mod = null) {
 		if (goType.name === "simd.F32x4" || goType.name === "F32x4") {
 			return "v128";
 		}
-		if (mod?.getStructType(goType.name)) {
+		const struct = mod?.getStructType(goType.name);
+		if (struct) {
+			// The complex types are registered as structs; keep their name so
+			// every spelling of `complex128` maps to one wasm type (arrays and
+			// slices of it are keyed by the element type).
 			return {
 				kind: "ref",
 				nullable: true,
-				typeIndex: mod.getStructType(goType.name).typeIndex,
+				typeIndex: struct.typeIndex,
+				...(struct.isComplex && { typeName: struct.name }),
 			};
 		}
 		const resolved = checker?.types?.get(goType.name);
