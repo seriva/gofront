@@ -361,6 +361,31 @@ func main() {
 	assertEqual(errors.map((e) => e.message).join(), "");
 });
 
+test("a variable that shares its name with a declared type is a value", () => {
+	const { js, errors } = compileDts(
+		`interface Foo { x: number; }
+declare var Foo: Foo;`,
+		`package main
+import "js:./types.d.ts"
+func main() { _ = Foo.x }`,
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	assert(js.includes("Foo.x"));
+});
+
+test("an elided literal cannot stand for a basic type in a field or pointer slice", () => {
+	const { errors } = compile(`type S struct{ x int }
+
+func main() {
+	_ = S{x: {}}
+	_ = S{{}}
+	_ = []*int{{}}
+}`);
+	assertErrorContains(errors, "invalid composite literal type int");
+	assertErrorContains(errors, "invalid composite literal type *int");
+	assertEqual(errors.length, 3);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

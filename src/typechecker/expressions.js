@@ -65,6 +65,9 @@ const NOT_RANGEABLE_KINDS = new Set([
 	"namespace",
 ]);
 
+// Scope binding kinds that name a value, not a type.
+const VALUE_KINDS = new Set(["var", "const", "func"]);
+
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -1050,7 +1053,11 @@ export const expressionCheckMethods = {
 	_namesType(name, t, scope) {
 		if (!this.types.has(name)) return false;
 		const owner = scope.lookupScope(name);
-		if (owner?.object(name).kind === "type") return true;
+		const kind = owner?.object(name).kind;
+		if (kind === "type") return true;
+		// An import that declares a variable, constant or function beside a
+		// type of that name (`declare var Foo: Foo`) binds the value.
+		if (this._isImportScope(owner) && VALUE_KINDS.has(kind)) return false;
 		// A binding the source declared as a variable, constant, function,
 		// parameter or package is a value, whatever its type is.
 		if (owner && owner !== this.universe && !this._externalNames.has(name))
@@ -1130,7 +1137,8 @@ export const expressionCheckMethods = {
 	// `dom.Element.id`: a `.d.ts` type has no methods or fields to select, it is
 	// not a value.
 	_checkDtsTypeSelector(expr, baseType) {
-		if (baseType?.kind !== "namespace" || !baseType._dtsType) return null;
+		const base = this._deepUnderlying(baseType);
+		if (base?.kind !== "namespace" || !base._dtsType) return null;
 		return this.err(
 			`${exprText(expr.expr)} (type) is not an expression`,
 			expr.expr,
@@ -3314,9 +3322,28 @@ export const expressionCheckMethods = {
 		return !["struct", "array", "slice", "map", "simd"].includes(core?.kind);
 	},
 
-	// An elided `{...}` cannot stand for a basic or `.d.ts` type.
-	_isNonLiteralHint(base) {
+	// An elided `{...}` cannot stand for a basic or `.d.ts` type, nor for a
+	// pointer to one (`[]*int{{}}`).
+	_isNonLiteralHint(t) {
+		let base = this._deepUnderlying(t);
+		if (base?.kind === "pointer") base = this._deepUnderlying(base.base);
 		return base?.kind === "basic" || base?.kind === "namespace";
+	},
+
+	// The value of a struct field: an elided `{...}` takes the field's type as
+	// its hint, so one a basic or `.d.ts` type cannot take is rejected there
+	// too.
+	_checkFieldValue(value, scope, fieldType) {
+		if (
+			value.kind === "CompositeLit" &&
+			value.typeExpr === null &&
+			fieldType &&
+			this._isNonLiteralHint(fieldType)
+		) {
+			value._type = this.checkCompositeLit(value, scope, fieldType);
+			return fieldType;
+		}
+		return this.checkExpr(value, scope);
 	},
 
 	checkCompositeLit(expr, scope, hintType = null) {
@@ -3326,7 +3353,7 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
-		if (expr.typeExpr === null && hintType && this._isNonLiteralHint(base)) {
+		if (expr.typeExpr === null && hintType && this._isNonLiteralHint(t)) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
 		}
@@ -3384,7 +3411,7 @@ export const expressionCheckMethods = {
 				elem,
 				"implicit assignment to",
 			);
-			const vt = this.checkExpr(elem, scope);
+			const vt = this._checkFieldValue(elem, scope, fieldType);
 			if (fieldType)
 				this.assertAssignable(
 					fieldType,
@@ -3426,7 +3453,7 @@ export const expressionCheckMethods = {
 				this._checkLiteralField(base, keyName, t, elem.key, "cannot refer to");
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
-					const vt = this.checkExpr(elem.value, scope);
+					const vt = this._checkFieldValue(elem.value, scope, fieldType);
 					this.assertAssignable(
 						fieldType,
 						vt,

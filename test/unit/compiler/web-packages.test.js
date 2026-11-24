@@ -1277,6 +1277,45 @@ func g(r fetch.Response, e dom.Element, d webgpu.Device) {
 	assertEqual(ok.errors.map((e) => e.message).join(), "");
 });
 
+test("a defined type over a package type is not a value either", () => {
+	const { errors } = check(
+		`type MyEl dom.Element
+
+func f() {
+	x := MyEl.id
+	_ = x
+	_ = MyEl.remove
+	_ = MyEl{}
+}`,
+	);
+	assertErrorContains(errors, "MyEl (type) is not an expression");
+	assertErrorContains(errors, "invalid composite literal type MyEl");
+	assertEqual(errors.length, 3);
+});
+
+for (const [name, body, count] of [
+	["a struct literal with an elided positional field", "_ = S{{}, nil}", 1],
+	["a struct literal with an elided keyed field", "_ = S{e: {}}", 1],
+	["an elided element of a pointer slice", "_ = []*dom.Element{{}}", 1],
+	["an elided pointer-typed field", "_ = S{p: {}}", 1],
+]) {
+	test(`${name} of a package type is rejected`, () => {
+		const { errors } = check(
+			`type S struct {
+	e dom.Element
+	p *dom.Element
+}
+
+func f() {
+	${body}
+}`,
+		);
+		assertErrorContains(errors, "invalid composite literal type");
+		assertErrorContains(errors, "dom.Element");
+		assertEqual(errors.length, count);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
