@@ -1010,6 +1010,89 @@ interface Window { matchMedia(query: string): MediaQueryList; }
 	);
 });
 
+section("Declaration packages — list parameters and dictionary members");
+
+const GPU_LISTS = `
+interface CommandBuffer { label: string; }
+interface CommandEncoder { finish(): CommandBuffer; }
+/** @dictionary */
+interface BindGroupLayoutEntry { binding: int; }
+/** @dictionary */
+interface BindGroupLayoutDescriptor { entries: BindGroupLayoutEntry[]; label?: string; }
+/** @dictionary */
+interface ColorTargetState { format: string; }
+/** @dictionary */
+interface FragmentState { targets: (ColorTargetState | null)[]; }
+interface Queue { submit(commandBuffers: CommandBuffer[]): void; }
+interface Device {
+	queue: Queue;
+	createCommandEncoder(): CommandEncoder;
+	createBindGroupLayout(d: BindGroupLayoutDescriptor): void;
+}
+`;
+
+const gpuLists = (body) =>
+	build(`package main\n\nimport "gofront/webgpu"\n\n${body}\n`, {
+		stdlib: { "stdlib/gofront/webgpu/webgpu.d.ts": GPU_LISTS },
+	});
+
+test("a slice of the declared element type is a list parameter", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	enc := dev.createCommandEncoder()
+	dev.queue.submit([]webgpu.CommandBuffer{enc.finish()})
+	var cmds []webgpu.CommandBuffer = []webgpu.CommandBuffer{}
+	dev.queue.submit(cmds)
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a dictionary member that is a list takes a slice of its element type", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a list parameter rejects a slice of any", () => {
+	const { errors } =
+		gpuLists(`func f(dev webgpu.Device, enc webgpu.CommandEncoder) {
+	dev.queue.submit([]any{enc.finish()})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "[]any");
+	assertErrorContains(errors, "as []webgpu.CommandBuffer value");
+});
+
+test("a dictionary member that is a list rejects a slice of any", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []any{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "as []webgpu.BindGroupLayoutEntry value");
+	assertErrorContains(errors, "member entries");
+});
+
+test("a dictionary member of the declared element type still checks its keys", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"bindin": 0}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "unknown member 'bindin'");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

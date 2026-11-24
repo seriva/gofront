@@ -57,6 +57,14 @@ import {
 	VOID,
 } from "./types.js";
 
+// Operand kinds a `range` rejects outright (see `_notRangeable`).
+const NOT_RANGEABLE_KINDS = new Set([
+	"struct",
+	"interface",
+	"pointer",
+	"namespace",
+]);
+
 const NILABLE_KINDS = new Set([
 	"slice",
 	"map",
@@ -407,7 +415,7 @@ export const expressionCheckMethods = {
 						`(package '${this.pkgName}' is //gofront:target ${this.target} — browser globals are only available in js packages)`,
 					);
 				}
-				return t;
+				return this._resolveDtsAlias(t);
 			}
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
@@ -2044,9 +2052,10 @@ export const expressionCheckMethods = {
 	},
 
 	// A range operand of a kind Go rejects: bool, float or complex values,
-	// structs, interfaces, non-array pointers, nil, and a type parameter with no
-	// core type (`_rangeCore` resolves one that has it first). JS-dynamic `any`
-	// and kinds the checker models loosely are left alone.
+	// structs, interfaces, `.d.ts` types, non-array pointers, nil, and a type
+	// parameter with no core type (`_rangeCore` resolves one that has it
+	// first). JS-dynamic `any` and kinds the checker models loosely are left
+	// alone.
 	_notRangeable(type) {
 		if (!type || type._tainted || isAny(type)) return false;
 		if (type.kind === "typeParam") return true;
@@ -2060,9 +2069,7 @@ export const expressionCheckMethods = {
 		if (u?.kind === "basic") return !(isInteger(u) || isString(u) || isAny(u));
 		if (u?.kind === "pointer" && type._viaCore)
 			return this._deepUnderlying(u.base)?.kind !== "array";
-		return (
-			u?.kind === "struct" || u?.kind === "interface" || u?.kind === "pointer"
-		);
+		return NOT_RANGEABLE_KINDS.has(u?.kind);
 	},
 
 	// The type a `range` operand is read as: a type parameter stands for its
@@ -2721,8 +2728,8 @@ export const expressionCheckMethods = {
 
 		const ret = fnType.returns;
 		if (!ret || ret.length === 0) return VOID;
-		if (ret.length === 1) return ret[0];
-		return { kind: "tuple", types: ret };
+		if (ret.length === 1) return this._resolveDtsAlias(ret[0]);
+		return this._resolveDtsAlias({ kind: "tuple", types: ret });
 	},
 
 	// `shared.NewXxx(n)` allocates from a linear memory that is sized once at

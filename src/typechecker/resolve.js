@@ -52,6 +52,18 @@ function declId(t) {
 
 // Go infers T from the "largest" untyped constant kind (int < rune < float <
 // complex), and a typed argument beats any untyped one.
+// The fields of each composite type kind that hold types a `.d.ts`
+// reference may sit in (see `_resolveDtsAlias`).
+const DTS_ALIAS_FIELDS = new Map([
+	["slice", ["elem"]],
+	["array", ["elem"]],
+	["promise", ["elem"]],
+	["pointer", ["base"]],
+	["map", ["key", "value"]],
+	["tuple", ["types"]],
+	["func", ["params", "returns"]],
+]);
+
 const UNTYPED_RANK = { int: 0, int32: 1, float64: 2, complex128: 3 };
 function untypedWins(prev, next) {
 	if (prev.kind !== "untyped") return false;
@@ -1615,10 +1627,8 @@ export const resolveMethods = {
 
 	resolveType(t) {
 		if (!t) return ANY;
-		if (t.kind === "basic" && t.alias) {
-			const found = this.types.get(t.alias) ?? this._dtsQualifiedType(t.alias);
-			if (found) return found;
-		}
+		if (DTS_ALIAS_FIELDS.has(t.kind) || (t.kind === "basic" && t.alias))
+			return this._resolveDtsAlias(t);
 		if (
 			t.kind === "named" &&
 			(!t.typeArgs || t.typeArgs.length === 0) &&
@@ -1634,6 +1644,45 @@ export const resolveMethods = {
 		if (t.kind === "named" && t.typeArgs?.length)
 			return this._withGenericMethods(t);
 		return t;
+	},
+
+	// Resolves the `.d.ts` type references (`basic` with an `alias`) in and
+	// under `t`: a bare reference to the type it names, and the references
+	// inside a slice, array, map, pointer, promise, tuple or function type in
+	// place. A `namespace` is never entered (its members may refer back to it),
+	// and a type with nothing to resolve is returned as it is, so a resolved
+	// `.d.ts` type keeps its identity. `seen` holds the aliases being resolved,
+	// so a self-referential `type A = A[]` ends.
+	_resolveDtsAlias(t, seen) {
+		if (!t || typeof t !== "object") return t;
+		if (t.kind === "basic") return this._resolveAliasRef(t, seen);
+		let out = t;
+		for (const field of DTS_ALIAS_FIELDS.get(t.kind) ?? []) {
+			const v = t[field];
+			const next = Array.isArray(v)
+				? this._resolveEach(v, seen)
+				: this._resolveDtsAlias(v, seen);
+			if (next !== v) out = { ...out, [field]: next };
+		}
+		return out;
+	},
+
+	// The type the `.d.ts` reference `t` names (its own references resolved
+	// too), or `t` when it names none or is already being resolved.
+	_resolveAliasRef(t, seen) {
+		if (!t.alias || seen?.has(t.alias)) return t;
+		const found = this.types.get(t.alias) ?? this._dtsQualifiedType(t.alias);
+		if (!found || found === t) return t;
+		if (found.kind === "namespace") return found;
+		return this._resolveDtsAlias(found, new Set(seen).add(t.alias));
+	},
+
+	// `types` with each `.d.ts` reference resolved, or `types` itself when
+	// none changed.
+	_resolveEach(types, seen) {
+		if (!types) return types;
+		const out = types.map((x) => this._resolveDtsAlias(x, seen));
+		return out.every((x, i) => x === types[i]) ? types : out;
 	},
 
 	// A substituted generic instance (e.g. Stack[int] from an inferred call)
@@ -1739,7 +1788,9 @@ export const resolveMethods = {
 			case "interface":
 				return this._fieldTypeInterface(base, baseType, field, node);
 			case "namespace":
-				return this._fieldTypeNamespace(base, field, node);
+				return this._resolveDtsAlias(
+					this._fieldTypeNamespace(base, field, node),
+				);
 			case "shared":
 			case "simd":
 				if (base.methods?.has(field)) return base.methods.get(field);

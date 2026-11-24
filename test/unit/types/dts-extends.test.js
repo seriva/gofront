@@ -256,6 +256,151 @@ declare var document: Child;`,
 	assert(!js.includes("document$"), "a declared JS global keeps its name");
 });
 
+section(".d.ts — references inside composite types");
+
+const PLAIN_DTS = `
+interface Plain { id: number; }
+interface Sub extends Plain { name: string; }
+declare function getP(): Plain;
+declare function getPs(): Plain[];
+declare function getProm(): Promise<Plain[]>;
+declare function getPromP(): Promise<Plain>;
+declare function getSub(): Sub;
+declare function takePs(xs: Plain[]): void;
+declare function takeCb(cb: (xs: Plain[]) => void): void;
+declare const plainArr: Plain[];
+declare const plainVal: Plain;
+declare type PlainList = Plain[];
+declare function getList(): PlainList;
+`;
+
+const plain = (body) => compile(body, PLAIN_DTS);
+
+test("a slice of a .d.ts type returned by a call is that type's slice", () => {
+	const { errors } = plain(`func main() {
+	var xs []Plain = getPs()
+	takePs([]Plain{})
+	takePs(xs)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a slice returned through a type alias is that type's slice", () => {
+	const { errors } = plain(`func main() {
+	var xs []Plain = getList()
+	_ = xs
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a slice inside a promise, a callback parameter and a constant resolves", () => {
+	const { errors } = plain(`func main() {
+	var xs []Plain = await getProm()
+	takeCb(func(ys []Plain) { _ = ys })
+	var zs []Plain = plainArr
+	_, _ = xs, zs
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a slice of a .d.ts type is not a slice of another type", () => {
+	const { errors } = plain(`func main() {
+	var xs []Sub = getPs()
+	_ = xs
+}`);
+	assertErrorContains(errors, "cannot use");
+	assertErrorContains(errors, "[]Plain");
+});
+
+test("a slice of any is not a slice of a .d.ts type", () => {
+	const { errors } = plain(`func main() {
+	takePs([]any{getP()})
+}`);
+	assertErrorContains(errors, "[]any");
+	assertErrorContains(errors, "as []Plain value");
+});
+
+test("a self-referential alias in a declaration ends", () => {
+	const { errors } = compile(
+		`func main() {
+	_ = loop()
+}`,
+		`type Loop = Loop[];
+declare function loop(): Loop;`,
+	);
+	assertEqual(errors.length, 0);
+});
+
+for (const [name, op, want] of [
+	["indexing", "_ = p[0]", "Cannot index type Plain"],
+	["slicing", "_ = p[0:1]", "Cannot slice type Plain"],
+	["calling", "p()", "Cannot call non-function type Plain"],
+	["len", "_ = len(p)", "len"],
+	["cap", "_ = cap(p)", "cap"],
+	["append", "_ = append(p, 1)", "append"],
+	["delete", 'delete(p, "k")', "delete"],
+	["dereferencing", "_ = *p", "cannot dereference non-pointer type Plain"],
+	["asserting", "_ = p.(int)", "not an interface"],
+	["ranging", "for range p {}", "cannot range over"],
+	["testing", "if p {}", "non-boolean"],
+	["looping on", "for p {}", "non-boolean"],
+]) {
+	test(`${name} a .d.ts value returned by a call is rejected`, () => {
+		const { errors } = plain(`func main() {
+	p := getP()
+	${op}
+}`);
+		assertErrorContains(errors, want);
+	});
+}
+
+test("operations on an element of a .d.ts slice are rejected", () => {
+	const { errors } = plain(`func main() {
+	p := getPs()[0]
+	_ = p[0]
+	p()
+	if p {}
+}`);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertErrorContains(errors, "Cannot call non-function type Plain");
+	assertErrorContains(errors, "non-boolean");
+});
+
+test("operations on a .d.ts constant are rejected", () => {
+	const { errors } = plain(`func main() {
+	_ = plainVal[0]
+	plainVal()
+	if plainVal {}
+}`);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertErrorContains(errors, "Cannot call non-function type Plain");
+	assertErrorContains(errors, "non-boolean");
+});
+
+test("ranging over a .d.ts value is rejected", () => {
+	const { errors } = plain(`func f(p Plain) {
+	for range p {}
+}
+func main() {}`);
+	assertErrorContains(errors, "cannot range over");
+});
+
+test("a value awaited from a promise keeps its .d.ts type", () => {
+	const { errors } = plain(`func main() {
+	p := await getPromP()
+	_ = p[0]
+}`);
+	assertErrorContains(errors, "Cannot index type Plain");
+});
+
+test("a derived .d.ts value is still assignable to its base", () => {
+	const { errors } = plain(`func main() {
+	var p Plain = getSub()
+	_ = p
+}`);
+	assertEqual(errors.length, 0);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

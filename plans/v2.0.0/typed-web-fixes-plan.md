@@ -143,7 +143,7 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
 
 ### Phase 1: `.d.ts` Alias Resolution & Parser Parenthesised Types (roots `dts-unresolved-alias-leak`, `namespace-missing-notrangeable`, `dts-paren-type-collapses-non-func`)
 *Scheduled from review follow-ups (2026-11-24). Unblocks real WebGPU usage (`dev.queue.submit`, `dev.createRenderPipeline`).*
-- [ ] Task 1.1: Resolve `.d.ts` aliases recursively in `resolveType`, resolve at expression boundaries, and reject `for range` on namespaces (T1.1–T1.5)
+- [x] Task 1.1: Resolve `.d.ts` aliases recursively in `resolveType`, resolve at expression boundaries, and reject `for range` on namespaces (T1.1–T1.5)
   - Files: `src/typechecker/resolve.js` (`resolveType`, `_fieldTypeNamespace`), `src/typechecker/expressions.js` (`Ident`, `_checkCallExpr`, `_notRangeable`)
   - Test: `test/unit/types/dts-extends.test.js`, `test/unit/types/browser-globals.test.js`, `test/unit/compiler/web-packages.test.js`: T1.1–T1.6 (`Plain[]`, `[]webgpu.CommandBuffer`, `[]dom.NotRestoredReasons`, `Promise<Plain[]>`, `(xs: Plain[]) => void`, `plainArr`, dictionary member `"entries": []webgpu.BindGroupLayoutEntry{}`, negative T1.6 `submit([]any{...})` / `"entries": []any{...}` asserting `as []webgpu.`, plus negative `assertErrorContains` cases for indexing, slicing, calling, `len`/`cap`/`append`/`delete`, deref, type assertion, `for range`, `if`/`for` on call/member results and resolved params) + controls
   - Done when: all T1.1–T1.2 cases compile with 0 errors, all T1.3–T1.6 cases fail with Go/GoFront diagnostics, and `example/` + `stdlib/` stay green

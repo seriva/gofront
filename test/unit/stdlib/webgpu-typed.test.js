@@ -66,6 +66,53 @@ func main() {}`,
 	assertEqual(errors.length, 0);
 });
 
+test("queue.submit takes a slice of command buffers", () => {
+	const { errors } = build(
+		`func frame(dev webgpu.Device) {
+	enc := dev.createCommandEncoder()
+	dev.queue.submit([]webgpu.CommandBuffer{enc.finish()})
+}
+
+func main() {}`,
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("queue.submit rejects a slice of any", () => {
+	const { errors } = build(
+		`func frame(dev webgpu.Device) {
+	enc := dev.createCommandEncoder()
+	dev.queue.submit([]any{enc.finish()})
+}
+
+func main() {}`,
+	);
+	assertErrorContains(errors, "as []webgpu.CommandBuffer value");
+});
+
+test("createBindGroupLayout takes typed entries and rejects a slice of any", () => {
+	const ok = build(
+		`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"binding": 0, "visibility": 1}},
+	})
+}
+
+func main() {}`,
+	);
+	assertEqual(ok.errors.map((e) => e.message).join(), "");
+	const bad = build(
+		`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []any{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`,
+	);
+	assertErrorContains(bad.errors, "as []webgpu.BindGroupLayoutEntry value");
+});
+
 test("a dictionary member that does not exist is rejected", () => {
 	const { errors } = build(
 		`func pipeline(dev webgpu.Device, mod webgpu.ShaderModule) {

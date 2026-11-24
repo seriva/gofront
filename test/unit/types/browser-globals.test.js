@@ -309,6 +309,67 @@ test("a program that reads a typed global loads the declarations once", () => {
 	assertEqual(parsed, 1);
 });
 
+section("Typed browser globals — operations on resolved values");
+
+for (const [name, op, want] of [
+	["indexing", "_ = el[0]", "Cannot index type dom.Element"],
+	["slicing", "_ = el[0:1]", "Cannot slice type dom.Element"],
+	["calling", "el()", "Cannot call non-function type dom.Element"],
+	["ranging", "for range el {}", "cannot range over el"],
+	["testing", "if el {}", "non-boolean condition"],
+]) {
+	test(`${name} an element read from a call is rejected`, () => {
+		const { errors } = compile(
+			body(`import "gofront/dom"
+
+func main() {
+	el := document.getElementById("x")
+	${op}
+}`),
+		);
+		assertErrorContains(errors, want);
+	});
+}
+
+test("ranging over an element or a collection parameter is rejected", () => {
+	const { errors } = compile(
+		body(`import "gofront/dom"
+
+func f(el dom.Element) {
+	for range el {}
+}
+
+func g(ch dom.HTMLCollection) {
+	for range ch {}
+}`),
+	);
+	assertErrorContains(errors, "cannot range over el");
+	assertErrorContains(errors, "cannot range over ch");
+});
+
+test("a slice of browser values typed through a member is that type's slice", () => {
+	const { errors } = compile(
+		body(`import "gofront/dom"
+
+func f(n dom.NotRestoredReasons) {
+	var xs []dom.NotRestoredReasons = n.children
+	_ = xs
+}`),
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a member of an element read from a call is still read", () => {
+	const { errors } = compile(
+		body(`func main() {
+	el := document.getElementById("x")
+	var id string = el.id
+	_ = id
+}`),
+	);
+	assertEqual(errors.length, 0);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
