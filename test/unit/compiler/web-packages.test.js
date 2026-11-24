@@ -1128,6 +1128,32 @@ func main() {}`);
 	assertErrorContains(errors, "member targets");
 });
 
+const GPU_ALIASES = `
+interface ColorTargetState { format: string; }
+type TargetAlias = ColorTargetState;
+`;
+
+test("a package type alias in a struct field is the type it names", () => {
+	const { errors } = build(
+		`package main
+
+import "gofront/webgpu"
+
+type S struct { T webgpu.TargetAlias }
+
+func f(s S, c webgpu.ColorTargetState) {
+	c = s.T
+	_ = s.T[0]
+}
+
+func main() {}
+`,
+		{ stdlib: { "stdlib/gofront/webgpu/webgpu.d.ts": GPU_ALIASES } },
+	);
+	assertErrorContains(errors, "Cannot index type webgpu.ColorTargetState");
+	assertEqual(errors.length, 1);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

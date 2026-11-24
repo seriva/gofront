@@ -370,7 +370,7 @@ export class DtsParser {
 
 	// `(a: A, b?: B) => R` is a function type; any other parenthesized type
 	// only groups the type inside it.
-	_parseParenType() {
+	_parseParenType(inReturn = false) {
 		const start = this.pos;
 		this.pos++;
 		this.skipTypeExpr(")");
@@ -380,7 +380,7 @@ export class DtsParser {
 			// `(T | null)`, `(() => void)`: the parentheses only group a type.
 			const end = this.pos;
 			this.pos = start + 1;
-			const inner = this.parseType();
+			const inner = this.parseType(inReturn);
 			this.pos = end;
 			return inner;
 		}
@@ -441,7 +441,7 @@ export class DtsParser {
 			this.skipBlock();
 			return ANY;
 		}
-		if (c === "(") return this._parseParenType();
+		if (c === "(") return this._parseParenType(inReturn);
 		if (c === '"' || c === "'") {
 			this.skipStringLit();
 			return { kind: "basic", name: "string" };
@@ -926,7 +926,9 @@ function funcType(params, ret) {
 
 // The type of the union `members`: its first member that is not `null` or
 // `undefined`, marked `_nullable` when the union has one of those. `any` and
-// a union of only `null` and `undefined` need no mark (they hold `nil`).
+// a union of only `null` and `undefined` need no mark (they hold `nil`); a
+// reference to a `.d.ts` type is `any` here but is marked, as the type it names
+// is not.
 function nullableUnion(members) {
 	const concrete = members.filter(
 		(t) => !(t.kind === "basic" && t.name === "nil"),
@@ -934,7 +936,9 @@ function nullableUnion(members) {
 	if (concrete.length === members.length || concrete.length === 0)
 		return members[0];
 	const t = concrete[0];
-	return t.kind === "basic" && t.name === "any" ? t : { ...t, _nullable: true };
+	return t.kind === "basic" && t.name === "any" && !t.alias
+		? t
+		: { ...t, _nullable: true };
 }
 
 // Binds the `extends` names of the interfaces and classes in `decls` that

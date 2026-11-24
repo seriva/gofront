@@ -5,7 +5,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
@@ -444,6 +443,17 @@ test("a parenthesized non-function type is the type it groups", () => {
 	const { params } = values.get("f");
 	assertEqual(params[0].kind, "slice");
 	assertEqual(params[0].elem.name, params[1].name);
+});
+
+test("a parenthesized tuple in a return position stays a tuple", () => {
+	const { values } = parseDts(`declare function g(): ([string, number]);`);
+	assertEqual(
+		JSON.stringify(values.get("g").returns),
+		JSON.stringify([
+			{ kind: "basic", name: "string" },
+			{ kind: "basic", name: "float64" },
+		]),
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

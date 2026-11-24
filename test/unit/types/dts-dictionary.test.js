@@ -93,12 +93,14 @@ test("a parenthesised union of a type and null keeps the type", () => {
 	const t = paramOf("(Foo | null)[]");
 	assertEqual(t.kind, "slice");
 	assertEqual(t.elem.alias, "Foo");
+	assertEqual(t.elem._nullable, true);
 });
 
 test("a nested parenthesis still keeps the type", () => {
 	const t = paramOf("((Foo | null))[]");
 	assertEqual(t.kind, "slice");
 	assertEqual(t.elem.alias, "Foo");
+	assertEqual(t.elem._nullable, true);
 });
 
 test("a parenthesised primitive union keeps its first member", () => {

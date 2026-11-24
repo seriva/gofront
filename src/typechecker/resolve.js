@@ -294,7 +294,7 @@ export const resolveMethods = {
 				const named = this._typeOfName(node.name, node, scope);
 				if (named) {
 					this._useQualifiedTypeName(node, named);
-					return this._checkConstraintUse(named, node);
+					return this._checkConstraintUse(this._resolveDtsAlias(named), node);
 				}
 				const jsOnly = this._jsOnlyMember(node.name);
 				if (jsOnly) return this._errJsOnly(jsOnly, node);
@@ -1668,13 +1668,18 @@ export const resolveMethods = {
 	},
 
 	// The type the `.d.ts` reference `t` names (its own references resolved
-	// too), or `t` when it names none or is already being resolved.
+	// too), or `t` when it names none or is already being resolved. A nullable
+	// reference gives a `_nullable` copy of that type.
 	_resolveAliasRef(t, seen) {
 		if (!t.alias || seen?.has(t.alias)) return t;
 		const found = this.types.get(t.alias) ?? this._dtsQualifiedType(t.alias);
 		if (!found || found === t) return t;
-		if (found.kind === "namespace") return found;
-		return this._resolveDtsAlias(found, new Set(seen).add(t.alias));
+		const type =
+			found.kind === "namespace"
+				? found
+				: this._resolveDtsAlias(found, new Set(seen).add(t.alias));
+		// `T | null` names T marked `_nullable` (see `nullableUnion`).
+		return t._nullable && !type._nullable ? { ...type, _nullable: true } : type;
 	},
 
 	// `types` with each `.d.ts` reference resolved, or `types` itself when
@@ -2005,6 +2010,8 @@ export const resolveMethods = {
 	_dtsDerivesFrom(ns, target, seen = new Set()) {
 		if (ns === target) return true;
 		if (!ns?._dtsType || seen.has(ns)) return false;
+		// A `_nullable` copy of a type (`T | null`) is that type.
+		if (target?._dtsType && identical(ns, target)) return true;
 		seen.add(ns);
 		return this._dtsBases(ns).some((b) =>
 			this._dtsDerivesFrom(b, target, seen),

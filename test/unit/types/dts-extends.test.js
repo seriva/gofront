@@ -401,6 +401,85 @@ test("a derived .d.ts value is still assignable to its base", () => {
 	assertEqual(errors.length, 0);
 });
 
+const ALIAS_DTS = `${PLAIN_DTS}
+type AliasP = Plain;
+declare function takeNullCb(cb: () => (Plain | null)): void;
+declare function takeNull(p: Plain | null): void;
+`;
+
+test("a value of a .d.ts alias of a type is that type", () => {
+	const { errors } = compile(
+		`type S struct { P AliasP }
+type G[T any] struct { V T }
+func f(s S, x any) {
+	_ = s.P[0]
+	for range s.P {}
+	if s.P {}
+	g := G[AliasP]{V: getP()}
+	_ = g.V[0]
+	_ = ([]AliasP{getP()})[0][0]
+	_ = (map[string]AliasP{})["a"][0]
+	_ = x.(AliasP)[0]
+}
+func main() {}`,
+		ALIAS_DTS,
+	);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertErrorContains(errors, "cannot range over");
+	assertErrorContains(errors, "non-boolean");
+	assertEqual(errors.length, 7);
+});
+
+test("a .d.ts alias of a slice is that slice wherever it is named", () => {
+	const { errors } = compile(
+		`func f(x []PlainList) {
+	var ys []Plain = x[0:1][0]
+	_ = ys
+	_ = x[0:1][0][0][0]
+}
+func main() {}`,
+		ALIAS_DTS,
+	);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertEqual(errors.length, 1);
+});
+
+test("a struct with a .d.ts alias field converts to one with the aliased type", () => {
+	const { errors } = compile(
+		`type S1 struct { P AliasP }
+type S2 struct { P Plain }
+func main() {
+	var a S1
+	var b S2 = S2(a)
+	_ = b
+}`,
+		ALIAS_DTS,
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a callback returning a nullable .d.ts type may return nothing", () => {
+	const { errors } = compile(
+		`func main() {
+	takeNullCb(func() {})
+	takeNullCb(func() Plain { return getP() })
+}`,
+		ALIAS_DTS,
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a nullable .d.ts parameter takes a derived value and nil", () => {
+	const { errors } = compile(
+		`func main() {
+	takeNull(getSub())
+	takeNull(nil)
+}`,
+		ALIAS_DTS,
+	);
+	assertEqual(errors.length, 0);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
