@@ -27,8 +27,14 @@ Close the internal compiler-quality blind spots not owned by the remaining v2.0.
 4. **JS codegen string-inspection regexes (`src/backend/js/`)**
    - Replace duplicated `/^(new |\{|\[|Array|__nm\()|\$z_/.test(zero)` checks (`src/backend/js/expressions.js:2557,2703,3370`) with a type-driven `needsFreshZero(type)` predicate.
    - Replace scattered `!val.endsWith("n") && /^-?\d+$/.test(val)` BigInt patches (6+ sites across `index.js`, `expressions.js`, `statements.js`) with one typed literal emitter helper.
-5. **Prototype-mixin state encapsulation (`TypeChecker`, `CodeGen`, `FunctionEmitter`)**
+5. **Prototype-mixin state encapsulation & hidden dispatch (`TypeChecker`, `CodeGen`, `FunctionEmitter`)**
    - Audit the 51–83 `this.*` fields shared across `Object.assign(Class.prototype, ...)` mixins in `src/typechecker/`, `src/backend/js/`, and `src/backend/wasm/` and extract stateless helpers or explicit context objects where coupling is highest.
-6. **Residual correctness, fuzz baseline & lint hygiene**
+   - Audit string-indexed method dispatch tables like `STMT_GEN_DELEGATE` (`src/backend/js/statements.js:146-158`) that suppress static call edges in Sentrux while leaving implicit runtime coupling across mixin files.
+6. **Package cache & incremental-build hardening (`src/link/package-cache.js`, `src/link/user-js.js`)**
+   - `deepFreeze` (`src/link/package-cache.js:122-135`) calls `Object.freeze` on `Map`/`Set` instances, which only blocks own-property assignment—not `.set()`/`.add()`/`.delete()` mutations on cached collections (`exportedSymbols`, `exportedTypes`, etc.). Under `freezePackageCache(true)`, guard mutator methods on frozen `Map`/`Set` instances so test-time immutability checks actually catch collection writes.
+   - Tighten `summaryHash` (`src/link/package-cache.js:247-299`): replace unescaped `out.join(",")` framing with length-prefixed or escaped tokens, and fix the `Map` key sort comparator (`String(a) < String(b) ? -1 : 1`) to return `0` on equality.
+   - Revisit `filesSignature` (`mtimeMs:size` in `src/link/package-cache.js:171-182`) for same-size/same-mtime rewrites (follow-up from PR #310) and check whether `userEmitter.memo` (`src/link/user-js.js:43`) needs a bound in long-lived processes.
+   - Consider replacing comment-sentinel string splicing (`/*__GOFRONT_USER:...*/` in `src/link/user-js.js` and `wasmMarker` in `src/link/wasm.js`) with structured chunk assembly, and check whether `cloneAst(programs)` in `src/link/user-js.js:159` can be dropped once in-place AST mutations (#2) are removed.
+7. **Residual correctness, fuzz baseline & lint hygiene**
    - Re-probe anything not cleared by a pre-2.0.0 `/bs-plan follow-ups` pass: the ~7 WasmGC ICE entries in `plans/follow-ups.md`, the 4 remaining non-excluded `check-baseline.txt` roots (`R9`, `W1`, `builtin-complex-operands`, and 3 singletons), and the 7 Biome unused-symbol warnings (`emit-builtins.js`, `assignability.js`, `expressions.js`, `range-assign.test.js`, `simd.test.js`).
    - Once warnings are zero, consider tightening Biome unused-import/unused-var rules to errors so regressions fail `npm run check`.

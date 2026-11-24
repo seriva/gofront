@@ -16,11 +16,11 @@ Reclaim SLOC and maintenance overhead added during the v2.0.0 checker, WASM, and
    - Verify `test/fuzz/check-baseline.txt` holds only `# excluded:` entries after `checker-operand-rules`.
    - Decide whether to keep `test/fuzz/` (~2.2k lines) as an on-demand regression oracle or retire it (and `test/unit/cli/checkfuzz.test.js`) once `checker-operand-rules` and `value-stores` are complete.
 2. **Test suite deduplication (`test/unit/`)**
-   - Audit overlap between the ~97k lines of `test/unit/**/*.js` and `test/unit/fixtures/conformance/` (286+ files).
+   - Audit overlap between `test/unit/**/*.js` (grew from ~97k lines on 2026-11-19 to ~112k lines across 188 files by 2026-11-23) and `test/unit/fixtures/conformance/` (286+ files).
    - Consolidate repetitive per-repro tests into table-driven cases or conformance fixtures where coverage is identical.
 3. **Checker `JS_DYNAMIC_ANY` & interop leftovers (`src/typechecker/`)**
    - After `typed-web-platform` types browser globals via WebIDL, audit remaining `JS_DYNAMIC_ANY` permissive branches and hand-written interop shims for dead or unnecessary paths.
-4. **Backend shrinking pass (`src/backend/wasm/`, `src/backend/js/`)**
-   - Audit the largest backend files (`src/backend/js/expressions.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/boundary.js`) for dead helpers, duplicated store/layout logic left after `wasm-struct-types`, `value-stores`, and `js-dead-code-elimination`.
+4. **Backend & checker shrinking pass (`src/backend/wasm/`, `src/backend/js/`, `src/typechecker/`)**
+   - Audit the largest files (`src/backend/js/expressions.js` 4.3kL, `src/backend/wasm/emit-stmts.js` 4.1kL, `src/backend/wasm/emit-exprs.js` 3.7kL, `src/typechecker/expressions.js` 3.5kL, `src/backend/wasm/boundary.js` 2.9kL, `src/backend/js/statements.js` 2.6kL) for dead helpers, duplicated store/layout logic left after `wasm-struct-types`, `value-stores`, and `js-dead-code-elimination`.
 5. **Working notes cleanup**
    - Remove temporary checklists like `plans/v2.0.0/next-steps.md` if still present.
