@@ -3322,20 +3322,24 @@ export const expressionCheckMethods = {
 		return t ?? ANY;
 	},
 
-	// `int{}`, `T{}` for a type parameter without a core type. An elided
-	// `{...}` stands for its hint, or for what a hint of `*T` points at (one
-	// level: `[]**T{{}}` has no literal to elide), so the same rule applies to
-	// that type: a struct, array, slice or map, or a type parameter with such
-	// a core type. A basic, `.d.ts`, func or interface hint is invalid.
-	_isInvalidLiteralType(expr, t, base, scope) {
-		// A type that already failed to resolve has its error.
-		if (t?._tainted) return false;
-		let lit = base;
-		if (expr.typeExpr === null && lit?.kind === "pointer")
-			lit = this._deepUnderlying(this.resolveType(lit.base));
-		if (lit?._tainted) return false;
-		const core = lit?.kind === "typeParam" ? this._coreType(lit, scope) : lit;
-		return !["struct", "array", "slice", "map", "simd"].includes(core?.kind);
+	// The type a literal builds, as the struct, array, slice, map or simd type
+	// that holds its elements (`lit`) with the type to name in a diagnostic
+	// (`type`). An elided `{...}` stands for its hint, or for what a hint of
+	// `*T` points at (one level: `[]**T{{}}` has no literal to elide). A type
+	// parameter stands for its core type. A basic, `.d.ts`, func or interface
+	// type is not one of those and yields `lit: null`, as does a type that
+	// already failed to resolve (it has its error).
+	_literalType(expr, t, scope) {
+		let type = t;
+		let base = this._deepUnderlying(t);
+		if (expr.typeExpr === null && base?.kind === "pointer") {
+			type = this.resolveType(base.base);
+			base = this._deepUnderlying(type);
+		}
+		const lit = base?.kind === "typeParam" ? this._coreType(base, scope) : base;
+		if (["struct", "array", "slice", "map", "simd"].includes(lit?.kind))
+			return { type, lit };
+		return { type, lit: null, tainted: !!(t?._tainted || base?._tainted) };
 	},
 
 	// Go gives an elided literal its type from the element or key type of the
@@ -3353,23 +3357,29 @@ export const expressionCheckMethods = {
 			expr.typeExpr === null
 				? hintType
 				: this.resolveTypeNode(expr.typeExpr, scope);
-		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
-		if (this._isInvalidLiteralType(expr, t, base, scope)) {
+		const { type, lit: base, tainted } = this._literalType(expr, t, scope);
+		if (tainted) return this._checkUnknownCompositeLit(expr, scope, t);
+		if (!base) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
 		}
 		if (this._isSliceOrArray(base)) this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
-		if (base?.kind === "struct")
-			return this._checkStructCompositeLit(expr, scope, t, base);
-		if (base?.kind === "simd")
-			return this._checkSimdCompositeLit(expr, scope, t, base);
-		if (this._isSliceOrArray(base))
-			return this._checkSliceArrayCompositeLit(expr, scope, t, base, typeNode);
-		if (base?.kind === "map")
-			return this._checkMapCompositeLit(expr, scope, t, base);
-		return this._checkUnknownCompositeLit(expr, scope, t);
+		this._checkLiteralElems(expr, scope, type, base, typeNode);
+		return t;
+	},
+
+	// Checks the elements of a literal of `type` (its holder is `base`) and
+	// leaves the type the literal was given to the caller.
+	_checkLiteralElems(expr, scope, type, base, typeNode) {
+		if (base.kind === "struct")
+			this._checkStructCompositeLit(expr, scope, type, base);
+		else if (base.kind === "simd")
+			this._checkSimdCompositeLit(expr, scope, type, base);
+		else if (this._isSliceOrArray(base))
+			this._checkSliceArrayCompositeLit(expr, scope, type, base, typeNode);
+		else this._checkMapCompositeLit(expr, scope, type, base);
 	},
 
 	_checkSimdCompositeLit(expr, scope, t, base) {
