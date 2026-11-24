@@ -39,6 +39,7 @@ import {
 	PackageScope,
 	promotedMethods,
 	Scope,
+	signalOf,
 	TAINTED_ANY,
 	TypeCheckError,
 	typeStr,
@@ -1699,7 +1700,9 @@ export class TypeChecker {
 
 	// `name?={ cond }` sets the attribute when `cond` is true.
 	_checkTemplCondAttr(a, scope) {
-		const t = this._checkTemplExpr(a, a.tokens, scope);
+		const raw = this._checkTemplExpr(a, a.tokens, scope);
+		// A `gom.Signal[bool]` or `gom.Computed[bool]` stands for its value.
+		const t = signalOf(raw)?.elem ?? raw;
 		this._requireTemplBool(
 			t,
 			a.expr,

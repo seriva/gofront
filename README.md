@@ -217,7 +217,7 @@ templ TodoItem(t Todo) {
 
 templ AppView() {
     <div class={ cardStyle() }>
-        @Header(highCount(), syncMsg, syncCls)
+        @Header(highCount())
         @TodoList(visibleTodos())
     </div>
 }
@@ -233,6 +233,9 @@ Key syntax features:
 - `for _, v := range slice { }` — loop rendering inside template bodies
 - Go expressions in template bodies are type-checked like the rest of the package
 - `switch expr { case v: ... default: ... }` — switch rendering inside template bodies
+- `{ sig.Get() }`, `{ sig }`, `class={ sig }`, `disabled?={ boolSig }` — text and attributes that read a
+  `gom.Signal` or `gom.Computed` update in place when the signal is `Set`, with no re-render
+  (see [Signals in `.templ`](docs/compilation-mapping.md#signals-in-templ))
 - `@templ.Raw(htmlStr)` — inject raw/trusted HTML (uses `insertAdjacentHTML`)
 - `ref="name"` — capture the element at mount time into an optional `refs map[string]any`
   passed as `gom.Mount("#app", AppView(), refs)`; no `querySelector` needed afterwards

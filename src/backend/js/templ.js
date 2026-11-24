@@ -2,9 +2,59 @@
 // Mounts an HTML/expression tree onto a parent DOM node by emitting plain
 // document.createElement / appendChild / setAttribute calls.
 
-import { UnsupportedError } from "../../typechecker/types.js";
+import { forEachChild } from "../../lower/walk.js";
+import {
+	callsSignalGet,
+	signalOf,
+	UnsupportedError,
+} from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+// Whether evaluating `node` calls `Get` on a `gom.Signal` or `gom.Computed`,
+// directly or through a `Get` an embedded one promotes. A function literal
+// is only declared, not run, by the expression holding it, unless that
+// expression calls it on the spot.
+function readsSignal(node) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some(readsSignal);
+	if (node.kind === "FuncLit") return false;
+	if (
+		node.kind === "CallExpr" &&
+		node.func?.kind === "SelectorExpr" &&
+		node.func.field === "Get" &&
+		callsSignalGet(node.func.expr?._type)
+	)
+		return true;
+	let found = false;
+	forEachChild(node, (child) => {
+		found ||=
+			node.kind === "CallExpr" &&
+			child === node.func &&
+			child?.kind === "FuncLit"
+				? readsChildren(child)
+				: readsSignal(child);
+	});
+	return found;
+}
+
+function readsChildren(node) {
+	let found = false;
+	forEachChild(node, (child) => {
+		found ||= readsSignal(child);
+	});
+	return found;
+}
+
+/**
+ * How a checked `.templ` expression depends on signals: "bare" when its value
+ * is itself a `gom.Signal` or `gom.Computed` (read through `Get`), "reads"
+ * when it calls `Get` on one, null when it reads none.
+ */
+export function templReactivity(expr) {
+	if (signalOf(expr?._type)) return "bare";
+	return readsSignal(expr) ? "reads" : null;
+}
 
 /** @type {ThisType<CodeGen>} */
 export const templGenMethods = {
@@ -87,9 +137,7 @@ export const templGenMethods = {
 					`${p}.appendChild(document.createTextNode(${JSON.stringify(node.value)}));`,
 				);
 			case "TemplExpr":
-				return this.line(
-					`${p}.appendChild(document.createTextNode(String(${this._genTemplExpr(node, '""')})));`,
-				);
+				return this._genTemplText(node, p);
 			case "TemplComponent":
 				return this._genTemplComponentMount(node, p);
 			case "TemplChildren": {
@@ -112,6 +160,20 @@ export const templGenMethods = {
 			default:
 				break;
 		}
+	},
+
+	// `{ expr }` as text. An expression that reads a signal gets its own text
+	// node that an Effect rewrites whenever the signal changes.
+	_genTemplText(node, p) {
+		const { js, reactive } = this._genTemplValue(node, '""');
+		if (!reactive)
+			return this.line(
+				`${p}.appendChild(document.createTextNode(String(${js})));`,
+			);
+		const t = this._freshVar("t");
+		this.line(`const ${t} = document.createTextNode("");`);
+		this.line(`${p}.appendChild(${t});`);
+		this._genTemplEffect(`${t}.data = String(${js});`);
 	},
 
 	_genTemplComponentMount(node, p) {
@@ -167,22 +229,42 @@ export const templGenMethods = {
 				);
 			}
 		} else if (attr.kind === "expr") {
-			const exprJs = this._genTemplExpr(attr, '""');
-			if (name === "class") {
-				this.line(setClass(exprJs));
-			} else {
-				this.line(
-					`${el}.setAttribute(${JSON.stringify(name)}, String(${exprJs}));`,
-				);
-			}
+			const { js, reactive } = this._genTemplValue(attr, '""');
+			const assign =
+				name === "class"
+					? setClass(js)
+					: `${el}.setAttribute(${JSON.stringify(name)}, String(${js}));`;
+			if (reactive) this._genTemplEffect(assign);
+			else this.line(assign);
 		} else if (attr.kind === "bool") {
 			this.line(`${el}.setAttribute(${JSON.stringify(name)}, "");`);
 		} else if (attr.kind === "cond-bool") {
-			const exprJs = this._genTemplExpr(attr, '""');
-			this.line(
-				`if(${exprJs})${el}.setAttribute(${JSON.stringify(name)}, "");`,
-			);
+			const { js, reactive } = this._genTemplValue(attr, '""');
+			if (reactive)
+				this._genTemplEffect(
+					`${el}.toggleAttribute(${JSON.stringify(name)}, !!(${js}));`,
+				);
+			else
+				this.line(`if(${js})${el}.setAttribute(${JSON.stringify(name)}, "");`);
 		}
+	},
+
+	// Runs `stmt` now and again whenever a signal it reads changes. The Effect
+	// belongs to the root being mounted into, so mounting that root again
+	// stops it.
+	_genTemplEffect(stmt) {
+		this.line(`Effect$$gom(function() { ${stmt} });`);
+	},
+
+	// The JS of the Go expression of `node` and whether it reads a signal. A
+	// bare `gom.Signal` or `gom.Computed` is read through its `Get`.
+	_genTemplValue(node, emptyJs) {
+		const js = this._genTemplExpr(node, emptyJs);
+		const how = node.expr ? templReactivity(node.expr) : null;
+		return {
+			js: how === "bare" ? `(${js}).Get()` : js,
+			reactive: how !== null,
+		};
 	},
 
 	_genTemplIf(node, p) {

@@ -8,6 +8,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Added
+- **Signals for `gom` and `.templ`**: `gom.NewSignal`, `gom.NewComputed` and `gom.Effect` hold values that notify what depends on them, and `.templ` text and attributes bound to a signal (`{ count.Get() }`, `{ count }`, `class={ cls }`, `disabled?={ busy }`) update in place when it changes, without re-rendering the page ([details](docs/compilation-mapping.md#signals-in-templ)).
+
 - **`//go:embed` for `string`, `[]byte` and `embed.FS`**: a package-level variable under `//go:embed` (with `import _ "embed"`, or `import "embed"` for `embed.FS`) holds the matched files, from single files, globs and directories, on JavaScript and WebAssembly alike, so shaders, templates and data load with no network request. An `embed.FS` reads them with `ReadFile`; `ReadDir` and `Open` are not available ([details](docs/go-compatibility.md#embedding-files-with-goembed)).
 
 - **Faster `gofront dev` rebuilds**: after a save, `gofront dev` re-checks only the edited package and the packages that import something it changed, and `dev` now also rebuilds when an embedded file or a `.d.ts` file changes ([details](docs/usage.md#the-dev-loop)).
