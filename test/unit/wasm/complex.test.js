@@ -4,6 +4,7 @@
 import {
 	assertAllTargetsOutput,
 	assertEqual,
+	assertProgramOutput,
 	assertWasmProgramOutput,
 	compileHybrid,
 	runWasm,
@@ -648,5 +649,28 @@ func main() {
 	await assertAllTargetsOutput(
 		src,
 		"body\np (0+3i)\np (2+0i)\nc64 (1.5+0i)\nlit (2+0i)\nm 7 (2+0i)\n",
+	);
+});
+
+section(
+	"WASM Complex — package-level complex globals with literal initializers",
+);
+
+test("package-level complex variables take int, float and rune literals", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+var a complex128 = 1
+var b complex64 = 2
+var c complex128 = 1.5
+var d complex128 = -1
+var e complex64 = 'a'
+var g complex128 = (2)
+
+func main() { fmt.Println(a, b, c, d, e, g) }
+`,
+		"(1+0i) (2+0i) (1.5+0i) (-1+0i) (97+0i) (2+0i)\n",
 	);
 });

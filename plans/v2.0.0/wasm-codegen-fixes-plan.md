@@ -138,7 +138,7 @@ Roots:
 
 ### Phase 1: Package Globals & Resolved Pointer/Zero Types (roots `wasm-global-const-init-type-mismatch`, `wasm-backend-unresolved-typename`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Guard Wasm global constant initializers by `wType` and pass declared `goType` to `__init_globals` (W1.1–W1.3)
+- [x] Task 1.1: Guard Wasm global constant initializers by `wType` and pass declared `goType` to `__init_globals` (W1.1–W1.3)
   - Files: `src/backend/wasm/globals.js` (`_collectPackageGlobals`, `_makeGlobalInitFunc`)
   - Test: `test/unit/wasm/strings_any.test.js` (W1.1–W1.2 `any` globals incl. no-`fmt` assertion), `test/unit/wasm/scalars.test.js` (W1.3 float globals incl. `(1)`, `'a'`, defined `F`), `test/unit/wasm/complex.test.js` (W1.3 `complex128`/`complex64` globals) + W1 controls
   - Done when: every W1 program prints Go's output on `wasm` and the W1 controls still pass

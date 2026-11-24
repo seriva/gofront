@@ -307,24 +307,40 @@ export function _collectPackageGlobals(progs, mod, checker) {
 						sign = -1;
 					}
 
+					// A literal becomes a Wasm constant initializer only when its
+					// kind matches the global's Wasm type; any other literal (an
+					// `any`, `complex128` or `float64 = 1` global) is assigned by
+					// the start function with the declared type.
+					const isFloatType = wType === "f32" || wType === "f64";
 					let isConstInit = false;
 					if (litNode && litNode.kind === "BasicLit") {
-						if (litNode.litKind === "INT") {
+						if (
+							litNode.litKind === "INT" &&
+							(wType === "i32" || wType === "i64" || isFloatType)
+						) {
 							isConstInit = true;
 							const s = String(litNode.value);
 							const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
-							initInsts = [
-								wType === "i64"
-									? {
-											op: "i64.const",
-											value: BigInt(sign) * BigInt(clean),
-										}
-									: {
-											op: "i32.const",
-											value: (sign * Number(clean)) | 0,
-										},
-							];
-						} else if (litNode.litKind === "FLOAT") {
+							if (isFloatType) {
+								initInsts = [
+									{ op: `${wType}.const`, value: sign * Number(clean) },
+								];
+							} else if (wType === "i64") {
+								initInsts = [
+									{
+										op: "i64.const",
+										value: BigInt(sign) * BigInt(clean),
+									},
+								];
+							} else {
+								initInsts = [
+									{
+										op: "i32.const",
+										value: (sign * Number(clean)) | 0,
+									},
+								];
+							}
+						} else if (litNode.litKind === "FLOAT" && isFloatType) {
 							isConstInit = true;
 							initInsts = [
 								{
@@ -332,7 +348,7 @@ export function _collectPackageGlobals(progs, mod, checker) {
 									value: sign * Number(litNode.value),
 								},
 							];
-						} else if (litNode.litKind === "BOOL") {
+						} else if (litNode.litKind === "BOOL" && wType === "i32") {
 							isConstInit = true;
 							initInsts = [
 								{
@@ -356,6 +372,7 @@ export function _collectPackageGlobals(progs, mod, checker) {
 						(isConst ? pendingConsts : pending).push({
 							name,
 							expr: values[i],
+							goType: rawType,
 						});
 					}
 					mod.globals.push({
@@ -403,7 +420,7 @@ export function _orderConstInits(entries) {
 // initializer in declaration order and invoking package `init()` functions;
 // registered as the module start function.
 export function _makeGlobalInitFunc(pending, initNames = []) {
-	const stmts = pending.map(({ name, names, expr, types, zeroType }) =>
+	const stmts = pending.map(({ name, names, expr, types, zeroType, goType }) =>
 		zeroType
 			? { kind: "GlobalZeroInit", name, goType: zeroType }
 			: {
@@ -414,7 +431,7 @@ export function _makeGlobalInitFunc(pending, initNames = []) {
 								name: n,
 								_type: types?.[i] ?? expr._type?.types?.[i],
 							}))
-						: [{ kind: "Ident", name, _type: expr._type }],
+						: [{ kind: "Ident", name, _type: goType ?? expr._type }],
 					op: "=",
 					rhs: [expr],
 				},
