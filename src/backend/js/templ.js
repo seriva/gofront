@@ -118,9 +118,7 @@ export const templGenMethods = {
 					`${p}.appendChild(document.createTextNode(${JSON.stringify(node.value)}));`,
 				);
 			case "TemplExpr":
-				return this.line(
-					`${p}.appendChild(document.createTextNode(String(${this._genTemplExpr(node, '""')})));`,
-				);
+				return this._genTemplText(node, p);
 			case "TemplComponent":
 				return this._genTemplComponentMount(node, p);
 			case "TemplChildren": {
@@ -143,6 +141,20 @@ export const templGenMethods = {
 			default:
 				break;
 		}
+	},
+
+	// `{ expr }` as text. An expression that reads a signal gets its own text
+	// node that an Effect rewrites whenever the signal changes.
+	_genTemplText(node, p) {
+		const { js, reactive } = this._genTemplValue(node, '""');
+		if (!reactive)
+			return this.line(
+				`${p}.appendChild(document.createTextNode(String(${js})));`,
+			);
+		const t = this._freshVar("t");
+		this.line(`const ${t} = document.createTextNode("");`);
+		this.line(`${p}.appendChild(${t});`);
+		this._genTemplEffect(`${t}.data = String(${js});`);
 	},
 
 	_genTemplComponentMount(node, p) {
@@ -214,6 +226,24 @@ export const templGenMethods = {
 				`if(${exprJs})${el}.setAttribute(${JSON.stringify(name)}, "");`,
 			);
 		}
+	},
+
+	// Runs `stmt` now and again whenever a signal it reads changes. The Effect
+	// belongs to the root being mounted into, so mounting that root again
+	// stops it.
+	_genTemplEffect(stmt) {
+		this.line(`Effect$$gom(function() { ${stmt} });`);
+	},
+
+	// The JS of the Go expression of `node` and whether it reads a signal. A
+	// bare `gom.Signal` or `gom.Computed` is read through its `Get`.
+	_genTemplValue(node, emptyJs) {
+		const js = this._genTemplExpr(node, emptyJs);
+		const how = node.expr ? templReactivity(node.expr) : null;
+		return {
+			js: how === "bare" ? `(${js}).Get()` : js,
+			reactive: how !== null,
+		};
 	},
 
 	_genTemplIf(node, p) {

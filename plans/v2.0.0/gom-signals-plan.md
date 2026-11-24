@@ -91,7 +91,7 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
   - Files: `src/lower/reachability.js`, `src/typechecker/index.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-detect.test.js`: `{ sig.Get() }`, a compound expression reading a signal, a bare signal/computed value (`{ sig }`, `{ comp }`, `disabled?={ boolSig }`, `disabled?={ boolComp }`) even when `.Get()` is never called in `.go`, and a `Signal.Get()` or stdlib function called only inside `.templ` are detected and kept reachable (including `Effect$$gom` and `Get`); a non-signal `Get` is not flagged; non-bool bare signal in `cond-bool` is rejected
   - Done when: templates without signals emit the same JS as before and templ-only stdlib calls and bare-signal `.Get()` are never pruned
-- [ ] Task 2.2: Surgical text bindings (former 8.3)
+- [x] Task 2.2: Surgical text bindings (former 8.3)
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-text.test.js`: `{ sig.Get() }`, compound text expressions, multiple reactive text nodes in the same element (`<p>{ a.Get() } { b.Get() }</p>`), and bare `{ sig }` / `{ comp }` update `.data` on `Set` with the same text node and parent before and after
   - Done when: dynamic text updates without recreating parents
