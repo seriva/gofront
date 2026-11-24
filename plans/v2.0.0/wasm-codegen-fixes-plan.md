@@ -142,7 +142,7 @@ Roots:
   - Files: `src/backend/wasm/globals.js` (`_collectPackageGlobals`, `_makeGlobalInitFunc`)
   - Test: `test/unit/wasm/strings_any.test.js` (W1.1–W1.2 `any` globals incl. no-`fmt` assertion), `test/unit/wasm/scalars.test.js` (W1.3 float globals incl. `(1)`, `'a'`, defined `F`), `test/unit/wasm/complex.test.js` (W1.3 `complex128`/`complex64` globals) + W1 controls
   - Done when: every W1 program prints Go's output on `wasm` and the W1 controls still pass
-- [ ] Task 1.2: Add `resolvedType` and box func and defined complex pointees in `isReplaceableRef` (W2.1–W2.4)
+- [x] Task 1.2: Add `resolvedType` and box func and defined complex pointees in `isReplaceableRef` (W2.1–W2.4)
   - Files: `src/backend/wasm/types.js` (`resolvedType`, `isReplaceableRef`)
   - Test: `test/unit/wasm/pointers.test.js` (W2.1–W2.2: `new(F)`, `new(func() int)`, `*pf = fn; (*pf)()`, `struct{ P *F }`), `test/unit/wasm/complex.test.js` (W2.4: `var p *C = new(C)`, `func mk() *C`, `func box(p *C) any`, `struct{ P *C }`), `test/unit/wasm/fmt-any.test.js` (W2.3–W2.4: `C`, `C64`, `C2` in `any` → `Println` and `%T`) + W2 controls
   - Done when: W2.1–W2.4 build valid modules with Go's output; `&f` still reports `cannot take the address of a variable of func type`

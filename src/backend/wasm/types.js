@@ -613,18 +613,30 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 	return base != null && isStructType(base, checker, mod);
 }
 
-// Slices, maps and pointers are reference values that an assignment through a
-// pointer replaces (a nil map becomes a new one, `*pp = q` repoints `p`),
-// unlike structs and arrays, whose pointer is the value's own reference.
-function isReplaceableRef(goType, checker) {
+// The non-named type `goType` stands for: a `TypeName`/`Ident` is looked up in
+// the checker's type table and a defined type is followed to its underlying
+// type (`type C complex128` -> `complex128`).  Null for a defined-type cycle.
+export function resolvedType(goType, checker = null) {
 	let t = goType;
-	if (t?.kind === "TypeName" && checker?.types?.has(t.name))
+	if (
+		(t?.kind === "TypeName" || t?.kind === "Ident") &&
+		checker?.types?.has(t.name)
+	)
 		t = checker.types.get(t.name);
-	if (t?.kind === "named" && t.underlying) t = t.underlying;
+	return namedBase(t, checker);
+}
+
+// Slices, maps, funcs, complex numbers and pointers are reference values that
+// an assignment through a pointer replaces (a nil map becomes a new one,
+// `*pp = q` repoints `p`, `*pf = fn` stores a closure), unlike structs and
+// arrays, whose pointer is the value's own reference.
+function isReplaceableRef(goType, checker) {
+	const t = resolvedType(goType, checker);
 	return (
 		isSliceType(goType, checker) ||
 		isMapType(goType, checker) ||
-		isComplex(goType) ||
+		isFuncType(goType, checker) ||
+		isComplex(t) ||
 		t?.kind === "pointer" ||
 		t?.kind === "PointerType"
 	);

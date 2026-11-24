@@ -674,3 +674,73 @@ func main() { fmt.Println(a, b, c, d, e, g) }
 		"(1+0i) (2+0i) (1.5+0i) (-1+0i) (97+0i) (2+0i)\n",
 	);
 });
+
+section("WASM Complex — defined complex types behind pointers");
+
+test("pointers to a defined complex type are boxes (no fmt)", async () => {
+	await assertProgramOutput(
+		`package main
+
+type C complex128
+
+func box(p *C) any { return p }
+
+func mk() *C { return new(C) }
+
+func main() {
+	var p *C = new(C)
+	*p = 2 + 1i
+	println(int(real(*p)), int(imag(*p)))
+	q := mk()
+	*q = 4
+	println(int(real(*q)))
+	println(box(p) != nil)
+	_, ok := box(p).(*C)
+	println(ok)
+}
+`,
+		"2 1\n4\ntrue\ntrue\n",
+	);
+});
+test("a struct field of type *C holds a boxed defined complex", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+type h struct{ P *C }
+
+func main() {
+	v := h{new(C)}
+	*v.P = 5
+	fmt.Println(*v.P, real(*v.P))
+}
+`,
+		"(5+0i) 5\n",
+	);
+});
+test("new of a defined complex type and of complex128 box the value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+func main() {
+	p := new(C)
+	*p = 1 + 1i
+	*p += 2
+	fmt.Println(*p)
+	fmt.Printf("%T\\n", p)
+	fmt.Println(new(complex128) != nil)
+	var x any = new(complex128)
+	_, ok := x.(*complex128)
+	fmt.Println(ok)
+}
+`,
+		"(3+1i)\n*main.C\ntrue\ntrue\n",
+	);
+});
