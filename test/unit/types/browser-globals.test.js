@@ -752,6 +752,141 @@ func main() {
 	absent(js, "__ifv");
 });
 
+// What a `fn(x)` of a `MyInt` passes to the browser's `console.warn`/`log`.
+const logged = (js) => {
+	const seen = [];
+	const log = (...a) => seen.push(JSON.stringify(a));
+	runJs(js, { console: { log, warn: log, info: log } });
+	return seen.join();
+};
+
+test("a stored browser function assigned a method of an alias declared later stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+var fn = console.log
+
+func init() { fn = c.warn }
+
+var c = console
+
+func main() {
+	var x MyInt = 5
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of an alias in an inner block stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	if true {
+		c := console
+		fn = c.warn
+	}
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of a chained alias declared later stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	if true {
+		d := console
+		c := d
+		fn = c.warn
+	}
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of an alias declared before it stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	c := console
+	fn := console.log
+	fn = c.warn
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of a name bound twice is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ warn func(...any) }
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	fn := console.log
+	if true {
+		c := console
+		_ = c
+	}
+	if true {
+		c := L{func(a ...any) { kept = a }}
+		fn = c.warn
+	}
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function assigned a method of an alias of a Go value is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ warn func(...any) }
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	fn := console.log
+	if true {
+		c := L{func(a ...any) { kept = a }}
+		fn = c.warn
+	}
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function assigned a method of an unresolved name is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ warn func(...any) }
+
+func get() L { return L{} }
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	if true {
+		c := get()
+		fn = c.warn
+	}
+	fn(x)
+}`);
+	assertContains(js, "fn(new MyInt(x));");
+});
+
 test("a stored browser function assigned a Go function after a browser one is called as Go calls", () => {
 	const js = compiled(`type MyInt int
 

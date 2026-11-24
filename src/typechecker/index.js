@@ -2095,10 +2095,39 @@ export class TypeChecker {
 			);
 		}
 		const errorCount = this.errors.length;
-		let t = this._resolveDtsAlias(scope.lookup(name));
+		const base = def
+			? this._declaredRootType(def, scope, scan, new Set([name]))
+			: scope.lookup(name);
+		let t = this._resolveDtsAlias(base);
 		for (const field of chain) if (t) t = this.fieldType(t, field, {});
 		this.errors.length = errorCount;
 		return t?._hostFunc === true;
+	}
+
+	// The type of the value `def` that declares the root of a member chain
+	// (`c := console`), found without the declaration being in scope yet.
+	// Null when it cannot be told: a root bound more than once, or a value
+	// that is not a name or a member chain.
+	_declaredRootType(def, scope, scan, seen) {
+		const chain = [];
+		let root = def;
+		while (root?.kind === "SelectorExpr") {
+			chain.unshift(root.field);
+			root = root.expr;
+		}
+		if (root?.kind !== "Ident") return null;
+		const bound = scan.bound.get(root.name) ?? 0;
+		if (bound > 1 || seen.has(root.name)) return null;
+		const inner = bound === 1 ? scan.defs.get(root.name) : undefined;
+		const errorCount = this.errors.length;
+		let t = this._resolveDtsAlias(
+			inner
+				? this._declaredRootType(inner, scope, scan, seen.add(root.name))
+				: scope.lookup(root.name),
+		);
+		for (const field of chain) if (t) t = this.fieldType(t, field, {});
+		this.errors.length = errorCount;
+		return t;
 	}
 
 	_assignedInPackage() {
