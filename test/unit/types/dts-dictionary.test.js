@@ -373,7 +373,7 @@ func main() { _ = Foo.x }`,
 	assert(js.includes("Foo.x"));
 });
 
-test("an elided literal cannot stand for a basic type in a field or pointer slice", () => {
+test("an elided literal is missing its type in a field and cannot stand for a pointer to a basic type", () => {
 	const { errors } = compile(`type S struct{ x int }
 
 func main() {
@@ -381,7 +381,7 @@ func main() {
 	_ = S{{}}
 	_ = []*int{{}}
 }`);
-	assertErrorContains(errors, "invalid composite literal type int");
+	assertErrorContains(errors, "missing type in composite literal");
 	assertErrorContains(errors, "invalid composite literal type *int");
 	assertEqual(errors.length, 3);
 });

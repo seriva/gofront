@@ -1135,10 +1135,18 @@ export const expressionCheckMethods = {
 	},
 
 	// `dom.Element.id`: a `.d.ts` type has no methods or fields to select, it is
-	// not a value.
+	// not a value. `(*MyEl).id` over a defined type of one has no method either.
 	_checkDtsTypeSelector(expr, baseType) {
-		const base = this._deepUnderlying(baseType);
+		const viaPointer = baseType?.kind === "pointer";
+		const base = this._deepUnderlying(
+			viaPointer ? this.resolveType(baseType.base) : baseType,
+		);
 		if (base?.kind !== "namespace" || !base._dtsType) return null;
+		if (viaPointer)
+			return this.err(
+				`${exprText(expr)} undefined (type ${typeStr(baseType)} has no method ${expr.field})`,
+				expr,
+			);
 		return this.err(
 			`${exprText(expr.expr)} (type) is not an expression`,
 			expr.expr,
@@ -3314,49 +3322,39 @@ export const expressionCheckMethods = {
 		return t ?? ANY;
 	},
 
-	// `int{}`, `T{}` for a type parameter without a core type.
+	// `int{}`, `T{}` for a type parameter without a core type. An elided
+	// `{...}` stands for its hint, or for what a hint of `*T` points at (one
+	// level: `[]**T{{}}` has no literal to elide), so the same rule applies to
+	// that type: a struct, array, slice or map, or a type parameter with such
+	// a core type. A basic, `.d.ts`, func or interface hint is invalid.
 	_isInvalidLiteralType(expr, t, base, scope) {
 		// A type that already failed to resolve has its error.
-		if (!expr.typeExpr || t?._tainted) return false;
-		const core = t?.kind === "typeParam" ? this._coreType(t, scope) : base;
+		if (t?._tainted) return false;
+		let lit = base;
+		if (expr.typeExpr === null && lit?.kind === "pointer")
+			lit = this._deepUnderlying(this.resolveType(lit.base));
+		if (lit?._tainted) return false;
+		const core = lit?.kind === "typeParam" ? this._coreType(lit, scope) : lit;
 		return !["struct", "array", "slice", "map", "simd"].includes(core?.kind);
 	},
 
-	// An elided `{...}` cannot stand for a basic or `.d.ts` type, nor for a
-	// pointer to one (`[]*int{{}}`).
-	_isNonLiteralHint(t) {
-		let base = this._deepUnderlying(t);
-		if (base?.kind === "pointer") base = this._deepUnderlying(base.base);
-		return base?.kind === "basic" || base?.kind === "namespace";
-	},
-
-	// The value of a struct field: an elided `{...}` takes the field's type as
-	// its hint, so one a basic or `.d.ts` type cannot take is rejected there
-	// too.
-	_checkFieldValue(value, scope, fieldType) {
-		if (
-			value.kind === "CompositeLit" &&
-			value.typeExpr === null &&
-			fieldType &&
-			this._isNonLiteralHint(fieldType)
-		) {
-			value._type = this.checkCompositeLit(value, scope, fieldType);
-			return fieldType;
-		}
-		return this.checkExpr(value, scope);
+	// Go gives an elided literal its type from the element or key type of the
+	// enclosing array, slice or map literal only. Anywhere else (a struct
+	// field, a call argument) there is none to take.
+	_checkUntypedCompositeLit(expr, scope) {
+		this.err("missing type in composite literal", expr);
+		return this._checkUnknownCompositeLit(expr, scope, TAINTED_ANY);
 	},
 
 	checkCompositeLit(expr, scope, hintType = null) {
+		if (expr.typeExpr === null && !hintType)
+			return this._checkUntypedCompositeLit(expr, scope);
 		const t =
 			expr.typeExpr === null
-				? (hintType ?? ANY)
+				? hintType
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = this._deepUnderlying(t);
 		const typeNode = expr.typeExpr;
-		if (expr.typeExpr === null && hintType && this._isNonLiteralHint(t)) {
-			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
-			return t;
-		}
 		if (this._isInvalidLiteralType(expr, t, base, scope)) {
 			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
 			return t;
@@ -3411,7 +3409,7 @@ export const expressionCheckMethods = {
 				elem,
 				"implicit assignment to",
 			);
-			const vt = this._checkFieldValue(elem, scope, fieldType);
+			const vt = this.checkExpr(elem, scope);
 			if (fieldType)
 				this.assertAssignable(
 					fieldType,
@@ -3453,7 +3451,7 @@ export const expressionCheckMethods = {
 				this._checkLiteralField(base, keyName, t, elem.key, "cannot refer to");
 				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
-					const vt = this._checkFieldValue(elem.value, scope, fieldType);
+					const vt = this.checkExpr(elem.value, scope);
 					this.assertAssignable(
 						fieldType,
 						vt,

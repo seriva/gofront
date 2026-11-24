@@ -1293,10 +1293,11 @@ func f() {
 	assertEqual(errors.length, 3);
 });
 
+// Go gives an elided literal a type from the element or key type of an
+// array, slice or map literal only; a struct field value has none to take.
 for (const [name, body, count] of [
 	["a struct literal with an elided positional field", "_ = S{{}, nil}", 1],
 	["a struct literal with an elided keyed field", "_ = S{e: {}}", 1],
-	["an elided element of a pointer slice", "_ = []*dom.Element{{}}", 1],
 	["an elided pointer-typed field", "_ = S{p: {}}", 1],
 ]) {
 	test(`${name} of a package type is rejected`, () => {
@@ -1310,11 +1311,158 @@ func f() {
 	${body}
 }`,
 		);
-		assertErrorContains(errors, "invalid composite literal type");
-		assertErrorContains(errors, "dom.Element");
+		assertErrorContains(errors, "missing type in composite literal");
 		assertEqual(errors.length, count);
 	});
 }
+
+test("an elided element of a pointer slice of a package type is rejected", () => {
+	const { errors } = check("func f() { _ = []*dom.Element{{}} }");
+	assertErrorContains(errors, "invalid composite literal type *dom.Element");
+	assertEqual(errors.length, 1);
+});
+
+for (const [name, body, want] of [
+	[
+		"a defined type over a package type",
+		"type MyEl dom.Element\nfunc f() { _ = (*MyEl).id }",
+		"*MyEl.id undefined (type *MyEl has no method id)",
+	],
+	[
+		"a method of a defined type over a package type",
+		"type MyEl dom.Element\nfunc f() { _ = (*MyEl).remove }",
+		"*MyEl.remove undefined (type *MyEl has no method remove)",
+	],
+	[
+		"a package type",
+		"func f() { _ = (*dom.Element).id }",
+		"*dom.Element.id undefined (type *dom.Element has no method id)",
+	],
+	[
+		"a pointer to a pointer to a defined type",
+		"type MyEl dom.Element\nfunc f() { _ = (**MyEl).id }",
+		"**MyEl has no field or method 'id'",
+	],
+]) {
+	test(`a field selected from a pointer to ${name} is rejected`, () => {
+		const { errors } = check(body);
+		assertErrorContains(errors, want);
+		assertEqual(errors.length, 1);
+	});
+}
+
+test("a field of a pointer to a defined type over a package type still reads through a value", () => {
+	const { errors } = check(`type MyEl dom.Element
+
+func f(p *MyEl) {
+	_ = p.id
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+// An elided literal takes its hint as its type, so the hint must be a type a
+// literal can have: a struct, array, slice or map, or one pointer to those.
+for (const [name, body] of [
+	["a field of a pointer to a pointer", "_ = S{pp: {}}"],
+	["a field of a pointer to a pointer to a package type", "_ = S{pd: {}}"],
+	["a slice element of a pointer to a pointer", "_ = []**int{{}}"],
+	[
+		"a slice element of a pointer to a pointer to a package type",
+		"_ = []**dom.Element{{}}",
+	],
+	["a map value of a pointer to a pointer", '_ = map[string]**int{"a": {}}'],
+	[
+		"a map value of a pointer to a pointer to a struct",
+		'_ = map[string]**T{"a": {}}',
+	],
+	["a map key of a pointer to a pointer to a struct", "_ = map[**T]int{{}: 1}"],
+	["a slice element of a func type", "_ = []func(){{}}"],
+	["a slice element of a defined func type", "_ = []F{{}}"],
+	["a slice element of an empty interface", "_ = []interface{}{{}}"],
+	["a slice element of any", "_ = []any{{}}"],
+	["a map value of any", '_ = map[string]any{"a": {}}'],
+	["a slice element of a method interface", "_ = []I{{}}"],
+	["a pointer to a func type", "_ = []*func(){{}}"],
+	["a slice element of a type parameter without a core type", "g[int]()"],
+	[
+		"a slice element of a pointer to a type parameter without a core type",
+		"h[int]()",
+	],
+	["a func-typed struct field", "_ = S{f: {}}"],
+]) {
+	test(`an elided literal for ${name} is rejected`, () => {
+		const { errors } = check(`type T struct{ a int }
+type F func()
+type I interface{ M() }
+type S struct {
+	pp **int
+	pd **dom.Element
+	f  func()
+}
+
+func g[X any]() { _ = []X{{}} }
+func h[X any]() { _ = []*X{{}} }
+
+func main() {
+	${body}
+}`);
+		const msgs = errors.map((e) => e.message).join("\n");
+		assert(
+			/invalid composite literal type|missing type in composite literal/.test(
+				msgs,
+			),
+			`expected a composite literal error, got: ${msgs}`,
+		);
+	});
+}
+
+test("an elided literal in a struct field is missing its type for every field type", () => {
+	const { errors } = check(`type T struct{ a int }
+type S struct {
+	t  T
+	p  *T
+	xs []int
+	m  map[string]int
+}
+
+func f() {
+	_ = S{t: {a: 1}}
+	_ = S{p: {}}
+	_ = S{xs: {}}
+	_ = S{m: {}}
+	_ = S{{a: 1}, nil, nil, nil}
+}`);
+	assertErrorContains(errors, "missing type in composite literal");
+	assertEqual(errors.length, 5);
+});
+
+test("an elided literal keeps working for every element and key position", () => {
+	const { errors } = check(`type T struct{ a int }
+type Point struct{ x, y int }
+type P *T
+
+func g[X ~[]int]() { _ = []X{{1}} }
+
+func f() {
+	_ = []T{{a: 1}}
+	_ = []*T{{a: 1}}
+	_ = []*T{{}}
+	_ = [][]int{{1, 2}}
+	_ = map[string][]int{"a": {1}}
+	_ = []struct{ a int }{{a: 1}}
+	_ = []Point{{1, 2}}
+	_ = [2]Point{{1, 2}, {3, 4}}
+	_ = map[Point]string{{1, 2}: "a"}
+	_ = []*[]int{{1}}
+	_ = [][2]int{{1, 2}}
+	_ = []map[string]int{{"a": 1}}
+	_ = map[string]map[string]int{"a": {"b": 1}}
+	_ = []P{{}}
+	_ = [...]T{5: {a: 1}}
+	g[[]int]()
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
