@@ -256,6 +256,276 @@ declare var document: Child;`,
 	assert(!js.includes("document$"), "a declared JS global keeps its name");
 });
 
+section(".d.ts — references inside composite types");
+
+const PLAIN_DTS = `
+interface Plain { id: number; }
+interface Sub extends Plain { name: string; }
+declare function getP(): Plain;
+declare function getPs(): Plain[];
+declare function getProm(): Promise<Plain[]>;
+declare function getPromP(): Promise<Plain>;
+declare function getSub(): Sub;
+declare function takePs(xs: Plain[]): void;
+declare function takeCb(cb: (xs: Plain[]) => void): void;
+declare const plainArr: Plain[];
+declare const plainVal: Plain;
+declare type PlainList = Plain[];
+declare function getList(): PlainList;
+`;
+
+const plain = (body) => compile(body, PLAIN_DTS);
+
+test("a slice of a .d.ts type returned by a call is that type's slice", () => {
+	const { errors } = plain(`func main() {
+	var xs []Plain = getPs()
+	takePs([]Plain{})
+	takePs(xs)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a slice returned through a type alias is that type's slice", () => {
+	const { errors } = plain(`func main() {
+	var xs []Plain = getList()
+	_ = xs
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a slice inside a promise, a callback parameter and a constant resolves", () => {
+	const { errors } = plain(`func main() {
+	var xs []Plain = await getProm()
+	takeCb(func(ys []Plain) { _ = ys })
+	var zs []Plain = plainArr
+	_, _ = xs, zs
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a slice of a .d.ts type is not a slice of another type", () => {
+	const { errors } = plain(`func main() {
+	var xs []Sub = getPs()
+	_ = xs
+}`);
+	assertErrorContains(errors, "cannot use");
+	assertErrorContains(errors, "[]Plain");
+});
+
+test("a slice of any is not a slice of a .d.ts type", () => {
+	const { errors } = plain(`func main() {
+	takePs([]any{getP()})
+}`);
+	assertErrorContains(errors, "[]any");
+	assertErrorContains(errors, "as []Plain value");
+});
+
+test("a self-referential alias in a declaration ends", () => {
+	const { errors } = compile(
+		`func main() {
+	_ = loop()
+}`,
+		`type Loop = Loop[];
+declare function loop(): Loop;`,
+	);
+	assertEqual(errors.length, 0);
+});
+
+for (const [name, op, want] of [
+	["indexing", "_ = p[0]", "Cannot index type Plain"],
+	["slicing", "_ = p[0:1]", "Cannot slice type Plain"],
+	["calling", "p()", "Cannot call non-function type Plain"],
+	["len", "_ = len(p)", "len"],
+	["cap", "_ = cap(p)", "cap"],
+	["append", "_ = append(p, 1)", "append"],
+	["delete", 'delete(p, "k")', "delete"],
+	["dereferencing", "_ = *p", "cannot dereference non-pointer type Plain"],
+	["asserting", "_ = p.(int)", "not an interface"],
+	["ranging", "for range p {}", "cannot range over"],
+	["testing", "if p {}", "non-boolean"],
+	["looping on", "for p {}", "non-boolean"],
+]) {
+	test(`${name} a .d.ts value returned by a call is rejected`, () => {
+		const { errors } = plain(`func main() {
+	p := getP()
+	${op}
+}`);
+		assertErrorContains(errors, want);
+	});
+}
+
+test("operations on an element of a .d.ts slice are rejected", () => {
+	const { errors } = plain(`func main() {
+	p := getPs()[0]
+	_ = p[0]
+	p()
+	if p {}
+}`);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertErrorContains(errors, "Cannot call non-function type Plain");
+	assertErrorContains(errors, "non-boolean");
+});
+
+test("operations on a .d.ts constant are rejected", () => {
+	const { errors } = plain(`func main() {
+	_ = plainVal[0]
+	plainVal()
+	if plainVal {}
+}`);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertErrorContains(errors, "Cannot call non-function type Plain");
+	assertErrorContains(errors, "non-boolean");
+});
+
+test("ranging over a .d.ts value is rejected", () => {
+	const { errors } = plain(`func f(p Plain) {
+	for range p {}
+}
+func main() {}`);
+	assertErrorContains(errors, "cannot range over");
+});
+
+test("a value awaited from a promise keeps its .d.ts type", () => {
+	const { errors } = plain(`func main() {
+	p := await getPromP()
+	_ = p[0]
+}`);
+	assertErrorContains(errors, "Cannot index type Plain");
+});
+
+test("a derived .d.ts value is still assignable to its base", () => {
+	const { errors } = plain(`func main() {
+	var p Plain = getSub()
+	_ = p
+}`);
+	assertEqual(errors.length, 0);
+});
+
+const ALIAS_DTS = `${PLAIN_DTS}
+type AliasP = Plain;
+declare function takeNullCb(cb: () => (Plain | null)): void;
+declare function takeNull(p: Plain | null): void;
+`;
+
+test("a value of a .d.ts alias of a type is that type", () => {
+	const { errors } = compile(
+		`type S struct { P AliasP }
+type G[T any] struct { V T }
+func f(s S, x any) {
+	_ = s.P[0]
+	for range s.P {}
+	if s.P {}
+	g := G[AliasP]{V: getP()}
+	_ = g.V[0]
+	_ = ([]AliasP{getP()})[0][0]
+	_ = (map[string]AliasP{})["a"][0]
+	_ = x.(AliasP)[0]
+}
+func main() {}`,
+		ALIAS_DTS,
+	);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertErrorContains(errors, "cannot range over");
+	assertErrorContains(errors, "non-boolean");
+	assertEqual(errors.length, 7);
+});
+
+test("a .d.ts alias of a slice is that slice wherever it is named", () => {
+	const { errors } = compile(
+		`func f(x []PlainList) {
+	var ys []Plain = x[0:1][0]
+	_ = ys
+	_ = x[0:1][0][0][0]
+}
+func main() {}`,
+		ALIAS_DTS,
+	);
+	assertErrorContains(errors, "Cannot index type Plain");
+	assertEqual(errors.length, 1);
+});
+
+test("a struct with a .d.ts alias field converts to one with the aliased type", () => {
+	const { errors } = compile(
+		`type S1 struct { P AliasP }
+type S2 struct { P Plain }
+func main() {
+	var a S1
+	var b S2 = S2(a)
+	_ = b
+}`,
+		ALIAS_DTS,
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a callback returning a nullable .d.ts type may return nothing", () => {
+	const { errors } = compile(
+		`func main() {
+	takeNullCb(func() {})
+	takeNullCb(func() Plain { return getP() })
+}`,
+		ALIAS_DTS,
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a nullable .d.ts parameter takes a derived value and nil", () => {
+	const { errors } = compile(
+		`func main() {
+	takeNull(getSub())
+	takeNull(nil)
+}`,
+		ALIAS_DTS,
+	);
+	assertEqual(errors.length, 0);
+});
+
+const NS_ALIAS_DTS = `
+declare namespace N {
+	interface NPlain { id: number; }
+	type NAlias = N.NPlain;
+	type NList = N.NPlain[];
+}
+declare function topGetT(): N.NPlain;
+declare function topGetA(): N.NAlias;
+declare function topGetL(): N.NList;
+declare function topGetN(): N.NAlias | null;
+declare function takeA(a: N.NAlias): void;
+`;
+
+test("a type alias declared in a .d.ts namespace is the type it names", () => {
+	const { errors } = compile(
+		`func main() {
+	_ = topGetT()[0]
+	_ = topGetA()[0]
+	_ = topGetL()[0][0]
+	_ = topGetN()[0]
+}`,
+		NS_ALIAS_DTS,
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 4);
+});
+
+test("a namespaced .d.ts alias works as a member and a parameter", () => {
+	const { errors } = compile(
+		`func main() {
+	h := topHolder()
+	takeA(topGetT())
+	takeL(topGetL())
+	takeL(h.l)
+	_ = h.a[0]
+	_ = h.l[0][0]
+}`,
+		`${NS_ALIAS_DTS}
+interface Holder { a: N.NAlias; l: N.NList; }
+declare function topHolder(): Holder;
+declare function takeL(l: N.NList): void;`,
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 2);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -9,6 +9,7 @@
 import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { goTypeName } from "../../../src/backend/shared/fmt-types.js";
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { PackageCache } from "../../../src/link/package-cache.js";
 import { Parser } from "../../../src/parser/index.js";
@@ -16,6 +17,7 @@ import { declarationStats } from "../../../src/resolver.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	compileDir,
@@ -1008,6 +1010,719 @@ interface Window { matchMedia(query: string): MediaQueryList; }
 		}).trim(),
 		"has",
 	);
+});
+
+section("Declaration packages — list parameters and dictionary members");
+
+const GPU_LISTS = `
+interface CommandBuffer { label: string; }
+interface CommandEncoder { finish(): CommandBuffer; }
+/** @dictionary */
+interface BindGroupLayoutEntry { binding: int; }
+/** @dictionary */
+interface BindGroupLayoutDescriptor { entries: BindGroupLayoutEntry[]; label?: string; }
+/** @dictionary */
+interface ColorTargetState { format: string; }
+/** @dictionary */
+interface FragmentState { targets: (ColorTargetState | null)[]; }
+interface Queue { submit(commandBuffers: CommandBuffer[]): void; }
+interface Device {
+	queue: Queue;
+	createCommandEncoder(): CommandEncoder;
+	createBindGroupLayout(d: BindGroupLayoutDescriptor): void;
+	createFragment(f: FragmentState): void;
+}
+`;
+
+const gpuLists = (body) =>
+	build(`package main\n\nimport "gofront/webgpu"\n\n${body}\n`, {
+		stdlib: { "stdlib/gofront/webgpu/webgpu.d.ts": GPU_LISTS },
+	});
+
+test("a slice of the declared element type is a list parameter", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	enc := dev.createCommandEncoder()
+	dev.queue.submit([]webgpu.CommandBuffer{enc.finish()})
+	var cmds []webgpu.CommandBuffer = []webgpu.CommandBuffer{}
+	dev.queue.submit(cmds)
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a dictionary member that is a list takes a slice of its element type", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a list parameter rejects a slice of any", () => {
+	const { errors } =
+		gpuLists(`func f(dev webgpu.Device, enc webgpu.CommandEncoder) {
+	dev.queue.submit([]any{enc.finish()})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "[]any");
+	assertErrorContains(errors, "as []webgpu.CommandBuffer value");
+});
+
+test("a dictionary member that is a list rejects a slice of any", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []any{map[string]any{"binding": 0}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "as []webgpu.BindGroupLayoutEntry value");
+	assertErrorContains(errors, "member entries");
+});
+
+test("a dictionary member of the declared element type still checks its keys", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createBindGroupLayout(map[string]any{
+		"entries": []webgpu.BindGroupLayoutEntry{map[string]any{"bindin": 0}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "unknown member 'bindin'");
+});
+
+test("a parenthesised union list member takes a slice of its element type", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []webgpu.ColorTargetState{map[string]any{"format": "bgra8unorm"}, nil},
+	})
+}
+
+func main() {}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a parenthesised union list member checks the keys of its elements", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []webgpu.ColorTargetState{map[string]any{"formt": "bgra8unorm"}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "unknown member 'formt'");
+});
+
+test("a parenthesised union list member rejects a slice of any", () => {
+	const { errors } = gpuLists(`func f(dev webgpu.Device) {
+	dev.createFragment(map[string]any{
+		"targets": []any{map[string]any{"format": "bgra8unorm"}},
+	})
+}
+
+func main() {}`);
+	assertErrorContains(errors, "as []webgpu.ColorTargetState value");
+	assertErrorContains(errors, "member targets");
+});
+
+const GPU_ALIASES = `
+interface ColorTargetState { format: string; }
+type TargetAlias = ColorTargetState;
+`;
+
+test("a package type alias in a struct field is the type it names", () => {
+	const { errors } = build(
+		`package main
+
+import "gofront/webgpu"
+
+type S struct { T webgpu.TargetAlias }
+
+func f(s S, c webgpu.ColorTargetState) {
+	c = s.T
+	_ = s.T[0]
+}
+
+func main() {}
+`,
+		{ stdlib: { "stdlib/gofront/webgpu/webgpu.d.ts": GPU_ALIASES } },
+	);
+	assertErrorContains(errors, "Cannot index type webgpu.ColorTargetState");
+	assertEqual(errors.length, 1);
+});
+
+test("a type alias in a package namespace is the type it names", () => {
+	const ns = parseDeclarationPackage(
+		`declare namespace N {
+	interface NPlain { id: number; }
+	type NAlias = N.NPlain;
+	type NList = N.NPlain[];
+}
+declare function getP(): N.NPlain;
+declare function getA(): N.NAlias;
+declare function getL(): N.NList;
+declare function getN(): N.NAlias | null;`,
+		"nsp",
+	);
+	const { errors } = check(
+		`func f() {
+	_ = nsp.getP()[0]
+	_ = nsp.getA()[0]
+	_ = nsp.getL()[0][0]
+	_ = nsp.getN()[0]
+}`,
+		[ns],
+	);
+	assertErrorContains(errors, "Cannot index type NPlain");
+	assertEqual(errors.length, 4);
+});
+
+section("Declaration packages — types are not values");
+
+const FETCH = `
+declare class Response { ok: boolean; clone(): Response; }
+declare function fetch(url: string): Promise<Response>;
+`;
+const fetchPkg = () => parseDeclarationPackage(FETCH, "fetch");
+
+const typeAsValue = (body, pkgs = [domPkg(), gpuPkg(), fetchPkg()]) =>
+	check(`func f() {\n${body}\n}`, pkgs);
+
+for (const [name, body, want] of [
+	[
+		"a composite literal of a package interface",
+		"_ = fetch.Response{}",
+		"invalid composite literal type fetch.Response",
+	],
+	[
+		"a composite literal of a package class",
+		"_ = dom.Element{}",
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"the address of a composite literal of a package type",
+		"_ = &dom.Element{}",
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"an elided slice element of a package type",
+		"_ = []dom.Element{{}}",
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"an elided map value of a package type",
+		'_ = map[string]dom.Element{"a": {}}',
+		"invalid composite literal type dom.Element",
+	],
+	[
+		"a composite literal of a package dictionary",
+		"_ = webgpu.BufferDescriptor{}",
+		"invalid composite literal type webgpu.BufferDescriptor",
+	],
+	[
+		"a method selected from a package type",
+		"_ = fetch.Response.clone",
+		"fetch.Response (type) is not an expression",
+	],
+	[
+		"a device method selected from a package type",
+		"_ = webgpu.Device.createBuffer",
+		"webgpu.Device (type) is not an expression",
+	],
+	[
+		"a field selected from a package type",
+		"_ = dom.Element.id",
+		"dom.Element (type) is not an expression",
+	],
+]) {
+	test(`${name} is rejected`, () => {
+		const { errors } = typeAsValue(body);
+		assertErrorContains(errors, want);
+		assertEqual(errors.length, 1);
+	});
+}
+
+test("a composite literal of a local declaration type is rejected", () => {
+	const local = parseDeclarationPackage(
+		"interface Plain { id: number; }",
+		"loc",
+	);
+	const { errors } = check("func f() { _ = loc.Plain{} }", [local]);
+	assertErrorContains(errors, "invalid composite literal type loc.Plain");
+});
+
+test("a bare declaration global, a Go struct literal and a package type name keep working", () => {
+	const { errors } = typeAsValue(
+		`_ = fetch.Response
+	_ = Response`,
+	);
+	assertErrorContains(errors, "fetch.Response (type) is not an expression");
+	assertEqual(errors.length, 1);
+	const ok = check(
+		`type S struct{ a int }
+
+func g(r fetch.Response, e dom.Element, d webgpu.Device) {
+	_ = S{a: 1}
+	_ = []S{{a: 1}}
+	_ = r.clone()
+	_ = e.id
+	_ = d.createBuffer(map[string]any{"size": 4})
+	_ = []dom.Element{e}
+}`,
+		[domPkg(), gpuPkg(), fetchPkg()],
+	);
+	assertEqual(ok.errors.map((e) => e.message).join(), "");
+});
+
+test("a defined type over a package type is not a value either", () => {
+	const { errors } = check(
+		`type MyEl dom.Element
+
+func f() {
+	x := MyEl.id
+	_ = x
+	_ = MyEl.remove
+	_ = MyEl{}
+}`,
+	);
+	assertErrorContains(errors, "MyEl (type) is not an expression");
+	assertErrorContains(errors, "invalid composite literal type MyEl");
+	assertEqual(errors.length, 3);
+});
+
+// Go gives an elided literal a type from the element or key type of an
+// array, slice or map literal only; a struct field value has none to take.
+for (const [name, body, count] of [
+	["a struct literal with an elided positional field", "_ = S{{}, nil}", 1],
+	["a struct literal with an elided keyed field", "_ = S{e: {}}", 1],
+	["an elided pointer-typed field", "_ = S{p: {}}", 1],
+]) {
+	test(`${name} of a package type is rejected`, () => {
+		const { errors } = check(
+			`type S struct {
+	e dom.Element
+	p *dom.Element
+}
+
+func f() {
+	${body}
+}`,
+		);
+		assertErrorContains(errors, "missing type in composite literal");
+		assertEqual(errors.length, count);
+	});
+}
+
+test("an elided element of a pointer slice of a package type is rejected", () => {
+	const { errors } = check("func f() { _ = []*dom.Element{{}} }");
+	assertErrorContains(errors, "invalid composite literal type *dom.Element");
+	assertEqual(errors.length, 1);
+});
+
+for (const [name, body, want] of [
+	[
+		"a defined type over a package type",
+		"type MyEl dom.Element\nfunc f() { _ = (*MyEl).id }",
+		"*MyEl.id undefined (type *MyEl has no method id)",
+	],
+	[
+		"a method of a defined type over a package type",
+		"type MyEl dom.Element\nfunc f() { _ = (*MyEl).remove }",
+		"*MyEl.remove undefined (type *MyEl has no method remove)",
+	],
+	[
+		"a package type",
+		"func f() { _ = (*dom.Element).id }",
+		"*dom.Element.id undefined (type *dom.Element has no method id)",
+	],
+	[
+		"a pointer to a pointer to a defined type",
+		"type MyEl dom.Element\nfunc f() { _ = (**MyEl).id }",
+		"**MyEl has no field or method 'id'",
+	],
+]) {
+	test(`a field selected from a pointer to ${name} is rejected`, () => {
+		const { errors } = check(body);
+		assertErrorContains(errors, want);
+		assertEqual(errors.length, 1);
+	});
+}
+
+test("a field of a pointer to a defined type over a package type still reads through a value", () => {
+	const { errors } = check(`type MyEl dom.Element
+
+func f(p *MyEl) {
+	_ = p.id
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+// An elided literal takes its hint as its type, so the hint must be a type a
+// literal can have: a struct, array, slice or map, or one pointer to those.
+for (const [name, body] of [
+	["a field of a pointer to a pointer", "_ = S{pp: {}}"],
+	["a field of a pointer to a pointer to a package type", "_ = S{pd: {}}"],
+	["a slice element of a pointer to a pointer", "_ = []**int{{}}"],
+	[
+		"a slice element of a pointer to a pointer to a package type",
+		"_ = []**dom.Element{{}}",
+	],
+	["a map value of a pointer to a pointer", '_ = map[string]**int{"a": {}}'],
+	[
+		"a map value of a pointer to a pointer to a struct",
+		'_ = map[string]**T{"a": {}}',
+	],
+	["a map key of a pointer to a pointer to a struct", "_ = map[**T]int{{}: 1}"],
+	["a slice element of a func type", "_ = []func(){{}}"],
+	["a slice element of a defined func type", "_ = []F{{}}"],
+	["a slice element of an empty interface", "_ = []interface{}{{}}"],
+	["a slice element of any", "_ = []any{{}}"],
+	["a map value of any", '_ = map[string]any{"a": {}}'],
+	["a slice element of a method interface", "_ = []I{{}}"],
+	["a pointer to a func type", "_ = []*func(){{}}"],
+	["a slice element of a type parameter without a core type", "g[int]()"],
+	[
+		"a slice element of a pointer to a type parameter without a core type",
+		"h[int]()",
+	],
+	["a func-typed struct field", "_ = S{f: {}}"],
+]) {
+	test(`an elided literal for ${name} is rejected`, () => {
+		const { errors } = check(`type T struct{ a int }
+type F func()
+type I interface{ M() }
+type S struct {
+	pp **int
+	pd **dom.Element
+	f  func()
+}
+
+func g[X any]() { _ = []X{{}} }
+func h[X any]() { _ = []*X{{}} }
+
+func main() {
+	${body}
+}`);
+		const msgs = errors.map((e) => e.message).join("\n");
+		assert(
+			/invalid composite literal type|missing type in composite literal/.test(
+				msgs,
+			),
+			`expected a composite literal error, got: ${msgs}`,
+		);
+	});
+}
+
+test("an elided literal in a struct field is missing its type for every field type", () => {
+	const { errors } = check(`type T struct{ a int }
+type S struct {
+	t  T
+	p  *T
+	xs []int
+	m  map[string]int
+}
+
+func f() {
+	_ = S{t: {a: 1}}
+	_ = S{p: {}}
+	_ = S{xs: {}}
+	_ = S{m: {}}
+	_ = S{{a: 1}, nil, nil, nil}
+}`);
+	assertErrorContains(errors, "missing type in composite literal");
+	assertEqual(errors.length, 5);
+});
+
+test("an elided literal keeps working for every element and key position", () => {
+	const { errors } = check(`type T struct{ a int }
+type Point struct{ x, y int }
+type P *T
+
+func g[X ~[]int]() { _ = []X{{1}} }
+
+func f() {
+	_ = []T{{a: 1}}
+	_ = []*T{{a: 1}}
+	_ = []*T{{}}
+	_ = [][]int{{1, 2}}
+	_ = map[string][]int{"a": {1}}
+	_ = []struct{ a int }{{a: 1}}
+	_ = []Point{{1, 2}}
+	_ = [2]Point{{1, 2}, {3, 4}}
+	_ = map[Point]string{{1, 2}: "a"}
+	_ = []*[]int{{1}}
+	_ = [][2]int{{1, 2}}
+	_ = []map[string]int{{"a": 1}}
+	_ = map[string]map[string]int{"a": {"b": 1}}
+	_ = []P{{}}
+	_ = [...]T{5: {a: 1}}
+	g[[]int]()
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+section("Declaration packages — runtime type names");
+
+test("goTypeName spells a declaration type with its package", () => {
+	const gpu = gpuPkg();
+	const device = gpu.types.get("Device");
+	assertEqual(goTypeName(device), "webgpu.Device");
+	assertEqual(goTypeName({ kind: "slice", elem: device }), "[]webgpu.Device");
+	assertEqual(
+		goTypeName({
+			kind: "map",
+			key: { kind: "basic", name: "string" },
+			value: { kind: "pointer", base: device },
+		}),
+		"map[string]*webgpu.Device",
+	);
+});
+
+test("goTypeName spells an unresolved declaration reference by its name", () => {
+	const ref = (alias) => ({ kind: "basic", name: "any", alias });
+	assertEqual(goTypeName(ref("gofront/dom.Node")), "dom.Node");
+	assertEqual(
+		goTypeName({ kind: "slice", elem: ref("gofront/dom.Node") }),
+		"[]dom.Node",
+	);
+	assertEqual(goTypeName(ref("Plain")), "Plain");
+	assertEqual(goTypeName({ kind: "basic", name: "any" }), "interface {}");
+});
+
+test("a failed assertion to a slice of declaration types names it", () => {
+	const { res, errors } = withTempDir(
+		{
+			"main.go": `package main
+
+import (
+	"gofront/dom"
+	"gofront/webgpu"
+)
+
+func main() {
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	var a any = n.children
+	defer func() { println(recover()) }()
+	_ = a.([]webgpu.Device)
+}
+`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)),
+	);
+	assertEqual(errors.length, 0);
+	const out = runJs(res.js, {
+		document: { getElementById: () => ({ children: [] }) },
+	});
+	assertContains(
+		out,
+		"interface {} is []dom.NotRestoredReasons, not []webgpu.Device",
+	);
+});
+
+const FMT_DOCUMENT = {
+	document: { getElementById: () => ({ id: "x", children: [] }) },
+};
+
+// Compiles `main` (a `package main` body) against the real stdlib and runs it.
+function runWithStdlib(main, files = {}, globals = FMT_DOCUMENT) {
+	const { res, errors } = withTempDir({ "main.go": main, ...files }, (dir) =>
+		toCompileResult(() => compileDir(dir)),
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	return runJs(res.js, globals);
+}
+
+test("%T names the declaration type of a direct operand", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+)
+
+func main() {
+	el := document.getElementById("x").(dom.Element)
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	fmt.Println(fmt.Sprintf("%T", el))
+	fmt.Println(fmt.Sprintf("%T", n.children))
+	fmt.Println(fmt.Sprintf("%T", []dom.Element{}))
+	fmt.Println(fmt.Sprintf("%T", map[string]dom.Element{}))
+	fmt.Println(fmt.Sprintf("%T", &el))
+	fmt.Println(fmt.Sprintf("%T %T", el, n.children))
+}
+`);
+	assertEqual(
+		out,
+		[
+			"dom.Element",
+			"[]dom.NotRestoredReasons",
+			"[]dom.Element",
+			"map[string]dom.Element",
+			"*dom.Element",
+			"dom.Element []dom.NotRestoredReasons",
+		].join("\n"),
+	);
+});
+
+test("%T names the declaration type of a value held in an interface", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+	"gofront/webgpu"
+)
+
+func main() {
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	var a any = n.children
+	fmt.Println(fmt.Sprintf("%T", a))
+	defer func() { fmt.Println(recover()) }()
+	_ = a.([]webgpu.Device)
+}
+`);
+	assertEqual(
+		out,
+		[
+			"[]dom.NotRestoredReasons",
+			"interface conversion: interface {} is []dom.NotRestoredReasons, not []webgpu.Device",
+		].join("\n"),
+	);
+});
+
+test("%T names a type declared by a local declaration file", () => {
+	const out = runWithStdlib(
+		`package main
+
+import (
+	"fmt"
+	"js:./types.d.ts"
+)
+
+func main() {
+	fmt.Println(fmt.Sprintf("%T", plainVal))
+	fmt.Println(fmt.Sprintf("%T", plainList))
+}
+`,
+		{
+			"types.d.ts": `interface Plain { x: number; }
+declare const plainVal: Plain;
+declare const plainList: Plain[];
+`,
+		},
+		{ plainVal: { x: 1 }, plainList: [] },
+	);
+	assertEqual(out, "Plain\n[]Plain");
+});
+
+test("%T names a declaration type reached through an alias, a global or a clashing name", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	d "gofront/dom"
+)
+
+var dom = 3
+
+func main() {
+	el := document.getElementById("x").(d.Element)
+	var a any = []d.Element{el}
+	fmt.Println(fmt.Sprintf("%T|%T|%T|%d", document, el, a, dom))
+}
+`);
+	assertEqual(out, "dom.Document|dom.Element|[]dom.Element|3");
+});
+
+test("a formatted declaration value does not crash fmt", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+)
+
+func main() {
+	el := document.getElementById("x").(dom.Element)
+	fmt.Println(fmt.Sprintf("%v|%T", el.id, el))
+}
+`);
+	assertEqual(out, "x|dom.Element");
+});
+
+const PLAIN_DTS = `interface Plain { x: number; }
+declare const plainVal: Plain;
+declare const plainList: Plain[];
+declare const plainMap: { [k: string]: Plain };
+declare function takePlain(p: Plain): void;
+`;
+const PLAIN_GLOBALS = {
+	plainVal: { x: 1 },
+	plainList: [{ x: 2 }],
+	plainMap: { a: { x: 3 } },
+	takePlain() {},
+};
+
+test("a struct holding a slice, map, pointer or func of a local declaration type compiles", () => {
+	const out = runWithStdlib(
+		`package main
+
+import (
+	"fmt"
+	"js:./types.d.ts"
+)
+
+type S struct{ Ps []Plain }
+type M struct{ M map[string]Plain }
+type F struct{ F func(Plain) }
+type P struct{ P *Plain }
+type L [][]Plain
+type N struct{ N int }
+type Direct struct{ D Plain }
+
+func main() {
+	fmt.Println(len(S{Ps: plainList}.Ps))
+	fmt.Println(S{Ps: plainList}, M{M: map[string]Plain{}}, F{F: takePlain}, P{}, L{plainList})
+	fmt.Println(fmt.Sprintf("%v", N{3}))
+	var a any = S{Ps: plainList}
+	_, ok := a.(S)
+	fmt.Println(ok)
+	fmt.Printf("%v|%+v\\n", N{4}, N{5})
+	fmt.Println(fmt.Sprintf("%T", Direct{D: plainVal}))
+}
+`,
+		{ "types.d.ts": PLAIN_DTS },
+		PLAIN_GLOBALS,
+	);
+	const lines = out.split("\n");
+	assertEqual(lines[0], "1");
+	assertEqual(lines[2], "{3}");
+	assertEqual(lines[3], "true");
+	assertEqual(lines[4], "{4}|{N:5}");
+	assertEqual(lines[5], "main.Direct");
+	assertEqual(lines.length, 6);
+});
+
+test("a pointer to a declaration type held in an interface names its type", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+)
+
+func main() {
+	el := document.getElementById("x").(dom.Element)
+	var p any = &el
+	fmt.Println(fmt.Sprintf("%T", p))
+}
+`);
+	assertEqual(out, "*dom.Element");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

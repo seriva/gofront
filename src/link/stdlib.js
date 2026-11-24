@@ -18,6 +18,7 @@ import { cloneAst, forEachChild } from "../lower/walk.js";
 import { Parser } from "../parser/index.js";
 import {
 	declarationsCurrent,
+	isDeclarationImport,
 	isLocalPath,
 	resolveStdlibSource,
 } from "../resolver.js";
@@ -780,6 +781,7 @@ export function checkGeneratedGo(
 		deps,
 	);
 	checker.bindReachedPackages(filename);
+	bindGeneratedDeclarationImports(imports, checker, filename);
 	const before = checker.errors.length;
 	checker.checkAll([ast]);
 	if (checker.errors.length > before) {
@@ -793,6 +795,17 @@ export function checkGeneratedGo(
 	}
 	for (const { link } of parts) link?.(checker);
 	return [ast];
+}
+
+// Binds the declaration packages (`gofront/dom`) the generated file imports:
+// its code names their types, which carry no Go source to load.
+function bindGeneratedDeclarationImports(imports, checker, filename) {
+	for (const { path, alias } of imports) {
+		if (!isDeclarationImport(path)) continue;
+		const name = path.slice(path.lastIndexOf("/") + 1);
+		const pkg = checker.useDeclarationPackage(name);
+		if (pkg) checker.bindDeclarationPackage(pkg, alias ?? name, filename);
+	}
 }
 
 // Packages a `js` package may use without importing them, as the compiler

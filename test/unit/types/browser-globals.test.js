@@ -19,10 +19,13 @@ import {
 } from "../../../src/typechecker/types.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	compile,
 	compileDir,
+	compileDts,
+	runJs,
 	section,
 	summarize,
 	test,
@@ -307,6 +310,698 @@ test("a program that reads a typed global loads the declarations once", () => {
 	);
 	assertEqual(errors.length, 0);
 	assertEqual(parsed, 1);
+});
+
+section("Typed browser globals — operations on resolved values");
+
+for (const [name, op, want] of [
+	["indexing", "_ = el[0]", "Cannot index type dom.Element"],
+	["slicing", "_ = el[0:1]", "Cannot slice type dom.Element"],
+	["calling", "el()", "Cannot call non-function type dom.Element"],
+	["ranging", "for range el {}", "cannot range over el"],
+	["testing", "if el {}", "non-boolean condition"],
+]) {
+	test(`${name} an element read from a call is rejected`, () => {
+		const { errors } = compile(
+			body(`import "gofront/dom"
+
+func main() {
+	el := document.getElementById("x")
+	${op}
+}`),
+		);
+		assertErrorContains(errors, want);
+	});
+}
+
+test("ranging over an element or a collection parameter is rejected", () => {
+	const { errors } = compile(
+		body(`import "gofront/dom"
+
+func f(el dom.Element) {
+	for range el {}
+}
+
+func g(ch dom.HTMLCollection) {
+	for range ch {}
+}`),
+	);
+	assertErrorContains(errors, "cannot range over el");
+	assertErrorContains(errors, "cannot range over ch");
+});
+
+test("a slice of browser values typed through a member is that type's slice", () => {
+	const { errors } = compile(
+		body(`import "gofront/dom"
+
+func f(n dom.NotRestoredReasons) {
+	var xs []dom.NotRestoredReasons = n.children
+	_ = xs
+}`),
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("a member of an element read from a call is still read", () => {
+	const { errors } = compile(
+		body(`func main() {
+	el := document.getElementById("x")
+	var id string = el.id
+	_ = id
+}`),
+	);
+	assertEqual(errors.length, 0);
+});
+
+section("Typed browser globals — operators");
+
+const OPS_PRELUDE = `import "gofront/dom"
+
+func f(w dom.Window, w2 dom.Window, e dom.Element, n dom.Node, d dom.Document) {`;
+
+for (const [op, want] of [
+	["_ = window + 1", "mismatched types dom.Window and untyped int"],
+	["_ = w + 1", "mismatched types dom.Window and untyped int"],
+	["w += 1", "mismatched types dom.Window and untyped int"],
+	["_ = w + w", "operator + not defined on w"],
+	["_ = w - 1", "mismatched types dom.Window and untyped int"],
+	["_ = w * 2", "mismatched types dom.Window and untyped int"],
+	["_ = w < w", "operator < not defined on dom.Window"],
+	["_ = w == 1", "mismatched types dom.Window and untyped int"],
+	["_ = 1 == w", "mismatched types untyped int and dom.Window"],
+	['_ = w == "x"', "mismatched types dom.Window and untyped string"],
+	["_ = w && true", "mismatched types dom.Window and untyped bool"],
+	["_ = w || false", "mismatched types dom.Window and untyped bool"],
+	["_ = !w", "operator ! not defined on w"],
+	["_ = -w", "operator - not defined on w"],
+	["_ = +w", "operator + not defined on w"],
+	["_ = ^w", "operator ^ not defined on w"],
+	["_ = w == d", "mismatched types dom.Window and dom.Document"],
+]) {
+	test(`${op} on a browser value is rejected`, () => {
+		const { errors } = compile(
+			body(`${OPS_PRELUDE}
+	${op}
+}`),
+		);
+		assertErrorContains(errors, "invalid operation");
+		assertErrorContains(errors, want);
+		assertEqual(errors.length, 1);
+	});
+}
+
+test("the window global is not a number", () => {
+	const { errors } = compile(
+		body(`func main() {
+	_ = window + 1
+}`),
+	);
+	assertErrorContains(errors, "mismatched types dom.Window and untyped int");
+});
+
+test("a browser value still compares by reference and against nil", () => {
+	const { errors } = compile(
+		body(`${OPS_PRELUDE}
+	_ = w == nil
+	_ = w != nil
+	_ = nil == w
+	_ = w == w2
+	_ = e == n
+	_ = n != e
+	if window == nil {
+		return
+	}
+}
+
+func g(a dom.Element, b dom.Element) bool { return a == b }`),
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a browser value keeps its other operator errors", () => {
+	const { errors } = compile(
+		body(`${OPS_PRELUDE}
+	_ = w << 1
+	_ = 1 << w
+	w++
+	switch w {
+	case 1:
+	}
+}
+
+func g(k map[dom.Element]int) {}`),
+	);
+	assertErrorContains(errors, "shifted operand w");
+	assertErrorContains(errors, "invalid shift count");
+	assertErrorContains(errors, "non-numeric type dom.Window");
+	assertErrorContains(errors, "cannot convert 1");
+	assertEqual(errors.length, 4);
+});
+
+section("Typed browser globals — stored function values");
+
+const compiled = (src) => {
+	const { js, errors } = compile(body(src));
+	assertEqual(errors.map((e) => e.message).join(), "");
+	return js;
+};
+
+const absent = (js, text) =>
+	assert(!js.includes(text), `unexpected ${text} in the output`);
+
+test("a stored browser function binds its receiver and copies nothing", () => {
+	const js = compiled(`type P struct{ X int }
+
+func main() {
+	p := P{1}
+	arr := [2]int{1, 2}
+	fn := console.log
+	fn(p)
+	fn(arr)
+}`);
+	assertContains(js, "console.log?.bind(console)");
+	assertContains(js, "fn(p);");
+	assertContains(js, "fn(arr);");
+	absent(js, "p.__clone()");
+	absent(js, "arr?.slice()");
+});
+
+test("a stored browser function spreads a slice as a JavaScript spread", () => {
+	const js = compiled(`func main() {
+	fn := console.log
+	xs := []any{1, 2}
+	fn(xs...)
+}`);
+	assertContains(js, "fn(...(xs ?? []))");
+	absent(js, "__sp");
+});
+
+test("a stored browser method keeps its receiver and takes any argument count", () => {
+	const js = compiled(`func main() {
+	st := window.setTimeout
+	st(func() {}, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+	ce := document.createElement
+	el := ce("div")
+	println(el.tagName)
+}`);
+	absent(js, "too many arguments");
+	const out = runJs(js, {
+		window: { setTimeout() {} },
+		document: {
+			createElement(tag) {
+				if (this?.tag !== "doc") throw new Error("lost receiver");
+				return { tagName: tag };
+			},
+			tag: "doc",
+		},
+	});
+	assertEqual(out, "div");
+});
+
+test("a method value of a browser object evaluates its receiver once", () => {
+	const js = compiled(`func main() {
+	fn := document.getElementById("a").getAttribute
+	println(fn("k"))
+}`);
+	const looked = [];
+	const out = runJs(js, {
+		document: {
+			getElementById(id) {
+				looked.push(id);
+				return {
+					id,
+					getAttribute(name) {
+						return `${this.id}-${name}`;
+					},
+				};
+			},
+		},
+	});
+	assertEqual(looked.join(), "a");
+	assertEqual(out, "a-k");
+});
+
+test("a nil check of a missing browser method still reads the property", () => {
+	const js = compiled(`func main() {
+	println(window.matchMedia != nil)
+}`);
+	assertEqual(runJs(js, { window: {} }), "false");
+	assertEqual(runJs(js, { window: { matchMedia() {} } }), "true");
+});
+
+test("a Go variadic function value keeps its interface boxing", () => {
+	const js = compiled(`type P struct{ X int }
+
+func keep(xs ...any) {}
+
+func main() {
+	p := P{1}
+	k := keep
+	k(p)
+	var g func(...any) = console.log
+	g(p)
+	console.log(p)
+}`);
+	assertContains(js, "k(__ifv(p));");
+	assertContains(js, "g(__ifv(p));");
+	assertContains(js, "console.log(p);");
+});
+
+test("a stored browser function assigned a Go closure is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+var gfn = console.log
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	fn = func(a ...any) { kept = a }
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0])
+	var xs []any
+	fn(xs...)
+	println(len(kept))
+	gfn = func(a ...any) { kept = a }
+	gfn(x, arr)
+	_, ok2 := kept[0].(MyInt)
+	println(ok2)
+	gfn(xs...)
+	println(len(kept))
+}`);
+	assertContains(js, "fn({ __sp: xs });");
+	assertEqual(runJs(js), "true 1\n0\ntrue\n0");
+});
+
+test("a stored browser function never assigned stays a browser call", () => {
+	const js = compiled(`func main() {
+	fn := console.log
+	other := 1
+	other = 2
+	var xs []any
+	fn(xs...)
+	println(other)
+}`);
+	assertContains(js, "fn(...(xs ?? []));");
+	absent(js, "__sp");
+});
+
+test("a browser function variable of another function is unaffected by an assignment there", () => {
+	const js = compiled(`func f() {
+	fn := func(a ...any) {}
+	fn = func(a ...any) {}
+	fn(1)
+}
+
+func main() {
+	f()
+	fn := console.log
+	var xs []any
+	fn(xs...)
+}`);
+	assertContains(js, "fn(...(xs ?? []));");
+});
+
+test("a nil slice spread to a browser function passes no arguments", () => {
+	const js = compiled(`func main() {
+	var xs []any
+	console.log(xs...)
+	fn := console.log
+	fn(xs...)
+	ys := []any{1, 2}
+	fn(ys...)
+}`);
+	const seen = [];
+	runJs(js, { console: { log: (...a) => seen.push(`[${a.join(",")}]`) } });
+	assertEqual(seen.join(""), "[][][1,2]");
+});
+
+test("a method value of a nested browser member evaluates its receiver once", () => {
+	const js = compiled(`func main() {
+	fn := document.firstElementChild.getAttribute
+	println(fn("k"))
+}`);
+	let reads = 0;
+	const out = runJs(js, {
+		document: {
+			get firstElementChild() {
+				reads++;
+				return {
+					id: reads,
+					getAttribute(name) {
+						return `${this.id}-${name}`;
+					},
+				};
+			},
+		},
+	});
+	assertEqual(reads, 1);
+	assertEqual(out, "1-k");
+});
+
+test("a function of a declared namespace takes any argument count as a value", () => {
+	const { js, errors } = compileDts(
+		`declare namespace MyNS {
+	function foo(...args: any[]): number;
+}
+`,
+		body(`import "js:./types.d.ts"
+
+func main() {
+	fn := MyNS.foo
+	println(fn(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+	var g func(...any) float64 = MyNS.foo
+	println(g(1, 2))
+}`),
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	absent(js, "too many arguments");
+	assertContains(js, "MyNS.foo?.bind(MyNS)");
+	assertEqual(
+		runJs(js, {
+			MyNS: {
+				foo(...args) {
+					return this === undefined ? -1 : args.length;
+				},
+			},
+		}),
+		"10\n2",
+	);
+});
+
+test("a nil check of a callback property and a missing method reads the property", () => {
+	const js = compiled(`import "gofront/dom"
+
+func main() {
+	el := document.getElementById("a").(dom.HTMLElement)
+	println(el.onclick != nil)
+	println(window.matchMedia != nil)
+}`);
+	assertEqual(
+		runJs(js, {
+			document: { getElementById: () => ({ onclick: null }) },
+			window: {},
+		}),
+		"false\nfalse",
+	);
+	assertEqual(
+		runJs(js, {
+			document: { getElementById: () => ({ onclick() {} }) },
+			window: { matchMedia() {} },
+		}),
+		"true\ntrue",
+	);
+});
+
+test("a stored browser function assigned other browser functions stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	fn = console.warn
+	other := console.error
+	fn = other
+	fn = nil
+	fn = console.info
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertContains(js, "fn(x);");
+	const seen = [];
+	runJs(js, {
+		console: { info: (...a) => seen.push(JSON.stringify(a)) },
+	});
+	assertEqual(seen.join(), "[5]");
+});
+
+test("a stored browser function assigned a method of a local browser object stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	c := console
+	fn := console.log
+	fn = c.warn
+	fn = console.info
+	fn(x)
+}`);
+	absent(js, "__ifv");
+});
+
+// What a `fn(x)` of a `MyInt` passes to the browser's `console.warn`/`log`.
+const logged = (js) => {
+	const seen = [];
+	const log = (...a) => seen.push(JSON.stringify(a));
+	runJs(js, { console: { log, warn: log, info: log } });
+	return seen.join();
+};
+
+test("a stored browser function assigned a method of an alias declared later stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+var fn = console.log
+
+func init() { fn = c.warn }
+
+var c = console
+
+func main() {
+	var x MyInt = 5
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of an alias in an inner block stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	if true {
+		c := console
+		fn = c.warn
+	}
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of a chained alias declared later stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	if true {
+		d := console
+		c := d
+		fn = c.warn
+	}
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of an alias declared before it stays a browser call", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	c := console
+	fn := console.log
+	fn = c.warn
+	fn(x)
+}`);
+	absent(js, "__ifv");
+	assertEqual(logged(js), "[5]");
+});
+
+test("a stored browser function assigned a method of a name bound twice is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ warn func(...any) }
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	fn := console.log
+	if true {
+		c := console
+		_ = c
+	}
+	if true {
+		c := L{func(a ...any) { kept = a }}
+		fn = c.warn
+	}
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function assigned a method of an alias of a Go value is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ warn func(...any) }
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	fn := console.log
+	if true {
+		c := L{func(a ...any) { kept = a }}
+		fn = c.warn
+	}
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function assigned a method of an unresolved name is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ warn func(...any) }
+
+func get() L { return L{} }
+
+func main() {
+	var x MyInt = 5
+	fn := console.log
+	if true {
+		c := get()
+		fn = c.warn
+	}
+	fn(x)
+}`);
+	assertContains(js, "fn(new MyInt(x));");
+});
+
+test("a stored browser function assigned a Go function after a browser one is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	fn = console.warn
+	fn = func(a ...any) { kept = a }
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0])
+}`);
+	assertEqual(runJs(js), "true 1");
+});
+
+test("a stored browser function assigned a variable that holds a Go function is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	fn := console.log
+	other := console.error
+	other = func(a ...any) { kept = a }
+	fn = other
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function assigned a browser function of a Go value is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+type L struct{ log func(...any) }
+
+func main() {
+	var x MyInt = 5
+	var kept []any
+	l := L{func(a ...any) { kept = a }}
+	fn := console.log
+	fn = l.log
+	fn(x)
+	_, ok := kept[0].(MyInt)
+	println(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("a stored browser function a short variable redeclaration assigns is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func getFn(kept *[]any) (func(...any), int) {
+	return func(a ...any) { *kept = a }, 1
+}
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	fn, n := getFn(&kept)
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0], n)
+}`);
+	assertEqual(runJs(js), "true 1 1");
+});
+
+test("a stored browser function written through a pointer is called as Go calls", () => {
+	const js = compiled(`type MyInt int
+
+func main() {
+	var x MyInt = 5
+	arr := [2]int{1, 2}
+	var kept []any
+	fn := console.log
+	p := &fn
+	*p = func(a ...any) { kept = a }
+	fn(x, arr)
+	arr[0] = 99
+	_, ok := kept[0].(MyInt)
+	println(ok, kept[1].([2]int)[0])
+}`);
+	assertEqual(runJs(js), "true 1");
+});
+
+test("a declared function with an optional parameter, stored and assigned a Go function, needs the argument", () => {
+	const dts = "declare function foo(a?: number): void;\n";
+	const ok = compileDts(
+		dts,
+		body(`import "js:./types.d.ts"
+
+func main() {
+	fn := foo
+	fn()
+}`),
+	);
+	assertEqual(ok.errors.map((e) => e.message).join(), "");
+	const { errors } = compileDts(
+		dts,
+		body(`import "js:./types.d.ts"
+
+func main() {
+	fn := foo
+	fn = func(a float64) { println(a) }
+	fn()
+}`),
+	);
+	assertErrorContains(errors, "Too few arguments: expected 1, got 0");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

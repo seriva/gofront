@@ -14,6 +14,7 @@ interface Response {
 	json(): unknown;
 }
 
+/** @dictionary */
 interface RequestInit {
 	method: string;
 	body: string;

@@ -81,6 +81,50 @@ test("a dictionary inside a namespace is marked", () => {
 	assertEqual(members.E._dictionary, undefined);
 });
 
+section(".d.ts — parenthesised types");
+
+// The type of the parameter `x` of `declare function f(x: <type>): void`.
+const paramOf = (type) => {
+	const { values } = parseDts(`declare function f(x: ${type}): void;`);
+	return values.get("f").params[0];
+};
+
+test("a parenthesised union of a type and null keeps the type", () => {
+	const t = paramOf("(Foo | null)[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.alias, "Foo");
+	assertEqual(t.elem._nullable, true);
+});
+
+test("a nested parenthesis still keeps the type", () => {
+	const t = paramOf("((Foo | null))[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.alias, "Foo");
+	assertEqual(t.elem._nullable, true);
+});
+
+test("a parenthesised primitive union keeps its first member", () => {
+	const t = paramOf("(string | null)[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.name, "string");
+	assertEqual(t.elem._nullable, true);
+	assertEqual(paramOf("(string | number)[]").elem.name, "string");
+});
+
+test("a parenthesised type name is that type", () => {
+	assertEqual(paramOf("(Foo)").alias, "Foo");
+	assertEqual(paramOf("(string)").name, "string");
+});
+
+test("a parenthesised function type is still a function", () => {
+	const t = paramOf("((x: number) => void)[]");
+	assertEqual(t.kind, "slice");
+	assertEqual(t.elem.kind, "func");
+	const nullable = paramOf("(() => void) | null");
+	assertEqual(nullable.kind, "func");
+	assertEqual(nullable._nullable, true);
+});
+
 section(".d.ts — dictionary arguments");
 
 test("a dictionary parameter takes nil", () => {
@@ -291,6 +335,55 @@ test("a dictionary literal runs as a plain object", () => {
 	assertEqual(errors.length, 0);
 	const out = runJs(js, { create: (d) => d.size + d.label.length });
 	assertEqual(out.trim(), "5");
+});
+
+section(".d.ts — a type is not a value");
+
+test("a composite literal of a declared interface or dictionary is rejected", () => {
+	const { errors } = compile(`func main() {
+	_ = Plain{}
+	_ = Desc{}
+	_ = []Plain{{}}
+}`);
+	assertErrorContains(errors, "invalid composite literal type Plain");
+	assertErrorContains(errors, "invalid composite literal type Desc");
+	assertEqual(errors.length, 3);
+});
+
+test("a Go struct literal and a map-built dictionary still compile", () => {
+	const { errors } = compile(`type S struct{ a int }
+
+func main() {
+	_ = S{a: 1}
+	_ = []S{{a: 1}}
+	println(create(map[string]any{"size": 1}))
+}`);
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a variable that shares its name with a declared type is a value", () => {
+	const { js, errors } = compileDts(
+		`interface Foo { x: number; }
+declare var Foo: Foo;`,
+		`package main
+import "js:./types.d.ts"
+func main() { _ = Foo.x }`,
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	assert(js.includes("Foo.x"));
+});
+
+test("an elided literal is missing its type in a field and cannot stand for a pointer to a basic type", () => {
+	const { errors } = compile(`type S struct{ x int }
+
+func main() {
+	_ = S{x: {}}
+	_ = S{{}}
+	_ = []*int{{}}
+}`);
+	assertErrorContains(errors, "missing type in composite literal");
+	assertErrorContains(errors, "invalid composite literal type *int");
+	assertEqual(errors.length, 3);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

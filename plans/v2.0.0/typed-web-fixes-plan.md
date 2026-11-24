@@ -1,7 +1,7 @@
 # Typed Web Platform & `.d.ts` Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-24)
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): the 7 review follow-ups logged by [`typed-web-platform-plan.md`](typed-web-platform-plan.md) Phases 1–4 (PRs #316–#319). Independent of [`multi-package-fixes-plan.md`](multi-package-fixes-plan.md), [`wasm-codegen-fixes-plan.md`](wasm-codegen-fixes-plan.md), [`generics-and-aliases-plan.md`](generics-and-aliases-plan.md), and [`js-codegen-and-value-semantics-plan.md`](js-codegen-and-value-semantics-plan.md) except shared checker edits in `src/typechecker/expressions.js` and `src/typechecker/index.js` (rebase if run in parallel).  
 **Release note:** Slices of typed browser and WebGPU values such as `[]webgpu.CommandBuffer`, `[]webgpu.ColorTargetState` and `[]dom.Node` now type-check cleanly, `fmt.Sprintf("%T", …)` and assertion panics print their real type names instead of `[]interface {}`, and storing a browser function such as `console.log` in a variable no longer clones arguments or breaks variadic spreads. **Breaking:** Browser and WebGPU parameters and descriptor members that take a list now need a slice of their element type instead of `[]any` (write `queue.submit([]webgpu.CommandBuffer{cmd})` and `"targets": []webgpu.ColorTargetState{map[string]any{...}}`); invalid operations on typed browser values (`window + 1`, `el[0]`, `for range el`, `if el`, `fetch.Response{}` and `fetch.Response.clone`) and unused imports shadowed by a universe global in another file are now compile errors, so use `== nil`, a type assertion, or the runtime global instead.
@@ -143,39 +143,39 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
 
 ### Phase 1: `.d.ts` Alias Resolution & Parser Parenthesised Types (roots `dts-unresolved-alias-leak`, `namespace-missing-notrangeable`, `dts-paren-type-collapses-non-func`)
 *Scheduled from review follow-ups (2026-11-24). Unblocks real WebGPU usage (`dev.queue.submit`, `dev.createRenderPipeline`).*
-- [ ] Task 1.1: Resolve `.d.ts` aliases recursively in `resolveType`, resolve at expression boundaries, and reject `for range` on namespaces (T1.1–T1.5)
+- [x] Task 1.1: Resolve `.d.ts` aliases recursively in `resolveType`, resolve at expression boundaries, and reject `for range` on namespaces (T1.1–T1.5)
   - Files: `src/typechecker/resolve.js` (`resolveType`, `_fieldTypeNamespace`), `src/typechecker/expressions.js` (`Ident`, `_checkCallExpr`, `_notRangeable`)
   - Test: `test/unit/types/dts-extends.test.js`, `test/unit/types/browser-globals.test.js`, `test/unit/compiler/web-packages.test.js`: T1.1–T1.6 (`Plain[]`, `[]webgpu.CommandBuffer`, `[]dom.NotRestoredReasons`, `Promise<Plain[]>`, `(xs: Plain[]) => void`, `plainArr`, dictionary member `"entries": []webgpu.BindGroupLayoutEntry{}`, negative T1.6 `submit([]any{...})` / `"entries": []any{...}` asserting `as []webgpu.`, plus negative `assertErrorContains` cases for indexing, slicing, calling, `len`/`cap`/`append`/`delete`, deref, type assertion, `for range`, `if`/`for` on call/member results and resolved params) + controls
   - Done when: all T1.1–T1.2 cases compile with 0 errors, all T1.3–T1.6 cases fail with Go/GoFront diagnostics, and `example/` + `stdlib/` stay green
-- [ ] Task 1.2: Preserve parenthesised non-function types in `DtsParser._parseParenType` (T2.1–T2.2)
+- [x] Task 1.2: Preserve parenthesised non-function types in `DtsParser._parseParenType` (T2.1–T2.2)
   - Files: `src/dts-parser.js` (`_parseParenType`)
   - Test: `test/unit/types/dts-dictionary.test.js`, `test/unit/compiler/web-packages.test.js`, `test/unit/stdlib/webgpu-typed.test.js`: T2.2 (`(ColorTargetState | null)[]`, `(string | null)[]`, `((ColorTargetState | null))[]`, `(Foo)`, `(string | number)[]`, callback controls) and full WebGPU T2.1 `dev.createRenderPipeline(...)` with `targets: []webgpu.ColorTargetState{}`; migrate the existing `createRenderPipeline takes a dictionary` case (`webgpu-typed.test.js:59`, `"targets": []any{map[string]any{...}}`) to `[]webgpu.ColorTargetState{map[string]any{...}}` and add the `[]any` form as a negative case (T1.6), listed under `### Tests Changed`
   - Done when: all 5 parenthesised union array fields in `stdlib/gofront/webgpu/webgpu.d.ts` parse to their element types, `dev.createRenderPipeline` compiles with 0 errors, and `"targets": []any{...}` is rejected
 
 ### Phase 2: Checker Soundness for `.d.ts` Types, Operators & Unused Imports (roots `dts-type-accepted-as-value`, `import-used-universe-fallback`, `namespace-operand-kind-loose`)
-- [ ] Task 2.1: Reject `.d.ts` types in composite literals and value member selectors (T3.1–T3.2)
+- [x] Task 2.1: Reject `.d.ts` types in composite literals and value member selectors (T3.1–T3.2)
   - Files: `src/typechecker/expressions.js` (`_isInvalidLiteralType`, `_checkSelectorExpr`)
   - Test: `test/unit/compiler/web-packages.test.js`, `test/unit/types/dts-dictionary.test.js`: negative `assertErrorContains` tests for `fetch.Response{}`, `dom.Element{}`, `&dom.Element{}`, elided `[]dom.Element{{}}` and `map[string]dom.Element{"a": {}}`, `webgpu.BufferDescriptor{}`, local `Plain{}`, `fetch.Response.clone`, `webgpu.Device.createBuffer`, `dom.Element.tagName`; controls for bare universe `Response`, `strings.Builder{}`, `declare namespace N`
   - Done when: every `.d.ts` type in composite-literal (typed or elided) or value-selector position fails at compile time with clear diagnostics
-- [ ] Task 2.2: Restrict `_importUsed` to the importing file's scope (T4.1–T4.2)
+- [x] Task 2.2: Restrict `_importUsed` to the importing file's scope (T4.1–T4.2)
   - Files: `src/typechecker/index.js` (`_importUsed`)
   - Test: `test/unit/compiler/imports.test.js`, `test/unit/compiler/web-packages.test.js`: T4.1 (`import len "./sub"` + sibling `len("abc")`, `import "gofront/fetch"` + sibling `fetch("/x")`), T4.2 (`import console "./sub"` + sibling `console.log`), plus controls (`fetch.Response` type-only use, same-file value use, `gofront/simd`/`gofront/shared`)
   - Done when: unused imports matching universe bindings are reported even when a sibling file uses the universe binding
-- [ ] Task 2.3: Classify `.d.ts` namespaces out of `"loose"` in operators and untyped-constant conversion (T5.1–T5.2)
+- [x] Task 2.3: Classify `.d.ts` namespaces out of `"loose"` in operators and untyped-constant conversion (T5.1–T5.2)
   - Files: `src/typechecker/operators.js` (`operandKindOf`, `COMPARABLE_KINDS`), `src/typechecker/assignability.js` (`CONST_REJECTING_KINDS`)
   - Test: `test/unit/types/browser-globals.test.js`, `test/unit/types/numeric-operands.test.js`: negative `assertErrorContains` tests for `window + 1`, `w + 1`, `w += 1`, `w + w`, `w - 1`, `w * 2`, `w < w`, `w == 1`, `w == "x"`, `w && true`, `w || false`, `!w`, `-w`, `+w`, `^w`; controls for `w == nil`, `w != nil`, `w == w2`, `e == n`, `w == d`
   - Done when: arithmetic, ordering, logical, unary, and constant-equality ops on `.d.ts` values fail at compile time while `nil` and same/derived-type reference equality keep passing
 
 ### Phase 3: Runtime Type Names & Stored Browser Func Values (roots `dts-type-name-missing-namespace`, `dts-func-value-treated-as-go-variadic`)
-- [ ] Task 3.1: Format `.d.ts` namespace types and aliases in `goTypeName` and block unresolved aliases in `TypeSpeller.spellable` (T6.1, T6.3)
+- [x] Task 3.1: Format `.d.ts` namespace types and aliases in `goTypeName` and block unresolved aliases in `TypeSpeller.spellable` (T6.1, T6.3)
   - Files: `src/backend/shared/fmt-types.js` (`goTypeName`), `src/lower/gen-types.js` (`TypeSpeller.spellable`)
   - Test: `test/unit/compiler/web-packages.test.js`: unit assertions for `goTypeName` on `namespace`, `[]namespace`, and `basic.alias`, plus runtime assertion panic `a.([]webgpu.Device)` printing `not []webgpu.Device`
   - Done when: `goTypeName` never prints `interface {}` for `.d.ts` namespace types or aliases
-- [ ] Task 3.2: Support `.d.ts` namespace types in `FmtGen` and bind declaration imports in `gofront_gen.go` (T6.1, T6.2)
+- [x] Task 3.2: Support `.d.ts` namespace types in `FmtGen` and bind declaration imports in `gofront_gen.go` (T6.1, T6.2)
   - Files: `src/lower/fmt-formatters.js` (`key`, `typeName`, `spellable`/`spell`, `describe`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/compiler/web-packages.test.js`: `fmt.Sprintf("%T", ...)` on `e.children`, boxed `var a any = e.children`, `el`, `[]dom.Element{}`, `map[string]dom.Element{}`, `&el`, and local `.d.ts` `Plain`, plus failed assertion `a.([]webgpu.Device)` printing `is []dom.NotRestoredReasons, not []webgpu.Device`
   - Done when: direct and `any`-boxed `fmt.Sprintf("%T", ...)` print the real `.d.ts` type names instead of `""` or `[]interface {}`
-- [ ] Task 3.3: Tag `.d.ts` function types with `_hostFunc` and fix stored browser func values in JS codegen (T7.1–T7.2)
+- [x] Task 3.3: Tag `.d.ts` function types with `_hostFunc` and fix stored browser func values in JS codegen (T7.1–T7.2)
   - Files: `src/dts-parser.js` (`funcType`, `markHostAny`), `src/backend/js/expressions.js` (`_calleeIsBrowserApi`, `_calleeIsGoVariadic`, `_isStdlibFuncValue`)
   - Test: `test/unit/compiler/web-packages.test.js`, `test/unit/types/browser-globals.test.js`: `fn := console.log; fn(p)` (no `__clone`), `fn(arr)` (no `.slice`), `fn(xs...)` (`...xs`, no `__sp`), `fn := window.setTimeout` (>8 args / no 8-branch wrapper), `fn := document.createElement; fn("div")`; controls for Go variadic `fn := keep; fn(p)` and `var fn func(...any) = console.log`
   - Docs: `docs/usage.md` *Typed browser globals* → *Migrating an existing program*: add bullets for a list parameter or descriptor member (`[]webgpu.CommandBuffer{cmd}` / `[]webgpu.ColorTargetState{map[string]any{...}}` instead of `[]any`), a truthiness test on a browser value (`el != nil` instead of `if el`), and indexing or ranging an element (assert or use its API, e.g. `el.children.item(0)`)

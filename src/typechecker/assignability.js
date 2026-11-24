@@ -62,6 +62,7 @@ const CONST_REJECTING_KINDS = new Set([
 	"pointer",
 	"func",
 	"chan",
+	"namespace",
 ]);
 
 // Operand kinds Go names in a comparison error (`not defined on struct`);

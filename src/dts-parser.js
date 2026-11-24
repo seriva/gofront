@@ -325,7 +325,7 @@ export class DtsParser {
 		while (!this.eof() && (this.ch() === "|" || this.ch() === "&")) {
 			const union = this.ch() === "|";
 			this.pos++;
-			const member = this._parseTypeNoUnion();
+			const member = this._parseTypeNoUnion(inReturn);
 			if (union) members.push(member);
 			this.skip();
 		}
@@ -368,21 +368,21 @@ export class DtsParser {
 		return base;
 	}
 
-	// `(a: A, b?: B) => R` is a function type; a parenthesized type is `any`
-	// unless it groups a function type.
-	_parseParenType() {
+	// `(a: A, b?: B) => R` is a function type; any other parenthesized type
+	// only groups the type inside it.
+	_parseParenType(inReturn = false) {
 		const start = this.pos;
 		this.pos++;
 		this.skipTypeExpr(")");
 		this.consume(")");
 		this.skip();
 		if (!this.startsWith("=>")) {
-			// `(() => void)`: the parentheses only group a function type.
+			// `(T | null)`, `(() => void)`: the parentheses only group a type.
 			const end = this.pos;
 			this.pos = start + 1;
-			const inner = this.parseType();
+			const inner = this.parseType(inReturn);
 			this.pos = end;
-			return inner.kind === "func" ? inner : ANY;
+			return inner;
 		}
 		this.pos = start;
 		const params = this.parseParams();
@@ -441,7 +441,7 @@ export class DtsParser {
 			this.skipBlock();
 			return ANY;
 		}
-		if (c === "(") return this._parseParenType();
+		if (c === "(") return this._parseParenType(inReturn);
 		if (c === '"' || c === "'") {
 			this.skipStringLit();
 			return { kind: "basic", name: "string" };
@@ -904,12 +904,15 @@ export class DtsParser {
 
 // The `func` type of a signature with parameters `params` (parseParams) and
 // result `ret`. A call must pass the arguments before the first optional
-// parameter.
+// parameter. `_hostFunc` marks a function JavaScript implements, which
+// codegen calls as JavaScript does (see `_calleeIsBrowserApi`); it is not
+// carried to a Go func type a value converts to.
 function funcType(params, ret) {
 	const isVariadic = params.some((p) => p.variadic);
 	const firstOptional = params.findIndex((p) => p.optional);
 	return {
 		kind: "func",
+		_hostFunc: true,
 		params: params.map((p) =>
 			p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
 		),
@@ -926,7 +929,9 @@ function funcType(params, ret) {
 
 // The type of the union `members`: its first member that is not `null` or
 // `undefined`, marked `_nullable` when the union has one of those. `any` and
-// a union of only `null` and `undefined` need no mark (they hold `nil`).
+// a union of only `null` and `undefined` need no mark (they hold `nil`); a
+// reference to a `.d.ts` type is `any` here but is marked, as the type it names
+// is not.
 function nullableUnion(members) {
 	const concrete = members.filter(
 		(t) => !(t.kind === "basic" && t.name === "nil"),
@@ -934,7 +939,9 @@ function nullableUnion(members) {
 	if (concrete.length === members.length || concrete.length === 0)
 		return members[0];
 	const t = concrete[0];
-	return t.kind === "basic" && t.name === "any" ? t : { ...t, _nullable: true };
+	return t.kind === "basic" && t.name === "any" && !t.alias
+		? t
+		: { ...t, _nullable: true };
 }
 
 // Binds the `extends` names of the interfaces and classes in `decls` that
@@ -967,14 +974,17 @@ function declarationTypeKey(pkg, name) {
 // results and element types, and the `extends` names of a declaration. A name
 // the package declares (`names`) becomes its `declarationTypeKey`; a name
 // written `other.T` for a package it references (`requires`) becomes that
-// package's key; any other name is left alone.
+// package's key; any other name is left alone. A name `ns.T` of a namespace
+// the package declares becomes the key of `ns` followed by `.T`.
 function qualifyReferences(type, pkg, names, requires, seen) {
 	if (!type || typeof type !== "object" || seen.has(type)) return;
 	seen.add(type);
 	const walk = (t) => qualifyReferences(t, pkg, names, requires, seen);
 	const qualify = (n) => {
-		if (names.has(n)) return declarationTypeKey(pkg, n);
 		const dot = n.indexOf(".");
+		// `ns.T` of a namespace this package declares.
+		if (names.has(n) || (dot > 0 && names.has(n.slice(0, dot))))
+			return declarationTypeKey(pkg, n);
 		return dot > 0 && requires.has(n.slice(0, dot))
 			? declarationTypeKey(n.slice(0, dot), n.slice(dot + 1))
 			: n;

@@ -234,12 +234,13 @@ test("http_client.d.ts — valid fetch call compiles", () => {
 		`package main
 import "js:http_client.d.ts"
 func main() {
-  resp := fetch("https://example.com", RequestInit{method: "GET", body: ""})
+  resp := fetch("https://example.com", map[string]any{"method": "GET", "body": ""})
   console.log(resp.status)
 }`,
 		{ fromFile: join(FIXTURES, "_dummy.go") },
 	);
-	// RequestInit is resolved from .d.ts — type checker accepts this without errors
+	// RequestInit is a .d.ts dictionary, built as a map literal — the type
+	// checker accepts this without errors
 	assertEqual(errors.length, 0);
 });
 
@@ -263,7 +264,10 @@ func main() {
 				!js.includes("__sp"),
 				"expected external variadic function not to use __sp",
 			);
-			assert(js.includes('customTag("div", ...xs)'), "expected spread call");
+			assert(
+				js.includes('customTag("div", ...(xs ?? []))'),
+				"expected spread call",
+			);
 		},
 	);
 });

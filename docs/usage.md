@@ -444,6 +444,9 @@ Migrating an existing program, fix what the compiler reports:
 - **An attribute or value parsed as a number** (`int(el.getAttribute("data-id"))`): the value is a string, so use `strconv.Atoi`.
 - **A property the browser does not declare** (a custom `window.myConfig`, or a CSS property such as `style.display`): declare it in a `.d.ts` file you import with `js:` and assert to it, or use the API form (`style.setProperty("display", "none")`).
 - **A library that adds globals** (PeerJS and similar): keep its `.d.ts` as before. Consumer declarations are unchanged.
+- **A list passed as `[]any`** (`queue.submit([]any{cmd})`, a `"targets": []any{...}` member): a parameter or descriptor member that takes a list wants a slice of its element type, so write `queue.submit([]webgpu.CommandBuffer{cmd})` and `"targets": []webgpu.ColorTargetState{map[string]any{"format": "bgra8unorm"}}`.
+- **A browser value used as a condition** (`if el {`): compare it instead, `if el != nil {`.
+- **Indexing or ranging an element** (`el[0]`, `for range el`): an element is not a Go slice or map, so use its API (`el.children.item(0)`) or assert the value to the type you mean before indexing it.
 
 The ECMAScript built-ins among the globals (`Math`, `JSON`, `Date`, `RegExp`, `Promise`, `Error`,
 `Symbol`, `String`, `Number`, `Boolean`, `Array`, `Object`, `parseInt`, `parseFloat`, `isNaN`,
