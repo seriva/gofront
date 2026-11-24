@@ -217,7 +217,11 @@ export const statementCheckMethods = {
 					stmt.rhs[i],
 					"variable declaration",
 				);
-			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY, stmt.lhs[i]);
+			scope.defineLocal(
+				name,
+				this._inferredVarType(defaultType(rhsFlat[i]), name, scope) ?? ANY,
+				stmt.lhs[i],
+			);
 		}
 	},
 

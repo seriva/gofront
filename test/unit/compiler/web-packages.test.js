@@ -9,6 +9,7 @@
 import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { goTypeName } from "../../../src/backend/shared/fmt-types.js";
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { PackageCache } from "../../../src/link/package-cache.js";
 import { Parser } from "../../../src/parser/index.js";
@@ -16,6 +17,7 @@ import { declarationStats } from "../../../src/resolver.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	compileDir,
@@ -1462,6 +1464,265 @@ func f() {
 	g[[]int]()
 }`);
 	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+section("Declaration packages — runtime type names");
+
+test("goTypeName spells a declaration type with its package", () => {
+	const gpu = gpuPkg();
+	const device = gpu.types.get("Device");
+	assertEqual(goTypeName(device), "webgpu.Device");
+	assertEqual(goTypeName({ kind: "slice", elem: device }), "[]webgpu.Device");
+	assertEqual(
+		goTypeName({
+			kind: "map",
+			key: { kind: "basic", name: "string" },
+			value: { kind: "pointer", base: device },
+		}),
+		"map[string]*webgpu.Device",
+	);
+});
+
+test("goTypeName spells an unresolved declaration reference by its name", () => {
+	const ref = (alias) => ({ kind: "basic", name: "any", alias });
+	assertEqual(goTypeName(ref("gofront/dom.Node")), "dom.Node");
+	assertEqual(
+		goTypeName({ kind: "slice", elem: ref("gofront/dom.Node") }),
+		"[]dom.Node",
+	);
+	assertEqual(goTypeName(ref("Plain")), "Plain");
+	assertEqual(goTypeName({ kind: "basic", name: "any" }), "interface {}");
+});
+
+test("a failed assertion to a slice of declaration types names it", () => {
+	const { res, errors } = withTempDir(
+		{
+			"main.go": `package main
+
+import (
+	"gofront/dom"
+	"gofront/webgpu"
+)
+
+func main() {
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	var a any = n.children
+	defer func() { println(recover()) }()
+	_ = a.([]webgpu.Device)
+}
+`,
+		},
+		(dir) => toCompileResult(() => compileDir(dir)),
+	);
+	assertEqual(errors.length, 0);
+	const out = runJs(res.js, {
+		document: { getElementById: () => ({ children: [] }) },
+	});
+	assertContains(
+		out,
+		"interface {} is []dom.NotRestoredReasons, not []webgpu.Device",
+	);
+});
+
+const FMT_DOCUMENT = {
+	document: { getElementById: () => ({ id: "x", children: [] }) },
+};
+
+// Compiles `main` (a `package main` body) against the real stdlib and runs it.
+function runWithStdlib(main, files = {}, globals = FMT_DOCUMENT) {
+	const { res, errors } = withTempDir({ "main.go": main, ...files }, (dir) =>
+		toCompileResult(() => compileDir(dir)),
+	);
+	assertEqual(errors.map((e) => e.message).join(), "");
+	return runJs(res.js, globals);
+}
+
+test("%T names the declaration type of a direct operand", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+)
+
+func main() {
+	el := document.getElementById("x").(dom.Element)
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	fmt.Println(fmt.Sprintf("%T", el))
+	fmt.Println(fmt.Sprintf("%T", n.children))
+	fmt.Println(fmt.Sprintf("%T", []dom.Element{}))
+	fmt.Println(fmt.Sprintf("%T", map[string]dom.Element{}))
+	fmt.Println(fmt.Sprintf("%T", &el))
+	fmt.Println(fmt.Sprintf("%T %T", el, n.children))
+}
+`);
+	assertEqual(
+		out,
+		[
+			"dom.Element",
+			"[]dom.NotRestoredReasons",
+			"[]dom.Element",
+			"map[string]dom.Element",
+			"*dom.Element",
+			"dom.Element []dom.NotRestoredReasons",
+		].join("\n"),
+	);
+});
+
+test("%T names the declaration type of a value held in an interface", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+	"gofront/webgpu"
+)
+
+func main() {
+	n := document.getElementById("x").(dom.NotRestoredReasons)
+	var a any = n.children
+	fmt.Println(fmt.Sprintf("%T", a))
+	defer func() { fmt.Println(recover()) }()
+	_ = a.([]webgpu.Device)
+}
+`);
+	assertEqual(
+		out,
+		[
+			"[]dom.NotRestoredReasons",
+			"interface conversion: interface {} is []dom.NotRestoredReasons, not []webgpu.Device",
+		].join("\n"),
+	);
+});
+
+test("%T names a type declared by a local declaration file", () => {
+	const out = runWithStdlib(
+		`package main
+
+import (
+	"fmt"
+	"js:./types.d.ts"
+)
+
+func main() {
+	fmt.Println(fmt.Sprintf("%T", plainVal))
+	fmt.Println(fmt.Sprintf("%T", plainList))
+}
+`,
+		{
+			"types.d.ts": `interface Plain { x: number; }
+declare const plainVal: Plain;
+declare const plainList: Plain[];
+`,
+		},
+		{ plainVal: { x: 1 }, plainList: [] },
+	);
+	assertEqual(out, "Plain\n[]Plain");
+});
+
+test("%T names a declaration type reached through an alias, a global or a clashing name", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	d "gofront/dom"
+)
+
+var dom = 3
+
+func main() {
+	el := document.getElementById("x").(d.Element)
+	var a any = []d.Element{el}
+	fmt.Println(fmt.Sprintf("%T|%T|%T|%d", document, el, a, dom))
+}
+`);
+	assertEqual(out, "dom.Document|dom.Element|[]dom.Element|3");
+});
+
+test("a formatted declaration value does not crash fmt", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+)
+
+func main() {
+	el := document.getElementById("x").(dom.Element)
+	fmt.Println(fmt.Sprintf("%v|%T", el.id, el))
+}
+`);
+	assertEqual(out, "x|dom.Element");
+});
+
+const PLAIN_DTS = `interface Plain { x: number; }
+declare const plainVal: Plain;
+declare const plainList: Plain[];
+declare const plainMap: { [k: string]: Plain };
+declare function takePlain(p: Plain): void;
+`;
+const PLAIN_GLOBALS = {
+	plainVal: { x: 1 },
+	plainList: [{ x: 2 }],
+	plainMap: { a: { x: 3 } },
+	takePlain() {},
+};
+
+test("a struct holding a slice, map, pointer or func of a local declaration type compiles", () => {
+	const out = runWithStdlib(
+		`package main
+
+import (
+	"fmt"
+	"js:./types.d.ts"
+)
+
+type S struct{ Ps []Plain }
+type M struct{ M map[string]Plain }
+type F struct{ F func(Plain) }
+type P struct{ P *Plain }
+type L [][]Plain
+type N struct{ N int }
+type Direct struct{ D Plain }
+
+func main() {
+	fmt.Println(len(S{Ps: plainList}.Ps))
+	fmt.Println(S{Ps: plainList}, M{M: map[string]Plain{}}, F{F: takePlain}, P{}, L{plainList})
+	fmt.Println(fmt.Sprintf("%v", N{3}))
+	var a any = S{Ps: plainList}
+	_, ok := a.(S)
+	fmt.Println(ok)
+	fmt.Printf("%v|%+v\\n", N{4}, N{5})
+	fmt.Println(fmt.Sprintf("%T", Direct{D: plainVal}))
+}
+`,
+		{ "types.d.ts": PLAIN_DTS },
+		PLAIN_GLOBALS,
+	);
+	const lines = out.split("\n");
+	assertEqual(lines[0], "1");
+	assertEqual(lines[2], "{3}");
+	assertEqual(lines[3], "true");
+	assertEqual(lines[4], "{4}|{N:5}");
+	assertEqual(lines[5], "main.Direct");
+	assertEqual(lines.length, 6);
+});
+
+test("a pointer to a declaration type held in an interface names its type", () => {
+	const out = runWithStdlib(`package main
+
+import (
+	"fmt"
+	"gofront/dom"
+)
+
+func main() {
+	el := document.getElementById("x").(dom.Element)
+	var p any = &el
+	fmt.Println(fmt.Sprintf("%T", p))
+}
+`);
+	assertEqual(out, "*dom.Element");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

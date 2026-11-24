@@ -167,15 +167,15 @@ Root: `.d.ts` function types created by `funcType` (`src/dts-parser.js:908-925`)
   - Done when: arithmetic, ordering, logical, unary, and constant-equality ops on `.d.ts` values fail at compile time while `nil` and same/derived-type reference equality keep passing
 
 ### Phase 3: Runtime Type Names & Stored Browser Func Values (roots `dts-type-name-missing-namespace`, `dts-func-value-treated-as-go-variadic`)
-- [ ] Task 3.1: Format `.d.ts` namespace types and aliases in `goTypeName` and block unresolved aliases in `TypeSpeller.spellable` (T6.1, T6.3)
+- [x] Task 3.1: Format `.d.ts` namespace types and aliases in `goTypeName` and block unresolved aliases in `TypeSpeller.spellable` (T6.1, T6.3)
   - Files: `src/backend/shared/fmt-types.js` (`goTypeName`), `src/lower/gen-types.js` (`TypeSpeller.spellable`)
   - Test: `test/unit/compiler/web-packages.test.js`: unit assertions for `goTypeName` on `namespace`, `[]namespace`, and `basic.alias`, plus runtime assertion panic `a.([]webgpu.Device)` printing `not []webgpu.Device`
   - Done when: `goTypeName` never prints `interface {}` for `.d.ts` namespace types or aliases
-- [ ] Task 3.2: Support `.d.ts` namespace types in `FmtGen` and bind declaration imports in `gofront_gen.go` (T6.1, T6.2)
+- [x] Task 3.2: Support `.d.ts` namespace types in `FmtGen` and bind declaration imports in `gofront_gen.go` (T6.1, T6.2)
   - Files: `src/lower/fmt-formatters.js` (`key`, `typeName`, `spellable`/`spell`, `describe`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/compiler/web-packages.test.js`: `fmt.Sprintf("%T", ...)` on `e.children`, boxed `var a any = e.children`, `el`, `[]dom.Element{}`, `map[string]dom.Element{}`, `&el`, and local `.d.ts` `Plain`, plus failed assertion `a.([]webgpu.Device)` printing `is []dom.NotRestoredReasons, not []webgpu.Device`
   - Done when: direct and `any`-boxed `fmt.Sprintf("%T", ...)` print the real `.d.ts` type names instead of `""` or `[]interface {}`
-- [ ] Task 3.3: Tag `.d.ts` function types with `_hostFunc` and fix stored browser func values in JS codegen (T7.1–T7.2)
+- [x] Task 3.3: Tag `.d.ts` function types with `_hostFunc` and fix stored browser func values in JS codegen (T7.1–T7.2)
   - Files: `src/dts-parser.js` (`funcType`, `markHostAny`), `src/backend/js/expressions.js` (`_calleeIsBrowserApi`, `_calleeIsGoVariadic`, `_isStdlibFuncValue`)
   - Test: `test/unit/compiler/web-packages.test.js`, `test/unit/types/browser-globals.test.js`: `fn := console.log; fn(p)` (no `__clone`), `fn(arr)` (no `.slice`), `fn(xs...)` (`...xs`, no `__sp`), `fn := window.setTimeout` (>8 args / no 8-branch wrapper), `fn := document.createElement; fn("div")`; controls for Go variadic `fn := keep; fn(p)` and `var fn func(...any) = console.log`
   - Docs: `docs/usage.md` *Typed browser globals* → *Migrating an existing program*: add bullets for a list parameter or descriptor member (`[]webgpu.CommandBuffer{cmd}` / `[]webgpu.ColorTargetState{map[string]any{...}}` instead of `[]any`), a truthiness test on a browser value (`el != nil` instead of `if el`), and indexing or ranging an element (assert or use its API, e.g. `el.children.item(0)`)

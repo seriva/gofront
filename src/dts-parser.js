@@ -904,12 +904,15 @@ export class DtsParser {
 
 // The `func` type of a signature with parameters `params` (parseParams) and
 // result `ret`. A call must pass the arguments before the first optional
-// parameter.
+// parameter. `_hostFunc` marks a function JavaScript implements, which
+// codegen calls as JavaScript does (see `_calleeIsBrowserApi`); it is not
+// carried to a Go func type a value converts to.
 function funcType(params, ret) {
 	const isVariadic = params.some((p) => p.variadic);
 	const firstOptional = params.findIndex((p) => p.optional);
 	return {
 		kind: "func",
+		_hostFunc: true,
 		params: params.map((p) =>
 			p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
 		),

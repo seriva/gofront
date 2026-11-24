@@ -13,6 +13,7 @@
 import { assignabilityMethods } from "./assignability.js";
 import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
+import { goFuncType, scanStores } from "./host-func.js";
 import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
 import { newLabelScope, statementCheckMethods } from "./statements.js";
@@ -655,6 +656,8 @@ export class TypeChecker {
 	}
 
 	checkAll(programs) {
+		this._programs = programs;
+		this._programAssigned = null;
 		for (const p of programs) {
 			const d = p._targetDirective;
 			if (!d) continue;
@@ -2006,9 +2009,12 @@ export class TypeChecker {
 	_runFuncBody(decl, inner, returnType) {
 		const savedDefer = this._deferCount;
 		const savedLabels = this._labels;
+		const savedAssigned = this._bodyAssigned;
 		this._deferCount = 0;
 		this._labels = newLabelScope();
+		this._bodyAssigned = scanStores(decl.body);
 		this.checkBlock(decl.body, inner, returnType);
+		this._bodyAssigned = savedAssigned;
 		this._reportUnused(inner, decl);
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
@@ -2038,6 +2044,99 @@ export class TypeChecker {
 		return true;
 	}
 
+	// The type of a variable declared without one from a value of type `t`.
+	// One that holds a function JavaScript implements keeps calling it as
+	// JavaScript does unless a Go value may be stored into it.
+	_inferredVarType(t, name, scope) {
+		if (t?._hostFunc !== true) return t;
+		const scan =
+			scope !== this.globals && this._bodyAssigned
+				? this._bodyAssigned
+				: this._assignedInPackage();
+		return this._storesOnlyHost(name, scope, scan, new Set([name]))
+			? t
+			: goFuncType(t);
+	}
+
+	// Whether everything stored into the variable `name` is `nil` or a function
+	// JavaScript implements. `seen` holds the variables under test, so stores
+	// that pass a value around a cycle (`a = b; b = a`) add nothing.
+	_storesOnlyHost(name, scope, scan, seen) {
+		return (scan.stores.get(name) ?? []).every((v) =>
+			this._isHostValue(v, scope, scan, seen),
+		);
+	}
+
+	// Whether the expression `v`, stored into a variable, is `nil` or a
+	// function JavaScript implements: a name or a member chain (`console.warn`)
+	// whose root resolves to one. A plain name that one declaration of the
+	// scanned code binds is that declaration's variable, found by its value, as
+	// it may be declared after the variable stored into; any other root
+	// resolves in the scope where that variable is declared.
+	_isHostValue(v, scope, scan, seen) {
+		const chain = [];
+		let root = v;
+		while (root?.kind === "SelectorExpr") {
+			chain.unshift(root.field);
+			root = root.expr;
+		}
+		if (root?.kind !== "Ident") return false;
+		const name = root.name;
+		if (root === v && name === "nil") return !scan.bound.has("nil");
+		const bound = scan.bound.get(name) ?? 0;
+		if (bound > 1) return false;
+		const def = bound === 1 ? scan.defs.get(name) : undefined;
+		if (def && !chain.length) {
+			if (seen.has(name)) return true;
+			seen.add(name);
+			return (
+				this._isHostValue(def, scope, scan, seen) &&
+				this._storesOnlyHost(name, scope, scan, seen)
+			);
+		}
+		const errorCount = this.errors.length;
+		const base = def
+			? this._declaredRootType(def, scope, scan, new Set([name]))
+			: scope.lookup(name);
+		let t = this._resolveDtsAlias(base);
+		for (const field of chain) if (t) t = this.fieldType(t, field, {});
+		this.errors.length = errorCount;
+		return t?._hostFunc === true;
+	}
+
+	// The type of the value `def` that declares the root of a member chain
+	// (`c := console`), found without the declaration being in scope yet.
+	// Null when it cannot be told: a root bound more than once, or a value
+	// that is not a name or a member chain.
+	_declaredRootType(def, scope, scan, seen) {
+		const chain = [];
+		let root = def;
+		while (root?.kind === "SelectorExpr") {
+			chain.unshift(root.field);
+			root = root.expr;
+		}
+		if (root?.kind !== "Ident") return null;
+		const bound = scan.bound.get(root.name) ?? 0;
+		if (bound > 1 || seen.has(root.name)) return null;
+		const inner = bound === 1 ? scan.defs.get(root.name) : undefined;
+		const errorCount = this.errors.length;
+		let t = this._resolveDtsAlias(
+			inner
+				? this._declaredRootType(inner, scope, scan, seen.add(root.name))
+				: scope.lookup(root.name),
+		);
+		for (const field of chain) if (t) t = this.fieldType(t, field, {});
+		this.errors.length = errorCount;
+		return t;
+	}
+
+	_assignedInPackage() {
+		this._programAssigned ??= scanStores(
+			(this._programs ?? []).map((p) => p.decls),
+		);
+		return this._programAssigned;
+	}
+
 	checkVarDecl(decl, scope) {
 		const savedSharedAlloc = this._sharedAllocOk;
 		this._sharedAllocOk = scope === this.globals;
@@ -2055,7 +2154,10 @@ export class TypeChecker {
 						this._rejectUntypedNil(vt, spec.value[i], "variable declaration")
 					)
 						vt = ANY;
-					const varType = type ?? defaultType(vt) ?? ANY;
+					const varType =
+						type ??
+						this._inferredVarType(defaultType(vt), spec.names[i], scope) ??
+						ANY;
 					if (!type && spec.names.length === spec.value.length)
 						this._checkConstDefault(vt, spec.value[i], "variable declaration");
 					if (type)

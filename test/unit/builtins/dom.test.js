@@ -264,7 +264,10 @@ func main() {
 				!js.includes("__sp"),
 				"expected external variadic function not to use __sp",
 			);
-			assert(js.includes('customTag("div", ...xs)'), "expected spread call");
+			assert(
+				js.includes('customTag("div", ...(xs ?? []))'),
+				"expected spread call",
+			);
 		},
 	);
 });
