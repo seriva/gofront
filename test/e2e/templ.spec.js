@@ -96,3 +96,20 @@ test("templ switch: active filter button gets active class", async ({
 	await expect(page.locator(S.filterActive)).toHaveClass(/active/);
 	await expect(page.locator(S.filterAll)).not.toHaveClass(/active/);
 });
+
+test("sync status updates its text and class in place", async ({ page }) => {
+	await page.locator(S.checkbox(1)).click();
+	const sync = page.locator(S.syncStatus);
+	await expect(sync).toContainText("Saved", { timeout: 5000 });
+	await expect(sync).toHaveClass(/saved/);
+	// Hold the element: a render() would replace it with a new one.
+	const el = await sync.elementHandle();
+	await expect
+		.poll(
+			() => el.evaluate((n) => [n.isConnected, n.textContent, n.className]),
+			{
+				timeout: 5000,
+			},
+		)
+		.toEqual([true, "", "sync-status"]);
+});

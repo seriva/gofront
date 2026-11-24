@@ -73,6 +73,31 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | `fmt.Sprintf` and the other `fmt` functions | Ordinary calls into Go source (`stdlib/fmt/`), the same on both backends; a generated formatter describes each type that reaches an `any` operand |
 | `json.Marshal(v)` / `json.Unmarshal(b, &v)` | `__json_marshal(__json_enc_T, v)` / `__json_unmarshal(__json_dec_T, b, v)` — one encoder/decoder function generated per type from its `json` struct tags; `MarshalJSON`/`UnmarshalJSON` methods are called directly |
 
+### Signals in `.templ`
+
+A `.templ` expression that reads a `gom.Signal` or `gom.Computed` keeps its DOM node up to date: when the signal is `Set`, only that text node or attribute is rewritten, with no re-render and no virtual DOM.
+
+```go
+var count = gom.NewSignal(0)
+
+templ Counter() {
+	<button disabled?={ count.Get() >= 10 }>Clicks: { count.Get() }</button>
+}
+
+// count.Set(count.Get() + 1) updates the label and disables the button at 10.
+```
+
+An expression is bound to the signal when it calls `Get` on a `gom.Signal` or `gom.Computed`, or when its value is one: `{ count }` shows the current value, `class={ cls }` sets the class from it and `disabled?={ busy }` follows a `gom.Signal[bool]` or `gom.Computed[bool]`. The whole expression runs again on every change, so `{ fmt.Sprintf("%d items", count.Get()) }` works too. An expression that reads no signal compiles exactly as before.
+
+| `.templ` | JavaScript |
+|---|---|
+| `{ expr }` reading a signal | A text node of its own whose `data` an `Effect` sets |
+| `attr={ expr }`, `class={ expr }` reading a signal | The usual `setAttribute` or `className` assignment, run inside an `Effect` |
+| `attr?={ expr }` reading a signal | `toggleAttribute(name, !!value)` inside an `Effect` |
+| An expression that reads no signal | Unchanged: evaluated once when the component mounts |
+
+Each `Effect` belongs to the element passed to `gom.Mount` or `gom.MountTo`; mounting into that element again stops its effects before the old content is replaced, so a re-render never leaves stale bindings behind. Only text and attribute expressions are bound: the condition of an `if` or `switch`, the range of a `for` and the arguments of `@Component(...)` are read once when the component mounts, so a change there still needs a `gom.Mount` call. Signals work in `js` packages only.
+
 ### Type system at runtime
 
 All type checking happens at compile time. At runtime, types are erased — there are no

@@ -99,7 +99,7 @@ Add `gom.Signal[T]`, `gom.Computed[T]` and `gom.Effect` and make `.templ` text a
   - Files: `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ-reactive-attr.test.js`: `class={ … }` and other `expr` attributes (including bare `{ sig }` / `{ comp }`) update on HTML and SVG elements; `disabled?={ sig.Get() }`, `disabled?={ boolSig }` and `disabled?={ boolComp }` toggle through `toggleAttribute`
   - Done when: attribute expressions that read a signal update in place
-- [ ] Task 2.4: Docs and the `templ` example (former 8.6, signal part)
+- [x] Task 2.4: Docs and the `templ` example (former 8.6, signal part)
   - Files: `docs/language-support.md`, `docs/compilation-mapping.md`, `README.md`, `example/templ/src/render.templ`, `example/templ/src/store.go`
   - Test: `test/e2e/templ.spec.js`: `syncMsg`/`syncCls` (`SyncStatus` in `example/templ/src/render.templ`, updated by `setSyncStatus`/`triggerSave` in `example/templ/src/store.go` without calling `render()`) updates `.sync-status` text and class in place while its element stays the same DOM node
   - Done when: `docs/` describes `gom.Signal`, `gom.Computed` and `gom.Effect`; all Playwright E2E tests pass

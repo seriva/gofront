@@ -15,10 +15,10 @@ var highPriority bool
 var dragSrcId  int
 var dropAfter  bool
 
-// syncMsg / syncCls drive the sync-status indicator.
-// Updated by setSyncStatus; render() reads them to build the node.
-var syncMsg string
-var syncCls string
+// syncMsg / syncCls drive the sync-status indicator. SyncStatus in
+// render.templ reads them, so setSyncStatus updates the indicator in place.
+var syncMsg = gom.NewSignal("")
+var syncCls = gom.NewSignal("")
 
 // errorMsg holds the current validation error; "" means no error.
 var errorMsg string
@@ -78,24 +78,20 @@ async func loadTodos() error {
 // ── Sync status ───────────────────────────────────────────────
 
 func setSyncStatus(msg string, cls string) {
-	syncMsg = msg
-	syncCls = cls
+	syncMsg.Set(msg)
+	syncCls.Set(cls)
 }
 
 async func triggerSave() {
 	setSyncStatus("Saving…", "saving")
-	render()
 	err := await saveTodos()
 	if err != nil {
 		setSyncStatus("Save failed", "error")
-		render()
 		return
 	}
 	setSyncStatus("Saved ✓", "saved")
-	render()
 	await sleep(1500)
 	setSyncStatus("", "")
-	render()
 }
 
 // ── Mutations ─────────────────────────────────────────────────
