@@ -6,7 +6,8 @@
 // This pass specializes all generic templates reachable from code into concrete Go declarations
 // (e.g. Identity$int, Box$int, Stack$int.Push) and re-typechecks the monomorphised AST.
 
-import { declaredTypeNames } from "../../lower/walk.js";
+import { renameLocalTypes } from "../../lower/local-types.js";
+import { declaredTypeNames, forEachChild } from "../../lower/walk.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import { embeddedFieldName, PackageScope } from "../../typechecker/types.js";
 import { goTypeName } from "../shared/fmt-types.js";
@@ -951,12 +952,68 @@ export function monomorphise(programs, checker) {
 		}
 	}
 
+	// Each instantiation cloned its generic body with the local types of the
+	// template, so `g$int` and `g$string` both declare `type Q`; the checker
+	// keys types by bare name, so those that differ between instantiations
+	// are renamed apart before checking.
+	renameLocalTypes(progs, new Set(), sharedLocalTypeNames(progs));
+
 	// One pass over all programs: declarations of every linked package are
 	// visible to the others (cross-package references are dequalified).
 	monoChecker.checkAll(progs);
 	nameInstances(monoChecker, typeInstances);
 
 	return { programs: progs, checker: monoChecker };
+}
+
+// The names of function-local types that several declarations share and that
+// mean the same type in each: the copies of a local type a generic body
+// declares without using its type parameters.  They keep one name, which the
+// generated `fmt` lookup also spells.  A type that differs between copies, or
+// names one that does, is not shared and is renamed per copy.
+function sharedLocalTypeNames(progs) {
+	const apart = new Set();
+	const shared = new Map();
+	for (const [name, texts] of localTypeCopies(progs)) {
+		if (texts.length < 2) continue;
+		if (texts.every((t) => t === texts[0])) shared.set(name, texts[0]);
+		else apart.add(name);
+	}
+	// A type spelled with one that is renamed per copy differs between copies
+	// once that name does.
+	for (let moved = true; moved; ) {
+		moved = false;
+		for (const [name, text] of shared) {
+			if (![...apart].some((o) => text.includes(`"name":${JSON.stringify(o)}`)))
+				continue;
+			shared.delete(name);
+			apart.add(name);
+			moved = true;
+		}
+	}
+	return new Set(shared.keys());
+}
+
+// Name -> the source text of every function-local declaration of that name.
+function localTypeCopies(progs) {
+	const bare = (k, v) => (k.startsWith("_") ? undefined : v);
+	const copies = new Map();
+	const visit = (node, top) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n, top);
+			return;
+		}
+		if (node.kind === "TypeDecl" && !top) {
+			const list = copies.get(node.name) ?? [];
+			list.push(JSON.stringify(node, bare));
+			copies.set(node.name, list);
+		}
+		forEachChild(node, (c) => visit(c, false));
+	};
+	for (const p of progs)
+		for (const d of p.decls ?? []) visit(d, d.kind === "TypeDecl");
+	return copies;
 }
 
 // Records Go's spelling of each generic instance (`Box[int]`) on its

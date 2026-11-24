@@ -858,3 +858,23 @@ func main() {
 		"1 2 3 4\n",
 	);
 });
+
+test("a defined type of a generic instance, instantiated twice", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type S[A any] struct{ X A }
+
+type W[B any] S[B]
+
+func main() {
+	a := W[int]{X: 1}
+	b := W[string]{X: "s"}
+	fmt.Println(a.X, b.X)
+}
+`,
+		"1 s\n",
+	);
+});

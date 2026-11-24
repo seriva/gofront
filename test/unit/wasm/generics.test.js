@@ -1835,3 +1835,180 @@ func main() {
 		);
 	});
 }
+
+section("Generics — local types in generic bodies");
+
+test("a local struct type per instantiation of a generic function", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) {
+	type Q struct{ X T }
+	fmt.Println(Q{v}.X)
+}
+
+func main() {
+	g(5)
+	g("hi")
+}
+`,
+		"5\nhi\n",
+	);
+});
+
+test("local slice, alias and generic-instance types per instantiation", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T2[A any] struct{ V A }
+
+func g[T any](v T) {
+	type S []T
+	type A = T
+	type Q T2[T]
+	s := S{v, v}
+	var a A = v
+	q := Q{V: v}
+	fmt.Println(len(s), s[1], a, q.V)
+}
+
+func main() {
+	g(5)
+	g(1.5)
+	g("x")
+}
+`,
+		"2 5 5 5\n2 1.5 1.5 1.5\n2 x x x\n",
+	);
+});
+
+test("a local type inside a closure of a generic function", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) func() {
+	return func() {
+		type Q struct{ X T }
+		fmt.Println(Q{v}.X)
+	}
+}
+
+func main() {
+	g(5)()
+	g("hi")()
+	g(1.5)()
+}
+`,
+		"5\nhi\n1.5\n",
+	);
+});
+
+test("a local type inside a generic method", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Box[T any] struct{ V T }
+
+func (b Box[T]) Show() {
+	type Q struct{ X T }
+	fmt.Println(Q{b.V}.X)
+}
+
+func main() {
+	Box[int]{7}.Show()
+	Box[string]{"s"}.Show()
+}
+`,
+		"7\ns\n",
+	);
+});
+
+test("local types stay correct with one instantiation, no type parameter, or one per function", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) {
+	type Q struct{ X T }
+	fmt.Println(Q{v}.X)
+}
+
+func k[T any](v T) {
+	type Q struct{ X int }
+	fmt.Println(Q{3}.X, v)
+}
+
+func h[T any](v T) {
+	type Q struct{ Y T }
+	fmt.Println(Q{v}.Y)
+}
+
+func main() {
+	g(5)
+	k(1)
+	k("a")
+	h("hi")
+}
+`,
+		"5\n3 1\n3 a\nhi\n",
+	);
+});
+
+test("a local type that shares its name with a package type and another function's local", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Q struct{ Z bool }
+
+func g[T any](v T) {
+	type Q struct{ X T }
+	fmt.Println(Q{v}.X)
+}
+
+func h() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	g(5)
+	g("hi")
+	h()
+	fmt.Println(Q{true}.Z)
+}
+`,
+		"5\nhi\n1\ntrue\n",
+	);
+});
+
+test("a local type built from a per-instantiation local type is renamed with it", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) {
+	type A struct{ X T }
+	type B struct{ In A }
+	fmt.Println(B{A{v}}.In.X)
+}
+
+func main() {
+	g(5)
+	g("hi")
+}
+`,
+		"5\nhi\n",
+	);
+});

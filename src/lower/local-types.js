@@ -29,8 +29,15 @@ export function freshLocalName(name, taken) {
 // own: a local type spelled like one is renamed too, so it cannot clash with
 // the imported type in the flat module.  It also holds the package-level
 // var, const and func names: a local type spelled like one is renamed so it
-// cannot take that value over inside its function.  Returns whether anything was renamed.
-export function renameLocalTypes(programs, reserved = new Set()) {
+// cannot take that value over inside its function.  `keep` holds names whose
+// several declarations are the same type (the clones of a generic body's local
+// type that does not depend on a type parameter): they share one name.
+// Returns whether anything was renamed.
+export function renameLocalTypes(
+	programs,
+	reserved = new Set(),
+	keep = new Set(),
+) {
 	const counts = new Map();
 	const count = (node) => {
 		if (!node || typeof node !== "object") return;
@@ -41,7 +48,9 @@ export function renameLocalTypes(programs, reserved = new Set()) {
 	};
 	for (const p of programs) count(p.decls);
 	const dup = new Set(
-		[...counts].filter(([k, n]) => n > 1 || reserved.has(k)).map(([k]) => k),
+		[...counts]
+			.filter(([k, n]) => (n > 1 && !keep.has(k)) || reserved.has(k))
+			.map(([k]) => k),
 	);
 	const taken = new Set([...counts.keys(), ...reserved]);
 	let changed = false;
