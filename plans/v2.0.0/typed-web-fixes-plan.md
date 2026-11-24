@@ -1,7 +1,7 @@
 # Typed Web Platform & `.d.ts` Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-24)
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): the 7 review follow-ups logged by [`typed-web-platform-plan.md`](typed-web-platform-plan.md) Phases 1–4 (PRs #316–#319). Independent of [`multi-package-fixes-plan.md`](multi-package-fixes-plan.md), [`wasm-codegen-fixes-plan.md`](wasm-codegen-fixes-plan.md), [`generics-and-aliases-plan.md`](generics-and-aliases-plan.md), and [`js-codegen-and-value-semantics-plan.md`](js-codegen-and-value-semantics-plan.md) except shared checker edits in `src/typechecker/expressions.js` and `src/typechecker/index.js` (rebase if run in parallel).  
 **Release note:** Slices of typed browser and WebGPU values such as `[]webgpu.CommandBuffer`, `[]webgpu.ColorTargetState` and `[]dom.Node` now type-check cleanly, `fmt.Sprintf("%T", …)` and assertion panics print their real type names instead of `[]interface {}`, and storing a browser function such as `console.log` in a variable no longer clones arguments or breaks variadic spreads. **Breaking:** Browser and WebGPU parameters and descriptor members that take a list now need a slice of their element type instead of `[]any` (write `queue.submit([]webgpu.CommandBuffer{cmd})` and `"targets": []webgpu.ColorTargetState{map[string]any{...}}`); invalid operations on typed browser values (`window + 1`, `el[0]`, `for range el`, `if el`, `fetch.Response{}` and `fetch.Response.clone`) and unused imports shadowed by a universe global in another file are now compile errors, so use `== nil`, a type assertion, or the runtime global instead.
