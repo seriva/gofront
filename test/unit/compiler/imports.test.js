@@ -209,6 +209,71 @@ test("side-effect import _ is not flagged as unused", () => {
 	});
 });
 
+// Two files of one package: `a.go` imports, `b.go` uses a name the universe
+// also binds. The use in `b.go` is not a use of `a.go`'s import.
+const SIBLING = (aImports, bBody, extra = {}) => ({
+	"a.go": `package main\n${aImports}\nfunc A() {}\n`,
+	"b.go": `package main\nfunc main() {\n${bBody}\n}\n`,
+	"sub/sub.go": "package sub\nfunc F() int { return 1 }\n",
+	...extra,
+});
+
+const compileSibling = (files) =>
+	withTempDir(files, (dir) => toCompileResult(() => compileDir(dir)));
+
+test("a sibling file's use of a builtin does not use an import named like it", () => {
+	const { errors } = compileSibling(
+		SIBLING('import len "./sub"', 'println(len("abc"))'),
+	);
+	assertErrorContains(errors, "'len' imported and not used");
+	assertEqual(errors.length, 1);
+});
+
+test("a sibling file's use of a browser global does not use an import named like it", () => {
+	const { errors } = compileSibling(
+		SIBLING('import console "./sub"', 'console.log("hi")'),
+	);
+	assertErrorContains(errors, "'console' imported and not used");
+	assertEqual(errors.length, 1);
+});
+
+test("a sibling file's call of a global function does not use a same-named package import", () => {
+	const { errors } = compileSibling(
+		SIBLING('import "gofront/fetch"', '_ = fetch("/x")'),
+	);
+	assertErrorContains(errors, "'fetch' imported and not used");
+	assertEqual(errors.length, 1);
+});
+
+test("an import used as a qualifier in its own file is used", () => {
+	const { errors } = compileSibling({
+		"a.go":
+			'package main\nimport len "./sub"\nfunc A() int { return len.F() }\n',
+		"b.go": 'package main\nfunc main() { println(len("abc"), A()) }\n',
+		"sub/sub.go": "package sub\nfunc F() int { return 1 }\n",
+	});
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("a declaration package used for a type only is used", () => {
+	const { errors } = compileSibling({
+		"a.go":
+			'package main\nimport "gofront/fetch"\nfunc A(r fetch.Response) bool { return r.ok }\n',
+		"b.go": "package main\nfunc main() {}\n",
+	});
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
+test("gofront/shared and gofront/simd imports stay used when their qualifier is", () => {
+	const { errors } = compileSibling({
+		"a.go":
+			'package main\nimport "gofront/shared"\nvar Counts = shared.NewUint8(4)\n',
+		"b.go":
+			'package main\nimport "gofront/simd"\nfunc main() { _ = simd.F32x4{}; println(len(Counts)) }\n',
+	});
+	assertEqual(errors.map((e) => e.message).join(), "");
+});
+
 section("Dot imports");
 
 test("dot import: functions available without qualifier", () => {
