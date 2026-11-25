@@ -152,7 +152,7 @@ Roots:
 
 ### Phase 1: Type-Switch `init` (root `typeswitch-init-omitted`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Parse and type-check `TypeSwitchStmt.init` (J1.1, J1.4)
+- [x] Task 1.1: Parse and type-check `TypeSwitchStmt.init` (J1.1, J1.4)
   - Files: `src/parser/statements.js` (`parseSwitch`, `_parseTypeSwitchBody`), `src/typechecker/statements.js` (`_checkTypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1 compiles (no `Undefined: 'y'`) and J1.4 `assertErrorContains(…, "declared and not used: y")`, plus a parser test that the node carries `init`
   - Done when: the type switch `init` is in the AST, its names resolve in every clause, and an unused `init` variable is reported
