@@ -1058,6 +1058,170 @@ func main() {
 	assertErrorContains(errors, "Unknown type 'sub.Float32Array'");
 });
 
+section("unexported interface methods belong to their package");
+
+const SECRET_UTIL = `package util
+
+type I interface {
+	secret() int
+	Pub() int
+}
+
+type Base struct{}
+
+func (Base) secret() int { return 7 }
+func (Base) Pub() int    { return 1 }
+
+type Impl struct{}
+
+func (Impl) secret() int { return 3 }
+func (Impl) Pub() int    { return 2 }
+
+func Use(i I) int { return i.Pub() }
+
+type baseI interface{ secret() int }
+
+type Embeds interface {
+	baseI
+	Pub() int
+}
+`;
+
+const MINE_DECL = `type Mine struct{}
+
+func (Mine) secret() int { return 1 }
+func (Mine) Pub() int    { return 2 }
+`;
+
+function secretErrors(body, extraUtil = "") {
+	return packageErrors({
+		"util/util.go": SECRET_UTIL + extraUtil,
+		"main.go": `package main
+
+import "./util"
+
+${MINE_DECL}
+${body}
+
+func main() {}
+`,
+	});
+}
+
+for (const [name, body, message] of [
+	["value assignment", "var _ util.I = Mine{}", "Mine does not implement I"],
+	["pointer assignment", "var _ util.I = &Mine{}", "does not implement I"],
+	[
+		"interface to interface",
+		"type localI interface{ secret() int; Pub() int }\nvar li localI = Mine{}\nvar _ util.I = li",
+		"does not implement I",
+	],
+	[
+		"call argument",
+		"func f() int { return util.Use(Mine{}) }",
+		"Mine does not implement I",
+	],
+	[
+		"return value",
+		"func f() util.I { return Mine{} }",
+		"Mine does not implement I",
+	],
+	["slice literal", "var _ = []util.I{Mine{}}", "does not implement I"],
+	[
+		"type assertion",
+		"func f(i util.I) { _ = i.(Mine) }",
+		"impossible type assertion",
+	],
+	[
+		"type switch case",
+		"func f(i util.I) int {\n\tswitch i.(type) {\n\tcase Mine:\n\t\treturn 1\n\t}\n\treturn 0\n}",
+		"impossible type switch case",
+	],
+	[
+		"generic constraint",
+		"func g[T util.I](x T) int { return x.Pub() }\nvar _ = g(Mine{})",
+		"does not satisfy constraint I",
+	],
+	[
+		"embedded unexported interface",
+		"var _ util.Embeds = Mine{}",
+		"Mine does not implement Embeds",
+	],
+]) {
+	test(`foreign type cannot satisfy foreign interface: ${name}`, () => {
+		assertErrorContains(secretErrors(body), message);
+	});
+}
+
+test("foreign type cannot satisfy foreign embedded interface in a local interface", () => {
+	const errors = secretErrors(
+		"type Wrap interface{ util.I }\nvar _ Wrap = Mine{}",
+	);
+	assertErrorContains(errors, "Wrap");
+});
+
+for (const [name, body] of [
+	[
+		"embedding util.Base",
+		"type Good struct{ util.Base }\nvar _ util.I = Good{}",
+	],
+	[
+		"embedding *util.Base",
+		"type Good struct{ *util.Base }\nvar _ util.I = Good{Base: &util.Base{}}",
+	],
+	["util.Impl", "var _ util.I = util.Impl{}"],
+	["util.Use(util.Impl{})", "var _ = util.Use(util.Impl{})"],
+]) {
+	test(`foreign interface still satisfied: ${name}`, () => {
+		assertEqual(secretErrors(body).length, 0);
+	});
+}
+
+test("embedding a generic util.Base[int] satisfies the foreign interface", () => {
+	const errors = packageErrors({
+		"util/util.go": `package util
+
+type I interface {
+	secret() int
+	Pub() int
+}
+
+type Base[T any] struct{ V T }
+
+func (b Base[T]) secret() int { return 7 }
+func (b Base[T]) Pub() int    { return 1 }
+`,
+		"main.go": `package main
+
+import "./util"
+
+type Good struct{ util.Base[int] }
+
+var _ util.I = Good{}
+
+func main() {}
+`,
+	});
+	assertEqual(errors.length, 0);
+});
+
+test("unexported interface methods still match within one package", () => {
+	const errors = packageErrors({
+		"main.go": `package main
+
+type I interface{ secret() int }
+type T struct{}
+
+func (T) secret() int { return 1 }
+
+var _ I = T{}
+
+func main() {}
+`,
+	});
+	assertEqual(errors.length, 0);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
