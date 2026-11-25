@@ -2044,6 +2044,7 @@ export const expressionGenMethods = {
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
+		if (name === "any") return `(${val} != null)`;
 		const simd = this._simdCheckExpr(name, val);
 		if (simd) return simd;
 		if (name === "error")
@@ -2053,12 +2054,15 @@ export const expressionGenMethods = {
 		const named = this.checker?.types.get(name);
 		const namedInfo = this._namedBoxInfo(named);
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
-		// User-declared interfaces: check the dynamic value has every method.
-		if (named?.underlying?.kind === "interface")
+		// User-declared interfaces (and aliases to any/interfaces): check the
+		// dynamic value is non-nil and has every method.
+		const under = this._underlyingOf(named);
+		if (isAny(under)) return `(${val} != null)`;
+		if (under?.kind === "interface" && name !== "error")
 			return this._ifaceMethodCheck(
 				val,
-				[...named.underlying.methods.keys()],
-				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
+				[...(under.methods?.keys() ?? [])],
+				this._unwrapIsMulti(under.methods?.get("Unwrap")),
 			);
 		if (this._isTaggedFuncType(named)) {
 			this.useHelper("ifaceBox");

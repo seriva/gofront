@@ -497,13 +497,11 @@ export const typeInfoGenMethods = {
 			case "pointer":
 				return this._pointerTypeCheck(t.base, val);
 			case "interface":
-				return t.methods?.size
-					? this._ifaceMethodCheck(
-							val,
-							[...t.methods.keys()],
-							this._unwrapIsMulti(t.methods.get("Unwrap")),
-						)
-					: null;
+				return this._ifaceMethodCheck(
+					val,
+					[...(t.methods?.keys() ?? [])],
+					this._unwrapIsMulti(t.methods?.get("Unwrap")),
+				);
 			case "typeParam": {
 				const f = this._typeParamZeroFactory(t.name);
 				return f ? `(${f}?.is?.(${val}) ?? true)` : null;

@@ -186,7 +186,7 @@ Roots:
   - Done when: slices of struct array fields see updates written through any whole-struct pointer store on all targets
 
 ### Phase 4: JS Nil-`any` Assertions, 64-Bit Range Counters & Wide-Int Bitwise Ops (roots `js-empty-iface-nil-assert`, `js-int64-range-counter`, `js-wide-int-bitwise`)
-- [ ] Task 4.1: Reject `nil` on concrete and generic `any` / `interface{}` assertions in JS (J5.1)
+- [x] Task 4.1: Reject `nil` on concrete and generic `any` / `interface{}` assertions in JS (J5.1)
   - Files: `src/backend/js/expressions.js` (`_typeNameCheckExpr`), `src/backend/js/type-info.js` (`_typeCheckForType`)
   - Test: `test/unit/language/interfaces.test.js`: J5.1 rows and controls (comma-ok and single-value `n.(any)`, `f[interface{}](n)`, `f[any](n)` on `nil` and non-nil values) with `assertAllTargetsOutput`
   - Done when: JS empty-interface assertions match Go/WASM on both `nil` and non-nil interfaces
