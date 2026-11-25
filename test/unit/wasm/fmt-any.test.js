@@ -577,6 +577,78 @@ func main() {
 	});
 }
 
+section("fmt: generic types of another package");
+
+const UTIL_GENERICS = `package util
+
+type Pair[T any] struct{ A, B T }
+type List[T any] struct{ Items []T }
+type Plain struct{ X int }
+`;
+
+for (const target of ["js", "both", "wasm"]) {
+	const onTarget = (src) =>
+		target === "js" ? src : `//gofront:target ${target}\n${src}`;
+	const runMain = async (decls, body) =>
+		(
+			await compileHybridProject({
+				"util/util.go": onTarget(UTIL_GENERICS),
+				"main.go": onTarget(`package main
+import (
+	"fmt"
+	"./util"
+)
+${decls}
+func main() {
+${body}
+}
+`),
+			})
+		).lines.join("\n");
+
+	test(`an imported generic struct prints and reports its type (${target})`, async () => {
+		const o = await runMain(
+			"",
+			`	p := util.Pair[int]{1, 2}
+	fmt.Println(p)
+	fmt.Printf("%T %v %+v\\n", p, p, p)
+	fmt.Printf("%T %v\\n", util.Pair[string]{"a", "b"}, util.Pair[string]{"a", "b"})`,
+		);
+		assertEqual(
+			o,
+			"{1 2}\nutil.Pair[int] {1 2} {A:1 B:2}\nutil.Pair[string] {a b}",
+		);
+	});
+
+	test(`an imported generic struct in an any, behind a pointer, and as a field (${target})`, async () => {
+		const o = await runMain(
+			"type Outer struct{ P util.Pair[int] }",
+			`	var a any = util.Pair[int]{1, 2}
+	fmt.Println(a)
+	fmt.Printf("%T %v\\n", a, a)
+	p := &util.Pair[int]{1, 2}
+	fmt.Println(p)
+	fmt.Printf("%T %+v\\n", p, p)
+	o := Outer{P: util.Pair[int]{1, 2}}
+	fmt.Printf("%v %+v %T\\n", o, o, o)`,
+		);
+		assertEqual(
+			o,
+			"{1 2}\nutil.Pair[int] {1 2}\n&{1 2}\n*util.Pair[int] &{A:1 B:2}\n{{1 2}} {P:{A:1 B:2}} main.Outer",
+		);
+	});
+
+	test(`an imported generic struct holding a slice, and a local generic holding an imported type (${target})`, async () => {
+		const o = await runMain(
+			"type Box[T any] struct{ V T }",
+			`	fmt.Println(util.List[int]{[]int{1, 2}})
+	fmt.Printf("%T\\n", util.List[int]{})
+	fmt.Printf("%T %v\\n", Box[util.Plain]{util.Plain{1}}, Box[util.Plain]{util.Plain{1}})`,
+		);
+		assertEqual(o, "{[1 2]}\nutil.List[int]\nmain.Box[util.Plain] {{1}}");
+	});
+}
+
 test("generic struct instantiations built inside generic functions", () => {
 	const o = out(
 		`

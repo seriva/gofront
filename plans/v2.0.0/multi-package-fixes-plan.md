@@ -167,7 +167,7 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
   - Files: `src/lower/gen-types.js` (`ownerOf`, `spellNamed`, `qualifierFor`, `declaringPackage`, `renamedSpelling`), `src/typechecker/index.js` (`bindReachedPackages`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/compiler/packages.test.js`, `test/unit/wasm/json.test.js`: M4.1–M4.2 (`json.Unmarshal` on default, aliased, dual-alias `s1`/`s2`, dot-imported, indirect `main`→`mid`→`leaf.Num`, shadowed-alias `var s = 99`, and `*s.MyInt` across `js`, `both`, `wasm`), M4.2b (`json.Unmarshal` into `sub.W` on all 3 targets) + M4 controls
   - Done when: `gofront_gen.go` qualifies every imported local-package type cleanly without `Undefined` errors, and no `TypeSpeller` method other than `ownerOf` scans `checker.types` to find a type's package
-- [ ] Task 3.2: Recognize imported generic instances in `FmtGen.isNamedInScope` via the inherited `ownerOf` (M4.3–M4.4)
+- [x] Task 3.2: Recognize imported generic instances in `FmtGen.isNamedInScope` via the inherited `ownerOf` (M4.3–M4.4)
   - Files: `src/lower/fmt-formatters.js` (`isNamedInScope`, `spellableNamed`, `typeName`)
   - Test: `test/unit/wasm/fmt-any.test.js`, `test/unit/compiler/packages.test.js`: M4.3–M4.4 (`fmt.Println`, `%T`, `%+v`, `any`-boxed `util.Pair[int]`, `util.List[int]`, `&util.Pair[int]`, `Outer{P: util.Pair[int]}` on `js`, `both`, `wasm`)
   - Done when: imported generic structs and composites format identically to Go (`{1 2}`, `util.Pair[int]`) on all targets

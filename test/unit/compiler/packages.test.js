@@ -1785,6 +1785,46 @@ ${body}
 		assertEqual(out, "5 99 <nil>");
 	});
 
+	test(`json and fmt keep types of colliding packages apart (${target})`, async () => {
+		const a =
+			"package a\ntype Box struct{ V int }\ntype Num int\ntype G[T any] struct{ X T }\nfunc MkA() Box { return Box{1} }\n";
+		const b =
+			"package b\ntype Box struct{ V int }\ntype Num int\ntype G[T any] struct{ X T }\nfunc MkB() Box { return Box{2} }\n";
+		const body = `var w W
+	err := json.Unmarshal([]byte(\`{"A":{"V":3},"B":{"V":4},"N":5,"M":6,"G":{"X":7},"H":{"X":8}}\`), &w)
+	out, _ := json.Marshal(w)
+	fmt.Println(w, err, string(out))
+	fmt.Printf("%T %T %T %T %T %T\\n", w.A, w.B, w.N, w.M, w.G, w.H)
+	fmt.Printf("%+v\\n", w)`;
+		const want = `{{3} {4} 5 6 {7} {8}} <nil> {"A":{"V":3},"B":{"V":4},"N":5,"M":6,"G":{"X":7},"H":{"X":8}}
+a.Box b.Box a.Num b.Num a.G[int] b.G[int]
+{A:{V:3} B:{V:4} N:5 M:6 G:{X:7} H:{X:8}}`;
+		assertEqual(
+			await run({
+				"a/a.go": a,
+				"b/b.go": b,
+				"main.go": decode(
+					'"./a"\n"./b"',
+					"type W struct{ A a.Box; B b.Box; N a.Num; M b.Num; G a.G[int]; H b.G[int] }",
+					body,
+				),
+			}),
+			want,
+		);
+		assertEqual(
+			await run({
+				"a/a.go": a,
+				"b/b.go": b,
+				"main.go": decode(
+					'"./a"\n. "./b"',
+					"type W struct{ A a.Box; B Box; N a.Num; M Num; G a.G[int]; H G[int] }\nvar _ = MkB",
+					body,
+				),
+			}),
+			want,
+		);
+	});
+
 	test(`%T names the package clause of a local package (${target})`, async () => {
 		const out = await run({
 			"mathx/vec.go": "package vec\ntype V struct{ X, Y int }\n",
