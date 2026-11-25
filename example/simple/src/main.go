@@ -3,6 +3,7 @@ package main
 import (
     "errors"
     "gofront/dom"
+    "strconv"
     "unicode/utf8"
 
     "./utils"
@@ -10,6 +11,12 @@ import (
 )
 
 const maxTodoLen = 120
+
+// attrInt reads the integer attribute name of el, or 0 when it is missing.
+func attrInt(el dom.Element, name string) int {
+    n, _ := strconv.Atoi(el.getAttribute(name))
+    return n
+}
 
 func validateTodo(text string) error {
     if !utils.HasText(text) {
@@ -112,7 +119,7 @@ func setupEvents() {
         submitInput()
     })
 
-    input.addEventListener("keydown", func(e any) {
+    input.addEventListener("keydown", func(e dom.KeyboardEvent) {
         if e.key == "Enter" {
             submitInput()
         }
@@ -123,28 +130,31 @@ func setupEvents() {
     })
 
     // Event delegation: toggle & delete
-    list.addEventListener("change", func(e any) {
-        if e.target.getAttribute("data-action") == "toggle" {
-            toggleTodo(int(e.target.getAttribute("data-todo-id")))
+    list.addEventListener("change", func(e dom.Event) {
+        target := e.target.(dom.Element)
+        if target.getAttribute("data-action") == "toggle" {
+            toggleTodo(attrInt(target, "data-todo-id"))
             render()
             triggerSave()
         }
     })
 
-    list.addEventListener("click", func(e any) {
-        if e.target.getAttribute("data-action") == "delete" {
-            removeTodo(int(e.target.getAttribute("data-todo-id")))
+    list.addEventListener("click", func(e dom.MouseEvent) {
+        target := e.target.(dom.Element)
+        if target.getAttribute("data-action") == "delete" {
+            removeTodo(attrInt(target, "data-todo-id"))
             render()
             triggerSave()
         }
     })
 
     // Event delegation: filter & clear
-    footer.addEventListener("click", func(e any) {
-        action := e.target.getAttribute("data-action")
+    footer.addEventListener("click", func(e dom.MouseEvent) {
+        target := e.target.(dom.Element)
+        action := target.getAttribute("data-action")
         switch action {
         case "filter":
-            setFilter(int(e.target.getAttribute("data-filter")))
+            setFilter(attrInt(target, "data-filter"))
             render()
         case "clear-completed":
             clearCompleted()
@@ -159,22 +169,22 @@ func setupEvents() {
     })
 
     // ── Drag-and-drop ─────────────────────────────────────────
-    list.addEventListener("dragstart", func(e any) {
-        li := e.target.closest("li")
+    list.addEventListener("dragstart", func(e dom.DragEvent) {
+        li := e.target.(dom.Element).closest("li")
         if li == nil { return }
-        dragSrcId = int(li.getAttribute("data-id"))
+        dragSrcId = attrInt(li, "data-id")
         li.classList.add("dragging")
         e.dataTransfer.effectAllowed = "move"
     })
 
-    list.addEventListener("dragover", func(e any) {
-        li := e.target.closest("li")
+    list.addEventListener("dragover", func(e dom.DragEvent) {
+        li := e.target.(dom.Element).closest("li")
         if li == nil { return }
-        targetId := int(li.getAttribute("data-id"))
+        targetId := attrInt(li, "data-id")
         if dragSrcId != targetId {
             e.preventDefault()
             rect := li.getBoundingClientRect()
-            after := e.clientY > rect.top+rect.height/2
+            after := float64(e.clientY) > rect.top+rect.height/2
             li.classList.remove("drag-over-top", "drag-over-bottom")
             if after {
                 li.classList.add("drag-over-bottom")
@@ -184,30 +194,30 @@ func setupEvents() {
         }
     })
 
-    list.addEventListener("dragleave", func(e any) {
-        li := e.target.closest("li")
+    list.addEventListener("dragleave", func(e dom.DragEvent) {
+        li := e.target.(dom.Element).closest("li")
         if li == nil { return }
-        if !li.contains(e.relatedTarget) {
+        if !li.contains(e.relatedTarget.(dom.Node)) {
             li.classList.remove("drag-over-top", "drag-over-bottom")
         }
     })
 
-    list.addEventListener("drop", func(e any) {
+    list.addEventListener("drop", func(e dom.DragEvent) {
         e.preventDefault()
-        li := e.target.closest("li")
+        li := e.target.(dom.Element).closest("li")
         if li == nil { return }
-        targetId := int(li.getAttribute("data-id"))
+        targetId := attrInt(li, "data-id")
         if dragSrcId != targetId {
             rect := li.getBoundingClientRect()
-            after := e.clientY > rect.top+rect.height/2
+            after := float64(e.clientY) > rect.top+rect.height/2
             moveTodo(dragSrcId, targetId, after)
             render()
             triggerSave()
         }
     })
 
-    list.addEventListener("dragend", func(e any) {
-        li := e.target.closest("li")
+    list.addEventListener("dragend", func(e dom.DragEvent) {
+        li := e.target.(dom.Element).closest("li")
         if li != nil {
             li.classList.remove("dragging", "drag-over-top", "drag-over-bottom")
         }

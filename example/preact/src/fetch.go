@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gofront/dom"
 	"time"
 
 	"js:./preact.d.ts"
@@ -16,7 +17,7 @@ type FetchCancel struct {
 	deadline   time.Time
 	hasLimit   bool
 	started    bool
-	controller AbortControllerWrapper
+	controller dom.AbortController
 }
 
 // NewFetchCancel returns a FetchCancel that is not cancelled and has no deadline.
@@ -56,7 +57,7 @@ async func FetchTodosWithCancel(c *FetchCancel, url string) (loaded []Todo, err 
 		return nil, stopErr
 	}
 
-	c.controller = newAbortController()
+	c.controller = newAbortController().(dom.AbortController)
 	c.started = true
 
 	resp := await fetch(url, map[string]any{"signal": c.controller.signal})

@@ -1,5 +1,7 @@
 package main
 
+import "gofront/dom"
+
 // ── Filter mode ───────────────────────────────────────────────
 
 const (
@@ -66,10 +68,10 @@ type TodoItemProps struct {
 	OnToggle    func(int)
 	OnDelete    func(int)
 	OnEdit      func(int, string)
-	OnDragStart func(any)
-	OnDragOver  func(any)
-	OnDrop      func(any)
-	OnDragEnd   func(any)
+	OnDragStart func(dom.DragEvent)
+	OnDragOver  func(dom.DragEvent)
+	OnDrop      func(dom.DragEvent)
+	OnDragEnd   func(dom.DragEvent)
 }
 
 type HeaderProps struct {
@@ -83,8 +85,8 @@ type InputRowProps struct {
 	HighPriority     bool
 	Saving           bool
 	ErrorMsg         string
-	OnInput          func(any)
-	OnKeyDown        func(any)
+	OnInput          func(dom.Event)
+	OnKeyDown        func(dom.KeyboardEvent)
 	OnTogglePriority func()
 	OnAdd            func()
 }

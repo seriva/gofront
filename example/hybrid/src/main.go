@@ -1,6 +1,12 @@
 package main
 
-import "./sim"
+import (
+	"gofront/canvas"
+	"gofront/dom"
+	"strconv"
+
+	"./sim"
+)
 
 // ── Simulation state (JS side) ────────────────────────────────
 
@@ -10,21 +16,21 @@ const (
 )
 
 var (
-	canvas  any
-	ctx     any
-	paused  = false
-	target  = 2048
-	lastNow = 0.0
-	frames  = 0
-	fpsTime = 0.0
-	fps     = 0
-	mouseX  = canvasW / 2
-	mouseY  = canvasH / 2
-	refs    = map[string]any{}
+	canvasEl dom.HTMLCanvasElement
+	ctx      canvas.CanvasRenderingContext2D
+	paused   = false
+	target   = 2048
+	lastNow  = 0.0
+	frames   = 0
+	fpsTime  = 0.0
+	fps      = 0
+	fpsText  = gom.NewSignal("— fps")
+	mouseX   = canvasW / 2
+	mouseY   = canvasH / 2
 )
 
 func render() {
-	gom.Mount("#controls", Controls(target, paused, sim.Count()), refs)
+	gom.Mount("#controls", Controls(target, paused, sim.Count()))
 }
 
 // ── Frame loop ────────────────────────────────────────────────
@@ -46,12 +52,12 @@ func frame(now float64) {
 	}
 
 	ctx.fillStyle = "rgba(13, 15, 18, 0.35)"
-	ctx.fillRect(0, 0, canvasW, canvasH)
+	ctx.fillRect(0, 0, float64(canvasW), float64(canvasH))
 	ctx.fillStyle = "#00add8"
 	n := sim.Count()
 	pos := sim.Positions
 	for i := 0; i < n; i++ {
-		ctx.fillRect(pos[i*2], pos[i*2+1], 2, 2)
+		ctx.fillRect(float64(pos[i*2]), float64(pos[i*2+1]), 2, 2)
 	}
 
 	frames++
@@ -59,9 +65,7 @@ func frame(now float64) {
 		fps = frames
 		frames = 0
 		fpsTime = now
-		if refs["fps"] != nil {
-			refs["fps"].textContent = fmt.Sprintf("%d fps", fps)
-		}
+		fpsText.Set(strconv.Itoa(fps) + " fps")
 	}
 	requestAnimationFrame(frame)
 }
@@ -69,21 +73,21 @@ func frame(now float64) {
 // ── Events ────────────────────────────────────────────────────
 
 func setupEvents() {
-	canvas.addEventListener("mousemove", func(e any) {
-		rect := canvas.getBoundingClientRect()
-		mouseX = float32(e.clientX-rect.left) * canvasW / float32(rect.width)
-		mouseY = float32(e.clientY-rect.top) * canvasH / float32(rect.height)
+	canvasEl.addEventListener("mousemove", func(e dom.MouseEvent) {
+		rect := canvasEl.getBoundingClientRect()
+		mouseX = float32(float64(e.clientX)-rect.left) * canvasW / float32(rect.width)
+		mouseY = float32(float64(e.clientY)-rect.top) * canvasH / float32(rect.height)
 	})
 
 	controls := document.querySelector("#controls")
-	controls.addEventListener("click", func(e any) {
-		btn := e.target.closest("[data-action]")
+	controls.addEventListener("click", func(e dom.MouseEvent) {
+		btn := e.target.(dom.Element).closest("[data-action]")
 		if btn == nil {
 			return
 		}
 		switch btn.getAttribute("data-action") {
 		case "count":
-			target = int(btn.getAttribute("data-count"))
+			target, _ = strconv.Atoi(btn.getAttribute("data-count"))
 			sim.Reset(target, canvasW, canvasH)
 			render()
 		case "pause":
@@ -100,8 +104,8 @@ func setupEvents() {
 
 func main() {
 	sim.LoadConfig(sim.DefaultConfigJSON)
-	canvas = document.getElementById("sim")
-	ctx = canvas.getContext("2d")
+	canvasEl = document.getElementById("sim").(dom.HTMLCanvasElement)
+	ctx = canvasEl.getContext("2d").(canvas.CanvasRenderingContext2D)
 
 	sim.Reset(target, canvasW, canvasH)
 	render()

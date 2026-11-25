@@ -33,7 +33,7 @@ templ Controls(target int, paused bool, live int) {
 	</div>
 	<div class="row stats">
 		<span><strong id="live-count">{ live }</strong> live</span>
-		<span ref="fps">— fps</span>
+		<span id="fps">{ fpsText }</span>
 		<span>config: <strong id="config-name">{ sim.ConfigName() }</strong></span>
 		<span class="hint">Move the mouse over the canvas to steer the attractor.</span>
 	</div>

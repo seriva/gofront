@@ -18,9 +18,21 @@ test.describe("Hybrid JS + WasmGC particle example", () => {
 		const canvas = page.locator("#sim");
 		await expect(canvas).toBeVisible();
 		await expect(page.locator("#live-count")).toHaveText("2048");
+		await expect(page.locator("#config-name")).toHaveText("standard");
 
-		// The simulation runs a few frames and paints onto the canvas.
-		await page.waitForTimeout(600);
+		// The simulation runs a few frames and paints onto the canvas, and the
+		// signal-bound FPS span updates in place without replacing the element.
+		const fpsEl = await page.locator("#fps").elementHandle();
+		await expect
+			.poll(
+				() =>
+					fpsEl.evaluate((n) => [
+						n.isConnected,
+						/^\d+ fps$/.test(n.textContent),
+					]),
+				{ timeout: 3000 },
+			)
+			.toEqual([true, true]);
 		const painted = await canvas.evaluate((el) => {
 			const data = el
 				.getContext("2d")

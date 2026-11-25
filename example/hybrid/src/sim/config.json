@@ -1,0 +1,6 @@
+{
+	"name": "standard",
+	"drag": 0.999,
+	"attractor_force": 60000.0,
+	"soften": 400.0
+}

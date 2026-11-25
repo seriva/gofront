@@ -39,11 +39,6 @@ declare function useReducer(
 	initialState: any,
 ): [state: any, dispatch: (action: any) => void];
 
-export interface AbortControllerWrapper {
-	signal: any;
-	abort(): void;
-}
-
-declare function newAbortController(): AbortControllerWrapper;
+declare function newAbortController(): any;
 
 declare function sleep(ms: number): Promise<void>;
