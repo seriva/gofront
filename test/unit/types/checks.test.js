@@ -11,6 +11,7 @@ import {
 	assertWasmProgramOutput,
 	compile,
 	compileDir,
+	compileDts,
 	compileWasm,
 	Lexer,
 	Parser,
@@ -2737,6 +2738,16 @@ for (const target of ["js", "both", "wasm"]) {
 			"func g[T ~int]() {\n\tconst C = T(1)\n\t_ = C\n}\nfunc main() { g[int]() }",
 			"T(1) (value of type T constrained by ~int) is not constant",
 		],
+		[
+			"a call of a function named int",
+			"func int(x float64) float64 { return x }\nconst C = int(5)\nfunc main() { _ = C }",
+			"int(5) (value of type float64) is not constant",
+		],
+		[
+			"a call of a closure named rune",
+			"func main() {\n\trune := func(x int) int { return x }\n\tconst C = rune(5)\n\t_ = C\n}",
+			"rune(5) (value of type int) is not constant",
+		],
 	]) {
 		test(`a constant initialized from ${what} is an error in a ${target} package (J2.1)`, () => {
 			const { errors } = compile(`package main\n${body}\n`, { target });
@@ -2910,7 +2921,93 @@ func main() {
 		);
 		assertEqual(errors.length, 0);
 	});
+
+	test(`an array index from a call of a closure named byte is an error in a ${target} package (J2.1)`, () => {
+		const { errors } = compile(
+			"package main\nfunc main() {\n\tbyte := func(x int) int { return x }\n\ta := [...]int{byte(5): 2}\n\t_ = a\n}\n",
+			{ target },
+		);
+		assertErrorContains(errors, "must be integer constant");
+	});
+
+	test(`constants and conversions of other packages compile as constants and array indices in a ${target} package (J2.1 control)`, () => {
+		const errors = withTempDir(
+			{
+				"sub/sub.go": `//gofront:target ${target}\npackage sub\n\ntype D int\n\nconst K = 2\nconst L = len([4]int{})\n`,
+				"dot/dot.go": `//gofront:target ${target}\npackage dot\n\nconst M = 3\n`,
+				"main.go": `//gofront:target ${target}
+package main
+
+import (
+	. "./dot"
+	"math"
+	s "./sub"
+	"time"
+)
+
+type MyInt int
+
+const A = s.K + s.L + M
+const B = s.D(3)
+const P = math.Pi
+const T = 5 * time.Second
+const U = (MyInt)(5) + MyInt(1)
+
+var a = [...]int{s.K: 1, s.L: 2, M + 4: 3, s.D(8): 4, math.MaxInt8: 5, int(200): 6, byte(201): 7}
+
+func main() { println(A, int(B), P, int64(T), int(U), len(a)) }
+`,
+			},
+			(dir) => toCompileResult(() => compileDir(dir)).errors,
+		);
+		assertEqual(errors.length, 0);
+	});
 }
+
+for (const [what, expr, want] of [
+	[
+		"a window property",
+		"window.innerWidth",
+		"window.innerWidth (value of type int) is not constant",
+	],
+	[
+		"a document property",
+		"document.title",
+		"document.title (value of type string) is not constant",
+	],
+	["a console method", "console.log", "console.log (value of type"],
+]) {
+	test(`a constant initialized from ${what} is an error (J2.1)`, () => {
+		const { errors } = compile(
+			`package main\nconst C = ${expr}\nfunc main() { _ = C }\n`,
+		);
+		assertErrorContains(errors, want);
+	});
+}
+
+test("an array index from a browser global is an error (J2.1)", () => {
+	const { errors } = compile(
+		"package main\nvar a = [...]int{window.innerWidth: 2}\nfunc main() { _ = a }\n",
+	);
+	assertErrorContains(
+		errors,
+		"index window.innerWidth must be integer constant",
+	);
+});
+
+test("a member of a JavaScript namespace is not a constant (J2.1)", () => {
+	const dts = "declare namespace NS { const K: number; }";
+	const { errors } = compileDts(
+		dts,
+		'package main\n\nimport "js:./types.d.ts"\n\nconst C = NS.K\n\nfunc main() { _ = C }\n',
+	);
+	assertErrorContains(errors, "NS.K (value of type float64) is not constant");
+	const keyed = compileDts(
+		dts,
+		'package main\n\nimport "js:./types.d.ts"\n\nvar a = [...]int{NS.K: 1}\n\nfunc main() { _ = a }\n',
+	);
+	assertErrorContains(keyed.errors, "index NS.K must be integer constant");
+});
 
 test("valid constant expressions evaluate on every target (J2 control)", async () => {
 	await assertAllTargetsOutput(

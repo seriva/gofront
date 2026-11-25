@@ -43,7 +43,6 @@ import {
 	NIL,
 	RUNE,
 	Scope,
-	SIZED_INT_NAMES,
 	STRING,
 	shadowsJsGlobal,
 	TAINTED_ANY,
@@ -2299,17 +2298,6 @@ export const expressionCheckMethods = {
 		return expr;
 	},
 
-	// `int(K)`, `uint8(K)`, `MyInt(K)`: a conversion to an integer type.
-	_isIntConversion(expr) {
-		if (expr.args?.length !== 1) return false;
-		const target = expr._conversionTargetType;
-		if (expr._isTypeConversion && target)
-			return isInteger(this._deepUnderlying(target));
-		return (
-			expr.func?.kind === "Ident" && SIZED_INT_NAMES.includes(expr.func.name)
-		);
-	},
-
 	// Keyed array literal indices (Go spec): each key must be a non-negative
 	// integer constant, and no index may appear twice.  The resolved index is
 	// stored on the KeyValueExpr as `_index` for compositeLitIndices.
@@ -2369,18 +2357,24 @@ export const expressionCheckMethods = {
 			case "Ident":
 				return (scope ?? this.globals).lookupObject(e.name)?.kind === "const";
 			case "SelectorExpr": {
-				// Package members: constant unless the package says otherwise.
-				const ns =
+				// `pkg.K` with K a constant a GoFront package declares. A browser
+				// global (`window.innerWidth`) or a member of a JavaScript
+				// declaration is a runtime value.
+				const obj =
 					e.expr?.kind === "Ident"
-						? (scope ?? this.globals).lookup(e.expr.name)
+						? (scope ?? this.globals).lookupObject(e.expr.name)
 						: null;
-				if (ns?.kind !== "namespace") return false;
-				return ns._consts ? ns._consts.has(e.field) : true;
+				const ns = obj?.kind === "pkg" ? obj.type : null;
+				if (!ns?._gofront) return false;
+				const kind = ns._kinds?.get(e.field);
+				return kind ? kind === "const" : !!ns._consts?.has(e.field);
 			}
 			case "TypeConversion":
 				return this._isConstType(e._type) && this._isConstExpr(e.expr, scope);
 			case "CallExpr":
-				if (e._isTypeConversion || this._isIntConversion(e))
+				// A conversion only when the callee names a type: `int(5)` with a
+				// function or closure `int` in scope is a call.
+				if (e._isTypeConversion)
 					return (
 						this._isConstType(e._type) && this._isConstExpr(e.args?.[0], scope)
 					);
