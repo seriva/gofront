@@ -162,15 +162,15 @@ Roots:
   - Done when: every W3 program prints Go's output on `wasm` and `npm run check` passes with `monomorph.js` importing from `src/lower/`
 
 ### Phase 3: Component-Type Prescan & Anonymous-Interface Dispatch (roots `wasm-prescan-shallow-type-scan`, `wasm-recv-type-name-selector-misreads-field-as-pkg`)
-- [ ] Task 3.1: Add `forEachComponentType`/`containsInterfaceType` and use them for `__any_eq` and `__any_hash` (W5.1–W5.3)
+- [x] Task 3.1: Add `forEachComponentType`/`containsInterfaceType` and use them for `__any_eq` and `__any_hash` (W5.1–W5.3)
   - Files: `src/backend/wasm/prescan.js` (`forEachComponentType`, `containsInterfaceType`, `_usesAnyEq`), `src/backend/wasm/index.js` (`usesAnyHash`), `src/backend/wasm/emit-maps.js` (`emitKeyHash` guard)
   - Test: `test/unit/wasm/arrays.test.js` (no-`fmt` `[2]any ==`, `[2]I ==`, `[2][2]any ==`, `!=`, `switch [2]any`, local `struct{ A any }` `==`, `[1]struct{ A any } ==`, generic `eq[[2]any]`), `test/unit/wasm/map-keys.test.js` (`map[[2]any]int`, `map[[1][2]any]int`, `map[[1]I]int`, `map[struct{ A any }]int`, `map[K]int`, generic `put[[2]any]`, each with and without `fmt`) + W5 controls
   - Done when: every W5 program prints Go's output on `wasm` without importing `fmt`
-- [ ] Task 3.2: Scan component types, struct fields and package vars for anonymous-interface dispatchers (W6.1–W6.2)
+- [x] Task 3.2: Scan component types, struct fields and package vars for anonymous-interface dispatchers (W6.1–W6.2)
   - Files: `src/backend/wasm/prescan.js` (`_scanFuncSigInterfaces`)
   - Test: `test/unit/wasm/boundary.test.js`: W6.1 (`Box{v interface{ M() int }}`, `Box[interface{ M() struct{ X int } }]`), W6.2 (slice, map, pointer, array, struct, func-param and result composites; `var G interface{…}`; `var G []interface{…}`; exported field) + unexported-`box` control
   - Done when: every W6.1–W6.2 program builds a valid module with Go's output
-- [ ] Task 3.3: Read `x.Y` as `pkg.Type` only for package names in `_getReceiverTypeName` (W6.3)
+- [x] Task 3.3: Read `x.Y` as `pkg.Type` only for package names in `_getReceiverTypeName` (W6.3)
   - Files: `src/backend/wasm/emit.js` (`_getReceiverTypeName`)
   - Test: `test/unit/wasm/interfaces.test.js`: W6.3 (`v.X.M()` on anonymous struct, named `b.X.M()`, pointer `p.X.M()`, package var, generic `b.V.M()`) + W6 controls (`Box{X: A{}}.X.M()`, chained, indexed, method value, local named `fmt`); existing qualified-receiver tests (`simd.F32x4` methods) keep passing
   - Done when: every W6.3 program prints `9` on `wasm`

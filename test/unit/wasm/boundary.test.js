@@ -6,7 +6,9 @@ import { CompileError, InternalCompilerError } from "../../../src/compiler.js";
 import {
 	assert,
 	assertEqual,
+	assertProgramOutput,
 	assertThrows,
+	assertWasmProgramOutput,
 	compileHybridProject,
 	section,
 	test,
@@ -2526,3 +2528,191 @@ func main() {
 	});
 	assertEqual(res.lines.join("\n"), "5");
 });
+
+section("WASM Boundary — anonymous interfaces inside exported types");
+
+// Exported declarations reach JS, so every anonymous interface they hold
+// needs dispatchers even when no Go code calls its methods.
+const anonIfaceProgram = (decls, body) => `package main
+
+import "fmt"
+
+type A struct{}
+
+func (A) M() int { return 9 }
+
+${decls}
+
+func main() {
+${body}
+}
+`;
+
+const anonIfaceCases = [
+	[
+		"an exported struct with an unexported interface field",
+		"type Box struct{ v interface{ M() int } }",
+		'\tfmt.Printf("%T\\n", Box{A{}})',
+		"main.Box\n",
+	],
+	[
+		"a generic struct instantiated with an anonymous interface",
+		"type Box[T any] struct{ V T }\n\nvar b Box[interface{ M() struct{ X int } }]",
+		"\tfmt.Println(b.V == nil)",
+		"true\n",
+	],
+	[
+		"a slice parameter",
+		"func F(xs []interface{ M() int }) int { return len(xs) }",
+		"\tfmt.Println(F([]interface{ M() int }{A{}}))",
+		"1\n",
+	],
+	[
+		"a map parameter",
+		"func F(m map[string]interface{ M() int }) int { return len(m) }",
+		'\tfmt.Println(F(map[string]interface{ M() int }{"a": A{}}))',
+		"1\n",
+	],
+	[
+		"a pointer parameter",
+		"func F(p *interface{ M() int }) bool { return *p != nil }",
+		"\tvar x interface{ M() int } = A{}\n\tfmt.Println(F(&x))",
+		"true\n",
+	],
+	[
+		"an array parameter",
+		"func F(a [1]interface{ M() int }) bool { return a[0] != nil }",
+		"\tfmt.Println(F([1]interface{ M() int }{A{}}))",
+		"true\n",
+	],
+	[
+		"a struct parameter",
+		"func F(s struct{ V interface{ M() int } }) bool { return s.V != nil }",
+		"\tfmt.Println(F(struct{ V interface{ M() int } }{A{}}))",
+		"true\n",
+	],
+	[
+		"a func parameter",
+		"func F(f func(interface{ M() int }) bool) bool { return f(A{}) }",
+		"\tfmt.Println(F(func(x interface{ M() int }) bool { return x != nil }))",
+		"true\n",
+	],
+	[
+		"a slice result",
+		"func F() []interface{ M() int } { return []interface{ M() int }{A{}} }",
+		"\tfmt.Println(len(F()))",
+		"1\n",
+	],
+	[
+		"an exported interface var",
+		"var G interface{ M() int } = A{}",
+		"\tfmt.Println(G != nil)",
+		"true\n",
+	],
+	[
+		"an exported slice var",
+		"var G = []interface{ M() int }{A{}}",
+		"\tfmt.Println(len(G))",
+		"1\n",
+	],
+	[
+		"an exported struct with an exported interface field",
+		"type Box struct{ V interface{ M() int } }",
+		"\tfmt.Println(Box{A{}}.V != nil)",
+		"true\n",
+	],
+	[
+		"control: an unexported struct with an interface field",
+		"type box struct{ v interface{ M() int } }",
+		"\tfmt.Println(box{A{}}.v != nil)",
+		"true\n",
+	],
+];
+
+for (const [name, decls, body, want] of anonIfaceCases) {
+	test(`anonymous interface in ${name}`, async () => {
+		await assertProgramOutput(anonIfaceProgram(decls, body), want);
+	});
+}
+
+// `both` packages may not mutate package vars, so these run on wasm only.
+test("anonymous interface in mutated exported vars", async () => {
+	await assertWasmProgramOutput(
+		anonIfaceProgram(
+			"var G interface{ M() int }\n\nvar H []interface{ M() int }",
+			"\tG = A{}\n\tH = append(H, A{})\n\tfmt.Println(G != nil, len(H))",
+		),
+		"true 1\n",
+	);
+});
+
+// An interface on the boundary exposes its methods' signatures too, so the
+// anonymous interfaces they hold need dispatchers as well, at any depth.
+const nestedIfaceCases = [
+	[
+		"a method parameter of an anonymous interface",
+		"func F(x interface{ M(interface{ N() int }) int }) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a method result of an anonymous interface",
+		"func F(x interface{ M() interface{ N() int } }) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a method result of a named interface",
+		"type I interface{ M() interface{ N() int } }\n\nfunc F(x I) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a method of an unexported named interface",
+		"type i interface{ M() interface{ N() int } }\n\nfunc F(x i) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a struct field of a method parameter",
+		"func F(x interface{ M(struct{ V interface{ N() int } }) }) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a doubly nested method result",
+		"func F(x interface {\n\tM() interface{ N() []interface{ O() int } }\n}) bool {\n\treturn x == nil\n}",
+		"\tfmt.Println(F(nil))",
+	],
+];
+
+for (const [name, decls, body] of nestedIfaceCases) {
+	test(`anonymous interface in ${name}`, async () => {
+		await assertProgramOutput(anonIfaceProgram(decls, body), "true\n");
+	});
+}
+
+// Exported vars initialized from a multi-value expression take their type
+// from the declaration's resolved global, not from the initializer node.
+const multiValueVarCases = [
+	[
+		"a comma-ok map lookup",
+		"var m = map[int]interface{ M() int }{}\n\nvar B, _ = m[0]",
+	],
+	[
+		"a call to a func literal's second result",
+		"var _, B = func() (int, interface{ M() int }) { return 0, nil }()",
+	],
+	[
+		"a multi-result call",
+		"func f() (int, interface{ M() int }) { return 0, nil }\n\nvar _, B = f()",
+	],
+	[
+		"a comma-ok type assertion",
+		"var y any\n\nvar B, _ = y.(interface{ M() int })",
+	],
+];
+
+for (const [name, decls] of multiValueVarCases) {
+	test(`anonymous interface in an exported var from ${name}`, async () => {
+		await assertWasmProgramOutput(
+			anonIfaceProgram(decls, "\tfmt.Println(B == nil)"),
+			"true\n",
+		);
+	});
+}

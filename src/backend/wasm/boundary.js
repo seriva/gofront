@@ -44,6 +44,7 @@ import {
 	jsClassName,
 	jsMemberName,
 } from "../shared/member-names.js";
+import { exportedVarTypes } from "./prescan.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -672,20 +673,12 @@ function checkDesc(desc, where, errors) {
 // loads, after package initialization (`var Limit = 40` is `Limit` in the
 // facade); a var of an unsupported type is left out.
 function collectVarDecl(d, meta, mod) {
-	for (const spec of d.decls ?? d.specs ?? [d]) {
-		const names = spec.names ?? (spec.name ? [spec.name] : []);
-		const values = spec.value ?? (spec.init ? [spec.init] : []);
-		for (let i = 0; i < names.length; i++) {
-			const name = names[i];
-			if (!isExported(name)) continue;
-			const goType =
-				spec.type ?? mod.resolveGlobal(name)?.goType ?? values[i]?._type;
-			const shared = Boolean(getSharedInfo(goType, mod.checker));
-			const desc = classifyType(goType, mod);
-			if (!shared && (!desc || desc.k === "unsupported" || desc.k === "void"))
-				continue;
-			meta.vars.push({ name, desc, shared });
-		}
+	for (const { name, goType } of exportedVarTypes(d, mod)) {
+		const shared = Boolean(getSharedInfo(goType, mod.checker));
+		const desc = classifyType(goType, mod);
+		if (!shared && (!desc || desc.k === "unsupported" || desc.k === "void"))
+			continue;
+		meta.vars.push({ name, desc, shared });
 	}
 }
 

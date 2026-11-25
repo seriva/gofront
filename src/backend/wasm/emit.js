@@ -1386,10 +1386,11 @@ export class FunctionEmitter {
 				return this._getReceiverTypeName(loc.goType);
 			}
 		}
-		if (node && node.kind === "SelectorExpr") {
-			const pkg = node.expr?.name;
-			if (pkg) return `${pkg}.${node.field}`;
-		}
+		// `pkg.Type` names a qualified type; `v.X` selects a field, whose type
+		// (an anonymous interface) has no name of its own.
+		const base = node?.kind === "SelectorExpr" ? node.expr : null;
+		if (base?.name && (base._isNamespace || base._type?.kind === "namespace"))
+			return `${base.name}.${node.field}`;
 		return null;
 	}
 

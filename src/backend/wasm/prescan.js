@@ -10,6 +10,7 @@ import {
 	isInterfaceType,
 	isNonEmptyInterface,
 	printOperandKind,
+	structFieldList,
 	toWasmType,
 } from "./types.js";
 
@@ -72,30 +73,136 @@ export function hasPanicNilUsage(programs, checker) {
 	);
 }
 
+// The kinds `forEachComponentType` descends into.  Equality and hashing see
+// through arrays and struct fields only; a dispatcher can be reached through
+// any type a value is built from.
+export const COMPARABLE_COMPONENTS = new Set(["array", "struct"]);
+export const ALL_COMPONENTS = new Set([
+	"array",
+	"struct",
+	"slice",
+	"map",
+	"pointer",
+	"func",
+	"tuple",
+	"interface",
+]);
+
+const elemOf = (t) => [t.elem];
+const funcParts = (t) => [
+	...(t.params ?? []).map((p) => (t.kind === "FuncType" ? p?.type : p)),
+	...(t.kind === "FuncType" ? [t.returnType] : (t.returns ?? [])),
+];
+const COMPONENT_PARTS = {
+	array: elemOf,
+	slice: elemOf,
+	pointer: (t) => [t.base],
+	map: (t) => [t.key, t.value ?? t.elem],
+	tuple: (t) => t.types ?? [],
+	struct: (t, checker) => structFieldList(t, checker).map((f) => f.goType),
+	func: funcParts,
+	// An interface's method signatures, which the boundary exposes with it.
+	interface: (t) =>
+		getInterfaceMethodList(t).flatMap((m) => [...m.params, ...m.returns]),
+};
+
+// The component kind of a type node, AST (`ArrayType`) or checker (`array`).
+const COMPONENT_KIND = {
+	ArrayType: "array",
+	StructType: "struct",
+	SliceType: "slice",
+	MapType: "map",
+	PointerType: "pointer",
+	FuncType: "func",
+	TupleType: "tuple",
+	InterfaceType: "interface",
+};
+for (const k of Object.keys(COMPONENT_PARTS)) COMPONENT_KIND[k] = k;
+
+// The type a defined-type reference stands for (`TypeName` through the
+// checker's table, `named` through its underlying type); undefined for any
+// other type, null when there is none.
+function definedTarget(t, checker) {
+	if (t.kind === "TypeName" || t.kind === "Ident") {
+		const resolved = checker?.types?.get(t.name);
+		return resolved && resolved !== t ? resolved : null;
+	}
+	if (t.kind === "named") return t.underlying ?? checker?.types?.get(t.name);
+	return undefined;
+}
+
+// Calls `visit` on `goType` and on every type it is built from, looking
+// through defined types (`TypeName`, `named`) and descending into the
+// component kinds in `through`.  `visit` returning true skips that type's
+// components.  Each type (and type name) is visited once, so recursive types
+// terminate.
+export function forEachComponentType(
+	goType,
+	checker,
+	visit,
+	{ through = COMPARABLE_COMPONENTS } = {},
+) {
+	const seen = new Set();
+	const walk = (t) => {
+		if (!t || typeof t !== "object" || seen.has(t)) return;
+		seen.add(t);
+		if (visit(t)) return;
+		const target = definedTarget(t, checker);
+		if (target !== undefined) {
+			// A type name is resolved once, however many nodes spell it.
+			if (t.kind !== "named") {
+				if (seen.has(`ref:${t.name}`)) return;
+				seen.add(`ref:${t.name}`);
+			}
+			walk(target);
+			return;
+		}
+		const kind = COMPONENT_KIND[t.kind];
+		if (!through.has(kind)) return;
+		for (const c of COMPONENT_PARTS[kind](t, checker)) walk(c);
+	};
+	walk(goType);
+}
+
+// Whether a value of `goType` holds an interface that `==` or hashing must
+// compare dynamically: the type itself, an array element or a struct field.
+export function containsInterfaceType(goType, checker) {
+	let found = false;
+	forEachComponentType(goType, checker, (t) => {
+		if (found) return true;
+		if (isInterfaceType(t, checker)) found = true;
+		return found;
+	});
+	return found;
+}
+
 // `__any_eq` is only needed when some `==`/`!=` (or switch case) compares
-// anyref operands, a struct with an anyref field is compared, or the error
-// runtime (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a
-// site, so a gap surfaces as a compile error rather than a bad module.
+// operands that hold an interface (directly, or in an array element or struct
+// field), a struct with an anyref field is compared, or the error runtime
+// (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a site, so a
+// gap surfaces as a compile error rather than a bad module.
 export function _usesAnyEq(funcDecls, mod) {
 	if (mod.hasErrorType) return true;
 	for (const info of mod.mapTypes.values()) {
-		if (isInterfaceType(info.keyGoType, mod.checker)) return true;
+		if (containsInterfaceType(info.keyGoType, mod.checker)) return true;
 	}
 	for (const info of mod.structTypes.values()) {
 		if (info.fields?.some((f) => f.wType === "anyref")) return true;
 	}
-	const isAnyRef = (n) =>
-		Boolean(n?._type) && toWasmType(n._type, mod.checker, mod) === "anyref";
+	const holdsAny = (n) =>
+		Boolean(n?._type) &&
+		(toWasmType(n._type, mod.checker, mod) === "anyref" ||
+			containsInterfaceType(n._type, mod.checker));
 	return funcDecls.some((fn) =>
 		_someNode(fn.body, (n) => {
 			if (n.kind === "BinaryExpr" && (n.op === "==" || n.op === "!="))
-				return isAnyRef(n.left) || isAnyRef(n.right);
+				return holdsAny(n.left) || holdsAny(n.right);
 			// A tagless case of interface type compares `true == case`, and a
 			// case of interface type against a concrete tag compares boxed values.
 			if (n.kind === "SwitchStmt")
 				return (
-					(n.tag && isAnyRef(n.tag)) ||
-					n.cases.some((c) => (c.list ?? []).some(isAnyRef))
+					(n.tag && holdsAny(n.tag)) ||
+					n.cases.some((c) => (c.list ?? []).some(holdsAny))
 				);
 			return false;
 		}),
@@ -208,13 +315,15 @@ export function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 }
 
 // A qualified interface (`fmt.Stringer`) in a signature is a boundary type
-// when the function is exported, so its dispatchers must exist.  Returns true
-// when `t` names such a type.
+// when the function is exported, so its dispatchers must exist.  Registers
+// them when `t` names such an interface; returns true when `t` is a qualified
+// name the checker does not know, whose components cannot be scanned.
 function _registerQualifiedIface(t, interfaceCalls, checker) {
 	if (t.kind !== "TypeName" || !t.name?.includes(".")) return false;
 	const resolved = checker?.types?.get(t.name);
-	const iface = resolved?.underlying ?? resolved;
-	if (!resolved || !isNonEmptyInterface(iface, checker)) return true;
+	if (!resolved) return true;
+	const iface = resolved.underlying ?? resolved;
+	if (!isInterfaceType(iface, checker)) return false;
 	for (const m of getInterfaceMethodList(iface)) {
 		const key = `${t.name}.${m.name}`;
 		if (interfaceCalls.has(key)) continue;
@@ -225,9 +334,57 @@ function _registerQualifiedIface(t, interfaceCalls, checker) {
 			methodSig: { kind: "func", params: m.params, returns: m.returns },
 		});
 	}
+	return false;
+}
+
+// Registers the dispatchers of an anonymous interface type
+// (`interface{ M() int }`).  Returns true when `t` is one.
+function _registerAnonIface(t, interfaceCalls, checker, mod) {
+	if (!(t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)))
+		return false;
+	const ifaceName = anonIfaceName(t, checker, mod);
+	for (const m of getInterfaceMethodList(t)) {
+		const key = `${ifaceName}.${m.name}`;
+		if (interfaceCalls.has(key)) continue;
+		interfaceCalls.set(key, {
+			ifaceName,
+			ifaceType: t,
+			methodName: m.name,
+			methodSig: { kind: "func", params: m.params, returns: m.returns },
+		});
+	}
 	return true;
 }
 
+const isExportedName = (name) => /^[A-Z]/.test(name ?? "");
+
+// The exported names of a package `var` declaration with their types: the
+// declared type, else the global's resolved type (which covers multi-value
+// initializers such as `var B, ok = m[k]`), else the initializer's type.  The
+// boundary exposes exactly these, so the dispatcher scan reads them too.
+export function exportedVarTypes(d, mod) {
+	const out = [];
+	for (const spec of d.decls ?? d.specs ?? [d]) {
+		const names = spec.names ?? (spec.name ? [spec.name] : []);
+		const values = spec.value ?? (spec.init ? [spec.init] : []);
+		names.forEach((name, i) => {
+			if (!isExportedName(name)) return;
+			const goType =
+				spec.type ?? mod.resolveGlobal(name)?.goType ?? values[i]?._type;
+			out.push({ name, goType });
+		});
+	}
+	return out;
+}
+
+// Anonymous and qualified interfaces a JS caller can hand the module or
+// receive from it need dispatchers even when no Go code calls their methods:
+// those in function signatures, and in the fields and types of exported
+// type and `var` declarations, at any depth (`[]interface{ M() int }`,
+// `struct{ V interface{ M() int } }`, `*Box[interface{ M() int }]`), including
+// the method signatures of the interfaces found (`interface{ M() interface{
+// N() int } }`).  A named interface gets its own dispatchers from its
+// declaration, but its methods' signatures are still scanned.
 export function _scanFuncSigInterfaces(
 	progs,
 	funcDecls,
@@ -235,40 +392,33 @@ export function _scanFuncSigInterfaces(
 	checker,
 	mod,
 ) {
-	const scanType = (t) => {
-		if (!t) return;
-		if (_registerQualifiedIface(t, interfaceCalls, checker)) return;
-		if (t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)) {
-			const mList = getInterfaceMethodList(t);
-			if (mList.length === 0) return;
-			const ifaceName = anonIfaceName(t, checker, mod);
-			for (const m of mList) {
-				const key = `${ifaceName}.${m.name}`;
-				if (!interfaceCalls.has(key)) {
-					interfaceCalls.set(key, {
-						ifaceName,
-						ifaceType: t,
-						methodName: m.name,
-						methodSig: {
-							kind: "func",
-							params: m.params,
-							returns: m.returns,
-						},
-					});
-				}
-			}
+	// The bodies of named interfaces, which are scanned but not registered
+	// under an anonymous name.
+	const namedBodies = new WeakSet();
+	const visit = (t) => {
+		if (_registerQualifiedIface(t, interfaceCalls, checker)) return true;
+		const target = definedTarget(t, checker);
+		if (target !== undefined) {
+			if (target && isInterfaceType(t, checker)) namedBodies.add(target);
+		} else if (!namedBodies.has(t)) {
+			_registerAnonIface(t, interfaceCalls, checker, mod);
 		}
+		return false;
 	};
-	for (const fn of funcDecls) {
+	const scanType = (t) =>
+		forEachComponentType(t, checker, visit, { through: ALL_COMPONENTS });
+	const scanSig = (fn) => {
 		for (const p of fn.params ?? []) scanType(p.type);
 		scanType(fn.returnType);
-	}
+	};
+	for (const fn of funcDecls) scanSig(fn);
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
-			if (d.kind === "FuncDecl") {
-				for (const param of d.params ?? []) scanType(param.type);
-				scanType(d.returnType);
-			}
+			if (d.kind === "FuncDecl") scanSig(d);
+			else if (d.kind === "TypeDecl" && isExportedName(d.name))
+				scanType(d.type);
+			else if (d.kind === "VarDecl")
+				for (const { goType } of exportedVarTypes(d, mod)) scanType(goType);
 		}
 	}
 }
