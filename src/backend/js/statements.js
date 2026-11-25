@@ -1399,7 +1399,13 @@ export const statementGenMethods = {
 
 	_genIteratorBranchStmt(stmt) {
 		if (!stmt.label) {
-			if (this._iterLoopDepth > 0) {
+			// A `break` ends the innermost loop or value switch of the callback
+			// (a type switch's own `break` is labeled, see
+			// `_typeSwitchBreakLabel`); a `continue` the innermost loop.
+			const jsTargets =
+				this._iterLoopDepth +
+				(stmt.keyword === "break" ? this._iterSwitchDepth : 0);
+			if (jsTargets > 0) {
 				if (stmt.keyword !== "fallthrough") this.line(`${stmt.keyword};`);
 				return;
 			}
@@ -1413,7 +1419,8 @@ export const statementGenMethods = {
 			}
 			return;
 		}
-		if (this._innerLoopLabels?.has(stmt.label)) {
+		// A label of a loop or switch inside the callback is a JS label in it.
+		if (this._jsLabels?.some((l) => l.name === stmt.label)) {
 			if (stmt.keyword !== "fallthrough")
 				this.line(`${stmt.keyword} ${jsSafeName(stmt.label)};`);
 			return;
@@ -1560,11 +1567,7 @@ export const statementGenMethods = {
 
 	_genForLoop(stmt) {
 		const isInner = this._inIteratorBody;
-		if (isInner) {
-			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
-			this._innerLoopLabels = this._innerLoopLabels ?? new Set();
-			for (const l of this._loopLabels(stmt)) this._innerLoopLabels.add(l);
-		}
+		if (isInner) this._iterLoopDepth++;
 		try {
 			if (this.isRangeFor(stmt)) {
 				if (stmt.init.rhs[0]._isIterator) this.genIteratorFor(stmt);
@@ -1589,10 +1592,7 @@ export const statementGenMethods = {
 			this.indented(() => this.genBlock(stmt.body));
 			this.line("}");
 		} finally {
-			if (isInner) {
-				this._iterLoopDepth--;
-				for (const l of this._loopLabels(stmt)) this._innerLoopLabels.delete(l);
-			}
+			if (isInner) this._iterLoopDepth--;
 		}
 	},
 
@@ -2101,7 +2101,7 @@ export const statementGenMethods = {
 					target: this._iterTargetFlag,
 					loopLabels: this._currentIterLoopLabels,
 					loopDepth: this._iterLoopDepth,
-					innerLabels: this._innerLoopLabels,
+					switchDepth: this._iterSwitchDepth,
 					jsLabels: this._jsLabels,
 				};
 				this._inIteratorBody = true;
@@ -2111,8 +2111,8 @@ export const statementGenMethods = {
 				this._iterTargetFlag = targetFlag;
 				this._currentIterLoopLabels = loopLabels;
 				this._iterLoopDepth = 0;
-				// Loops of an enclosing callback are not JS labels in this one.
-				this._innerLoopLabels = new Set();
+				this._iterSwitchDepth = 0;
+				// Labels of an enclosing callback are not JS labels in this one.
 				this._jsLabels = [];
 
 				if (assignPreamble) assignPreamble();
@@ -2125,7 +2125,7 @@ export const statementGenMethods = {
 				this._iterTargetFlag = prev.target;
 				this._currentIterLoopLabels = prev.loopLabels;
 				this._iterLoopDepth = prev.loopDepth;
-				this._innerLoopLabels = prev.innerLabels;
+				this._iterSwitchDepth = prev.switchDepth;
 				this._jsLabels = prev.jsLabels;
 
 				this.line("return true;");
@@ -2510,6 +2510,9 @@ export const statementGenMethods = {
 		const genBody = () => {
 			const { tag, caseExpr } = this._switchTagAndCases(stmt);
 			this.line(`switch (${tag}) {`);
+			// An unlabeled `break` in a range-over-func body ends this JS switch.
+			const inIter = this._inIteratorBody;
+			if (inIter) this._iterSwitchDepth++;
 			this.indented(() => {
 				for (const c of stmt.cases) {
 					if (c.list) {
@@ -2534,6 +2537,7 @@ export const statementGenMethods = {
 					this.line("}");
 				}
 			});
+			if (inIter) this._iterSwitchDepth--;
 			this.line("}");
 		};
 
@@ -2636,7 +2640,7 @@ export const statementGenMethods = {
 					const only = c.types.length === 1 ? c.types[0] : null;
 					bind(this._typeSwitchBinding(only));
 				}
-				for (const s of c.stmts) this.genStmt(s);
+				this.genBlock(c);
 			});
 			this.line("}");
 			first = false;
@@ -2645,7 +2649,7 @@ export const statementGenMethods = {
 			this.line(first ? "{" : "else {");
 			this.indented(() => {
 				if (stmt.assign) bind("__tsw");
-				for (const s of hasDefault.stmts) this.genStmt(s);
+				this.genBlock(hasDefault);
 			});
 			this.line("}");
 		}

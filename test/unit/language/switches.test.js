@@ -445,6 +445,161 @@ func main() {
 	);
 });
 
+test("a type switch clause declares a name that shadows an init or outer variable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func pair() (int, int) { return 1, 20 }
+
+func main() {
+	var v any = 2
+	switch y := 10; x := v.(type) {
+	case int:
+		y := y + x
+		fmt.Println(y)
+	}
+	switch y := 10; v.(type) {
+	case int:
+		fmt.Println(y)
+		_, y := pair()
+		fmt.Println(y)
+	}
+	z := 7
+	switch v.(type) {
+	case string:
+	default:
+		fmt.Println(z)
+		_, z := pair()
+		fmt.Println(z)
+	}
+	switch x := v.(type) {
+	case int:
+		z := z + x
+		fmt.Println(z)
+	}
+	fmt.Println(z)
+}
+`,
+		"12\n10\n20\n7\n20\n9\n7\n",
+	);
+});
+
+const SEQ = `func seq(yield func(any) bool) {
+	for _, v := range []any{1, "a", 3} {
+		if !yield(v) {
+			return
+		}
+	}
+}
+
+func nums(yield func(int) bool) {
+	for i := 1; i <= 3; i++ {
+		if !yield(i) {
+			return
+		}
+	}
+}
+`;
+
+test("a labeled break of a type switch inside a range-over-func body ends only the switch", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${SEQ}
+func main() {
+	for v := range seq {
+	L:
+		switch v.(type) {
+		case int:
+			break L
+		}
+		fmt.Println("after", v)
+	}
+	for v := range seq {
+	M:
+		switch y := 1; v.(type) {
+		case string:
+			for i := 0; i < 2; i++ {
+				if i+y == 2 {
+					break M
+				}
+			}
+			fmt.Println("unreachable")
+		}
+		fmt.Println("then", v)
+	}
+}
+`,
+		"after 1\nafter a\nafter 3\nthen 1\nthen a\nthen 3\n",
+	);
+});
+
+test("a break in a value switch inside a range-over-func body ends only the switch", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+${SEQ}
+func main() {
+	for v := range nums {
+		switch v {
+		case 1:
+			break
+		}
+		fmt.Println("after", v)
+	}
+	for v := range nums {
+	L:
+		switch {
+		case v > 1:
+			for {
+				break L
+			}
+		}
+		fmt.Println("labeled", v)
+	}
+	for v := range nums {
+		switch v {
+		case 2:
+			continue
+		}
+		fmt.Println("kept", v)
+	}
+Outer:
+	for v := range nums {
+		switch v {
+		case 2:
+			break Outer
+		}
+		fmt.Println("outer", v)
+	}
+	for v := range nums {
+		for w := range seq {
+			switch w.(type) {
+			case string:
+				switch v {
+				case 3:
+					break
+				}
+				continue
+			}
+			if v == 3 {
+				break
+			}
+			fmt.Println("nested", v, w)
+		}
+	}
+}
+`,
+		"after 1\nafter 2\nafter 3\nlabeled 1\nlabeled 2\nlabeled 3\nkept 1\nkept 3\nouter 1\nnested 1 1\nnested 1 3\nnested 2 1\nnested 2 3\n",
+	);
+});
+
 test("type switch init in escapes, comma-ok reads, loops and generics", async () => {
 	await assertAllTargetsOutput(
 		`package main
