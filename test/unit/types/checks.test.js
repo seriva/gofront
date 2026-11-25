@@ -11,6 +11,7 @@ import {
 	assertWasmProgramOutput,
 	compile,
 	compileDir,
+	compileDts,
 	compileWasm,
 	Lexer,
 	Parser,
@@ -2652,6 +2653,410 @@ for (const target of ["js", "both", "wasm"]) {
 		assertEqual(errors.length, 0);
 	});
 }
+
+section("Constant initializers and complex operands (J2)");
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		[
+			"a function call",
+			"func f(n int) int { return n }\nconst C = f(5)\nfunc main() { _ = C }",
+			"f(5) (value of type int) is not constant",
+		],
+		[
+			"a package variable",
+			"var x = 5\nconst C = x\nfunc main() { _ = C }",
+			"x is not constant",
+		],
+		[
+			"a local variable",
+			"func main() {\n\tx := 5\n\tconst C = x\n\t_ = C\n}",
+			"x (variable of type int) is not constant",
+		],
+		[
+			"len of a slice",
+			"func main() {\n\ts := []int{1, 2}\n\tconst C = len(s)\n\t_ = C\n}",
+			"len(s) (value of type int) is not constant",
+		],
+		[
+			"min of variables",
+			"func main() {\n\ta, b := 1, 2\n\tconst C = min(a, b)\n\t_ = C\n}",
+			"min(a, b) (value of type int) is not constant",
+		],
+		[
+			"a variable inside a typed constant",
+			"func main() {\n\tx := 5\n\tconst C int = x + 1\n\t_ = C\n}",
+			"is not constant",
+		],
+		[
+			"a second value of a constant group",
+			"func f() int { return 1 }\nconst A, B = 1, f()\nfunc main() { _, _ = A, B }",
+			"f() (value of type int) is not constant",
+		],
+		[
+			"a conversion to a byte slice",
+			'const C = []byte("abc")\nfunc main() { _ = C }',
+			'[]byte("abc") (value of type',
+		],
+		[
+			"a conversion to a rune slice",
+			'const C = []rune("abc")\nfunc main() { _ = C }',
+			'[]rune("abc") (value of type',
+		],
+		[
+			"a conversion to any",
+			"const C = any(1)\nfunc main() { _ = C }",
+			"any(1) (value of interface type any) is not constant",
+		],
+		[
+			"a conversion to an empty interface",
+			"const C = interface{}(1)\nfunc main() { _ = C }",
+			"interface{}(1) (value of",
+		],
+		[
+			"len of a converted byte slice",
+			'const C = len([]byte("abc"))\nfunc main() { _ = C }',
+			'len([]byte("abc")) (value of type int) is not constant',
+		],
+		[
+			"a nil pointer conversion",
+			"const C = (*int)(nil)\nfunc main() { _ = C }",
+			"(*int)(nil) (value of type *int) is not constant",
+		],
+		[
+			"a nil slice conversion",
+			"const C = []int(nil)\nfunc main() { _ = C }",
+			"[]int(nil) (value of type []int) is not constant",
+		],
+		[
+			"a nil interface conversion",
+			"const C = any(nil)\nfunc main() { _ = C }",
+			"any(nil) (value of interface type any) is not constant",
+		],
+		[
+			"a conversion to a type parameter",
+			"func g[T ~int]() {\n\tconst C = T(1)\n\t_ = C\n}\nfunc main() { g[int]() }",
+			"T(1) (value of type T constrained by ~int) is not constant",
+		],
+		[
+			"a call of a function named int",
+			"func int(x float64) float64 { return x }\nconst C = int(5)\nfunc main() { _ = C }",
+			"int(5) (value of type float64) is not constant",
+		],
+		[
+			"a call of a closure named rune",
+			"func main() {\n\trune := func(x int) int { return x }\n\tconst C = rune(5)\n\t_ = C\n}",
+			"rune(5) (value of type int) is not constant",
+		],
+	]) {
+		test(`a constant initialized from ${what} is an error in a ${target} package (J2.1)`, () => {
+			const { errors } = compile(`package main\n${body}\n`, { target });
+			assertErrorContains(errors, want);
+			assertErrorContains(errors, "is not constant");
+		});
+	}
+
+	for (const [what, args] of [
+		["integer variables", "a, b"],
+		["a float and an integer variable", "x, a"],
+		["an integer variable and an untyped constant", "a, 2"],
+	]) {
+		test(`complex of ${what} is an error in a ${target} package (J2.2)`, () => {
+			const { errors } = compile(
+				`package main\nfunc main() {\n\ta, b := 1, 2\n\tx := 1.5\n\t_, _, _ = a, b, x\n\t_ = complex(${args})\n}\n`,
+				{ target },
+			);
+			assertErrorContains(
+				errors,
+				args === "x, a"
+					? "mismatched types float64 and int"
+					: "expected floating-point",
+			);
+		});
+	}
+
+	for (const [what, decl, want] of [
+		[
+			"float32 and float64 variables",
+			"var a float32 = 1\nvar b float64 = 2",
+			"invalid operation: complex(a, b) (mismatched types float32 and float64)",
+		],
+		[
+			"a defined float64 and a float64",
+			"type MyF64 float64\nvar a MyF64 = 1\nvar b float64 = 2",
+			"invalid operation: complex(a, b) (mismatched types MyF64 and float64)",
+		],
+		[
+			"a defined float32 and a float32",
+			"type MyF32 float32\nvar a MyF32 = 1\nvar b float32 = 2",
+			"invalid operation: complex(a, b) (mismatched types MyF32 and float32)",
+		],
+		[
+			"two different defined floats",
+			"type MyF1 float64\ntype MyF2 float64\nvar a MyF1 = 1\nvar b MyF2 = 2",
+			"invalid operation: complex(a, b) (mismatched types MyF1 and MyF2)",
+		],
+	]) {
+		test(`complex of ${what} reports mismatched types in a ${target} package (J2.2)`, () => {
+			const { errors } = compile(
+				`package main\n${decl}\nfunc main() { _ = complex(a, b) }\n`,
+				{ target },
+			);
+			assertErrorContains(errors, want);
+		});
+	}
+
+	for (const [what, src, want] of [
+		[
+			"a ~float64 type parameter",
+			"func g[T ~float64](a, b T) { _ = complex(a, b) }",
+			"a (variable of type T constrained by ~float64) not supported as argument to built-in complex for go1.18 (see go.dev/issue/50937)",
+		],
+		[
+			"a ~float32 type parameter",
+			"func g[T ~float32](a, b T) { _ = complex(a, b) }",
+			"a (variable of type T constrained by ~float32) not supported as argument to built-in complex",
+		],
+		[
+			"a float32 | float64 type parameter",
+			"func g[T float32 | float64](a, b T) { _ = complex(a, b) }",
+			"a (variable of type T constrained by float32 | float64) not supported as argument to built-in complex",
+		],
+		[
+			"a float type parameter and an untyped constant",
+			"func g[T ~float64](a T) { _ = complex(a, 2) }",
+			"a (variable of type T constrained by ~float64) not supported as argument to built-in complex",
+		],
+		[
+			"an integer type parameter",
+			"func g[T ~int](a, b T) { _ = complex(a, b) }",
+			"invalid argument: arguments have type T, expected floating-point",
+		],
+		[
+			"two different float type parameters",
+			"func g[T ~float64, U ~float64](a T, b U) { _ = complex(a, b) }",
+			"invalid operation: complex(a, b) (mismatched types T and U)",
+		],
+	]) {
+		test(`complex of ${what} is an error as in Go in a ${target} package (J2.2)`, () => {
+			const { errors } = compile(`package main\n${src}\nfunc main() {}\n`, {
+				target,
+			});
+			assertErrorContains(errors, want);
+		});
+	}
+
+	test(`complex of defined float32 operands is complex64 in a ${target} package (J2.2)`, () => {
+		const { errors } = compile(
+			`package main
+type MyF32 float32
+func main() {
+	var a, b MyF32 = 1, 2
+	var c complex64 = complex(a, 2)
+	var d complex64 = complex(a, b)
+	var e complex64 = complex(2, b)
+	_, _, _ = c, d, e
+}
+`,
+			{ target },
+		);
+		assertEqual(errors.length, 0);
+	});
+
+	test(`constants converted to constant types compile in a ${target} package (J2.1 control)`, () => {
+		const { errors } = compile(
+			`package main
+type MyInt int
+type MyStr string
+type MyBool bool
+type Deep MyInt
+const A = MyInt(3)
+const B = float64(2)
+const C = string("a")
+const D = MyStr("a") + "b"
+const F = MyBool(true)
+const G = string(rune(65))
+const H = Deep(MyInt(4))
+const I = len([3]int{})
+func main() {
+	const E = complex64(1)
+	_, _, _, _, _, _, _, _, _ = A, B, C, D, E, F, G, H, I
+}
+`,
+			{ target },
+		);
+		assertEqual(errors.length, 0);
+	});
+
+	test(`valid constant expressions and complex operands compile in a ${target} package (J2 control)`, () => {
+		const { errors } = compile(
+			`package main
+type MyF float64
+type Ints [3]int
+const Top = len("abc") + int(2) + min(1, 2)
+const Later = cap(later)
+var later = [3]int{}
+func main() {
+	const A = 1 + 2
+	const B = len("abc")
+	const C = len([3]int{})
+	const D = complex(1, 2)
+	const E = real(D)
+	const F = min(1, 2)
+	const G = int(A)
+	var arr [3]int
+	const L = len(arr)
+	var p *[3]int
+	const M = cap(p)
+	const N = max(A, 7.5)
+	const Z = 3 + 4i
+	const Im = imag(Z) + real(1 + 2i)
+	var f32 float32 = 1
+	_, _, _, _, _ = complex(f32, 2), complex(MyF(2), MyF(2)), complex(1.5, 2), L, M
+	_, _, _, _, _ = Top, N, Z, Im, Later
+	_, _, _, _, _ = B, C, E, F, G
+}
+`,
+			{ target },
+		);
+		assertEqual(errors.length, 0);
+	});
+
+	test(`an array index from a call of a closure named byte is an error in a ${target} package (J2.1)`, () => {
+		const { errors } = compile(
+			"package main\nfunc main() {\n\tbyte := func(x int) int { return x }\n\ta := [...]int{byte(5): 2}\n\t_ = a\n}\n",
+			{ target },
+		);
+		assertErrorContains(errors, "must be integer constant");
+	});
+
+	test(`constants and conversions of other packages compile as constants and array indices in a ${target} package (J2.1 control)`, () => {
+		const errors = withTempDir(
+			{
+				"sub/sub.go": `//gofront:target ${target}\npackage sub\n\ntype D int\n\nconst K = 2\nconst L = len([4]int{})\n`,
+				"dot/dot.go": `//gofront:target ${target}\npackage dot\n\nconst M = 3\n`,
+				"main.go": `//gofront:target ${target}
+package main
+
+import (
+	. "./dot"
+	"math"
+	s "./sub"
+	"time"
+)
+
+type MyInt int
+
+const A = s.K + s.L + M
+const B = s.D(3)
+const P = math.Pi
+const T = 5 * time.Second
+const U = (MyInt)(5) + MyInt(1)
+
+var a = [...]int{s.K: 1, s.L: 2, M + 4: 3, s.D(8): 4, math.MaxInt8: 5, int(200): 6, byte(201): 7}
+
+func main() { println(A, int(B), P, int64(T), int(U), len(a)) }
+`,
+			},
+			(dir) => toCompileResult(() => compileDir(dir)).errors,
+		);
+		assertEqual(errors.length, 0);
+	});
+}
+
+for (const [what, expr, want] of [
+	[
+		"a window property",
+		"window.innerWidth",
+		"window.innerWidth (value of type int) is not constant",
+	],
+	[
+		"a document property",
+		"document.title",
+		"document.title (value of type string) is not constant",
+	],
+	["a console method", "console.log", "console.log (value of type"],
+]) {
+	test(`a constant initialized from ${what} is an error (J2.1)`, () => {
+		const { errors } = compile(
+			`package main\nconst C = ${expr}\nfunc main() { _ = C }\n`,
+		);
+		assertErrorContains(errors, want);
+	});
+}
+
+test("an array index from a browser global is an error (J2.1)", () => {
+	const { errors } = compile(
+		"package main\nvar a = [...]int{window.innerWidth: 2}\nfunc main() { _ = a }\n",
+	);
+	assertErrorContains(
+		errors,
+		"index window.innerWidth must be integer constant",
+	);
+});
+
+test("a member of a JavaScript namespace is not a constant (J2.1)", () => {
+	const dts = "declare namespace NS { const K: number; }";
+	const { errors } = compileDts(
+		dts,
+		'package main\n\nimport "js:./types.d.ts"\n\nconst C = NS.K\n\nfunc main() { _ = C }\n',
+	);
+	assertErrorContains(errors, "NS.K (value of type float64) is not constant");
+	const keyed = compileDts(
+		dts,
+		'package main\n\nimport "js:./types.d.ts"\n\nvar a = [...]int{NS.K: 1}\n\nfunc main() { _ = a }\n',
+	);
+	assertErrorContains(keyed.errors, "index NS.K must be integer constant");
+});
+
+test("valid constant expressions evaluate on every target (J2 control)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyF float64
+
+func main() {
+	const A = 1 + 2
+	const B = len("abc")
+	const C = len([3]int{})
+	const D = complex(1, 2)
+	const E = real(D)
+	const F = min(1, 2)
+	const G = int(A)
+	var arr [3]int
+	const L = len(arr)
+	var f32 float32 = 1
+	_ = complex(f32, 2)
+	_ = complex(MyF(2), MyF(2))
+	fmt.Println(A, B, C, D, E, F, G, L)
+}
+`,
+		"3 3 3 (1+2i) 1 1 3 3\n",
+	);
+});
+
+test("complex of defined float32 operands is complex64 on every target (J2.2)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyF32 float32
+type MyF64 float64
+
+func main() {
+	var a, b MyF32 = 1, 2
+	var x MyF64 = 3
+	var c complex64 = complex(a, b)
+	c += complex(a, 0.5)
+	fmt.Printf("%T %T %T %v %v\\n", complex(a, b), complex(a, 2), complex(x, x), c, complex(x, 4))
+}
+`,
+		"complex64 complex64 complex128 (2+2.5i) (3+4i)\n",
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
