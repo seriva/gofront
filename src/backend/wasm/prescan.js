@@ -311,12 +311,14 @@ export function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 
 // A qualified interface (`fmt.Stringer`) in a signature is a boundary type
 // when the function is exported, so its dispatchers must exist.  Returns true
-// when `t` names such a type.
+// when `t` names such an interface (or an unresolved qualified type), whose
+// components need no further scan.
 function _registerQualifiedIface(t, interfaceCalls, checker) {
 	if (t.kind !== "TypeName" || !t.name?.includes(".")) return false;
 	const resolved = checker?.types?.get(t.name);
-	const iface = resolved?.underlying ?? resolved;
-	if (!resolved || !isNonEmptyInterface(iface, checker)) return true;
+	if (!resolved) return true;
+	const iface = resolved.underlying ?? resolved;
+	if (!isInterfaceType(iface, checker)) return false;
 	for (const m of getInterfaceMethodList(iface)) {
 		const key = `${t.name}.${m.name}`;
 		if (interfaceCalls.has(key)) continue;
@@ -330,6 +332,46 @@ function _registerQualifiedIface(t, interfaceCalls, checker) {
 	return true;
 }
 
+// Registers the dispatchers of an anonymous interface type
+// (`interface{ M() int }`).  Returns true when `t` is one.
+function _registerAnonIface(t, interfaceCalls, checker, mod) {
+	if (!(t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)))
+		return false;
+	const ifaceName = anonIfaceName(t, checker, mod);
+	for (const m of getInterfaceMethodList(t)) {
+		const key = `${ifaceName}.${m.name}`;
+		if (interfaceCalls.has(key)) continue;
+		interfaceCalls.set(key, {
+			ifaceName,
+			ifaceType: t,
+			methodName: m.name,
+			methodSig: { kind: "func", params: m.params, returns: m.returns },
+		});
+	}
+	return true;
+}
+
+const isExportedName = (name) => /^[A-Z]/.test(name ?? "");
+
+// The declared types of a package `var` declaration's exported names.
+function exportedVarTypes(d) {
+	const out = [];
+	for (const spec of d.decls ?? d.specs ?? [d]) {
+		const names = spec.names ?? (spec.name ? [spec.name] : []);
+		const values = spec.value ?? (spec.init ? [spec.init] : []);
+		names.forEach((name, i) => {
+			if (isExportedName(name)) out.push(spec.type ?? values[i]?._type);
+		});
+	}
+	return out;
+}
+
+// Anonymous and qualified interfaces a JS caller can hand the module or
+// receive from it need dispatchers even when no Go code calls their methods:
+// those in function signatures, and in the fields and types of exported
+// type and `var` declarations, at any depth (`[]interface{ M() int }`,
+// `struct{ V interface{ M() int } }`, `*Box[interface{ M() int }]`).  A named
+// interface gets its dispatchers from its own declaration.
 export function _scanFuncSigInterfaces(
 	progs,
 	funcDecls,
@@ -337,40 +379,24 @@ export function _scanFuncSigInterfaces(
 	checker,
 	mod,
 ) {
-	const scanType = (t) => {
-		if (!t) return;
-		if (_registerQualifiedIface(t, interfaceCalls, checker)) return;
-		if (t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)) {
-			const mList = getInterfaceMethodList(t);
-			if (mList.length === 0) return;
-			const ifaceName = anonIfaceName(t, checker, mod);
-			for (const m of mList) {
-				const key = `${ifaceName}.${m.name}`;
-				if (!interfaceCalls.has(key)) {
-					interfaceCalls.set(key, {
-						ifaceName,
-						ifaceType: t,
-						methodName: m.name,
-						methodSig: {
-							kind: "func",
-							params: m.params,
-							returns: m.returns,
-						},
-					});
-				}
-			}
-		}
-	};
-	for (const fn of funcDecls) {
+	const visit = (t) =>
+		_registerQualifiedIface(t, interfaceCalls, checker) ||
+		_registerAnonIface(t, interfaceCalls, checker, mod) ||
+		(definedTarget(t, checker) !== undefined && isInterfaceType(t, checker));
+	const scanType = (t) =>
+		forEachComponentType(t, checker, visit, { through: ALL_COMPONENTS });
+	const scanSig = (fn) => {
 		for (const p of fn.params ?? []) scanType(p.type);
 		scanType(fn.returnType);
-	}
+	};
+	for (const fn of funcDecls) scanSig(fn);
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
-			if (d.kind === "FuncDecl") {
-				for (const param of d.params ?? []) scanType(param.type);
-				scanType(d.returnType);
-			}
+			if (d.kind === "FuncDecl") scanSig(d);
+			else if (d.kind === "TypeDecl" && isExportedName(d.name))
+				scanType(d.type);
+			else if (d.kind === "VarDecl")
+				for (const t of exportedVarTypes(d)) scanType(t);
 		}
 	}
 }
