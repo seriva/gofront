@@ -551,16 +551,43 @@ function unsupportedMsg(where, what) {
 	return `${where}: ${what} is not yet supported across the wasm boundary (planned)`;
 }
 
+// Names of the exported generic structs the `wasm` packages declare. Read
+// before monomorphisation, which replaces the generic declarations.
+export function exportedGenericStructs(progs) {
+	const names = new Set();
+	for (const p of progs) {
+		if ((p.target ?? "wasm") !== "wasm") continue;
+		if (isTestSource(p._path ?? p._filename)) continue;
+		for (const d of p.decls ?? [])
+			if (
+				d.kind === "TypeDecl" &&
+				d.type?.kind === "StructType" &&
+				d.typeParams?.length > 0 &&
+				isExported(d.name)
+			)
+				names.add(d.name);
+	}
+	return names;
+}
+
 // Builds the boundary metadata for every exported symbol of `wasm`-target
 // packages (plus struct descriptors of `both` packages they expose).
 // Throws a compile error for unsupported boundary types.
-export function collectBoundaryMeta(progs, funcDecls, mod) {
+export function collectBoundaryMeta(
+	progs,
+	funcDecls,
+	mod,
+	genericStructs = new Set(),
+) {
 	const meta = {
 		structs: [],
 		funcs: [],
 		consts: [],
 		vars: [], // exported package-level shared buffers of wasm packages
 		structByName: new Map(),
+		// Exported generic structs of `wasm` packages: a js caller builds them
+		// through a `Box` class even when the wasm side has no instance.
+		genericStructs,
 		_mod: mod,
 	};
 	const errors = [];
@@ -2303,7 +2330,7 @@ export function generateFacade(
 			genHandleStruct(out, name, fields, methods, promoted);
 		}
 	}
-	genGenericClasses(out, needs, meta._mod);
+	genGenericClasses(out, needs, meta);
 
 	for (const [name, desc] of needs.anonStructs) {
 		out.push(`function ${P}to_${name}(o) {
@@ -2777,7 +2804,12 @@ function promotedMethods(info, fields, methods, meta) {
 // A generic struct is built in a js main as `new Box(V, [...zeroFactories,
 // "int"])`; the facade only has the instances (`Box$int`).  `Box` picks the
 // instance named by the last type-argument entry (the printed type arguments).
-function genGenericClasses(out, needs, mod) {
+//
+// A generic struct the wasm package never instantiates has no instance to
+// pick: its class is still emitted, and building one throws the same
+// `TypeError` instead of a raw `ReferenceError`.
+function genGenericClasses(out, needs, meta) {
+	const mod = meta._mod;
 	const groups = new Map();
 	for (const [name, { info }] of needs.structs) {
 		if (info.pkgTarget === "both") continue;
@@ -2791,6 +2823,8 @@ function genGenericClasses(out, needs, mod) {
 			.get(m[1])
 			.set(m[2].replaceAll(" ", "").replace(/(?<![\w.])main\./g, ""), name);
 	}
+	for (const base of meta.genericStructs)
+		if (!groups.has(base)) groups.set(base, new Map());
 	for (const [base, instances] of groups) {
 		const table = [...instances]
 			.map(([id, cls]) => `${JSON.stringify(id)}: ${cls}`)

@@ -2852,3 +2852,147 @@ func main() { println(mid.F()) }
 		GENERIC_FROM_JS_HINT,
 	);
 });
+
+section("WASM Boundary — generic structs with no wasm instance");
+
+const WASM_BOX_UNUSED = `//gofront:target wasm
+package util
+
+type Box[T any] struct{ V T }
+
+func Plain() int { return 1 }
+`;
+
+async function expectNoBoxInstance(mainSrc, name = "Box") {
+	const res = await compileHybridProject(
+		{ "util/util.go": WASM_BOX_UNUSED, "main.go": mainSrc },
+		{ exports: ["run"] },
+	);
+	let err = null;
+	try {
+		res.mod.run();
+	} catch (e) {
+		err = e;
+	}
+	assert(
+		err instanceof TypeError &&
+			err.message.includes(`GoFront: no ${name} instance`),
+		`expected the no-instance TypeError, got ${err?.name}: ${err?.message}`,
+	);
+}
+
+test("a js literal of a wasm generic struct with no instance throws the documented TypeError", () =>
+	expectNoBoxInstance(`package main
+
+import "./util"
+
+func run() int {
+	b := util.Box[int]{V: 5}
+	return b.V
+}
+
+func main() {}
+`));
+
+test("a js var of a wasm generic struct with no instance throws the documented TypeError", () =>
+	expectNoBoxInstance(`package main
+
+import "./util"
+
+func run() int {
+	var b util.Box[int]
+	return b.V
+}
+
+func main() {}
+`));
+
+test("a js func taking a wasm generic struct with no instance throws the documented TypeError", () =>
+	expectNoBoxInstance(`package main
+
+import "./util"
+
+func f(b util.Box[int]) int { return b.V }
+
+func run() int {
+	return f(util.Box[int]{})
+}
+
+func main() {}
+`));
+
+test("a wasm generic struct with an instance keeps resolving from js", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target wasm
+package util
+
+type Box[T any] struct{ V T }
+
+func Take(b Box[int]) int { return b.V }
+`,
+		"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Take(util.Box[int]{V: 7})) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "7");
+});
+
+test("a wasm generic struct with no instance still throws the TypeError when js declares the same name", () =>
+	expectNoBoxInstance(
+		`package main
+
+import "./util"
+
+type Box struct{ Z int }
+
+func run() int {
+	b := util.Box[int]{V: 5}
+	return b.V + Box{Z: 1}.Z
+}
+
+func main() {}
+`,
+		"Box$$util",
+	));
+
+test("a wasm generic struct with no instance throws the TypeError next to an instantiated one", async () => {
+	const res = await compileHybridProject(
+		{
+			"util/util.go": `//gofront:target wasm
+package util
+
+type Box[T any] struct{ V T }
+
+type Pair[T any] struct{ A, B T }
+
+func Take(b Box[int]) int { return b.V }
+`,
+			"main.go": `package main
+
+import "./util"
+
+func run() int {
+	p := util.Pair[int]{A: 1}
+	return p.A
+}
+
+func main() {}
+`,
+		},
+		{ exports: ["run"] },
+	);
+	let err = null;
+	try {
+		res.mod.run();
+	} catch (e) {
+		err = e;
+	}
+	assert(
+		err instanceof TypeError &&
+			err.message.includes("GoFront: no Pair instance"),
+		`expected the no-instance TypeError, got ${err?.name}: ${err?.message}`,
+	);
+});

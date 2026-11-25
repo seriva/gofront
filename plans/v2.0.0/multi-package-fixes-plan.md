@@ -157,7 +157,7 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
   - Files: `src/typechecker/index.js` (`_registerFuncDecl`), `src/typechecker/expressions.js` (`_checkInstantiationExpr`, `_resolveGenericFnType`)
   - Test: `test/unit/wasm/boundary.test.js`: negative `assertErrorContains` tests for inferred `util.Id(3)`, explicit `util.Id[int](3)`, func value `f := util.Id[int]`, already-instantiated `Id(1)` in `util`, and dot-imported `Id(3)`; controls for JS→`both` and WASM→`wasm` generics
   - Done when: JS→WASM generic function calls fail at compile time with an actionable message instead of runtime `ReferenceError`
-- [ ] Task 2.2: Emit stub class for zero-instantiation exported WASM generic structs (M3.3–M3.4)
+- [x] Task 2.2: Emit stub class for zero-instantiation exported WASM generic structs (M3.3–M3.4)
   - Files: `src/backend/wasm/boundary.js` (`genGenericClasses`, `collectBoundaryMeta`)
   - Test: `test/unit/wasm/boundary.test.js`: M3.3 (`util.Box[int]{V: 5}` when `wasm` has 0 instances throws `GoFront: no Box instance` instead of `ReferenceError`), M3.4 (`var b util.Box[int]`, `func f(b util.Box[int])`), plus existing `boundary.test.js:2367-2391` unchanged
   - Done when: zero-instance exported WASM generic structs never throw raw `ReferenceError` (docs land in Task 4.4)
