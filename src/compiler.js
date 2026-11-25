@@ -71,7 +71,7 @@ import {
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
 	renameLocalTypes,
-	withOriginalTypeNames,
+	withOriginalNames,
 } from "./link/stdlib.js";
 import { userEmitter, userMarker } from "./link/user-js.js";
 import {
@@ -1284,6 +1284,7 @@ function compileOwnUnit(ctx) {
 		pkgTarget,
 		programs: rootPrograms,
 		types: checker.types,
+		renamedTypes,
 	};
 	const emitTarget = asInternalError(() =>
 		registerPackageUnit(options, { ...link, bundledPackages }),
@@ -1332,14 +1333,14 @@ function compileOwnUnit(ctx) {
 		// Every declaration file the check read, as `[file, stamp]` pairs.
 		declarations: [...(checker.declarationStamps ?? [])],
 		programs: driver ? programs.filter((p) => p !== driver) : programs,
-		exportedSymbols: checker.getExportedSymbols(),
-		exportedTypes: withOriginalTypeNames(
-			checker.getExportedTypes(),
+		exportedSymbols: withOriginalNames(
+			checker.getExportedSymbols(),
 			renamedTypes,
 		),
+		exportedTypes: withOriginalNames(checker.getExportedTypes(), renamedTypes),
 		reachedTypes: checker.getReachedTypes(),
 		exportedConsts: checker.getExportedConsts(),
-		exportedKinds: checker.getExportedKinds(),
+		exportedKinds: withOriginalNames(checker.getExportedKinds(), renamedTypes),
 	};
 	return unit;
 }

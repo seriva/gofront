@@ -1222,6 +1222,126 @@ func main() {}
 	assertEqual(errors.length, 0);
 });
 
+section("dot-imported collision-mangled types");
+
+const dotPkgs = (target, files, mainBody) => ({
+	...Object.fromEntries(
+		Object.entries(files).map(([path, src]) => [
+			path,
+			`//gofront:target ${target}\n${src}`,
+		]),
+	),
+	"main.go": `//gofront:target ${target}
+package main
+import (
+	"fmt"
+${Object.keys(files)
+	.filter((f) => f.endsWith(".go"))
+	.map((f) => `\t${f.startsWith("b/") ? "." : ""} "./${f.split("/")[0]}"`)
+	.join("\n")}
+)
+${mainBody}
+`,
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`dot-imported type named after a JS built-in converts (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"util/util.go": `//gofront:target ${target}\npackage util\ntype Map int\n`,
+			"main.go": `//gofront:target ${target}
+package main
+import (
+	"fmt"
+	. "./util"
+)
+func main() { fmt.Println(int(Map(3))) }
+`,
+		});
+		assertEqual(lines.join("\n"), "3");
+	});
+
+	test(`qualified type named after a JS built-in still converts (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"util/util.go": `//gofront:target ${target}\npackage util\ntype Map int\n`,
+			"main.go": `//gofront:target ${target}
+package main
+import (
+	"fmt"
+	"./util"
+)
+func main() { fmt.Println(int(util.Map(3))) }
+`,
+		});
+		assertEqual(lines.join("\n"), "3");
+	});
+
+	test(`dot-imported type colliding with another package converts (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go": "package a\ntype Num int\nfunc One() Num { return 1 }\n",
+					"b/b.go": "package b\ntype Num int\n",
+				},
+				"var _ = a.One\nfunc main() { fmt.Println(int(Num(2))) }",
+			),
+		);
+		assertEqual(lines.join("\n"), "2");
+	});
+
+	test(`dot-imported type used only in a type position still works (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go": "package a\ntype Num int\nfunc One() Num { return 1 }\n",
+					"b/b.go": "package b\ntype Num int\n",
+				},
+				"var _ = a.One\nfunc main() {\n\tvar x Num = 2\n\tfmt.Println(int(x))\n}",
+			),
+		);
+		assertEqual(lines.join("\n"), "2");
+	});
+}
+
+for (const target of ["js", "both"]) {
+	test(`dot-imported colliding struct literal and method survive pruning (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go":
+						"package a\ntype Box struct{ V int }\nfunc One() Box { return Box{1} }\n",
+					"b/b.go":
+						"package b\ntype Box struct{ V int }\nfunc (b Box) Get() int { return b.V }\n",
+				},
+				"var _ = a.One\nfunc main() {\n\tvar x Box\n\tx.V = 5\n\tfmt.Println(Box{V: 2}.Get(), x.Get())\n}",
+			),
+		);
+		assertEqual(lines.join("\n"), "2 5");
+	});
+}
+
+test("a renamed type is exported under its declared name in every export table", () => {
+	withTempDir(
+		{
+			"util/util.go":
+				"package util\ntype Map int\nfunc One() Map { return 1 }\n",
+		},
+		(dir) => {
+			const res = compileDir(join(dir, "util"));
+			for (const table of [
+				res.exportedTypes,
+				res.exportedSymbols,
+				res.exportedKinds,
+			])
+				assert(table.has("Map"), "export table is missing 'Map'");
+			assertEqual(res.exportedKinds.get("Map"), "type");
+			assertEqual(res.exportedSymbols.get("Map"), res.exportedTypes.get("Map"));
+		},
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

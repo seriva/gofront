@@ -341,8 +341,16 @@ reach you through an embedded struct or interface, to struct types written inlin
 to method expressions (`util.Rec.twice`). An exported field or method promoted through
 an unexported embedded struct stays usable. Export the name, or move the code into the
 package that owns it. A dot import (`import . "./util"`) binds only the exported
-names, so `secret()` is undefined and `var b box` is an unknown type there. A package's own files, its `_test.go` files and the code the
+names, so `secret()` is undefined and `var b box` is an unknown type there.
+A package's own files, its `_test.go` files and the code the
 compiler generates for it can use its unexported names.
+
+An unexported method of an interface belongs to the interface's package, so only a type
+from that package can implement it. If `util.I` declares `secret() int`, a `Mine` in
+`main` with its own `secret() int` method does not satisfy it: `var _ util.I = Mine{}`
+is an error, and so are a type assertion or type switch case to `Mine`, and passing
+`Mine{}` where a type parameter is constrained by `util.I`. Embedding a `util` type
+that has the method does satisfy it.
 
 ---
 

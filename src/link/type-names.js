@@ -120,9 +120,11 @@ export function registerLocalTypeOwners(programs, pkgKey, owners) {
 	for (const p of programs) visit(p.decls);
 }
 
-// Importers name a renamed type by its declared name (`b.Pt`).
-export function withOriginalTypeNames(types, renamed) {
+// Importers name a renamed type by its declared name (`b.Pt`): `table` is one
+// of the package's export tables (types, symbols or kinds), keyed by the
+// mangled name, and gains an entry under the declared one.
+export function withOriginalNames(table, renamed) {
 	for (const [name, mangled] of renamed)
-		if (types.has(mangled)) types.set(name, types.get(mangled));
-	return types;
+		if (table.has(mangled)) table.set(name, table.get(mangled));
+	return table;
 }
