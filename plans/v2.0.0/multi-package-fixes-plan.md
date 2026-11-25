@@ -1,7 +1,7 @@
 # Multi-Package Linking, Lowering & Visibility Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-25)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): multi-package follow-ups from `codegen-fixes` Phase 6 (L83), `names-panics-type-exprs` Phases 1 & 3 (L84, L89), `package-scope` Phases 1 & 3 (L99, L102, L103), and `js-dead-code-elimination` Phase 1 (L111). Independent of [`typed-web-fixes-plan.md`](typed-web-fixes-plan.md), [`wasm-codegen-fixes-plan.md`](wasm-codegen-fixes-plan.md), [`generics-and-aliases-plan.md`](generics-and-aliases-plan.md), and [`js-codegen-and-value-semantics-plan.md`](js-codegen-and-value-semantics-plan.md) (shared files: `src/typechecker/index.js`, `src/typechecker/expressions.js`, `src/lower/gen-types.js`, `src/lower/fmt-formatters.js` — rebase if run in parallel).  
 **Release note:** Local packages can now reuse the same function, variable, constant, type and `init()` names as each other, even two packages with the same name in different folders, and `json` and `fmt` now work on types and generic structs from other local packages on every target. **Breaking:** a type no longer satisfies another package's interface through unexported methods it declares itself; embed a type from that package instead. Calling a `wasm` package's generic function from a `js` package is now a compile error rather than a crash when the program runs.
@@ -143,49 +143,49 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
 
 ### Phase 1: Package Visibility & Mangled Type Exports (roots `iface-implements-ignores-method-pkg`, `mangled-type-export-symbol-mismatch`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Enforce owning `_pkgId` on unexported interface methods in `implements()` (M1.1–M1.2)
+- [x] Task 1.1: Enforce owning `_pkgId` on unexported interface methods in `implements()` (M1.1–M1.2)
   - Files: `src/typechecker/assignability.js` (`implements`)
   - Test: `test/unit/compiler/packages.test.js`: M1.1–M1.2 (`var _ util.I = Mine{}`, `&Mine{}`, interface-to-interface, embedded foreign interface, unexported embedded interface in `util`, `i.(Mine)`, `switch i.(type)`, `func g[T util.I]` all rejected with `assertErrorContains`), M1.3 (call argument, return, slice literal) + passing controls (`util.Base`, `util.Base[int]`, `util.Impl`, same-pkg). Import `isExported` from `./types.js` (not imported by `assignability.js` today)
   - Done when: foreign types cannot satisfy foreign interfaces with unexported methods unless promoted from that package
-- [ ] Task 1.2: Restore unmangled names in `exportedSymbols`/`exportedKinds` and resolve mangled dot-imported types in DCE (M2.1–M2.3)
+- [x] Task 1.2: Restore unmangled names in `exportedSymbols`/`exportedKinds` and resolve mangled dot-imported types in DCE (M2.1–M2.3)
   - Files: `src/link/type-names.js`, `src/compiler.js` (also store `renamedTypes` on the unit), `src/lower/reachability.js` (`_depDecls` shared by `_resolveName` and `_resolveQual`)
   - Test: `test/unit/compiler/packages.test.js`, `test/unit/compiler/imports.test.js`: M2.1 (`import . "./util"; Map(3)` on `js`/`both`/`wasm`), M2.2 (`import . "./b"; Num(2)`), M2.3 (`import . "./b"; Box{V: 2}` and `x.Get()` under DCE on `js`/`both`) + controls
   - Done when: dot-imported collision-mangled types resolve in value/conversion/literal positions and survive JS DCE
 
 ### Phase 2: Reject Unsupported JS→WASM Generic Calls (root `wasm-boundary-generic-func-unchecked`)
-- [ ] Task 2.1: Report a compile error when a `js` package calls or references a `wasm` package's generic function (M3.1–M3.2)
+- [x] Task 2.1: Report a compile error when a `js` package calls or references a `wasm` package's generic function (M3.1–M3.2)
   - Files: `src/typechecker/index.js` (`_registerFuncDecl`), `src/typechecker/expressions.js` (`_checkInstantiationExpr`, `_resolveGenericFnType`)
   - Test: `test/unit/wasm/boundary.test.js`: negative `assertErrorContains` tests for inferred `util.Id(3)`, explicit `util.Id[int](3)`, func value `f := util.Id[int]`, already-instantiated `Id(1)` in `util`, and dot-imported `Id(3)`; controls for JS→`both` and WASM→`wasm` generics
   - Done when: JS→WASM generic function calls fail at compile time with an actionable message instead of runtime `ReferenceError`
-- [ ] Task 2.2: Emit stub class for zero-instantiation exported WASM generic structs (M3.3–M3.4)
+- [x] Task 2.2: Emit stub class for zero-instantiation exported WASM generic structs (M3.3–M3.4)
   - Files: `src/backend/wasm/boundary.js` (`genGenericClasses`, `collectBoundaryMeta`)
   - Test: `test/unit/wasm/boundary.test.js`: M3.3 (`util.Box[int]{V: 5}` when `wasm` has 0 instances throws `GoFront: no Box instance` instead of `ReferenceError`), M3.4 (`var b util.Box[int]`, `func f(b util.Box[int])`), plus existing `boundary.test.js:2367-2391` unchanged
   - Done when: zero-instance exported WASM generic structs never throw raw `ReferenceError` (docs land in Task 4.4)
 
 ### Phase 3: Generated-Go Local Type Qualification & Imported Generic `fmt` (roots `gen-types-unqualified-local-type`, `fmt-gen-imported-generic-scope`)
-- [ ] Task 3.1: Add `TypeSpeller.ownerOf(t)` and qualify all non-local named types in `TypeSpeller` / `gofront_gen.go` through it; `declaringPackage` and `renamedSpelling` read it too (M4.1–M4.2b)
+- [x] Task 3.1: Add `TypeSpeller.ownerOf(t)` and qualify all non-local named types in `TypeSpeller` / `gofront_gen.go` through it; `declaringPackage` and `renamedSpelling` read it too (M4.1–M4.2b)
   - Files: `src/lower/gen-types.js` (`ownerOf`, `spellNamed`, `qualifierFor`, `declaringPackage`, `renamedSpelling`), `src/typechecker/index.js` (`bindReachedPackages`), `src/link/stdlib.js` (`checkGeneratedGo`)
   - Test: `test/unit/compiler/packages.test.js`, `test/unit/wasm/json.test.js`: M4.1–M4.2 (`json.Unmarshal` on default, aliased, dual-alias `s1`/`s2`, dot-imported, indirect `main`→`mid`→`leaf.Num`, shadowed-alias `var s = 99`, and `*s.MyInt` across `js`, `both`, `wasm`), M4.2b (`json.Unmarshal` into `sub.W` on all 3 targets) + M4 controls
   - Done when: `gofront_gen.go` qualifies every imported local-package type cleanly without `Undefined` errors, and no `TypeSpeller` method other than `ownerOf` scans `checker.types` to find a type's package
-- [ ] Task 3.2: Recognize imported generic instances in `FmtGen.isNamedInScope` via the inherited `ownerOf` (M4.3–M4.4)
+- [x] Task 3.2: Recognize imported generic instances in `FmtGen.isNamedInScope` via the inherited `ownerOf` (M4.3–M4.4)
   - Files: `src/lower/fmt-formatters.js` (`isNamedInScope`, `spellableNamed`, `typeName`)
   - Test: `test/unit/wasm/fmt-any.test.js`, `test/unit/compiler/packages.test.js`: M4.3–M4.4 (`fmt.Println`, `%T`, `%+v`, `any`-boxed `util.Pair[int]`, `util.List[int]`, `&util.Pair[int]`, `Outer{P: util.Pair[int]}` on `js`, `both`, `wasm`)
   - Done when: imported generic structs and composites format identically to Go (`{1 2}`, `util.Pair[int]`) on all targets
 
 ### Phase 4: Multi-Package Top-Level Value, Function & `init()` Isolation (root `flat-pkg-value-namespace`)
-- [ ] Task 4.1: Give each package unique `init()` names in JS and exempt `"init"` in WASM link checks (M5.3)
+- [x] Task 4.1: Give each package unique `init()` names in JS and exempt `"init"` in WASM link checks (M5.3)
   - Files: `src/backend/js/index.js` (`_emitFuncDecls`), `src/link/wasm.js` (`checkLinkCollisions`)
   - Test: `test/unit/compiler/link.test.js`, `test/unit/compiler/packages.test.js`: M5.3 (`util` + `main` both defining `func init()`, plus multiple `init()` in one package, across `js`, `both`, `wasm`)
   - Done when: `init()` runs in Go dependency order across all linked packages without TDZ crashes or link errors
-- [ ] Task 4.2: Compute build-wide top-level value/type collision maps with one per-path suffix helper, and rename through the generalised stdlib renamer (M5.1, M5.2, M5.4, M5.5, M5.7)
+- [x] Task 4.2: Compute build-wide top-level value/type collision maps with one per-path suffix helper, and rename through the generalised stdlib renamer (M5.1, M5.2, M5.4, M5.5, M5.7)
   - Files: `src/link/pkg-names.js` (new: `pkgSuffix`, collision map, renamer moved from `src/link/stdlib.js` `mangleStdlibAst`/`mangleRefs`), `src/link/type-names.js` (`mangleCollidingTypes` uses `pkgSuffix`), `src/compiler.js`
   - Test: `test/unit/compiler/link.test.js`, `test/unit/compiler/package-cache.test.js`: unit tests for collision detection (unexported funcs/vars/consts, exported funcs/vars/consts, cross-kind type-vs-value, `p1/util` vs `p2/util` for values **and** types), local-shadow preservation, and `PackageCache` invalidation when collisions change; `test/unit/compiler/stdlib-go.test.js` stays green (stdlib still renamed by the shared renamer)
   - Done when: every colliding top-level value/function/type across local packages gets a unique per-path mangled name from `pkgSuffix` without altering non-colliding exports, and `src/link/stdlib.js` no longer has its own renamer
-- [ ] Task 4.3: Thread mangled local exports through checker namespaces, dot-imports, and reachability DCE (M5.1, M5.2, M5.4)
+- [x] Task 4.3: Thread mangled local exports through checker namespaces, dot-imports, and reachability DCE (M5.1, M5.2, M5.4)
   - Files: `src/typechecker/index.js` (`addPackageNamespace`, `addDefinitions`), `src/typechecker/resolve.js` (`_fieldTypeNamespace`), `src/lower/reachability.js` (`_depDecls` from Task 1.2, `_typesNamed` decode via `pkgSuffix`)
   - Test: `test/unit/compiler/pkg-collisions.test.js`: qualified calls (`a.Make()`, `b.Make()`), dot-imported colliding values/funcs, and DCE pruning of unused colliding helpers on `js` and `both`
   - Done when: mangled local exports stamp `_stdName` consistently and survive DCE when reachable
-- [ ] Task 4.4: Wire mangled local symbols through JS expressions, WASM linker (`checkLinkCollisions` keyed by package path), and WASM facade; update user docs (M5.1–M5.7)
+- [x] Task 4.4: Wire mangled local symbols through JS expressions, WASM linker (`checkLinkCollisions` keyed by package path), and WASM facade; update user docs (M5.1–M5.7)
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/boundary.js`, `src/link/wasm.js`, `docs/hybrid-wasm.md` (drop "Linked `wasm` packages share one namespace" at `:191-192`; add the JS→WASM generic-function rule and the zero-instance generic struct `TypeError` from Phase 2)
   - Test: `test/unit/compiler/pkg-collisions.test.js`, `test/unit/wasm/boundary.test.js`: M5.1–M5.7 across `js`, `both`, `wasm`, and hybrid (`js` `main` importing two `wasm` packages both exporting `Make`, plus `p1/util` + `p2/util` values and types, `var`/`const`, cross-kind `type Box` vs `func Box()`)
   - Done when: all M5.1–M5.7 probes produce Go's output across `js`, `both`, `wasm`, and hybrid targets with zero collisions, and `docs/hybrid-wasm.md` matches the new rules

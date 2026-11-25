@@ -143,7 +143,7 @@ function userJs(unit, reach) {
 	const key = `${ids.join(",")}|${promotionKey(emitter, reach)}`;
 	const hit = emitter.memo.get(key);
 	if (hit) return hit;
-	const { target, strict, natives, isTest } = emitter.options;
+	const { target, strict, natives, isTest, initSuffix } = emitter.options;
 	const codegen = new CodeGen(
 		emitter.checker,
 		emitter.jsImports,
@@ -154,6 +154,7 @@ function userJs(unit, reach) {
 			natives,
 			keepMethods: reach.keepMethods(),
 			deferHelpers: true,
+			initSuffix,
 		},
 	);
 	const js = codegen.generateAll(cloneAst(programs), { isTest });

@@ -14,7 +14,11 @@
 // which switches over every type the program encodes or decodes anywhere.
 
 import { resolveJsonFields } from "../typechecker/resolve.js";
-import { defaultType, LOCAL_TYPE_SUFFIX } from "../typechecker/types.js";
+import {
+	defaultType,
+	LOCAL_TYPE_SUFFIX,
+	suffixPackageName,
+} from "../typechecker/types.js";
 import {
 	collectProgramTypes,
 	hasSharedRepr,
@@ -200,7 +204,10 @@ export class JsonCodecGen extends TypeSpeller {
 				const at = name.indexOf("$$");
 				if (at >= 0) {
 					const orig = name.slice(0, at);
-					const modPath = name.slice(at + 2).replaceAll("$", "/");
+					const suffix = name.slice(at + 2);
+					const modPath = suffix.includes("$")
+						? suffix.replaceAll("$", "/")
+						: suffixPackageName(suffix);
 					name = `${modPath}.${orig}`;
 				} else if (!name.includes(".")) {
 					name = `${this.declaringPackage(t)}.${name}`;

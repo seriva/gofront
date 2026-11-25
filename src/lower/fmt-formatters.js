@@ -23,6 +23,7 @@ import {
 	embeddedFieldName,
 	FMT_PRINT_FUNCS,
 	LOCAL_TYPE_SUFFIX,
+	suffixPackageName,
 } from "../typechecker/types.js";
 import {
 	collectProgramTypes,
@@ -291,10 +292,7 @@ class FmtGen extends TypeSpeller {
 				let name = t.name.replace(LOCAL_TYPE_SUFFIX, "");
 				const at = name.indexOf("$$");
 				if (at >= 0)
-					name = `${name
-						.slice(at + 2)
-						.split("$")
-						.at(-1)}.${name.slice(0, at)}`;
+					name = `${suffixPackageName(name.slice(at + 2))}.${name.slice(0, at)}`;
 				else if (!name.includes("."))
 					name = `${this.declaringPackage(t)}.${name}`;
 				return t.typeArgs?.length
@@ -328,13 +326,15 @@ class FmtGen extends TypeSpeller {
 	}
 
 	// A type the generated file can name: declared at package level or by
-	// another package, or a function-local type, which the checker keeps in
-	// its type table under its name.
+	// another package (an instance of an imported generic type included), or a
+	// function-local type, which the checker keeps in its type table under its
+	// name.
 	isNamedInScope(t) {
 		return (
 			t.name.includes("$$") ||
 			t.name.includes(".") ||
 			this.topLevel.has(t.name) ||
+			this.ownerOf(t) !== null ||
 			this.checker.types.get(t.name) === t
 		);
 	}

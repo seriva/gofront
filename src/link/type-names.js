@@ -8,10 +8,16 @@
 
 import {
 	freshLocalName,
+	renameLocalTypes,
 	renameTypeRefs,
 	valueNamesIn,
 } from "../lower/local-types.js";
-import { forEachChild } from "../lower/walk.js";
+import {
+	declaredTypeNames,
+	forEachChild,
+	forEachTemplGo,
+} from "../lower/walk.js";
+import { isExported } from "../typechecker/types.js";
 
 export { renameLocalTypes } from "../lower/local-types.js";
 export { declaredTypeNames } from "../lower/walk.js";
@@ -58,21 +64,23 @@ function jsBuiltinClash(decl, decls, methodTypes, shadows) {
 	return shadows.target === "wasm" || isClassFree(decl, decls, methodTypes);
 }
 
-// Registers the package's type names in `owners` (name -> package key) and
-// renames those another package registered first.  Returns Map<name, mangled>
-// for the renamed types, empty when nothing collides.  A type named after a
+// Registers the package's type names in `owners` (name -> package key, shared
+// with the package's value names, see pkg-names.js) and renames those another
+// package registered first, to `Name` + `suffix` (`Name$$b`, see `pkgSuffix`).
+// Returns Map<name, mangled> for the renamed types, empty when nothing
+// collides.  A type named after a
 // predeclared type (`type int32 = string`, `type any = int`) is renamed too:
 // `predeclared` holds those names, and the checker and both backends key types
 // by bare name, so the package's `int32` must not meet the predeclared one
 // that other packages (the Go-source stdlib) spell.  It takes the local-type
 // `Name__L<n>` form rather than `Name$$pkg`, which later stages read as a type
 // of another package.  A type named after a JS built-in (see `jsBuiltinClash`)
-// takes `Name$$pkg` too, so the class it emits cannot shadow the built-in; it
+// takes the suffix too, so the class it emits cannot shadow the built-in; it
 // does not claim the bare name, which no output uses.
 export function mangleCollidingTypes(
 	programs,
 	pkgKey,
-	pkgName,
+	suffix,
 	owners,
 	predeclared = new Set(),
 	shadows = null,
@@ -95,8 +103,7 @@ export function mangleCollidingTypes(
 		const clash = jsBuiltinClash(decl, decls, methodTypes, shadows);
 		const owner = owners.get(name);
 		if (owner === undefined && !clash) owners.set(name, pkgKey);
-		else if (clash || owner !== pkgKey)
-			renamed.set(name, `${name}$$${pkgName}`);
+		else if (clash || owner !== pkgKey) renamed.set(name, `${name}${suffix}`);
 	}
 	if (renamed.size > 0)
 		for (const p of programs)
@@ -116,13 +123,51 @@ export function registerLocalTypeOwners(programs, pkgKey, owners) {
 		if (node.kind === "TypeDecl" && !owners.has(node.name))
 			owners.set(node.name, pkgKey);
 		forEachChild(node, visit);
+		forEachTemplGo(node, visit);
 	};
 	for (const p of programs) visit(p.decls);
 }
 
-// Importers name a renamed type by its declared name (`b.Pt`).
-export function withOriginalTypeNames(types, renamed) {
+// Importers name a renamed type by its declared name (`b.Pt`): `table` is one
+// of the package's export tables (types, symbols or kinds), keyed by the
+// mangled name, and gains an entry under the declared one.
+export function withOriginalNames(table, renamed) {
 	for (const [name, mangled] of renamed)
-		if (types.has(mangled)) types.set(name, types.get(mangled));
-	return types;
+		if (table.has(mangled)) table.set(name, table.get(mangled));
+	return table;
+}
+
+// A file that dot-imports a package spells a type the package renamed by its
+// declared name (`Box`), but the build knows the type by the renamed one
+// (`Box$$b`), and both backends look a type up by the name the source gives.
+// Renames those spellings in `program` once, so every later stage sees the
+// type's real name.  `renamed` is the package's declared -> renamed map; a
+// name the file declares at package level is left.  A type declared in a
+// function shadows the import only in its block, so it first takes a name of
+// its own (`Box__L1`) that no type of the build (`owners`) spells, and joins
+// `owners` under `pkgKey`, the importing package.  The new name is emitted at
+// the top level, so it also avoids every name the package's files
+// (`pkgPrograms`, `program` among them) spell, such as a package-level var,
+// const or func of another file.
+export function renameDotImportedTypes(
+	program,
+	renamed,
+	owners,
+	pkgKey,
+	pkgPrograms = [program],
+) {
+	const own = new Set(topLevelTypeDecls([program]).map((d) => d.name));
+	const refs = new Map(
+		[...renamed].filter(([name]) => isExported(name) && !own.has(name)),
+	);
+	if (refs.size === 0) return;
+	const inUse = new Set([
+		...(owners?.keys() ?? []),
+		...declaredTypeNames(pkgPrograms),
+		...valueNamesIn(pkgPrograms),
+	]);
+	if (renameLocalTypes([program], new Set(refs.keys()), new Set(), inUse))
+		registerLocalTypeOwners([program], pkgKey, owners);
+	for (const d of program.decls ?? [])
+		renameTypeRefs(d, refs, new Set(), new Set());
 }

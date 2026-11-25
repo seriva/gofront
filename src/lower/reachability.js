@@ -615,7 +615,7 @@ export class BuildReach extends StdlibReach {
 		for (const found of unit.byName.get(name) ?? []) this._item(found);
 		if (isExported(name))
 			for (const key of program._dotImports ?? [])
-				for (const found of this.units.get(key)?.byName.get(name) ?? [])
+				for (const found of this._depDecls(this.units.get(key), name))
 					this._item(found);
 		if (program._generated)
 			for (const found of this._typesNamed(name)) this._item(found);
@@ -627,9 +627,20 @@ export class BuildReach extends StdlibReach {
 		const key = program._localImports?.get(qual.slice(0, dot));
 		const dep = this.units.get(key);
 		if (!dep) return;
-		const field = qual.slice(dot + 1);
-		for (const n of [field, `${field}$$${dep.pkgName}`])
-			for (const found of dep.byName.get(n) ?? []) this._item(found);
+		for (const found of this._depDecls(dep, qual.slice(dot + 1)))
+			this._item(found);
+	}
+
+	// The declarations of package `dep` that its exported name `name` stands
+	// for: a type, function, var or const the build renamed (`Box` ->
+	// `Box$$b`) is declared under the renamed name.
+	_depDecls(dep, name) {
+		if (!dep) return [];
+		const renamed = dep.renamedTypes?.get(name) ?? dep.renamedValues?.get(name);
+		return [
+			...(dep.byName.get(name) ?? []),
+			...(renamed ? (dep.byName.get(renamed) ?? []) : []),
+		];
 	}
 
 	// The generated Go names a type of another local package by its bare name.

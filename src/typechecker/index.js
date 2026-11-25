@@ -26,6 +26,7 @@ import {
 	BOOL,
 	copyFieldOwner,
 	copyType,
+	declaredName,
 	declPackages,
 	defaultType,
 	displayTypeName,
@@ -184,6 +185,7 @@ export class TypeChecker {
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._untypedImports = new Set(); // names bound by npm imports without types
 		this._localTypes = new Set(); // names of types declared in a function or block
+		this._generatedKeys = new Set(); // type-table keys only the generated Go uses
 		this._localTypesVisible = false; // checking the generated Go, which names any local type
 		this._importedTypes = new WeakSet(); // named types reached through an imported package
 		this._pendingConstraintUses = []; // constraint-interface checks waiting on a type declaration
@@ -297,6 +299,43 @@ export class TypeChecker {
 		}
 	}
 
+	// Binds in the generated `file` the qualifier `alias` as the package named
+	// `pkgName`: `alias.T` names each type of that package any import of this
+	// package registered, whichever file imported it and however it is
+	// aliased (a dot import and an indirect dependency included). The generated
+	// Go spells a foreign type through such a qualifier, as a file's own import
+	// of the package may be shadowed or absent.
+	bindGeneratedPackage(file, alias, pkgName) {
+		this._fileScope(file).definePackage(alias, {
+			kind: "namespace",
+			name: alias,
+			members: {},
+			_gofront: true,
+		});
+		// An instance of a generic type (`type IntPair = Pair[int]` exports one)
+		// carries its template's name; the generated Go spells it `Pair[int]`
+		// through the template, so only the template is bound.
+		const owned = new Set();
+		for (const type of this.types.values())
+			if (
+				type?.kind === "named" &&
+				type._pkgName === pkgName &&
+				!type._genericOf &&
+				this._importBound.has(type)
+			)
+				owned.add(type);
+		for (const type of owned) {
+			const key = `${alias}.${type.name}`;
+			this._bindImportedType(file, key, type);
+			this._generatedKeys.add(key);
+		}
+	}
+
+	// Whether `name` is a type declared inside a function or block.
+	isFunctionLocalType(name) {
+		return this._localTypes.has(name);
+	}
+
 	// The type an import in `scope` (a file's scope) or in the scope shared by
 	// every file names `key`.
 	_importedType(scope, key) {
@@ -324,6 +363,8 @@ export class TypeChecker {
 	// `consts` maps the package's constant names to their folded value (see
 	// typechecker/const-fold.js), or null when the folder cannot evaluate one.
 	// `kinds` maps each member to what the package declares it as (see Scope).
+	// `mangle` maps the functions, vars and consts the build renamed
+	// (`Make` -> `Make$$b`) to the name they are declared under.
 	addPackageNamespace(
 		pkgName,
 		symbols,
@@ -333,6 +374,7 @@ export class TypeChecker {
 		kinds = null,
 		file = null,
 		reached = null,
+		mangle = null,
 	) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
@@ -345,6 +387,7 @@ export class TypeChecker {
 			_target: target,
 			_consts: consts,
 			_kinds: kinds,
+			_mangle: mangle?.size > 0 ? mangle : undefined,
 		});
 		const register = (name, type, visible) => {
 			const prior = this.types.get(name);
@@ -530,7 +573,11 @@ export class TypeChecker {
 	}
 
 	_isImportRegistered(key, type) {
-		return this._importKeys.has(key) && this._importBound.has(type);
+		return (
+			this._importKeys.has(key) &&
+			this._importBound.has(type) &&
+			!this._generatedKeys.has(key)
+		);
 	}
 
 	recordBlocker(category, item = null) {
@@ -840,9 +887,9 @@ export class TypeChecker {
 		]);
 
 		const report = (root, node) => {
-			this.recordBlocker("mutable package variable", root);
+			this.recordBlocker("mutable package variable", declaredName(root));
 			this.err(
-				`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
+				`package-level variable '${declaredName(root)}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
 				node,
 			);
 		};
@@ -1502,7 +1549,7 @@ export class TypeChecker {
 
 	_registerFuncDecl(decl, funcType, typeParamTypes) {
 		if (this.globals.has(decl.name) && decl.name !== "init")
-			this.err(`${decl.name} redeclared in this block`, decl);
+			this.err(`${declaredName(decl.name)} redeclared in this block`, decl);
 		if (decl.native) funcType.native = decl.native;
 		if (typeParamTypes) {
 			this.globals.defineFunc(
@@ -1513,6 +1560,10 @@ export class TypeChecker {
 					typeParams: typeParamTypes,
 					underlying: funcType,
 					declNode: decl,
+					// Where the template lives: only a `js` caller needs it, to
+					// reject a `wasm` template it cannot instantiate.
+					_target: this.target,
+					_pkgName: this.pkgName,
 				},
 				decl,
 			);
@@ -1830,7 +1881,7 @@ export class TypeChecker {
 			async: false,
 		};
 		if (this.globals.has(decl.name) && decl.name !== "init") {
-			this.err(`${decl.name} redeclared in this block`, decl);
+			this.err(`${declaredName(decl.name)} redeclared in this block`, decl);
 		}
 		this.globals.defineFunc(decl.name, funcType, decl);
 	}
@@ -1853,7 +1904,7 @@ export class TypeChecker {
 			async: false,
 		};
 		if (this.globals.has(decl.name) && decl.name !== "init") {
-			this.err(`${decl.name} redeclared in this block`, decl);
+			this.err(`${declaredName(decl.name)} redeclared in this block`, decl);
 		}
 		this.globals.defineFunc(decl.name, funcType, decl);
 	}
@@ -2029,7 +2080,10 @@ export class TypeChecker {
 			!returnType._hasNamedReturns
 		) {
 			if (!this._isTerminating(decl.body)) {
-				this.err(`missing return at end of ${kind} '${decl.name}'`, decl);
+				this.err(
+					`missing return at end of ${kind} '${declaredName(decl.name)}'`,
+					decl,
+				);
 			}
 		}
 	}

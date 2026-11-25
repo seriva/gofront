@@ -188,8 +188,17 @@ a facade into `app.js` that exposes each `wasm` package's exported functions, me
 literal constants and structs under the package name — JS code calls them like any other
 import.
 
-Linked `wasm` packages share one namespace: a top-level name declared in two of them is a
-compile error.
+Linked `wasm` packages keep their own names, as in Go: two of them (or a `wasm` package
+and a `js` one) can declare the same function, variable, constant or type, and JS calls
+`a.Make()` and `b.Make()` reach the right one.
+
+A generic function of a `wasm` package cannot be called from a `js` package: the module
+holds a copy only for each type its own `wasm` callers use, so a `js` caller has none to
+reach. `util.Id(3)`, `util.Id[int](3)` and `f := util.Id[int]` are compile errors.
+Wrap the call in a non-generic function inside the `wasm` package, or move the generic
+function to a `both` package. A generic struct of a `wasm` package that the module never
+instantiates still has a class on the facade; building one from JS throws
+`GoFront: no Box instance` instead of failing with a `ReferenceError`.
 
 Visibility follows Go on every target: only exported (uppercase) names, fields and methods
 of a `wasm` package are on the facade, and Go code in another package cannot use the

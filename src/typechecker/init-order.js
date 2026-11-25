@@ -12,7 +12,7 @@
 // receiver or statement hides the package-level one from the next statement to
 // the end of its block, and not outside it.
 
-import { underlyingOf } from "./types.js";
+import { declaredName, underlyingOf } from "./types.js";
 
 function forEachChildNode(node, fn) {
 	for (const key of Object.keys(node)) {
@@ -276,11 +276,11 @@ function findCycle(start, depsOf, pending) {
 }
 
 function cycleMessage(entry, chain) {
-	const name = entry.names[0];
+	const name = declaredName(entry.names[0]);
 	if (!chain) return `initialization cycle for ${name}`;
 	if (chain.length === 1)
 		return `initialization cycle: ${name} refers to itself`;
-	return `initialization cycle for ${name}: ${chain.join(" refers to ")}`;
+	return `initialization cycle for ${name}: ${chain.map(declaredName).join(" refers to ")}`;
 }
 
 // Go's rule: repeatedly take the earliest spec whose dependencies are done.

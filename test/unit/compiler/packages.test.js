@@ -2,6 +2,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { compileFiles, compileSingleFile } from "../../../src/compiler.js";
+import { renameDotImportedTypes } from "../../../src/link/type-names.js";
 import {
 	assert,
 	assertContains,
@@ -13,6 +14,7 @@ import {
 	compileHybridProject,
 	FIXTURES,
 	ROOT,
+	runInDom,
 	runJs,
 	section,
 	summarize,
@@ -1057,6 +1059,911 @@ func main() {
 	});
 	assertErrorContains(errors, "Unknown type 'sub.Float32Array'");
 });
+
+section("unexported interface methods belong to their package");
+
+const SECRET_UTIL = `package util
+
+type I interface {
+	secret() int
+	Pub() int
+}
+
+type Base struct{}
+
+func (Base) secret() int { return 7 }
+func (Base) Pub() int    { return 1 }
+
+type Impl struct{}
+
+func (Impl) secret() int { return 3 }
+func (Impl) Pub() int    { return 2 }
+
+func Use(i I) int { return i.Pub() }
+
+type baseI interface{ secret() int }
+
+type Embeds interface {
+	baseI
+	Pub() int
+}
+`;
+
+const MINE_DECL = `type Mine struct{}
+
+func (Mine) secret() int { return 1 }
+func (Mine) Pub() int    { return 2 }
+`;
+
+function secretErrors(body, extraUtil = "") {
+	return packageErrors({
+		"util/util.go": SECRET_UTIL + extraUtil,
+		"main.go": `package main
+
+import "./util"
+
+${MINE_DECL}
+${body}
+
+func main() {}
+`,
+	});
+}
+
+for (const [name, body, message] of [
+	["value assignment", "var _ util.I = Mine{}", "Mine does not implement I"],
+	["pointer assignment", "var _ util.I = &Mine{}", "does not implement I"],
+	[
+		"interface to interface",
+		"type localI interface{ secret() int; Pub() int }\nvar li localI = Mine{}\nvar _ util.I = li",
+		"does not implement I",
+	],
+	[
+		"call argument",
+		"func f() int { return util.Use(Mine{}) }",
+		"Mine does not implement I",
+	],
+	[
+		"return value",
+		"func f() util.I { return Mine{} }",
+		"Mine does not implement I",
+	],
+	["slice literal", "var _ = []util.I{Mine{}}", "does not implement I"],
+	[
+		"type assertion",
+		"func f(i util.I) { _ = i.(Mine) }",
+		"impossible type assertion",
+	],
+	[
+		"type switch case",
+		"func f(i util.I) int {\n\tswitch i.(type) {\n\tcase Mine:\n\t\treturn 1\n\t}\n\treturn 0\n}",
+		"impossible type switch case",
+	],
+	[
+		"generic constraint",
+		"func g[T util.I](x T) int { return x.Pub() }\nvar _ = g(Mine{})",
+		"does not satisfy constraint I",
+	],
+	[
+		"embedded unexported interface",
+		"var _ util.Embeds = Mine{}",
+		"Mine does not implement Embeds",
+	],
+]) {
+	test(`foreign type cannot satisfy foreign interface: ${name}`, () => {
+		assertErrorContains(secretErrors(body), message);
+	});
+}
+
+test("foreign type cannot satisfy foreign embedded interface in a local interface", () => {
+	const errors = secretErrors(
+		"type Wrap interface{ util.I }\nvar _ Wrap = Mine{}",
+	);
+	assertErrorContains(errors, "Wrap");
+});
+
+for (const [name, body] of [
+	[
+		"embedding util.Base",
+		"type Good struct{ util.Base }\nvar _ util.I = Good{}",
+	],
+	[
+		"embedding *util.Base",
+		"type Good struct{ *util.Base }\nvar _ util.I = Good{Base: &util.Base{}}",
+	],
+	["util.Impl", "var _ util.I = util.Impl{}"],
+	["util.Use(util.Impl{})", "var _ = util.Use(util.Impl{})"],
+]) {
+	test(`foreign interface still satisfied: ${name}`, () => {
+		assertEqual(secretErrors(body).length, 0);
+	});
+}
+
+test("embedding a generic util.Base[int] satisfies the foreign interface", () => {
+	const errors = packageErrors({
+		"util/util.go": `package util
+
+type I interface {
+	secret() int
+	Pub() int
+}
+
+type Base[T any] struct{ V T }
+
+func (b Base[T]) secret() int { return 7 }
+func (b Base[T]) Pub() int    { return 1 }
+`,
+		"main.go": `package main
+
+import "./util"
+
+type Good struct{ util.Base[int] }
+
+var _ util.I = Good{}
+
+func main() {}
+`,
+	});
+	assertEqual(errors.length, 0);
+});
+
+test("unexported interface methods still match within one package", () => {
+	const errors = packageErrors({
+		"main.go": `package main
+
+type I interface{ secret() int }
+type T struct{}
+
+func (T) secret() int { return 1 }
+
+var _ I = T{}
+
+func main() {}
+`,
+	});
+	assertEqual(errors.length, 0);
+});
+
+section("dot-imported collision-mangled types");
+
+const dotPkgs = (target, files, mainBody) => ({
+	...Object.fromEntries(
+		Object.entries(files).map(([path, src]) => [
+			path,
+			`//gofront:target ${target}\n${src}`,
+		]),
+	),
+	"main.go": `//gofront:target ${target}
+package main
+import (
+	"fmt"
+${Object.keys(files)
+	.filter((f) => f.endsWith(".go"))
+	.map((f) => `\t${f.startsWith("b/") ? "." : ""} "./${f.split("/")[0]}"`)
+	.join("\n")}
+)
+${mainBody}
+`,
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`dot-imported type named after a JS built-in converts (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"util/util.go": `//gofront:target ${target}\npackage util\ntype Map int\n`,
+			"main.go": `//gofront:target ${target}
+package main
+import (
+	"fmt"
+	. "./util"
+)
+func main() { fmt.Println(int(Map(3))) }
+`,
+		});
+		assertEqual(lines.join("\n"), "3");
+	});
+
+	test(`qualified type named after a JS built-in still converts (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"util/util.go": `//gofront:target ${target}\npackage util\ntype Map int\n`,
+			"main.go": `//gofront:target ${target}
+package main
+import (
+	"fmt"
+	"./util"
+)
+func main() { fmt.Println(int(util.Map(3))) }
+`,
+		});
+		assertEqual(lines.join("\n"), "3");
+	});
+
+	test(`dot-imported type colliding with another package converts (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go": "package a\ntype Num int\nfunc One() Num { return 1 }\n",
+					"b/b.go": "package b\ntype Num int\n",
+				},
+				"var _ = a.One\nfunc main() { fmt.Println(int(Num(2))) }",
+			),
+		);
+		assertEqual(lines.join("\n"), "2");
+	});
+
+	test(`dot-imported type used only in a type position still works (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go": "package a\ntype Num int\nfunc One() Num { return 1 }\n",
+					"b/b.go": "package b\ntype Num int\n",
+				},
+				"var _ = a.One\nfunc main() {\n\tvar x Num = 2\n\tfmt.Println(int(x))\n}",
+			),
+		);
+		assertEqual(lines.join("\n"), "2");
+	});
+}
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`dot-imported colliding struct literal and method survive pruning (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go":
+						"package a\ntype Box struct{ V int }\nfunc One() Box { return Box{1} }\n",
+					"b/b.go":
+						"package b\ntype Box struct{ V int }\nfunc (b Box) Get() int { return b.V }\n",
+				},
+				"var _ = a.One\nfunc main() {\n\tvar x Box\n\tx.V = 5\n\tfmt.Println(Box{V: 2}.Get(), x.Get())\n}",
+			),
+		);
+		assertEqual(lines.join("\n"), "2 5");
+	});
+
+	test(`dot-imported colliding struct as variable, literal and pointer (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go":
+						"package a\ntype Box struct{ V int }\nfunc One() Box { return Box{1} }\n",
+					"b/b.go":
+						"package b\ntype Box struct{ V int }\nfunc (b *Box) Get() int { return b.V }\nfunc Make() Box { return Box{V: 9} }\n",
+				},
+				`var _ = a.One
+type Emb struct{ Box }
+func take(b *Box, bs []Box, m map[string]Box) int { return b.Get() + len(bs) + len(m) }
+func main() {
+	var x Box
+	x.V = 5
+	p := &Box{V: 7}
+	n := new(Box)
+	n.V = 3
+	fmt.Println(x.V, p.Get(), Make().V, Emb{Box{V: 6}}.V)
+	fmt.Println(take(n, []Box{{V: 1}, Box{V: 2}}, map[string]Box{"k": {V: 4}}))
+}`,
+			),
+		);
+		assertEqual(lines.join("\n"), "5 7 9 6\n6");
+	});
+
+	test(`dot-imported colliding generic struct (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go":
+						"package a\ntype Box[T any] struct{ V T }\nfunc One() Box[int] { return Box[int]{V: 1} }\n",
+					"b/b.go":
+						"package b\ntype Box[T any] struct{ V T }\nfunc (b Box[T]) Get() T { return b.V }\n",
+				},
+				`var _ = a.One
+func wrap[T any](v T) Box[T] { return Box[T]{V: v} }
+func main() {
+	var x Box[int]
+	x.V = 5
+	p := &Box[string]{V: "s"}
+	fmt.Println(x.V, Box[int]{V: 2}.Get(), p.Get(), wrap(8).Get())
+}`,
+			),
+		);
+		assertEqual(lines.join("\n"), "5 2 s 8");
+	});
+}
+
+const SHADOW_A =
+	"package a\ntype Box struct{ V int }\nfunc One() Box { return Box{1} }\n";
+const SHADOW_B =
+	"package b\ntype Box struct{ V int }\nfunc (b Box) Get() int { return b.V }\n";
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`function-local type shadows a dot-imported type only in its block (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{ "b/b.go": SHADOW_B },
+				"func f() int { type Box int; return int(Box(3)) }\nfunc main() {\n\tvar x Box\n\tx.V = 5\n\tfmt.Println(f(), x.V)\n}",
+			),
+		);
+		assertEqual(lines.join("\n"), "3 5");
+	});
+
+	// Each program declares the local type once, so it keeps its name until
+	// the dot import is resolved.
+	for (const [shape, decl, call] of [
+		[
+			"func literal",
+			"var g = func() int { type Box struct{ W int }; return Box{W: 1}.W }",
+			"g()",
+		],
+		[
+			"method",
+			"type T struct{}\nfunc (T) m() int { type Box struct{ W int }; p := &Box{W: 1}; return p.W }",
+			"T{}.m()",
+		],
+		[
+			"nested block",
+			"func g() int {\n\ty := Box{V: 2}\n\t{\n\t\ttype Box struct{ W int }\n\t\tz := []Box{{W: 1}}\n\t\treturn z[0].W * y.Get() / 2\n\t}\n}",
+			"g()",
+		],
+	])
+		test(`function-local struct in a ${shape} shadowing a colliding dot-imported type (${target})`, async () => {
+			const { lines } = await compileHybridProject(
+				dotPkgs(
+					target,
+					{ "a/a.go": SHADOW_A, "b/b.go": SHADOW_B },
+					`var _ = a.One\n${decl}\nfunc main() { fmt.Println(${call}, Box{V: 6}.Get()) }`,
+				),
+			);
+			assertEqual(lines.join("\n"), "1 6");
+		});
+
+	test(`a later package's local type does not reuse a dot-import shadow's name (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"b/b.go": SHADOW_B,
+					"c/c.go":
+						"package c\nfunc C() int { type Box struct{ Z int }; return Box{Z: 7}.Z }\n",
+				},
+				"func f() int { type Box struct{ W int }; return Box{W: 3}.W }\nfunc main() { fmt.Println(f(), c.C(), Box{V: 1}.Get()) }",
+			),
+		);
+		assertEqual(lines.join("\n"), "3 7 1");
+	});
+
+	// The shadow's new name is emitted at the top level, where another file
+	// of the package may already declare it as a value.
+	for (const sibling of [
+		"var Box__L1 = 99",
+		"const Box__L1 = 99",
+		"func Box__L1() int { return 99 }",
+	])
+		test(`a dot-import shadow's name avoids a sibling file's \`${sibling.split(" ")[0]}\` (${target})`, async () => {
+			const use = sibling.startsWith("func") ? "Box__L1()" : "Box__L1";
+			const { lines } = await compileHybridProject({
+				...dotPkgs(
+					target,
+					{ "a/a.go": SHADOW_A, "b/b.go": SHADOW_B },
+					"var _ = a.One\nfunc f() int { type Box struct{ W int }; return Box{W: 3}.W }\nfunc main() { fmt.Println(f(), Box{V: 5}.Get(), GetL1()) }",
+				),
+				"f2.go": `//gofront:target ${target}\npackage main\n${sibling}\nfunc GetL1() int { return ${use} }\n`,
+			});
+			assertEqual(lines.join("\n"), "3 5 99");
+		});
+}
+
+test("diagnostics spell a renamed type the way the source does", () => {
+	const errors = packageErrors({
+		"b/b.go": "package b\ntype Num int\n",
+		"main.go": `package main
+import . "./b"
+func f() { type Num string; var n int = Num("x"); _ = n }
+func main() { var s string = Num(3); _ = s }
+`,
+	});
+	assertErrorContains(errors, 'cannot use Num("x") (constant "x" of type Num)');
+	assertErrorContains(errors, "cannot use Num(3) (constant 3 of type b.Num)");
+});
+
+section("collision-mangled types in .templ expressions");
+
+// Builds the project, mounts `View()` into #app and returns its text.
+function templText(files) {
+	const { js } = withTempDir(files, (dir) => compileDir(dir));
+	const { lines } = runInDom(js, '<div id="app"></div>');
+	return lines.join("\n");
+}
+
+const TEMPL_A =
+	"package a\ntype Box[T any] struct{ V T }\nfunc One() Box[int] { return Box[int]{V: 1} }\n";
+const TEMPL_B =
+	"package b\ntype Box[T any] struct{ V T }\nfunc (b Box[T]) Get() T { return b.V }\n";
+
+const templMain = (mount = "View()", imports = "") => `package main
+import (
+	"./a"
+${imports})
+var _ = a.One
+func main() {
+	gom.Mount("#app", ${mount})
+	println(document.querySelector("#app").textContent)
+}
+`;
+
+test("a dot-imported colliding generic type in every .templ expression position", () => {
+	const text = templText({
+		"a/a.go": TEMPL_A,
+		"b/b.go": TEMPL_B,
+		"main.go": templMain(),
+		"view.templ": `package main
+import (
+	"strconv"
+	. "./b"
+)
+func mk(n int) Box[int] { return Box[int]{V: n} }
+templ View() {
+	for _, it := range []Box[int]{mk(2)} {
+		<i>{ strconv.Itoa(it.Get()) }</i>
+	}
+	if new(Box[int]).Get() == 0 {
+		<b>3</b>
+	} else if new(Box[int]).Get() == 9 {
+		<b>9</b>
+	}
+	switch mk(4).Get() {
+	case new(Box[int]).Get(), Box[int](mk(4)).Get():
+		<s>4</s>
+	}
+	<p title={ strconv.Itoa(Box[int](mk(5)).V) }>{ strconv.Itoa(func() int { var x Box[int]; x.V = 6; return x.Get() }()) }</p>
+	<div>
+		@Item(*new(Box[int]))
+	</div>
+}
+templ Item(b Box[int]) {
+	<em>{ strconv.Itoa(b.Get() + 7) }</em>
+}`,
+	});
+	assertEqual(text, "23467");
+});
+
+test("a .templ function-local type shadows a dot-imported colliding type", () => {
+	const text = templText({
+		"a/a.go": TEMPL_A,
+		"b/b.go": TEMPL_B,
+		"main.go": templMain(),
+		"view.templ": `package main
+import (
+	"strconv"
+	. "./b"
+)
+templ View() {
+	<span>{ strconv.Itoa(func() int { type Box struct{ W int }; return Box{W: 8}.W }()) }</span>
+	<span>{ strconv.Itoa(func() int { var x Box[int]; x.V = 9; return x.Get() }()) }</span>
+}`,
+	});
+	assertEqual(text, "89");
+});
+
+test("a package's own .templ file uses its collision-mangled type", () => {
+	const text = templText({
+		"a/a.go": TEMPL_A,
+		"b/b.go": TEMPL_B,
+		"b/view.templ": `package b
+import "strconv"
+templ View() {
+	<span>{ strconv.Itoa(func() int { var x Box[int]; x.V = 42; return x.Get() }()) }</span>
+}`,
+		"main.go": templMain("b.View()", '\t"./b"\n'),
+	});
+	assertEqual(text, "42");
+});
+
+test("a .templ function-local type does not replace a package-level type", () => {
+	const text = templText({
+		"main.go": `package main
+type T struct{ A int }
+func main() {
+	gom.Mount("#app", View())
+	println(T{A: 1}.A, document.querySelector("#app").textContent)
+}
+`,
+		"view.templ": `package main
+import "strconv"
+templ View() {
+	<span>{ strconv.Itoa(func() int { type T struct{ W int }; return T{W: 4}.W }()) }</span>
+}`,
+	});
+	assertEqual(text, "1 4");
+});
+
+test("a type the file declares itself is not renamed by a dot import", () => {
+	const program = {
+		decls: [
+			{ kind: "TypeDecl", name: "Box", type: { kind: "StructType" } },
+			{
+				kind: "VarDecl",
+				decls: [{ names: ["x"], type: { kind: "TypeName", name: "Box" } }],
+			},
+			{
+				kind: "VarDecl",
+				decls: [{ names: ["y"], type: { kind: "TypeName", name: "Num" } }],
+			},
+		],
+	};
+	renameDotImportedTypes(
+		program,
+		new Map([
+			["Box", "Box$$b"],
+			["Num", "Num$$b"],
+		]),
+	);
+	assertEqual(program.decls[0].name, "Box");
+	assertEqual(program.decls[1].decls[0].type.name, "Box");
+	assertEqual(program.decls[2].decls[0].type.name, "Num$$b");
+});
+
+test("a function-local type shadowing a dot import takes a name no other type uses", () => {
+	const local = {
+		kind: "TypeDecl",
+		name: "Box",
+		type: { kind: "TypeName", name: "int" },
+	};
+	const localUse = { kind: "TypeName", name: "Box" };
+	const program = {
+		decls: [
+			{
+				kind: "FuncDecl",
+				name: "f",
+				params: [],
+				body: [
+					local,
+					{ kind: "VarDecl", decls: [{ names: ["y"], type: localUse }] },
+				],
+			},
+			{
+				kind: "VarDecl",
+				decls: [{ names: ["x"], type: { kind: "TypeName", name: "Box" } }],
+			},
+		],
+	};
+	const owners = new Map([
+		["Box", "/main"],
+		["Box__L1", "/c"],
+	]);
+	renameDotImportedTypes(
+		program,
+		new Map([["Box", "Box$$b"]]),
+		owners,
+		"/main",
+	);
+	assertEqual(local.name, "Box__L2");
+	assertEqual(localUse.name, "Box__L2");
+	assertEqual(program.decls[1].decls[0].type.name, "Box$$b");
+	assertEqual(owners.get("Box__L2"), "/main");
+});
+
+test("a renamed type is exported under its declared name in every export table", () => {
+	withTempDir(
+		{
+			"util/util.go":
+				"package util\ntype Map int\nfunc One() Map { return 1 }\n",
+		},
+		(dir) => {
+			const res = compileDir(join(dir, "util"));
+			for (const table of [
+				res.exportedTypes,
+				res.exportedSymbols,
+				res.exportedKinds,
+			])
+				assert(table.has("Map"), "export table is missing 'Map'");
+			assertEqual(res.exportedKinds.get("Map"), "type");
+			assertEqual(res.exportedSymbols.get("Map"), res.exportedTypes.get("Map"));
+		},
+	);
+});
+
+section("generated Go: types of other local packages");
+
+// Every file of the project carries the target directive of `target`.
+const onTarget = (target, files) =>
+	Object.fromEntries(
+		Object.entries(files).map(([path, src]) => [
+			path,
+			target === "js" ? src : `//gofront:target ${target}\n${src}`,
+		]),
+	);
+
+const SUB_MYINT = "package sub\ntype MyInt int\n";
+const JSON_IMPORTS = '"fmt"\n"encoding/json"';
+
+for (const target of ["js", "both", "wasm"]) {
+	const run = async (files) =>
+		(await compileHybridProject(onTarget(target, files))).lines.join("\n");
+
+	const decode = (imports, decls, body) => `package main
+import (
+${JSON_IMPORTS}
+${imports}
+)
+${decls}
+func main() {
+${body}
+}
+`;
+
+	test(`json.Unmarshal into a struct holding an imported type (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": SUB_MYINT,
+			"main.go": decode(
+				'"./sub"',
+				"type Wrap struct{ B sub.MyInt }",
+				'var w Wrap\n\terr := json.Unmarshal([]byte(`{"B":3}`), &w)\n\tfmt.Println(w.B, err)',
+			),
+		});
+		assertEqual(out, "3 <nil>");
+	});
+
+	test(`json.Unmarshal into an imported struct whose field has its package's type (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": "package sub\ntype MyInt int\ntype W struct{ N MyInt }\n",
+			"main.go": decode(
+				'"./sub"',
+				"",
+				'var w sub.W\n\terr := json.Unmarshal([]byte(`{"N":4}`), &w)\n\tfmt.Println(w.N, err)',
+			),
+		});
+		assertEqual(out, "4 <nil>");
+	});
+
+	test(`json.Unmarshal into an imported type reached through an alias (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": SUB_MYINT,
+			"main.go": decode(
+				's "./sub"',
+				"type Wrap struct{ B s.MyInt; P *s.MyInt }",
+				'var w Wrap\n\terr := json.Unmarshal([]byte(`{"B":3,"P":9}`), &w)\n\tfmt.Println(w.B, *w.P, err)',
+			),
+		});
+		assertEqual(out, "3 9 <nil>");
+	});
+
+	test(`json.Unmarshal into types two files import under different aliases (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": SUB_MYINT,
+			"a.go": 'package main\nimport s1 "./sub"\ntype A struct{ B s1.MyInt }\n',
+			"main.go": decode(
+				's2 "./sub"',
+				"type Wrap struct{ B s2.MyInt }",
+				'var w Wrap\n\tvar a A\n\terr := json.Unmarshal([]byte(`{"B":3}`), &w)\n\tjson.Unmarshal([]byte(`{"B":5}`), &a)\n\tfmt.Println(w.B, a.B, err)',
+			),
+		});
+		assertEqual(out, "3 5 <nil>");
+	});
+
+	test(`json.Unmarshal into a dot-imported type (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": SUB_MYINT,
+			"main.go": decode(
+				'. "./sub"',
+				"type Wrap struct{ B MyInt }",
+				'var w Wrap\n\terr := json.Unmarshal([]byte(`{"B":3}`), &w)\n\tfmt.Println(w.B, err)',
+			),
+		});
+		assertEqual(out, "3 <nil>");
+	});
+
+	test(`json.Unmarshal into a type another package declares from a third (${target})`, async () => {
+		const out = await run({
+			"leaf/leaf.go": "package leaf\ntype Num int\n",
+			"mid/mid.go":
+				'package mid\nimport "../leaf"\ntype M struct{ N leaf.Num }\n',
+			"main.go": decode(
+				'"./mid"',
+				"",
+				'var m mid.M\n\terr := json.Unmarshal([]byte(`{"N":4}`), &m)\n\tfmt.Printf("%v %T %v\\n", m.N, m.N, err)',
+			),
+		});
+		assertEqual(out, "4 leaf.Num <nil>");
+	});
+
+	test(`json.Unmarshal when a sibling file's variable shares the import's name (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": SUB_MYINT,
+			"a.go": 'package main\nimport s "./sub"\ntype A struct{ B s.MyInt }\n',
+			"b.go": "package main\nvar s = 99\n",
+			"main.go": decode(
+				"",
+				"",
+				'var a A\n\terr := json.Unmarshal([]byte(`{"B":5}`), &a)\n\tfmt.Println(a.B, s, err)',
+			),
+		});
+		assertEqual(out, "5 99 <nil>");
+	});
+
+	test(`json and fmt keep types of colliding packages apart (${target})`, async () => {
+		const a =
+			"package a\ntype Box struct{ V int }\ntype Num int\ntype G[T any] struct{ X T }\nfunc MkA() Box { return Box{1} }\n";
+		const b =
+			"package b\ntype Box struct{ V int }\ntype Num int\ntype G[T any] struct{ X T }\nfunc MkB() Box { return Box{2} }\n";
+		const body = `var w W
+	err := json.Unmarshal([]byte(\`{"A":{"V":3},"B":{"V":4},"N":5,"M":6,"G":{"X":7},"H":{"X":8}}\`), &w)
+	out, _ := json.Marshal(w)
+	fmt.Println(w, err, string(out))
+	fmt.Printf("%T %T %T %T %T %T\\n", w.A, w.B, w.N, w.M, w.G, w.H)
+	fmt.Printf("%+v\\n", w)`;
+		const want = `{{3} {4} 5 6 {7} {8}} <nil> {"A":{"V":3},"B":{"V":4},"N":5,"M":6,"G":{"X":7},"H":{"X":8}}
+a.Box b.Box a.Num b.Num a.G[int] b.G[int]
+{A:{V:3} B:{V:4} N:5 M:6 G:{X:7} H:{X:8}}`;
+		assertEqual(
+			await run({
+				"a/a.go": a,
+				"b/b.go": b,
+				"main.go": decode(
+					'"./a"\n"./b"',
+					"type W struct{ A a.Box; B b.Box; N a.Num; M b.Num; G a.G[int]; H b.G[int] }",
+					body,
+				),
+			}),
+			want,
+		);
+		assertEqual(
+			await run({
+				"a/a.go": a,
+				"b/b.go": b,
+				"main.go": decode(
+					'"./a"\n. "./b"',
+					"type W struct{ A a.Box; B Box; N a.Num; M Num; G a.G[int]; H G[int] }\nvar _ = MkB",
+					body,
+				),
+			}),
+			want,
+		);
+	});
+
+	test(`%T names the package clause of a local package (${target})`, async () => {
+		const out = await run({
+			"mathx/vec.go": "package vec\ntype V struct{ X, Y int }\n",
+			"main.go": `package main
+import (
+	"fmt"
+	"./mathx"
+)
+func main() { fmt.Printf("%T %v\\n", vec.V{1, 2}, vec.V{1, 2}) }
+`,
+		});
+		assertEqual(out, "vec.V {1 2}");
+	});
+
+	test(`json.Marshal of a type with an imported type argument (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go": SUB_MYINT,
+			"main.go": decode(
+				'"./sub"',
+				"type Box[T any] struct{ V T }",
+				'b, _ := json.Marshal(Box[sub.MyInt]{4})\n\tfmt.Printf("%s %T\\n", b, Box[sub.MyInt]{4})',
+			),
+		});
+		assertEqual(out, '{"V":4} main.Box[sub.MyInt]');
+	});
+
+	test(`fmt and json name an imported generic type its package also aliases an instance of (${target})`, async () => {
+		const util =
+			"package util\ntype Pair[T any] struct{ A, B T }\ntype IntPair = Pair[int]\n";
+		assertEqual(
+			await run({
+				"util/util.go": util,
+				"main.go": `package main
+import (
+	"fmt"
+	"./util"
+)
+func main() { fmt.Printf("%T %v\\n", util.Pair[int]{1, 2}, util.Pair[int]{1, 2}) }
+`,
+			}),
+			"util.Pair[int] {1 2}",
+		);
+		assertEqual(
+			await run({
+				"util/util.go": util,
+				"main.go": decode(
+					'"./util"',
+					"",
+					'var p util.IntPair\n\tvar q util.Pair[string]\n\terr := json.Unmarshal([]byte(`{"A":1,"B":2}`), &p)\n\tjson.Unmarshal([]byte(`{"A":"x"}`), &q)\n\tfmt.Printf("%T %v %T %q %v\\n", p, p, q, q.A, err)',
+				),
+			}),
+			'util.Pair[int] {1 2} util.Pair[string] "x" <nil>',
+		);
+	});
+
+	test(`json and fmt name a renamed type another package imports under an alias (${target})`, async () => {
+		const out = await run({
+			"leaf/leaf.go":
+				"package leaf\ntype Num int\ntype G[T any] struct{ X T }\n",
+			"mid/mid.go":
+				'package mid\nimport l "../leaf"\ntype M struct{ N l.Num; H l.G[int] }\n',
+			"main.go": decode(
+				'"./mid"',
+				"type Num int\ntype G[T any] struct{ X T }",
+				'var m mid.M\n\terr := json.Unmarshal([]byte(`{"N":4,"H":{"X":5}}`), &m)\n\tfmt.Printf("%v %T %v %T %v %v %v\\n", m.N, m.N, m.H, m.H, err, Num(1), G[int]{2})',
+			),
+		});
+		assertEqual(out, "4 leaf.Num {5} leaf.G[int] <nil> 1 {2}");
+	});
+
+	test(`errors.As into a renamed type another package imports under an alias (${target})`, async () => {
+		const out = await run({
+			"leaf/leaf.go":
+				'package leaf\ntype MyErr struct{ C int }\nfunc (e *MyErr) Error() string { return "e" }\n',
+			"mid/mid.go":
+				'package mid\nimport l "../leaf"\nfunc F() error { return &l.MyErr{7} }\nfunc G() *l.MyErr { return nil }\n',
+			"main.go": `package main
+import (
+	"errors"
+	"fmt"
+	"./mid"
+)
+type MyErr struct{}
+func (MyErr) Error() string { return "m" }
+func main() {
+	e := mid.G()
+	fmt.Println(errors.As(mid.F(), &e), e.C, MyErr{})
+}
+`,
+		});
+		assertEqual(out, "true 7 m");
+	});
+
+	test(`json and fmt name a renamed type of a package with a non-ASCII name (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go":
+				"package café\ntype MyInt int\ntype G[T any] struct{ X T }\n",
+			"main.go": decode(
+				'"./sub"',
+				"type MyInt int\ntype G[T any] struct{ X T }\ntype W struct{ B café.MyInt; H café.G[int] }",
+				'var w W\n\terr := json.Unmarshal([]byte(`{"B":3,"H":{"X":4}}`), &w)\n\tfmt.Printf("%v %T %v %T %v %v %v\\n", w.B, w.B, w.H, w.H, err, MyInt(1), G[int]{2})',
+			),
+		});
+		assertEqual(out, "3 café.MyInt {4} café.G[int] <nil> 1 {2}");
+	});
+}
+
+section("init() in several packages");
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`util and main both declare init, and util declares two (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			{
+				"util/util.go": `package util
+
+import "fmt"
+
+var V = 3
+
+func init() { fmt.Println("util init", V) }
+func init() { fmt.Println("util init 2") }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func init() { fmt.Println("main init", util.V) }
+
+func main() { fmt.Println("main") }
+`,
+			},
+			{ target },
+		);
+		assertEqual(lines.join("|"), "util init 3|util init 2|main init 3|main");
+	});
+}
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

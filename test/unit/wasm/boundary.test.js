@@ -1070,33 +1070,106 @@ func main() { constpkg.Touch() }
 
 section("WASM Boundary v1 — linking diagnostics (5c)");
 
-test("top-level name collisions between linked wasm packages are an error", () =>
-	expectCompileError(
-		{
-			"a/a.go": `//gofront:target wasm
+test("linked wasm packages may declare the same top-level names", async () => {
+	const { lines } = await compileHybridProject({
+		"a/a.go": `//gofront:target wasm
 package a
 
+var calls int
+
 func helper() int { return 1 }
-func A() int { return helper() }
+func Make() int { calls++; return helper() }
+func Calls() int { return calls }
 `,
-			"b/b.go": `//gofront:target wasm
+		"b/b.go": `//gofront:target wasm
 package b
 
+var calls int
+
 func helper() int { return 2 }
-func B() int { return helper() }
+func Make() int { calls += 10; return helper() }
+func Calls() int { return calls }
 `,
-			"main.go": `package main
+		"main.go": `package main
 
 import (
+	"fmt"
 	"./a"
 	"./b"
 )
 
-func main() { println(a.A(), b.B()) }
+func main() { fmt.Println(a.Make(), b.Make(), a.Make(), a.Calls(), b.Calls()) }
 `,
-		},
-		"'helper' is declared in both 'a' and 'b'",
-	));
+	});
+	assertEqual(lines.join("|"), "1 2 1 2 10");
+});
+
+test("js main calls the same function of two wasm packages and takes it as a value", async () => {
+	const { lines } = await compileHybridProject({
+		"a/a.go": `//gofront:target wasm
+package a
+
+func Make() int { return 1 }
+`,
+		"b/b.go": `//gofront:target wasm
+package b
+
+func Make() int { return 2 }
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	"./a"
+	"./b"
+)
+
+func main() {
+	f := b.Make
+	fmt.Println(a.Make(), b.Make(), f())
+}
+`,
+	});
+	assertEqual(lines.join("|"), "1 2 2");
+});
+
+test("two wasm packages of one name in different directories link side by side", async () => {
+	const { lines } = await compileHybridProject({
+		"p1/util/u.go": `//gofront:target wasm
+package util
+
+type Box struct{ V int }
+
+var x = 1
+
+func Make() Box { return Box{V: x} }
+`,
+		"p2/util/u.go": `//gofront:target wasm
+package util
+
+type Box struct{ S string }
+
+var x = 2
+
+func Make() Box { return Box{S: "two"} }
+func X() int { return x }
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	u1 "./p1/util"
+	u2 "./p2/util"
+)
+
+func main() {
+	a, b := u1.Make(), u2.Make()
+	fmt.Println(a.V, b.S, u2.X())
+}
+`,
+	});
+	assertEqual(lines.join("|"), "1 two 2");
+});
 
 section(
 	"WASM Boundary v2 — WASM to JS closures & cached trampolines (Task H5.1)",
@@ -2716,3 +2789,341 @@ for (const [name, decls] of multiValueVarCases) {
 		);
 	});
 }
+
+section("WASM Boundary — generic functions cannot be called from js");
+
+const WASM_GENERIC_ID = `//gofront:target wasm
+package util
+
+func Id[T any](s T) T { return s }
+
+func Twice(n int) int { return Id(n) * 2 }
+`;
+
+const GENERIC_FROM_JS_HINT =
+	"generic function util.Id is declared in a wasm package";
+
+async function expectGenericCallError(mainBody, extraImport = "") {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"main.go": `package main
+
+import ${extraImport}"./util"
+
+func main() {
+${mainBody}
+}
+`,
+		},
+		GENERIC_FROM_JS_HINT,
+	);
+}
+
+test("a js package cannot call a wasm generic function with inferred type arguments", () =>
+	expectGenericCallError("\tprintln(util.Id(3))"));
+
+test("a js package cannot call a wasm generic function with explicit type arguments", () =>
+	expectGenericCallError("\tprintln(util.Id[int](3))"));
+
+test("a js package cannot take a wasm generic function instance as a value", () =>
+	expectGenericCallError("\tf := util.Id[int]\n\tprintln(f(3))"));
+
+test("a js package cannot call a dot-imported wasm generic function", async () => {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"main.go": `package main
+
+import . "./util"
+
+func main() { println(Id(3)) }
+`,
+		},
+		GENERIC_FROM_JS_HINT,
+	);
+});
+
+test("the wasm generic function error names the wrapper and both-package fixes", async () => {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Id(3)) }
+`,
+		},
+		"wrap it in a non-generic function",
+	);
+});
+
+test("a wasm package may use its own generic function and js may call the wrapper", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": WASM_GENERIC_ID,
+		"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Twice(3)) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "6");
+});
+
+test("a js package may call a generic function from a both package", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": WASM_GENERIC_ID.replace("target wasm", "target both"),
+		"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Id(3), util.Id[string]("a")) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "3 a");
+});
+
+test("a wasm package may call a generic function from another wasm package", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": WASM_GENERIC_ID,
+		"calc/calc.go": `//gofront:target wasm
+package calc
+
+import "../util"
+
+func Run(n int) int { return util.Id(n) + util.Id[int](1) }
+`,
+		"main.go": `package main
+
+import "./calc"
+
+func main() { println(calc.Run(4)) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "5");
+});
+
+test("a js package that is not main cannot call a wasm generic function either", async () => {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"mid/mid.go": `package mid
+
+import "../util"
+
+func F() int { return util.Id(3) }
+`,
+			"main.go": `package main
+
+import "./mid"
+
+func main() { println(mid.F()) }
+`,
+		},
+		GENERIC_FROM_JS_HINT,
+	);
+});
+
+section("WASM Boundary — generic structs with no wasm instance");
+
+const WASM_BOX_UNUSED = `//gofront:target wasm
+package util
+
+type Box[T any] struct{ V T }
+
+func Plain() int { return 1 }
+`;
+
+async function expectNoBoxInstance(mainSrc, name = "Box") {
+	const res = await compileHybridProject(
+		{ "util/util.go": WASM_BOX_UNUSED, "main.go": mainSrc },
+		{ exports: ["run"] },
+	);
+	let err = null;
+	try {
+		res.mod.run();
+	} catch (e) {
+		err = e;
+	}
+	assert(
+		err instanceof TypeError &&
+			err.message.includes(`GoFront: no ${name} instance`),
+		`expected the no-instance TypeError, got ${err?.name}: ${err?.message}`,
+	);
+}
+
+test("a js literal of a wasm generic struct with no instance throws the documented TypeError", () =>
+	expectNoBoxInstance(`package main
+
+import "./util"
+
+func run() int {
+	b := util.Box[int]{V: 5}
+	return b.V
+}
+
+func main() {}
+`));
+
+test("a js var of a wasm generic struct with no instance throws the documented TypeError", () =>
+	expectNoBoxInstance(`package main
+
+import "./util"
+
+func run() int {
+	var b util.Box[int]
+	return b.V
+}
+
+func main() {}
+`));
+
+test("a js func taking a wasm generic struct with no instance throws the documented TypeError", () =>
+	expectNoBoxInstance(`package main
+
+import "./util"
+
+func f(b util.Box[int]) int { return b.V }
+
+func run() int {
+	return f(util.Box[int]{})
+}
+
+func main() {}
+`));
+
+test("a wasm generic struct with an instance keeps resolving from js", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target wasm
+package util
+
+type Box[T any] struct{ V T }
+
+func Take(b Box[int]) int { return b.V }
+`,
+		"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Take(util.Box[int]{V: 7})) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "7");
+});
+
+test("a wasm generic struct with no instance still throws the TypeError when js declares the same name", () =>
+	expectNoBoxInstance(
+		`package main
+
+import "./util"
+
+type Box struct{ Z int }
+
+func run() int {
+	b := util.Box[int]{V: 5}
+	return b.V + Box{Z: 1}.Z
+}
+
+func main() {}
+`,
+	));
+
+test("the no-instance TypeError names a renamed wasm generic struct as declared", async () => {
+	const box = (pkg, extra = "") => `//gofront:target wasm
+package ${pkg}
+
+type Box[T any] struct{ V T }
+${extra}`;
+	const cases = [
+		[
+			{
+				"a/a.go": box("a", "\nfunc Take(b Box[int]) int { return b.V }\n"),
+				"b/b.go": box("b"),
+			},
+			"./a",
+			"./b",
+		],
+		[
+			{ "p1/util/u.go": box("util"), "p2/util/u.go": box("util") },
+			"./p1/util",
+			"./p2/util",
+		],
+	];
+	for (const [files, first, second] of cases) {
+		const res = await compileHybridProject(
+			{
+				...files,
+				"main.go": `package main
+
+import (
+	x "${first}"
+	y "${second}"
+)
+
+var _ x.Box[string]
+
+func run() int {
+	b := y.Box[int]{V: 5}
+	return b.V
+}
+
+func main() {}
+`,
+			},
+			{ exports: ["run"] },
+		);
+		let err = null;
+		try {
+			res.mod.run();
+		} catch (e) {
+			err = e;
+		}
+		assert(
+			err instanceof TypeError &&
+				err.message.includes("GoFront: no Box instance") &&
+				!err.message.includes("$$"),
+			`expected the no-instance TypeError, got ${err?.name}: ${err?.message}`,
+		);
+	}
+});
+
+test("a wasm generic struct with no instance throws the TypeError next to an instantiated one", async () => {
+	const res = await compileHybridProject(
+		{
+			"util/util.go": `//gofront:target wasm
+package util
+
+type Box[T any] struct{ V T }
+
+type Pair[T any] struct{ A, B T }
+
+func Take(b Box[int]) int { return b.V }
+`,
+			"main.go": `package main
+
+import "./util"
+
+func run() int {
+	p := util.Pair[int]{A: 1}
+	return p.A
+}
+
+func main() {}
+`,
+		},
+		{ exports: ["run"] },
+	);
+	let err = null;
+	try {
+		res.mod.run();
+	} catch (e) {
+		err = e;
+	}
+	assert(
+		err instanceof TypeError &&
+			err.message.includes("GoFront: no Pair instance"),
+		`expected the no-instance TypeError, got ${err?.name}: ${err?.message}`,
+	);
+});

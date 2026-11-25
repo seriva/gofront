@@ -15,6 +15,28 @@ export function forEachChild(node, fn) {
 	}
 }
 
+// The non-enumerable properties a `.templ` node keeps its parsed Go on (see
+// parser/templ.js): an expression, a `case` list, or a `for` header.
+const TEMPL_GO_KEYS = ["expr", "exprs", "forStmt"];
+
+/**
+ * Calls `fn(child)` for the parsed Go a `.templ` node (or one of its
+ * attributes) holds, which `forEachChild` does not visit.  A `case` list's
+ * first expression is also its `expr`, and is visited once.
+ */
+export function forEachTemplGo(node, fn) {
+	const hidden = (key) => {
+		const d = Object.getOwnPropertyDescriptor(node, key);
+		return d && !d.enumerable ? d.value : undefined;
+	};
+	const exprs = hidden("exprs");
+	for (const key of TEMPL_GO_KEYS) {
+		const value = hidden(key);
+		if (!value || (key === "expr" && exprs?.includes(value))) continue;
+		fn(value);
+	}
+}
+
 /**
  * The names of every type the programs declare, nested declarations (a type
  * declared in a function) included, in source order.
@@ -26,6 +48,7 @@ export function declaredTypeNames(programs) {
 		if (Array.isArray(node)) return node.forEach(visit);
 		if (node.kind === "TypeDecl") names.push(node.name);
 		forEachChild(node, visit);
+		forEachTemplGo(node, visit);
 	};
 	for (const p of programs) visit(p.decls);
 	return names;

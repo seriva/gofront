@@ -4,7 +4,7 @@
 // src/lower/fmt-formatters.js), and holds what those generators share: the
 // imports the spelled code needs and the enumeration of the program's types.
 
-import { defaultType } from "../typechecker/types.js";
+import { defaultType, suffixPackageName } from "../typechecker/types.js";
 import { forEachChild } from "./walk.js";
 
 export function under(t) {
@@ -123,6 +123,17 @@ function importPaths(programs) {
 	return paths;
 }
 
+// A qualifier whose path is `LOCAL_PACKAGE + pkgName` names a local package the
+// build compiled rather than a package the generated file imports: the checker
+// binds it to that package's types (`bindGeneratedPackage`).
+export const LOCAL_PACKAGE = "@local:";
+
+export const localPackageOf = (path) =>
+	path.startsWith(LOCAL_PACKAGE) ? path.slice(LOCAL_PACKAGE.length) : null;
+
+// The qualifier prefix the generated file gives a local package it reaches.
+export const LOCAL_QUALIFIER = "_gf_pkg_";
+
 // The generated file's imports for the qualifiers (name -> path) its code
 // spells: a path, or { path, alias } for a qualifier renamed to stay clear of
 // a package-level name.
@@ -165,8 +176,9 @@ export function collectProgramTypes(programs, checker) {
 
 // A type this package declared as `Name$$pkg` cannot be written in Go source;
 // generated files spell it `Name__PKG_pkg` and `restoredTypeName` renames the
-// parsed references back.
-const STAND_IN = /^(.+)__PKG_(\w+)$/;
+// parsed references back. The package name is any Go identifier, Unicode
+// letters included (`package café`).
+const STAND_IN = /^(.+)__PKG_([\p{L}\p{Nd}_]+)$/u;
 
 export function renamedStandIn(name) {
 	const at = name.indexOf("$$");
@@ -188,6 +200,7 @@ export class TypeSpeller {
 		this.programs = programs;
 		this.importPaths = importPaths(programs);
 		this.declared = declaredNames(programs);
+		this.owners = new Map(); // type name -> `ownerOf` answer
 	}
 
 	// Go source for the type.
@@ -212,17 +225,77 @@ export class TypeSpeller {
 		return byKind[t.kind]();
 	}
 
-	// The package name `%T` and errors print for the bare-named type `t`: this
-	// package, or the local package an importer reaches it through as `p.Name`.
-	declaringPackage(t) {
-		if (this.declared.has(t.name) || !this.checker) return this.pkgName;
-		for (const [key, v] of this.checker.types) {
-			const dot = key.indexOf(".");
-			if (v !== t || dot <= 0 || key.slice(dot + 1) !== t.name) continue;
-			const modPath = this.importPaths.get(key.slice(0, dot));
-			if (modPath) return canonicalName(modPath);
+	// The package that declares the named type `t`, or null for a type the
+	// generated file names bare: this package's own types (declared at package
+	// level or in a function), and names no package owns (`.d.ts` types).
+	// `{ pkgName, modPath }` otherwise: `modPath` is the import path of a
+	// standard library package the generated file imports itself, and null for
+	// a local package, which it reaches through a synthetic qualifier (see
+	// `localQualifier`). Instances of a generic type belong to the package that
+	// declares the template. This is the only place that scans the checker's
+	// type table for a type's package.
+	ownerOf(t) {
+		if (t?.kind !== "named") return null;
+		if (!this.owners.has(t.name)) this.owners.set(t.name, this.findOwner(t));
+		return this.owners.get(t.name);
+	}
+
+	findOwner(t) {
+		const { name } = t;
+		if (this.declared.has(name) || this.checker?.isFunctionLocalType?.(name))
+			return null;
+		const at = name.indexOf("$$");
+		if (at >= 0) return this.renamedOwner(t, at);
+		const dot = name.indexOf(".");
+		if (dot > 0) {
+			const modPath = this.importPaths.get(name.slice(0, dot));
+			return modPath ? { modPath, pkgName: canonicalName(modPath) } : null;
 		}
-		return this.pkgName;
+		return this.checker && t._pkgName
+			? { pkgName: t._pkgName, modPath: null }
+			: null;
+	}
+
+	// The owner of a type declared as `Name$$pkg` because its bare name was
+	// taken: a type of a local package, which this package's imports reach
+	// directly (`q.Name`), through another package, or by dot import; or a
+	// standard library type, which carries its import path in the name.
+	renamedOwner(t, at) {
+		const orig = t.name.slice(0, at);
+		const suffix = t.name.slice(at + 2);
+		const pkg = suffixPackageName(suffix);
+		const stdlib = () => ({
+			modPath: suffix.replaceAll("$", "/"),
+			pkgName: pkg,
+		});
+		if (!this.checker) return stdlib();
+		const local = { pkgName: t._pkgName ?? pkg, modPath: null };
+		// Reached through another package (`mid.leaf.Num`), which may import it
+		// under an alias (`mid.l.Num`): a local package's type keeps its package
+		// clause as the suffix, where a standard library one has its path.
+		const through = `.${pkg}.${orig}`;
+		const viaAlias = (key) =>
+			t._pkgName === pkg && key.slice(key.lastIndexOf(".") + 1) === orig;
+		let indirect = false;
+		for (const [key, v] of this.checker.types) {
+			if (v !== t && !(t._genericOf && v?._generic === t._genericOf)) continue;
+			const dot = key.indexOf(".");
+			if (dot < 0 && key === orig) return local;
+			if (dot <= 0) continue;
+			if (key.slice(dot + 1) === orig) {
+				const modPath = this.importPaths.get(key.slice(0, dot));
+				if (!modPath || modPath.startsWith(".")) return local;
+				return { modPath, pkgName: canonicalName(modPath) };
+			}
+			if (key.endsWith(through) || viaAlias(key)) indirect = true;
+		}
+		return indirect ? local : stdlib();
+	}
+
+	// The package name `%T` and errors print for the bare-named type `t`: this
+	// package, or the package that declares it.
+	declaringPackage(t) {
+		return this.ownerOf(t)?.pkgName ?? this.pkgName;
 	}
 
 	// The name the generated file uses for the package at `modPath`: its
@@ -239,58 +312,39 @@ export class TypeSpeller {
 		return name;
 	}
 
-	// How the generated file names a type declared as `Name$$pkg` because its
-	// bare name was taken, or null for a stdlib package it reaches by path.
-	// A package's own type, and one that no import of this package names (it
-	// came through another package), is spelled by a lexable stand-in that
-	// `restoredTypeName` turns back into the declared name once parsed; a
-	// package the checker reaches as `q` is spelled `q.Name`.
-	renamedSpelling(t) {
-		const orig = t.name.slice(0, t.name.indexOf("$$"));
-		const standIn = renamedStandIn(t.name);
-		if (this.declared.has(t.name) || !this.checker) {
-			return this.declared.has(t.name) ? standIn : null;
-		}
-		const through = `.${t.name.slice(t.name.indexOf("$$") + 2)}.${orig}`;
-		let indirect = false;
-		for (const [key, v] of this.checker.types) {
-			const dot = key.indexOf(".");
-			if (v !== t || dot <= 0) continue;
-			if (key.slice(dot + 1) === orig) return key;
-			if (key.endsWith(through)) indirect = true;
-		}
-		return indirect ? standIn : null;
+	// The name the generated file uses for the local package `pkgName`: a
+	// synthetic one no import or declaration of the build can shadow.
+	localQualifier(pkgName) {
+		const path = LOCAL_PACKAGE + pkgName;
+		for (const [name, p] of this.qualifiers) if (p === path) return name;
+		const base = LOCAL_QUALIFIER + pkgName.replace(/[^A-Za-z0-9_]/g, "_");
+		const taken = (n) => this.declared.has(n) || this.qualifiers.has(n);
+		let name = base;
+		for (let i = 2; taken(name); i++) name = `${base}_${i}`;
+		this.qualifiers.set(name, path);
+		return name;
 	}
 
-	// `q.Name` as the checker reaches a type through the import `q`: a
-	// standard library package is imported by the generated file itself, as it
-	// cannot rely on the imports of the user's files. A local package keeps
-	// the name its importer gave it, which the type table knows.
-	qualifiedSpelling(spelled) {
-		const dot = spelled.indexOf(".");
-		const modPath =
-			dot > 0 ? this.importPaths.get(spelled.slice(0, dot)) : null;
-		return modPath && !modPath.startsWith(".")
-			? `${this.qualifierFor(modPath)}${spelled.slice(dot)}`
-			: spelled;
+	// How the generated file names the type `t`: bare for this package's own
+	// types (a renamed one by its lexable stand-in, which `restoredTypeName`
+	// turns back into the declared name once parsed), and qualified by its
+	// package for any other.
+	spellName(t) {
+		const { name } = t;
+		const renamed = name.includes("$$");
+		const owner = this.declared.has(name) ? null : this.ownerOf(t);
+		if (!owner) return renamed ? renamedStandIn(name) : name;
+		if (owner.modPath) {
+			const rest = renamed
+				? name.slice(0, name.indexOf("$$"))
+				: name.slice(name.indexOf(".") + 1);
+			return `${this.qualifierFor(owner.modPath)}.${rest}`;
+		}
+		return `${this.localQualifier(owner.pkgName)}.${renamed ? renamedStandIn(name) : name}`;
 	}
 
 	spellNamed(t) {
-		let name = t.name;
-		const at = name.indexOf("$$");
-		const dot = name.indexOf(".");
-		if (at >= 0) {
-			const orig = name.slice(0, at);
-			const spelled = this.renamedSpelling(t);
-			if (spelled) name = this.qualifiedSpelling(spelled);
-			else {
-				const modPath = name.slice(at + 2).replaceAll("$", "/");
-				name = `${this.qualifierFor(modPath)}.${orig}`;
-			}
-		} else if (dot > 0) {
-			const modPath = this.importPaths.get(name.slice(0, dot));
-			if (modPath) name = `${this.qualifierFor(modPath)}${name.slice(dot)}`;
-		}
+		const name = this.spellName(t);
 		return t.typeArgs?.length
 			? `${name}[${t.typeArgs.map((a) => this.spell(a)).join(", ")}]`
 			: name;
