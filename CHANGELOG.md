@@ -82,6 +82,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Import cycles are compile errors**: a local package that imports itself, directly or through other packages, now reports `import cycle not allowed` with the packages involved and the import that starts the cycle, in `check`, `build`, `dev` and `test`, instead of crashing the compiler.
 - **Methods on a defined type held in a generic struct**: calling or taking a method of a non-struct defined type stored in a field of a generic struct (`h.c.Double()` with `Counter int` in `Holder[T]`) no longer fails at run time with "is not a function".
 - **Type switch `init` statements work**: `switch y := f(); x := v.(type)` and `switch setup(); v.(type)` now run the init and let the clauses use its variables on JavaScript and WebAssembly, and an unused init variable is reported. On JavaScript, a `break` in a type switch clause, or in any `switch` inside a range-over-func loop, now ends only that switch, a clause can declare a variable that shadows one it reads, and a `return` in a closure inside a range-over-func loop returns from the closure instead of ending the loop.
+- **Struct conversions and pointer stores keep Go's value semantics**: `T(src)` of the same struct type now copies the value, `[]int(s)` and `[]byte(b)` share the slice's backing array on JavaScript as they do in Go, and `*p = v` (also in a method, a generic function or a multi-value assignment) keeps slices that point into the struct's array fields up to date on JavaScript and WebAssembly.
 
 ## [1.9.2] - 2026-11-13
 

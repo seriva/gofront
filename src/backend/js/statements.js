@@ -876,7 +876,9 @@ export const statementGenMethods = {
 		const derefs =
 			lhs.length > 1
 				? stmt.lhs.map((l) =>
-						this._isStructDerefTarget(l) ? this.genExpr(l.operand) : null,
+						this._isStructDerefTarget(l)
+							? { ptr: this.genExpr(l.operand), type: l._type }
+							: null,
 					)
 				: null;
 		hoisted?.restore();
@@ -1221,9 +1223,16 @@ export const statementGenMethods = {
 					kind: "typeParamPtr",
 					ptr: this.genExpr(l.operand),
 					isStruct: this._typeParamIsStructJs(l.operand._type.base.name),
+					zero:
+						this._typeParamZeroFactory(l.operand._type.base.name) ??
+						"undefined",
 				};
 			if (this._isStructPointerType(l.operand?._type))
-				return { kind: "structPtr", ptr: this.genExpr(l.operand) };
+				return {
+					kind: "structPtr",
+					ptr: this.genExpr(l.operand),
+					type: l._type,
+				};
 		}
 		return {
 			kind: this._isStableStore(l) ? "stable" : "plain",
@@ -1246,32 +1255,51 @@ export const statementGenMethods = {
 			case "blank":
 				return;
 			case "structPtr":
-				this.line(`Object.assign(${target.ptr}, ${src});`);
+				// A struct with array or nested struct fields keeps their
+				// storage, which slices and pointers into it still see.
+				if (this._hasAggregateField(target.type))
+					this._copyIntoStorage(target.ptr, src, target.type);
+				else this.line(`Object.assign(${target.ptr}, ${src});`);
 				return;
 			case "typeParamPtr":
+				this.useHelper("copyInto");
 				this.line(
-					`((__p, __v) => { if (${target.isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
+					`((__p, __v) => { if (${target.isStruct}) __copyInto(${target.zero}, __p, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
 				);
 				return;
-			case "stable": {
-				let from = src;
-				if (!/^[\w$.[\]]+$/.test(from)) {
-					this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-					from = `__s${this._tmpCounter}`;
-					this.line(`const ${from} = ${src};`);
-				}
-				let dst = target.js;
-				if (!/^[\w$.]+$/.test(dst)) {
-					this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-					dst = `__d${this._tmpCounter}`;
-					this.line(`const ${dst} = ${target.js};`);
-				}
-				this._emitCopyInto(dst, from, target.type);
+			case "stable":
+				this._copyIntoStorage(target.js, src, target.type);
 				return;
-			}
 			default:
 				this.line(`${target.js} = ${src};`);
 		}
+	},
+
+	// Whether a struct type has an array or struct field.
+	_hasAggregateField(type) {
+		const fields = this._aggregateBase(type)?.fields;
+		return (
+			fields instanceof Map &&
+			[...fields.values()].some((t) => this._aggregateBase(t))
+		);
+	},
+
+	// `_emitCopyInto` with `dst` and `src` bound to temporaries first unless
+	// they are plain paths, so each expression runs once.
+	_copyIntoStorage(dstJs, srcJs, type) {
+		let from = srcJs;
+		if (!/^[\w$.[\]]+$/.test(from)) {
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			from = `__s${this._tmpCounter}`;
+			this.line(`const ${from} = ${srcJs};`);
+		}
+		let dst = dstJs;
+		if (!/^[\w$.]+$/.test(dst)) {
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			dst = `__d${this._tmpCounter}`;
+			this.line(`const ${dst} = ${dstJs};`);
+		}
+		this._emitCopyInto(dst, from, type);
 	},
 
 	// Copies aggregate `src` into the storage `dst` element by element, going
@@ -1315,8 +1343,8 @@ export const statementGenMethods = {
 	},
 
 	// Evaluates every right-hand side once into a temporary, then stores each
-	// non-blank target in order.  `derefs[i]` is the struct a `*p` target
-	// writes into.
+	// non-blank target in order.  `derefs[i]` is the pointer and struct type
+	// of a `*p` target.
 	_genMultiAssignViaTemps(stmt, lhs, rhsStr, derefs) {
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__t${this._tmpCounter}`;
@@ -1325,7 +1353,7 @@ export const statementGenMethods = {
 			if (lhs[i] === "_") continue;
 			const src = `${tmp}[${i}]`;
 			if (derefs?.[i])
-				this._storeInto({ kind: "structPtr", ptr: derefs[i] }, src);
+				this._storeInto({ kind: "structPtr", ...derefs[i] }, src);
 			else this.line(`${lhs[i]} ${stmt.op} ${src};`);
 		}
 	},

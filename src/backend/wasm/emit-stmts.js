@@ -1132,23 +1132,9 @@ export class StmtsEmitter {
 		this.emitExpr(r, baseWType);
 		this.pushInstruction({ op: "local.set", index: tmpR });
 		this._emitNilGuard(tmpL, operand._type);
-		for (let i = 0; i < structInfo.fields.length; i++) {
-			this.pushInstruction({ op: "local.get", index: tmpL });
-			this.pushInstruction({ op: "local.get", index: tmpR });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: structInfo.typeIndex,
-				fieldIndex: i,
-			});
-			// A composite literal is already a fresh value.
-			if (r.kind !== "CompositeLit")
-				this._emitCopyFieldValue(structInfo.fields[i]);
-			this.pushInstruction({
-				op: "struct.set",
-				typeIndex: structInfo.typeIndex,
-				fieldIndex: i,
-			});
-		}
+		// Array and nested struct fields are written into the pointee's
+		// existing storage, which slices and pointers into it still see.
+		this._emitStructFieldsInto(structInfo, tmpL, tmpR);
 		this.releaseTemp(tmpR, baseWType);
 		this.releaseTemp(tmpL, baseWType);
 	}

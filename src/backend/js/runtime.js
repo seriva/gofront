@@ -360,6 +360,24 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   return cp(x, zero);
 };`;
 
+// `*p = v` through a type-parameter pointer to a struct: copies `v` into the
+// pointee, keeping the storage of its array and nested struct fields (slices
+// and pointers into them stay valid).  `z` is the zero-value factory, whose
+// value shows which fields are arrays or structs (a pointer's zero is null).
+export const HELPER_COPYINTO = `var __copyInto = __copyInto || function(z, dst, src) {
+  const isObj = (o) => o !== null && typeof o === "object";
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
+  const cp = (d, s, zero) => {
+    if (ArrayBuffer.isView(s)) { d.set(s); return; }
+    const keys = Array.isArray(s) ? s.keys() : Object.keys(s);
+    for (const k of keys) {
+      if (isShape(zero?.[k]) && isObj(s[k]) && isObj(d[k])) cp(d[k], s[k], zero[k]);
+      else d[k] = s[k];
+    }
+  };
+  cp(dst, src, z?.());
+};`;
+
 // == on type-parameter operands: structs and arrays compare by value, other
 // type arguments with ===.  Decided at run time from the zero-value factory.
 export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {

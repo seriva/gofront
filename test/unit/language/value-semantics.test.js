@@ -2365,3 +2365,144 @@ func main() {
 		"5\nab Zb\ntrue\n",
 	);
 });
+
+section("Whole-struct stores through pointers");
+
+const ptrStoreCase = (name, decls, body, want) =>
+	test(name, async () => {
+		await assertAllTargetsOutput(
+			`package main
+
+import "fmt"
+
+type T struct{ M [2]int }
+type Inner struct{ M [2]int }
+type Outer struct{ In Inner }
+
+${decls}
+
+func main() {
+${body}
+}
+`,
+			want,
+		);
+	});
+
+ptrStoreCase(
+	"*pt = T{...} keeps slices of array fields live",
+	"",
+	`	var t T
+	s := t.M[:]
+	pt := &t
+	*pt = T{M: [2]int{1, 2}}
+	fmt.Println(s)`,
+	"[1 2]\n",
+);
+
+ptrStoreCase(
+	"*po = Outer{...} keeps slices of nested array fields live",
+	"",
+	`	var o Outer
+	s := o.In.M[:]
+	po := &o
+	*po = Outer{In: Inner{M: [2]int{3, 4}}}
+	fmt.Println(s)`,
+	"[3 4]\n",
+);
+
+ptrStoreCase(
+	"a generic *p = v keeps slices of array fields live",
+	"func set[V any](p *V, v V) { *p = v }",
+	`	var t T
+	s := t.M[:]
+	set(&t, T{M: [2]int{5, 6}})
+	fmt.Println(s)`,
+	"[5 6]\n",
+);
+
+ptrStoreCase(
+	"*pt = other keeps slices live and does not alias other",
+	"",
+	`	var t T
+	s := t.M[:]
+	other := T{M: [2]int{4, 5}}
+	pt := &t
+	*pt = other
+	other.M[0] = 0
+	fmt.Println(s, t.M, other.M)`,
+	"[4 5] [4 5] [0 5]\n",
+);
+
+ptrStoreCase(
+	"*t = T{...} in a pointer-receiver method keeps slices live",
+	"func (t *T) reset() { *t = T{M: [2]int{8, 9}} }",
+	`	var t T
+	s := t.M[:]
+	t.reset()
+	fmt.Println(s)`,
+	"[8 9]\n",
+);
+
+ptrStoreCase(
+	"*p = T{...} on &arr[0] keeps slices live",
+	"",
+	`	var arr [2]T
+	s := arr[0].M[:]
+	p := &arr[0]
+	*p = T{M: [2]int{6, 7}}
+	fmt.Println(s)`,
+	"[6 7]\n",
+);
+
+ptrStoreCase(
+	"*pt, n = mk() keeps slices live",
+	"func mk() (T, int) { return T{M: [2]int{1, 2}}, 3 }",
+	`	var t T
+	s := t.M[:]
+	pt := &t
+	var n int
+	*pt, n = mk()
+	fmt.Println(s, n)`,
+	"[1 2] 3\n",
+);
+
+ptrStoreCase(
+	"*pu, n = T{...}, 6 keeps slices live",
+	"",
+	`	var u T
+	s := u.M[:]
+	pu := &u
+	var n int
+	*pu, n = T{M: [2]int{4, 5}}, 6
+	fmt.Println(s, n)`,
+	"[4 5] 6\n",
+);
+
+ptrStoreCase(
+	"a generic multi-value *p store keeps slices live",
+	"func mk() (T, int) { return T{M: [2]int{2, 3}}, 4 }\nfunc setm[V any](p *V, v V) { var n int; *p, n = v, 1; _ = n }",
+	`	var t T
+	s := t.M[:]
+	setm(&t, T{M: [2]int{9, 8}})
+	fmt.Println(s)`,
+	"[9 8]\n",
+);
+
+ptrStoreCase(
+	"direct stores without a pointer keep slices live",
+	"",
+	`	var t T
+	s := t.M[:]
+	t = T{M: [2]int{1, 2}}
+	fmt.Println(s)
+	var w Outer
+	ws := w.In.M[:]
+	w.In = Inner{M: [2]int{3, 4}}
+	fmt.Println(ws)
+	var a [2]int
+	as := a[:]
+	a = [2]int{5, 6}
+	fmt.Println(as)`,
+	"[1 2]\n[3 4]\n[5 6]\n",
+);
