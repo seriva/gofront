@@ -10,6 +10,7 @@ import { ERROR } from "../../typechecker/types.js";
 import {
 	addBoundaryHelpers,
 	collectBoundaryMeta,
+	exportedGenericStructs,
 	generateFacade,
 	scanBoundaryImports,
 } from "./boundary.js";
@@ -332,6 +333,9 @@ export function compileWasmModule(
 	let resolvedChecker = checker;
 	let resolvedLowerResult = lowerResult;
 
+	const genericStructs = options.boundary
+		? exportedGenericStructs(progs)
+		: undefined;
 	if (hasGenerics(progs)) {
 		const mono = monomorphise(progs, checker);
 		progs = mono.programs;
@@ -974,7 +978,7 @@ export function compileWasmModule(
 
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
-		? collectBoundaryMeta(progs, funcDecls, mod)
+		? collectBoundaryMeta(progs, funcDecls, mod, genericStructs)
 		: null;
 
 	// 2. Pre-scan for needed imports so import func indices are fixed

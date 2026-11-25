@@ -1513,6 +1513,10 @@ export class TypeChecker {
 					typeParams: typeParamTypes,
 					underlying: funcType,
 					declNode: decl,
+					// Where the template lives: only a `js` caller needs it, to
+					// reject a `wasm` template it cannot instantiate.
+					_target: this.target,
+					_pkgName: this.pkgName,
 				},
 				decl,
 			);
