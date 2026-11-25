@@ -21,6 +21,15 @@ import { jsMemberName, jsSafeName } from "./names.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
+// Nodes an unlabeled `break` inside them belongs to, not to an enclosing
+// type switch.
+const BREAK_SCOPES = new Set([
+	"ForStmt",
+	"SwitchStmt",
+	"TypeSwitchStmt",
+	"FuncLit",
+]);
+
 // The same variable or field chain (`x`, `n.Children`) on both sides.
 const sameChain = (a, b) =>
 	a.kind === b.kind &&
@@ -1421,6 +1430,10 @@ export const statementGenMethods = {
 	},
 
 	_genBranchStmt(stmt) {
+		if (stmt._breakLabel) {
+			this.line(`break ${stmt._breakLabel};`);
+			return;
+		}
 		if (this._inIteratorBody) {
 			this._genIteratorBranchStmt(stmt);
 			return;
@@ -2556,7 +2569,34 @@ export const statementGenMethods = {
 		return this._aggregateBase(t) ? this._cloneJs(t, "__tsw") : "__tsw";
 	},
 
+	// Labels the type switch's `{ … }` when a clause has an unlabeled `break`:
+	// JS would end the enclosing loop (or reject the `break`), as the clauses
+	// are not a JS `switch`. Each such `break` is marked with the label.
+	_typeSwitchBreakLabel(stmt) {
+		let label = null;
+		const visit = (node) => {
+			if (!node || typeof node !== "object") return;
+			if (Array.isArray(node)) return node.forEach(visit);
+			if (BREAK_SCOPES.has(node.kind)) return;
+			if (
+				node.kind === "BranchStmt" &&
+				node.keyword === "break" &&
+				!node.label
+			) {
+				this._tswBreakCounter = (this._tswBreakCounter ?? 0) + 1;
+				label ??= `__tswb${this._tswBreakCounter}`;
+				node._breakLabel = label;
+				return;
+			}
+			forEachChild(node, visit);
+		};
+		for (const c of stmt.cases) visit(c.stmts);
+		return label;
+	},
+
 	genTypeSwitch(stmt) {
+		const breakLabel = this._typeSwitchBreakLabel(stmt);
+		if (breakLabel) this.line(`${breakLabel}:`);
 		this.line("{");
 		this.indented(() => {
 			if (stmt.init) {
