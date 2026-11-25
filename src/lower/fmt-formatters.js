@@ -328,13 +328,15 @@ class FmtGen extends TypeSpeller {
 	}
 
 	// A type the generated file can name: declared at package level or by
-	// another package, or a function-local type, which the checker keeps in
-	// its type table under its name.
+	// another package (an instance of an imported generic type included), or a
+	// function-local type, which the checker keeps in its type table under its
+	// name.
 	isNamedInScope(t) {
 		return (
 			t.name.includes("$$") ||
 			t.name.includes(".") ||
 			this.topLevel.has(t.name) ||
+			this.ownerOf(t) !== null ||
 			this.checker.types.get(t.name) === t
 		);
 	}

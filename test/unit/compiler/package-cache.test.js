@@ -619,3 +619,30 @@ func main() { xs := []int{3, 1}; sort.Ints(xs); fmt.Println(xs, 1) }
 		},
 	);
 });
+
+test("a wasm package whose generated Go names another package's types is served from the cache", () => {
+	withTempDir(
+		{
+			"main.go": `//gofront:target wasm
+package main
+import (
+	"fmt"
+	"./u"
+)
+func main() { fmt.Println(u.Pair[int]{1, 2}, u.Num(3)) }
+`,
+			"u/u.go": `//gofront:target wasm
+package u
+type Pair[T any] struct{ A, B T }
+type Num int
+`,
+		},
+		(dir) => {
+			const cache = new PackageCache();
+			checkedBuild(cache, dir);
+			const again = checkedBuild(cache, dir);
+			assertEqual(again.misses, 0);
+			assertEqual(again.hits, 2);
+		},
+	);
+});

@@ -2769,6 +2769,42 @@ func Run() string {
 	});
 }
 
+section("encoding/json: types of other local packages");
+
+for (const target of ["wasm", "both"]) {
+	test(`Unmarshal into a struct whose fields are types of another package (${target})`, async () => {
+		const { lines } = await compileHybridProject({
+			"sub/sub.go": `//gofront:target ${target}
+package sub
+
+type MyInt int
+type W struct{ N MyInt }
+`,
+			"main.go": `//gofront:target ${target}
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"./sub"
+)
+
+type Wrap struct{ B sub.MyInt }
+
+func main() {
+	var w Wrap
+	var x sub.W
+	err := json.Unmarshal([]byte(\`{"B":3}\`), &w)
+	err2 := json.Unmarshal([]byte(\`{"N":4}\`), &x)
+	out, _ := json.Marshal(x)
+	fmt.Println(w.B, x.N, err, err2, string(out))
+}
+`,
+		});
+		assertEqual(lines.join("\n"), '3 4 <nil> <nil> {"N":4}');
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

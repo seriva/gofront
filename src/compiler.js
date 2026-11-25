@@ -1246,12 +1246,20 @@ function reuseUnit(unit, ctx) {
 		);
 		if (imports.join("|") !== unit.generatedImports) return null;
 	}
+	noteGeneratedQualifiers(unit.codecs, bundledPackages);
 	for (const w of unit.warnings) log.warn(w);
 	for (const t of unit.jsonSet) options.jsonBuild[t] = true;
 	const emitTarget = asInternalError(() =>
 		registerPackageUnit(options, { ...unit.link, bundledPackages }),
 	);
 	return { ...unit, emitTarget };
+}
+
+// The generated Go reaches local packages through synthetic qualifiers, which
+// the flat output dequalifies like any import of them.
+function noteGeneratedQualifiers(codecs, bundledPackages) {
+	for (const p of codecs)
+		for (const q of p._localQualifiers ?? []) bundledPackages.add(q);
 }
 
 // Type-checks and generates the package's own code: the part of a compile
@@ -1283,6 +1291,7 @@ function compileOwnUnit(ctx) {
 		{ ...options, importTokens: generatedImports },
 		STDLIB_DEPS,
 	);
+	noteGeneratedQualifiers(codecs, bundledPackages);
 	checker.reportUnusedImports();
 	if (errors.length > 0) {
 		throw new CompileError(errors);
