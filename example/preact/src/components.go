@@ -1,7 +1,11 @@
 package main
 
-import "./utils"
-import "js:./preact.d.ts"
+import (
+	"gofront/dom"
+
+	"./utils"
+	"js:./preact.d.ts"
+)
 
 func itemClass(t Todo, editing any) string {
 	cls := "todo-item"
@@ -35,10 +39,10 @@ func TodoItem(p TodoItemProps) VNode {
 			"class":     "edit-input",
 			"value":     editText,
 			"autoFocus": true,
-			"onInput": func(e any) {
-				setEditText(e.target.value)
+			"onInput": func(e dom.Event) {
+				setEditText(e.target.(dom.HTMLInputElement).value)
 			},
-			"onKeyDown": func(e any) {
+			"onKeyDown": func(e dom.KeyboardEvent) {
 				if e.key == "Enter" {
 					if p.OnEdit != nil {
 						p.OnEdit(p.Todo.ID, String(editText))
@@ -49,7 +53,7 @@ func TodoItem(p TodoItemProps) VNode {
 					setEditing(false)
 				}
 			},
-			"onBlur": func(e any) {
+			"onBlur": func(e dom.FocusEvent) {
 				if p.OnEdit != nil {
 					p.OnEdit(p.Todo.ID, String(editText))
 				}
@@ -59,7 +63,7 @@ func TodoItem(p TodoItemProps) VNode {
 	} else {
 		textChild = h("span", map[string]any{
 			"class": "todo-text",
-			"onDblClick": func(e any) {
+			"onDblClick": func(e dom.MouseEvent) {
 				setEditText(p.Todo.Text)
 				setEditing(true)
 			},

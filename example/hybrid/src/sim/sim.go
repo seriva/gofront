@@ -2,6 +2,7 @@
 package sim
 
 import (
+	_ "embed"
 	"encoding/json"
 	"gofront/shared"
 	"gofront/simd"
@@ -22,8 +23,9 @@ var currentConfig = Config{
 	Soften:         400.0,
 }
 
-// DefaultConfigJSON is the initial simulation config in JSON.
-const DefaultConfigJSON = `{"name":"standard","drag":0.999,"attractor_force":60000.0,"soften":400.0}`
+// DefaultConfigJSON is the initial simulation config, embedded from config.json.
+//go:embed config.json
+var DefaultConfigJSON string
 
 // LoadConfig parses a JSON configuration string inside the WASM module and applies it.
 func LoadConfig(configJSON string) error {

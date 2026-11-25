@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"gofront/dom"
 	"strings"
 	"unicode/utf8"
 
@@ -261,25 +262,25 @@ func App() VNode {
 		doSave(next)
 	}
 
-	onDragStart := func(t Todo) func(any) {
-		return func(e any) {
+	onDragStart := func(t Todo) func(dom.DragEvent) {
+		return func(e dom.DragEvent) {
 			dragSrcId = t.ID
 			e.dataTransfer.effectAllowed = "move"
 		}
 	}
 
-	onDragOver := func(t Todo) func(any) {
-		return func(e any) {
+	onDragOver := func(t Todo) func(dom.DragEvent) {
+		return func(e dom.DragEvent) {
 			if dragSrcId != t.ID {
 				e.preventDefault()
-				rect := e.currentTarget.getBoundingClientRect()
-				dropAfter = e.clientY > rect.top+rect.height/2
+				rect := e.currentTarget.(dom.Element).getBoundingClientRect()
+				dropAfter = float64(e.clientY) > rect.top+rect.height/2
 			}
 		}
 	}
 
-	onDrop := func(t Todo) func(any) {
-		return func(e any) {
+	onDrop := func(t Todo) func(dom.DragEvent) {
+		return func(e dom.DragEvent) {
 			e.preventDefault()
 			if dragSrcId != 0 && dragSrcId != t.ID {
 				next := moveTodo(currentTodos, dragSrcId, t.ID, dropAfter)
@@ -289,7 +290,7 @@ func App() VNode {
 		}
 	}
 
-	onDragEnd := func(e any) {
+	onDragEnd := func(e dom.DragEvent) {
 		dragSrcId = 0
 	}
 
@@ -348,8 +349,8 @@ func App() VNode {
 			HighPriority:     highPriority == true,
 			Saving:           saving == true,
 			ErrorMsg:         String(errorMsg),
-			OnInput:          func(e any) { setInputValue(e.target.value) },
-			OnKeyDown: func(e any) {
+			OnInput:          func(e dom.Event) { setInputValue(e.target.(dom.HTMLInputElement).value) },
+			OnKeyDown: func(e dom.KeyboardEvent) {
 				if e.key == "Enter" {
 					onAdd()
 				}

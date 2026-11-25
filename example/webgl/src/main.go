@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"gofront/dom"
 	"math"
 )
@@ -21,27 +22,11 @@ var (
 	angleY float32 = 0.0
 )
 
-const vertexShaderSource = `#version 300 es
-in vec3 a_position;
-in vec3 a_color;
+//go:embed vertex.glsl
+var vertexShaderSource string
 
-uniform mat4 u_mvp;
-out vec3 v_color;
-
-void main() {
-    gl_Position = u_mvp * vec4(a_position, 1.0);
-    v_color = a_color;
-}`
-
-const fragmentShaderSource = `#version 300 es
-precision mediump float;
-
-in vec3 v_color;
-out vec4 fragColor;
-
-void main() {
-    fragColor = vec4(v_color, 1.0);
-}`
+//go:embed fragment.glsl
+var fragmentShaderSource string
 
 func mat4Identity(out []float32) {
 	for i := 0; i < 16; i++ {

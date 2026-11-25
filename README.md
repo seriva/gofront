@@ -185,12 +185,13 @@ compatible with the `gom.Node` interface.
 ```
 example/templ/
   src/
-    render.templ  ← UI as templ declarations: TodoItem, TodoList, Header, InputRow, StatsBar, AppView, …
+    render.templ  ← UI as templ declarations: TodoItem, TodoList, Header, SyncStatus (signals), InputRow, StatsBar, AppView, …
     render.go     ← helper functions (todoItemClass, filterLabel, …) + render() entry point
     types.go      ← Todo struct, filter/priority constants
-    store.go      ← state, mutations, localStorage persistence
+    store.go      ← state, mutations, gom.NewSignal sync status, localStorage persistence
     styles.go     ← appStyles() CSS string
-    main.go       ← event setup, entry point
+    main.go       ← typed DOM event setup, entry point
+    browser.d.ts  ← minimal external type declaration (sleep)
     utils/        ← Filter[T], Plural, HasText
   app.js          ← generated output
   index.html      ← HTML shell
@@ -303,15 +304,17 @@ all inside template bodies.
 
 ### WebGL2 (3D showcase)
 
-A 3D rotating colored cube rendered with WebGL2 shaders. Demonstrates GoFront's static
-WebGL2 typings, `Float32Array` / `Uint16Array` slice mapping, zero-allocation `for range`
-loops, and continuous `requestAnimationFrame` rendering — all with zero per-frame heap
-allocations.
+A 3D rotating colored cube rendered with WebGL2 shaders embedded via `//go:embed`.
+Demonstrates GoFront's static WebGL2 typings, `Float32Array` / `Uint16Array` slice
+mapping, zero-allocation `for range` loops, and continuous `requestAnimationFrame`
+rendering — all with zero per-frame heap allocations.
 
 ```
 example/webgl/
   src/
-    main.go       ← shaders, mat4 math, vertex/index buffers, render loop
+    main.go       ← mat4 math, vertex/index buffers, render loop, //go:embed shaders
+    vertex.glsl   ← vertex shader embedded at compile time
+    fragment.glsl ← fragment shader embedded at compile time
   app.js          ← generated output
   index.html      ← canvas element
 ```
@@ -319,16 +322,17 @@ example/webgl/
 ### Hybrid (JS + WasmGC particle simulation)
 
 A particle simulation stepped inside a `wasm` package (`sim`) and rendered to a 2D canvas
-from JavaScript through a zero-copy `gofront/shared` `Float32` buffer, paired with `.templ`
-UI controls.
+from JavaScript (`gofront/dom` + `gofront/canvas`) through a zero-copy `gofront/shared`
+`Float32` buffer, paired with `.templ` UI controls and a `gom.Signal` FPS readout.
 
 ```
 example/hybrid/
   src/
-    controls.templ ← UI controls (step, reset, gravity toggle, particle count)
-    main.go        ← canvas rendering loop reading sim.Positions + DOM event wiring
+    controls.templ ← UI controls (particle count, pause/resume, reset, signal-bound FPS)
+    main.go        ← typed 2D canvas loop reading sim.Positions + DOM event wiring
     sim/
-      sim.go       ← //gofront:target wasm · particle physics & shared.NewFloat32 buffer
+      config.json  ← default physics config embedded via //go:embed in wasm
+      sim.go       ← //gofront:target wasm · SIMD particle physics & shared.NewFloat32 buffers
   app.js           ← generated JS bundle + boundary facade
   app.wasm         ← generated WasmGC module
   index.html       ← canvas + controls shell
