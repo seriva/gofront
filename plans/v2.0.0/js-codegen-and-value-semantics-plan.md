@@ -156,7 +156,7 @@ Roots:
   - Files: `src/parser/statements.js` (`parseSwitch`, `_parseTypeSwitchBody`), `src/typechecker/statements.js` (`_checkTypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1 compiles (no `Undefined: 'y'`) and J1.4 `assertErrorContains(…, "declared and not used: y")`, plus a parser test that the node carries `init`
   - Done when: the type switch `init` is in the AST, its names resolve in every clause, and an unused `init` variable is reported
-- [ ] Task 1.2: Capture-scan and emit `TypeSwitchStmt.init` on JS (J1.1–J1.3)
+- [x] Task 1.2: Capture-scan and emit `TypeSwitchStmt.init` on JS (J1.1–J1.3)
   - Files: `src/lower/captures.js`, `src/backend/js/statements.js` (`genTypeSwitch`), `src/backend/js/expressions.js` (`RECEIVER_STEP.TypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1, J1.2, J1.3 (shadowed `y` + closure capture) with `assertOutput(…, { targets: ["both", "js"] })`
   - Done when: type switch `init` runs once, before the switch expression, with its own scope and closure captures, on `js`/`both`

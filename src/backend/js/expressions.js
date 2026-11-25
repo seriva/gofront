@@ -91,7 +91,7 @@ const RECEIVER_STEP = {
 	IfStmt: (s, reads) => branches(reads, s.init, s.cond),
 	ForStmt: (s, reads) => branches(reads, s.init, s.cond),
 	SwitchStmt: (s, reads) => branches(reads, s.init, s.tag),
-	TypeSwitchStmt: (s, reads) => branches(reads, s.expr),
+	TypeSwitchStmt: (s, reads) => branches(reads, s.init, s.expr),
 	ReturnStmt: (s, reads) => branches(reads, s.values),
 	ExprStmt: (s, reads) => {
 		if (reads(s.expr)) return "deref";

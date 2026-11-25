@@ -2559,47 +2559,55 @@ export const statementGenMethods = {
 	genTypeSwitch(stmt) {
 		this.line("{");
 		this.indented(() => {
-			const val = this.genExpr(stmt.expr);
-			this.line(`const __tsw = ${val};`);
-			// The binding is declared per clause, after the switch expression
-			// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
-			const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
-			const bind = (valueJs) =>
-				this.line(
-					`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
-				);
-
-			let first = true;
-			let hasDefault = false;
-			for (const c of stmt.cases) {
-				if (!c.types) {
-					// default case — emit last
-					hasDefault = c;
-					continue;
-				}
-				const cond = c.types
-					.map((t) => this._typeCheckExpr(t, "__tsw"))
-					.join(" || ");
-				this.line(`${first ? "if" : "else if"} (${cond}) {`);
-				this.indented(() => {
-					if (stmt.assign) {
-						const only = c.types.length === 1 ? c.types[0] : null;
-						bind(this._typeSwitchBinding(only));
-					}
-					for (const s of c.stmts) this.genStmt(s);
-				});
-				this.line("}");
-				first = false;
-			}
-			if (hasDefault) {
-				this.line(first ? "{" : "else {");
-				this.indented(() => {
-					if (stmt.assign) bind("__tsw");
-					for (const s of hasDefault.stmts) this.genStmt(s);
-				});
-				this.line("}");
+			if (stmt.init) {
+				this._genScopedInit(stmt.init, () => this._genTypeSwitchBody(stmt));
+			} else {
+				this._genTypeSwitchBody(stmt);
 			}
 		});
 		this.line("}");
+	},
+
+	_genTypeSwitchBody(stmt) {
+		const val = this.genExpr(stmt.expr);
+		this.line(`const __tsw = ${val};`);
+		// The binding is declared per clause, after the switch expression
+		// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
+		const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
+		const bind = (valueJs) =>
+			this.line(
+				`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
+			);
+
+		let first = true;
+		let hasDefault = false;
+		for (const c of stmt.cases) {
+			if (!c.types) {
+				// default case — emit last
+				hasDefault = c;
+				continue;
+			}
+			const cond = c.types
+				.map((t) => this._typeCheckExpr(t, "__tsw"))
+				.join(" || ");
+			this.line(`${first ? "if" : "else if"} (${cond}) {`);
+			this.indented(() => {
+				if (stmt.assign) {
+					const only = c.types.length === 1 ? c.types[0] : null;
+					bind(this._typeSwitchBinding(only));
+				}
+				for (const s of c.stmts) this.genStmt(s);
+			});
+			this.line("}");
+			first = false;
+		}
+		if (hasDefault) {
+			this.line(first ? "{" : "else {");
+			this.indented(() => {
+				if (stmt.assign) bind("__tsw");
+				for (const s of hasDefault.stmts) this.genStmt(s);
+			});
+			this.line("}");
+		}
 	},
 };

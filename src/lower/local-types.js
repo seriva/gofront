@@ -353,12 +353,15 @@ const SCOPED_WALKS = {
 	DefineStmt: (node, values, walk) => walk(node.rhs, values),
 	VarDecl: walkSpecs,
 	ConstDecl: walkSpecs,
-	// The bound name is in scope in each clause's body, not its type list.
+	// The init's names are in scope in the expression and clauses; the bound
+	// name is in scope in each clause's body, not its type list.
 	TypeSwitchStmt: (node, values, walk) => {
-		const inner = withNames(values, node.assign ? [node.assign] : []);
-		walk(node.expr, values);
+		walk(node.init, values);
+		const header = withNames(values, node.init ? valueNames(node.init) : []);
+		const inner = withNames(header, node.assign ? [node.assign] : []);
+		walk(node.expr, header);
 		for (const c of node.cases ?? []) {
-			walk(c.types, values);
+			walk(c.types, header);
 			walk(c.stmts, inner);
 		}
 	},
