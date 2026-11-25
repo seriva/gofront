@@ -1,7 +1,7 @@
 # Multi-Package Linking, Lowering & Visibility Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** In Progress  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): multi-package follow-ups from `codegen-fixes` Phase 6 (L83), `names-panics-type-exprs` Phases 1 & 3 (L84, L89), `package-scope` Phases 1 & 3 (L99, L102, L103), and `js-dead-code-elimination` Phase 1 (L111). Independent of [`typed-web-fixes-plan.md`](typed-web-fixes-plan.md), [`wasm-codegen-fixes-plan.md`](wasm-codegen-fixes-plan.md), [`generics-and-aliases-plan.md`](generics-and-aliases-plan.md), and [`js-codegen-and-value-semantics-plan.md`](js-codegen-and-value-semantics-plan.md) (shared files: `src/typechecker/index.js`, `src/typechecker/expressions.js`, `src/lower/gen-types.js`, `src/lower/fmt-formatters.js` — rebase if run in parallel).  
 **Release note:** Local packages can now reuse the same function, variable, constant, type and `init()` names as each other, even two packages with the same name in different folders, and `json` and `fmt` now work on types and generic structs from other local packages on every target. **Breaking:** a type no longer satisfies another package's interface through unexported methods it declares itself; embed a type from that package instead. Calling a `wasm` package's generic function from a `js` package is now a compile error rather than a crash when the program runs.
