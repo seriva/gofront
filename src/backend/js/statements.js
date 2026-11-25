@@ -871,8 +871,9 @@ export const statementGenMethods = {
 		);
 		const hoisted = this._hoistLhsOperands(stmt, this._inForPost);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
-		// A struct pointer target is the struct itself: it is written with
-		// `Object.assign`, which a destructuring target cannot express.
+		// A struct pointer target is the struct itself: `_storeInto` writes
+		// into the pointee's storage, which a destructuring target cannot
+		// express.
 		const derefs =
 			lhs.length > 1
 				? stmt.lhs.map((l) =>
@@ -1205,10 +1206,8 @@ export const statementGenMethods = {
 
 	_genStableWholeAssign(stmt) {
 		const target = this._storeTarget(stmt.lhs[0]);
-		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-		const src = `__s${this._tmpCounter}`;
-		this.line(`{ const ${src} = ${this.genExpr(stmt.rhs[0])};`);
-		this._storeInto(target, src);
+		this.line("{");
+		this._storeInto(target, this.genExpr(stmt.rhs[0]));
 		this.line("}");
 	},
 
@@ -1223,6 +1222,7 @@ export const statementGenMethods = {
 					kind: "typeParamPtr",
 					ptr: this.genExpr(l.operand),
 					isStruct: this._typeParamIsStructJs(l.operand._type.base.name),
+					isArray: this._typeParamIsArrayJs(l.operand._type.base.name),
 					zero:
 						this._typeParamZeroFactory(l.operand._type.base.name) ??
 						"undefined",
@@ -1231,6 +1231,16 @@ export const statementGenMethods = {
 				return {
 					kind: "structPtr",
 					ptr: this.genExpr(l.operand),
+					type: l._type,
+				};
+			// An array pointee: the pointer is evaluated now, its `.value`
+			// only at the store (a nil pointer panics after the right-hand
+			// side has run, as in Go).
+			if (this._isStableStore(l))
+				return {
+					kind: "stable",
+					js: this.genExpr(l.operand),
+					deref: true,
 					type: l._type,
 				};
 		}
@@ -1246,10 +1256,11 @@ export const statementGenMethods = {
 	// `_storeTarget`.  A
 	// blank target stores nothing; a `*p` of a struct (or of a type parameter
 	// that is one) copies into the pointee; an address-taken or sliced struct
-	// or array (and the array behind a `*p`) is copied element by element into
-	// its existing storage; any
+	// or array (and the array behind a `*p`, a type parameter's included) is
+	// copied element by element into its existing storage; any
 	// other target is assigned.  A plain store keeps `src` itself, so the
-	// caller passes a fresh copy of an aggregate there.
+	// caller passes a fresh copy of an aggregate there.  The target's
+	// operands are evaluated before `src`, as Go evaluates them first.
 	_storeInto(target, src) {
 		switch (target.kind) {
 			case "blank":
@@ -1264,11 +1275,11 @@ export const statementGenMethods = {
 			case "typeParamPtr":
 				this.useHelper("copyInto");
 				this.line(
-					`((__p, __v) => { if (${target.isStruct}) __copyInto(${target.zero}, __p, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
+					`((__p, __v) => { if (${target.isStruct}) __copyInto(${target.zero}, __p, __v); else if (${target.isArray}) __copyInto(${target.zero}, __p.value, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
 				);
 				return;
 			case "stable":
-				this._copyIntoStorage(target.js, src, target.type);
+				this._copyIntoStorage(target.js, src, target.type, target.deref);
 				return;
 			default:
 				this.line(`${target.js} = ${src};`);
@@ -1285,21 +1296,23 @@ export const statementGenMethods = {
 	},
 
 	// `_emitCopyInto` with `dst` and `src` bound to temporaries first unless
-	// they are plain paths, so each expression runs once.
-	_copyIntoStorage(dstJs, srcJs, type) {
-		let from = srcJs;
-		if (!/^[\w$.[\]]+$/.test(from)) {
+	// they are plain paths, so each expression runs once.  `dst` is bound
+	// before `src` runs (even a plain path, which `src` could reassign): Go
+	// evaluates the pointer or index operands of a target (`*getP()`,
+	// `xs[i()]`) before the right-hand side.  With `deref`, `dstJs` is a
+	// pointer and the storage is its `.value`.
+	_copyIntoStorage(dstJs, srcJs, type, deref = false) {
+		const bind = (prefix, js) => {
 			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-			from = `__s${this._tmpCounter}`;
-			this.line(`const ${from} = ${srcJs};`);
-		}
-		let dst = dstJs;
-		if (!/^[\w$.]+$/.test(dst)) {
-			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-			dst = `__d${this._tmpCounter}`;
-			this.line(`const ${dst} = ${dstJs};`);
-		}
-		this._emitCopyInto(dst, from, type);
+			const name = `${prefix}${this._tmpCounter}`;
+			this.line(`const ${name} = ${js};`);
+			return name;
+		};
+		const srcIsPath = /^[\w$.[\]]+$/.test(srcJs);
+		const dst =
+			srcIsPath && /^[\w$.]+$/.test(dstJs) ? dstJs : bind("__d", dstJs);
+		const from = srcIsPath ? srcJs : bind("__s", srcJs);
+		this._emitCopyInto(deref ? `${dst}.value` : dst, from, type);
 	},
 
 	// Copies aggregate `src` into the storage `dst` element by element, going

@@ -2481,7 +2481,7 @@ ptrStoreCase(
 
 ptrStoreCase(
 	"a generic multi-value *p store keeps slices live",
-	"func mk() (T, int) { return T{M: [2]int{2, 3}}, 4 }\nfunc setm[V any](p *V, v V) { var n int; *p, n = v, 1; _ = n }",
+	"func setm[V any](p *V, v V) { var n int; *p, n = v, 1; _ = n }",
 	`	var t T
 	s := t.M[:]
 	setm(&t, T{M: [2]int{9, 8}})
@@ -2506,3 +2506,298 @@ ptrStoreCase(
 	fmt.Println(as)`,
 	"[1 2]\n[3 4]\n[5 6]\n",
 );
+
+test("a whole-value store evaluates the target's operands before the right-hand side", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct {
+	M [2]int
+	X int
+}
+type S struct{ X int }
+
+func (t *T) reset(v func() T) { *t = v() }
+
+func ptrOf[V any](log *string, p *V) *V { *log += "L"; return p }
+func setg[V any](log *string, p *V, v func() V) { *ptrOf(log, p) = v() }
+func setgm[V any](log *string, p *V, v func() V) { *ptrOf(log, p), _ = v(), 1 }
+
+func main() {
+	order := ""
+	var t T
+	var s S
+	var a [2]int
+	var xs [2][2]int
+	var ts [2]T
+	px, pts := &xs[0], &ts[0]
+	_, _ = px, pts
+	getP := func() *T { order += "L"; return &t }
+	getV := func() T { order += "R"; return T{M: [2]int{1, 2}, X: 3} }
+	getSP := func() *S { order += "L"; return &s }
+	getSV := func() S { order += "R"; return S{4} }
+	getAP := func() *[2]int { order += "L"; return &a }
+	getAV := func() [2]int { order += "R"; return [2]int{5, 6} }
+	idx := func() int { order += "L"; return 1 }
+	show := func(what string) { fmt.Println(what, order); order = "" }
+
+	*getP() = getV()
+	show("struct")
+	*getP(), _ = getV(), 1
+	show("multi")
+	*getSP() = getSV()
+	show("flat")
+	*getAP() = getAV()
+	show("array")
+	*getAP(), _ = getAV(), 1
+	show("array multi")
+	xs[idx()] = getAV()
+	show("element")
+	ts[idx()] = getV()
+	show("struct element")
+	setg(&order, &t, getV)
+	show("generic")
+	setgm(&order, &t, getV)
+	show("generic multi")
+	setg(&order, &a, getAV)
+	show("generic array")
+	(&t).reset(getV)
+	fmt.Println(t.M, t.X, s.X, a, xs[1], ts[1].M)
+}
+`,
+		"struct LR\nmulti LR\nflat LR\narray LR\narray multi LR\nelement LR\nstruct element LR\ngeneric LR\ngeneric multi LR\ngeneric array LR\n[1 2] 3 4 [5 6] [5 6] [1 2]\n",
+	);
+});
+
+// The Go spec leaves open whether `pt` is read before or after a call on the
+// right-hand side (gc happens to read it after).  GoFront reads the pointer
+// first on every target, as it does for a struct without array fields.
+test("*pt = f() reads the pointer before f reassigns it, on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct {
+	M [2]int
+	X int
+}
+
+func main() {
+	t1 := T{M: [2]int{1, 2}, X: 1}
+	t2 := T{M: [2]int{3, 4}, X: 2}
+	pt := &t1
+	*pt = func() T { pt = &t2; return T{M: [2]int{9, 9}, X: 9} }()
+	fmt.Println(t1.M, t1.X, t2.M, t2.X)
+	t1 = T{M: [2]int{1, 2}, X: 1}
+	t2 = T{M: [2]int{3, 4}, X: 2}
+	pt = &t1
+	var n int
+	*pt, n = func() (T, int) { pt = &t2; return T{M: [2]int{9, 9}, X: 9}, 5 }()
+	fmt.Println(t1.M, t1.X, t2.M, t2.X, n)
+}
+`,
+		"[9 9] 9 [3 4] 2\n[9 9] 9 [3 4] 2 5\n",
+	);
+});
+
+test("a generic *p store into an array pointee keeps slices of it live", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ M [2]int }
+type Arr [2]int
+
+func set[V any](p *V, v V) { *p = v }
+
+func setOk[V any](p *V, m map[string]V) bool {
+	var ok bool
+	*p, ok = m["k"]
+	return ok
+}
+
+func setAssert[V any](p *V, a any) {
+	*p, _ = a.(V)
+}
+
+func setRange[V any](p *V, xs []V) {
+	for _, *p = range xs {
+	}
+}
+
+func setMulti[V any](p *V, v V) int {
+	var n int
+	*p, n = v, 1
+	return n
+}
+
+func main() {
+	var a [2]int
+	s := a[:]
+	set(&a, [2]int{5, 6})
+	fmt.Println(s)
+
+	var b [2]byte
+	bs := b[:]
+	set(&b, [2]byte{3, 4})
+	fmt.Println(bs)
+
+	var na Arr
+	ns := na[:]
+	set(&na, Arr{7, 8})
+	fmt.Println(ns)
+
+	var f [2]float64
+	fs := f[:]
+	set(&f, [2]float64{1.5, 2.5})
+	fmt.Println(fs)
+
+	var ta [2]T
+	inner := ta[1].M[:]
+	set(&ta, [2]T{{M: [2]int{1, 1}}, {M: [2]int{2, 2}}})
+	fmt.Println(inner)
+
+	var aa [2][2]int
+	in2 := aa[1][:]
+	set(&aa, [2][2]int{{1, 2}, {3, 4}})
+	fmt.Println(in2)
+
+	var t T
+	tm := t.M[:]
+	set(&t.M, [2]int{4, 4})
+	fmt.Println(tm)
+
+	src := [2]int{1, 2}
+	var dst [2]int
+	ds := dst[:]
+	set(&dst, src)
+	src[0] = 9
+	fmt.Println(ds, dst)
+
+	var c [2]int
+	cs := c[:]
+	ok := setOk(&c, map[string][2]int{"k": {1, 9}})
+	fmt.Println(cs, ok)
+
+	var d [2]int
+	dss := d[:]
+	setAssert(&d, [2]int{2, 8})
+	fmt.Println(dss)
+
+	var e [2]int
+	es := e[:]
+	setRange(&e, [][2]int{{1, 1}, {3, 7}})
+	fmt.Println(es)
+
+	var g [2]int
+	gs := g[:]
+	n := setMulti(&g, [2]int{6, 5})
+	fmt.Println(gs, n)
+
+	x := 1
+	set(&x, 5)
+	var sl []int
+	set(&sl, []int{1})
+	fmt.Println(x, sl)
+}
+`,
+		"[5 6]\n[3 4]\n[7 8]\n[1.5 2.5]\n[2 2]\n[3 4]\n[4 4]\n[1 2] [1 2]\n[1 9] true\n[2 8]\n[3 7]\n[6 5] 1\n5 [1]\n",
+	);
+});
+
+test("conversions from a slice-or-string type parameter follow the type argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B []byte
+type R []rune
+type Str string
+
+func conv[S ~[]byte | ~string](s S) []byte { return []byte(s) }
+func convR[S ~[]rune | ~string](s S) []rune  { return []rune(s) }
+func strR[S ~[]rune | ~string](s S) string   { return string(s) }
+func strB[S ~[]byte | ~string](s S) string   { return string(s) }
+func convU[S interface{ []uint8 | B }](s S) []byte { return []byte(s) }
+func convN[S B | ~string](s S) []byte        { return []byte(s) }
+func convNB[S B | []byte](s S) B             { return B(s) }
+func convStr[S ~string](s S) []byte          { return []byte(s) }
+func convStrR[S ~string](s S) []rune         { return []rune(s) }
+func toStr[S ~[]byte | ~string](s S) Str      { return Str(s) }
+
+func strMix[S ~[]byte | ~[]rune | ~string](s S) string { return string(s) }
+func strMixI[S ~int32 | ~int64 | ~string](s S) string  { return string(s) }
+func runesOf[S ~[]rune | ~string](s S) int             { return len([]rune(s)) }
+
+func main() {
+	b := []byte("ab")
+	tb := conv(b)
+	tb[0] = 'Z'
+	sb := conv("ab")
+	sb[0] = 'Z'
+	fmt.Println(string(b), string(tb))
+	fmt.Println(string(sb), len(sb))
+	var nb []byte
+	fmt.Println(conv(nb) == nil, len(conv("")))
+
+	r := []rune("hé")
+	tr := convR(r)
+	tr[0] = 'X'
+	sr := convR("hé")
+	sr[0] = 'Y'
+	fmt.Println(string(r), string(tr), string(sr), len(sr))
+	fmt.Println(strR(r), strR("ok"), strB(b), strB("ok2"))
+
+	u := []uint8("cd")
+	tu := convU(u)
+	tu[0] = 'Q'
+	fmt.Println(string(u))
+
+	nbv := B("ef")
+	tn := convN(nbv)
+	tn[0] = 'W'
+	fmt.Println(string(nbv), string(convN("gh")))
+
+	x := []byte("ij")
+	y := convNB(x)
+	y[0] = 'V'
+	fmt.Println(string(x))
+
+	fmt.Println(string(convStr(Str("kl"))), string(convStrR("mn")))
+	fmt.Println(toStr(b), toStr("op"))
+
+	var nr []rune
+	var nb2 []byte
+	fmt.Println(string(nr) == "", strMix(nr) == "", strMix(nb2) == "", strR(nr) == "")
+	fmt.Println(strMix([]rune("xé")), strMix([]byte("y")), strMix("z"))
+	fmt.Println(strMixI(int32(65)), strMixI(int64(66)), strMixI("w"))
+	fmt.Println(runesOf("hé"), runesOf([]rune("abc")))
+}
+`,
+		"Zb Zb\nZb 2\ntrue 0\nXé Xé Yé 2\nXé ok Zb ok2\nQd\nWf gh\nVj\nkl mn\nZb op\ntrue true true true\nxé y z\nA B w\n2 3\n",
+	);
+});
+
+test("an array conversion from a slice type parameter copies the elements", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func toArr[S ~[]int](s S) [2]int { return [2]int(s) }
+
+func main() {
+	s := []int{1, 2, 3}
+	a := toArr(s)
+	a[0] = 9
+	fmt.Println(s, a)
+}
+`,
+		"[1 2 3] [9 2]\n",
+	);
+});
