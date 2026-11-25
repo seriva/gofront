@@ -1550,7 +1550,8 @@ export const statementGenMethods = {
 			this.line(`for (const _$ of ${iteree} ?? "") {`);
 		} else {
 			const limit = this._rangeExprLimit(iterType, iteree);
-			this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
+			const start = is64BitInt(iterType) ? "0n" : "0";
+			this.line(`for (let _$ = ${start}; _$ < ${limit}; _$++) {`);
 		}
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
@@ -1801,9 +1802,17 @@ export const statementGenMethods = {
 	_genIntRangeFor(stmt, iteree, isAssign) {
 		const varNode = stmt.init.lhs[0];
 		const name = varNode?.kind === "Ident" ? varNode.name : null;
-		if (this._isSimpleIntRange(stmt, name, isAssign)) {
+		const rangeExpr = stmt.init.rhs[0].expr;
+		const iterType = rangeExpr._coreType ?? rangeExpr._type;
+		const isBig = is64BitInt(iterType);
+		const isTypeParam = rangeExpr._type?.kind === "typeParam";
+		if (
+			this._isSimpleIntRange(stmt, name, isAssign) &&
+			(!isTypeParam || isBig)
+		) {
 			const v = !name || name === "_" ? "_$" : name;
-			this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
+			const start = isBig ? "0n" : "0";
+			this.line(`for (let ${v} = ${start}; ${v} < ${iteree}; ${v}++) {`);
 			this.indented(() => this.genBlock(stmt.body));
 			this.line("}");
 			return;
@@ -1812,7 +1821,14 @@ export const statementGenMethods = {
 		const d = this._loopDepth++;
 		const i = `__i${d}`;
 		const n = `__n${d}`;
-		this.line(`for (let ${i} = 0, ${n} = ${iteree}; ${i} < ${n}; ${i}++) {`);
+		const start = isBig
+			? "0n"
+			: isTypeParam
+				? `typeof ${n} === "bigint" ? 0n : 0`
+				: "0";
+		this.line(
+			`for (let ${n} = ${iteree}, ${i} = ${start}; ${i} < ${n}; ${i}++) {`,
+		);
 		this.indented(() => {
 			this._emitRangeVar(varNode, i, isAssign);
 			this._genIntRangeBody(stmt, name, isAssign);

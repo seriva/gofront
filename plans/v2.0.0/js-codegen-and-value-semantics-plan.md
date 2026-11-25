@@ -190,7 +190,7 @@ Roots:
   - Files: `src/backend/js/expressions.js` (`_typeNameCheckExpr`), `src/backend/js/type-info.js` (`_typeCheckForType`)
   - Test: `test/unit/language/interfaces.test.js`: J5.1 rows and controls (comma-ok and single-value `n.(any)`, `f[interface{}](n)`, `f[any](n)` on `nil` and non-nil values) with `assertAllTargetsOutput`
   - Done when: JS empty-interface assertions match Go/WASM on both `nil` and non-nil interfaces
-- [ ] Task 4.2: Use `0n` counters for JS `int64`/`uint64` range loops (J5.2)
+- [x] Task 4.2: Use `0n` counters for JS `int64`/`uint64` range loops (J5.2)
   - Files: `src/backend/js/statements.js` (`_genIntRangeFor`)
   - Test: `test/unit/language/range-iter.test.js`: J5.2 (`range int64(5)`, `range uint64(5)`, `range n` with `n int64`, and a generic `range` over a `T ~int64` count) with `assertAllTargetsOutput`
   - Done when: 64-bit integer range counters compare and print like Go on `js`, `both`, and `wasm`

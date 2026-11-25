@@ -492,6 +492,80 @@ func main() {
 	);
 });
 
+section("Range over 64-bit integers (J5.2)");
+
+test("range over int64, uint64, defined int64 and generic ~int64 counts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyInt64 int64
+
+func findThree[T ~int64](limit T) T {
+	var hit T = -1
+	for i := range limit {
+		if i == 3 {
+			hit = i
+		}
+	}
+	return hit
+}
+
+func main() {
+	var a int64 = -1
+	for i := range int64(5) {
+		if i == 3 {
+			a = i
+		}
+	}
+
+	var b uint64 = 99
+	for i := range uint64(5) {
+		if i == 3 {
+			b = i
+		}
+	}
+
+	var n int64 = 4
+	var c int64 = -1
+	for i := range n {
+		if i == 2 {
+			c = i
+		}
+	}
+
+	d := findThree(int64(5))
+
+	var m MyInt64 = 4
+	var e MyInt64 = -1
+	for i := range m {
+		if i == 2 {
+			e = i
+		}
+	}
+
+	// Capture, assign to existing var, and zero-var forms
+	var fs []func() int64
+	for i := range int64(3) {
+		fs = append(fs, func() int64 { return i })
+	}
+	var assigned int64
+	for assigned = range int64(4) {
+	}
+	zeroVar := 0
+	for range int64(3) {
+		zeroVar++
+	}
+
+	fmt.Println(a, b, c, d, e)
+	fmt.Println(fs[0](), fs[1](), fs[2](), assigned, zeroVar)
+}
+`,
+		"3 3 2 3 2\n0 1 2 3 3\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
