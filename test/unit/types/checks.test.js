@@ -2713,6 +2713,8 @@ for (const target of ["js", "both", "wasm"]) {
 type MyF float64
 type Ints [3]int
 const Top = len("abc") + int(2) + min(1, 2)
+const Later = cap(later)
+var later = [3]int{}
 func main() {
 	const A = 1 + 2
 	const B = len("abc")
@@ -2726,9 +2728,11 @@ func main() {
 	var p *[3]int
 	const M = cap(p)
 	const N = max(A, 7.5)
+	const Z = 3 + 4i
+	const Im = imag(Z) + real(1 + 2i)
 	var f32 float32 = 1
 	_, _, _, _, _ = complex(f32, 2), complex(MyF(2), MyF(2)), complex(1.5, 2), L, M
-	_, _ = Top, N
+	_, _, _, _, _ = Top, N, Z, Im, Later
 	_, _, _, _, _ = B, C, E, F, G
 }
 `,
