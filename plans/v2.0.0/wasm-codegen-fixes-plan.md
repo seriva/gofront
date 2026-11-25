@@ -170,7 +170,7 @@ Roots:
   - Files: `src/backend/wasm/prescan.js` (`_scanFuncSigInterfaces`)
   - Test: `test/unit/wasm/boundary.test.js`: W6.1 (`Box{v interface{ M() int }}`, `Box[interface{ M() struct{ X int } }]`), W6.2 (slice, map, pointer, array, struct, func-param and result composites; `var G interface{…}`; `var G []interface{…}`; exported field) + unexported-`box` control
   - Done when: every W6.1–W6.2 program builds a valid module with Go's output
-- [ ] Task 3.3: Read `x.Y` as `pkg.Type` only for package names in `_getReceiverTypeName` (W6.3)
+- [x] Task 3.3: Read `x.Y` as `pkg.Type` only for package names in `_getReceiverTypeName` (W6.3)
   - Files: `src/backend/wasm/emit.js` (`_getReceiverTypeName`)
   - Test: `test/unit/wasm/interfaces.test.js`: W6.3 (`v.X.M()` on anonymous struct, named `b.X.M()`, pointer `p.X.M()`, package var, generic `b.V.M()`) + W6 controls (`Box{X: A{}}.X.M()`, chained, indexed, method value, local named `fmt`); existing qualified-receiver tests (`simd.F32x4` methods) keep passing
   - Done when: every W6.3 program prints `9` on `wasm`
