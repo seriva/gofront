@@ -372,6 +372,81 @@ func main() {
 	);
 });
 
+section("WASM map keys that hold interfaces");
+
+// Each program runs once as written (no fmt import) and once with fmt
+// imported, since fmt pulls in interface helpers on its own.
+const keyProgram = (decls, body) => `package main
+
+${decls}
+
+func main() {
+${body}
+}
+`;
+const withFmt = (src) =>
+	src.replace(
+		"package main\n",
+		'package main\n\nimport "fmt"\n\nvar _ = fmt.Sprint\n',
+	);
+
+const interfaceKeyCases = [
+	[
+		"map[[2]any]int",
+		"",
+		'\tm := map[[2]any]int{}\n\tm[[2]any{1, "a"}] = 3\n\tm[[2]any{1, "a"}] += 4\n\tprintln(m[[2]any{1, "a"}], len(m))',
+		"7 1\n",
+	],
+	[
+		"map[[1][2]any]int",
+		"",
+		"\tm := map[[1][2]any]int{}\n\tm[[1][2]any{{1, 2}}] = 5\n\tprintln(m[[1][2]any{{1, 2}}], m[[1][2]any{{2, 1}}])",
+		"5 0\n",
+	],
+	[
+		"map[[1]I]int",
+		"type I interface{ M() int }\ntype A struct{ v int }\n\nfunc (a A) M() int { return a.v }",
+		"\tm := map[[1]I]int{}\n\tm[[1]I{A{1}}] = 6\n\tprintln(m[[1]I{A{1}}], m[[1]I{A{2}}])",
+		"6 0\n",
+	],
+	[
+		"map[struct{ A any }]int",
+		"",
+		"\tm := map[struct{ A any }]int{}\n\tm[struct{ A any }{1}] = 8\n\tprintln(m[struct{ A any }{1}], m[struct{ A any }{2}])",
+		"8 0\n",
+	],
+	[
+		"map[K]int with K struct{ A any }",
+		"type K struct{ A any }",
+		'\tm := map[K]int{}\n\tm[K{"x"}] = 9\n\tprintln(m[K{"x"}], m[K{"y"}])',
+		"9 0\n",
+	],
+	[
+		"generic put with a [2]any key",
+		"func put[K comparable](m map[K]int, k K, v int) { m[k] = v }",
+		"\tm := map[[2]any]int{}\n\tput(m, [2]any{1, 2}, 4)\n\tprintln(m[[2]any{1, 2}])",
+		"4\n",
+		// The JS backend stores the key under a type-parameter map by identity.
+		"wasm",
+	],
+	[
+		"control: map[any]int",
+		"",
+		"\tm := map[any]int{}\n\tm[1] = 2\n\tprintln(m[1])",
+		"2\n",
+	],
+];
+
+for (const [name, decls, body, want, only] of interfaceKeyCases) {
+	const check = only === "wasm" ? assertWasmProgramOutput : assertProgramOutput;
+	test(`${name} without fmt`, async () => {
+		await check(keyProgram(decls, body), want);
+	});
+	test(`${name} with fmt`, async () => {
+		await check(withFmt(keyProgram(decls, body)), want);
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

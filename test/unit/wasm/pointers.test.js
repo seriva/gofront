@@ -1250,3 +1250,141 @@ func main() {
 		"true\ntrue\n",
 	);
 });
+
+section(
+	"WASM Pointers — new of a func type and pointers to defined complex types",
+);
+
+test("new of a defined func type is a nil closure box", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type F func() int
+
+func main() {
+	pf := new(F)
+	fmt.Println(*pf == nil)
+}
+`,
+		"true\n",
+	);
+});
+test("new of a func literal type stores and calls a closure", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type F func() int
+
+func main() {
+	pg := new(func() int)
+	fmt.Println(*pg == nil)
+	*pg = func() int { return 5 }
+	fmt.Println((*pg)())
+}
+`,
+		"true\n5\n",
+	);
+});
+test("a *F variable takes a closure through the pointer", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type F func() int
+
+func main() {
+	var pf *F = new(F)
+	fn := func() int { return 7 }
+	*pf = fn
+	fmt.Println((*pf)(), *pf != nil)
+}
+`,
+		"7 true\n",
+	);
+});
+test("a struct field of type *F boxes a closure", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type F func() int
+
+type holder struct{ P *F }
+
+func main() {
+	h := holder{new(F)}
+	*h.P = func() int { return 3 }
+	fmt.Println((*h.P)(), h.P != nil)
+}
+`,
+		"3 true\n",
+	);
+});
+test("a *F parameter replaces the caller's closure", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type F func() int
+
+func set(p *F, f F) { *p = f }
+
+func main() {
+	pf := new(F)
+	set(pf, func() int { return 11 })
+	fmt.Println((*pf)())
+}
+`,
+		"11\n",
+	);
+});
+
+test("a pointer to a func-typed variable is still rejected in a wasm package", () => {
+	const { errors } = compileWasm(`package main
+
+type F func() int
+
+func main() {
+	var f F
+	p := &f
+	_ = p
+}
+`);
+	assertErrorContains(
+		errors,
+		"cannot take the address of a variable of func type F in a wasm package",
+	);
+});
+
+test("pointers to reference-like types keep working", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type C complex128
+
+var g C
+
+func main() {
+	a := new(any)
+	b := new([]int)
+	c := new(map[string]int)
+	d := new(complex128)
+	var e [2]complex128
+	s := make([]C, 2)
+	m := map[int]C{1: 2}
+	z := C(1 + 2i)
+	fmt.Println(*a == nil, *b == nil, *c == nil, *d, e[0], g, s, m, z*z, z == z, real(z), imag(z))
+}
+`,
+		"true true true (0+0i) (0+0i) (0+0i) [(0+0i) (0+0i)] map[1:(2+0i)] (-3+4i) true 1 2\n",
+	);
+});

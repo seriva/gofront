@@ -433,3 +433,44 @@ func main() { var p P1; `;
 	);
 	assertEqual(compile(`${decl}_ = P3(p) }`).errors.length, 0);
 });
+
+section("Slice to array pointer conversions");
+
+const SLICE_PTR_MSG =
+	"cannot convert a slice to an array pointer in a wasm package";
+
+const slicePtrCases = {
+	"(*[2]int)(s)": `func main() { s := []int{1, 2}; p := (*[2]int)(s); println(p[0]) }`,
+	"(*[0]int)([]int(nil))": `func main() { p := (*[0]int)([]int(nil)); println(p == nil) }`,
+	"(*A)(s) with a defined array type": `type A [2]int
+func main() { s := []int{1, 2}; p := (*A)(s); println(p[0]) }`,
+};
+
+for (const target of ["wasm", "both"]) {
+	for (const [name, body] of Object.entries(slicePtrCases)) {
+		test(`${target}: ${name} is rejected`, () => {
+			const { errors } = compile(`package main\n${body}\n`, { target });
+			assertErrorContains(errors, SLICE_PTR_MSG);
+			assertErrorContains(errors, "convert to an array ([N]T(s)) instead");
+		});
+	}
+}
+
+test("js: (*[2]int)(s) still compiles", () => {
+	const { errors } = compile(`package main
+func main() { s := []int{1, 2}; p := (*[2]int)(s); println(p[0]) }`);
+	assertEqual(errors.length, 0);
+});
+
+test("(*[0]int)(nil) is a nil pointer conversion and runs on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+func main() {
+	p := (*[0]int)(nil)
+	println(p == nil)
+}
+`,
+		"true\n",
+	);
+});

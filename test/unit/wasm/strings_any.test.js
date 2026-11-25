@@ -4,6 +4,7 @@
 import {
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	compileHybrid,
 	runWasm,
 	section,
@@ -1111,4 +1112,100 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "jello 5");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM Strings — package-level `any` globals with literal initializers");
+
+test("package-level any variables hold int, rune, bool and negative literals", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+var a any = 1
+var b any = true
+var c any = 'a'
+var d any = -5
+var e any = false
+var f any = 0x10
+
+func main() { fmt.Println(a, b, c, d, e, f) }
+`,
+		"1 true 97 -5 false 16\n",
+	);
+});
+
+test("package-level any variables hold float literals", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+var a any = 1.5
+var b any = -1.5
+
+func main() { fmt.Printf("%v %v %T %T\\n", a, b, a, b) }
+`,
+		"1.5 -1.5 float64 float64\n",
+	);
+});
+
+test("package-level any variables in a multi-name declaration", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+var a, b any = 1, 2
+var c, d any = "x", 2.5
+
+func main() { fmt.Println(a, b, c, d) }
+`,
+		"1 2 x 2.5\n",
+	);
+});
+
+test("package-level any variables work without importing fmt", async () => {
+	await assertProgramOutput(
+		`package main
+
+var a any = 7
+var b any = 'a'
+
+func main() {
+	println(a.(int))
+	println(b.(rune))
+}
+`,
+		"7\n97\n",
+	);
+});
+
+test("package-level literal initializers keep working for matching types", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type B bool
+
+var a any = "hi"
+var b any = 1 + 2i
+var c any = 1 + 2
+var e error = nil
+var x int = 1.0
+var u uint8 = 'a'
+var i int64 = 1
+var bb B = true
+
+const K = 1
+
+var k any = K
+
+const f float64 = 1
+
+func main() { fmt.Println(a, b, c, e, x, u, i, bb, k, f) }
+`,
+		"hi (1+2i) 3 <nil> 1 97 1 true 1 1\n",
+	);
 });

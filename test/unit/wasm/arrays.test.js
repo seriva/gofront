@@ -7,7 +7,9 @@ import { HELPER_SLICE, HELPER_SV } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
 	assertEqual,
+	assertProgramOutput,
 	assertValidWasm,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	compileHybridProject,
@@ -1999,4 +2001,261 @@ func Main() int {
 `).run("Main");
 	assertEqual(res.jsRes, 438);
 	assertEqual(Number(res.wasmRes), 438);
+});
+
+section("Arrays and structs holding interfaces compare with ==");
+
+// No program here imports fmt, so nothing else pulls in the interface
+// equality helper.
+const eqProgram = (decls, body) => `package main
+
+${decls}
+
+func main() {
+${body}
+}
+`;
+
+test("[2]any == [2]any without fmt", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"func f(a, b [2]any) bool { return a == b }",
+			'\tprintln(f([2]any{1, "x"}, [2]any{1, "x"}), f([2]any{1, 2}, [2]any{1, 3}))',
+		),
+		"true false\n",
+	);
+});
+
+test("[2]I == [2]I with a named interface", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			`type I interface{ M() int }
+type A struct{ v int }
+
+func (a A) M() int { return a.v }`,
+			"\ta := [2]I{A{1}, A{2}}\n\tb := [2]I{A{1}, A{2}}\n\tc := [2]I{A{1}, A{3}}\n\tprintln(a == b, a == c)",
+		),
+		"true false\n",
+	);
+});
+
+test("[2][2]any == and [2]any !=", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"",
+			"\ta := [2][2]any{{1, 2}, {3, 4}}\n\tb := [2][2]any{{1, 2}, {3, 4}}\n\tc := [2]any{1, 2}\n\td := [2]any{1, 5}\n\tprintln(a == b, c != d, c != c)",
+		),
+		"true true false\n",
+	);
+});
+
+test("switch on a [2]any tag", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"",
+			`	a := [2]any{1, 2}
+	switch a {
+	case [2]any{1, 3}:
+		println("no")
+	case [2]any{1, 2}:
+		println("yes")
+	}`,
+		),
+		"yes\n",
+	);
+});
+
+test("local struct{ A any } values and [1]struct{ A any } compare", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"",
+			`	x := struct{ A any }{1}
+	y := struct{ A any }{1}
+	z := struct{ A any }{"1"}
+	p := [1]struct{ A any }{{2}}
+	q := [1]struct{ A any }{{2}}
+	println(x == y, x == z, p == q)`,
+		),
+		"true false true\n",
+	);
+});
+
+test("generic eq instantiated with [2]any", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"func eq[T comparable](a, b T) bool { return a == b }",
+			"\tprintln(eq([2]any{1, 2}, [2]any{1, 2}), eq([2]any{1, 2}, [2]any{2, 1}))",
+		),
+		"true false\n",
+	);
+});
+
+test("controls: named struct with any field, [1]K, any-wrapped arrays", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"type K struct{ A any }",
+			`	println(K{1} == K{1}, [1]K{{1}} == [1]K{{2}})
+	println(any([2]any{1, 2}) == any([2]any{1, 2}))`,
+		),
+		"true false\ntrue\n",
+	);
+});
+
+test("control: struct{ A any } parameters compared with fmt imported", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func same(a, b struct{ A any }) bool { return a == b }
+
+func main() {
+	fmt.Println(same(struct{ A any }{1}, struct{ A any }{1}), same(struct{ A any }{1}, struct{ A any }{2}))
+}
+`,
+		"true false\n",
+	);
+});
+
+section("WASM Arrays — slice-to-array conversions");
+
+test("[2]int(s) copies the first two elements", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	s := []int{1, 2, 3}
+	fmt.Println([2]int(s))
+}
+`,
+		"[1 2]\n",
+	);
+});
+
+test("[N]T(s) for float, string, byte, any, empty and resliced sources", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	f := []float64{1.5, 2.5, 3.5}
+	fmt.Println([2]float64(f))
+	str := []string{"a", "b", "c"}
+	fmt.Println([2]string(str))
+	fmt.Println([2]byte([]byte("hi")))
+	s := []int{1, 2, 3}
+	fmt.Println([0]int(s), len([0]int(s)))
+	xs := []any{1, "x", 2.5}
+	fmt.Println([2]any(xs))
+	fmt.Println([2]int(s[1:]))
+}
+`,
+		"[1.5 2.5]\n[a b]\n[104 105]\n[] 0\n[1 x]\n[2 3]\n",
+	);
+});
+
+test("defined array and slice types convert, and the result is a copy", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type A [2]int
+type Sl []int
+
+func main() {
+	fmt.Println(A(Sl{4, 5}))
+	s := []int{1, 2, 3}
+	a := [2]int(s)
+	s[0] = 99
+	a[1] = 42
+	fmt.Println(a, s)
+}
+`,
+		"[4 5]\n[1 42] [99 2 3]\n",
+	);
+});
+
+test("generic [2]T(s)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func f[T any](s []T) [2]T { return [2]T(s) }
+
+func main() {
+	fmt.Println(f([]int{7, 8, 9}), f([]string{"x", "y"}))
+}
+`,
+		"[7 8] [x y]\n",
+	);
+});
+
+test("[0]int of a nil slice is an empty array", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	var s []int
+	fmt.Println([0]int(s), len([0]int(s)))
+}
+`,
+		"[] 0\n",
+	);
+});
+
+test("[2]S(s) and [2][2]int(s) copy their elements", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type S struct{ X int }
+
+func main() {
+	s := []S{{1}, {2}}
+	a := [2]S(s)
+	s[0].X = 9
+	fmt.Println(a)
+	m := [][2]int{{1, 2}, {3, 4}}
+	b := [2][2]int(m)
+	m[0][0] = 9
+	fmt.Println(b)
+}
+`,
+		"[{1} {2}]\n[[1 2] [3 4]]\n",
+	);
+});
+
+test("a short slice panics, printed or discarded", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func printed() {
+	defer func() { fmt.Println(recover()) }()
+	s := []int{1}
+	fmt.Println([2]int(s))
+}
+
+func discarded() {
+	defer func() { fmt.Println(recover()) }()
+	s := []int{1}
+	_ = [2]int(s)
+}
+
+func main() {
+	printed()
+	discarded()
+}
+`,
+		"runtime error: cannot convert slice with length 1 to array or pointer to array with length 2\nruntime error: cannot convert slice with length 1 to array or pointer to array with length 2\n",
+	);
 });

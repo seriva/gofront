@@ -21,6 +21,7 @@ import {
 	isStringType,
 	isStructType,
 	pointerBase,
+	resolvedType,
 	structFieldList,
 	toWasmType,
 } from "./types.js";
@@ -1385,10 +1386,11 @@ export class FunctionEmitter {
 				return this._getReceiverTypeName(loc.goType);
 			}
 		}
-		if (node && node.kind === "SelectorExpr") {
-			const pkg = node.expr?.name;
-			if (pkg) return `${pkg}.${node.field}`;
-		}
+		// `pkg.Type` names a qualified type; `v.X` selects a field, whose type
+		// (an anonymous interface) has no name of its own.
+		const base = node?.kind === "SelectorExpr" ? node.expr : null;
+		if (base?.name && (base._isNamespace || base._type?.kind === "namespace"))
+			return `${base.name}.${node.field}`;
 		return null;
 	}
 
@@ -1628,12 +1630,13 @@ export class FunctionEmitter {
 			wType !== null &&
 			wType.kind === "ref"
 		) {
+			const resolved = resolvedType(goType, this.mod.checker);
 			if (
-				(goType && isComplex(goType)) ||
+				(goType && isComplex(resolved)) ||
 				wType.typeName === "$complex64" ||
 				wType.typeName === "$complex128"
 			) {
-				const is64 = isComplex64(goType) || wType.typeName === "$complex64";
+				const is64 = isComplex64(resolved) || wType.typeName === "$complex64";
 				const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
 				this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
 				this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
@@ -1676,7 +1679,7 @@ export class FunctionEmitter {
 				const size = this._getArraySize(goType);
 				if (
 					isStructType(elemType, this.mod.checker, this.mod) ||
-					isComplex(elemType) ||
+					isComplex(resolvedType(elemType, this.mod.checker)) ||
 					(elemType?.kind !== "pointer" &&
 						isArrayType(elemType, this.mod.checker))
 				) {

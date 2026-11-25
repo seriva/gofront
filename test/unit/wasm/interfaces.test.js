@@ -2069,3 +2069,96 @@ func main() {
 		"hit\n",
 	);
 });
+
+section("Method calls on anonymous-interface fields");
+
+const fieldCallProgram = (decls, body) => `package main
+
+import "fmt"
+
+type A struct{}
+
+func (A) M() int { return 9 }
+
+${decls}
+
+func main() {
+${body}
+}
+`;
+
+const fieldCallCases = [
+	[
+		"a field of an anonymous struct",
+		"",
+		"\tv := struct{ X interface{ M() int } }{A{}}\n\tfmt.Println(v.X.M())",
+	],
+	[
+		"a field of a named struct",
+		"type Box struct{ X interface{ M() int } }",
+		"\tb := Box{X: A{}}\n\tfmt.Println(b.X.M())",
+	],
+	[
+		"a field through a pointer",
+		"type box struct{ X interface{ M() int } }",
+		"\tp := &box{A{}}\n\tfmt.Println(p.X.M())",
+	],
+	[
+		"a field of a package var",
+		"var v = struct{ X interface{ M() int } }{A{}}",
+		"\tfmt.Println(v.X.M())",
+	],
+	[
+		"a field of a generic struct",
+		"type Box[T any] struct{ V T }",
+		"\tb := Box[interface{ M() int }]{A{}}\n\tfmt.Println(b.V.M())",
+	],
+	[
+		"a field of a composite literal (control)",
+		"type Box struct{ X interface{ M() int } }",
+		"\tfmt.Println(Box{X: A{}}.X.M())",
+	],
+	[
+		"a chained field (control)",
+		"type In struct{ X interface{ M() int } }\ntype Out struct{ I In }",
+		"\to := Out{In{A{}}}\n\tfmt.Println(o.I.X.M())",
+	],
+	[
+		"an indexed element (control)",
+		"",
+		"\txs := []interface{ M() int }{A{}}\n\tfmt.Println(xs[0].M())",
+	],
+	[
+		"a method value (control)",
+		"",
+		"\tv := struct{ X interface{ M() int } }{A{}}\n\tf := v.X.M\n\tfmt.Println(f())",
+	],
+	[
+		"a named interface field (control)",
+		"type I interface{ M() int }",
+		"\tv := struct{ X I }{A{}}\n\tfmt.Println(v.X.M())",
+	],
+];
+
+for (const [name, decls, body] of fieldCallCases) {
+	test(`method call on ${name}`, async () => {
+		await assertProgramOutput(fieldCallProgram(decls, body), "9\n");
+	});
+}
+
+test("method call on a field of a local named fmt (control)", async () => {
+	await assertProgramOutput(
+		`package main
+
+type A struct{}
+
+func (A) M() int { return 9 }
+
+func main() {
+	fmt := struct{ X interface{ M() int } }{A{}}
+	println(fmt.X.M())
+}
+`,
+		"9\n",
+	);
+});

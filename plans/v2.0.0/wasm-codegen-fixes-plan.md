@@ -1,7 +1,7 @@
 # WebAssembly Codegen & WasmGC Validity Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-25)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): the remaining WasmGC ICE and invalid-module follow-ups from `checker-go-rules` (L26), `checker-operand-rules` (L35), `wasm-struct-types` (L50, L51), `codegen-fixes` (L76), and `names-panics-type-exprs` (L88, L92, L93, plus L94 which shares L50's exact root). L12 (`type W[B any] S[B]`) was re-probed (13/13 pass) and verified already fixed by `wasm-struct-types` Task 1.1 (`b311621a`). Reviewed 2026-11-24 (`/bs-plan review`): user decisions recorded in *Scope* (W2 `new(F)` boxes `*F` but keeps the `&f` ban; W4 `(*[N]T)(s)` becomes a checker error on `wasm`/`both`). **Shared files:** `js-codegen-and-value-semantics` Task 2.1 also edits `emitTypeConversion` (`src/backend/wasm/emit-exprs.js`, Phase 4 here); `multi-package-fixes` edits `src/link/type-names.js` and `src/backend/wasm/monomorph.js` (Phase 2 here). Whichever plan lands second rebases.  
 **Release note:** Fixes WebAssembly build failures and internal compiler errors for package-level `any`/float/complex variable initializers, `new` of a func type, defined complex types in `any`, pointers and arrays, comparing arrays or structs that hold interfaces and using them as map keys, local types declared inside generic functions, structs and parameters with anonymous-interface types, and slice-to-array conversions (`[N]T(s)`). Converting a slice to an array pointer (`(*[N]T)(s)`) never worked in `wasm` and `both` packages and is now a compile error there; convert to an array (`[N]T(s)`) instead.
@@ -138,49 +138,49 @@ Roots:
 
 ### Phase 1: Package Globals & Resolved Pointer/Zero Types (roots `wasm-global-const-init-type-mismatch`, `wasm-backend-unresolved-typename`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Guard Wasm global constant initializers by `wType` and pass declared `goType` to `__init_globals` (W1.1–W1.3)
+- [x] Task 1.1: Guard Wasm global constant initializers by `wType` and pass declared `goType` to `__init_globals` (W1.1–W1.3)
   - Files: `src/backend/wasm/globals.js` (`_collectPackageGlobals`, `_makeGlobalInitFunc`)
   - Test: `test/unit/wasm/strings_any.test.js` (W1.1–W1.2 `any` globals incl. no-`fmt` assertion), `test/unit/wasm/scalars.test.js` (W1.3 float globals incl. `(1)`, `'a'`, defined `F`), `test/unit/wasm/complex.test.js` (W1.3 `complex128`/`complex64` globals) + W1 controls
   - Done when: every W1 program prints Go's output on `wasm` and the W1 controls still pass
-- [ ] Task 1.2: Add `resolvedType` and box func and defined complex pointees in `isReplaceableRef` (W2.1–W2.4)
+- [x] Task 1.2: Add `resolvedType` and box func and defined complex pointees in `isReplaceableRef` (W2.1–W2.4)
   - Files: `src/backend/wasm/types.js` (`resolvedType`, `isReplaceableRef`)
   - Test: `test/unit/wasm/pointers.test.js` (W2.1–W2.2: `new(F)`, `new(func() int)`, `*pf = fn; (*pf)()`, `struct{ P *F }`), `test/unit/wasm/complex.test.js` (W2.4: `var p *C = new(C)`, `func mk() *C`, `func box(p *C) any`, `struct{ P *C }`), `test/unit/wasm/fmt-any.test.js` (W2.3–W2.4: `C`, `C64`, `C2` in `any` → `Println` and `%T`) + W2 controls
   - Done when: W2.1–W2.4 build valid modules with Go's output; `&f` still reports `cannot take the address of a variable of func type`
-- [ ] Task 1.3: Zero-fill `[N]C` arrays with complex zeros in locals, fields and globals (W2.5)
+- [x] Task 1.3: Zero-fill `[N]C` arrays with complex zeros in locals, fields and globals (W2.5)
   - Files: `src/backend/wasm/emit.js` (`emitZeroValue`), `src/backend/wasm/globals.js` (`_zeroArrayConst`)
   - Test: `test/unit/wasm/complex.test.js`: `var a [2]C`, `var g [2]C`, `type C2 C; var g [2]C2`, `type s struct{ A [2]C }` zero value, `complex64` variant; control `var g [2]complex128`
   - Done when: `real(a[0])` prints `0` for every W2.5 program with no null-pointer trap
 
 ### Phase 2: Monomorphised Local Types (root `wasm-monomorph-local-type-collision`)
-- [ ] Task 2.1: Move `renameLocalTypes` to the `lower` layer
+- [x] Task 2.1: Move `renameLocalTypes` to the `lower` layer
   - Files: `src/lower/local-types.js` (new), `src/link/type-names.js` (re-export)
   - Test: `test/unit/types/identity.test.js`: new case importing `renameLocalTypes` from `src/lower/local-types.js` that renames two same-named local `TypeDecl`s in two `FuncDecl`s to distinct `__L<n>` names (fails first: module missing); existing `src/link/type-names.js` import keeps passing
   - Done when: `renameLocalTypes` is defined only in `src/lower/local-types.js`, existing callers are unchanged, and `npm run check` passes
-- [ ] Task 2.2: Rename local types after monomorphisation (W3.1–W3.2)
+- [x] Task 2.2: Rename local types after monomorphisation (W3.1–W3.2)
   - Files: `src/backend/wasm/monomorph.js` (`monomorphise`)
   - Test: `test/unit/wasm/generics.test.js`: W3.1–W3.2 (local struct, slice, alias, `T2[T]`, closure-local and generic-method-local types across `int`/`string` and `int`/`float64`, printing fields) + W3 controls; plus a regression test in `test/unit/wasm/structs.test.js` for the already-fixed L12 (`type W[B any] S[B]`)
   - Done when: every W3 program prints Go's output on `wasm` and `npm run check` passes with `monomorph.js` importing from `src/lower/`
 
 ### Phase 3: Component-Type Prescan & Anonymous-Interface Dispatch (roots `wasm-prescan-shallow-type-scan`, `wasm-recv-type-name-selector-misreads-field-as-pkg`)
-- [ ] Task 3.1: Add `forEachComponentType`/`containsInterfaceType` and use them for `__any_eq` and `__any_hash` (W5.1–W5.3)
+- [x] Task 3.1: Add `forEachComponentType`/`containsInterfaceType` and use them for `__any_eq` and `__any_hash` (W5.1–W5.3)
   - Files: `src/backend/wasm/prescan.js` (`forEachComponentType`, `containsInterfaceType`, `_usesAnyEq`), `src/backend/wasm/index.js` (`usesAnyHash`), `src/backend/wasm/emit-maps.js` (`emitKeyHash` guard)
   - Test: `test/unit/wasm/arrays.test.js` (no-`fmt` `[2]any ==`, `[2]I ==`, `[2][2]any ==`, `!=`, `switch [2]any`, local `struct{ A any }` `==`, `[1]struct{ A any } ==`, generic `eq[[2]any]`), `test/unit/wasm/map-keys.test.js` (`map[[2]any]int`, `map[[1][2]any]int`, `map[[1]I]int`, `map[struct{ A any }]int`, `map[K]int`, generic `put[[2]any]`, each with and without `fmt`) + W5 controls
   - Done when: every W5 program prints Go's output on `wasm` without importing `fmt`
-- [ ] Task 3.2: Scan component types, struct fields and package vars for anonymous-interface dispatchers (W6.1–W6.2)
+- [x] Task 3.2: Scan component types, struct fields and package vars for anonymous-interface dispatchers (W6.1–W6.2)
   - Files: `src/backend/wasm/prescan.js` (`_scanFuncSigInterfaces`)
   - Test: `test/unit/wasm/boundary.test.js`: W6.1 (`Box{v interface{ M() int }}`, `Box[interface{ M() struct{ X int } }]`), W6.2 (slice, map, pointer, array, struct, func-param and result composites; `var G interface{…}`; `var G []interface{…}`; exported field) + unexported-`box` control
   - Done when: every W6.1–W6.2 program builds a valid module with Go's output
-- [ ] Task 3.3: Read `x.Y` as `pkg.Type` only for package names in `_getReceiverTypeName` (W6.3)
+- [x] Task 3.3: Read `x.Y` as `pkg.Type` only for package names in `_getReceiverTypeName` (W6.3)
   - Files: `src/backend/wasm/emit.js` (`_getReceiverTypeName`)
   - Test: `test/unit/wasm/interfaces.test.js`: W6.3 (`v.X.M()` on anonymous struct, named `b.X.M()`, pointer `p.X.M()`, package var, generic `b.V.M()`) + W6 controls (`Box{X: A{}}.X.M()`, chained, indexed, method value, local named `fmt`); existing qualified-receiver tests (`simd.F32x4` methods) keep passing
   - Done when: every W6.3 program prints `9` on `wasm`
 
 ### Phase 4: Slice-to-Array Conversions (root `wasm-missing-slice-to-array-conversion`; user decision on `(*[N]T)(s)`)
-- [ ] Task 4.1: Lower `[N]T(s)` on WASM with Go's length panic and an element copy (W4.1–W4.4)
+- [x] Task 4.1: Lower `[N]T(s)` on WASM with Go's length panic and an element copy (W4.1–W4.4)
   - Files: `src/backend/wasm/emit-exprs.js` (`emitTypeConversion`)
   - Test: `test/unit/wasm/arrays.test.js`: W4.1–W4.2 with `assertProgramOutput` (*JS ok*); W4.3 copy isolation for `[2]S(s)` and `[2][2]int(s)` and W4.4 short-slice panics (printed and discarded, under `recover()`) with `assertWasmProgramOutput`
   - Done when: every W4.1–W4.4 program prints Go's output on `wasm`, including the panic text `cannot convert slice with length 1 to array or pointer to array with length 2`
-- [ ] Task 4.2: Reject `(*[N]T)(s)` in `wasm`/`both` packages and document slice-to-array conversions (W4.5)
+- [x] Task 4.2: Reject `(*[N]T)(s)` in `wasm`/`both` packages and document slice-to-array conversions (W4.5)
   - Files: `src/typechecker/expressions.js` (`_convertible` slice→pointer branch, new `_errSliceArrayPointer`), `docs/hybrid-wasm.md` (pointers section + feature list), `docs/go-compatibility.md` (pointers row)
   - Test: `test/unit/types/pointers.test.js`: `assertErrorContains(errors, "cannot convert a slice to an array pointer in a wasm package")` for `(*[2]int)(s)` and `(*[0]int)(nil)` on `wasm` and `both`; positive case: a `js` package still compiles `(*[2]int)(s)`
   - Done when: W4.5 fails to compile with that message on `wasm`/`both`, `js` packages are unchanged, and both docs pages describe `[N]T(s)` and the `(*[N]T)(s)` rule

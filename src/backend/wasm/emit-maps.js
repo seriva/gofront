@@ -83,6 +83,19 @@ export class MapsEmitter {
 		return null;
 	}
 
+	// Hashes the interface value in `keyLocal` with `__any_hash`.  The
+	// `usesAnyHash` prescan declares it for every map key that holds an
+	// interface; a missed key throws here instead of calling function 0.
+	_emitAnyHash(keyLocal) {
+		const hashIdx = this.mod.resolveFuncIndex("__any_hash");
+		if (hashIdx === null)
+			throw new Error(
+				"internal: __any_hash was not declared (usesAnyHash scan missed a map key)",
+			);
+		this.pushInstruction({ op: "local.get", index: keyLocal });
+		this.pushInstruction({ op: "call", funcIndex: hashIdx });
+	}
+
 	emitKeyHash(keyLocal, keyGoType) {
 		if (isStringType(keyGoType, this.mod.checker)) {
 			this.pushInstruction({ op: "local.get", index: keyLocal });
@@ -93,9 +106,7 @@ export class MapsEmitter {
 			return;
 		}
 		if (isInterfaceType(keyGoType, this.mod.checker)) {
-			this.pushInstruction({ op: "local.get", index: keyLocal });
-			const hashIdx = this.mod.resolveFuncIndex("__any_hash");
-			this.pushInstruction({ op: "call", funcIndex: hashIdx });
+			this._emitAnyHash(keyLocal);
 			return;
 		}
 		if (isArrayType(keyGoType, this.mod.checker)) {
