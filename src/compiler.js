@@ -702,7 +702,13 @@ function resolveImports(
 				// names against this package.
 				noteLocalImport(p, alias ?? dep.pkgName, alias === ".", depKey);
 				if (alias === ".") {
-					if (!p._generated) renameDotImportedTypes(p, dep.renamedTypes);
+					if (!p._generated)
+						renameDotImportedTypes(
+							p,
+							dep.renamedTypes,
+							options.typeOwners,
+							fromDir,
+						);
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
 					checker.addDefinitions(
@@ -1016,11 +1022,6 @@ export function compileFiles(files, options = {}) {
 		options.typeOwners,
 		pkgTarget,
 	);
-	// The names the renaming left: a stored unit is only valid where they come
-	// out the same, which is how it notices a different set of packages that
-	// declare the same types.
-	const typeNames = cache ? declaredTypeNames(programs).join(",") : "";
-
 	// The test runner's driver is a source that exists only in memory: it is
 	// parsed and checked with the package but never written next to it.
 	const driver = testDriverProgram(options, programs, pkgTarget, fromDir);
@@ -1055,6 +1056,13 @@ export function compileFiles(files, options = {}) {
 			importTokens,
 		},
 	);
+	// The names the renaming left (a dot import renames the local types that
+	// shadow it): a stored unit is only valid where they come out the same,
+	// which is how it notices a different set of packages that declare the
+	// same types.
+	const typeNames = cache
+		? declaredTypeNames(programs.filter((p) => p !== driver)).join(",")
+		: "";
 
 	// ── 3. Type-check and generate, or reuse the stored unit ──────
 	const unitKey = cache

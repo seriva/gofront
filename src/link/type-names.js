@@ -8,10 +8,11 @@
 
 import {
 	freshLocalName,
+	renameLocalTypes,
 	renameTypeRefs,
 	valueNamesIn,
 } from "../lower/local-types.js";
-import { declaredTypeNames, forEachChild } from "../lower/walk.js";
+import { forEachChild, forEachTemplGo } from "../lower/walk.js";
 import { isExported } from "../typechecker/types.js";
 
 export { renameLocalTypes } from "../lower/local-types.js";
@@ -117,6 +118,7 @@ export function registerLocalTypeOwners(programs, pkgKey, owners) {
 		if (node.kind === "TypeDecl" && !owners.has(node.name))
 			owners.set(node.name, pkgKey);
 		forEachChild(node, visit);
+		forEachTemplGo(node, visit);
 	};
 	for (const p of programs) visit(p.decls);
 }
@@ -135,13 +137,19 @@ export function withOriginalNames(table, renamed) {
 // (`Box$$b`), and both backends look a type up by the name the source gives.
 // Renames those spellings in `program` once, so every later stage sees the
 // type's real name.  `renamed` is the package's declared -> renamed map; a
-// name the file declares itself (a local type shadowing the import) is left.
-export function renameDotImportedTypes(program, renamed) {
-	const own = new Set(declaredTypeNames([program]));
+// name the file declares at package level is left.  A type declared in a
+// function shadows the import only in its block, so it first takes a name of
+// its own (`Box__L1`) that no type of the build (`owners`) spells, and joins
+// `owners` under `pkgKey`, the importing package.
+export function renameDotImportedTypes(program, renamed, owners, pkgKey) {
+	const own = new Set(topLevelTypeDecls([program]).map((d) => d.name));
 	const refs = new Map(
 		[...renamed].filter(([name]) => isExported(name) && !own.has(name)),
 	);
 	if (refs.size === 0) return;
+	const inUse = new Set(owners?.keys() ?? []);
+	if (renameLocalTypes([program], new Set(refs.keys()), new Set(), inUse))
+		registerLocalTypeOwners([program], pkgKey, owners);
 	for (const d of program.decls ?? [])
 		renameTypeRefs(d, refs, new Set(), new Set());
 }
