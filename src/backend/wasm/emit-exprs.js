@@ -3212,6 +3212,15 @@ export class ExprsEmitter {
 
 		this.emitExpr(expr, fromWType);
 
+		if (
+			isSliceType(fromType, this.mod.checker) &&
+			targetType?.kind !== "pointer" &&
+			isArrayType(targetType, this.mod.checker)
+		) {
+			this._emitSliceToArray(fromType, targetType);
+			return;
+		}
+
 		if (isComplex(targetType)) {
 			this._emitComplexConversion(targetType, fromType, fromWType);
 			return;
@@ -3308,6 +3317,97 @@ export class ExprsEmitter {
 			this.pushInstruction(`${toWType}.trunc_sat_${fromWType}_${dstSign}`);
 			if (toWType === "i32") this.emitNarrowIntWrap(targetType);
 		}
+	}
+
+	// `[N]T(s)` with the slice on the stack: panics like Go when `len(s) < N`,
+	// else builds a fresh array from `s[0:N]`.  Struct and array elements are
+	// copied too, so the result shares nothing with `s`.
+	_emitSliceToArray(fromType, targetType) {
+		const sliceInfo = this.mod.getSliceType(this._getSliceElemType(fromType));
+		const arrInfo = sliceInfo.arrInfo;
+		const size = this._getArraySize(targetType);
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		const sTmp = this.acquireTemp(sliceW);
+		const lenTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		this._emitSliceUnpack(sTmp, sliceInfo, { len: lenTmp });
+
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "i32.const", value: size });
+		this.pushInstruction("i32.lt_u");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		const str = (text) => {
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString(text),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+		};
+		const concat = () =>
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+		str("runtime error: cannot convert slice with length ");
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStrFromI32ImportIndex(),
+		});
+		concat();
+		str(` to array or pointer to array with length ${size}`);
+		concat();
+		this.emitRuntimePanicThrow();
+		this.pushInstruction("end");
+
+		const dst = this.acquireTemp(arrW);
+		this.pushInstruction({ op: "i32.const", value: size });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: dst });
+		// A nil or empty slice may hold no backing array; `array.copy` traps
+		// on a null source even for zero elements.
+		if (size > 0) {
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: sTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: sliceInfo.typeIndex,
+				fieldIndex: 0,
+			});
+			this.pushInstruction({ op: "local.get", index: sTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: sliceInfo.typeIndex,
+				fieldIndex: 1,
+			});
+			this.pushInstruction({ op: "i32.const", value: size });
+			this.pushInstruction({ op: "array.copy", typeIndex: arrInfo.typeIndex });
+		}
+		this.pushInstruction({ op: "local.get", index: dst });
+		const elemType = this._getArrayElemType(targetType);
+		if (
+			elemType?.kind !== "pointer" &&
+			(isArrayType(elemType, this.mod.checker) ||
+				(isStructType(elemType, this.mod.checker, this.mod) &&
+					!isPointerToStruct(elemType, this.mod.checker, this.mod)))
+		) {
+			this.emitCopyArray(targetType);
+		}
+		this.releaseTemp(dst, arrW);
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(sTmp, sliceW);
 	}
 
 	_emitComplexConversion(targetType, fromType, fromWType) {
