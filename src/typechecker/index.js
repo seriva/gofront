@@ -2274,6 +2274,19 @@ export class TypeChecker {
 		return types;
 	}
 
+	// Go's `X (value of type T) is not constant` for a constant initializer.
+	_notConstantText(v, t) {
+		const conversion = v._isTypeConversion || v.kind === "TypeConversion";
+		// A package variable is not typed yet (its type reads `any`).
+		if (isAny(t) && !conversion) return `${exprText(v)} is not constant`;
+		let what = operandKind(v, typeStr(t));
+		if (t.kind === "typeParam")
+			what += ` constrained by ${this._constraintText(t)}`;
+		else if (isAny(t) || this._deepUnderlying(t)?.kind === "interface")
+			what = `value of interface type ${typeStr(t)}`;
+		return `${exprText(v)} (${what}) is not constant`;
+	}
+
 	checkConstDecl(decl, scope) {
 		for (const spec of decl.decls) {
 			const failed = [];
@@ -2291,13 +2304,7 @@ export class TypeChecker {
 			});
 			spec.value.forEach((v, i) => {
 				if (!failed[i] && !isNil(valTypes[i]) && !this._isConstExpr(v, scope))
-					// A package variable is not typed yet (its type reads `any`).
-					this.err(
-						isAny(valTypes[i])
-							? `${exprText(v)} is not constant`
-							: `${exprText(v)} (${operandKind(v, typeStr(valTypes[i]))}) is not constant`,
-						v,
-					);
+					this.err(this._notConstantText(v, valTypes[i]), v);
 			});
 			// Explicit type annotation → typed constant; otherwise preserve untyped
 			const type = spec.type

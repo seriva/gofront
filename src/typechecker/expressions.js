@@ -2352,6 +2352,7 @@ export const expressionCheckMethods = {
 	_isConstExpr(e, scope) {
 		switch (e?.kind) {
 			case "BasicLit":
+				return e.litKind !== "NIL";
 			case "ImagLit":
 				return true;
 			case "ParenExpr":
@@ -2377,10 +2378,12 @@ export const expressionCheckMethods = {
 				return ns._consts ? ns._consts.has(e.field) : true;
 			}
 			case "TypeConversion":
-				return this._isConstExpr(e.expr, scope);
+				return this._isConstType(e._type) && this._isConstExpr(e.expr, scope);
 			case "CallExpr":
 				if (e._isTypeConversion || this._isIntConversion(e))
-					return this._isConstExpr(e.args?.[0], scope);
+					return (
+						this._isConstType(e._type) && this._isConstExpr(e.args?.[0], scope)
+					);
 				if (
 					e.func?.kind !== "Ident" ||
 					!CONST_BUILTINS.has(e.func.name) ||
@@ -2397,6 +2400,18 @@ export const expressionCheckMethods = {
 			default:
 				return false;
 		}
+	},
+
+	// Whether a constant may have type `t`: a boolean, numeric or string type,
+	// or a type defined from one (not a slice, pointer, interface or type
+	// parameter).
+	_isConstType(t) {
+		const u = this._deepUnderlying(t);
+		if (u?.kind === "untyped") return u.base !== "nil";
+		return (
+			u?.kind === "basic" &&
+			(isBool(u) || isString(u) || isNumeric(u) || isComplex(u))
+		);
 	},
 
 	_resolveCallArgTypes(expr, scope) {
@@ -3302,56 +3317,61 @@ export const expressionCheckMethods = {
 				? expr.args[i]._type
 				: t,
 		);
-		if (!this._complexOperandsFloat(expr, crt, cit)) return ANY;
-		if (crt.kind === "untyped" && cit.kind === "untyped")
-			return UNTYPED_COMPLEX;
-		if (crt.name === "float32" && cit.name === "float32") return COMPLEX64;
-		if (crt.name === "float64" && cit.name === "float64") return COMPLEX128;
-		if (crt.name === "float32" || cit.name === "float32") {
-			if (crt.name === "float64" || cit.name === "float64") {
-				this.err(
-					`invalid complex call: mismatched float types (${typeStr(crt)} and ${typeStr(cit)})`,
-					expr,
-				);
-			}
-			// An untyped operand takes type float32 (`complex(f, 0.01)`).
-			this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
-			this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
-			return COMPLEX64;
-		}
-		return COMPLEX128;
+		const part = this._complexPartType(expr, crt, cit);
+		if (!part) return ANY;
+		if (part.kind === "untyped") return UNTYPED_COMPLEX;
+		if (part.name !== "float32") return COMPLEX128;
+		// An untyped operand takes type float32 (`complex(f, 0.01)`).
+		this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
+		this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
+		return COMPLEX64;
 	},
 
-	// Whether the operand type `t` of `complex(a, b)` may be a float: untyped,
-	// floating-point underneath, or not known well enough to tell.
-	_isComplexPartType(t) {
-		if (t.kind === "untyped") return true;
-		const u = this._deepUnderlying(t);
-		return !u || u._tainted || isFloat(u) || isAny(u);
-	},
-
-	// The operands of `complex(a, b)` must be numeric and floating-point: a
-	// typed operand of any other numeric type, or two different typed operands, is an error.
-	_complexOperandsFloat(expr, crt, cit) {
+	// The part type of `complex(a, b)` as Go's checker finds it: an untyped
+	// operand takes the other operand's type, both must then be identical, and
+	// that type must be floating-point underneath (a type parameter is not
+	// supported). Returns the untyped or basic float type, or null after an error.
+	_complexPartType(expr, crt, cit) {
 		for (const t of [crt, cit])
-			if (!isNumeric(t)) {
+			if (t?.kind !== "typeParam" && !isNumeric(t)) {
 				this.err(`cannot use ${typeStr(t)} as float in complex()`, expr);
-				return false;
+				return null;
 			}
-		const okR = this._isComplexPartType(crt);
-		if (okR && this._isComplexPartType(cit)) return true;
-		const typed = crt.kind !== "untyped" && cit.kind !== "untyped";
-		if (typed && typeStr(crt) !== typeStr(cit))
+		if (crt.kind === "untyped" && cit.kind === "untyped") return crt;
+		const typed = crt.kind === "untyped" ? cit : crt;
+		const arg = expr.args[crt.kind === "untyped" ? 1 : 0];
+		if (
+			crt.kind !== "untyped" &&
+			cit.kind !== "untyped" &&
+			!identical(crt, cit)
+		) {
 			this.err(
 				`invalid operation: ${exprText(expr)} (mismatched types ${typeStr(crt)} and ${typeStr(cit)})`,
 				expr,
 			);
-		else
-			this.err(
-				`invalid argument: arguments have type ${typeStr(okR ? cit : crt)}, expected floating-point`,
-				expr,
-			);
-		return false;
+			return null;
+		}
+		if (typed.kind === "typeParam") {
+			const terms = this._constraintTerms(typed.constraint, new Set());
+			if (
+				terms?.length > 0 &&
+				terms.every((t) => isFloat(this._deepUnderlying(t)))
+			) {
+				this.err(
+					`${exprText(arg)} (${operandKind(arg, typeStr(typed), false)} constrained by ${this._constraintText(typed)}) not supported as argument to built-in complex for go1.18 (see go.dev/issue/50937)`,
+					expr,
+				);
+				return null;
+			}
+		} else {
+			const u = this._deepUnderlying(typed);
+			if (isFloat(u)) return u;
+		}
+		this.err(
+			`invalid argument: arguments have type ${typeStr(typed)}, expected floating-point`,
+			expr,
+		);
+		return null;
 	},
 
 	_checkBuiltinRealImag(name, expr, argTypes) {
