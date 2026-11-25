@@ -235,6 +235,340 @@ func main() {
 	);
 });
 
+test("a local type is not renamed onto a named result", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() (Q__L1 int) {
+	type Q struct{ Y string }
+	fmt.Println(Q{"a"}.Y)
+	return
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(g())
+	f()
+}
+`,
+		"a\n0\n1\n",
+	);
+});
+
+test("a generic local type is not renamed onto a named result", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) (Q__L1 int) {
+	type Q struct{ X T }
+	fmt.Println(Q{v}.X)
+	return
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(g(5), g("hi"))
+	f()
+}
+`,
+		"5\nhi\n0 0\n1\n",
+	);
+});
+
+test("a local type is not renamed onto a method's named result", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type S struct{}
+
+func (S) g() (Q__L1 int) {
+	type Q struct{ Y string }
+	fmt.Println(Q{"a"}.Y)
+	return
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(S{}.g())
+	f()
+}
+`,
+		"a\n0\n1\n",
+	);
+});
+
+test("a local type is not renamed onto a func literal's named result", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() int {
+	h := func() (Q__L1 int) {
+		type Q struct{ Y string }
+		fmt.Println(Q{"a"}.Y)
+		return
+	}
+	return h()
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(g())
+	f()
+}
+`,
+		"a\n0\n1\n",
+	);
+});
+
+test("a generic func literal's local type is not renamed onto its named result", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[T any](v T) int {
+	h := func() (Q__L1 int) {
+		type Q struct{ Y T }
+		fmt.Println(Q{v}.Y)
+		return
+	}
+	return h()
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(g(1), g("s"))
+	f()
+}
+`,
+		"1\ns\n0 0\n1\n",
+	);
+});
+
+test("a local type is not renamed onto a used type parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[Q__L1 any](x Q__L1) Q__L1 {
+	type Q struct{ Y Q__L1 }
+	_ = Q{x}
+	return x
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(g(42))
+	f()
+}
+`,
+		"42\n1\n",
+	);
+});
+
+test("a local type is not renamed onto a type parameter beside another", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[T any, Q__L1 any](v T, x Q__L1) {
+	type Q struct{ Y T }
+	fmt.Println(Q{v}.Y, x)
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	g(42, "ok")
+	f()
+}
+`,
+		"42 ok\n1\n",
+	);
+});
+
+test("a local type is not renamed onto an unused type parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[Q__L1 any]() {
+	type Q struct{ Y int }
+	fmt.Println(Q{3}.Y)
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	g[int]()
+	f()
+}
+`,
+		"3\n1\n",
+	);
+});
+
+test("a method's local type is not renamed onto its generic type's parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[Q__L1 any] struct{ v Q__L1 }
+
+func (b Box[Q__L1]) M() Q__L1 {
+	type Q struct{ Y Q__L1 }
+	return Q{b.v}.Y
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(Box[int]{3}.M())
+	f()
+}
+`,
+		"3\n1\n",
+	);
+});
+
+test("a method's local type is not renamed onto an unused generic type parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Box[Q__L1 any] struct{ v int }
+
+func (b Box[_]) M() int {
+	type Q struct{ Y int }
+	return Q{b.v}.Y
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	fmt.Println(Box[string]{3}.M())
+	f()
+}
+`,
+		"3\n1\n",
+	);
+});
+
+test("a local type is not renamed onto a type parameter used as a type argument", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Pair[A any, B any] struct {
+	a A
+	b B
+}
+
+func g[Q__L1 any](x Q__L1) {
+	type Q struct{ Y int }
+	p := Pair[Q__L1, int]{x, 1}
+	fmt.Println(Q{3}.Y, p.a)
+}
+
+func f() {
+	type Q struct{ X int }
+	fmt.Println(Q{1}.X)
+}
+
+func main() {
+	g("s")
+	f()
+}
+`,
+		"3 s\n1\n",
+	);
+});
+
+test("a package type named after a predeclared type is not renamed onto a parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int32 string
+
+func g(int32__L1 int) int32 { return int32("p") }
+
+func main() { fmt.Println(g(1)) }
+`,
+		"p\n",
+	);
+});
+
+test("a package type named after a predeclared type is not renamed onto a func", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int32 string
+
+func int32__L1() int { return 4 }
+
+func main() {
+	var s int32 = "a"
+	fmt.Println(s, int32__L1())
+}
+`,
+		"a 4\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

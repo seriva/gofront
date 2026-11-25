@@ -6,7 +6,11 @@
 // type-checked, the convention Go-source stdlib packages use: diagnostics and
 // `%T` show it as `b.Pt`, and importers reach it through `b.Pt` as usual.
 
-import { freshLocalName, renameTypeRefs } from "../lower/local-types.js";
+import {
+	freshLocalName,
+	renameTypeRefs,
+	valueNamesIn,
+} from "../lower/local-types.js";
 import { forEachChild } from "../lower/walk.js";
 
 export { renameLocalTypes } from "../lower/local-types.js";
@@ -80,7 +84,11 @@ export function mangleCollidingTypes(
 	for (const decl of decls) {
 		const { name } = decl;
 		if (predeclared.has(name)) {
-			taken ??= new Set([...owners.keys(), ...decls.map((d) => d.name)]);
+			taken ??= new Set([
+				...owners.keys(),
+				...decls.map((d) => d.name),
+				...valueNamesIn(programs),
+			]);
 			renamed.set(name, freshLocalName(name, taken));
 			continue;
 		}

@@ -39,20 +39,15 @@ export function renameLocalTypes(
 	keep = new Set(),
 ) {
 	const counts = new Map();
-	// Names of values (funcs, vars, consts, parameters, locals): a fresh type
-	// name must not spell one, or it would take that value over.
-	const values = new Set();
 	const count = (node) => {
 		if (!node || typeof node !== "object") return;
 		if (Array.isArray(node)) return node.forEach(count);
 		if (node.kind === "TypeDecl")
 			counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
-		if ((node.kind === "FuncDecl" || node.kind === "Ident") && node.name)
-			values.add(node.name);
-		for (const n of declaredNames(node)) values.add(n);
 		forEachChild(node, count);
 	};
 	for (const p of programs) count(p.decls);
+	const values = valueNamesIn(programs);
 	const dup = new Set(
 		[...counts]
 			.filter(([k, n]) => (n > 1 && !keep.has(k)) || reserved.has(k))
@@ -100,7 +95,7 @@ export function renameLocalTypes(
 			return;
 		}
 		const here = FUNC_KINDS.has(node.kind)
-			? new Set([...visible, ...declaredParams(node)])
+			? new Set([...visible, ...declaredNames(node)])
 			: visible;
 		forEachChild(node, (c) => scan(c, here));
 	};
@@ -108,6 +103,28 @@ export function renameLocalTypes(
 		for (const d of p.decls ?? [])
 			if (d.kind !== "TypeDecl") scan(d, new Set());
 	return changed;
+}
+
+// Names of values (funcs, vars, consts, parameters, named results, locals)
+// and of type parameters the programs declare or use: a fresh type name must
+// not spell one, or it would take that value (or type parameter) over.
+export function valueNamesIn(programs) {
+	const names = new Set();
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) return node.forEach(visit);
+		if (
+			(node.kind === "FuncDecl" ||
+				node.kind === "Ident" ||
+				node.kind === "TypeParam") &&
+			node.name
+		)
+			names.add(node.name);
+		for (const n of declaredNames(node)) names.add(n);
+		forEachChild(node, visit);
+	};
+	for (const p of programs) visit(p.decls);
+	return names;
 }
 
 const VALUE_DECL_KINDS = new Set(["DefineStmt", "VarDecl", "ConstDecl"]);
@@ -119,12 +136,6 @@ function valueNames(stmt) {
 
 function declaresValue(stmt, name) {
 	return valueNames(stmt).includes(name);
-}
-
-function declaredParams(fn) {
-	const names = (fn.params ?? []).map((p) => p.name).filter(Boolean);
-	if (fn.recvName) names.push(fn.recvName);
-	return names;
 }
 
 // `tparams` are type parameters in scope; `values` are names a function
@@ -169,6 +180,10 @@ function declaredNames(node) {
 	if (node.kind === "TypeSwitchStmt" && node.assign) names.push(node.assign);
 	for (const p of node.params ?? []) if (p.name) names.push(p.name);
 	if (node.recvName) names.push(node.recvName);
+	// Named results live on the return type's side table, which child
+	// traversal skips.
+	for (const r of node.returnType?._namedReturns ?? [])
+		if (r.name) names.push(r.name);
 	return names;
 }
 
