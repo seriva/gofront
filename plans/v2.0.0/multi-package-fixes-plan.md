@@ -173,7 +173,7 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
   - Done when: imported generic structs and composites format identically to Go (`{1 2}`, `util.Pair[int]`) on all targets
 
 ### Phase 4: Multi-Package Top-Level Value, Function & `init()` Isolation (root `flat-pkg-value-namespace`)
-- [ ] Task 4.1: Give each package unique `init()` names in JS and exempt `"init"` in WASM link checks (M5.3)
+- [x] Task 4.1: Give each package unique `init()` names in JS and exempt `"init"` in WASM link checks (M5.3)
   - Files: `src/backend/js/index.js` (`_emitFuncDecls`), `src/link/wasm.js` (`checkLinkCollisions`)
   - Test: `test/unit/compiler/link.test.js`, `test/unit/compiler/packages.test.js`: M5.3 (`util` + `main` both defining `func init()`, plus multiple `init()` in one package, across `js`, `both`, `wasm`)
   - Done when: `init()` runs in Go dependency order across all linked packages without TDZ crashes or link errors

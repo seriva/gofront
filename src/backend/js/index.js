@@ -247,6 +247,9 @@ export class CodeGen {
 		// the types whose values leave Go; null keeps every method (see
 		// lower/reachability.js).
 		this.keepMethods = options.keepMethods ?? null;
+		// A package's `init` is named after the package, so the `init`s of the
+		// packages of one bundle do not meet (see `_emitFuncDecls`).
+		this.initSuffix = options.initSuffix ?? null;
 		// A bundle's helpers are defined once by whoever links the chunks
 		// (`helperNames`, `helperPrelude`) instead of at the top of each chunk.
 		this.deferHelpers = options.deferHelpers ?? false;
@@ -436,7 +439,8 @@ export class CodeGen {
 			if (d.kind === "FuncDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				if (d.name === "init") {
-					const renamed = initCount === 0 ? "init" : `init$${initCount}`;
+					const base = this.initSuffix ? `init${this.initSuffix}` : "init";
+					const renamed = initCount === 0 ? base : `${base}$${initCount}`;
 					initNames.push(renamed);
 					this.genFuncDecl(d, renamed);
 					initCount++;

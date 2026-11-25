@@ -194,6 +194,7 @@ function topLevelDeclNames(decl) {
 	}
 }
 
+// `init` is not a name: the backend numbers each package's.
 export function checkLinkCollisions(units) {
 	const owner = new Map(); // name -> pkgName
 	const errors = [];
@@ -201,7 +202,8 @@ export function checkLinkCollisions(units) {
 		for (const p of u.programs) {
 			for (const d of p.decls ?? []) {
 				for (const name of topLevelDeclNames(d)) {
-					if (name === "_") continue;
+					if (name === "_" || (name === "init" && d.kind === "FuncDecl"))
+						continue;
 					const prev = owner.get(name);
 					if (prev === undefined) owner.set(name, u.pkgName);
 					else if (prev !== u.pkgName)

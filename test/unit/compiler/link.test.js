@@ -119,6 +119,13 @@ test("methods are keyed by receiver type", () => {
 	);
 });
 
+test("every package may declare init", () => {
+	checkLinkCollisions([
+		unit("a", [fn("init")]),
+		unit("b", [fn("init"), fn("init")]),
+	]);
+});
+
 // ── Go-source stdlib mangling ────────────────────────────────
 
 section("Link — mangleStdlibAst");

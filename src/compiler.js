@@ -70,6 +70,7 @@ import {
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
+	pkgSuffix,
 	registerLocalTypeOwners,
 	renameDotImportedTypes,
 	renameLocalTypes,
@@ -937,6 +938,7 @@ export function compileFiles(files, options = {}) {
 		rootDir: options.rootDir ?? fromDir,
 		bundledDirs: options.bundledDirs ?? new Set(),
 		typeOwners: options.typeOwners ?? new Map(),
+		pkgSuffixes: options.pkgSuffixes ?? new Map(),
 		jsonBuild: options.jsonBuild ?? { js: false, wasm: false },
 	};
 	const outputDir =
@@ -1016,6 +1018,7 @@ export function compileFiles(files, options = {}) {
 	// Local packages share one flat JS module: a type name another package
 	// already declared, or a JS built-in (`Map`), is renamed here
 	// (`Pt` -> `Pt$$b`).
+	const suffix = pkgSuffix(options.pkgSuffixes, resolve(fromDir), pkgName);
 	const renamedTypes = mangleLocalTypes(
 		programs,
 		resolve(fromDir),
@@ -1060,9 +1063,12 @@ export function compileFiles(files, options = {}) {
 	// The names the renaming left (a dot import renames the local types that
 	// shadow it): a stored unit is only valid where they come out the same,
 	// which is how it notices a different set of packages that declare the
-	// same types.
+	// same types.  The package's suffix names its `init`.
 	const typeNames = cache
-		? declaredTypeNames(programs.filter((p) => p !== driver)).join(",")
+		? [
+				declaredTypeNames(programs.filter((p) => p !== driver)).join(","),
+				suffix,
+			].join("|")
 		: "";
 
 	// ── 3. Type-check and generate, or reuse the stored unit ──────
@@ -1101,6 +1107,7 @@ export function compileFiles(files, options = {}) {
 			pkgTarget,
 			fromDir,
 			renamedTypes,
+			suffix,
 			countCompile: cache ? countCompile : () => {},
 		});
 	if (cache && !own) {
@@ -1278,6 +1285,7 @@ function compileOwnUnit(ctx) {
 		pkgTarget,
 		fromDir,
 		renamedTypes,
+		suffix,
 	} = ctx;
 	ctx.countCompile();
 	const errors = checker.checkAll(programs);
@@ -1327,6 +1335,8 @@ function compileOwnUnit(ctx) {
 						strict: isStrict,
 						natives: options.natives,
 						isTest: options.isTest ?? false,
+						// A dependency's `init` shares the bundle with the others'.
+						initSuffix: options.isDependency ? suffix : null,
 					},
 					rootPrograms,
 				);

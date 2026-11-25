@@ -34,6 +34,7 @@ import {
 import { spliceUserChunk, userMarkerKey } from "./user-js.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
+export { pkgSuffix } from "./pkg-names.js";
 export {
 	declaredTypeNames,
 	mangleCollidingTypes,
