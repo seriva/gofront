@@ -327,6 +327,155 @@ func Sum() int { return len(reg) + ps[0].k + len(arr) + k }
 		"1 2 14",
 	));
 
+test("a literal key naming a renamed value is renamed for an imported map type", () =>
+	allTargets(
+		{
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./a"
+)
+
+var k = 1
+
+func main() { fmt.Println(k, a.Get()) }
+`,
+			"types/types.go": `package types
+
+type Registry map[int]string
+
+type P struct{ k int }
+
+type Pt struct{ K int }
+`,
+			"a/a.go": `package a
+
+import "../types"
+
+var k = 3
+
+var reg = types.Registry{k: "ok"}
+var ps = []types.Pt{{K: k}}
+var m = map[string]types.Pt{"x": {K: 4}}
+
+func Get() string { return reg[3] + string(rune('0'+ps[0].K+m["x"].K)) }
+`,
+		},
+		"1 ok7",
+	));
+
+test("a literal key naming a renamed value is renamed for a function-local map type", () =>
+	allTargets(
+		{
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./a"
+	"./b"
+)
+
+func main() { fmt.Println(a.K(), b.F()) }
+`,
+			"a/a.go": `package a
+
+var k = 100
+
+func K() int { return k }
+`,
+			"b/b.go": `package b
+
+var k = 200
+
+type S struct{ k int }
+
+func F() string {
+	type M map[int]string
+	type L struct{ k int }
+	m := M{k: "ok"}
+	s := S{k: 1}
+	l := L{k: 2}
+	return m[200] + string(rune('0'+s.k+l.k))
+}
+`,
+		},
+		"100 ok3",
+	));
+
+test("a dot-imported map type's key naming a renamed value reads its own package's", () =>
+	allTargets(
+		{
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./a"
+	. "./b"
+	. "./types"
+)
+
+func main() {
+	r := Registry{K: "ok"}
+	p := Pt{K: 2}
+	fmt.Println(r[3], r, a.K, p.K)
+}
+`,
+			"types/types.go": `package types
+
+type Registry map[int]string
+
+type Pt struct{ K int }
+`,
+			"a/a.go": `package a
+
+var K = 1
+`,
+			"b/b.go": `package b
+
+var K = 3
+`,
+		},
+		"ok map[3:ok] 1 2",
+	));
+
+test("packages declare the same blank constant", () =>
+	allTargets(
+		{
+			"main.go": `package main
+
+import (
+	"fmt"
+	"./a"
+	"./b"
+)
+
+const _ = 9
+
+func main() { fmt.Println(a.A, a.B, b.A2, b.B2) }
+`,
+			"a/a.go": `package a
+
+const (
+	A = iota
+	_
+	B
+)
+`,
+			"b/b.go": `package b
+
+const (
+	A2 = iota
+	_
+	B2
+)
+
+const _, _ = 1, 2
+`,
+		},
+		"0 2 0 2",
+	));
+
 section("Package collisions — types and values");
 
 test("a function or var of one package and a type of another share a name", () =>

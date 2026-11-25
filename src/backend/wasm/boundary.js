@@ -32,7 +32,7 @@
 //     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
 //     handed out by this facade) may be passed back in.
 
-import { UnsupportedError } from "../../typechecker/types.js";
+import { declaredName, UnsupportedError } from "../../typechecker/types.js";
 import { FIXED_FLOAT_JS } from "../shared/fixed-float.js";
 import {
 	unicodeIsJs,
@@ -2807,7 +2807,8 @@ function promotedMethods(info, fields, methods, meta) {
 //
 // A generic struct the wasm package never instantiates has no instance to
 // pick: its class is still emitted, and building one throws the same
-// `TypeError` instead of a raw `ReferenceError`.
+// `TypeError` instead of a raw `ReferenceError`.  The message names the type
+// as declared (`Box`, not the build's `Box$$b`).
 function genGenericClasses(out, needs, meta) {
 	const mod = meta._mod;
 	const groups = new Map();
@@ -2834,7 +2835,7 @@ function genGenericClasses(out, needs, meta) {
 		const tz = a.at(-1);
 		const id = Array.isArray(tz) && typeof tz.at(-1) === "string" ? tz.at(-1).replaceAll(" ", "") : undefined;
 		const C = id === undefined ? ${instances.size === 1 ? `${[...instances.values()][0]}` : "undefined"} : { ${table} }[id];
-		if (!C) throw new TypeError("GoFront: no ${base} instance for the type arguments " + id + " in the wasm package");
+		if (!C) throw new TypeError("GoFront: no ${declaredName(base)} instance for the type arguments " + id + " in the wasm package");
 		return new C(...(Array.isArray(tz) ? a.slice(0, -1) : a));
 	}
 }`);

@@ -3028,8 +3028,66 @@ func run() int {
 
 func main() {}
 `,
-		"Box$$util",
 	));
+
+test("the no-instance TypeError names a renamed wasm generic struct as declared", async () => {
+	const box = (pkg, extra = "") => `//gofront:target wasm
+package ${pkg}
+
+type Box[T any] struct{ V T }
+${extra}`;
+	const cases = [
+		[
+			{
+				"a/a.go": box("a", "\nfunc Take(b Box[int]) int { return b.V }\n"),
+				"b/b.go": box("b"),
+			},
+			"./a",
+			"./b",
+		],
+		[
+			{ "p1/util/u.go": box("util"), "p2/util/u.go": box("util") },
+			"./p1/util",
+			"./p2/util",
+		],
+	];
+	for (const [files, first, second] of cases) {
+		const res = await compileHybridProject(
+			{
+				...files,
+				"main.go": `package main
+
+import (
+	x "${first}"
+	y "${second}"
+)
+
+var _ x.Box[string]
+
+func run() int {
+	b := y.Box[int]{V: 5}
+	return b.V
+}
+
+func main() {}
+`,
+			},
+			{ exports: ["run"] },
+		);
+		let err = null;
+		try {
+			res.mod.run();
+		} catch (e) {
+			err = e;
+		}
+		assert(
+			err instanceof TypeError &&
+				err.message.includes("GoFront: no Box instance") &&
+				!err.message.includes("$$"),
+			`expected the no-instance TypeError, got ${err?.name}: ${err?.message}`,
+		);
+	}
+});
 
 test("a wasm generic struct with no instance throws the TypeError next to an instantiated one", async () => {
 	const res = await compileHybridProject(

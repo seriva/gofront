@@ -3482,6 +3482,10 @@ export const expressionCheckMethods = {
 	_checkStructKeyedElems(expr, scope, t, base) {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
+				// The package-name renamer could not tell this literal's key
+				// from a value it renamed (see `renameLiteral`): it names a field.
+				if (elem.key._fieldName !== undefined)
+					elem.key.name = elem.key._fieldName;
 				const keyName = elem.key.name;
 				const embed = base._structFields?.find(
 					(f) => f.embedded && embeddedFieldName(f) === keyName,

@@ -1580,11 +1580,15 @@ export class CodeGen {
 
 	genConstDecl(decl) {
 		for (const spec of decl.decls) {
+			// A constant has no side effects: a blank one binds nothing, and two
+			// `const _` (of one package or of two) must not both declare `_`.
+			if (spec.names.every((n) => n === "_")) continue;
 			const vals = spec.value.map((v) => this.genExpr(v));
 			if (spec.names.length === 1) {
 				this.line(`const ${spec.names[0]} = ${vals[0]};`);
 			} else {
-				this.line(`const [${spec.names.join(", ")}] = [${vals.join(", ")}];`);
+				const targets = spec.names.map((n) => (n === "_" ? "" : n));
+				this.line(`const [${targets.join(", ")}] = [${vals.join(", ")}];`);
 			}
 		}
 	}

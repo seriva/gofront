@@ -219,7 +219,10 @@ function isFieldKey(node, child) {
 // A composite literal of `valueMode` renaming: `type` is the type an elided
 // literal (`{1, 2}` in `[]P{{1, 2}}`) inherits, `walk(node)` renames a node in
 // the literal's scope.  A key `Ident` is a struct field unless the literal's
-// type is a map, slice or array, whose keys are expressions.
+// type is a map, slice or array, whose keys are expressions.  When the renamer
+// cannot tell (a type of another package, a dot-imported or a function-local
+// one) the key is renamed and keeps its written spelling in `_fieldName`, which
+// the checker puts back once it finds the literal is a struct's.
 function renameLiteral(lit, type, walk, valueMode) {
 	const own = lit.typeExpr ?? type;
 	if (lit.typeExpr) walk(lit.typeExpr);
@@ -232,37 +235,58 @@ function renameLiteral(lit, type, walk, valueMode) {
 	for (const e of lit.elems ?? []) {
 		if (e?.kind !== "KeyValueExpr") sub(e, elem);
 		else {
-			if (!(fields && e.key?.kind === "Ident"))
-				sub(e.key, literalPart(own, valueMode.typeDecls, "key"));
+			const key = e.key;
+			if (key?.kind !== "Ident" || fields === false)
+				sub(key, literalPart(own, valueMode.typeDecls, "key"));
+			else if (fields === null) {
+				const name = key.name;
+				walk(key);
+				if (key.name !== name) key._fieldName ??= name;
+			}
 			sub(e.value, elem);
 		}
 	}
 }
 
-// The type node a type expression stands for after following the package's
-// own named types, or null for a type the package does not declare.
+const LITERAL_TYPE_KINDS = new Set([
+	"StructType",
+	"MapType",
+	"SliceType",
+	"ArrayType",
+]);
+
+// The name a type expression spells (`P`, `P[int]`), or null for one that is
+// not a bare name (`types.P`, `[]P`).
+function literalTypeName(type) {
+	if (type.kind === "Ident") return type.name;
+	if (type.kind === "TypeName" || type.kind === "GenericTypeName")
+		return type.name.includes(".") ? null : type.name;
+	if (type.kind === "InstantiationExpr" || type.kind === "IndexExpr")
+		return type.expr?.kind === "Ident" ? type.expr.name : null;
+	return null;
+}
+
+// The struct, map, slice or array type node a type expression stands for
+// after following the package's own top-level named types, or null for any
+// other type (one the package does not declare at top level among them).
 function literalUnderlying(type, typeDecls) {
 	for (let hops = 0; hops < 16 && type; hops++) {
-		const name =
-			type.kind === "Ident" || type.kind === "TypeName"
-				? type.name
-				: type.kind === "InstantiationExpr" && type.expr?.kind === "Ident"
-					? type.expr.name
-					: null;
-		if (name === null) return type;
-		const decl = typeDecls.get(name);
+		if (LITERAL_TYPE_KINDS.has(type.kind)) return type;
+		const name = literalTypeName(type);
+		const decl = name === null ? null : typeDecls.get(name);
 		if (!decl) return null;
 		type = decl.type;
 	}
 	return null;
 }
 
-// Whether a literal of `type` has fields for keys.  A type the package does
-// not declare (another package's, a predeclared one) is taken for a struct,
-// the only one of those whose literal can take a bare name as a key.
+// Whether a literal of `type` has fields for keys: true for a struct, false
+// for a map, slice or array, null when the renamer cannot tell (a type of
+// another package, a dot-imported or function-local one, a type parameter).
 function literalIsStruct(type, typeDecls) {
 	const under = literalUnderlying(type, typeDecls);
-	return !["MapType", "SliceType", "ArrayType"].includes(under?.kind);
+	if (["MapType", "SliceType", "ArrayType"].includes(under?.kind)) return false;
+	return under?.kind === "StructType" ? true : null;
 }
 
 // The key or element type node of a map, slice or array literal type.
