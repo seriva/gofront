@@ -176,11 +176,11 @@ Roots:
   - Done when: every W6.3 program prints `9` on `wasm`
 
 ### Phase 4: Slice-to-Array Conversions (root `wasm-missing-slice-to-array-conversion`; user decision on `(*[N]T)(s)`)
-- [ ] Task 4.1: Lower `[N]T(s)` on WASM with Go's length panic and an element copy (W4.1–W4.4)
+- [x] Task 4.1: Lower `[N]T(s)` on WASM with Go's length panic and an element copy (W4.1–W4.4)
   - Files: `src/backend/wasm/emit-exprs.js` (`emitTypeConversion`)
   - Test: `test/unit/wasm/arrays.test.js`: W4.1–W4.2 with `assertProgramOutput` (*JS ok*); W4.3 copy isolation for `[2]S(s)` and `[2][2]int(s)` and W4.4 short-slice panics (printed and discarded, under `recover()`) with `assertWasmProgramOutput`
   - Done when: every W4.1–W4.4 program prints Go's output on `wasm`, including the panic text `cannot convert slice with length 1 to array or pointer to array with length 2`
-- [ ] Task 4.2: Reject `(*[N]T)(s)` in `wasm`/`both` packages and document slice-to-array conversions (W4.5)
+- [x] Task 4.2: Reject `(*[N]T)(s)` in `wasm`/`both` packages and document slice-to-array conversions (W4.5)
   - Files: `src/typechecker/expressions.js` (`_convertible` slice→pointer branch, new `_errSliceArrayPointer`), `docs/hybrid-wasm.md` (pointers section + feature list), `docs/go-compatibility.md` (pointers row)
   - Test: `test/unit/types/pointers.test.js`: `assertErrorContains(errors, "cannot convert a slice to an array pointer in a wasm package")` for `(*[2]int)(s)` and `(*[0]int)(nil)` on `wasm` and `both`; positive case: a `js` package still compiles `(*[2]int)(s)`
   - Done when: W4.5 fails to compile with that message on `wasm`/`both`, `js` packages are unchanged, and both docs pages describe `[N]T(s)` and the `(*[N]T)(s)` rule
