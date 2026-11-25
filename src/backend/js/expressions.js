@@ -211,8 +211,9 @@ const SIGNED_NEG_WRAP = {
 	rune: "| 0",
 };
 
-// Integer types whose JS shifts must follow Go's 64-bit semantics.
-const WIDE_INT_NAMES = new Set(["int", "int64", "uint", "uint64", "uintptr"]);
+// Number-backed wide integer types whose shifts and bitwise ops follow 64-bit semantics.
+const WIDE_NUMBER_NAMES = new Set(["int", "uint", "uintptr"]);
+const WIDE_BIT_OPS = new Set(["<<", ">>", "&", "|", "^", "&^"]);
 
 const STRICT_OPS = new Set([
 	"+",
@@ -1398,6 +1399,10 @@ export const expressionGenMethods = {
 				: "BigInt.asIntN";
 			if (op === "-" || op === "~") return `${wrap}(64, ${op}(${operandCode}))`;
 		}
+		if (op === "~") {
+			const not = this._genUnaryBitNot(expr, code);
+			if (not) return not;
+		}
 		const wrap = this.strict
 			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
 			: null;
@@ -1412,6 +1417,22 @@ export const expressionGenMethods = {
 			this._emittedBinaryOp(expr.operand) !== null ||
 			((op === "-" || op === "+") && /^[-+]/.test(code));
 		return needsParens ? `${op}(${code})` : `${op}${code}`;
+	},
+
+	_genUnaryBitNot(expr, code) {
+		if (expr._type?.kind === "typeParam") {
+			const factory = this._typeParamZeroFactory(expr._type.name);
+			if (!factory) return null;
+			this.useHelper("generics");
+			return `__tar(${factory}, "^", ${code}, -1)`;
+		}
+		const tName = this._typeName(expr._type);
+		if (tName === "int") return `(-(${code}) - 1)`;
+		if (tName === "uint" || tName === "uintptr") {
+			this.useHelper("bit64");
+			return `__bit64("^", ${code}, -1, true)`;
+		}
+		return null;
 	},
 
 	_genSelectorExpr(expr) {
@@ -2082,16 +2103,26 @@ export const expressionGenMethods = {
 		return "true"; // unknown type — can't check at runtime
 	},
 
+	_ifaceLiteralCheckExpr(typeNode, val) {
+		const own = this._ifaceMethodCheck(
+			val,
+			(typeNode.methods ?? []).map((m) => m.name),
+			this._unwrapIsMulti(
+				(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
+			),
+		);
+		if (!typeNode.embeds?.length) return own;
+		const checks = [
+			own,
+			...typeNode.embeds.map((e) => this._typeCheckExpr(e, val)),
+		].filter((c) => c !== "true");
+		return `(${checks.join(" && ")})`;
+	},
+
 	// Anonymous interfaces and pointers to named non-struct types; null otherwise.
 	_namedOrIfaceCheckExpr(typeNode, val) {
-		if (typeNode.kind === "InterfaceType" && !(typeNode.embeds?.length > 0))
-			return this._ifaceMethodCheck(
-				val,
-				(typeNode.methods ?? []).map((m) => m.name),
-				this._unwrapIsMulti(
-					(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
-				),
-			);
+		if (typeNode.kind === "InterfaceType")
+			return this._ifaceLiteralCheckExpr(typeNode, val);
 		if (typeNode.kind === "PointerType" && typeNode.base?.kind === "TypeName") {
 			const info = this._namedBoxInfo(
 				this.checker?.types.get(typeNode.base.name),
@@ -3635,7 +3666,9 @@ export const expressionGenMethods = {
 		if (this._is64BitInt(expr._type)) return this._gen64BitBinaryExpr(expr);
 
 		if (
-			(this.strict || this._isFloat32(expr._type)) &&
+			(this.strict ||
+				this._isFloat32(expr._type) ||
+				this._isWideNumberBitOp(expr.op, expr._type)) &&
 			this._needsStrictOp(expr.op, expr._type)
 		) {
 			const l = this.genExpr(expr.left);
@@ -4229,6 +4262,12 @@ export const expressionGenMethods = {
 		return name === "uint" || name === "uintptr";
 	},
 
+	// Number-backed `int`, `uint` and `uintptr` shifts and bitwise operators
+	// use 64-bit helpers on every target (`js` included).
+	_isWideNumberBitOp(op, type) {
+		return WIDE_BIT_OPS.has(op) && WIDE_NUMBER_NAMES.has(this._typeName(type));
+	},
+
 	_needsStrictOp(op, type) {
 		if (type?.kind === "typeParam")
 			return (
@@ -4239,8 +4278,7 @@ export const expressionGenMethods = {
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
 		if (op === "-" && this._isUintWord(type)) return true;
-		if (op === "<<" || op === ">>")
-			return WIDE_INT_NAMES.has(this._typeName(type));
+		if (this._isWideNumberBitOp(op, type)) return true;
 		return this.isIntType(type) && (op === "/" || op === "%");
 	},
 
@@ -4409,6 +4447,10 @@ export const expressionGenMethods = {
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
+		return this._genWideStrictBinary(op, l, r, type, divZero);
+	},
+
+	_genWideStrictBinary(op, l, r, type, divZero) {
 		if (op === "-" && this._isUintWord(type))
 			return `((__d) => __d < 0 ? __d + 2 ** 64 : __d)((${l}) - (${r}))`;
 		if (op === "<<" || op === ">>") {
@@ -4419,11 +4461,17 @@ export const expressionGenMethods = {
 			if (op === "<<") return `__shl64(${l}, ${r}, ${unsigned})`;
 			return `__shr64(${l}, ${r}, ${unsigned})`;
 		}
+		if (this._isWideNumberBitOp(op, type)) {
+			this.useHelper("bit64");
+			const unsigned = this._typeName(type).startsWith("u");
+			return `__bit64("${op}", ${l}, ${r}, ${unsigned})`;
+		}
 		if (this.isIntType(type)) {
 			if (op === "/")
 				return `((${r}) === 0 ? ${divZero} : Math.trunc((${l}) / (${r})))`;
 			if (op === "%") return `((${r}) === 0 ? ${divZero} : ((${l}) % (${r})))`;
 		}
+		if (op === "&^") return `((${l}) & ~(${r}))`;
 		return `${l} ${op} ${r}`;
 	},
 };

@@ -99,28 +99,36 @@ export const typeInfoGenMethods = {
 				return node.cases.some((c) => typeNodeMentions(c.types, names));
 			case "TypeConversion":
 				return typeNodeMentions(node.targetType, names);
+			case "UnaryExpr":
 			case "BinaryExpr":
-				return (
-					((node.op === "==" || node.op === "!=") &&
-						node.left._type?.kind === "typeParam") ||
-					(node._type?.kind === "typeParam" && names.has(node._type.name))
-				);
 			case "AssignStmt":
-				return (
-					node.op !== "=" &&
-					node.lhs?.[0]?._type?.kind === "typeParam" &&
-					names.has(node.lhs[0]._type.name)
-				);
 			case "IncDecStmt":
-				return (
-					node.expr?._type?.kind === "typeParam" &&
-					names.has(node.expr._type.name)
-				);
+				return this._opUsesTypeInfo(node, names);
 			case "CallExpr":
 				return this._callUsesTypeInfo(node, names);
 			case "CompositeLit":
 			case "GenericTypeName":
 				return typeArgsMention(node);
+			default:
+				return false;
+		}
+	},
+
+	_opUsesTypeInfo(node, names) {
+		const isTp = (t) => t?.kind === "typeParam" && names.has(t.name);
+		switch (node.kind) {
+			case "UnaryExpr":
+				return node.op === "^" && isTp(node._type);
+			case "BinaryExpr":
+				return (
+					((node.op === "==" || node.op === "!=") &&
+						node.left._type?.kind === "typeParam") ||
+					isTp(node._type)
+				);
+			case "AssignStmt":
+				return node.op !== "=" && isTp(node.lhs?.[0]?._type);
+			case "IncDecStmt":
+				return isTp(node.expr?._type);
 			default:
 				return false;
 		}

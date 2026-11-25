@@ -638,6 +638,25 @@ var __shr64 = __shr64 || function(x, n, u) {
   return Math.floor(x / 2 ** Number(b));
 };`;
 
+export const HELPER_BIT64 = `var __bit64 = __bit64 || function(op, a, b, u) {
+  if ((a | 0) === a && (b | 0) === b && (!u || (a >= 0 && b >= 0))) {
+    switch (op) {
+      case "&": return a & b;
+      case "|": return a | b;
+      case "^": return a ^ b;
+      default: return a & ~b;
+    }
+  }
+  var ba = BigInt(Math.trunc(a)), bb = BigInt(Math.trunc(b)), r;
+  switch (op) {
+    case "&": r = ba & bb; break;
+    case "|": r = ba | bb; break;
+    case "^": r = ba ^ bb; break;
+    default: r = ba & ~bb;
+  }
+  return Number(u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r));
+};`;
+
 export const HELPER_TO64 = `var __to_i64 = __to_i64 || function(v) {
   if (typeof v === "bigint") return BigInt.asIntN(64, v);
   return Number.isFinite(v) ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : -9223372036854775808n;
@@ -747,6 +766,7 @@ var __tar = __tar || function(f, op, a, b) {
     case "uint8": case "byte": bits = 8; signed = false; break;
     case "uint16": bits = 16; signed = false; break;
     case "uint32": bits = 32; signed = false; break;
+    case "uint": case "uintptr": signed = false; break;
   }
   const w = bits === 0 ? (v) => v
     : bits === 32 ? (signed ? (v) => v | 0 : (v) => v >>> 0)
@@ -759,14 +779,14 @@ var __tar = __tar || function(f, op, a, b) {
     case "*": return k === "float32" ? Math.fround(a * b) : bits === 0 ? a * b : w(Math.imul(a, b));
     case "/": return int ? (b === 0 ? dz() : w(Math.trunc(a / b))) : k === "float32" ? Math.fround(a / b) : a / b;
     case "%": return int && b === 0 ? dz() : w(a % b);
-    case "&": return bits === 0 ? a & b : w(a & b);
-    case "|": return bits === 0 ? a | b : w(a | b);
-    case "^": return bits === 0 ? a ^ b : w(a ^ b);
-    case "&^": return bits === 0 ? a & ~b : w(a & ~b);
+    case "&": return bits === 0 ? __bit64(op, a, b, !signed) : w(a & b);
+    case "|": return bits === 0 ? __bit64(op, a, b, !signed) : w(a | b);
+    case "^": return bits === 0 ? __bit64(op, a, b, !signed) : w(a ^ b);
+    case "&^": return bits === 0 ? __bit64(op, a, b, !signed) : w(a & ~b);
   }
   b = Number(b);
   if (b < 0) ns();
-  if (bits === 0) return op === "<<" ? a << b : a >> b;
+  if (bits === 0) return op === "<<" ? __shl64(a, b, !signed) : __shr64(a, b, !signed);
   if (b >= bits) return op === ">>" && signed && a < 0 ? -1 : 0;
   return op === "<<" ? w(a << b) : signed ? a >> b : a >>> b;
 };

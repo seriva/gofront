@@ -906,38 +906,31 @@ export const statementGenMethods = {
 					: this.genExpr(stmt.lhs[0].expr);
 				const idx = this.genExpr(stmt.lhs[0].index);
 				const binOp = stmt.op.slice(0, -1);
-				const is64Val = is64BitInt(stmt.lhs[0]._mapValueType);
+				const valType = stmt.lhs[0]._mapValueType;
+				const is64Val = is64BitInt(valType);
 				let rhsVal = active[0].r;
 				if (is64Val) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
-				const complexVal = complexOp
-					? (read) =>
-							this._genComplexArith(
+				const useStrict =
+					!complexOp && this._needsStrictCompoundStmt(stmt, is64Val);
+				const mapCompound = (read) =>
+					complexOp
+						? this._genComplexArith(
 								binOp,
 								read,
 								rhsVal,
 								isComplex64(stmt.lhs[0]._type),
 							)
-					: null;
-				const rhsExpr = complexVal
-					? complexVal(`(__m[__k] ?? ${zero})`)
-					: is64Val
-						? this._gen64BitBinary(
-								binOp,
-								`(__m[__k] ?? ${zero})`,
-								rhsVal,
-								stmt.lhs[0]._mapValueType,
-							)
-						: `(__m[__k] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
-				const rhsExprDirect = complexVal
-					? complexVal(`(${base}[${idx}] ?? ${zero})`)
-					: is64Val
-						? this._gen64BitBinary(
-								binOp,
-								`(${base}[${idx}] ?? ${zero})`,
-								rhsVal,
-								stmt.lhs[0]._mapValueType,
-							)
-						: `(${base}[${idx}] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
+						: useStrict
+							? this._genStrictBinary(
+									binOp,
+									read,
+									rhsVal,
+									valType,
+									stmt.rhs[0]?._type,
+								)
+							: `${read} ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
+				const rhsExpr = mapCompound(`(__m[__k] ?? ${zero})`);
+				const rhsExprDirect = mapCompound(`(${base}[${idx}] ?? ${zero})`);
 				if (
 					this._hasCallExpr(stmt.lhs[0].expr) ||
 					this._hasCallExpr(stmt.lhs[0].index)
@@ -2359,7 +2352,8 @@ export const statementGenMethods = {
 	},
 
 	// Compound assignments that need more than the JS operator: strict
-	// numeric wrapping, 64-bit and float32 arithmetic, and integer `/=`.
+	// numeric wrapping, 64-bit and float32 arithmetic, wide-int shifts/bitwise,
+	// and integer `/=`.
 	_needsStrictCompoundStmt(stmt, is64) {
 		if (stmt.op === "=") return false;
 		const t = stmt.lhs[0]._type;
@@ -2367,6 +2361,7 @@ export const statementGenMethods = {
 			this.strict ||
 			is64 ||
 			this._isFloat32(t) ||
+			this._isWideNumberBitOp(stmt.op.slice(0, -1), t) ||
 			(stmt.op === "/=" && this.isIntType(t))
 		);
 	},

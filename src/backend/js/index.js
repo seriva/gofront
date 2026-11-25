@@ -54,6 +54,7 @@ import {
 import {
 	HELPER_APPEND,
 	HELPER_B64,
+	HELPER_BIT64,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
@@ -129,6 +130,7 @@ const HELPER_MAP = [
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
 	["shift", HELPER_SHIFT],
+	["bit64", HELPER_BIT64],
 	["to64", HELPER_TO64],
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
@@ -713,6 +715,10 @@ export class CodeGen {
 		}
 		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
+		if (name === "generics") {
+			this.useHelper("shift");
+			this.useHelper("bit64");
+		}
 		if (name === "slice") {
 			this._helpers.add("sv");
 			this._helpers.add("slicefail");

@@ -17,6 +17,7 @@ test("concrete and generic any / interface{} assertions reject nil", async () =>
 import "fmt"
 
 type E interface{}
+type E2 E
 type A = any
 type EAlias = interface{}
 
@@ -54,6 +55,24 @@ func switchAny(v any) string {
 	}
 }
 
+func switchGeneric[T any](v any) string {
+	switch v.(type) {
+	case T:
+		return "T"
+	default:
+		return "nil"
+	}
+}
+
+func switchEmptyIface(v any) string {
+	switch v.(type) {
+	case interface{}:
+		return "iface"
+	default:
+		return "nil"
+	}
+}
+
 func main() {
 	var n any
 	var m any = 3
@@ -77,6 +96,9 @@ func main() {
 	v8, ok8 := assertOk[interface{}](m)
 	v9, ok9 := n.(A)
 	v10, ok10 := n.(EAlias)
+	v11, ok11 := n.(E2)
+	_, ok12 := n.(interface{ any })
+	_, ok13 := n.(interface{ fmt.Stringer })
 	fmt.Println(v4, ok4)
 	fmt.Println(v5, ok5)
 	fmt.Println(v6, ok6)
@@ -84,10 +106,11 @@ func main() {
 	fmt.Println(v8, ok8)
 	fmt.Println(v9, ok9)
 	fmt.Println(v10, ok10)
-	fmt.Println(switchAny(n), switchAny(m))
+	fmt.Println(v11, ok11, ok12, ok13)
+	fmt.Println(switchAny(n), switchAny(m), switchGeneric[any](n), switchGeneric[any](m), switchGeneric[interface{}](n), switchGeneric[interface{}](m), switchEmptyIface(n), switchEmptyIface(m))
 }
 `,
-		"<nil> false\n<nil> false\n<nil> false\ntrue\ntrue\ntrue\n3 true\n<nil> false\n<nil> false\n3 true\n3 true\n<nil> false\n<nil> false\nnil any\n",
+		"<nil> false\n<nil> false\n<nil> false\ntrue\ntrue\ntrue\n3 true\n<nil> false\n<nil> false\n3 true\n3 true\n<nil> false\n<nil> false\n<nil> false false false\nnil any nil T nil T nil iface\n",
 	);
 });
 
