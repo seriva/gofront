@@ -2645,3 +2645,74 @@ test("anonymous interface in mutated exported vars", async () => {
 		"true 1\n",
 	);
 });
+
+// An interface on the boundary exposes its methods' signatures too, so the
+// anonymous interfaces they hold need dispatchers as well, at any depth.
+const nestedIfaceCases = [
+	[
+		"a method parameter of an anonymous interface",
+		"func F(x interface{ M(interface{ N() int }) int }) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a method result of an anonymous interface",
+		"func F(x interface{ M() interface{ N() int } }) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a method result of a named interface",
+		"type I interface{ M() interface{ N() int } }\n\nfunc F(x I) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a method of an unexported named interface",
+		"type i interface{ M() interface{ N() int } }\n\nfunc F(x i) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a struct field of a method parameter",
+		"func F(x interface{ M(struct{ V interface{ N() int } }) }) bool { return x == nil }",
+		"\tfmt.Println(F(nil))",
+	],
+	[
+		"a doubly nested method result",
+		"func F(x interface {\n\tM() interface{ N() []interface{ O() int } }\n}) bool {\n\treturn x == nil\n}",
+		"\tfmt.Println(F(nil))",
+	],
+];
+
+for (const [name, decls, body] of nestedIfaceCases) {
+	test(`anonymous interface in ${name}`, async () => {
+		await assertProgramOutput(anonIfaceProgram(decls, body), "true\n");
+	});
+}
+
+// Exported vars initialized from a multi-value expression take their type
+// from the declaration's resolved global, not from the initializer node.
+const multiValueVarCases = [
+	[
+		"a comma-ok map lookup",
+		"var m = map[int]interface{ M() int }{}\n\nvar B, _ = m[0]",
+	],
+	[
+		"a call to a func literal's second result",
+		"var _, B = func() (int, interface{ M() int }) { return 0, nil }()",
+	],
+	[
+		"a multi-result call",
+		"func f() (int, interface{ M() int }) { return 0, nil }\n\nvar _, B = f()",
+	],
+	[
+		"a comma-ok type assertion",
+		"var y any\n\nvar B, _ = y.(interface{ M() int })",
+	],
+];
+
+for (const [name, decls] of multiValueVarCases) {
+	test(`anonymous interface in an exported var from ${name}`, async () => {
+		await assertWasmProgramOutput(
+			anonIfaceProgram(decls, "\tfmt.Println(B == nil)"),
+			"true\n",
+		);
+	});
+}

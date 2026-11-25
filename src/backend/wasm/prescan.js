@@ -85,6 +85,7 @@ export const ALL_COMPONENTS = new Set([
 	"pointer",
 	"func",
 	"tuple",
+	"interface",
 ]);
 
 const elemOf = (t) => [t.elem];
@@ -100,6 +101,9 @@ const COMPONENT_PARTS = {
 	tuple: (t) => t.types ?? [],
 	struct: (t, checker) => structFieldList(t, checker).map((f) => f.goType),
 	func: funcParts,
+	// An interface's method signatures, which the boundary exposes with it.
+	interface: (t) =>
+		getInterfaceMethodList(t).flatMap((m) => [...m.params, ...m.returns]),
 };
 
 // The component kind of a type node, AST (`ArrayType`) or checker (`array`).
@@ -111,6 +115,7 @@ const COMPONENT_KIND = {
 	PointerType: "pointer",
 	FuncType: "func",
 	TupleType: "tuple",
+	InterfaceType: "interface",
 };
 for (const k of Object.keys(COMPONENT_PARTS)) COMPONENT_KIND[k] = k;
 
@@ -310,9 +315,9 @@ export function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 }
 
 // A qualified interface (`fmt.Stringer`) in a signature is a boundary type
-// when the function is exported, so its dispatchers must exist.  Returns true
-// when `t` names such an interface (or an unresolved qualified type), whose
-// components need no further scan.
+// when the function is exported, so its dispatchers must exist.  Registers
+// them when `t` names such an interface; returns true when `t` is a qualified
+// name the checker does not know, whose components cannot be scanned.
 function _registerQualifiedIface(t, interfaceCalls, checker) {
 	if (t.kind !== "TypeName" || !t.name?.includes(".")) return false;
 	const resolved = checker?.types?.get(t.name);
@@ -329,7 +334,7 @@ function _registerQualifiedIface(t, interfaceCalls, checker) {
 			methodSig: { kind: "func", params: m.params, returns: m.returns },
 		});
 	}
-	return true;
+	return false;
 }
 
 // Registers the dispatchers of an anonymous interface type
@@ -353,14 +358,20 @@ function _registerAnonIface(t, interfaceCalls, checker, mod) {
 
 const isExportedName = (name) => /^[A-Z]/.test(name ?? "");
 
-// The declared types of a package `var` declaration's exported names.
-function exportedVarTypes(d) {
+// The exported names of a package `var` declaration with their types: the
+// declared type, else the global's resolved type (which covers multi-value
+// initializers such as `var B, ok = m[k]`), else the initializer's type.  The
+// boundary exposes exactly these, so the dispatcher scan reads them too.
+export function exportedVarTypes(d, mod) {
 	const out = [];
 	for (const spec of d.decls ?? d.specs ?? [d]) {
 		const names = spec.names ?? (spec.name ? [spec.name] : []);
 		const values = spec.value ?? (spec.init ? [spec.init] : []);
 		names.forEach((name, i) => {
-			if (isExportedName(name)) out.push(spec.type ?? values[i]?._type);
+			if (!isExportedName(name)) return;
+			const goType =
+				spec.type ?? mod.resolveGlobal(name)?.goType ?? values[i]?._type;
+			out.push({ name, goType });
 		});
 	}
 	return out;
@@ -370,8 +381,10 @@ function exportedVarTypes(d) {
 // receive from it need dispatchers even when no Go code calls their methods:
 // those in function signatures, and in the fields and types of exported
 // type and `var` declarations, at any depth (`[]interface{ M() int }`,
-// `struct{ V interface{ M() int } }`, `*Box[interface{ M() int }]`).  A named
-// interface gets its dispatchers from its own declaration.
+// `struct{ V interface{ M() int } }`, `*Box[interface{ M() int }]`), including
+// the method signatures of the interfaces found (`interface{ M() interface{
+// N() int } }`).  A named interface gets its own dispatchers from its
+// declaration, but its methods' signatures are still scanned.
 export function _scanFuncSigInterfaces(
 	progs,
 	funcDecls,
@@ -379,10 +392,19 @@ export function _scanFuncSigInterfaces(
 	checker,
 	mod,
 ) {
-	const visit = (t) =>
-		_registerQualifiedIface(t, interfaceCalls, checker) ||
-		_registerAnonIface(t, interfaceCalls, checker, mod) ||
-		(definedTarget(t, checker) !== undefined && isInterfaceType(t, checker));
+	// The bodies of named interfaces, which are scanned but not registered
+	// under an anonymous name.
+	const namedBodies = new WeakSet();
+	const visit = (t) => {
+		if (_registerQualifiedIface(t, interfaceCalls, checker)) return true;
+		const target = definedTarget(t, checker);
+		if (target !== undefined) {
+			if (target && isInterfaceType(t, checker)) namedBodies.add(target);
+		} else if (!namedBodies.has(t)) {
+			_registerAnonIface(t, interfaceCalls, checker, mod);
+		}
+		return false;
+	};
 	const scanType = (t) =>
 		forEachComponentType(t, checker, visit, { through: ALL_COMPONENTS });
 	const scanSig = (fn) => {
@@ -396,7 +418,7 @@ export function _scanFuncSigInterfaces(
 			else if (d.kind === "TypeDecl" && isExportedName(d.name))
 				scanType(d.type);
 			else if (d.kind === "VarDecl")
-				for (const t of exportedVarTypes(d)) scanType(t);
+				for (const { goType } of exportedVarTypes(d, mod)) scanType(goType);
 		}
 	}
 }
