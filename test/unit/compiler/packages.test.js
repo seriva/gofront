@@ -1435,6 +1435,26 @@ for (const target of ["js", "both", "wasm"]) {
 		);
 		assertEqual(lines.join("\n"), "3 7 1");
 	});
+
+	// The shadow's new name is emitted at the top level, where another file
+	// of the package may already declare it as a value.
+	for (const sibling of [
+		"var Box__L1 = 99",
+		"const Box__L1 = 99",
+		"func Box__L1() int { return 99 }",
+	])
+		test(`a dot-import shadow's name avoids a sibling file's \`${sibling.split(" ")[0]}\` (${target})`, async () => {
+			const use = sibling.startsWith("func") ? "Box__L1()" : "Box__L1";
+			const { lines } = await compileHybridProject({
+				...dotPkgs(
+					target,
+					{ "a/a.go": SHADOW_A, "b/b.go": SHADOW_B },
+					"var _ = a.One\nfunc f() int { type Box struct{ W int }; return Box{W: 3}.W }\nfunc main() { fmt.Println(f(), Box{V: 5}.Get(), GetL1()) }",
+				),
+				"f2.go": `//gofront:target ${target}\npackage main\n${sibling}\nfunc GetL1() int { return ${use} }\n`,
+			});
+			assertEqual(lines.join("\n"), "3 5 99");
+		});
 }
 
 test("diagnostics spell a renamed type the way the source does", () => {

@@ -708,6 +708,7 @@ function resolveImports(
 							dep.renamedTypes,
 							options.typeOwners,
 							fromDir,
+							programs,
 						);
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
