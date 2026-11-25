@@ -2228,9 +2228,12 @@ export const expressionGenMethods = {
 			case "map":
 				return this._isNilLiteral(srcExpr) ? { kind: "MapType" } : null;
 			case "slice": {
+				// A string operand, or a type parameter with a string term,
+				// is encoded into a new slice.
 				const elem = this._underlyingOf(base.elem)?.name;
 				const fromText =
-					this._isStringExprType(srcExpr?._type) &&
+					(this._isStringExprType(srcExpr?._type) ||
+						this._convSourceKinds(srcExpr)?.has("string")) &&
 					["byte", "uint8", "rune", "int32", "int"].includes(elem);
 				return this._isNilLiteral(srcExpr) || fromText
 					? { kind: "SliceType", elem: base.elem }
@@ -3935,14 +3938,21 @@ export const expressionGenMethods = {
 			expr.expr._type?.kind === "named"
 				? expr.expr._type.underlying
 				: expr.expr._type;
-		// A type parameter whose terms are all slices converts like a slice.
+		// A slice (or a type parameter with a slice term, which may also have
+		// array terms of the target's length) is copied by its first `size`
+		// elements (a shorter slice panics); struct and array elements are
+		// deep copies, so the result shares no storage with the source.
 		const kinds = this._convSourceKinds(expr.expr);
 		const fromParamSlice =
 			kinds &&
-			[...kinds].every((k) => k === "bytes" || k === "runes" || k === "slice");
+			[...kinds].some((k) => k === "bytes" || k === "runes" || k === "slice");
 		if (srcResolved?.kind === "slice" || fromParamSlice) {
 			const size = t.size?.value !== undefined ? Number(t.size.value) : t.size;
-			return `${inner}.slice(0, ${size})`;
+			const target = this._aggregateBase(expr._type) ?? this._typeFromNode(t);
+			const elemClone = this._cloneJs(target?.elem, "__e");
+			this.useHelper("s2a");
+			const head = `__s2a(${inner}, ${size})`;
+			return elemClone === "__e" ? head : `${head}.map((__e) => ${elemClone})`;
 		}
 		// Array-to-array conversion yields a new array value.
 		return this._cloneJs(expr.expr._type, inner);

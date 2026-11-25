@@ -2801,3 +2801,260 @@ func main() {
 		"[1 2 3] [9 2]\n",
 	);
 });
+
+test("a generic *p store into a generic struct copies its array fields into the existing storage", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type G[E any] struct{ M [2]E }
+type N[E any] struct {
+	A [2][2]E
+	In G[E]
+}
+
+func set[V any](p *V, v V) { *p = v }
+func zeroArr[E any]() [2]E     { var a [2]E; return a }
+func mkArr[E any](x, y E) [2]E { return [2]E{x, y} }
+func mkG[E any](x, y E) G[E]   { return G[E]{M: [2]E{x, y}} }
+
+func probe[E any](x, y E) {
+	var g G[E]
+	sg := g.M[:]
+	set(&g, G[E]{M: [2]E{x, y}})
+	fmt.Println(sg)
+}
+
+func main() {
+	var gb G[byte]
+	sb := gb.M[:]
+	set(&gb, G[byte]{M: [2]byte{10, 20}})
+	var gi G[int]
+	si := gi.M[:]
+	set(&gi, G[int]{M: [2]int{1, 2}})
+	var gf G[float64]
+	sf := gf.M[:]
+	set(&gf, G[float64]{M: [2]float64{1.5, 2.5}})
+	var gu G[uint16]
+	su := gu.M[:]
+	set(&gu, G[uint16]{M: [2]uint16{300, 400}})
+	var g8 G[int8]
+	s8 := g8.M[:]
+	set(&g8, G[int8]{M: [2]int8{-1, 5}})
+	var gbo G[bool]
+	sbo := gbo.M[:]
+	set(&gbo, G[bool]{M: [2]bool{true, false}})
+	var gs G[string]
+	ss := gs.M[:]
+	set(&gs, G[string]{M: [2]string{"a", "b"}})
+	var ga G[[2]byte]
+	sa := ga.M[1][:]
+	set(&ga, G[[2]byte]{M: [2][2]byte{{1, 2}, {3, 4}}})
+	fmt.Println(sb, si, sf, su, s8, sbo, ss, sa)
+
+	var n N[byte]
+	na := n.A[1][:]
+	ni := n.In.M[:]
+	set(&n, N[byte]{A: [2][2]byte{{1, 2}, {3, 4}}, In: G[byte]{M: [2]byte{5, 6}}})
+	fmt.Println(na, ni)
+
+	// generic-built values into concrete storage and back
+	var b [2]byte
+	bs := b[:]
+	set(&b, mkArr[byte](3, 4))
+	z := zeroArr[byte]()
+	zs := z[:]
+	set(&z, [2]byte{7, 8})
+	var g2 G[byte]
+	g2s := g2.M[:]
+	set(&g2, mkG[byte](9, 10))
+	z16 := zeroArr[uint16]()
+	z16s := z16[:]
+	set(&z16, [2]uint16{11, 12})
+	zf := zeroArr[float32]()
+	zfs := zf[:]
+	set(&zf, [2]float32{1.25, 2})
+	fmt.Println(bs, zs, g2s, z16s, zfs)
+	var gi64 G[int64]
+	si64 := gi64.M[:]
+	set(&gi64, G[int64]{M: [2]int64{1 << 40, -3}})
+	fmt.Println(si64)
+
+	probe[byte](1, 2)
+	probe[int8](-3, 4)
+	probe[string]("x", "y")
+	// direct store, no generic
+	var g3 G[byte]
+	g3s := g3.M[:]
+	g3 = G[byte]{M: [2]byte{13, 14}}
+	pg := &g3
+	fmt.Println(g3s)
+	*pg = G[byte]{M: [2]byte{15, 16}}
+	fmt.Println(g3s)
+	g3.M = [2]byte{17, 18}
+	fmt.Println(g3s)
+}
+`,
+		"[10 20] [1 2] [1.5 2.5] [300 400] [-1 5] [true false] [a b] [3 4]\n[3 4] [5 6]\n[3 4] [7 8] [9 10] [11 12] [1.25 2]\n[1099511627776 -3]\n[1 2]\n[-3 4]\n[x y]\n[13 14]\n[15 16]\n[17 18]\n",
+	);
+});
+
+test("a named slice conversion from a string type parameter builds a new slice", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type B []byte
+type R []rune
+type Str string
+
+func toB[S ~[]byte | ~string](s S) B    { return B(s) }
+func toR[S ~[]rune | ~string](s S) R    { return R(s) }
+func strB[S ~string](s S) B             { return B(s) }
+func strR[S ~string](s S) R             { return R(s) }
+func bytesB[S ~[]byte](s S) B           { return B(s) }
+func runesR[S ~[]rune](s S) R           { return R(s) }
+func toBU[S ~[]uint8 | ~string](s S) B  { return B(s) }
+
+func main() {
+	b := toB("pq")
+	b[0] = 'P'
+	src := []byte("xy")
+	b2 := toB(src)
+	b2[0] = 'X'
+	b3 := toB(Str("ab"))
+	b3[1] = 'B'
+	var nb []byte
+	fmt.Println(string(b), string(src), string(b3), toB(nb) == nil, len(toB("")))
+	r := toR("hé")
+	r[0] = 'H'
+	rs := []rune("ok")
+	r2 := toR(rs)
+	r2[0] = 'O'
+	fmt.Println(string(r), string(rs), len(r))
+	c := strB(Str("mn"))
+	c[0] = 'M'
+	d := strR("ü!")
+	d[1] = '?'
+	fmt.Println(string(c), string(d), len(d))
+	e := bytesB(src)
+	e[1] = 'Y'
+	f := runesR(rs)
+	f[1] = 'K'
+	fmt.Println(string(src), string(rs))
+	g := toBU("uv")
+	g[0] = 'U'
+	fmt.Println(string(g))
+	fmt.Printf("%T %T\\n", b, r)
+}
+`,
+		"Pq Xy aB true 0\nHé Ok 2\nMn ü? 2\nXY OK\nUv\nmain.B main.R\n",
+	);
+});
+
+test("an array conversion from a slice copies struct and array elements", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ M [2]int }
+type P struct{ X *int }
+type A2 [2]int
+
+func toArrMix[S ~[]int | ~[2]int](s S) [2]int { return [2]int(s) }
+func toArr[S ~[]T](s S) [2]T                   { return [2]T(s) }
+func toArrTMix[S ~[]T | ~[2]T](s S) [2]T        { return [2]T(s) }
+func toNested[S ~[][2]int](s S) [2][2]int       { return [2][2]int(s) }
+func toElem[E any](s []E) [2]E                  { return [2]E(s) }
+func toNamed[S ~[]int | ~[2]int](s S) A2        { return A2(s) }
+func toBytes[S ~[]byte | ~[2]byte](s S) [2]byte { return [2]byte(s) }
+
+func main() {
+	s := []int{1, 2, 3}
+	a := toArrMix(s)
+	a[0] = 99
+	fmt.Println(s, a)
+	arr := [2]int{4, 5}
+	a2 := toArrMix(arr)
+	a2[0] = 98
+	fmt.Println(arr, a2)
+	n := toNamed(s[1:])
+	n[0] = 97
+	fmt.Println(s, n)
+	bs := []byte{1, 2, 3}
+	b := toBytes(bs)
+	b[0] = 9
+	ba := [2]byte{7, 8}
+	b2 := toBytes(ba)
+	b2[1] = 0
+	fmt.Println(bs, b, ba, b2)
+
+	ts := []T{{M: [2]int{1, 2}}, {M: [2]int{3, 4}}}
+	ta := toArr(ts)
+	ta[0].M[0] = 99
+	fmt.Println(ts[0].M, ta[0].M)
+	tm := toArrTMix(ts)
+	tm[1].M[1] = 88
+	tarr := [2]T{{M: [2]int{5, 6}}, {}}
+	tm2 := toArrTMix(tarr)
+	tm2[0].M[0] = 77
+	fmt.Println(ts[1].M, tm[1].M, tarr[0].M, tm2[0].M)
+
+	// concrete form
+	ca := [2]T(ts)
+	ca[0].M[1] = 66
+	fmt.Println(ts[0].M, ca[0].M)
+	ns := [][2]int{{1, 2}, {3, 4}}
+	cn := [2][2]int(ns)
+	cn[1][0] = 55
+	gn := toNested(ns)
+	gn[0][0] = 44
+	fmt.Println(ns, cn, gn)
+	ge := toElem(ts)
+	ge[1].M[0] = 33
+	gi := toElem([]int{6, 7})
+	fmt.Println(ts[1].M, ge[1].M, gi)
+	x := 1
+	ps := []P{{&x}, {&x}}
+	pa := [2]P(ps)
+	*pa[0].X = 5
+	fmt.Println(x, pa[0].X == ps[0].X)
+	sub := ts[1:]
+	one := [1]T(sub)
+	one[0].M[0] = 11
+	fmt.Println(ts[1].M, one[0].M)
+	anon := []struct{ M [1]int }{{M: [1]int{1}}}
+	aa := [1]struct{ M [1]int }(anon)
+	aa[0].M[0] = 2
+	fmt.Println(anon[0].M, aa[0].M)
+}
+`,
+		"[1 2 3] [99 2]\n[4 5] [98 5]\n[1 2 3] [97 3]\n[1 2 3] [9 2] [7 8] [7 0]\n[1 2] [99 2]\n[3 4] [3 88] [5 6] [77 6]\n[1 2] [1 66]\n[[1 2] [3 4]] [[1 2] [55 4]] [[44 2] [3 4]]\n[3 4] [33 4] [6 7]\n5 true\n[3 4] [11 4]\n[1] [2]\n",
+	);
+});
+
+test("an array conversion from a short slice panics and a nil slice converts to [0]T", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func toArrMix[S ~[]int | ~[2]int](s S) [2]int { return [2]int(s) }
+
+func try(f func()) {
+	defer func() { fmt.Println(recover()) }()
+	f()
+}
+
+func main() {
+	try(func() { fmt.Println([2]int([]int{1})) })
+	try(func() { fmt.Println(toArrMix([]int{7})) })
+	try(func() { var nb []byte; fmt.Println([0]byte(nb), [2]byte([]byte("ab"))) })
+}
+`,
+		"runtime error: cannot convert slice with length 1 to array or pointer to array with length 2\nruntime error: cannot convert slice with length 1 to array or pointer to array with length 2\n[] [97 98]\n<nil>\n",
+	);
+});

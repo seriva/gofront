@@ -364,12 +364,15 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
 // pointee, keeping the storage of its array and nested struct fields (slices
 // and pointers into them stay valid).  `z` is the zero-value factory, whose
 // value shows which fields are arrays or structs (a pointer's zero is null).
+// An array of numbers may be a typed array on one side and a plain array on
+// the other (erased generic code builds `[N]E` as a plain array), so only a
+// typed destination is filled with `set`; any other is copied element-wise.
 export const HELPER_COPYINTO = `var __copyInto = __copyInto || function(z, dst, src) {
   const isObj = (o) => o !== null && typeof o === "object";
   const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
   const cp = (d, s, zero) => {
-    if (ArrayBuffer.isView(s)) { d.set(s); return; }
-    const keys = Array.isArray(s) ? s.keys() : Object.keys(s);
+    if (ArrayBuffer.isView(d)) { d.set(s); return; }
+    const keys = Array.isArray(s) || ArrayBuffer.isView(s) ? s.keys() : Object.keys(s);
     for (const k of keys) {
       if (isShape(zero?.[k]) && isObj(s[k]) && isObj(d[k])) cp(d[k], s[k], zero[k]);
       else d[k] = s[k];
@@ -674,6 +677,14 @@ export const HELPER_SLICEFAIL = `var __slicefail = __slicefail || function(lo, h
   else if (t && !(hi >= 0 && hi <= mx)) s = "[:" + hi + ":" + (hi < 0 ? "" : mx) + "]";
   else s = "[" + lo + ":" + (lo < 0 ? "" : hi) + (t ? ":" : "") + "]";
   throw new Error("runtime error: slice bounds out of range " + s);
+};`;
+
+// `[n]T(s)`: the first `n` elements of slice `s` as a new array (a nil slice
+// converts to `[0]T`); panics when `s` is shorter, as Go does.
+export const HELPER_S2A = `var __s2a = __s2a || function(s, n) {
+  const len = s?.length ?? 0;
+  if (len < n) throw new Error("runtime error: cannot convert slice with length " + len + " to array or pointer to array with length " + n);
+  return s ? s.slice(0, n) : [];
 };`;
 
 // Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
