@@ -445,6 +445,92 @@ func main() { println(a.New().X, b.New().Y) }
 	);
 });
 
+const SHARED_VALUES = {
+	"a/a.go": `package a
+var x = 1
+func helper() int { return x }
+func Make() int { return helper() }
+`,
+	"b/b.go": `package b
+var x = 2
+func helper() int { return x * 10 }
+func Make() int { return helper() }
+`,
+};
+
+const valuesMain = (first, second) => `package main
+import (
+	"./${first}"
+	"./${second}"
+)
+func main() { println(a.Make(), b.Make()) }
+`;
+
+test("values two packages declare keep their names across cached builds", () => {
+	withTempDir({ ...SHARED_VALUES, "main.go": valuesMain("a", "b") }, (dir) => {
+		const cache = new PackageCache();
+		checkedBuild(cache, dir);
+		assertEqual(checkedBuild(cache, dir).misses, 0);
+		const js = () => build(dir, { packageCache: cache }).js;
+		assert(js().includes("Make$$b"), "the later package's function is renamed");
+		assert(js().includes("helper$$b"), "and so is its unexported one");
+		// The imports swap places: `a` now meets `b`'s names and is renamed.
+		write(dir, "main.go", valuesMain("b", "a"));
+		checkedBuild(cache, dir);
+		assert(js().includes("Make$$a"), "the rename follows the import order");
+		assert(!js().includes("Make$$b"), "and leaves the other package alone");
+		// A package that stops declaring the shared name is left alone.
+		write(
+			dir,
+			"a/a.go",
+			`package a
+var y = 1
+func helper2() int { return y }
+func Make2() int { return helper2() }
+`,
+		);
+		write(
+			dir,
+			"main.go",
+			valuesMain("b", "a").replace("a.Make()", "a.Make2()"),
+		);
+		checkedBuild(cache, dir);
+		assert(!js().includes("$$a"), "no rename is left once nothing collides");
+	});
+});
+
+test("packages of one name in different directories keep their suffixes across cached builds", () => {
+	const util = (n) => `package util
+var x = ${n}
+func Get() int { return x }
+`;
+	withTempDir(
+		{
+			"main.go": `package main
+import (
+	u1 "./p1/util"
+	u2 "./p2/util"
+)
+func main() { println(u1.Get(), u2.Get()) }
+`,
+			"p1/util/u.go": util(1),
+			"p2/util/u.go": util(2),
+		},
+		(dir) => {
+			const cache = new PackageCache();
+			checkedBuild(cache, dir);
+			assertEqual(checkedBuild(cache, dir).misses, 0);
+			const js = build(dir, { packageCache: cache }).js;
+			assert(
+				js.includes("Get$$util__2"),
+				"the second directory gets its own suffix",
+			);
+			write(dir, "p2/util/u.go", util(3));
+			assertEqual(checkedBuild(cache, dir).misses, 1);
+		},
+	);
+});
+
 test("a diamond keeps one copy of the shared package in every build", () => {
 	withTempDir(
 		{

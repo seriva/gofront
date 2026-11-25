@@ -151,39 +151,155 @@ function declaresValue(stmt, name) {
 // its innermost block (a function body, a block, or the implicit block of an
 // `if`, `for`, `switch` or case clause), so a use before a later shadowing
 // declaration still names the type.
-export function renameTypeRefs(node, renamed, tparams, values) {
+// With `valueMode` (`{ typeDecls }`, the package's type declarations by name)
+// `renamed` holds package-level values instead: every bare `Ident` that is not
+// shadowed is renamed, and a composite literal's key is renamed unless it
+// names a struct field.
+export function renameTypeRefs(
+	node,
+	renamed,
+	tparams,
+	values,
+	valueMode = null,
+) {
 	if (!node || typeof node !== "object") return;
 	const walk = (child, vals, tp = tparams) =>
-		renameTypeRefs(child, renamed, tp, vals);
+		renameTypeRefs(child, renamed, tp, vals, valueMode);
 	if (Array.isArray(node)) {
 		// A statement list: each declaration shadows the statements after it.
 		let vals = values;
 		for (const n of node) {
 			walk(n, vals);
-			if (n && typeof n === "object") vals = withNames(vals, valueNames(n));
+			if (n && typeof n === "object")
+				vals = withNames(vals, declaredHere(n, valueMode));
 		}
 		return;
 	}
 	const tp = withTypeParams(node, tparams);
 	const scoped = SCOPED_WALKS[node.kind];
 	if (scoped) return scoped(node, values, (c, v) => walk(c, v, tp));
-	if (isTypeRef(node, values) && renamed.has(node.name) && !tp.has(node.name)) {
+	if (valueMode && node.kind === "CompositeLit")
+		return renameLiteral(node, null, (c) => walk(c, values, tp), valueMode);
+	if (
+		isRef(node, values, valueMode) &&
+		renamed.has(node.name) &&
+		!tp.has(node.name)
+	) {
 		// Diagnostics quote an expression as the source spells it.
 		node._written ??= node.name;
 		node.name = renamed.get(node.name);
 	}
 	forEachChild(node, (child) => {
-		// A bare `Ident` key of a struct literal names a field, not a type; any
-		// other key (`Q{1}`, `Q(1)`, `[]Q{}`) is an expression that can use one.
-		if (
-			node.kind === "KeyValueExpr" &&
-			child === node.key &&
-			child.kind === "Ident"
-		)
-			return;
-		walk(child, values, tp);
+		if (!isFieldKey(node, child)) walk(child, values, tp);
 	});
 	forEachTemplGo(node, (child) => walk(child, values, tp));
+}
+
+// The names a statement declares in its scope: values, and in `valueMode` a
+// local type too, which shadows a package-level value of its name.
+function declaredHere(stmt, valueMode) {
+	return valueMode && stmt.kind === "TypeDecl" ? [stmt.name] : valueNames(stmt);
+}
+
+// Whether `node` names what `renameTypeRefs` renames: a type, or in
+// `valueMode` a bare `Ident` no local shadows.
+function isRef(node, values, valueMode) {
+	if (valueMode) return node.kind === "Ident" && !values.has(node.name);
+	return isTypeRef(node, values);
+}
+
+// A bare `Ident` key of a struct literal names a field, not a type; any other
+// key (`Q{1}`, `Q(1)`, `[]Q{}`) is an expression that can use one.
+function isFieldKey(node, child) {
+	return (
+		node.kind === "KeyValueExpr" && child === node.key && child.kind === "Ident"
+	);
+}
+
+// A composite literal of `valueMode` renaming: `type` is the type an elided
+// literal (`{1, 2}` in `[]P{{1, 2}}`) inherits, `walk(node)` renames a node in
+// the literal's scope.  A key `Ident` is a struct field unless the literal's
+// type is a map, slice or array, whose keys are expressions.  When the renamer
+// cannot tell (a type of another package, a dot-imported or a function-local
+// one) the key is renamed and keeps its written spelling in `_fieldName`, which
+// the checker puts back once it finds the literal is a struct's.
+function renameLiteral(lit, type, walk, valueMode) {
+	const own = lit.typeExpr ?? type;
+	if (lit.typeExpr) walk(lit.typeExpr);
+	const fields = literalIsStruct(own, valueMode.typeDecls);
+	const sub = (node, inherited) =>
+		node?.kind === "CompositeLit" && !node.typeExpr
+			? renameLiteral(node, inherited, walk, valueMode)
+			: walk(node);
+	const elem = literalPart(own, valueMode.typeDecls, "elem");
+	for (const e of lit.elems ?? []) {
+		if (e?.kind !== "KeyValueExpr") sub(e, elem);
+		else {
+			const key = e.key;
+			if (key?.kind !== "Ident" || fields === false)
+				sub(key, literalPart(own, valueMode.typeDecls, "key"));
+			else if (fields === null) {
+				const name = key.name;
+				walk(key);
+				if (key.name !== name) key._fieldName ??= name;
+			}
+			sub(e.value, elem);
+		}
+	}
+}
+
+const LITERAL_TYPE_KINDS = new Set([
+	"StructType",
+	"MapType",
+	"SliceType",
+	"ArrayType",
+]);
+
+// The name a type expression spells (`P`, `P[int]`), or null for one that is
+// not a bare name (`types.P`, `[]P`).
+function literalTypeName(type) {
+	if (type.kind === "Ident") return type.name;
+	if (type.kind === "TypeName" || type.kind === "GenericTypeName")
+		return type.name.includes(".") ? null : type.name;
+	if (type.kind === "InstantiationExpr" || type.kind === "IndexExpr")
+		return type.expr?.kind === "Ident" ? type.expr.name : null;
+	return null;
+}
+
+// The struct, map, slice or array type node a type expression stands for
+// after following the package's own top-level named types, or null for any
+// other type (one the package does not declare at top level among them).
+function literalUnderlying(type, typeDecls) {
+	for (let hops = 0; hops < 16 && type; hops++) {
+		if (LITERAL_TYPE_KINDS.has(type.kind)) return type;
+		const name = literalTypeName(type);
+		const decl = name === null ? null : typeDecls.get(name);
+		if (!decl) return null;
+		type = decl.type;
+	}
+	return null;
+}
+
+// Whether a literal of `type` has fields for keys: true for a struct, false
+// for a map, slice or array, null when the renamer cannot tell (a type of
+// another package, a dot-imported or function-local one, a type parameter).
+function literalIsStruct(type, typeDecls) {
+	const under = literalUnderlying(type, typeDecls);
+	if (["MapType", "SliceType", "ArrayType"].includes(under?.kind)) return false;
+	return under?.kind === "StructType" ? true : null;
+}
+
+// The key or element type node of a map, slice or array literal type.
+function literalPart(type, typeDecls, part) {
+	let under = literalUnderlying(type, typeDecls);
+	if (part === "elem" && under?.kind === "MapType") return under.value;
+	if (part === "key" && under?.kind === "MapType") return under.key;
+	if (under?.kind === "SliceType" || under?.kind === "ArrayType") {
+		under = under.elem;
+		// `[]*P{{1}}` elides `&P`.
+		return under?.kind === "PointerType" ? under.base : under;
+	}
+	return null;
 }
 
 const FUNC_KINDS = new Set(["FuncDecl", "MethodDecl", "FuncLit"]);

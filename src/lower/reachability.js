@@ -632,11 +632,11 @@ export class BuildReach extends StdlibReach {
 	}
 
 	// The declarations of package `dep` that its exported name `name` stands
-	// for: a type the build renamed (`Box` -> `Box$$b`) is declared under the
-	// renamed name.
+	// for: a type, function, var or const the build renamed (`Box` ->
+	// `Box$$b`) is declared under the renamed name.
 	_depDecls(dep, name) {
 		if (!dep) return [];
-		const renamed = dep.renamedTypes?.get(name);
+		const renamed = dep.renamedTypes?.get(name) ?? dep.renamedValues?.get(name);
 		return [
 			...(dep.byName.get(name) ?? []),
 			...(renamed ? (dep.byName.get(renamed) ?? []) : []),

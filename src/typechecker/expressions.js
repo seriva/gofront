@@ -2845,7 +2845,10 @@ export const expressionCheckMethods = {
 	// call. Reports the error and returns true.
 	_rejectWasmGenericFromJs(fnType, expr) {
 		if (this.target !== "js" || fnType._target !== "wasm") return false;
-		const name = `${fnType._pkgName}.${fnType.name}`;
+		const declared = displayTypeName(fnType.name);
+		const name = declared.includes(".")
+			? declared
+			: `${fnType._pkgName}.${declared}`;
 		this.err(
 			`generic function ${name} is declared in a wasm package and cannot be called from a js package; wrap it in a non-generic function in the wasm package, or move it to a 'both' package`,
 			expr,
@@ -3479,6 +3482,10 @@ export const expressionCheckMethods = {
 	_checkStructKeyedElems(expr, scope, t, base) {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
+				// The package-name renamer could not tell this literal's key
+				// from a value it renamed (see `renameLiteral`): it names a field.
+				if (elem.key._fieldName !== undefined)
+					elem.key.name = elem.key._fieldName;
 				const keyName = elem.key.name;
 				const embed = base._structFields?.find(
 					(f) => f.embedded && embeddedFieldName(f) === keyName,

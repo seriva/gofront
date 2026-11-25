@@ -1932,6 +1932,39 @@ func main() {
 	});
 }
 
+section("init() in several packages");
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`util and main both declare init, and util declares two (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			{
+				"util/util.go": `package util
+
+import "fmt"
+
+var V = 3
+
+func init() { fmt.Println("util init", V) }
+func init() { fmt.Println("util init 2") }
+`,
+				"main.go": `package main
+
+import (
+	"fmt"
+	"./util"
+)
+
+func init() { fmt.Println("main init", util.V) }
+
+func main() { fmt.Println("main") }
+`,
+			},
+			{ target },
+		);
+		assertEqual(lines.join("|"), "util init 3|util init 2|main init 3|main");
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

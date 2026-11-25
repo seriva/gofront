@@ -64,21 +64,23 @@ function jsBuiltinClash(decl, decls, methodTypes, shadows) {
 	return shadows.target === "wasm" || isClassFree(decl, decls, methodTypes);
 }
 
-// Registers the package's type names in `owners` (name -> package key) and
-// renames those another package registered first.  Returns Map<name, mangled>
-// for the renamed types, empty when nothing collides.  A type named after a
+// Registers the package's type names in `owners` (name -> package key, shared
+// with the package's value names, see pkg-names.js) and renames those another
+// package registered first, to `Name` + `suffix` (`Name$$b`, see `pkgSuffix`).
+// Returns Map<name, mangled> for the renamed types, empty when nothing
+// collides.  A type named after a
 // predeclared type (`type int32 = string`, `type any = int`) is renamed too:
 // `predeclared` holds those names, and the checker and both backends key types
 // by bare name, so the package's `int32` must not meet the predeclared one
 // that other packages (the Go-source stdlib) spell.  It takes the local-type
 // `Name__L<n>` form rather than `Name$$pkg`, which later stages read as a type
 // of another package.  A type named after a JS built-in (see `jsBuiltinClash`)
-// takes `Name$$pkg` too, so the class it emits cannot shadow the built-in; it
+// takes the suffix too, so the class it emits cannot shadow the built-in; it
 // does not claim the bare name, which no output uses.
 export function mangleCollidingTypes(
 	programs,
 	pkgKey,
-	pkgName,
+	suffix,
 	owners,
 	predeclared = new Set(),
 	shadows = null,
@@ -101,8 +103,7 @@ export function mangleCollidingTypes(
 		const clash = jsBuiltinClash(decl, decls, methodTypes, shadows);
 		const owner = owners.get(name);
 		if (owner === undefined && !clash) owners.set(name, pkgKey);
-		else if (clash || owner !== pkgKey)
-			renamed.set(name, `${name}$$${pkgName}`);
+		else if (clash || owner !== pkgKey) renamed.set(name, `${name}${suffix}`);
 	}
 	if (renamed.size > 0)
 		for (const p of programs)

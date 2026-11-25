@@ -1207,10 +1207,25 @@ export function displayTypeName(name) {
 	if (typeof name === "string") name = name.replace(LOCAL_TYPE_SUFFIX, "");
 	const i = typeof name === "string" ? name.indexOf("$$") : -1;
 	if (i < 0) return name;
-	return `${name
-		.slice(i + 2)
+	return `${suffixPackageName(name.slice(i + 2))}.${name.slice(0, i)}`;
+}
+
+// The name a package-level value was declared under: the build renames a
+// function, var or const another package also declares (`helper` ->
+// `helper$$util`), and diagnostics quote the declared name.
+export function declaredName(name) {
+	const at = typeof name === "string" ? name.indexOf("$$") : -1;
+	return at > 0 ? name.slice(0, at) : name;
+}
+
+// The package a `$$` suffix names: a standard library suffix is its import
+// path joined by `$` (`encoding$json`), a local package's its package name, and
+// a second local package of the same name gets `__<n>` after it (`util__2`).
+export function suffixPackageName(suffix) {
+	return suffix
 		.split("$")
-		.at(-1)}.${name.slice(0, i)}`;
+		.at(-1)
+		.replace(/__\d+$/, "");
 }
 
 // ── Iterator function detection (Go 1.23 range-over-func) ───

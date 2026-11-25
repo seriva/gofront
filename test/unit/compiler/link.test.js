@@ -2,6 +2,11 @@
 // Go-source stdlib name mangling)
 
 import { Lexer } from "../../../src/lexer/lexer.js";
+import {
+	mangleCollidingValues,
+	pkgSuffix,
+	renameDotImportedValues,
+} from "../../../src/link/pkg-names.js";
 import { mergeCompilationChunks } from "../../../src/link/sourcemap.js";
 import { checkGeneratedGo, mangleStdlibAst } from "../../../src/link/stdlib.js";
 import {
@@ -117,6 +122,155 @@ test("methods are keyed by receiver type", () => {
 			]),
 		"'T.Get' is declared in both 'a' and 'b'",
 	);
+});
+
+test("two units of one package name in different directories collide by directory", () => {
+	const keyed = (key, decls) => ({
+		key,
+		pkgName: "util",
+		programs: [{ decls }],
+	});
+	checkLinkCollisions([
+		keyed("/p1/util", [fn("Make")]),
+		keyed("/p1/util", [fn("Make")]),
+	]);
+	assertThrows(
+		() =>
+			checkLinkCollisions([
+				keyed("/p1/util", [fn("Make")]),
+				keyed("/p2/util", [fn("Make")]),
+			]),
+		"'Make' is declared in both '/p1/util' and '/p2/util'",
+	);
+});
+
+test("every package may declare init", () => {
+	checkLinkCollisions([
+		unit("a", [fn("init")]),
+		unit("b", [fn("init"), fn("init")]),
+	]);
+});
+
+// ── Package value names ──────────────────────────────────────
+
+section("Link — package value names");
+
+const parseGo = (src) => {
+	const ast = new Parser(
+		new Lexer(src, "p.go").tokenize(),
+		"p.go",
+		src,
+	).parse();
+	return ast;
+};
+
+const specNames = (ast) =>
+	ast.decls
+		.filter((d) => d.kind === "VarDecl" || d.kind === "ConstDecl")
+		.flatMap((d) => d.decls.flatMap((s) => s.names));
+
+// The identifier names in the program, in source order.
+function identNames(ast) {
+	const out = [];
+	const visit = (n) => {
+		if (!n || typeof n !== "object") return;
+		if (Array.isArray(n)) return n.forEach(visit);
+		if (n.kind === "Ident") out.push(n.name);
+		forEachChild(n, visit);
+	};
+	visit(ast.decls);
+	return out;
+}
+
+test("pkgSuffix gives each package directory one suffix", () => {
+	const suffixes = new Map();
+	assertEqual(pkgSuffix(suffixes, "/p1/util", "util"), "$$util");
+	assertEqual(pkgSuffix(suffixes, "/p1/util", "util"), "$$util");
+	assertEqual(pkgSuffix(suffixes, "/p2/util", "util"), "$$util__2");
+	assertEqual(pkgSuffix(suffixes, "/p3/util", "util"), "$$util__3");
+	assertEqual(pkgSuffix(suffixes, "/q/other", "other"), "$$other");
+});
+
+const COLLIDING = `package b
+
+type S struct{ helper int }
+
+const K = 3
+
+var Make2 = 1
+
+func helper() int { return K }
+func init() {}
+func (s S) Get() int { return helper() + s.helper }
+
+func Use(helper int) int {
+	k := K
+	{
+		K := 5
+		_ = K
+	}
+	s := S{helper: 2}
+	m := map[int]int{K: helper}
+	_ = _unused
+	return k + s.helper + m[3]
+}
+
+var _unused = Make2
+`;
+
+test("only names another package owns are renamed, and every reference follows", () => {
+	const ast = parseGo(COLLIDING);
+	const owners = new Map([
+		["helper", "/a"],
+		["K", "/a"],
+		["S", "/a"],
+	]);
+	const renamed = mangleCollidingValues([ast], "/b", "$$b", owners);
+	assertEqual(
+		[...renamed].map(([k, v]) => `${k}>${v}`).join(" "),
+		"K>K$$b helper>helper$$b",
+	);
+	assertEqual(owners.get("Make2"), "/b");
+	assertEqual(specNames(ast).join(" "), "K$$b Make2 _unused");
+	const names = ast.decls
+		.filter((d) => d.kind === "FuncDecl")
+		.map((d) => d.name);
+	assertEqual(names.join(" "), "helper$$b init Use");
+	const idents = identNames(ast);
+	assert(idents.includes("helper$$b"), "the call is renamed");
+	// In `Use` the parameter `helper`, the struct key `helper` and the inner
+	// block's `K` keep their names; the outer `K` and the map key `K` follow.
+	const use = ast.decls.find((d) => d.name === "Use");
+	assertEqual(
+		identNames({ decls: [use] }).join(" "),
+		"k K$$b K _ K s S helper m K$$b helper _ _unused k s m",
+	);
+});
+
+test("a dot import renames the exported names the importer does not declare", () => {
+	const ast = parseGo(`package main
+
+func Use(Make int) int { return Make + K + Own() }
+func Own() int { return Make2() }
+func Make2() int { return 1 }
+func main() { _ = Make(); _ = X }
+`);
+	renameDotImportedValues(
+		ast,
+		new Map([
+			["Make", "Make$$b"],
+			["K", "K$$b"],
+			["Own", "Own$$b"],
+			["X", "X$$b"],
+			["unexported", "unexported$$b"],
+		]),
+	);
+	const idents = identNames(ast);
+	assert(idents.includes("K$$b") && idents.includes("Make$$b"));
+	assert(idents.includes("X$$b"), "a var is renamed");
+	assert(!idents.includes("Own$$b"), "a name the importer declares stays");
+	const use = ast.decls.find((d) => d.name === "Use");
+	assertEqual(identNames({ decls: [use] }).join(" "), "Make K$$b Own");
 });
 
 // ── Go-source stdlib mangling ────────────────────────────────

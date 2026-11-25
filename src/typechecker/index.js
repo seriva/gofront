@@ -26,6 +26,7 @@ import {
 	BOOL,
 	copyFieldOwner,
 	copyType,
+	declaredName,
 	declPackages,
 	defaultType,
 	displayTypeName,
@@ -362,6 +363,8 @@ export class TypeChecker {
 	// `consts` maps the package's constant names to their folded value (see
 	// typechecker/const-fold.js), or null when the folder cannot evaluate one.
 	// `kinds` maps each member to what the package declares it as (see Scope).
+	// `mangle` maps the functions, vars and consts the build renamed
+	// (`Make` -> `Make$$b`) to the name they are declared under.
 	addPackageNamespace(
 		pkgName,
 		symbols,
@@ -371,6 +374,7 @@ export class TypeChecker {
 		kinds = null,
 		file = null,
 		reached = null,
+		mangle = null,
 	) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
@@ -383,6 +387,7 @@ export class TypeChecker {
 			_target: target,
 			_consts: consts,
 			_kinds: kinds,
+			_mangle: mangle?.size > 0 ? mangle : undefined,
 		});
 		const register = (name, type, visible) => {
 			const prior = this.types.get(name);
@@ -882,9 +887,9 @@ export class TypeChecker {
 		]);
 
 		const report = (root, node) => {
-			this.recordBlocker("mutable package variable", root);
+			this.recordBlocker("mutable package variable", declaredName(root));
 			this.err(
-				`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
+				`package-level variable '${declaredName(root)}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
 				node,
 			);
 		};
@@ -1544,7 +1549,7 @@ export class TypeChecker {
 
 	_registerFuncDecl(decl, funcType, typeParamTypes) {
 		if (this.globals.has(decl.name) && decl.name !== "init")
-			this.err(`${decl.name} redeclared in this block`, decl);
+			this.err(`${declaredName(decl.name)} redeclared in this block`, decl);
 		if (decl.native) funcType.native = decl.native;
 		if (typeParamTypes) {
 			this.globals.defineFunc(
@@ -1876,7 +1881,7 @@ export class TypeChecker {
 			async: false,
 		};
 		if (this.globals.has(decl.name) && decl.name !== "init") {
-			this.err(`${decl.name} redeclared in this block`, decl);
+			this.err(`${declaredName(decl.name)} redeclared in this block`, decl);
 		}
 		this.globals.defineFunc(decl.name, funcType, decl);
 	}
@@ -1899,7 +1904,7 @@ export class TypeChecker {
 			async: false,
 		};
 		if (this.globals.has(decl.name) && decl.name !== "init") {
-			this.err(`${decl.name} redeclared in this block`, decl);
+			this.err(`${declaredName(decl.name)} redeclared in this block`, decl);
 		}
 		this.globals.defineFunc(decl.name, funcType, decl);
 	}
@@ -2075,7 +2080,10 @@ export class TypeChecker {
 			!returnType._hasNamedReturns
 		) {
 			if (!this._isTerminating(decl.body)) {
-				this.err(`missing return at end of ${kind} '${decl.name}'`, decl);
+				this.err(
+					`missing return at end of ${kind} '${declaredName(decl.name)}'`,
+					decl,
+				);
 			}
 		}
 	}

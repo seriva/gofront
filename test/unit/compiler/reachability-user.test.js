@@ -153,7 +153,8 @@ func Used() int { return helper() }
 		(dir) => {
 			const { names } = reachOf(dir);
 			assertEqual(names().join(), "main");
-			assertEqual(names("util").join(), "Used,helper");
+			// The later package's `helper` is renamed apart from main's.
+			assertEqual(names("util").join(), "Used,helper$$util");
 		},
 	);
 });

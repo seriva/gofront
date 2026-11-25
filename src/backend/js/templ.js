@@ -5,6 +5,7 @@
 import { forEachChild } from "../../lower/walk.js";
 import {
 	callsSignalGet,
+	declaredName,
 	signalOf,
 	UnsupportedError,
 } from "../../typechecker/types.js";
@@ -110,7 +111,9 @@ export const templGenMethods = {
 			h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;
 		}
 		const hash = (h >>> 0).toString(36);
-		decl._className = `gfc_${goName}_${hash}`;
+		// A renamed class (`card$$a`) keeps its declared name: `$` cannot appear
+		// in a CSS class, and the hash already tells the packages' classes apart.
+		decl._className = `gfc_${declaredName(goName)}_${hash}`;
 		return decl._className;
 	},
 
