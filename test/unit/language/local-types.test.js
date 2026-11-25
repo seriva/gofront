@@ -861,6 +861,80 @@ func main() { g(); f() }
 	);
 });
 
+// A value an `if`/`for`/`switch` header, a type switch, an enclosing block or
+// a function literal declares is in scope in the nested body, so a local type
+// of the same name there is renamed apart from it.
+const HEADER_SHADOW_CASES = [
+	[
+		"an if header variable",
+		`if Q := 1; Q > 0 { type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"an if header variable in the else branch",
+		`if Q := 1; Q < 0 { } else { type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a for header variable",
+		`for Q := 0; Q < 1; Q++ { type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a range variable",
+		`for _, Q := range []int{1} { _ = Q; type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a switch header variable",
+		`switch Q := 1; Q { case 1: type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a type switch variable",
+		`var i any = 1
+	switch Q := i.(type) { case int: _ = Q; type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a var of an enclosing block",
+		`var Q = 1
+	_ = Q
+	{ type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a const of an enclosing block",
+		`const Q = 1
+	{ type Q struct{ X int }; fmt.Println(Q{2}.X) }`,
+	],
+	[
+		"a func literal parameter",
+		`func(Q int) { type Q struct{ X int }; fmt.Println(Q{2}.X) }(1)`,
+	],
+	[
+		"a func literal named result",
+		`_ = func() (Q int) { type Q struct{ X int }; fmt.Println(Q{2}.X); return }()`,
+	],
+];
+
+// The type is the only one of its name in the program, so only the shadowed
+// value can make it need a new name.
+for (const [what, body] of HEADER_SHADOW_CASES) {
+	for (const [where, sig, call] of [
+		["", "g()", "g()"],
+		[" in a generic body", "g[T any](t T)", "g(0)"],
+	]) {
+		test(`a local type shadowing ${what}${where} is renamed apart`, async () => {
+			await assertAllTargetsOutput(
+				`package main
+
+import "fmt"
+
+func ${sig} {
+	${body}
+}
+func main() { ${call} }
+`,
+				"2\n",
+			);
+		});
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

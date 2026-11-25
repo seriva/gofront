@@ -94,12 +94,12 @@ export function renameLocalTypes(
 			for (const rename of renames) rename();
 			return;
 		}
-		// A type parameter is in scope in the whole body, so a nested local
+		// A type parameter is in scope in the whole function, so a nested local
 		// type of the same name shadows it and is renamed apart.
 		const here = FUNC_KINDS.has(node.kind)
-			? new Set([...visible, ...declaredNames(node), ...typeParamNames(node)])
+			? withNames(visible, typeParamNames(node))
 			: visible;
-		forEachChild(node, (c) => scan(c, here));
+		walkScoped(node, here, scan);
 	};
 	for (const p of programs)
 		for (const d of p.decls ?? [])
@@ -230,6 +230,15 @@ const SCOPED_WALKS = {
 		}
 	},
 };
+
+// Walks `node`'s children with the values in scope in each (parameters, named
+// results, `if`/`for`/`switch` headers, a type switch's bound name), the same
+// scoping `renameTypeRefs` uses.
+function walkScoped(node, values, walk) {
+	const scoped = SCOPED_WALKS[node.kind];
+	if (scoped) return scoped(node, values, walk);
+	forEachChild(node, (child) => walk(child, values));
+}
 
 // `var (a = 1; b = a)`: each spec's names are in scope from the next spec.
 function walkSpecs(node, values, walk) {
