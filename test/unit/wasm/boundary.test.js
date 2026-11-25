@@ -2716,3 +2716,139 @@ for (const [name, decls] of multiValueVarCases) {
 		);
 	});
 }
+
+section("WASM Boundary — generic functions cannot be called from js");
+
+const WASM_GENERIC_ID = `//gofront:target wasm
+package util
+
+func Id[T any](s T) T { return s }
+
+func Twice(n int) int { return Id(n) * 2 }
+`;
+
+const GENERIC_FROM_JS_HINT =
+	"generic function util.Id is declared in a wasm package";
+
+async function expectGenericCallError(mainBody, extraImport = "") {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"main.go": `package main
+
+import ${extraImport}"./util"
+
+func main() {
+${mainBody}
+}
+`,
+		},
+		GENERIC_FROM_JS_HINT,
+	);
+}
+
+test("a js package cannot call a wasm generic function with inferred type arguments", () =>
+	expectGenericCallError("\tprintln(util.Id(3))"));
+
+test("a js package cannot call a wasm generic function with explicit type arguments", () =>
+	expectGenericCallError("\tprintln(util.Id[int](3))"));
+
+test("a js package cannot take a wasm generic function instance as a value", () =>
+	expectGenericCallError("\tf := util.Id[int]\n\tprintln(f(3))"));
+
+test("a js package cannot call a dot-imported wasm generic function", async () => {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"main.go": `package main
+
+import . "./util"
+
+func main() { println(Id(3)) }
+`,
+		},
+		GENERIC_FROM_JS_HINT,
+	);
+});
+
+test("the wasm generic function error names the wrapper and both-package fixes", async () => {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Id(3)) }
+`,
+		},
+		"wrap it in a non-generic function",
+	);
+});
+
+test("a wasm package may use its own generic function and js may call the wrapper", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": WASM_GENERIC_ID,
+		"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Twice(3)) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "6");
+});
+
+test("a js package may call a generic function from a both package", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": WASM_GENERIC_ID.replace("target wasm", "target both"),
+		"main.go": `package main
+
+import "./util"
+
+func main() { println(util.Id(3), util.Id[string]("a")) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "3 a");
+});
+
+test("a wasm package may call a generic function from another wasm package", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": WASM_GENERIC_ID,
+		"calc/calc.go": `//gofront:target wasm
+package calc
+
+import "../util"
+
+func Run(n int) int { return util.Id(n) + util.Id[int](1) }
+`,
+		"main.go": `package main
+
+import "./calc"
+
+func main() { println(calc.Run(4)) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "5");
+});
+
+test("a js package that is not main cannot call a wasm generic function either", async () => {
+	await expectCompileError(
+		{
+			"util/util.go": WASM_GENERIC_ID,
+			"mid/mid.go": `package mid
+
+import "../util"
+
+func F() int { return util.Id(3) }
+`,
+			"main.go": `package main
+
+import "./mid"
+
+func main() { println(mid.F()) }
+`,
+		},
+		GENERIC_FROM_JS_HINT,
+	);
+});

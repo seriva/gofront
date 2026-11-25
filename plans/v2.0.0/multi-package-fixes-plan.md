@@ -153,7 +153,7 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
   - Done when: dot-imported collision-mangled types resolve in value/conversion/literal positions and survive JS DCE
 
 ### Phase 2: Reject Unsupported JS→WASM Generic Calls (root `wasm-boundary-generic-func-unchecked`)
-- [ ] Task 2.1: Report a compile error when a `js` package calls or references a `wasm` package's generic function (M3.1–M3.2)
+- [x] Task 2.1: Report a compile error when a `js` package calls or references a `wasm` package's generic function (M3.1–M3.2)
   - Files: `src/typechecker/index.js` (`_registerFuncDecl`), `src/typechecker/expressions.js` (`_checkInstantiationExpr`, `_resolveGenericFnType`)
   - Test: `test/unit/wasm/boundary.test.js`: negative `assertErrorContains` tests for inferred `util.Id(3)`, explicit `util.Id[int](3)`, func value `f := util.Id[int]`, already-instantiated `Id(1)` in `util`, and dot-imported `Id(3)`; controls for JS→`both` and WASM→`wasm` generics
   - Done when: JS→WASM generic function calls fail at compile time with an actionable message instead of runtime `ReferenceError`

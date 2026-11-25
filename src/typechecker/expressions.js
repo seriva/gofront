@@ -2159,6 +2159,7 @@ export const expressionCheckMethods = {
 		expr.expr._genericOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?.kind === "generic") {
+			if (this._rejectWasmGenericFromJs(baseType, expr)) return TAINTED_ANY;
 			const typeArgs = expr.typeArgs.map((ta) =>
 				this.resolveTypeNode(ta, scope),
 			);
@@ -2839,7 +2840,21 @@ export const expressionCheckMethods = {
 		return out;
 	},
 
+	// WebAssembly monomorphises generics over the `wasm` units only, so a
+	// `js` package has no instance of a `wasm` package's generic function to
+	// call. Reports the error and returns true.
+	_rejectWasmGenericFromJs(fnType, expr) {
+		if (this.target !== "js" || fnType._target !== "wasm") return false;
+		const name = `${fnType._pkgName}.${fnType.name}`;
+		this.err(
+			`generic function ${name} is declared in a wasm package and cannot be called from a js package; wrap it in a non-generic function in the wasm package, or move it to a 'both' package`,
+			expr,
+		);
+		return true;
+	},
+
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
+		if (this._rejectWasmGenericFromJs(fnType, expr)) return null;
 		if (fnType.underlying && this._rejectSpreadCall(fnType.underlying, expr))
 			return null;
 		const typeArgs = this.inferTypeArgs(
