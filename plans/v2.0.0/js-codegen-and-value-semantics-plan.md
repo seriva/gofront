@@ -176,7 +176,7 @@ Roots:
   - Done when: non-float `complex(a, b)` calls fail at compile time instead of miscompiling or producing invalid WasmGC
 
 ### Phase 3: Value Semantics in Conversions & Pointer Stores (roots `struct-self-conversion-no-copy`, `js-slice-conversion-copies`, `struct-deref-store-replaces-arrays`)
-- [ ] Task 3.1: Copy structs on self-conversion `T(src)` on JS/WASM and share the backing array on JS slice-to-slice conversions (J3.1–J3.2)
+- [x] Task 3.1: Copy structs on self-conversion `T(src)` on JS/WASM and share the backing array on JS slice-to-slice conversions (J3.1–J3.2)
   - Files: `src/backend/js/expressions.js` (`_genStructClassConversion`, `_genSliceTypeConversion`), `src/backend/wasm/emit-exprs.js` (`emitTypeConversion`)
   - Test: `test/unit/language/value-semantics.test.js`: J3.1 (`T(src)`, generic `G[int](gs)`, control `U(src)`) and J3.2 (`[]int(s)`, `[]byte(b)`, `[]int(Ints)`, `[]byte(B)`, generic `[]int(S)`, `[]rune(r)`; controls `Ints(s)`, `[]byte(str)`) with `assertAllTargetsOutput`
   - Done when: struct self-conversions never alias and slice-to-slice conversions share backing storage on all targets

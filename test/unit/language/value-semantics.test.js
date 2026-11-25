@@ -2223,3 +2223,145 @@ storeCase(
 	fmt.Println(ts, *pt)`,
 	"[5 6] [[5 6] [7 8]]\n[9 10] [[9 10] [11 12]]\n[7 8] {[[5 6] [7 8]]}\n",
 );
+
+section("Conversions share or copy like Go");
+
+test("a struct self-conversion T(src) copies the value", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ X, Y int }
+type G[V any] struct {
+	X V
+	Y int
+}
+
+func main() {
+	src := T{1, 2}
+	dst := T(src)
+	dst.X = 2
+	fmt.Println(src.X, dst.X)
+	gs := G[int]{1, 2}
+	gdst := G[int](gs)
+	gdst.X = 2
+	fmt.Println(gs.X, gdst.X)
+}
+`,
+		"1 2\n1 2\n",
+	);
+});
+
+test("a conversion to a distinct struct type still copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ X, Y int }
+type U struct{ X, Y int }
+
+func main() {
+	src := T{1, 2}
+	u := U(src)
+	u.X = 2
+	fmt.Println(src.X, u.X)
+}
+`,
+		"1 2\n",
+	);
+});
+
+test("a struct self-conversion copies array fields", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A [2]int }
+
+func main() {
+	src := T{[2]int{1, 2}}
+	dst := T(src)
+	dst.A[0] = 9
+	fmt.Println(src.A, dst.A)
+}
+`,
+		"[1 2] [9 2]\n",
+	);
+});
+
+test("slice-to-slice conversions share the backing array", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Ints []int
+type B []byte
+
+func conv[S ~[]int](s S) []int { return []int(s) }
+
+func main() {
+	s := []int{1, 2}
+	t := []int(s)
+	t[0] = 99
+	fmt.Println(s[0], t[0])
+
+	b := []byte("ab")
+	tb := []byte(b)
+	tb[0] = 'Z'
+	fmt.Println(string(b), string(tb))
+
+	n := Ints{7, 8}
+	m := []int(n)
+	m[0] = 9
+	fmt.Println(n[0], m[0])
+
+	nb := B("ab")
+	xb := []byte(nb)
+	xb[0] = 'Z'
+	fmt.Println(string(nb))
+
+	g := Ints{1, 2}
+	gc := conv(g)
+	gc[1] = 8
+	fmt.Println(g[1])
+
+	r := []rune("hé")
+	r2 := []rune(r)
+	r2[0] = 'X'
+	fmt.Println(string(r), string(r2))
+}
+`,
+		"99 99\nZb Zb\n9 9\nZb\n8\nXé Xé\n",
+	);
+});
+
+test("converting to a named slice shares and []byte(string) copies", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Ints []int
+
+func main() {
+	s := []int{1, 2}
+	n := Ints(s)
+	n[0] = 5
+	fmt.Println(s[0])
+
+	str := "ab"
+	b := []byte(str)
+	b[0] = 'Z'
+	fmt.Println(str, string(b))
+
+	var ns []int
+	fmt.Println([]int(ns) == nil)
+}
+`,
+		"5\nab Zb\ntrue\n",
+	);
+});

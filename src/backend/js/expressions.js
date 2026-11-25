@@ -2191,10 +2191,6 @@ export const expressionGenMethods = {
 		const target = this.checker?.types.get(targetName);
 		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
 			return null;
-		// Two instances of one generic type share a name but not their type
-		// arguments, so only a non-generic same-type conversion is a no-op.
-		if (srcType?.name === targetName && !targetType?.typeArgs?.length)
-			return null;
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
 		const cls = this._dequalify(targetName);
@@ -3944,16 +3940,14 @@ export const expressionGenMethods = {
 				? (this.checker?.types.get(t.elem.name) ?? t.elem)
 				: t.elem;
 		const elem = this._underlyingOf(elemType)?.name;
-		// Converting a nil slice yields a nil slice.
-		const src = this._underlyingOf(expr.expr._type);
-		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
-			this._sliceConvNilSafe = true;
-			try {
-				return `((__s) => __s == null ? null : ${this._genSliceTypeConversion(expr, "__s", t)})(${inner})`;
-			} finally {
-				this._sliceConvNilSafe = false;
-			}
-		}
+		// A slice-to-slice conversion (including from a type parameter whose
+		// core type is a slice) shares the backing array and keeps a nil slice
+		// nil; only a string or dynamic source builds a new slice.
+		if (
+			this._underlyingOf(expr.expr._type)?.kind === "slice" ||
+			expr.expr._coreType?.kind === "slice"
+		)
+			return inner;
 		if (elem === "byte" || elem === "uint8") {
 			if (this._isStringExprType(expr.expr._type)) {
 				this.useHelper("u8enc");
