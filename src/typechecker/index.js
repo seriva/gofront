@@ -311,11 +311,15 @@ export class TypeChecker {
 			members: {},
 			_gofront: true,
 		});
+		// An instance of a generic type (`type IntPair = Pair[int]` exports one)
+		// carries its template's name; the generated Go spells it `Pair[int]`
+		// through the template, so only the template is bound.
 		const owned = new Set();
 		for (const type of this.types.values())
 			if (
 				type?.kind === "named" &&
 				type._pkgName === pkgName &&
+				!type._genericOf &&
 				this._importBound.has(type)
 			)
 				owned.add(type);

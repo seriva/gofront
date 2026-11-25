@@ -176,8 +176,9 @@ export function collectProgramTypes(programs, checker) {
 
 // A type this package declared as `Name$$pkg` cannot be written in Go source;
 // generated files spell it `Name__PKG_pkg` and `restoredTypeName` renames the
-// parsed references back.
-const STAND_IN = /^(.+)__PKG_(\w+)$/;
+// parsed references back. The package name is any Go identifier, Unicode
+// letters included (`package café`).
+const STAND_IN = /^(.+)__PKG_([\p{L}\p{Nd}_]+)$/u;
 
 export function renamedStandIn(name) {
 	const at = name.indexOf("$$");
@@ -271,7 +272,12 @@ export class TypeSpeller {
 			pkgName: t._pkgName ?? suffix.split("$").at(-1),
 			modPath: null,
 		};
+		// Reached through another package (`mid.leaf.Num`), which may import it
+		// under an alias (`mid.l.Num`): a local package's type keeps its package
+		// clause as the suffix, where a standard library one has its path.
 		const through = `.${suffix}.${orig}`;
+		const viaAlias = (key) =>
+			t._pkgName === suffix && key.slice(key.lastIndexOf(".") + 1) === orig;
 		let indirect = false;
 		for (const [key, v] of this.checker.types) {
 			if (v !== t && !(t._genericOf && v?._generic === t._genericOf)) continue;
@@ -283,7 +289,7 @@ export class TypeSpeller {
 				if (!modPath || modPath.startsWith(".")) return local;
 				return { modPath, pkgName: canonicalName(modPath) };
 			}
-			if (key.endsWith(through)) indirect = true;
+			if (key.endsWith(through) || viaAlias(key)) indirect = true;
 		}
 		return indirect ? local : stdlib();
 	}

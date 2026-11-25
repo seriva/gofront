@@ -1850,6 +1850,86 @@ func main() { fmt.Printf("%T %v\\n", vec.V{1, 2}, vec.V{1, 2}) }
 		});
 		assertEqual(out, '{"V":4} main.Box[sub.MyInt]');
 	});
+
+	test(`fmt and json name an imported generic type its package also aliases an instance of (${target})`, async () => {
+		const util =
+			"package util\ntype Pair[T any] struct{ A, B T }\ntype IntPair = Pair[int]\n";
+		assertEqual(
+			await run({
+				"util/util.go": util,
+				"main.go": `package main
+import (
+	"fmt"
+	"./util"
+)
+func main() { fmt.Printf("%T %v\\n", util.Pair[int]{1, 2}, util.Pair[int]{1, 2}) }
+`,
+			}),
+			"util.Pair[int] {1 2}",
+		);
+		assertEqual(
+			await run({
+				"util/util.go": util,
+				"main.go": decode(
+					'"./util"',
+					"",
+					'var p util.IntPair\n\tvar q util.Pair[string]\n\terr := json.Unmarshal([]byte(`{"A":1,"B":2}`), &p)\n\tjson.Unmarshal([]byte(`{"A":"x"}`), &q)\n\tfmt.Printf("%T %v %T %q %v\\n", p, p, q, q.A, err)',
+				),
+			}),
+			'util.Pair[int] {1 2} util.Pair[string] "x" <nil>',
+		);
+	});
+
+	test(`json and fmt name a renamed type another package imports under an alias (${target})`, async () => {
+		const out = await run({
+			"leaf/leaf.go":
+				"package leaf\ntype Num int\ntype G[T any] struct{ X T }\n",
+			"mid/mid.go":
+				'package mid\nimport l "../leaf"\ntype M struct{ N l.Num; H l.G[int] }\n',
+			"main.go": decode(
+				'"./mid"',
+				"type Num int\ntype G[T any] struct{ X T }",
+				'var m mid.M\n\terr := json.Unmarshal([]byte(`{"N":4,"H":{"X":5}}`), &m)\n\tfmt.Printf("%v %T %v %T %v %v %v\\n", m.N, m.N, m.H, m.H, err, Num(1), G[int]{2})',
+			),
+		});
+		assertEqual(out, "4 leaf.Num {5} leaf.G[int] <nil> 1 {2}");
+	});
+
+	test(`errors.As into a renamed type another package imports under an alias (${target})`, async () => {
+		const out = await run({
+			"leaf/leaf.go":
+				'package leaf\ntype MyErr struct{ C int }\nfunc (e *MyErr) Error() string { return "e" }\n',
+			"mid/mid.go":
+				'package mid\nimport l "../leaf"\nfunc F() error { return &l.MyErr{7} }\nfunc G() *l.MyErr { return nil }\n',
+			"main.go": `package main
+import (
+	"errors"
+	"fmt"
+	"./mid"
+)
+type MyErr struct{}
+func (MyErr) Error() string { return "m" }
+func main() {
+	e := mid.G()
+	fmt.Println(errors.As(mid.F(), &e), e.C, MyErr{})
+}
+`,
+		});
+		assertEqual(out, "true 7 m");
+	});
+
+	test(`json and fmt name a renamed type of a package with a non-ASCII name (${target})`, async () => {
+		const out = await run({
+			"sub/sub.go":
+				"package café\ntype MyInt int\ntype G[T any] struct{ X T }\n",
+			"main.go": decode(
+				'"./sub"',
+				"type MyInt int\ntype G[T any] struct{ X T }\ntype W struct{ B café.MyInt; H café.G[int] }",
+				'var w W\n\terr := json.Unmarshal([]byte(`{"B":3,"H":{"X":4}}`), &w)\n\tfmt.Printf("%v %T %v %T %v %v %v\\n", w.B, w.B, w.H, w.H, err, MyInt(1), G[int]{2})',
+			),
+		});
+		assertEqual(out, "3 café.MyInt {4} café.G[int] <nil> 1 {2}");
+	});
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
