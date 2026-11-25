@@ -152,11 +152,11 @@ Roots:
   - Done when: `real(a[0])` prints `0` for every W2.5 program with no null-pointer trap
 
 ### Phase 2: Monomorphised Local Types (root `wasm-monomorph-local-type-collision`)
-- [ ] Task 2.1: Move `renameLocalTypes` to the `lower` layer
+- [x] Task 2.1: Move `renameLocalTypes` to the `lower` layer
   - Files: `src/lower/local-types.js` (new), `src/link/type-names.js` (re-export)
   - Test: `test/unit/types/identity.test.js`: new case importing `renameLocalTypes` from `src/lower/local-types.js` that renames two same-named local `TypeDecl`s in two `FuncDecl`s to distinct `__L<n>` names (fails first: module missing); existing `src/link/type-names.js` import keeps passing
   - Done when: `renameLocalTypes` is defined only in `src/lower/local-types.js`, existing callers are unchanged, and `npm run check` passes
-- [ ] Task 2.2: Rename local types after monomorphisation (W3.1–W3.2)
+- [x] Task 2.2: Rename local types after monomorphisation (W3.1–W3.2)
   - Files: `src/backend/wasm/monomorph.js` (`monomorphise`)
   - Test: `test/unit/wasm/generics.test.js`: W3.1–W3.2 (local struct, slice, alias, `T2[T]`, closure-local and generic-method-local types across `int`/`string` and `int`/`float64`, printing fields) + W3 controls; plus a regression test in `test/unit/wasm/structs.test.js` for the already-fixed L12 (`type W[B any] S[B]`)
   - Done when: every W3 program prints Go's output on `wasm` and `npm run check` passes with `monomorph.js` importing from `src/lower/`

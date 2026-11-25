@@ -6,6 +6,7 @@
 
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { renameLocalTypes } from "../../../src/link/type-names.js";
+import { renameLocalTypes as renameLocalTypesDirect } from "../../../src/lower/local-types.js";
 import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import {
@@ -340,6 +341,25 @@ func main() {}
 	assertEqual(text(t), "interface{~int | ~float64}");
 	assertEqual(text(u), "interface{comparable; ~string}");
 	assertEqual(text(v), "Num");
+});
+
+test("renameLocalTypes (lower layer): same-named local types get distinct names", () => {
+	const source = `package main
+func f() { type Q struct{ X int }; _ = Q{} }
+func g() { type Q struct{ Y string }; _ = Q{} }
+func main() {}
+`;
+	const tokens = new Lexer(source, "test.go").tokenize();
+	const ast = new Parser(tokens, "test.go", source).parse();
+	assert(renameLocalTypesDirect([ast]), "expected a rename");
+	const names = ast.decls
+		.filter((d) => d.kind === "FuncDecl" && d.name !== "main")
+		.map((d) => d.body.stmts.find((s) => s.kind === "TypeDecl").name);
+	assert(
+		names.every((n) => /^Q__L\d+$/.test(n)),
+		`names ${names} must be Q__L<n>`,
+	);
+	assert(names[0] !== names[1], `names ${names} must differ`);
 });
 
 summarize();
