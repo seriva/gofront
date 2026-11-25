@@ -2699,6 +2699,25 @@ for (const target of ["js", "both", "wasm"]) {
 		});
 	}
 
+	for (const [what, args] of [
+		["integer variables", "a, b"],
+		["a float and an integer variable", "x, a"],
+		["an integer variable and an untyped constant", "a, 2"],
+	]) {
+		test(`complex of ${what} is an error in a ${target} package (J2.2)`, () => {
+			const { errors } = compile(
+				`package main\nfunc main() {\n\ta, b := 1, 2\n\tx := 1.5\n\t_, _, _ = a, b, x\n\t_ = complex(${args})\n}\n`,
+				{ target },
+			);
+			assertErrorContains(
+				errors,
+				args === "x, a"
+					? "mismatched types float64 and int"
+					: "expected floating-point",
+			);
+		});
+	}
+
 	test(`complex of float32 and float64 variables still reports mismatched float types in a ${target} package (J2.2 control)`, () => {
 		const { errors } = compile(
 			`package main\nfunc main() {\n\tvar a float32 = 1\n\tvar b float64 = 2\n\t_ = complex(a, b)\n}\n`,

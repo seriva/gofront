@@ -170,7 +170,7 @@ Roots:
   - Files: `src/typechecker/index.js` (`checkConstDecl`), `src/typechecker/expressions.js` (`_isConstExpr`)
   - Test: `test/unit/types/checks.test.js`: `assertErrorContains(…, "is not constant")` for `const C = f(5)`, `const C = x`, `const C = len(s)`, `const C = min(a, b)`; positive controls from the J2 control row (`len("abc")`, `len([3]int{})`, `len(arrVar)`, `complex(1, 2)`, `real(D)`, `min(1, 2)`, `int(A)`), function-local on `wasm`
   - Done when: runtime calls and variables in `const` initializers are rejected on all targets while valid Go constant expressions pass
-- [ ] Task 2.2: Require floating-point operands in `complex(a, b)` (J2.2)
+- [x] Task 2.2: Require floating-point operands in `complex(a, b)` (J2.2)
   - Files: `src/typechecker/expressions.js` (`_checkBuiltinComplex`)
   - Test: `test/unit/types/checks.test.js`: `assertErrorContains` for `complex(intVar, intVar)` and `complex(floatVar, intVar)`; controls `complex(1, 2)`, `complex(f32, 2)`, `complex(MyF(2), MyF(2))`, and the existing `complex(f32Var, f64Var)` mismatch error
   - Done when: non-float `complex(a, b)` calls fail at compile time instead of miscompiling or producing invalid WasmGC

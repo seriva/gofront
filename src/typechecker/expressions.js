@@ -35,6 +35,7 @@ import {
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
+	isFloat,
 	isInteger,
 	isNil,
 	isNumeric,
@@ -3301,14 +3302,7 @@ export const expressionCheckMethods = {
 				? expr.args[i]._type
 				: t,
 		);
-		if (!isNumeric(crt)) {
-			this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
-			return ANY;
-		}
-		if (!isNumeric(cit)) {
-			this.err(`cannot use ${typeStr(cit)} as float in complex()`, expr);
-			return ANY;
-		}
+		if (!this._complexOperandsFloat(expr, crt, cit)) return ANY;
 		if (crt.kind === "untyped" && cit.kind === "untyped")
 			return UNTYPED_COMPLEX;
 		if (crt.name === "float32" && cit.name === "float32") return COMPLEX64;
@@ -3326,6 +3320,38 @@ export const expressionCheckMethods = {
 			return COMPLEX64;
 		}
 		return COMPLEX128;
+	},
+
+	// Whether the operand type `t` of `complex(a, b)` may be a float: untyped,
+	// floating-point underneath, or not known well enough to tell.
+	_isComplexPartType(t) {
+		if (t.kind === "untyped") return true;
+		const u = this._deepUnderlying(t);
+		return !u || u._tainted || isFloat(u) || isAny(u);
+	},
+
+	// The operands of `complex(a, b)` must be numeric and floating-point: a
+	// typed operand of any other numeric type, or two different typed operands, is an error.
+	_complexOperandsFloat(expr, crt, cit) {
+		for (const t of [crt, cit])
+			if (!isNumeric(t)) {
+				this.err(`cannot use ${typeStr(t)} as float in complex()`, expr);
+				return false;
+			}
+		const okR = this._isComplexPartType(crt);
+		if (okR && this._isComplexPartType(cit)) return true;
+		const typed = crt.kind !== "untyped" && cit.kind !== "untyped";
+		if (typed && typeStr(crt) !== typeStr(cit))
+			this.err(
+				`invalid operation: ${exprText(expr)} (mismatched types ${typeStr(crt)} and ${typeStr(cit)})`,
+				expr,
+			);
+		else
+			this.err(
+				`invalid argument: arguments have type ${typeStr(okR ? cit : crt)}, expected floating-point`,
+				expr,
+			);
+		return false;
 	},
 
 	_checkBuiltinRealImag(name, expr, argTypes) {
