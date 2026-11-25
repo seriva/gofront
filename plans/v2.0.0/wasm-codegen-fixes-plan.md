@@ -1,7 +1,7 @@
 # WebAssembly Codegen & WasmGC Validity Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-25)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): the remaining WasmGC ICE and invalid-module follow-ups from `checker-go-rules` (L26), `checker-operand-rules` (L35), `wasm-struct-types` (L50, L51), `codegen-fixes` (L76), and `names-panics-type-exprs` (L88, L92, L93, plus L94 which shares L50's exact root). L12 (`type W[B any] S[B]`) was re-probed (13/13 pass) and verified already fixed by `wasm-struct-types` Task 1.1 (`b311621a`). Reviewed 2026-11-24 (`/bs-plan review`): user decisions recorded in *Scope* (W2 `new(F)` boxes `*F` but keeps the `&f` ban; W4 `(*[N]T)(s)` becomes a checker error on `wasm`/`both`). **Shared files:** `js-codegen-and-value-semantics` Task 2.1 also edits `emitTypeConversion` (`src/backend/wasm/emit-exprs.js`, Phase 4 here); `multi-package-fixes` edits `src/link/type-names.js` and `src/backend/wasm/monomorph.js` (Phase 2 here). Whichever plan lands second rebases.  
 **Release note:** Fixes WebAssembly build failures and internal compiler errors for package-level `any`/float/complex variable initializers, `new` of a func type, defined complex types in `any`, pointers and arrays, comparing arrays or structs that hold interfaces and using them as map keys, local types declared inside generic functions, structs and parameters with anonymous-interface types, and slice-to-array conversions (`[N]T(s)`). Converting a slice to an array pointer (`(*[N]T)(s)`) never worked in `wasm` and `both` packages and is now a compile error there; convert to an array (`[N]T(s)`) instead.
