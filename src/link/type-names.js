@@ -11,7 +11,8 @@ import {
 	renameTypeRefs,
 	valueNamesIn,
 } from "../lower/local-types.js";
-import { forEachChild } from "../lower/walk.js";
+import { declaredTypeNames, forEachChild } from "../lower/walk.js";
+import { isExported } from "../typechecker/types.js";
 
 export { renameLocalTypes } from "../lower/local-types.js";
 export { declaredTypeNames } from "../lower/walk.js";
@@ -127,4 +128,20 @@ export function withOriginalNames(table, renamed) {
 	for (const [name, mangled] of renamed)
 		if (table.has(mangled)) table.set(name, table.get(mangled));
 	return table;
+}
+
+// A file that dot-imports a package spells a type the package renamed by its
+// declared name (`Box`), but the build knows the type by the renamed one
+// (`Box$$b`), and both backends look a type up by the name the source gives.
+// Renames those spellings in `program` once, so every later stage sees the
+// type's real name.  `renamed` is the package's declared -> renamed map; a
+// name the file declares itself (a local type shadowing the import) is left.
+export function renameDotImportedTypes(program, renamed) {
+	const own = new Set(declaredTypeNames([program]));
+	const refs = new Map(
+		[...renamed].filter(([name]) => isExported(name) && !own.has(name)),
+	);
+	if (refs.size === 0) return;
+	for (const d of program.decls ?? [])
+		renameTypeRefs(d, refs, new Set(), new Set());
 }

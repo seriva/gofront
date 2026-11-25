@@ -34,6 +34,7 @@ export {
 	declaredTypeNames,
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
+	renameDotImportedTypes,
 	renameLocalTypes,
 	withOriginalNames,
 } from "./type-names.js";

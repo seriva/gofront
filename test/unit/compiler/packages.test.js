@@ -2,6 +2,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { compileFiles, compileSingleFile } from "../../../src/compiler.js";
+import { renameDotImportedTypes } from "../../../src/link/type-names.js";
 import {
 	assert,
 	assertContains,
@@ -1304,7 +1305,7 @@ func main() { fmt.Println(int(util.Map(3))) }
 	});
 }
 
-for (const target of ["js", "both"]) {
+for (const target of ["js", "both", "wasm"]) {
 	test(`dot-imported colliding struct literal and method survive pruning (${target})`, async () => {
 		const { lines } = await compileHybridProject(
 			dotPkgs(
@@ -1320,7 +1321,83 @@ for (const target of ["js", "both"]) {
 		);
 		assertEqual(lines.join("\n"), "2 5");
 	});
+
+	test(`dot-imported colliding struct as variable, literal and pointer (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go":
+						"package a\ntype Box struct{ V int }\nfunc One() Box { return Box{1} }\n",
+					"b/b.go":
+						"package b\ntype Box struct{ V int }\nfunc (b *Box) Get() int { return b.V }\nfunc Make() Box { return Box{V: 9} }\n",
+				},
+				`var _ = a.One
+type Emb struct{ Box }
+func take(b *Box, bs []Box, m map[string]Box) int { return b.Get() + len(bs) + len(m) }
+func main() {
+	var x Box
+	x.V = 5
+	p := &Box{V: 7}
+	n := new(Box)
+	n.V = 3
+	fmt.Println(x.V, p.Get(), Make().V, Emb{Box{V: 6}}.V)
+	fmt.Println(take(n, []Box{{V: 1}, Box{V: 2}}, map[string]Box{"k": {V: 4}}))
+}`,
+			),
+		);
+		assertEqual(lines.join("\n"), "5 7 9 6\n6");
+	});
+
+	test(`dot-imported colliding generic struct (${target})`, async () => {
+		const { lines } = await compileHybridProject(
+			dotPkgs(
+				target,
+				{
+					"a/a.go":
+						"package a\ntype Box[T any] struct{ V T }\nfunc One() Box[int] { return Box[int]{V: 1} }\n",
+					"b/b.go":
+						"package b\ntype Box[T any] struct{ V T }\nfunc (b Box[T]) Get() T { return b.V }\n",
+				},
+				`var _ = a.One
+func wrap[T any](v T) Box[T] { return Box[T]{V: v} }
+func main() {
+	var x Box[int]
+	x.V = 5
+	p := &Box[string]{V: "s"}
+	fmt.Println(x.V, Box[int]{V: 2}.Get(), p.Get(), wrap(8).Get())
+}`,
+			),
+		);
+		assertEqual(lines.join("\n"), "5 2 s 8");
+	});
 }
+
+test("a type the file declares itself is not renamed by a dot import", () => {
+	const program = {
+		decls: [
+			{ kind: "TypeDecl", name: "Box", type: { kind: "StructType" } },
+			{
+				kind: "VarDecl",
+				decls: [{ names: ["x"], type: { kind: "TypeName", name: "Box" } }],
+			},
+			{
+				kind: "VarDecl",
+				decls: [{ names: ["y"], type: { kind: "TypeName", name: "Num" } }],
+			},
+		],
+	};
+	renameDotImportedTypes(
+		program,
+		new Map([
+			["Box", "Box$$b"],
+			["Num", "Num$$b"],
+		]),
+	);
+	assertEqual(program.decls[0].name, "Box");
+	assertEqual(program.decls[1].decls[0].type.name, "Box");
+	assertEqual(program.decls[2].decls[0].type.name, "Num$$b");
+});
 
 test("a renamed type is exported under its declared name in every export table", () => {
 	withTempDir(

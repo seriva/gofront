@@ -13,6 +13,7 @@
 //     exportedTypes:   Map<name, type>, // the package's own declared types
 //     reachedTypes:    Map<name, type>, // types its imports registered (table only)
 //     exportedKinds:   Map<name, kind>, // what each name is declared as (see Scope)
+//     renamedTypes:    Map<name, name>, // types the build renamed (`Pt` -> `Pt$$b`)
 //   }
 //
 // Local imports (`import "./subpkg"`) are compiled recursively and bundled inline.
@@ -70,6 +71,7 @@ import {
 	importStdlibPackages,
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
+	renameDotImportedTypes,
 	renameLocalTypes,
 	withOriginalNames,
 } from "./link/stdlib.js";
@@ -700,6 +702,7 @@ function resolveImports(
 				// names against this package.
 				noteLocalImport(p, alias ?? dep.pkgName, alias === ".", depKey);
 				if (alias === ".") {
+					if (!p._generated) renameDotImportedTypes(p, dep.renamedTypes);
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
 					checker.addDefinitions(
@@ -1136,6 +1139,7 @@ export function compileFiles(files, options = {}) {
 		reachedTypes: unit.reachedTypes,
 		exportedConsts: unit.exportedConsts,
 		exportedKinds: unit.exportedKinds,
+		renamedTypes: unit.link.renamedTypes,
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
