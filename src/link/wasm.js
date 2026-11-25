@@ -194,10 +194,18 @@ function topLevelDeclNames(decl) {
 	}
 }
 
-// `init` is not a name: the backend numbers each package's.
+// After the build renamed the names that local packages share (see
+// link/pkg-names.js), only a true clash is left.  A package owns its names by
+// directory (`key`), not by package name, so two packages of one name in
+// different directories are told apart.  `init` is not a name: the backend
+// numbers each package's.
 export function checkLinkCollisions(units) {
-	const owner = new Map(); // name -> pkgName
+	const owner = new Map(); // name -> the unit that declares it
 	const errors = [];
+	const label = (u) =>
+		units.filter((o) => o.pkgName === u.pkgName).length > 1 && u.key
+			? u.key
+			: u.pkgName;
 	for (const u of units) {
 		for (const p of u.programs) {
 			for (const d of p.decls ?? []) {
@@ -205,10 +213,10 @@ export function checkLinkCollisions(units) {
 					if (name === "_" || (name === "init" && d.kind === "FuncDecl"))
 						continue;
 					const prev = owner.get(name);
-					if (prev === undefined) owner.set(name, u.pkgName);
-					else if (prev !== u.pkgName)
+					if (prev === undefined) owner.set(name, u);
+					else if ((prev.key ?? prev.pkgName) !== (u.key ?? u.pkgName))
 						errors.push(
-							`cannot link wasm packages: '${name}' is declared in both '${prev}' and '${u.pkgName}' (linked wasm packages share one namespace)`,
+							`cannot link wasm packages: '${name}' is declared in both '${label(prev)}' and '${label(u)}' (linked wasm packages share one namespace)`,
 						);
 				}
 			}

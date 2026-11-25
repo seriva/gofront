@@ -306,6 +306,46 @@ A package exports only the names it declares: a name it imports, or dot-imports 
 another package, is not reachable through it (`sub.Leaf` is an error when `sub` only
 imports `leaf`). Import the package directly where you need it.
 
+### Names shared between packages
+
+Two local packages can declare the same name, as in Go: each keeps its own function,
+variable, constant, type, `templ` component and `init()`, and a type of one package can
+share a name with a function of another. Importers reach each one through its package, so
+this works on `js`, `both` and `wasm` alike:
+
+```go
+// a/a.go
+package a
+
+var count int
+
+func helper() int { return 1 }
+func Make() int   { return helper() }
+```
+
+```go
+// b/b.go
+package b
+
+var count int
+
+func helper() int { return 2 }
+func Make() int   { return helper() }
+```
+
+```go
+// main.go
+fmt.Println(a.Make(), b.Make()) // 1 2
+```
+
+Packages with the same `package` name in different directories (`p1/util` and
+`p2/util`) are told apart by their import path, so import them under different aliases.
+Every package's `init()` runs once, dependencies first, in the order Go uses. The first
+package to declare a name keeps it in the output; a later one's is emitted as `Make$$b`
+(the name, `$$`, the package name, with `__2` after it for a second package of the same
+name), so only hand-written JavaScript that reaches it by name sees the suffix. A diagnostic
+always quotes the name as you wrote it.
+
 ### Visibility between packages
 
 As in Go, a name is exported when it starts with an uppercase letter (any Unicode

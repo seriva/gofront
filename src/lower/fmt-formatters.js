@@ -23,6 +23,7 @@ import {
 	embeddedFieldName,
 	FMT_PRINT_FUNCS,
 	LOCAL_TYPE_SUFFIX,
+	suffixPackageName,
 } from "../typechecker/types.js";
 import {
 	collectProgramTypes,
@@ -291,10 +292,7 @@ class FmtGen extends TypeSpeller {
 				let name = t.name.replace(LOCAL_TYPE_SUFFIX, "");
 				const at = name.indexOf("$$");
 				if (at >= 0)
-					name = `${name
-						.slice(at + 2)
-						.split("$")
-						.at(-1)}.${name.slice(0, at)}`;
+					name = `${suffixPackageName(name.slice(at + 2))}.${name.slice(0, at)}`;
 				else if (!name.includes("."))
 					name = `${this.declaringPackage(t)}.${name}`;
 				return t.typeArgs?.length

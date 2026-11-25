@@ -31,10 +31,17 @@ import {
 	freezeStdlibPackage,
 	freezesStoredUnits,
 } from "./package-cache.js";
+import { mangleBody, mangleStdlibAst } from "./pkg-names.js";
 import { spliceUserChunk, userMarkerKey } from "./user-js.js";
 import { lowerStdlibRefs, registerWasmUnit } from "./wasm.js";
 
-export { pkgSuffix } from "./pkg-names.js";
+export {
+	mangleCollidingValues,
+	mangleStdlibAst,
+	pkgSuffix,
+	renameDotImportedValues,
+	topLevelValueNames,
+} from "./pkg-names.js";
 export {
 	declaredTypeNames,
 	mangleCollidingTypes,
@@ -125,92 +132,6 @@ function stdlibTopLevelNames(programs) {
 		}
 	}
 	return { values, types };
-}
-
-// Renames the package's top-level declarations and every reference to them.
-// `refs` holds the `file:line:col` of identifiers the first type-check
-// resolved to package scope; type names are resolved by name (GoFront types
-// are package-flat) except where a type parameter shadows them.
-// With `lazy`, function and method bodies are left alone: they are mangled
-// by `mangleBody` once a lazily checked body is first reached.
-export function mangleStdlibAst(programs, ctx, { lazy = false } = {}) {
-	for (const p of programs) {
-		for (const d of p.decls ?? []) mangleDeclNames(d, ctx);
-		for (const d of p.decls ?? []) {
-			const deferred =
-				lazy && (d.kind === "FuncDecl" || d.kind === "MethodDecl");
-			const body = d.body;
-			if (deferred) d.body = null;
-			mangleRefs(d, p._filename, new Set(), ctx);
-			if (deferred) d.body = body;
-		}
-	}
-}
-
-function mangleBody(decl, file, ctx) {
-	const tparams = new Set((decl.typeParams ?? []).map((t) => t.name));
-	mangleRefs(decl.body, file, tparams, ctx);
-}
-
-function mangleDeclNames(d, { suffix, values }) {
-	if (d.kind === "TypeDecl" || (d.kind === "FuncDecl" && values.has(d.name))) {
-		d.name += suffix;
-	} else if (d.kind === "VarDecl" || d.kind === "ConstDecl") {
-		for (const spec of d.decls ?? [])
-			spec.names = spec.names.map((n) => (values.has(n) ? n + suffix : n));
-	}
-}
-
-function mangleRefs(node, file, tparams, ctx) {
-	if (!node || typeof node !== "object") return;
-	if (Array.isArray(node)) {
-		for (const n of node) mangleRefs(n, file, tparams, ctx);
-		return;
-	}
-	const tp =
-		node.typeParams?.length > 0
-			? new Set([...tparams, ...node.typeParams.map((t) => t.name)])
-			: tparams;
-	switch (node.kind) {
-		case "TypeName":
-		case "GenericTypeName":
-			mangleTypeRef(node, tp, ctx);
-			break;
-		case "CompositeLit":
-			if (node.typeExpr?.kind === "Ident")
-				mangleTypeRef(node.typeExpr, tp, ctx);
-			break;
-		case "InstantiationExpr": // `Stack[T]{}`, `Pair[K, V](x)`
-		case "IndexExpr":
-			if (node.expr?.kind === "Ident") mangleTypeRef(node.expr, tp, ctx);
-			break;
-		case "CallExpr":
-			if (
-				(node.func?.name === "new" || node.func?.name === "make") &&
-				node.args?.[0]?.kind === "Ident"
-			) {
-				mangleTypeRef(node.args[0], tp, ctx);
-			}
-			break;
-		case "Ident":
-			if (ctx.refs.has(`${file}:${node._line}:${node._col}`))
-				mangleIdentRef(node, ctx);
-			break;
-	}
-	forEachChild(node, (child) => mangleRefs(child, file, tp, ctx));
-}
-
-function mangleTypeRef(node, tparams, { suffix, types }) {
-	if (types.has(node.name) && !tparams.has(node.name)) {
-		node.name += suffix;
-	}
-}
-
-// A package-scope identifier: a package declaration gets the suffix.
-function mangleIdentRef(node, { suffix, values, types }) {
-	if (values.has(node.name) || types.has(node.name)) {
-		node.name += suffix;
-	}
 }
 
 function checkStdlibPrograms(programs, pkgName, options, deps, target) {
@@ -645,6 +566,7 @@ export function finishStdlibJs(merged, options, unit) {
 		emitted: unit.emitTarget !== "wasm",
 		emitter: unit.emitter,
 		renamedTypes: unit.link.renamedTypes,
+		renamedValues: unit.link.renamedValues,
 	});
 	if (!options.isDependency) spliceStdlibJs(merged, options);
 }

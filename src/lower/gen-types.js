@@ -4,7 +4,7 @@
 // src/lower/fmt-formatters.js), and holds what those generators share: the
 // imports the spelled code needs and the enumeration of the program's types.
 
-import { defaultType } from "../typechecker/types.js";
+import { defaultType, suffixPackageName } from "../typechecker/types.js";
 import { forEachChild } from "./walk.js";
 
 export function under(t) {
@@ -263,21 +263,19 @@ export class TypeSpeller {
 	renamedOwner(t, at) {
 		const orig = t.name.slice(0, at);
 		const suffix = t.name.slice(at + 2);
+		const pkg = suffixPackageName(suffix);
 		const stdlib = () => ({
 			modPath: suffix.replaceAll("$", "/"),
-			pkgName: suffix.split("$").at(-1),
+			pkgName: pkg,
 		});
 		if (!this.checker) return stdlib();
-		const local = {
-			pkgName: t._pkgName ?? suffix.split("$").at(-1),
-			modPath: null,
-		};
+		const local = { pkgName: t._pkgName ?? pkg, modPath: null };
 		// Reached through another package (`mid.leaf.Num`), which may import it
 		// under an alias (`mid.l.Num`): a local package's type keeps its package
 		// clause as the suffix, where a standard library one has its path.
-		const through = `.${suffix}.${orig}`;
+		const through = `.${pkg}.${orig}`;
 		const viaAlias = (key) =>
-			t._pkgName === suffix && key.slice(key.lastIndexOf(".") + 1) === orig;
+			t._pkgName === pkg && key.slice(key.lastIndexOf(".") + 1) === orig;
 		let indirect = false;
 		for (const [key, v] of this.checker.types) {
 			if (v !== t && !(t._genericOf && v?._generic === t._genericOf)) continue;

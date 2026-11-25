@@ -70,10 +70,13 @@ import {
 	finishStdlibJs,
 	importStdlibPackages,
 	mangleCollidingTypes,
+	mangleCollidingValues,
 	pkgSuffix,
 	registerLocalTypeOwners,
 	renameDotImportedTypes,
+	renameDotImportedValues,
 	renameLocalTypes,
+	topLevelValueNames,
 	withOriginalNames,
 } from "./link/stdlib.js";
 import { userEmitter, userMarker } from "./link/user-js.js";
@@ -703,7 +706,7 @@ function resolveImports(
 				// names against this package.
 				noteLocalImport(p, alias ?? dep.pkgName, alias === ".", depKey);
 				if (alias === ".") {
-					if (!p._generated)
+					if (!p._generated) {
 						renameDotImportedTypes(
 							p,
 							dep.renamedTypes,
@@ -711,6 +714,8 @@ function resolveImports(
 							fromDir,
 							programs,
 						);
+						renameDotImportedValues(p, dep.renamedValues, programs);
+					}
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
 					checker.addDefinitions(
@@ -739,6 +744,7 @@ function resolveImports(
 					dep.exportedKinds,
 					p._filename ?? null,
 					dep.reachedTypes,
+					dep.renamedValues,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -1017,14 +1023,21 @@ export function compileFiles(files, options = {}) {
 
 	// Local packages share one flat JS module: a type name another package
 	// already declared, or a JS built-in (`Map`), is renamed here
-	// (`Pt` -> `Pt$$b`).
+	// (`Pt` -> `Pt$$b`), and so is a function, var or const another package
+	// declared (`Make` -> `Make$$b`).
 	const suffix = pkgSuffix(options.pkgSuffixes, resolve(fromDir), pkgName);
 	const renamedTypes = mangleLocalTypes(
 		programs,
 		resolve(fromDir),
-		pkgName,
+		suffix,
 		options.typeOwners,
 		pkgTarget,
+	);
+	const renamedValues = mangleCollidingValues(
+		programs,
+		resolve(fromDir),
+		suffix,
+		options.typeOwners,
 	);
 	// The test runner's driver is a source that exists only in memory: it is
 	// parsed and checked with the package but never written next to it.
@@ -1063,10 +1076,11 @@ export function compileFiles(files, options = {}) {
 	// The names the renaming left (a dot import renames the local types that
 	// shadow it): a stored unit is only valid where they come out the same,
 	// which is how it notices a different set of packages that declare the
-	// same types.  The package's suffix names its `init`.
+	// same types or values.  The package's suffix names its `init`.
 	const typeNames = cache
 		? [
 				declaredTypeNames(programs.filter((p) => p !== driver)).join(","),
+				topLevelValueNames(programs.filter((p) => p !== driver)).join(","),
 				suffix,
 			].join("|")
 		: "";
@@ -1107,6 +1121,7 @@ export function compileFiles(files, options = {}) {
 			pkgTarget,
 			fromDir,
 			renamedTypes,
+			renamedValues,
 			suffix,
 			countCompile: cache ? countCompile : () => {},
 		});
@@ -1156,6 +1171,7 @@ export function compileFiles(files, options = {}) {
 		exportedConsts: unit.exportedConsts,
 		exportedKinds: unit.exportedKinds,
 		renamedTypes: unit.link.renamedTypes,
+		renamedValues: unit.link.renamedValues,
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
@@ -1285,9 +1301,12 @@ function compileOwnUnit(ctx) {
 		pkgTarget,
 		fromDir,
 		renamedTypes,
+		renamedValues,
 		suffix,
 	} = ctx;
 	ctx.countCompile();
+	// Importers name a renamed type or value by its declared name.
+	const renamed = new Map([...renamedTypes, ...renamedValues]);
 	const errors = checker.checkAll(programs);
 	const jsonBefore = `${options.jsonBuild.js}${options.jsonBuild.wasm}`;
 	const jsonFlags = { ...options.jsonBuild };
@@ -1315,6 +1334,7 @@ function compileOwnUnit(ctx) {
 		programs: rootPrograms,
 		types: checker.types,
 		renamedTypes,
+		renamedValues,
 	};
 	const emitTarget = asInternalError(() =>
 		registerPackageUnit(options, { ...link, bundledPackages }),
@@ -1365,14 +1385,11 @@ function compileOwnUnit(ctx) {
 		// Every declaration file the check read, as `[file, stamp]` pairs.
 		declarations: [...(checker.declarationStamps ?? [])],
 		programs: driver ? programs.filter((p) => p !== driver) : programs,
-		exportedSymbols: withOriginalNames(
-			checker.getExportedSymbols(),
-			renamedTypes,
-		),
+		exportedSymbols: withOriginalNames(checker.getExportedSymbols(), renamed),
 		exportedTypes: withOriginalNames(checker.getExportedTypes(), renamedTypes),
 		reachedTypes: checker.getReachedTypes(),
-		exportedConsts: checker.getExportedConsts(),
-		exportedKinds: withOriginalNames(checker.getExportedKinds(), renamedTypes),
+		exportedConsts: withOriginalNames(checker.getExportedConsts(), renamed),
+		exportedKinds: withOriginalNames(checker.getExportedKinds(), renamed),
 	};
 	return unit;
 }
@@ -1417,7 +1434,7 @@ const PREDECLARED_NAMES = ["error", "comparable", "true", "false", "nil"];
 
 // Renames the programs' local types in place. They are this build's copies of
 // the cached ASTs, so a later build starts from the unrenamed baseline.
-function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
+function mangleLocalTypes(programs, pkgKey, suffix, owners, pkgTarget) {
 	const predeclared = new Set([
 		...Object.keys(BASIC_TYPES),
 		...PREDECLARED_NAMES,
@@ -1425,7 +1442,7 @@ function mangleLocalTypes(programs, pkgKey, pkgName, owners, pkgTarget) {
 	const renamed = mangleCollidingTypes(
 		programs,
 		pkgKey,
-		pkgName,
+		suffix,
 		owners,
 		predeclared,
 		{ target: pkgTarget, builtins: JS_BUILTIN_CLASSES },

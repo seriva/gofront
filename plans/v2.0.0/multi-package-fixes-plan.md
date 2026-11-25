@@ -177,15 +177,15 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
   - Files: `src/backend/js/index.js` (`_emitFuncDecls`), `src/link/wasm.js` (`checkLinkCollisions`)
   - Test: `test/unit/compiler/link.test.js`, `test/unit/compiler/packages.test.js`: M5.3 (`util` + `main` both defining `func init()`, plus multiple `init()` in one package, across `js`, `both`, `wasm`)
   - Done when: `init()` runs in Go dependency order across all linked packages without TDZ crashes or link errors
-- [ ] Task 4.2: Compute build-wide top-level value/type collision maps with one per-path suffix helper, and rename through the generalised stdlib renamer (M5.1, M5.2, M5.4, M5.5, M5.7)
+- [x] Task 4.2: Compute build-wide top-level value/type collision maps with one per-path suffix helper, and rename through the generalised stdlib renamer (M5.1, M5.2, M5.4, M5.5, M5.7)
   - Files: `src/link/pkg-names.js` (new: `pkgSuffix`, collision map, renamer moved from `src/link/stdlib.js` `mangleStdlibAst`/`mangleRefs`), `src/link/type-names.js` (`mangleCollidingTypes` uses `pkgSuffix`), `src/compiler.js`
   - Test: `test/unit/compiler/link.test.js`, `test/unit/compiler/package-cache.test.js`: unit tests for collision detection (unexported funcs/vars/consts, exported funcs/vars/consts, cross-kind type-vs-value, `p1/util` vs `p2/util` for values **and** types), local-shadow preservation, and `PackageCache` invalidation when collisions change; `test/unit/compiler/stdlib-go.test.js` stays green (stdlib still renamed by the shared renamer)
   - Done when: every colliding top-level value/function/type across local packages gets a unique per-path mangled name from `pkgSuffix` without altering non-colliding exports, and `src/link/stdlib.js` no longer has its own renamer
-- [ ] Task 4.3: Thread mangled local exports through checker namespaces, dot-imports, and reachability DCE (M5.1, M5.2, M5.4)
+- [x] Task 4.3: Thread mangled local exports through checker namespaces, dot-imports, and reachability DCE (M5.1, M5.2, M5.4)
   - Files: `src/typechecker/index.js` (`addPackageNamespace`, `addDefinitions`), `src/typechecker/resolve.js` (`_fieldTypeNamespace`), `src/lower/reachability.js` (`_depDecls` from Task 1.2, `_typesNamed` decode via `pkgSuffix`)
   - Test: `test/unit/compiler/pkg-collisions.test.js`: qualified calls (`a.Make()`, `b.Make()`), dot-imported colliding values/funcs, and DCE pruning of unused colliding helpers on `js` and `both`
   - Done when: mangled local exports stamp `_stdName` consistently and survive DCE when reachable
-- [ ] Task 4.4: Wire mangled local symbols through JS expressions, WASM linker (`checkLinkCollisions` keyed by package path), and WASM facade; update user docs (M5.1–M5.7)
+- [x] Task 4.4: Wire mangled local symbols through JS expressions, WASM linker (`checkLinkCollisions` keyed by package path), and WASM facade; update user docs (M5.1–M5.7)
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/boundary.js`, `src/link/wasm.js`, `docs/hybrid-wasm.md` (drop "Linked `wasm` packages share one namespace" at `:191-192`; add the JS→WASM generic-function rule and the zero-instance generic struct `TypeError` from Phase 2)
   - Test: `test/unit/compiler/pkg-collisions.test.js`, `test/unit/wasm/boundary.test.js`: M5.1–M5.7 across `js`, `both`, `wasm`, and hybrid (`js` `main` importing two `wasm` packages both exporting `Make`, plus `p1/util` + `p2/util` values and types, `var`/`const`, cross-kind `type Box` vs `func Box()`)
   - Done when: all M5.1–M5.7 probes produce Go's output across `js`, `both`, `wasm`, and hybrid targets with zero collisions, and `docs/hybrid-wasm.md` matches the new rules

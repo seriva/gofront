@@ -1070,33 +1070,106 @@ func main() { constpkg.Touch() }
 
 section("WASM Boundary v1 — linking diagnostics (5c)");
 
-test("top-level name collisions between linked wasm packages are an error", () =>
-	expectCompileError(
-		{
-			"a/a.go": `//gofront:target wasm
+test("linked wasm packages may declare the same top-level names", async () => {
+	const { lines } = await compileHybridProject({
+		"a/a.go": `//gofront:target wasm
 package a
 
+var calls int
+
 func helper() int { return 1 }
-func A() int { return helper() }
+func Make() int { calls++; return helper() }
+func Calls() int { return calls }
 `,
-			"b/b.go": `//gofront:target wasm
+		"b/b.go": `//gofront:target wasm
 package b
 
+var calls int
+
 func helper() int { return 2 }
-func B() int { return helper() }
+func Make() int { calls += 10; return helper() }
+func Calls() int { return calls }
 `,
-			"main.go": `package main
+		"main.go": `package main
 
 import (
+	"fmt"
 	"./a"
 	"./b"
 )
 
-func main() { println(a.A(), b.B()) }
+func main() { fmt.Println(a.Make(), b.Make(), a.Make(), a.Calls(), b.Calls()) }
 `,
-		},
-		"'helper' is declared in both 'a' and 'b'",
-	));
+	});
+	assertEqual(lines.join("|"), "1 2 1 2 10");
+});
+
+test("js main calls the same function of two wasm packages and takes it as a value", async () => {
+	const { lines } = await compileHybridProject({
+		"a/a.go": `//gofront:target wasm
+package a
+
+func Make() int { return 1 }
+`,
+		"b/b.go": `//gofront:target wasm
+package b
+
+func Make() int { return 2 }
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	"./a"
+	"./b"
+)
+
+func main() {
+	f := b.Make
+	fmt.Println(a.Make(), b.Make(), f())
+}
+`,
+	});
+	assertEqual(lines.join("|"), "1 2 2");
+});
+
+test("two wasm packages of one name in different directories link side by side", async () => {
+	const { lines } = await compileHybridProject({
+		"p1/util/u.go": `//gofront:target wasm
+package util
+
+type Box struct{ V int }
+
+var x = 1
+
+func Make() Box { return Box{V: x} }
+`,
+		"p2/util/u.go": `//gofront:target wasm
+package util
+
+type Box struct{ S string }
+
+var x = 2
+
+func Make() Box { return Box{S: "two"} }
+func X() int { return x }
+`,
+		"main.go": `package main
+
+import (
+	"fmt"
+	u1 "./p1/util"
+	u2 "./p2/util"
+)
+
+func main() {
+	a, b := u1.Make(), u2.Make()
+	fmt.Println(a.V, b.S, u2.X())
+}
+`,
+	});
+	assertEqual(lines.join("|"), "1 two 2");
+});
 
 section(
 	"WASM Boundary v2 — WASM to JS closures & cached trampolines (Task H5.1)",

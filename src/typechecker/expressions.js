@@ -2845,7 +2845,10 @@ export const expressionCheckMethods = {
 	// call. Reports the error and returns true.
 	_rejectWasmGenericFromJs(fnType, expr) {
 		if (this.target !== "js" || fnType._target !== "wasm") return false;
-		const name = `${fnType._pkgName}.${fnType.name}`;
+		const declared = displayTypeName(fnType.name);
+		const name = declared.includes(".")
+			? declared
+			: `${fnType._pkgName}.${declared}`;
 		this.err(
 			`generic function ${name} is declared in a wasm package and cannot be called from a js package; wrap it in a non-generic function in the wasm package, or move it to a 'both' package`,
 			expr,
