@@ -1862,9 +1862,20 @@ export const expressionCheckMethods = {
 			return identical(s.elem, t.elem);
 		if (s.kind === "slice" && t.kind === "pointer") {
 			const arr = this.resolveType(this._deepUnderlying(t.base));
-			return arr?.kind === "array" && identical(s.elem, arr.elem);
+			if (arr?.kind !== "array" || !identical(s.elem, arr.elem)) return false;
+			if (this._isWasmPackage()) this._errSliceArrayPointer(expr);
+			return true;
 		}
 		return false;
+	},
+
+	// WasmGC has no array of its own behind a slice with an offset or spare
+	// capacity, so a pointer to its elements cannot alias the slice.
+	_errSliceArrayPointer(node) {
+		return this.err(
+			"cannot convert a slice to an array pointer in a wasm package; convert to an array ([N]T(s)) instead",
+			this._positioned(node),
+		);
 	},
 
 	_isByteOrRune(elem) {
