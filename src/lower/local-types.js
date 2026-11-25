@@ -94,8 +94,10 @@ export function renameLocalTypes(
 			for (const rename of renames) rename();
 			return;
 		}
+		// A type parameter is in scope in the whole body, so a nested local
+		// type of the same name shadows it and is renamed apart.
 		const here = FUNC_KINDS.has(node.kind)
-			? new Set([...visible, ...declaredNames(node)])
+			? new Set([...visible, ...declaredNames(node), ...typeParamNames(node)])
 			: visible;
 		forEachChild(node, (c) => scan(c, here));
 	};
@@ -151,7 +153,14 @@ export function renameTypeRefs(node, renamed, tparams, values) {
 	if (isTypeRef(node, vals) && renamed.has(node.name) && !tp.has(node.name))
 		node.name = renamed.get(node.name);
 	forEachChild(node, (child) => {
-		if (node.kind === "KeyValueExpr" && child === node.key) return;
+		// A bare `Ident` key of a struct literal names a field, not a type; any
+		// other key (`Q{1}`, `Q(1)`, `[]Q{}`) is an expression that can use one.
+		if (
+			node.kind === "KeyValueExpr" &&
+			child === node.key &&
+			child.kind === "Ident"
+		)
+			return;
 		renameTypeRefs(child, renamed, tp, vals);
 	});
 }
@@ -187,9 +196,20 @@ function declaredNames(node) {
 	return names;
 }
 
+// The type parameters a declaration introduces: a function's own, or for a
+// method those its receiver names (`func (b Box[T]) M()` declares `T`).
+function typeParamNames(node) {
+	const names = (node.typeParams ?? []).map((t) => t.name);
+	if (node.kind === "MethodDecl")
+		for (const a of node.recvType?.typeArgs ?? [])
+			if (a.kind === "TypeName") names.push(a.name);
+	return names;
+}
+
 function withTypeParams(node, tparams) {
-	if (!(node.typeParams?.length > 0)) return tparams;
-	return new Set([...tparams, ...node.typeParams.map((t) => t.name)]);
+	const names = typeParamNames(node);
+	if (names.length === 0) return tparams;
+	return new Set([...tparams, ...names]);
 }
 
 export const TYPE_REF_KINDS = new Set([

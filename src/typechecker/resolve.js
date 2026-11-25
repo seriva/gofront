@@ -282,8 +282,12 @@ export const resolveMethods = {
 		if (!node) return ANY;
 		switch (node.kind) {
 			case "TypeName": {
-				if (BASIC_TYPES[node.name])
+				if (BASIC_TYPES[node.name]) {
+					// A type parameter may be spelled like a predeclared type.
+					const shadow = scope?.lookup(node.name);
+					if (shadow?.kind === "typeParam") return shadow;
 					return node.name === "any" ? DECLARED_ANY : BASIC_TYPES[node.name];
+				}
 				if (node.name === "comparable")
 					return this._checkConstraintUse(COMPARABLE, node);
 				if (scope) {

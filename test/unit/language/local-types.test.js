@@ -569,6 +569,119 @@ func main() {
 	);
 });
 
+test("a renamed local type is renamed in composite literal keys", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() {
+	type Q struct{ X int }
+	m := map[Q]int{Q{1}: 2}
+	fmt.Println(m[Q{1}])
+}
+
+func f() {
+	type Q struct{ Y string }
+	m := map[Q]int{Q{"a"}: 3}
+	fmt.Println(m[Q{"a"}])
+}
+
+func main() { g(); f() }
+`,
+		"2\n3\n",
+	);
+});
+
+test("a renamed local type is renamed in conversion keys", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() {
+	type Q int
+	m := map[Q]int{Q(1): 2}
+	fmt.Println(m[Q(1)])
+}
+
+func f() {
+	type Q string
+	m := map[Q]int{Q("a"): 3}
+	fmt.Println(m[Q("a")])
+}
+
+func main() { g(); f() }
+`,
+		"2\n3\n",
+	);
+});
+
+test("a struct literal field named like a renamed local type keeps its name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ Q int }
+
+func g() {
+	type Q struct{ X int }
+	fmt.Println(T{Q: 5}.Q, Q{1}.X)
+}
+
+func f() {
+	type Q struct{ Y string }
+	fmt.Println(Q{"a"}.Y)
+}
+
+func main() { g(); f() }
+`,
+		"5 1\na\n",
+	);
+});
+
+test("a package type named after a predeclared type is not renamed onto a generic receiver's type parameter", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int32 string
+
+type Box[int32 any] struct{ v int32 }
+
+func (b Box[int32]) M() int32 { return b.v }
+
+func main() {
+	var s int32 = "hi"
+	fmt.Println(s, Box[int]{3}.M())
+}
+`,
+		"hi 3\n",
+	);
+});
+
+test("a nested local type may share a generic function's type parameter name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g[Q any](x Q) {
+	{
+		type Q struct{ Y int }
+		fmt.Println(Q{1}.Y)
+	}
+	fmt.Println(x)
+}
+
+func main() { g("hi") }
+`,
+		"1\nhi\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
