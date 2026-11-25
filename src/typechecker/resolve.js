@@ -282,19 +282,17 @@ export const resolveMethods = {
 		if (!node) return ANY;
 		switch (node.kind) {
 			case "TypeName": {
-				if (BASIC_TYPES[node.name]) {
-					// A type parameter may be spelled like a predeclared type.
-					const shadow = scope?.lookup(node.name);
-					if (shadow?.kind === "typeParam") return shadow;
-					return node.name === "any" ? DECLARED_ANY : BASIC_TYPES[node.name];
-				}
-				if (node.name === "comparable")
-					return this._checkConstraintUse(COMPARABLE, node);
+				// A type parameter or generic alias parameter may be spelled like a
+				// predeclared type (`int32`, `any`, `comparable`), and shadows it.
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
 					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
+				if (BASIC_TYPES[node.name])
+					return node.name === "any" ? DECLARED_ANY : BASIC_TYPES[node.name];
+				if (node.name === "comparable")
+					return this._checkConstraintUse(COMPARABLE, node);
 				const named = this._typeOfName(node.name, node, scope);
 				if (named) {
 					this._useQualifiedTypeName(node, named);

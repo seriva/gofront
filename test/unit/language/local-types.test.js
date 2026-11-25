@@ -682,6 +682,185 @@ func main() { g("hi") }
 	);
 });
 
+test("a generic alias parameter may be spelled like a predeclared type", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Alias[int32 any] = []int32
+
+type Any[any any] = []any
+
+func main() {
+	a := Alias[string]{"hi"}
+	var s string = Any[string]{"there"}[0]
+	fmt.Println(a[0], s)
+}
+`,
+		"hi there\n",
+	);
+});
+
+test("a type parameter or generic alias parameter may be spelled comparable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func F[comparable any](x comparable) comparable { return x }
+
+type Box[comparable any] struct{ v comparable }
+
+type Alias[comparable any] = []comparable
+
+func main() {
+	fmt.Println(F[int](7), Box[string]{"b"}.v, Alias[bool]{true}[0])
+}
+`,
+		"7 b true\n",
+	);
+});
+
+test("a local type used in a closure before a variable of its name is renamed", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() { type Q struct{ X int }; fn := func() { p := new(Q); p.X = 7; Q := 1; fmt.Println(p.X, Q) }; fn() }
+func f() { type Q struct{ Y string }; fmt.Println(Q{"hi"}.Y) }
+func main() { g(); f() }
+`,
+		"7 1\nhi\n",
+	);
+});
+
+test("a package type named like a predeclared type is renamed before a variable of its name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int32 string
+func f() { p := new(int32); *p = "hi"; int32 := 1; fmt.Println(*p, int32) }
+func main() { f() }
+`,
+		"hi 1\n",
+	);
+});
+
+test("a variable shadows a renamed type only within its block, after its declaration", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int32 string
+func g() {
+	type Q struct{ X int }
+	{
+		Q := 1
+		fmt.Println(Q)
+	}
+	p := new(Q)
+	p.X = 2
+	fmt.Println(p.X)
+	if Q := 3; Q > 0 {
+		fmt.Println(Q)
+	} else {
+		fmt.Println(Q)
+	}
+	for Q := 0; Q < 1; Q++ {
+		fmt.Println("for", Q)
+	}
+	for _, Q := range []int{9} {
+		fmt.Println("range", Q)
+	}
+	switch Q := 4; Q {
+	case 4:
+		fmt.Println("sw", Q)
+	}
+	var i any = Q{5}
+	switch Q := i.(type) {
+	case Q:
+		fmt.Println("ts", Q.X)
+	}
+	fn := func(Q int) int { return Q }
+	fmt.Println(fn(6), Q{7}.X)
+}
+func h() {
+	{
+		var int32 = 1
+		fmt.Println(int32)
+	}
+	{
+		const int32 = 2
+		fmt.Println(int32)
+	}
+	var s int32 = "x"
+	if int32 := 3; int32 > 0 {
+		fmt.Println(int32, s)
+	}
+	fmt.Println(int32("y"))
+}
+func f() { type Q struct{ Y string }; fmt.Println(Q{"hi"}.Y) }
+func main() { g(); h(); f() }
+`,
+		"1\n2\n3\nfor 0\nrange 9\nsw 4\nts 5\n6 7\n1\n2\n3 x\ny\nhi\n",
+	);
+});
+
+test("var specs and parameters shadow a renamed type from their declaration on", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type int32 string
+func h() {
+	var (
+		a = int32("a")
+		int32 = 5
+		b = int32
+	)
+	fmt.Println(a, int32, b)
+}
+func k(int32 int32) int32 { return int32 + "!" }
+func main() { h(); fmt.Println(k("z")) }
+`,
+		"a 5 5\nz!\n",
+	);
+});
+
+test("a renamed type used after a nested block's shadowing variable keeps its new name", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func g() {
+	type Q struct{ X int }
+	fn := func() {
+		q := Q{1}
+		{
+			Q := 2
+			fmt.Println(Q)
+		}
+		r := Q{3}
+		fmt.Println(q.X, r.X)
+	}
+	fn()
+	Q := 4
+	fmt.Println(Q)
+}
+func f() { type Q struct{ Y string }; fmt.Println(Q{"hi"}.Y) }
+func main() { g(); f() }
+`,
+		"2\n1 3\n4\nhi\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

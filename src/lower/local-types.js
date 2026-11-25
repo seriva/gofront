@@ -140,17 +140,29 @@ function declaresValue(stmt, name) {
 	return valueNames(stmt).includes(name);
 }
 
-// `tparams` are type parameters in scope; `values` are names a function
-// declares as parameters or locals, which shadow a same-spelled bare `Ident`.
+// `tparams` are type parameters in scope; `values` are the parameter and local
+// names in scope, which shadow a same-spelled bare `Ident`.  A value is in
+// scope the way Go scopes it: from just after its declaration to the end of
+// its innermost block (a function body, a block, or the implicit block of an
+// `if`, `for`, `switch` or case clause), so a use before a later shadowing
+// declaration still names the type.
 export function renameTypeRefs(node, renamed, tparams, values) {
 	if (!node || typeof node !== "object") return;
+	const walk = (child, vals, tp = tparams) =>
+		renameTypeRefs(child, renamed, tp, vals);
 	if (Array.isArray(node)) {
-		for (const n of node) renameTypeRefs(n, renamed, tparams, values);
+		// A statement list: each declaration shadows the statements after it.
+		let vals = values;
+		for (const n of node) {
+			walk(n, vals);
+			if (n && typeof n === "object") vals = withNames(vals, valueNames(n));
+		}
 		return;
 	}
 	const tp = withTypeParams(node, tparams);
-	const vals = FUNC_KINDS.has(node.kind) ? withLocals(node, values) : values;
-	if (isTypeRef(node, vals) && renamed.has(node.name) && !tp.has(node.name))
+	const scoped = SCOPED_WALKS[node.kind];
+	if (scoped) return scoped(node, values, (c, v) => walk(c, v, tp));
+	if (isTypeRef(node, values) && renamed.has(node.name) && !tp.has(node.name))
 		node.name = renamed.get(node.name);
 	forEachChild(node, (child) => {
 		// A bare `Ident` key of a struct literal names a field, not a type; any
@@ -161,23 +173,71 @@ export function renameTypeRefs(node, renamed, tparams, values) {
 			child.kind === "Ident"
 		)
 			return;
-		renameTypeRefs(child, renamed, tp, vals);
+		walk(child, values, tp);
 	});
 }
 
 const FUNC_KINDS = new Set(["FuncDecl", "MethodDecl", "FuncLit"]);
 
-// Adds every parameter and local name declared anywhere inside a function.
-function withLocals(fn, values) {
-	const out = new Set(values);
-	const visit = (node) => {
-		if (!node || typeof node !== "object") return;
-		if (Array.isArray(node)) return node.forEach(visit);
-		for (const n of declaredNames(node)) out.add(n);
-		forEachChild(node, visit);
+function withNames(values, names) {
+	return names.length === 0 ? values : new Set([...values, ...names]);
+}
+
+// Walks a function: its signature sees the enclosing scope, its body the
+// parameters, receiver and named results too.
+function walkFunc(node, values, walk) {
+	const inner = withNames(values, declaredNames(node));
+	forEachChild(node, (child) =>
+		walk(child, child === node.body ? inner : values),
+	);
+}
+
+// Walks a node whose `header` statement (an `if`/`for`/`switch` init) declares
+// names for the rest of the node.
+function walkWithHeader(header) {
+	return (node, values, walk) => {
+		walk(node[header], values);
+		const inner = withNames(
+			values,
+			node[header] ? valueNames(node[header]) : [],
+		);
+		forEachChild(node, (child) => {
+			if (child !== node[header]) walk(child, inner);
+		});
 	};
-	visit(fn);
-	return out;
+}
+
+// Nodes that open a scope or declare names, walked so each name shadows only
+// what follows it in its scope.
+const SCOPED_WALKS = {
+	FuncDecl: walkFunc,
+	MethodDecl: walkFunc,
+	FuncLit: walkFunc,
+	IfStmt: walkWithHeader("init"),
+	ForStmt: walkWithHeader("init"),
+	SwitchStmt: walkWithHeader("init"),
+	// The new names are not in scope in their own initializers.
+	DefineStmt: (node, values, walk) => walk(node.rhs, values),
+	VarDecl: walkSpecs,
+	ConstDecl: walkSpecs,
+	// The bound name is in scope in each clause's body, not its type list.
+	TypeSwitchStmt: (node, values, walk) => {
+		const inner = withNames(values, node.assign ? [node.assign] : []);
+		walk(node.expr, values);
+		for (const c of node.cases ?? []) {
+			walk(c.types, values);
+			walk(c.stmts, inner);
+		}
+	},
+};
+
+// `var (a = 1; b = a)`: each spec's names are in scope from the next spec.
+function walkSpecs(node, values, walk) {
+	let vals = values;
+	for (const d of node.decls ?? []) {
+		walk(d, vals);
+		vals = withNames(vals, d.names ?? []);
+	}
 }
 
 function declaredNames(node) {
