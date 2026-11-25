@@ -184,6 +184,7 @@ export class TypeChecker {
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._untypedImports = new Set(); // names bound by npm imports without types
 		this._localTypes = new Set(); // names of types declared in a function or block
+		this._generatedKeys = new Set(); // type-table keys only the generated Go uses
 		this._localTypesVisible = false; // checking the generated Go, which names any local type
 		this._importedTypes = new WeakSet(); // named types reached through an imported package
 		this._pendingConstraintUses = []; // constraint-interface checks waiting on a type declaration
@@ -295,6 +296,39 @@ export class TypeChecker {
 			for (const name of other.names("pkg"))
 				if (!scope.has(name)) scope.definePackage(name, other.get(name));
 		}
+	}
+
+	// Binds in the generated `file` the qualifier `alias` as the package named
+	// `pkgName`: `alias.T` names each type of that package any import of this
+	// package registered, whichever file imported it and however it is
+	// aliased (a dot import and an indirect dependency included). The generated
+	// Go spells a foreign type through such a qualifier, as a file's own import
+	// of the package may be shadowed or absent.
+	bindGeneratedPackage(file, alias, pkgName) {
+		this._fileScope(file).definePackage(alias, {
+			kind: "namespace",
+			name: alias,
+			members: {},
+			_gofront: true,
+		});
+		const owned = new Set();
+		for (const type of this.types.values())
+			if (
+				type?.kind === "named" &&
+				type._pkgName === pkgName &&
+				this._importBound.has(type)
+			)
+				owned.add(type);
+		for (const type of owned) {
+			const key = `${alias}.${type.name}`;
+			this._bindImportedType(file, key, type);
+			this._generatedKeys.add(key);
+		}
+	}
+
+	// Whether `name` is a type declared inside a function or block.
+	isFunctionLocalType(name) {
+		return this._localTypes.has(name);
 	}
 
 	// The type an import in `scope` (a file's scope) or in the scope shared by
@@ -530,7 +564,11 @@ export class TypeChecker {
 	}
 
 	_isImportRegistered(key, type) {
-		return this._importKeys.has(key) && this._importBound.has(type);
+		return (
+			this._importKeys.has(key) &&
+			this._importBound.has(type) &&
+			!this._generatedKeys.has(key)
+		);
 	}
 
 	recordBlocker(category, item = null) {

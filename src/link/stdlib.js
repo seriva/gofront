@@ -11,7 +11,11 @@ import { CodeGen, helperPrelude } from "../backend/js/index.js";
 import { Lexer } from "../lexer/lexer.js";
 import { generateErrorsAs } from "../lower/errors-as.js";
 import { generateFmtFormatters } from "../lower/fmt-formatters.js";
-import { restoredTypeName } from "../lower/gen-types.js";
+import {
+	LOCAL_QUALIFIER,
+	localPackageOf,
+	restoredTypeName,
+} from "../lower/gen-types.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { BuildReach, checkedDecl, StdlibReach } from "../lower/reachability.js";
 import { cloneAst, forEachChild } from "../lower/walk.js";
@@ -716,6 +720,14 @@ function restoreRenamedTypes(node) {
 	if (Array.isArray(node)) return node.forEach(restoreRenamedTypes);
 	if (typeof node.name === "string" && RENAMEABLE.has(node.kind))
 		node.name = restoredTypeName(node.name);
+	// `_gf_pkg_x.Name__PKG_x(v)`: a conversion names the type as a selector.
+	else if (
+		node.kind === "SelectorExpr" &&
+		node.expr?.kind === "Ident" &&
+		node.expr.name.startsWith(LOCAL_QUALIFIER) &&
+		typeof node.field === "string"
+	)
+		node.field = restoredTypeName(node.field);
 	forEachChild(node, restoreRenamedTypes);
 }
 
@@ -752,6 +764,15 @@ export function checkGeneratedGo(
 		const { path, alias } = typeof imp === "string" ? { path: imp } : imp;
 		specs.set(`${alias ?? ""} ${path}`, { path, alias });
 	}
+	// A local package the generated Go names is bound by the checker; every
+	// other import is written into the file.
+	const locals = [];
+	for (const [key, { path, alias }] of specs) {
+		const pkgName = localPackageOf(path);
+		if (pkgName === null) continue;
+		locals.push({ alias, pkgName });
+		specs.delete(key);
+	}
 	const imports = [...specs.values()];
 	const source = [
 		`package ${checker.pkgName}`,
@@ -772,6 +793,7 @@ export function checkGeneratedGo(
 	restoreRenamedTypes(ast.decls);
 	ast._source = source;
 	ast._generated = true;
+	ast._localQualifiers = locals.map((l) => l.alias);
 	ast._path = join(dirname(programs[0]._path ?? "."), filename);
 	ast.target = checker.target;
 	importStdlibPackages(
@@ -783,6 +805,8 @@ export function checkGeneratedGo(
 		deps,
 	);
 	checker.bindReachedPackages(filename);
+	for (const { alias, pkgName } of locals)
+		checker.bindGeneratedPackage(filename, alias, pkgName);
 	bindGeneratedDeclarationImports(imports, checker, filename);
 	const before = checker.errors.length;
 	checker.checkAll([ast]);
