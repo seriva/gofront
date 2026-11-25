@@ -2379,14 +2379,40 @@ export const expressionCheckMethods = {
 			case "CallExpr":
 				if (e._isTypeConversion || this._isIntConversion(e))
 					return this._isConstExpr(e.args?.[0], scope);
+				if (
+					e.func?.kind !== "Ident" ||
+					!CONST_BUILTINS.has(e.func.name) ||
+					(scope ?? this.globals).lookup(e.func.name)?.kind !== "builtin"
+				)
+					return false;
+				// `len` and `cap` of an array (or a pointer to one) are constant
+				// unless the operand calls a function or receives from a channel.
+				if (e._constLen != null)
+					return !e.args.some((a) => this._hasCallOrReceive(a, scope));
 				return (
-					e.func?.kind === "Ident" &&
-					CONST_BUILTINS.has(e.func.name) &&
-					(scope ?? this.globals).lookup(e.func.name)?.kind === "builtin"
+					e.args?.length > 0 && e.args.every((a) => this._isConstExpr(a, scope))
 				);
 			default:
 				return false;
 		}
+	},
+
+	// Whether the expression `e` contains a channel receive or a call that is
+	// not a constant expression (a conversion, `len("abc")`).
+	_hasCallOrReceive(e, scope) {
+		if (!e || typeof e !== "object") return false;
+		if (Array.isArray(e))
+			return e.some((x) => this._hasCallOrReceive(x, scope));
+		if (e.kind === "UnaryExpr" && e.op === "<-") return true;
+		if (e.kind === "CallExpr" && !this._isConstExpr(e, scope)) return true;
+		if (e.kind === "FuncLit") return false;
+		return Object.entries(e).some(
+			([k, v]) =>
+				!k.startsWith("_") &&
+				v &&
+				typeof v === "object" &&
+				this._hasCallOrReceive(v, scope),
+		);
 	},
 
 	_resolveCallArgTypes(expr, scope) {

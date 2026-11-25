@@ -2653,6 +2653,119 @@ for (const target of ["js", "both", "wasm"]) {
 	});
 }
 
+section("Constant initializers and complex operands (J2)");
+
+for (const target of ["js", "both", "wasm"]) {
+	for (const [what, body, want] of [
+		[
+			"a function call",
+			"func f(n int) int { return n }\nconst C = f(5)\nfunc main() { _ = C }",
+			"f(5) (value of type int) is not constant",
+		],
+		[
+			"a package variable",
+			"var x = 5\nconst C = x\nfunc main() { _ = C }",
+			"x is not constant",
+		],
+		[
+			"a local variable",
+			"func main() {\n\tx := 5\n\tconst C = x\n\t_ = C\n}",
+			"x (variable of type int) is not constant",
+		],
+		[
+			"len of a slice",
+			"func main() {\n\ts := []int{1, 2}\n\tconst C = len(s)\n\t_ = C\n}",
+			"len(s) (value of type int) is not constant",
+		],
+		[
+			"min of variables",
+			"func main() {\n\ta, b := 1, 2\n\tconst C = min(a, b)\n\t_ = C\n}",
+			"min(a, b) (value of type int) is not constant",
+		],
+		[
+			"a variable inside a typed constant",
+			"func main() {\n\tx := 5\n\tconst C int = x + 1\n\t_ = C\n}",
+			"is not constant",
+		],
+		[
+			"a second value of a constant group",
+			"func f() int { return 1 }\nconst A, B = 1, f()\nfunc main() { _, _ = A, B }",
+			"f() (value of type int) is not constant",
+		],
+	]) {
+		test(`a constant initialized from ${what} is an error in a ${target} package (J2.1)`, () => {
+			const { errors } = compile(`package main\n${body}\n`, { target });
+			assertErrorContains(errors, want);
+		});
+	}
+
+	test(`complex of float32 and float64 variables still reports mismatched float types in a ${target} package (J2.2 control)`, () => {
+		const { errors } = compile(
+			`package main\nfunc main() {\n\tvar a float32 = 1\n\tvar b float64 = 2\n\t_ = complex(a, b)\n}\n`,
+			{ target },
+		);
+		assertErrorContains(errors, "mismatched float types");
+	});
+
+	test(`valid constant expressions and complex operands compile in a ${target} package (J2 control)`, () => {
+		const { errors } = compile(
+			`package main
+type MyF float64
+type Ints [3]int
+const Top = len("abc") + int(2) + min(1, 2)
+func main() {
+	const A = 1 + 2
+	const B = len("abc")
+	const C = len([3]int{})
+	const D = complex(1, 2)
+	const E = real(D)
+	const F = min(1, 2)
+	const G = int(A)
+	var arr [3]int
+	const L = len(arr)
+	var p *[3]int
+	const M = cap(p)
+	const N = max(A, 7.5)
+	var f32 float32 = 1
+	_, _, _, _, _ = complex(f32, 2), complex(MyF(2), MyF(2)), complex(1.5, 2), L, M
+	_, _ = Top, N
+	_, _, _, _, _ = B, C, E, F, G
+}
+`,
+			{ target },
+		);
+		assertEqual(errors.length, 0);
+	});
+}
+
+test("valid constant expressions evaluate on every target (J2 control)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyF float64
+
+func main() {
+	const A = 1 + 2
+	const B = len("abc")
+	const C = len([3]int{})
+	const D = complex(1, 2)
+	const E = real(D)
+	const F = min(1, 2)
+	const G = int(A)
+	var arr [3]int
+	const L = len(arr)
+	var f32 float32 = 1
+	_ = complex(f32, 2)
+	_ = complex(MyF(2), MyF(2))
+	fmt.Println(A, B, C, D, E, F, G, L)
+}
+`,
+		"3 3 3 (1+2i) 1 1 3 3\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

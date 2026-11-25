@@ -15,6 +15,7 @@ import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { goFuncType, scanStores } from "./host-func.js";
 import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
+import { exprText, operandKind } from "./operand-text.js";
 import { resolveMethods } from "./resolve.js";
 import { newLabelScope, statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
@@ -2275,12 +2276,28 @@ export class TypeChecker {
 
 	checkConstDecl(decl, scope) {
 		for (const spec of decl.decls) {
-			const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
+			const failed = [];
+			const valTypes = spec.value.map((v) => {
+				const errorCount = this.errors.length;
+				const t = this.checkExpr(v, scope);
+				failed.push(this.errors.length > errorCount);
+				return t;
+			});
 			spec.value.forEach((v, i) => {
 				if (isNil(valTypes[i])) {
 					this.err("nil is not constant", v);
 					valTypes[i] = ANY;
 				}
+			});
+			spec.value.forEach((v, i) => {
+				if (!failed[i] && !isNil(valTypes[i]) && !this._isConstExpr(v, scope))
+					// A package variable is not typed yet (its type reads `any`).
+					this.err(
+						isAny(valTypes[i])
+							? `${exprText(v)} is not constant`
+							: `${exprText(v)} (${operandKind(v, typeStr(valTypes[i]))}) is not constant`,
+						v,
+					);
 			});
 			// Explicit type annotation → typed constant; otherwise preserve untyped
 			const type = spec.type

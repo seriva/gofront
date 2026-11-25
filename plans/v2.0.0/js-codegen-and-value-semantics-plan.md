@@ -166,7 +166,7 @@ Roots:
   - Done when: type switch `init` matches Go on `js`, `both`, and `wasm`
 
 ### Phase 2: Checker Soundness (roots `const-initializer-not-checked`, `complex-builtin-nonfloat-args`)
-- [ ] Task 2.1: Enforce constantness of `const` initializers and builtin arguments (J2.1)
+- [x] Task 2.1: Enforce constantness of `const` initializers and builtin arguments (J2.1)
   - Files: `src/typechecker/index.js` (`checkConstDecl`), `src/typechecker/expressions.js` (`_isConstExpr`)
   - Test: `test/unit/types/checks.test.js`: `assertErrorContains(…, "is not constant")` for `const C = f(5)`, `const C = x`, `const C = len(s)`, `const C = min(a, b)`; positive controls from the J2 control row (`len("abc")`, `len([3]int{})`, `len(arrVar)`, `complex(1, 2)`, `real(D)`, `min(1, 2)`, `int(A)`), function-local on `wasm`
   - Done when: runtime calls and variables in `const` initializers are rejected on all targets while valid Go constant expressions pass
