@@ -176,11 +176,11 @@ Roots:
   - Done when: non-float `complex(a, b)` calls fail at compile time instead of miscompiling or producing invalid WasmGC
 
 ### Phase 3: Value Semantics in Conversions & Pointer Stores (roots `struct-self-conversion-no-copy`, `js-slice-conversion-copies`, `struct-deref-store-replaces-arrays`)
-- [ ] Task 3.1: Copy structs on self-conversion `T(src)` on JS/WASM and share the backing array on JS slice-to-slice conversions (J3.1–J3.2)
+- [x] Task 3.1: Copy structs on self-conversion `T(src)` on JS/WASM and share the backing array on JS slice-to-slice conversions (J3.1–J3.2)
   - Files: `src/backend/js/expressions.js` (`_genStructClassConversion`, `_genSliceTypeConversion`), `src/backend/wasm/emit-exprs.js` (`emitTypeConversion`)
   - Test: `test/unit/language/value-semantics.test.js`: J3.1 (`T(src)`, generic `G[int](gs)`, control `U(src)`) and J3.2 (`[]int(s)`, `[]byte(b)`, `[]int(Ints)`, `[]byte(B)`, generic `[]int(S)`, `[]rune(r)`; controls `Ints(s)`, `[]byte(str)`) with `assertAllTargetsOutput`
   - Done when: struct self-conversions never alias and slice-to-slice conversions share backing storage on all targets
-- [ ] Task 3.2: Copy array and nested-struct fields in place on every whole-struct store through a pointer, JS & WASM (J3.3)
+- [x] Task 3.2: Copy array and nested-struct fields in place on every whole-struct store through a pointer, JS & WASM (J3.3)
   - Files: `src/backend/js/statements.js` (`_storeTarget`, `_storeInto`, `_genMultiAssignViaTemps`), `src/backend/js/runtime.js` (`__copyInto`), `src/backend/wasm/emit-stmts.js` (`_emitStructDerefAssign`)
   - Test: `test/unit/language/value-semantics.test.js`: every J3.3 row (`*pt = T{…}`, nested `Outer{Inner{M}}`, generic `set`, `*pt = other`, method `*t = T{…}`, `*p` on `&arr[0]`, `*pt, n = mk()`, `*pu, n = T{…}, 6`) plus the J3.3 control row, with `assertAllTargetsOutput`
   - Done when: slices of struct array fields see updates written through any whole-struct pointer store on all targets

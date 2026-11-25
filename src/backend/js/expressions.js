@@ -425,8 +425,8 @@ const ZERO_FOR_BASIC = {
 	float64: "0",
 	byte: "0",
 	rune: "0",
-	complex64: "{ re: 0, im: 0 }",
-	complex128: "{ re: 0, im: 0 }",
+	complex64: "Object.freeze({ re: 0, im: 0 })",
+	complex128: "Object.freeze({ re: 0, im: 0 })",
 	string: '""',
 	bool: "false",
 };
@@ -2182,18 +2182,15 @@ export const expressionGenMethods = {
 		return false;
 	},
 
-	// Converting a struct to a different defined struct type builds a copy in
-	// the target's class (so its methods exist); null when not applicable.
+	// Converting a struct to a defined struct type (its own type included)
+	// builds a copy in the target's class (so its methods exist); null when
+	// not applicable.
 	// An instance of a generic target keeps its own type arguments, not the
 	// source's.
 	_genStructClassConversion(targetName, srcType, inner, targetType) {
 		if (!targetName || targetName.includes("[")) return null;
 		const target = this.checker?.types.get(targetName);
 		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
-			return null;
-		// Two instances of one generic type share a name but not their type
-		// arguments, so only a non-generic same-type conversion is a no-op.
-		if (srcType?.name === targetName && !targetType?.typeArgs?.length)
 			return null;
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
@@ -2231,9 +2228,12 @@ export const expressionGenMethods = {
 			case "map":
 				return this._isNilLiteral(srcExpr) ? { kind: "MapType" } : null;
 			case "slice": {
+				// A string operand, or a type parameter with a string term,
+				// is encoded into a new slice.
 				const elem = this._underlyingOf(base.elem)?.name;
 				const fromText =
-					this._isStringExprType(srcExpr?._type) &&
+					(this._isStringExprType(srcExpr?._type) ||
+						this._convSourceKinds(srcExpr)?.has("string")) &&
 					["byte", "uint8", "rune", "int32", "int"].includes(elem);
 				return this._isNilLiteral(srcExpr) || fromText
 					? { kind: "SliceType", elem: base.elem }
@@ -3229,13 +3229,23 @@ export const expressionGenMethods = {
 	// ── Generic zero values (see HELPER_GENERICS) ─────────────────
 
 	// JS condition: type parameter `name` was instantiated with a struct (its
-	// zero value is a struct object, which is its own pointer when erased; a
-	// map's zero is a bare `{}`, so only a class instance or a populated
-	// object counts).
+	// zero value is a mutable struct object, which is its own pointer when
+	// erased; maps are empty or frozen, and complex numbers are frozen).
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && !Object.isFrozen(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			: "false";
+	},
+
+	// JS condition: type parameter `name` was instantiated with an array (its
+	// zero value is a mutable array or typed array; a slice's zero is null,
+	// and SIMD vectors are frozen arrays).  A pointer to it is a `{ value }`
+	// box around the array.
+	_typeParamIsArrayJs(name) {
+		const f = this._typeParamZeroFactory(name);
+		return f
+			? `((__z) => (Array.isArray(__z) && !Object.isFrozen(__z)) || ArrayBuffer.isView(__z))(${f}())`
 			: "false";
 	},
 
@@ -3928,9 +3938,21 @@ export const expressionGenMethods = {
 			expr.expr._type?.kind === "named"
 				? expr.expr._type.underlying
 				: expr.expr._type;
-		if (srcResolved?.kind === "slice") {
+		// A slice (or a type parameter with a slice term, which may also have
+		// array terms of the target's length) is copied by its first `size`
+		// elements (a shorter slice panics); struct and array elements are
+		// deep copies, so the result shares no storage with the source.
+		const kinds = this._convSourceKinds(expr.expr);
+		const fromParamSlice =
+			kinds &&
+			[...kinds].some((k) => k === "bytes" || k === "runes" || k === "slice");
+		if (srcResolved?.kind === "slice" || fromParamSlice) {
 			const size = t.size?.value !== undefined ? Number(t.size.value) : t.size;
-			return `${inner}.slice(0, ${size})`;
+			const target = this._aggregateBase(expr._type) ?? this._typeFromNode(t);
+			const elemClone = this._cloneJs(target?.elem, "__e");
+			this.useHelper("s2a");
+			const head = `__s2a(${inner}, ${size})`;
+			return elemClone === "__e" ? head : `${head}.map((__e) => ${elemClone})`;
 		}
 		// Array-to-array conversion yields a new array value.
 		return this._cloneJs(expr.expr._type, inner);
@@ -3944,42 +3966,116 @@ export const expressionGenMethods = {
 				? (this.checker?.types.get(t.elem.name) ?? t.elem)
 				: t.elem;
 		const elem = this._underlyingOf(elemType)?.name;
-		// Converting a nil slice yields a nil slice.
-		const src = this._underlyingOf(expr.expr._type);
-		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
-			this._sliceConvNilSafe = true;
-			try {
-				return `((__s) => __s == null ? null : ${this._genSliceTypeConversion(expr, "__s", t)})(${inner})`;
-			} finally {
-				this._sliceConvNilSafe = false;
-			}
+		const typedCtor = typedArrayConstructorForElem(
+			t.elem ? { kind: "basic", name: t.elem.name } : null,
+		);
+		// A slice-to-slice conversion (including from a type parameter whose
+		// terms are all slices) shares the backing array and keeps a nil slice
+		// nil; only a string or dynamic source builds a new slice.
+		const kinds = this._convSourceKinds(expr.expr);
+		if (
+			this._underlyingOf(expr.expr._type)?.kind === "slice" ||
+			(kinds && !kinds.has("string"))
+		)
+			return inner;
+		if (kinds || this._isStringExprType(expr.expr._type)) {
+			const enc = (s) => this._sliceFromStringJs(elem, typedCtor, s);
+			// A type parameter with string and slice terms: decided by the
+			// type argument at run time.
+			return kinds?.size > 1
+				? `((__s) => typeof __s === "string" ? ${enc("__s")} : __s)(${inner})`
+				: enc(inner);
 		}
 		if (elem === "byte" || elem === "uint8") {
-			if (this._isStringExprType(expr.expr._type)) {
-				this.useHelper("u8enc");
-				return `__u8enc(${inner})`;
-			}
 			if (isAny(expr.expr._type) || !expr.expr._type) {
 				this.useHelper("u8enc");
 				return `(typeof ${inner} === "string" ? __u8enc(${inner}) : new Uint8Array(${inner}))`;
 			}
 			return `new Uint8Array(${inner})`;
 		}
-		const typedCtor = typedArrayConstructorForElem(
-			t.elem ? { kind: "basic", name: t.elem.name } : null,
-		);
-		const fromString = this._isStringExprType(expr.expr._type);
-		if (typedCtor) {
-			return fromString
-				? `${typedCtor}.from(${inner}, __c => __c.codePointAt(0))`
-				: `new ${typedCtor}(${inner})`;
-		}
-		if ((elem === "rune" || elem === "int32" || elem === "int") && fromString)
-			return `Array.from(${inner}, __c => __c.codePointAt(0))`;
+		if (typedCtor) return `new ${typedCtor}(${inner})`;
 		return `Array.from(${inner})`;
 	},
 
-	_genStringConversion(srcType, inner) {
+	// `[]E(s)` of the string `s`: its UTF-8 bytes, or its code points.
+	_sliceFromStringJs(elem, typedCtor, s) {
+		if (elem === "byte" || elem === "uint8") {
+			this.useHelper("u8enc");
+			return `__u8enc(${s})`;
+		}
+		if (typedCtor) return `${typedCtor}.from(${s}, __c => __c.codePointAt(0))`;
+		if (elem === "rune" || elem === "int32" || elem === "int")
+			return `Array.from(${s}, __c => __c.codePointAt(0))`;
+		return `Array.from(${s})`;
+	},
+
+	// What a conversion operand of type-parameter type can hold at run time,
+	// one entry per kind of term in its type set (`string`, `bytes`, `runes`,
+	// `slice`, `int`, `other`); null for any other operand.
+	_convSourceKinds(node) {
+		const terms = node?._convTerms;
+		if (!terms) return null;
+		const kinds = new Set();
+		for (const u of terms) {
+			if (u?.kind === "slice") {
+				const e = this._underlyingOf(u.elem)?.name;
+				kinds.add(
+					e === "byte" || e === "uint8"
+						? "bytes"
+						: e === "rune" || e === "int32"
+							? "runes"
+							: "slice",
+				);
+			} else if (u?.kind === "basic" && u.name === "string")
+				kinds.add("string");
+			else if (u?.kind === "basic" && this.isIntType(u)) kinds.add("int");
+			else kinds.add("other");
+		}
+		return kinds;
+	},
+
+	// `string(s)` with `s` of a type parameter: the conversion of each kind
+	// of term, chosen by the type argument at run time when there are several
+	// (a nil slice is the empty string).
+	_genTypeParamStringConversion(kinds, inner) {
+		const convs = [
+			["string", (v) => `typeof ${v} === "string"`, (v) => v],
+			[
+				"int",
+				(v) => `typeof ${v} === "number" || typeof ${v} === "bigint"`,
+				(v) => {
+					this.useHelper("runestr");
+					return `__rstr(Number(${v}))`;
+				},
+			],
+			[
+				"bytes",
+				(v) => `${v} instanceof Uint8Array`,
+				(v) => {
+					this.useHelper("u8dec");
+					return `__u8dec(${v})`;
+				},
+			],
+			[
+				"runes",
+				null,
+				(v) => {
+					this.useHelper("runestr");
+					return `Array.from(${v} ?? [], c => __rstr(c)).join("")`;
+				},
+			],
+		].filter(([k]) => kinds.has(k));
+		if (convs.length !== kinds.size) return `String(${inner})`;
+		if (convs.length === 1) return convs[0][2](inner);
+		const last = convs.pop();
+		const tests = convs.map(
+			([, test, conv]) => `${test("__s")} ? ${conv("__s")} : `,
+		);
+		return `((__s) => ${tests.join("")}${last[2]("__s")})(${inner})`;
+	},
+
+	_genStringConversion(srcType, inner, kinds = null) {
+		if (kinds) return this._genTypeParamStringConversion(kinds, inner);
 		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (base && this.isIntType(base)) {
 			this.useHelper("runestr");
@@ -3993,7 +4089,7 @@ export const expressionGenMethods = {
 			}
 			if (elem === "rune" || elem === "int" || elem === "int32") {
 				this.useHelper("runestr");
-				return `Array.from(${inner}, c => __rstr(c)).join("")`;
+				return `Array.from(${inner} ?? [], c => __rstr(c)).join("")`;
 			}
 		}
 		return `String(${inner})`;
@@ -4007,6 +4103,7 @@ export const expressionGenMethods = {
 				return this._genStringConversion(
 					srcType,
 					isSrc64 ? `Number(${inner})` : inner,
+					this._convSourceKinds(expr.expr),
 				);
 			case "int64": {
 				this.useHelper("to64");

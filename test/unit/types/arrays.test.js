@@ -421,7 +421,7 @@ func main() {
 	assertEqual(runJs(js), "1 2 3");
 });
 
-test("[3]int(slice) codegen emits .slice(0, 3)", () => {
+test("[2]int(slice) codegen copies the first 2 elements with a length check", () => {
 	const { js, errors } = compile(`
 package main
 func main() {
@@ -431,7 +431,7 @@ func main() {
 }
 `);
 	assertEqual(errors.length, 0);
-	assertContains(js, ".slice(0, 2)");
+	assertContains(js, "__s2a(s, 2)");
 	assertEqual(runJs(js), "10 20");
 });
 

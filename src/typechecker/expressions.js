@@ -1235,6 +1235,19 @@ export const expressionCheckMethods = {
 		if (core?.kind === "map") operand._coreType = core;
 	},
 
+	// `[]byte(s)` or `string(s)` with `s` of a type parameter: the JS backend
+	// converts by the type argument (a slice shares its backing array, a
+	// string is encoded), so record the underlying type of every term in the
+	// constraint's type set on the operand.
+	_markTypeParamConvSource(srcType, operand, scope) {
+		if (srcType?.kind !== "typeParam" || !operand) return;
+		const terms = this._constraintTerms(srcType.constraint, new Set(), scope);
+		if (!terms?.length) return;
+		operand._convTerms = terms.map((t) =>
+			this._deepUnderlying(this.resolveType(t)),
+		);
+	},
+
 	// Underlying type of `t` for indexing, slicing, ranging and the like; a
 	// type parameter stands for its core type.
 	_coreUnderlying(t, scope) {
@@ -1777,6 +1790,7 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
+		this._markTypeParamConvSource(srcType, expr.expr, scope);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.expr))
 			return targetType;
 		if (
@@ -2777,6 +2791,7 @@ export const expressionCheckMethods = {
 				);
 			}
 			const argType = argTypes[0];
+			this._markTypeParamConvSource(argType, expr.args[0], scope);
 			this._checkConversionValidity(argType, fnType, expr);
 			return fnType;
 		}

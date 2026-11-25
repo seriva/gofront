@@ -3226,7 +3226,8 @@ export class ExprsEmitter {
 			return;
 		}
 
-		// Struct to a different defined struct type: a copy in the target's type.
+		// Struct to a struct type (the same one included): a copy in the
+		// target's type.
 		if (
 			isStructType(fromType, this.mod.checker, this.mod) &&
 			isStructType(targetType, this.mod.checker, this.mod) &&
@@ -3235,7 +3236,7 @@ export class ExprsEmitter {
 		) {
 			const src = this._resolveStructInfo({ _type: fromType });
 			const dst = this._resolveStructInfo({ _type: targetType });
-			if (src && dst && src.typeIndex !== dst.typeIndex) {
+			if (src && dst) {
 				this.emitCloneStruct(src, fromWType, dst);
 				return;
 			}

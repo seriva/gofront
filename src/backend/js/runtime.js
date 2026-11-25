@@ -330,8 +330,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   if (x === null || typeof x !== "object") return x;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return x;
-  // A Go map's zero (__nm() or __nilmap) marks a map argument: it stays shared.
-  if (zero.__nilm === true || zero.__nm === true) return x;
+  // A Go map's zero (__nm() or __nilmap) or a frozen value (SIMD, complex) stays shared.
+  if (zero.__nilm === true || zero.__nm === true || Object.isFrozen(zero)) return x;
   // A copy keeps the hidden tags (__t, __map, ...) that name the value's type
   // in an interface: the generic code boxes the value first and copies after.
   const keep = (v, c) => {
@@ -344,9 +344,9 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   // The zero value z is the shape of v: a field or element is copied only
   // where z holds an array or an object (a struct or array value); a null
   // zero is a pointer, slice, map, func or interface, which stays shared.
-  // A nil map zero (__nm() or __nilmap) marks a map field: it stays shared.
+  // A nil map zero (__nm() or __nilmap) or frozen value (SIMD, complex) stays shared.
   const isObj = (o) => o !== null && typeof o === "object";
-  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true && !Object.isFrozen(o);
   const cp = (v, z) => {
     if (!isObj(v)) return v;
     if (v.__nilm === true) return v;
@@ -358,6 +358,29 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
     return keep(v, c);
   };
   return cp(x, zero);
+};`;
+
+// `*p = v` through a type-parameter pointer to a struct: copies `v` into the
+// pointee, keeping the storage of its array and nested struct fields (slices
+// and pointers into them stay valid).  `z` is the zero-value factory, whose
+// value shows which fields are arrays or structs (a pointer's zero is null).
+// An array of numbers may be a typed array on one side and a plain array on
+// the other (erased generic code builds `[N]E` as a plain array), so only a
+// typed destination is filled with `set`; any other is copied element-wise.
+// Frozen zero values (SIMD vectors, complex numbers, nil maps) are immutable
+// values rather than mutable aggregate storage, so they are replaced directly.
+export const HELPER_COPYINTO = `var __copyInto = __copyInto || function(z, dst, src) {
+  const isObj = (o) => o !== null && typeof o === "object";
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true && !Object.isFrozen(o);
+  const cp = (d, s, zero) => {
+    if (ArrayBuffer.isView(d)) { d.set(s); return; }
+    const keys = Array.isArray(s) || ArrayBuffer.isView(s) ? s.keys() : Object.keys(s);
+    for (const k of keys) {
+      if (isShape(zero?.[k]) && isObj(s[k]) && isObj(d[k])) cp(d[k], s[k], zero[k]);
+      else d[k] = s[k];
+    }
+  };
+  cp(dst, src, z?.());
 };`;
 
 // == on type-parameter operands: structs and arrays compare by value, other
@@ -656,6 +679,14 @@ export const HELPER_SLICEFAIL = `var __slicefail = __slicefail || function(lo, h
   else if (t && !(hi >= 0 && hi <= mx)) s = "[:" + hi + ":" + (hi < 0 ? "" : mx) + "]";
   else s = "[" + lo + ":" + (lo < 0 ? "" : hi) + (t ? ":" : "") + "]";
   throw new Error("runtime error: slice bounds out of range " + s);
+};`;
+
+// `[n]T(s)`: the first `n` elements of slice `s` as a new array (a nil slice
+// converts to `[0]T`); panics when `s` is shorter, as Go does.
+export const HELPER_S2A = `var __s2a = __s2a || function(s, n) {
+  const len = s?.length ?? 0;
+  if (len < n) throw new Error("runtime error: cannot convert slice with length " + len + " to array or pointer to array with length " + n);
+  return s ? s.slice(0, n) : [];
 };`;
 
 // Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
