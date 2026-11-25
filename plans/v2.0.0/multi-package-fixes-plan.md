@@ -143,11 +143,11 @@ Root: Local user packages share one flat JS module (`src/link/user-js.js`, `src/
 
 ### Phase 1: Package Visibility & Mangled Type Exports (roots `iface-implements-ignores-method-pkg`, `mangled-type-export-symbol-mismatch`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Enforce owning `_pkgId` on unexported interface methods in `implements()` (M1.1–M1.2)
+- [x] Task 1.1: Enforce owning `_pkgId` on unexported interface methods in `implements()` (M1.1–M1.2)
   - Files: `src/typechecker/assignability.js` (`implements`)
   - Test: `test/unit/compiler/packages.test.js`: M1.1–M1.2 (`var _ util.I = Mine{}`, `&Mine{}`, interface-to-interface, embedded foreign interface, unexported embedded interface in `util`, `i.(Mine)`, `switch i.(type)`, `func g[T util.I]` all rejected with `assertErrorContains`), M1.3 (call argument, return, slice literal) + passing controls (`util.Base`, `util.Base[int]`, `util.Impl`, same-pkg). Import `isExported` from `./types.js` (not imported by `assignability.js` today)
   - Done when: foreign types cannot satisfy foreign interfaces with unexported methods unless promoted from that package
-- [ ] Task 1.2: Restore unmangled names in `exportedSymbols`/`exportedKinds` and resolve mangled dot-imported types in DCE (M2.1–M2.3)
+- [x] Task 1.2: Restore unmangled names in `exportedSymbols`/`exportedKinds` and resolve mangled dot-imported types in DCE (M2.1–M2.3)
   - Files: `src/link/type-names.js`, `src/compiler.js` (also store `renamedTypes` on the unit), `src/lower/reachability.js` (`_depDecls` shared by `_resolveName` and `_resolveQual`)
   - Test: `test/unit/compiler/packages.test.js`, `test/unit/compiler/imports.test.js`: M2.1 (`import . "./util"; Map(3)` on `js`/`both`/`wasm`), M2.2 (`import . "./b"; Num(2)`), M2.3 (`import . "./b"; Box{V: 2}` and `x.Get()` under DCE on `js`/`both`) + controls
   - Done when: dot-imported collision-mangled types resolve in value/conversion/literal positions and survive JS DCE

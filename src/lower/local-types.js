@@ -5,7 +5,7 @@
 // apart before type-checking (and again per instantiation after generics are
 // monomorphised).  Lives in `lower` so the `wasm` backend and the linker share it.
 
-import { forEachChild } from "./walk.js";
+import { forEachChild, forEachTemplGo } from "./walk.js";
 
 // The first `Name__L<n>` (n counting up from 1) that is not in `taken`, which
 // it joins. The number depends only on the names in play, never on how many
@@ -32,11 +32,14 @@ export function freshLocalName(name, taken) {
 // cannot take that value over inside its function.  `keep` holds names whose
 // several declarations are the same type (the clones of a generic body's local
 // type that does not depend on a type parameter): they share one name.
-// Returns whether anything was renamed.
+// `inUse` holds names a fresh name must avoid besides those (the types other
+// packages declared, local ones included).  Returns whether anything was
+// renamed.
 export function renameLocalTypes(
 	programs,
 	reserved = new Set(),
 	keep = new Set(),
+	inUse = new Set(),
 ) {
 	const counts = new Map();
 	const count = (node) => {
@@ -45,6 +48,7 @@ export function renameLocalTypes(
 		if (node.kind === "TypeDecl")
 			counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
 		forEachChild(node, count);
+		forEachTemplGo(node, count);
 	};
 	for (const p of programs) count(p.decls);
 	const values = valueNamesIn(programs);
@@ -53,7 +57,7 @@ export function renameLocalTypes(
 			.filter(([k, n]) => (n > 1 && !keep.has(k)) || reserved.has(k))
 			.map(([k]) => k),
 	);
-	const taken = new Set([...counts.keys(), ...reserved, ...values]);
+	const taken = new Set([...counts.keys(), ...reserved, ...values, ...inUse]);
 	let changed = false;
 	// Inner scopes first, so an outer rename never touches a nested
 	// declaration that already has its own name.  `visible` holds the value
@@ -124,6 +128,7 @@ export function valueNamesIn(programs) {
 			names.add(node.name);
 		for (const n of declaredNames(node)) names.add(n);
 		forEachChild(node, visit);
+		forEachTemplGo(node, visit);
 	};
 	for (const p of programs) visit(p.decls);
 	return names;
@@ -162,8 +167,11 @@ export function renameTypeRefs(node, renamed, tparams, values) {
 	const tp = withTypeParams(node, tparams);
 	const scoped = SCOPED_WALKS[node.kind];
 	if (scoped) return scoped(node, values, (c, v) => walk(c, v, tp));
-	if (isTypeRef(node, values) && renamed.has(node.name) && !tp.has(node.name))
+	if (isTypeRef(node, values) && renamed.has(node.name) && !tp.has(node.name)) {
+		// Diagnostics quote an expression as the source spells it.
+		node._written ??= node.name;
 		node.name = renamed.get(node.name);
+	}
 	forEachChild(node, (child) => {
 		// A bare `Ident` key of a struct literal names a field, not a type; any
 		// other key (`Q{1}`, `Q(1)`, `[]Q{}`) is an expression that can use one.
@@ -175,6 +183,7 @@ export function renameTypeRefs(node, renamed, tparams, values) {
 			return;
 		walk(child, values, tp);
 	});
+	forEachTemplGo(node, (child) => walk(child, values, tp));
 }
 
 const FUNC_KINDS = new Set(["FuncDecl", "MethodDecl", "FuncLit"]);
@@ -216,6 +225,14 @@ const SCOPED_WALKS = {
 	IfStmt: walkWithHeader("init"),
 	ForStmt: walkWithHeader("init"),
 	SwitchStmt: walkWithHeader("init"),
+	// A templ component's parameters are in scope in its body, and a templ
+	// `for` header's names in the loop body.
+	TemplDecl: walkFunc,
+	TemplFor: (node, values, walk) => {
+		walk(node.forStmt, values);
+		const init = node.forStmt?.init;
+		walk(node.body, withNames(values, init ? valueNames(init) : []));
+	},
 	// The new names are not in scope in their own initializers.
 	DefineStmt: (node, values, walk) => walk(node.rhs, values),
 	VarDecl: walkSpecs,
@@ -233,11 +250,12 @@ const SCOPED_WALKS = {
 
 // Walks `node`'s children with the values in scope in each (parameters, named
 // results, `if`/`for`/`switch` headers, a type switch's bound name), the same
-// scoping `renameTypeRefs` uses.
+// scoping `renameTypeRefs` uses.  The Go a `.templ` node holds is walked too.
 function walkScoped(node, values, walk) {
 	const scoped = SCOPED_WALKS[node.kind];
 	if (scoped) return scoped(node, values, walk);
 	forEachChild(node, (child) => walk(child, values));
+	forEachTemplGo(node, (child) => walk(child, values));
 }
 
 // `var (a = 1; b = a)`: each spec's names are in scope from the next spec.

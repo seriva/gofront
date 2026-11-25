@@ -34,8 +34,9 @@ export {
 	declaredTypeNames,
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
+	renameDotImportedTypes,
 	renameLocalTypes,
-	withOriginalTypeNames,
+	withOriginalNames,
 } from "./type-names.js";
 
 // ── Go-source stdlib ──────────────────────────────────────────
@@ -638,6 +639,7 @@ export function finishStdlibJs(merged, options, unit) {
 		emitTarget: unit.emitTarget,
 		emitted: unit.emitTarget !== "wasm",
 		emitter: unit.emitter,
+		renamedTypes: unit.link.renamedTypes,
 	});
 	if (!options.isDependency) spliceStdlibJs(merged, options);
 }

@@ -8,10 +8,16 @@
 
 import {
 	freshLocalName,
+	renameLocalTypes,
 	renameTypeRefs,
 	valueNamesIn,
 } from "../lower/local-types.js";
-import { forEachChild } from "../lower/walk.js";
+import {
+	declaredTypeNames,
+	forEachChild,
+	forEachTemplGo,
+} from "../lower/walk.js";
+import { isExported } from "../typechecker/types.js";
 
 export { renameLocalTypes } from "../lower/local-types.js";
 export { declaredTypeNames } from "../lower/walk.js";
@@ -116,13 +122,51 @@ export function registerLocalTypeOwners(programs, pkgKey, owners) {
 		if (node.kind === "TypeDecl" && !owners.has(node.name))
 			owners.set(node.name, pkgKey);
 		forEachChild(node, visit);
+		forEachTemplGo(node, visit);
 	};
 	for (const p of programs) visit(p.decls);
 }
 
-// Importers name a renamed type by its declared name (`b.Pt`).
-export function withOriginalTypeNames(types, renamed) {
+// Importers name a renamed type by its declared name (`b.Pt`): `table` is one
+// of the package's export tables (types, symbols or kinds), keyed by the
+// mangled name, and gains an entry under the declared one.
+export function withOriginalNames(table, renamed) {
 	for (const [name, mangled] of renamed)
-		if (types.has(mangled)) types.set(name, types.get(mangled));
-	return types;
+		if (table.has(mangled)) table.set(name, table.get(mangled));
+	return table;
+}
+
+// A file that dot-imports a package spells a type the package renamed by its
+// declared name (`Box`), but the build knows the type by the renamed one
+// (`Box$$b`), and both backends look a type up by the name the source gives.
+// Renames those spellings in `program` once, so every later stage sees the
+// type's real name.  `renamed` is the package's declared -> renamed map; a
+// name the file declares at package level is left.  A type declared in a
+// function shadows the import only in its block, so it first takes a name of
+// its own (`Box__L1`) that no type of the build (`owners`) spells, and joins
+// `owners` under `pkgKey`, the importing package.  The new name is emitted at
+// the top level, so it also avoids every name the package's files
+// (`pkgPrograms`, `program` among them) spell, such as a package-level var,
+// const or func of another file.
+export function renameDotImportedTypes(
+	program,
+	renamed,
+	owners,
+	pkgKey,
+	pkgPrograms = [program],
+) {
+	const own = new Set(topLevelTypeDecls([program]).map((d) => d.name));
+	const refs = new Map(
+		[...renamed].filter(([name]) => isExported(name) && !own.has(name)),
+	);
+	if (refs.size === 0) return;
+	const inUse = new Set([
+		...(owners?.keys() ?? []),
+		...declaredTypeNames(pkgPrograms),
+		...valueNamesIn(pkgPrograms),
+	]);
+	if (renameLocalTypes([program], new Set(refs.keys()), new Set(), inUse))
+		registerLocalTypeOwners([program], pkgKey, owners);
+	for (const d of program.decls ?? [])
+		renameTypeRefs(d, refs, new Set(), new Set());
 }

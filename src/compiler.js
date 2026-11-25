@@ -13,6 +13,7 @@
 //     exportedTypes:   Map<name, type>, // the package's own declared types
 //     reachedTypes:    Map<name, type>, // types its imports registered (table only)
 //     exportedKinds:   Map<name, kind>, // what each name is declared as (see Scope)
+//     renamedTypes:    Map<name, name>, // types the build renamed (`Pt` -> `Pt$$b`)
 //   }
 //
 // Local imports (`import "./subpkg"`) are compiled recursively and bundled inline.
@@ -70,8 +71,9 @@ import {
 	importStdlibPackages,
 	mangleCollidingTypes,
 	registerLocalTypeOwners,
+	renameDotImportedTypes,
 	renameLocalTypes,
-	withOriginalTypeNames,
+	withOriginalNames,
 } from "./link/stdlib.js";
 import { userEmitter, userMarker } from "./link/user-js.js";
 import {
@@ -700,6 +702,14 @@ function resolveImports(
 				// names against this package.
 				noteLocalImport(p, alias ?? dep.pkgName, alias === ".", depKey);
 				if (alias === ".") {
+					if (!p._generated)
+						renameDotImportedTypes(
+							p,
+							dep.renamedTypes,
+							options.typeOwners,
+							fromDir,
+							programs,
+						);
 					// A dot import binds only what the package exports.
 					const bind = p._generated ? (m) => m : exportedEntries;
 					checker.addDefinitions(
@@ -1013,11 +1023,6 @@ export function compileFiles(files, options = {}) {
 		options.typeOwners,
 		pkgTarget,
 	);
-	// The names the renaming left: a stored unit is only valid where they come
-	// out the same, which is how it notices a different set of packages that
-	// declare the same types.
-	const typeNames = cache ? declaredTypeNames(programs).join(",") : "";
-
 	// The test runner's driver is a source that exists only in memory: it is
 	// parsed and checked with the package but never written next to it.
 	const driver = testDriverProgram(options, programs, pkgTarget, fromDir);
@@ -1052,6 +1057,13 @@ export function compileFiles(files, options = {}) {
 			importTokens,
 		},
 	);
+	// The names the renaming left (a dot import renames the local types that
+	// shadow it): a stored unit is only valid where they come out the same,
+	// which is how it notices a different set of packages that declare the
+	// same types.
+	const typeNames = cache
+		? declaredTypeNames(programs.filter((p) => p !== driver)).join(",")
+		: "";
 
 	// ── 3. Type-check and generate, or reuse the stored unit ──────
 	const unitKey = cache
@@ -1136,6 +1148,7 @@ export function compileFiles(files, options = {}) {
 		reachedTypes: unit.reachedTypes,
 		exportedConsts: unit.exportedConsts,
 		exportedKinds: unit.exportedKinds,
+		renamedTypes: unit.link.renamedTypes,
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
@@ -1284,6 +1297,7 @@ function compileOwnUnit(ctx) {
 		pkgTarget,
 		programs: rootPrograms,
 		types: checker.types,
+		renamedTypes,
 	};
 	const emitTarget = asInternalError(() =>
 		registerPackageUnit(options, { ...link, bundledPackages }),
@@ -1332,14 +1346,14 @@ function compileOwnUnit(ctx) {
 		// Every declaration file the check read, as `[file, stamp]` pairs.
 		declarations: [...(checker.declarationStamps ?? [])],
 		programs: driver ? programs.filter((p) => p !== driver) : programs,
-		exportedSymbols: checker.getExportedSymbols(),
-		exportedTypes: withOriginalTypeNames(
-			checker.getExportedTypes(),
+		exportedSymbols: withOriginalNames(
+			checker.getExportedSymbols(),
 			renamedTypes,
 		),
+		exportedTypes: withOriginalNames(checker.getExportedTypes(), renamedTypes),
 		reachedTypes: checker.getReachedTypes(),
 		exportedConsts: checker.getExportedConsts(),
-		exportedKinds: checker.getExportedKinds(),
+		exportedKinds: withOriginalNames(checker.getExportedKinds(), renamedTypes),
 	};
 	return unit;
 }

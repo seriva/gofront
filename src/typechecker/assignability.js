@@ -19,6 +19,7 @@ import {
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
+	isExported,
 	isFloat,
 	isInteger,
 	isNil,
@@ -1912,6 +1913,16 @@ export const assignabilityMethods = {
 		return this._sigParamsMatch(rr, ar);
 	},
 
+	// An unexported interface method is satisfied only by a method declared in
+	// the interface's own package, so a foreign type cannot implement it.
+	_unexportedMethodForeign(name, required, actual) {
+		return (
+			!isExported(name) &&
+			required._pkgId !== undefined &&
+			actual._pkgId !== required._pkgId
+		);
+	},
+
 	implements(srcType, iface, _node) {
 		const isPtr = srcType?.kind === "pointer";
 		// *T has the full method set of T (value + pointer receivers).
@@ -1921,8 +1932,9 @@ export const assignabilityMethods = {
 		// Interface → interface: the source's method set must cover the target's.
 		if (base?.kind === "interface") {
 			for (const [name, required] of iface.methods) {
-				if (!this._implementsMethod(required, base.methods.get(name)))
-					return false;
+				const actual = base.methods.get(name);
+				if (!this._implementsMethod(required, actual)) return false;
+				if (this._unexportedMethodForeign(name, required, actual)) return false;
 			}
 			return true;
 		}
@@ -1940,6 +1952,7 @@ export const assignabilityMethods = {
 			if (!actual) return false;
 			if (!isPtr && actual._ptrRecv) return false;
 			if (!this._implementsMethod(required, actual)) return false;
+			if (this._unexportedMethodForeign(name, required, actual)) return false;
 		}
 		return true;
 	},

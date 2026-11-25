@@ -68,9 +68,13 @@ function interfaceText(n) {
 	return `interface{${parts.join("; ")}}`;
 }
 
+// A name as the source spells it: the build may have renamed a type
+// (`Box` -> `Box$$b`, `Box__L1`) and kept the written name in `_written`.
+const written = (n) => n._written ?? n.name;
+
 const TYPE_PRINTERS = {
-	TypeName: (n) => n.name,
-	GenericTypeName: (n) => `${n.name}[${joined(n.typeArgs, typeNodeText)}]`,
+	TypeName: written,
+	GenericTypeName: (n) => `${written(n)}[${joined(n.typeArgs, typeNodeText)}]`,
 	PointerType: (n) => `*${typeNodeText(n.base)}`,
 	SliceType: (n) => `[]${typeNodeText(n.elem)}`,
 	ArrayType: (n) =>
@@ -125,7 +129,7 @@ function callText(n) {
 }
 
 const PRINTERS = {
-	Ident: (n) => n.name,
+	Ident: written,
 	BasicLit: litText,
 	ImagLit: (n) => `${n.value}i`,
 	ParenExpr: (n) => `(${exprText(n.expr)})`,
