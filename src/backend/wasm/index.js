@@ -33,12 +33,12 @@ import {
 	_scanInterfaceTypeDecls,
 	_someNode,
 	_usesAnyEq,
+	containsInterfaceType,
 } from "./prescan.js";
 import { pruneUnusedFuncs } from "./prune-funcs.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
-	isInterfaceType,
 	isMapType,
 	isStringType,
 	PANIC_NIL_STRUCT,
@@ -903,13 +903,11 @@ export function compileWasmModule(
 			helper("__panic_text", [{ name: "v", type: ANY_T }], STR_T, "panic_text"),
 		);
 	}
-	mod.usesAnyHash = false;
-	for (const info of mod.mapTypes.values()) {
-		if (isInterfaceType(info.keyGoType, checker)) {
-			mod.usesAnyHash = true;
-			break;
-		}
-	}
+	// A map key hashes each interface it holds, also in array elements and
+	// struct fields.
+	mod.usesAnyHash = [...mod.mapTypes.values()].some((info) =>
+		containsInterfaceType(info.keyGoType, checker),
+	);
 	if (mod.usesAnyHash) {
 		funcDecls.push(
 			helper(

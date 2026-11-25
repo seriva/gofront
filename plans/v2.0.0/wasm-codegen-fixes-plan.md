@@ -162,7 +162,7 @@ Roots:
   - Done when: every W3 program prints Go's output on `wasm` and `npm run check` passes with `monomorph.js` importing from `src/lower/`
 
 ### Phase 3: Component-Type Prescan & Anonymous-Interface Dispatch (roots `wasm-prescan-shallow-type-scan`, `wasm-recv-type-name-selector-misreads-field-as-pkg`)
-- [ ] Task 3.1: Add `forEachComponentType`/`containsInterfaceType` and use them for `__any_eq` and `__any_hash` (W5.1–W5.3)
+- [x] Task 3.1: Add `forEachComponentType`/`containsInterfaceType` and use them for `__any_eq` and `__any_hash` (W5.1–W5.3)
   - Files: `src/backend/wasm/prescan.js` (`forEachComponentType`, `containsInterfaceType`, `_usesAnyEq`), `src/backend/wasm/index.js` (`usesAnyHash`), `src/backend/wasm/emit-maps.js` (`emitKeyHash` guard)
   - Test: `test/unit/wasm/arrays.test.js` (no-`fmt` `[2]any ==`, `[2]I ==`, `[2][2]any ==`, `!=`, `switch [2]any`, local `struct{ A any }` `==`, `[1]struct{ A any } ==`, generic `eq[[2]any]`), `test/unit/wasm/map-keys.test.js` (`map[[2]any]int`, `map[[1][2]any]int`, `map[[1]I]int`, `map[struct{ A any }]int`, `map[K]int`, generic `put[[2]any]`, each with and without `fmt`) + W5 controls
   - Done when: every W5 program prints Go's output on `wasm` without importing `fmt`

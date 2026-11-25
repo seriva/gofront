@@ -7,6 +7,7 @@ import { HELPER_SLICE, HELPER_SV } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
 	assertEqual,
+	assertProgramOutput,
 	assertValidWasm,
 	compile,
 	compileHybrid,
@@ -1999,4 +2000,118 @@ func Main() int {
 `).run("Main");
 	assertEqual(res.jsRes, 438);
 	assertEqual(Number(res.wasmRes), 438);
+});
+
+section("Arrays and structs holding interfaces compare with ==");
+
+// No program here imports fmt, so nothing else pulls in the interface
+// equality helper.
+const eqProgram = (decls, body) => `package main
+
+${decls}
+
+func main() {
+${body}
+}
+`;
+
+test("[2]any == [2]any without fmt", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"func f(a, b [2]any) bool { return a == b }",
+			'\tprintln(f([2]any{1, "x"}, [2]any{1, "x"}), f([2]any{1, 2}, [2]any{1, 3}))',
+		),
+		"true false\n",
+	);
+});
+
+test("[2]I == [2]I with a named interface", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			`type I interface{ M() int }
+type A struct{ v int }
+
+func (a A) M() int { return a.v }`,
+			"\ta := [2]I{A{1}, A{2}}\n\tb := [2]I{A{1}, A{2}}\n\tc := [2]I{A{1}, A{3}}\n\tprintln(a == b, a == c)",
+		),
+		"true false\n",
+	);
+});
+
+test("[2][2]any == and [2]any !=", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"",
+			"\ta := [2][2]any{{1, 2}, {3, 4}}\n\tb := [2][2]any{{1, 2}, {3, 4}}\n\tc := [2]any{1, 2}\n\td := [2]any{1, 5}\n\tprintln(a == b, c != d, c != c)",
+		),
+		"true true false\n",
+	);
+});
+
+test("switch on a [2]any tag", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"",
+			`	a := [2]any{1, 2}
+	switch a {
+	case [2]any{1, 3}:
+		println("no")
+	case [2]any{1, 2}:
+		println("yes")
+	}`,
+		),
+		"yes\n",
+	);
+});
+
+test("local struct{ A any } values and [1]struct{ A any } compare", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"",
+			`	x := struct{ A any }{1}
+	y := struct{ A any }{1}
+	z := struct{ A any }{"1"}
+	p := [1]struct{ A any }{{2}}
+	q := [1]struct{ A any }{{2}}
+	println(x == y, x == z, p == q)`,
+		),
+		"true false true\n",
+	);
+});
+
+test("generic eq instantiated with [2]any", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"func eq[T comparable](a, b T) bool { return a == b }",
+			"\tprintln(eq([2]any{1, 2}, [2]any{1, 2}), eq([2]any{1, 2}, [2]any{2, 1}))",
+		),
+		"true false\n",
+	);
+});
+
+test("controls: named struct with any field, [1]K, any-wrapped arrays", async () => {
+	await assertProgramOutput(
+		eqProgram(
+			"type K struct{ A any }",
+			`	println(K{1} == K{1}, [1]K{{1}} == [1]K{{2}})
+	println(any([2]any{1, 2}) == any([2]any{1, 2}))`,
+		),
+		"true false\ntrue\n",
+	);
+});
+
+test("control: struct{ A any } parameters compared with fmt imported", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func same(a, b struct{ A any }) bool { return a == b }
+
+func main() {
+	fmt.Println(same(struct{ A any }{1}, struct{ A any }{1}), same(struct{ A any }{1}, struct{ A any }{2}))
+}
+`,
+		"true false\n",
+	);
 });

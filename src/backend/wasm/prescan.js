@@ -10,6 +10,7 @@ import {
 	isInterfaceType,
 	isNonEmptyInterface,
 	printOperandKind,
+	structFieldList,
 	toWasmType,
 } from "./types.js";
 
@@ -72,30 +73,131 @@ export function hasPanicNilUsage(programs, checker) {
 	);
 }
 
+// The kinds `forEachComponentType` descends into.  Equality and hashing see
+// through arrays and struct fields only; a dispatcher can be reached through
+// any type a value is built from.
+export const COMPARABLE_COMPONENTS = new Set(["array", "struct"]);
+export const ALL_COMPONENTS = new Set([
+	"array",
+	"struct",
+	"slice",
+	"map",
+	"pointer",
+	"func",
+	"tuple",
+]);
+
+const elemOf = (t) => [t.elem];
+const funcParts = (t) => [
+	...(t.params ?? []).map((p) => (t.kind === "FuncType" ? p?.type : p)),
+	...(t.kind === "FuncType" ? [t.returnType] : (t.returns ?? [])),
+];
+const COMPONENT_PARTS = {
+	array: elemOf,
+	slice: elemOf,
+	pointer: (t) => [t.base],
+	map: (t) => [t.key, t.value ?? t.elem],
+	tuple: (t) => t.types ?? [],
+	struct: (t, checker) => structFieldList(t, checker).map((f) => f.goType),
+	func: funcParts,
+};
+
+// The component kind of a type node, AST (`ArrayType`) or checker (`array`).
+const COMPONENT_KIND = {
+	ArrayType: "array",
+	StructType: "struct",
+	SliceType: "slice",
+	MapType: "map",
+	PointerType: "pointer",
+	FuncType: "func",
+	TupleType: "tuple",
+};
+for (const k of Object.keys(COMPONENT_PARTS)) COMPONENT_KIND[k] = k;
+
+// The type a defined-type reference stands for (`TypeName` through the
+// checker's table, `named` through its underlying type); undefined for any
+// other type, null when there is none.
+function definedTarget(t, checker) {
+	if (t.kind === "TypeName" || t.kind === "Ident") {
+		const resolved = checker?.types?.get(t.name);
+		return resolved && resolved !== t ? resolved : null;
+	}
+	if (t.kind === "named") return t.underlying ?? checker?.types?.get(t.name);
+	return undefined;
+}
+
+// Calls `visit` on `goType` and on every type it is built from, looking
+// through defined types (`TypeName`, `named`) and descending into the
+// component kinds in `through`.  `visit` returning true skips that type's
+// components.  Each type (and type name) is visited once, so recursive types
+// terminate.
+export function forEachComponentType(
+	goType,
+	checker,
+	visit,
+	{ through = COMPARABLE_COMPONENTS } = {},
+) {
+	const seen = new Set();
+	const walk = (t) => {
+		if (!t || typeof t !== "object" || seen.has(t)) return;
+		seen.add(t);
+		if (visit(t)) return;
+		const target = definedTarget(t, checker);
+		if (target !== undefined) {
+			// A type name is resolved once, however many nodes spell it.
+			if (t.kind !== "named") {
+				if (seen.has(`ref:${t.name}`)) return;
+				seen.add(`ref:${t.name}`);
+			}
+			walk(target);
+			return;
+		}
+		const kind = COMPONENT_KIND[t.kind];
+		if (!through.has(kind)) return;
+		for (const c of COMPONENT_PARTS[kind](t, checker)) walk(c);
+	};
+	walk(goType);
+}
+
+// Whether a value of `goType` holds an interface that `==` or hashing must
+// compare dynamically: the type itself, an array element or a struct field.
+export function containsInterfaceType(goType, checker) {
+	let found = false;
+	forEachComponentType(goType, checker, (t) => {
+		if (found) return true;
+		if (isInterfaceType(t, checker)) found = true;
+		return found;
+	});
+	return found;
+}
+
 // `__any_eq` is only needed when some `==`/`!=` (or switch case) compares
-// anyref operands, a struct with an anyref field is compared, or the error
-// runtime (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a
-// site, so a gap surfaces as a compile error rather than a bad module.
+// operands that hold an interface (directly, or in an array element or struct
+// field), a struct with an anyref field is compared, or the error runtime
+// (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a site, so a
+// gap surfaces as a compile error rather than a bad module.
 export function _usesAnyEq(funcDecls, mod) {
 	if (mod.hasErrorType) return true;
 	for (const info of mod.mapTypes.values()) {
-		if (isInterfaceType(info.keyGoType, mod.checker)) return true;
+		if (containsInterfaceType(info.keyGoType, mod.checker)) return true;
 	}
 	for (const info of mod.structTypes.values()) {
 		if (info.fields?.some((f) => f.wType === "anyref")) return true;
 	}
-	const isAnyRef = (n) =>
-		Boolean(n?._type) && toWasmType(n._type, mod.checker, mod) === "anyref";
+	const holdsAny = (n) =>
+		Boolean(n?._type) &&
+		(toWasmType(n._type, mod.checker, mod) === "anyref" ||
+			containsInterfaceType(n._type, mod.checker));
 	return funcDecls.some((fn) =>
 		_someNode(fn.body, (n) => {
 			if (n.kind === "BinaryExpr" && (n.op === "==" || n.op === "!="))
-				return isAnyRef(n.left) || isAnyRef(n.right);
+				return holdsAny(n.left) || holdsAny(n.right);
 			// A tagless case of interface type compares `true == case`, and a
 			// case of interface type against a concrete tag compares boxed values.
 			if (n.kind === "SwitchStmt")
 				return (
-					(n.tag && isAnyRef(n.tag)) ||
-					n.cases.some((c) => (c.list ?? []).some(isAnyRef))
+					(n.tag && holdsAny(n.tag)) ||
+					n.cases.some((c) => (c.list ?? []).some(holdsAny))
 				);
 			return false;
 		}),
