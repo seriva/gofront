@@ -3684,6 +3684,8 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "block", blockType: "void" });
 		this.pushControl("break", stmt.label);
 
+		if (stmt.init) this.emitStmt(stmt.init);
+
 		const prevAssignLocal = stmt.assign ? this.locals.get(stmt.assign) : null;
 
 		const tswTmp = this.acquireTemp("anyref");

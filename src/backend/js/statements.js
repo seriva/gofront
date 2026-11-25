@@ -21,6 +21,15 @@ import { jsMemberName, jsSafeName } from "./names.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
+// Nodes an unlabeled `break` inside them belongs to, not to an enclosing
+// type switch.
+const BREAK_SCOPES = new Set([
+	"ForStmt",
+	"SwitchStmt",
+	"TypeSwitchStmt",
+	"FuncLit",
+]);
+
 // The same variable or field chain (`x`, `n.Children`) on both sides.
 const sameChain = (a, b) =>
 	a.kind === b.kind &&
@@ -1390,7 +1399,13 @@ export const statementGenMethods = {
 
 	_genIteratorBranchStmt(stmt) {
 		if (!stmt.label) {
-			if (this._iterLoopDepth > 0) {
+			// A `break` ends the innermost loop or value switch of the callback
+			// (a type switch's own `break` is labeled, see
+			// `_typeSwitchBreakLabel`); a `continue` the innermost loop.
+			const jsTargets =
+				this._iterLoopDepth +
+				(stmt.keyword === "break" ? this._iterSwitchDepth : 0);
+			if (jsTargets > 0) {
 				if (stmt.keyword !== "fallthrough") this.line(`${stmt.keyword};`);
 				return;
 			}
@@ -1404,7 +1419,8 @@ export const statementGenMethods = {
 			}
 			return;
 		}
-		if (this._innerLoopLabels?.has(stmt.label)) {
+		// A label of a loop or switch inside the callback is a JS label in it.
+		if (this._jsLabels?.some((l) => l.name === stmt.label)) {
 			if (stmt.keyword !== "fallthrough")
 				this.line(`${stmt.keyword} ${jsSafeName(stmt.label)};`);
 			return;
@@ -1421,6 +1437,10 @@ export const statementGenMethods = {
 	},
 
 	_genBranchStmt(stmt) {
+		if (stmt._breakLabel) {
+			this.line(`break ${stmt._breakLabel};`);
+			return;
+		}
 		if (this._inIteratorBody) {
 			this._genIteratorBranchStmt(stmt);
 			return;
@@ -1547,11 +1567,7 @@ export const statementGenMethods = {
 
 	_genForLoop(stmt) {
 		const isInner = this._inIteratorBody;
-		if (isInner) {
-			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
-			this._innerLoopLabels = this._innerLoopLabels ?? new Set();
-			for (const l of this._loopLabels(stmt)) this._innerLoopLabels.add(l);
-		}
+		if (isInner) this._iterLoopDepth++;
 		try {
 			if (this.isRangeFor(stmt)) {
 				if (stmt.init.rhs[0]._isIterator) this.genIteratorFor(stmt);
@@ -1576,10 +1592,7 @@ export const statementGenMethods = {
 			this.indented(() => this.genBlock(stmt.body));
 			this.line("}");
 		} finally {
-			if (isInner) {
-				this._iterLoopDepth--;
-				for (const l of this._loopLabels(stmt)) this._innerLoopLabels.delete(l);
-			}
+			if (isInner) this._iterLoopDepth--;
 		}
 	},
 
@@ -2088,7 +2101,7 @@ export const statementGenMethods = {
 					target: this._iterTargetFlag,
 					loopLabels: this._currentIterLoopLabels,
 					loopDepth: this._iterLoopDepth,
-					innerLabels: this._innerLoopLabels,
+					switchDepth: this._iterSwitchDepth,
 					jsLabels: this._jsLabels,
 				};
 				this._inIteratorBody = true;
@@ -2098,8 +2111,8 @@ export const statementGenMethods = {
 				this._iterTargetFlag = targetFlag;
 				this._currentIterLoopLabels = loopLabels;
 				this._iterLoopDepth = 0;
-				// Loops of an enclosing callback are not JS labels in this one.
-				this._innerLoopLabels = new Set();
+				this._iterSwitchDepth = 0;
+				// Labels of an enclosing callback are not JS labels in this one.
 				this._jsLabels = [];
 
 				if (assignPreamble) assignPreamble();
@@ -2112,7 +2125,7 @@ export const statementGenMethods = {
 				this._iterTargetFlag = prev.target;
 				this._currentIterLoopLabels = prev.loopLabels;
 				this._iterLoopDepth = prev.loopDepth;
-				this._innerLoopLabels = prev.innerLabels;
+				this._iterSwitchDepth = prev.switchDepth;
 				this._jsLabels = prev.jsLabels;
 
 				this.line("return true;");
@@ -2497,6 +2510,9 @@ export const statementGenMethods = {
 		const genBody = () => {
 			const { tag, caseExpr } = this._switchTagAndCases(stmt);
 			this.line(`switch (${tag}) {`);
+			// An unlabeled `break` in a range-over-func body ends this JS switch.
+			const inIter = this._inIteratorBody;
+			if (inIter) this._iterSwitchDepth++;
 			this.indented(() => {
 				for (const c of stmt.cases) {
 					if (c.list) {
@@ -2521,6 +2537,7 @@ export const statementGenMethods = {
 					this.line("}");
 				}
 			});
+			if (inIter) this._iterSwitchDepth--;
 			this.line("}");
 		};
 
@@ -2556,50 +2573,85 @@ export const statementGenMethods = {
 		return this._aggregateBase(t) ? this._cloneJs(t, "__tsw") : "__tsw";
 	},
 
+	// Labels the type switch's `{ … }` when a clause has an unlabeled `break`:
+	// JS would end the enclosing loop (or reject the `break`), as the clauses
+	// are not a JS `switch`. Each such `break` is marked with the label.
+	_typeSwitchBreakLabel(stmt) {
+		let label = null;
+		const visit = (node) => {
+			if (!node || typeof node !== "object") return;
+			if (Array.isArray(node)) return node.forEach(visit);
+			if (BREAK_SCOPES.has(node.kind)) return;
+			if (
+				node.kind === "BranchStmt" &&
+				node.keyword === "break" &&
+				!node.label
+			) {
+				this._tswBreakCounter = (this._tswBreakCounter ?? 0) + 1;
+				label ??= `__tswb${this._tswBreakCounter}`;
+				node._breakLabel = label;
+				return;
+			}
+			forEachChild(node, visit);
+		};
+		for (const c of stmt.cases) visit(c.stmts);
+		return label;
+	},
+
 	genTypeSwitch(stmt) {
+		const breakLabel = this._typeSwitchBreakLabel(stmt);
+		if (breakLabel) this.line(`${breakLabel}:`);
 		this.line("{");
 		this.indented(() => {
-			const val = this.genExpr(stmt.expr);
-			this.line(`const __tsw = ${val};`);
-			// The binding is declared per clause, after the switch expression
-			// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
-			const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
-			const bind = (valueJs) =>
-				this.line(
-					`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
-				);
-
-			let first = true;
-			let hasDefault = false;
-			for (const c of stmt.cases) {
-				if (!c.types) {
-					// default case — emit last
-					hasDefault = c;
-					continue;
-				}
-				const cond = c.types
-					.map((t) => this._typeCheckExpr(t, "__tsw"))
-					.join(" || ");
-				this.line(`${first ? "if" : "else if"} (${cond}) {`);
-				this.indented(() => {
-					if (stmt.assign) {
-						const only = c.types.length === 1 ? c.types[0] : null;
-						bind(this._typeSwitchBinding(only));
-					}
-					for (const s of c.stmts) this.genStmt(s);
-				});
-				this.line("}");
-				first = false;
-			}
-			if (hasDefault) {
-				this.line(first ? "{" : "else {");
-				this.indented(() => {
-					if (stmt.assign) bind("__tsw");
-					for (const s of hasDefault.stmts) this.genStmt(s);
-				});
-				this.line("}");
+			if (stmt.init) {
+				this._genScopedInit(stmt.init, () => this._genTypeSwitchBody(stmt));
+			} else {
+				this._genTypeSwitchBody(stmt);
 			}
 		});
 		this.line("}");
+	},
+
+	_genTypeSwitchBody(stmt) {
+		const val = this.genExpr(stmt.expr);
+		this.line(`const __tsw = ${val};`);
+		// The binding is declared per clause, after the switch expression
+		// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
+		const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
+		const bind = (valueJs) =>
+			this.line(
+				`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
+			);
+
+		let first = true;
+		let hasDefault = false;
+		for (const c of stmt.cases) {
+			if (!c.types) {
+				// default case — emit last
+				hasDefault = c;
+				continue;
+			}
+			const cond = c.types
+				.map((t) => this._typeCheckExpr(t, "__tsw"))
+				.join(" || ");
+			this.line(`${first ? "if" : "else if"} (${cond}) {`);
+			this.indented(() => {
+				if (stmt.assign) {
+					const only = c.types.length === 1 ? c.types[0] : null;
+					bind(this._typeSwitchBinding(only));
+				}
+				this.genBlock(c);
+			});
+			this.line("}");
+			first = false;
+		}
+		if (hasDefault) {
+			this.line(first ? "{" : "else {");
+			this.indented(() => {
+				if (stmt.assign) bind("__tsw");
+				this.genBlock(hasDefault);
+			});
+			this.line("}");
+		}
 	},
 };

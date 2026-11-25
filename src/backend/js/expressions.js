@@ -91,7 +91,7 @@ const RECEIVER_STEP = {
 	IfStmt: (s, reads) => branches(reads, s.init, s.cond),
 	ForStmt: (s, reads) => branches(reads, s.init, s.cond),
 	SwitchStmt: (s, reads) => branches(reads, s.init, s.tag),
-	TypeSwitchStmt: (s, reads) => branches(reads, s.expr),
+	TypeSwitchStmt: (s, reads) => branches(reads, s.init, s.expr),
 	ReturnStmt: (s, reads) => branches(reads, s.values),
 	ExprStmt: (s, reads) => {
 		if (reads(s.expr)) return "deref";
@@ -1235,9 +1235,12 @@ export const expressionGenMethods = {
 	_withFnCtx(body, fn, ownParams = null) {
 		const prev = this._fnCtx;
 		// A function starts with no JS labels in scope (see
-		// `_emitIterTargetDispatch`).
+		// `_emitIterTargetDispatch`), outside any range-over-func body: a
+		// closure in one returns from itself, not from the loop's function.
 		const prevLabels = this._jsLabels;
+		const prevInIter = this._inIteratorBody;
 		this._jsLabels = [];
+		this._inIteratorBody = false;
 		this._fnCtx = {
 			body,
 			parent: prev,
@@ -1254,6 +1257,7 @@ export const expressionGenMethods = {
 		} finally {
 			this._fnCtx = prev;
 			this._jsLabels = prevLabels;
+			this._inIteratorBody = prevInIter;
 		}
 	},
 

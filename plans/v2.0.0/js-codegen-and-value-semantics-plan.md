@@ -152,15 +152,15 @@ Roots:
 
 ### Phase 1: Type-Switch `init` (root `typeswitch-init-omitted`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Parse and type-check `TypeSwitchStmt.init` (J1.1, J1.4)
+- [x] Task 1.1: Parse and type-check `TypeSwitchStmt.init` (J1.1, J1.4)
   - Files: `src/parser/statements.js` (`parseSwitch`, `_parseTypeSwitchBody`), `src/typechecker/statements.js` (`_checkTypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1 compiles (no `Undefined: 'y'`) and J1.4 `assertErrorContains(…, "declared and not used: y")`, plus a parser test that the node carries `init`
   - Done when: the type switch `init` is in the AST, its names resolve in every clause, and an unused `init` variable is reported
-- [ ] Task 1.2: Capture-scan and emit `TypeSwitchStmt.init` on JS (J1.1–J1.3)
+- [x] Task 1.2: Capture-scan and emit `TypeSwitchStmt.init` on JS (J1.1–J1.3)
   - Files: `src/lower/captures.js`, `src/backend/js/statements.js` (`genTypeSwitch`), `src/backend/js/expressions.js` (`RECEIVER_STEP.TypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1, J1.2, J1.3 (shadowed `y` + closure capture) with `assertOutput(…, { targets: ["both", "js"] })`
   - Done when: type switch `init` runs once, before the switch expression, with its own scope and closure captures, on `js`/`both`
-- [ ] Task 1.3: Emit scoped `TypeSwitchStmt.init` on WASM (J1.1–J1.3)
+- [x] Task 1.3: Emit scoped `TypeSwitchStmt.init` on WASM (J1.1–J1.3)
   - Files: `src/backend/wasm/emit-stmts.js` (`emitTypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1–J1.3 with `assertAllTargetsOutput`, including the shadowed outer `y` printed after the switch
   - Done when: type switch `init` matches Go on `js`, `both`, and `wasm`
