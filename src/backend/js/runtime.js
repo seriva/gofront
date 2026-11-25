@@ -330,8 +330,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   if (x === null || typeof x !== "object") return x;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return x;
-  // A Go map's zero (__nm() or __nilmap) marks a map argument: it stays shared.
-  if (zero.__nilm === true || zero.__nm === true) return x;
+  // A Go map's zero (__nm() or __nilmap) or a frozen value (SIMD, complex) stays shared.
+  if (zero.__nilm === true || zero.__nm === true || Object.isFrozen(zero)) return x;
   // A copy keeps the hidden tags (__t, __map, ...) that name the value's type
   // in an interface: the generic code boxes the value first and copies after.
   const keep = (v, c) => {
@@ -344,9 +344,9 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   // The zero value z is the shape of v: a field or element is copied only
   // where z holds an array or an object (a struct or array value); a null
   // zero is a pointer, slice, map, func or interface, which stays shared.
-  // A nil map zero (__nm() or __nilmap) marks a map field: it stays shared.
+  // A nil map zero (__nm() or __nilmap) or frozen value (SIMD, complex) stays shared.
   const isObj = (o) => o !== null && typeof o === "object";
-  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true && !Object.isFrozen(o);
   const cp = (v, z) => {
     if (!isObj(v)) return v;
     if (v.__nilm === true) return v;
@@ -367,9 +367,11 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
 // An array of numbers may be a typed array on one side and a plain array on
 // the other (erased generic code builds `[N]E` as a plain array), so only a
 // typed destination is filled with `set`; any other is copied element-wise.
+// Frozen zero values (SIMD vectors, complex numbers, nil maps) are immutable
+// values rather than mutable aggregate storage, so they are replaced directly.
 export const HELPER_COPYINTO = `var __copyInto = __copyInto || function(z, dst, src) {
   const isObj = (o) => o !== null && typeof o === "object";
-  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true && !Object.isFrozen(o);
   const cp = (d, s, zero) => {
     if (ArrayBuffer.isView(d)) { d.set(s); return; }
     const keys = Array.isArray(s) || ArrayBuffer.isView(s) ? s.keys() : Object.keys(s);

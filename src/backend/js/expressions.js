@@ -425,8 +425,8 @@ const ZERO_FOR_BASIC = {
 	float64: "0",
 	byte: "0",
 	rune: "0",
-	complex64: "{ re: 0, im: 0 }",
-	complex128: "{ re: 0, im: 0 }",
+	complex64: "Object.freeze({ re: 0, im: 0 })",
+	complex128: "Object.freeze({ re: 0, im: 0 })",
 	string: '""',
 	bool: "false",
 };
@@ -3229,23 +3229,23 @@ export const expressionGenMethods = {
 	// ── Generic zero values (see HELPER_GENERICS) ─────────────────
 
 	// JS condition: type parameter `name` was instantiated with a struct (its
-	// zero value is a struct object, which is its own pointer when erased; a
-	// map's zero is a bare `{}`, so only a class instance or a populated
-	// object counts).
+	// zero value is a mutable struct object, which is its own pointer when
+	// erased; maps are empty or frozen, and complex numbers are frozen).
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && !Object.isFrozen(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
 			: "false";
 	},
 
 	// JS condition: type parameter `name` was instantiated with an array (its
-	// zero value is an array or a typed array; a slice's zero is null).  A
-	// pointer to it is a `{ value }` box around the array.
+	// zero value is a mutable array or typed array; a slice's zero is null,
+	// and SIMD vectors are frozen arrays).  A pointer to it is a `{ value }`
+	// box around the array.
 	_typeParamIsArrayJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `((__z) => Array.isArray(__z) || ArrayBuffer.isView(__z))(${f}())`
+			? `((__z) => (Array.isArray(__z) && !Object.isFrozen(__z)) || ArrayBuffer.isView(__z))(${f}())`
 			: "false";
 	},
 

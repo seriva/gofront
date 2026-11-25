@@ -30,6 +30,7 @@ import {
 	isStructType,
 	isTaggedSliceType,
 	pointerBase,
+	resolvedType,
 } from "./types.js";
 
 function hasReturnInBlock(n) {
@@ -916,6 +917,7 @@ export class StmtsEmitter {
 		return (
 			!!goType &&
 			goType.kind !== "pointer" &&
+			!isComplex(resolvedType(goType, this.mod.checker)) &&
 			isStructType(goType, this.mod.checker, this.mod) &&
 			!isPointerToStruct(goType, this.mod.checker, this.mod)
 		);
@@ -985,14 +987,7 @@ export class StmtsEmitter {
 	_needsStableStore(l, goType) {
 		if (!goType || goType.kind === "pointer") return false;
 		const isArr = this._isValueArray(goType);
-		if (
-			!isArr &&
-			!(
-				isStructType(goType, this.mod.checker, this.mod) &&
-				!isPointerToStruct(goType, this.mod.checker, this.mod)
-			)
-		)
-			return false;
+		if (!isArr && !this._isValueStruct(goType)) return false;
 		// Any callee may hold `&xs[i]` of a slice element, so when the program
 		// takes one, a whole-value store into an element writes in place.
 		if (this.mod.lowerResult?.elemAddrTaken && this._isSliceElemTarget(l))
@@ -1094,14 +1089,10 @@ export class StmtsEmitter {
 				this.releaseTemp(d, arrT);
 				continue;
 			}
-			const inner =
-				gt &&
-				gt.kind !== "pointer" &&
-				isStructType(gt, this.mod.checker, this.mod) &&
-				!isPointerToStruct(gt, this.mod.checker, this.mod)
-					? this._resolveStructInfo({ _type: gt })
-					: null;
-			if (inner) {
+			const inner = this._isValueStruct(gt)
+				? this._resolveStructInfo({ _type: gt })
+				: null;
+			if (inner && !inner.isComplex) {
 				const d = this.acquireTemp(f.wType);
 				const s = this.acquireTemp(f.wType);
 				get(dst, i);

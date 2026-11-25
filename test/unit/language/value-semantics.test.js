@@ -3058,3 +3058,143 @@ func main() {
 		"runtime error: cannot convert slice with length 1 to array or pointer to array with length 2\nruntime error: cannot convert slice with length 1 to array or pointer to array with length 2\n[] [97 98]\n<nil>\n",
 	);
 });
+
+test("a generic *p store handles SIMD vectors and masks directly, in structs, and in arrays", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"gofront/simd"
+)
+
+type S struct {
+	V simd.F32x4
+	M simd.Mask32x4
+}
+
+type G[E any] struct {
+	M [2]E
+	X E
+}
+
+type Outer struct {
+	In S
+	A  [2][2]simd.F32x4
+}
+
+func set[V any](p *V, v V) { *p = v }
+func swap[V any](a, b *V)  { *a, *b = *b, *a }
+func id[V any](v V) V      { return v }
+
+func main() {
+	v1 := simd.F32x4{1, 2, 3, 4}
+	v2 := simd.F32x4{5, 6, 7, 8}
+	m1 := v1.Equal(simd.F32x4{1, 0, 3, 0})
+	m2 := m1.Not()
+
+	// direct *V
+	var dv simd.F32x4
+	set(&dv, v1)
+	var dm simd.Mask32x4
+	set(&dm, m1)
+	fmt.Println(dv, dm)
+
+	// struct fields (named & anonymous)
+	var s S
+	set(&s, S{V: v1, M: m1})
+	var anon struct {
+		V simd.F32x4
+		M simd.Mask32x4
+	}
+	set(&anon, struct {
+		V simd.F32x4
+		M simd.Mask32x4
+	}{V: v2, M: m2})
+	fmt.Println(s.V, s.M, anon.V, anon.M)
+
+	// generic struct [2]E and E fields keep array slice storage
+	var gf G[simd.F32x4]
+	sf := gf.M[:]
+	set(&gf, G[simd.F32x4]{M: [2]simd.F32x4{v1, v2}, X: v2})
+	var gm G[simd.Mask32x4]
+	sm := gm.M[:]
+	set(&gm, G[simd.Mask32x4]{M: [2]simd.Mask32x4{m1, m2}, X: m2})
+	fmt.Println(gf.M[0], sf[1], gf.X, gm.M[0], sm[1], gm.X)
+
+	// direct [2]simd.F32x4 / [2]simd.Mask32x4 keep slice storage
+	var af [2]simd.F32x4
+	saf := af[:]
+	set(&af, [2]simd.F32x4{v1, v2})
+	var am [2]simd.Mask32x4
+	sam := am[:]
+	set(&am, [2]simd.Mask32x4{m1, m2})
+	fmt.Println(saf[0], saf[1], sam[0], sam[1])
+
+	// nested struct + 2D array
+	var out Outer
+	row := out.A[1][:]
+	set(&out, Outer{In: S{V: v1, M: m1}, A: [2][2]simd.F32x4{{v1, v2}, {v2, v1}}})
+	fmt.Println(out.In.V, out.In.M, row[0], row[1])
+
+	// tuple swap and value copy
+	a, b := v1, v2
+	swap(&a, &b)
+	ma, mb := m1, m2
+	swap(&ma, &mb)
+	fmt.Println(a, b, ma, mb, id(v1), id(m1), id(s).V, id(gf).M[0])
+}
+`,
+		"[1 2 3 4] [true false true false]\n[1 2 3 4] [true false true false] [5 6 7 8] [false true false true]\n[1 2 3 4] [5 6 7 8] [5 6 7 8] [true false true false] [false true false true] [false true false true]\n[1 2 3 4] [5 6 7 8] [true false true false] [false true false true]\n[1 2 3 4] [true false true false] [5 6 7 8] [1 2 3 4]\n[5 6 7 8] [1 2 3 4] [false true false true] [true false true false] [1 2 3 4] [true false true false] [1 2 3 4] [1 2 3 4]\n",
+	);
+});
+
+test("a generic *p store handles complex values without aliasing and keeps anonymous {re, im} structs mutable", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type SC struct {
+	C128 complex128
+	C64  complex64
+}
+
+type GC[E any] struct {
+	M [2]E
+}
+
+func set[V any](p *V, v V) { *p = v }
+func get[V any](p *V) V    { return *p }
+
+func main() {
+	var c complex128
+	set(&c, complex(1, 2))
+	var c64 complex64
+	set(&c64, complex(float32(3), float32(4)))
+	fmt.Println(c, c64, get(&c), get(&c64))
+
+	s := SC{C128: complex(1, 2), C64: complex(float32(5), float32(6))}
+	prev128, prev64 := s.C128, s.C64
+	set(&s, SC{C128: complex(7, 8), C64: complex(float32(9), float32(10))})
+	fmt.Println(prev128, prev64, s.C128, s.C64)
+
+	var gc GC[complex128]
+	gc.M[0] = complex(1, 1)
+	sl := gc.M[:]
+	prevElem := gc.M[0]
+	set(&gc, GC[complex128]{M: [2]complex128{complex(2, 3), complex(4, 5)}})
+	fmt.Println(prevElem, sl[0], sl[1])
+
+	var reIm struct {
+		re, im float64
+	}
+	set(&reIm, struct {
+		re, im float64
+	}{re: 11, im: 12})
+	fmt.Println(reIm.re, reIm.im)
+}
+`,
+		"(1+2i) (3+4i) (1+2i) (3+4i)\n(1+2i) (5+6i) (7+8i) (9+10i)\n(1+1i) (2+3i) (4+5i)\n11 12\n",
+	);
+});
