@@ -8,6 +8,7 @@
 
 import { forEachChild } from "../../lower/index.js";
 import {
+	displayTypeName,
 	isAny,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
@@ -88,8 +89,13 @@ export const typeInfoGenMethods = {
 
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
-		// A map or slice entering an interface is tagged by its instantiated type.
-		if (isGenericComposite(node._ifaceSrc)) return true;
+		// A map, slice, array, func or defined generic func entering an interface
+		// is tagged by its instantiated type.
+		if (
+			isGenericComposite(node._ifaceSrc) ||
+			this._isGenericTaggedFunc(node._ifaceSrc)
+		)
+			return true;
 		if (node._ifaceSrc?.kind === "typeParam" && names.has(node._ifaceSrc.name))
 			return true;
 		switch (node.kind) {
@@ -264,12 +270,14 @@ export const typeInfoGenMethods = {
 	},
 
 	_fmtBoxBase(t) {
-		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
-		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
-		if (this._isTaggedFuncType(t)) {
+		if (!t || t.kind === "typeParam") return null;
+		const fnTag = this._taggedFuncTagExpr(t);
+		if (fnTag) {
 			this.useHelper("ifaceBox");
-			return `(__v) => __tfn(__v, ${JSON.stringify(t.name)}, true)`;
+			return `(__v) => __tfn(__v, ${fnTag}, true)`;
 		}
+		if (mentionsTypeParam(t)) return null;
+		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
 		const u = this._underlyingOf(t);
 		if (t.kind === "pointer" && this._underlyingOf(t.base)?.kind === "struct") {
 			this.useHelper("ifaceBox");
@@ -289,18 +297,24 @@ export const typeInfoGenMethods = {
 		return null;
 	},
 
-	// Extra `__ity` arguments: `, true` marks a pointer and `, false, true` a
-	// defined slice type, whose nil value keeps its type as a tagged sentinel.
+	// Extra `__ity` arguments: `, true` marks a pointer, `, false, true` a
+	// defined slice type, and `, false, false, true` a defined func type.
 	_dynTagFlags(t) {
 		if (t?.kind === "pointer") return ", true";
 		if (this._isNamedComposite(t) && this._underlyingOf(t)?.kind === "slice")
 			return ", false, true";
+		if (
+			t?.kind === "named" &&
+			this._underlyingOf(t)?.kind === "func" &&
+			!this._namedBoxInfo(t)
+		)
+			return ", false, false, true";
 		return "";
 	},
 
-	// JS expression for the run-time type tag of a map, slice or array type `t`
-	// that mentions type parameters, built from their type information (see
-	// `__ti`); null when some part cannot be spelled.
+	// JS expression for the run-time type tag of a map, slice, array, func or
+	// defined generic func type `t` that mentions type parameters, built from
+	// their type information (see `__ti`); null when some part cannot be spelled.
 	_genericMapTag(t) {
 		const part = (x) => {
 			if (!mentionsTypeParam(x)) return JSON.stringify(this._dynTypeName(x));
@@ -309,6 +323,8 @@ export const typeInfoGenMethods = {
 					const f = this._typeParamZeroFactory(x.name);
 					return f ? `__tnm(${f})` : null;
 				}
+				case "named":
+					return this._genericNamedTag(x, t, part);
 				case "slice": {
 					const e = part(x.elem);
 					return e && `"[]" + ${e}`;
@@ -326,28 +342,8 @@ export const typeInfoGenMethods = {
 					const v = part(x.value);
 					return k && v && `"map[" + ${k} + "]" + ${v}`;
 				}
-				case "func": {
-					const rs = (x.returns ?? []).filter(
-						(r) => !(r?.kind === "basic" && r.name === "void"),
-					);
-					const ps = (x.params ?? []).map((p, i) => {
-						const s = part(p);
-						return (
-							s &&
-							(x.variadic && i === x.params.length - 1 ? `"..." + ${s}` : s)
-						);
-					});
-					const rParts = rs.map(part);
-					if (ps.some((p) => !p) || rParts.some((r) => !r)) return null;
-					const pExpr = ps.length ? ps.join(' + ", " + ') : '""';
-					const rExpr =
-						rParts.length === 0
-							? '""'
-							: rParts.length === 1
-								? `" " + ${rParts[0]}`
-								: `" (" + ${rParts.join(' + ", " + ')} + ")"`;
-					return `"func(" + ${pExpr} + ")" + ${rExpr}`;
-				}
+				case "func":
+					return this._genericFuncTag(x, part);
 				default:
 					return null;
 			}
@@ -355,16 +351,40 @@ export const typeInfoGenMethods = {
 		return part(t);
 	},
 
-	// A defined func type whose values carry their name as a run-time tag
-	// (one with methods is boxed as a class instead).
+	// A defined func type whose values carry their name (and instantiation
+	// arguments) as a run-time tag (one with methods is boxed as a class instead).
 	_isTaggedFuncType(t) {
 		return (
 			t?.kind === "named" &&
 			!mentionsTypeParam(t) &&
-			!t.typeArgs?.length &&
 			this._underlyingOf(t)?.kind === "func" &&
 			!this._namedBoxInfo(t)
 		);
+	},
+
+	// An instantiated generic defined func type that still mentions a type
+	// parameter (tagged at run time from its type-info factories).
+	_isGenericTaggedFunc(t) {
+		return (
+			t?.kind === "named" &&
+			mentionsTypeParam(t) &&
+			this._underlyingOf(t)?.kind === "func" &&
+			!this._namedBoxInfo(t)
+		);
+	},
+
+	// Run-time `__t` tag string for a concrete defined func type `t`.
+	_taggedFuncTag(t) {
+		if (!t?.typeArgs?.length) return t.name;
+		return `${t.name}[${t.typeArgs.map((a) => this._dynTypeName(a)).join(", ")}]`;
+	},
+
+	// JS expression for the run-time `__t` tag of defined func type `t`, or null.
+	_taggedFuncTagExpr(t) {
+		if (this._isTaggedFuncType(t))
+			return JSON.stringify(this._taggedFuncTag(t));
+		if (this._isGenericTaggedFunc(t)) return this._genericMapTag(t);
+		return null;
 	},
 
 	// The run-time type tag of an unnamed slice, map or non-struct pointer
@@ -443,22 +463,8 @@ export const typeInfoGenMethods = {
 				return `map[${s(t.key)}]${s(t.value)}`;
 			case "pointer":
 				return `*${s(t.base)}`;
-			case "func": {
-				// Go's spelling: no result is `func()`, not `func() void`.
-				const rs = (t.returns ?? []).filter(
-					(r) => !(r?.kind === "basic" && r.name === "void"),
-				);
-				const ps = (t.params ?? []).map((p, i) =>
-					t.variadic && i === t.params.length - 1 ? `...${s(p)}` : s(p),
-				);
-				const res =
-					rs.length === 0
-						? ""
-						: rs.length === 1
-							? ` ${s(rs[0])}`
-							: ` (${rs.map(s).join(", ")})`;
-				return `func(${ps.join(", ")})${res}`;
-			}
+			case "func":
+				return this._funcDynTypeStr(t, s);
 			case "interface":
 				// Every unnamed interface shares one tag.
 				return t.name ? typeStr(t) : "interface {}";
@@ -470,20 +476,87 @@ export const typeInfoGenMethods = {
 							`${(f.names ?? []).join(",")} ${s(f.type)}${f.tag ? ` ${JSON.stringify(f.tag)}` : ""}${f.embedded ? " embedded" : ""}`,
 					)
 					.join("; ")}}`;
+			case "named":
+				return this._namedDynTypeStr(t, s);
 			default:
 				return typeStr(t);
 		}
 	},
 
+	_funcDynTypeStr(t, s) {
+		// Go's spelling: no result is `func()`, not `func() void`.
+		const rs = (t.returns ?? []).filter(
+			(r) => !(r?.kind === "basic" && r.name === "void"),
+		);
+		const ps = (t.params ?? []).map((p, i) =>
+			t.variadic && i === t.params.length - 1 ? `...${s(p)}` : s(p),
+		);
+		const res =
+			rs.length === 0
+				? ""
+				: rs.length === 1
+					? ` ${s(rs[0])}`
+					: ` (${rs.map(s).join(", ")})`;
+		return `func(${ps.join(", ")})${res}`;
+	},
+
+	_namedDynTypeStr(t, s) {
+		const name = displayTypeName(t.name);
+		return t.typeArgs?.length
+			? `${name}[${t.typeArgs.map(s).join(", ")}]`
+			: name;
+	},
+
+	// Outermost defined type keeps its internal name (`Seq$$iter`, `GF__L1`);
+	// nested arguments use Go display spelling to match `_dynTypeName` and `__tnm`.
+	_genericNamedTag(x, root, part) {
+		const head = x === root ? x.name : displayTypeName(x.name);
+		const base = JSON.stringify(head);
+		if (!x.typeArgs?.length) return base;
+		const args = x.typeArgs.map(part);
+		if (args.some((a) => !a)) return null;
+		return `${base} + "[" + ${args.join(' + ", " + ')} + "]"`;
+	},
+
+	_genericFuncTag(x, part) {
+		const rs = (x.returns ?? []).filter(
+			(r) => !(r?.kind === "basic" && r.name === "void"),
+		);
+		const ps = (x.params ?? []).map((p, i) => {
+			const s = part(p);
+			return (
+				s && (x.variadic && i === x.params.length - 1 ? `"..." + ${s}` : s)
+			);
+		});
+		const rParts = rs.map(part);
+		if (ps.some((p) => !p) || rParts.some((r) => !r)) return null;
+		const pExpr = ps.length ? ps.join(' + ", " + ') : '""';
+		const rExpr =
+			rParts.length === 0
+				? '""'
+				: rParts.length === 1
+					? `" " + ${rParts[0]}`
+					: `" (" + ${rParts.join(' + ", " + ')} + ")"`;
+		return `"func(" + ${pExpr} + ")" + ${rExpr}`;
+	},
+
 	// Run-time test that `val` holds a value of the unnamed composite type
-	// (or named func type) of assertion target `typeNode`; null when the
+	// (or defined func type) of assertion target `typeNode`; null when the
 	// checker recorded no type for it.
 	_dynTypeCheck(typeNode, val) {
 		const t = typeNode?._assertType;
 		if (!t) return null;
+		const fnTag = this._taggedFuncTagExpr(t);
+		if (fnTag) {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${fnTag}, "namedfunc")`;
+		}
 		const u = this._underlyingOf(t);
-		const shape = mentionsTypeParam(t);
-		const tag = JSON.stringify(shape ? "" : this._dynTypeName(t));
+		const tag = this._dynCheckTag(t, u);
+		return this._dynUnderlyingCheck(t, u, val, tag);
+	},
+
+	_dynUnderlyingCheck(t, u, val, tag) {
 		this.useHelper("ifaceBox");
 		const args = (kind, ctor = "null", n = "0") =>
 			`__isty(${val}, ${tag}, "${kind}", ${ctor}, ${n})`;
@@ -499,13 +572,21 @@ export const typeInfoGenMethods = {
 				: null;
 			return args("slice", ctor ?? "null");
 		}
-		if (u?.kind === "pointer") {
-			if (u.base?.kind === "struct" && !u.base.name) return args("struct");
-			if (this._underlyingOf(u.base)?.kind === "struct") return null;
-			if (this._boxesInInterface(u)) return null;
-			return args("ptr");
-		}
+		if (u?.kind === "pointer") return this._dynPtrCheck(u, args);
 		return null;
+	},
+
+	_dynPtrCheck(u, args) {
+		if (u.base?.kind === "struct" && !u.base.name) return args("struct");
+		if (this._underlyingOf(u.base)?.kind === "struct") return null;
+		if (this._boxesInInterface(u)) return null;
+		return args("ptr");
+	},
+
+	_dynCheckTag(t, u) {
+		if (!mentionsTypeParam(t)) return JSON.stringify(this._dynTypeName(t));
+		if (u?.kind === "func") return this._genericMapTag(t) ?? '""';
+		return '""';
 	},
 
 	_underlyingOf(t) {
@@ -548,6 +629,11 @@ export const typeInfoGenMethods = {
 	},
 
 	_namedTypeCheck(t, val) {
+		const fnTag = this._taggedFuncTagExpr(t);
+		if (fnTag) {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${fnTag}, "namedfunc")`;
+		}
 		if (t.typeArgs?.length) {
 			const generic = this._genericInstanceCheck(
 				{ kind: "GenericTypeName", name: t.name, _typeArgs: t.typeArgs },

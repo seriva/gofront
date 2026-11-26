@@ -727,20 +727,8 @@ export const expressionGenMethods = {
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
-		if (
-			expr._ifaceSrc &&
-			!expr._tfnTagging &&
-			this._isTaggedFuncType(expr._ifaceSrc)
-		) {
-			// A value of a defined func type keeps that type in an interface.
-			expr._tfnTagging = true;
-			try {
-				this.useHelper("ifaceBox");
-				return `__tfn(${this.genExpr(expr)}, ${JSON.stringify(expr._ifaceSrc.name)}, true)`;
-			} finally {
-				expr._tfnTagging = false;
-			}
-		}
+		const taggedFn = this._genIfaceTaggedFuncExpr(expr);
+		if (taggedFn) return taggedFn;
 		if (isGenericComposite(expr._ifaceSrc) && !expr._gmapTagging) {
 			const tag = this._genericMapTag(expr._ifaceSrc);
 			if (tag) {
@@ -981,6 +969,20 @@ export const expressionGenMethods = {
 		return (
 			this._isNamedBoxKind(expr) && !expr._ifaceBoxing && !expr._noNamedBox
 		);
+	},
+
+	_genIfaceTaggedFuncExpr(expr) {
+		if (!expr._ifaceSrc || expr._tfnTagging) return null;
+		const fnTag = this._taggedFuncTagExpr(expr._ifaceSrc);
+		if (!fnTag) return null;
+		// A value of a defined func type keeps that type in an interface.
+		expr._tfnTagging = true;
+		try {
+			this.useHelper("ifaceBox");
+			return `__tfn(${this.genExpr(expr)}, ${fnTag}, true)`;
+		} finally {
+			expr._tfnTagging = false;
+		}
 	},
 
 	_genNamedIfaceBoxExpr(expr) {
@@ -2088,9 +2090,10 @@ export const expressionGenMethods = {
 				[...(under.methods?.keys() ?? [])],
 				this._unwrapIsMulti(under.methods?.get("Unwrap")),
 			);
-		if (this._isTaggedFuncType(named)) {
+		const fnTag = this._taggedFuncTagExpr(named);
+		if (fnTag) {
 			this.useHelper("ifaceBox");
-			return `__isty(${val}, ${JSON.stringify(name)}, "namedfunc")`;
+			return `__isty(${val}, ${fnTag}, "namedfunc")`;
 		}
 		if (named?.kind === "func") {
 			this.useHelper("ifaceBox");
@@ -2320,10 +2323,8 @@ export const expressionGenMethods = {
 			targetType,
 		);
 		if (structConv) return structConv;
-		if (this._isTaggedFuncType(targetType)) {
-			this.useHelper("ifaceBox");
-			return `__tfn(${arg}, ${JSON.stringify(targetType.name)})`;
-		}
+		const tagged = this._genTaggedFuncConv(targetType, arg);
+		if (tagged) return tagged;
 		const base =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
 		const targetNode = this._resolvedConversionTargetNode(base, srcExpr);
@@ -3950,6 +3951,13 @@ export const expressionGenMethods = {
 		return `__tconv(${factory}, ${inner})`;
 	},
 
+	_genTaggedFuncConv(t, arg) {
+		const fnTag = this._taggedFuncTagExpr(t);
+		if (!fnTag) return null;
+		this.useHelper("ifaceBox");
+		return `__tfn(${arg}, ${fnTag})`;
+	},
+
 	_genTypeConversion(expr, preInner = null) {
 		const inner = preInner ?? this.genExpr(expr.expr);
 		const t = expr.targetType;
@@ -3993,7 +4001,10 @@ export const expressionGenMethods = {
 				? this._genPrimitiveConversion(expr, inner, u.name)
 				: inner;
 		}
-		return this._genPrimitiveConversion(expr, inner, target);
+		return (
+			this._genTaggedFuncConv(expr._type, inner) ??
+			this._genPrimitiveConversion(expr, inner, target)
+		);
 	},
 
 	_genArrayTypeConversion(expr, inner, t) {

@@ -208,6 +208,144 @@ func main() {
 	);
 });
 
+test("generic defined func values boxed into any keep their instantiation tag and nil identity", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+type GF[T any] func(T)
+type MyGF = GF[int]
+
+func boxAnyGF[T any](v T) any {
+	return v
+}
+
+func boxGF[T any](f GF[T]) any {
+	return f
+}
+
+func convGF[T any](f func(T)) any {
+	return GF[T](f)
+}
+
+func assertOkGF[T any](v any) (T, bool) {
+	x, ok := v.(T)
+	return x, ok
+}
+
+func assertGFT[T any](v any) bool {
+	_, ok := v.(GF[T])
+	return ok
+}
+
+func switchGF(v any) string {
+	switch f := v.(type) {
+	case nil:
+		return "nil"
+	case GF[int]:
+		if f == nil {
+			return "nil-GF[int]"
+		}
+		return "GF[int]"
+	case GF[string]:
+		if f == nil {
+			return "nil-GF[string]"
+		}
+		return "GF[string]"
+	case func(int):
+		if f == nil {
+			return "nil-func(int)"
+		}
+		return "func(int)"
+	default:
+		return "other"
+	}
+}
+
+func main() {
+	var gf GF[int]
+	var agf any = gf
+	_, okAny := agf.(any)
+	vInt, okInt := agf.(GF[int])
+	_, okStr := agf.(GF[string])
+	_, okFn := agf.(func(int))
+	fmt.Println(okAny, agf == nil, okInt, vInt == nil, okStr, okFn)
+
+	var live GF[int] = func(int) {}
+	var alive any = live
+	vLive, okLiveInt := alive.(GF[int])
+	_, okLiveStr := alive.(GF[string])
+	_, okLiveFn := alive.(func(int))
+	fmt.Println(okLiveInt, vLive == nil, okLiveStr, okLiveFn)
+
+	bgf := boxAnyGF(gf)
+	_, bAny := bgf.(any)
+	_, bInt := bgf.(GF[int])
+	_, bStr := bgf.(GF[string])
+	fmt.Println(bAny, bgf == nil, bInt, bStr)
+
+	g1, gok1 := assertOkGF[GF[int]](agf)
+	_, gok2 := assertOkGF[GF[string]](agf)
+	g3, gok3 := assertOkGF[GF[int]](alive)
+	_, gok4 := assertOkGF[GF[string]](alive)
+	fmt.Println(gok1, g1 == nil, gok2, gok3, g3 == nil, gok4)
+
+	bg := boxGF(gf)
+	cg := convGF[int](nil)
+	cl := convGF[int](func(int) {})
+	fmt.Println(bg == nil, assertGFT[int](bg), assertGFT[string](bg))
+	fmt.Println(cg == nil, assertGFT[int](cg), assertGFT[string](cg))
+	fmt.Println(assertGFT[int](cl), assertGFT[string](cl))
+
+	conv := GF[int](func(int) {})
+	var aconv any = conv
+	_, c1 := aconv.(GF[int])
+	_, c2 := aconv.(GF[string])
+	_, c3 := aconv.(func(int))
+	pconv := (GF[int])(func(int) {})
+	var apconv any = pconv
+	_, pc1 := apconv.(GF[int])
+	_, pc2 := apconv.(GF[string])
+	_, pc3 := apconv.(func(int))
+	fmt.Println(c1, c2, c3, pc1, pc2, pc3)
+
+	var mgf MyGF
+	var amgf any = mgf
+	_, m1 := amgf.(GF[int])
+	_, m2 := amgf.(MyGF)
+	fmt.Println(amgf == nil, m1, m2)
+
+	var gfn GF[func()]
+	var agfn any = gfn
+	_, f1 := agfn.(GF[func()])
+	_, f2 := boxGF(gfn).(GF[func()])
+	var gb GF[byte]
+	var agb any = gb
+	_, b1 := agb.(GF[uint8])
+	_, b2 := boxGF(gb).(GF[uint8])
+	fmt.Println(f1, f2, b1, b2)
+
+	var seq iter.Seq[int]
+	var aseq any = seq
+	_, s1 := aseq.(any)
+	_, s2 := aseq.(iter.Seq[int])
+	_, s3 := aseq.(iter.Seq[string])
+	_, s4 := aseq.(func(func(int) bool))
+	fmt.Println(s1, aseq == nil, s2, s3, s4)
+
+	fmt.Println(switchGF(nil), switchGF(agf), switchGF(alive))
+	fmt.Println(agf, alive != nil)
+	fmt.Printf("%T\\n", any(gf))
+}
+`,
+		"true false true true false false\ntrue false false false\ntrue false true false\ntrue true false true false false\nfalse true false\nfalse true false\ntrue false\ntrue false false true false false\nfalse true true\ntrue true true true\ntrue false true false false\nnil nil-GF[int] GF[int]\n<nil> true\nmain.GF[int]\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
