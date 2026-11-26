@@ -445,7 +445,7 @@ const BUILTIN_GEN = {
 	cap: (s, e) => {
 		if (e._constLen != null) return s._genConstLen(e);
 		s.useHelper("slice");
-		return `__cap(${s.genExpr(e.args[0])})`;
+		return `__cap(${s.genExpr(e.args[0])}${s._typeParamArrayLenArg(e.args[0])})`;
 	},
 	make: (s, e) => s.genMake(e),
 	delete: (s, e) => {
@@ -2689,6 +2689,13 @@ export const expressionGenMethods = {
 		return t.kind === "named" && t.underlying?.kind === "interface";
 	},
 
+	_typeParamArrayLenArg(arg) {
+		const t = arg?._type;
+		const f =
+			t?.kind === "typeParam" ? this._typeParamZeroFactory(t.name) : null;
+		return f ? `, ${f}?.al` : "";
+	},
+
 	_genBuiltinLen(expr) {
 		if (expr._constLen != null) return this._genConstLen(expr);
 		const arg = expr.args[0];
@@ -2696,15 +2703,21 @@ export const expressionGenMethods = {
 		const wrapField = this._namedWrapperField(t, arg);
 		if (wrapField) return `${this.genExpr(arg)}.${wrapField}.length`;
 		const js = this.genExpr(arg);
-		if (t?.kind === "map") return `Object.keys(${js} ?? {}).length`;
+		if (this._underlyingOf(t)?.kind === "map")
+			return `Object.keys(${js} ?? {}).length`;
 		this.useHelper("len");
-		return `__len(${js})`;
+		return `__len(${js}${this._typeParamArrayLenArg(arg)})`;
 	},
 
 	_genBuiltinClear(expr) {
 		const arg = expr.args[0];
 		const t = arg?._type;
 		const js = this.genExpr(arg);
+		if (t?.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.name);
+			this.useHelper("generics");
+			return `__clear(${js}, ${f}?.ez)`;
+		}
 		if (
 			t?.kind === "map" ||
 			(t?.kind === "named" && t.underlying?.kind === "map")
@@ -2729,6 +2742,10 @@ export const expressionGenMethods = {
 	// contributes its UTF-8 bytes.
 	_genSliceSource(node) {
 		const js = this.genExpr(node);
+		if (node._type?.kind === "typeParam") {
+			this.useHelper("u8enc");
+			return `((__v) => typeof __v === "string" ? __u8enc(__v) : __v)(${js})`;
+		}
 		if (!this._isStringExprType(node._type)) return js;
 		this.useHelper("u8enc");
 		return `__u8enc(${js})`;
@@ -4085,6 +4102,10 @@ export const expressionGenMethods = {
 
 	_genStringConversion(srcType, inner) {
 		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
+		if (base?.kind === "typeParam") {
+			this.useHelper("generics");
+			return `__tstr(${inner})`;
+		}
 		if (base && this.isIntType(base)) {
 			this.useHelper("runestr");
 			return `__rstr(${inner})`;

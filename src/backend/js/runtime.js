@@ -2,7 +2,8 @@
 // Each export is a single JS statement (var __x = __x || function(...){...};) so that
 // multiple compiled files bundled together can safely repeat the declaration.
 
-export const HELPER_LEN = `var __len = __len || function(a) {
+export const HELPER_LEN = `var __len = __len || function(a, n) {
+  if (n != null) return n;
   if (a && typeof a === 'object' && !Array.isArray(a) && !ArrayBuffer.isView(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };`;
@@ -149,7 +150,8 @@ var __mkview = __mkview || function(b, o, n, c, f) {
   t.b = b; t.o = o; t.n = n; t.c = c;
   return new Proxy(t, __svh);
 };
-var __cap = __cap || function(a) {
+var __cap = __cap || function(a, n) {
+  if (n != null) return n;
   if (a == null) return 0;
   const s = a[__sv];
   if (s !== undefined) return s.c;
@@ -685,10 +687,19 @@ var __tbox = __tbox || function(f, x) {
   }
   return x;
 };
-var __ti = __ti || function(f, k, id, is, u, b, fb, nm) {
+var __ti = __ti || function(f, k, id, is, u, b, fb, nm, ez, al) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm; g.ez = ez; g.al = al;
   return g;
+};
+var __clear = __clear || function(v, ez) {
+  if (v == null) return;
+  if (v instanceof Map) { v.clear(); return; }
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = ez ? ez() : 0;
+    return;
+  }
+  for (const k in v) delete v[k];
 };
 var __tar = __tar || function(f, op, a, b) {
   const k = f?.k;
@@ -747,6 +758,15 @@ var __tar = __tar || function(f, op, a, b) {
 var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
 };
+var __tstr = __tstr || function(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return __rstr(v);
+  if (typeof v === "bigint") return __rstr(Number(v));
+  if (v instanceof Uint8Array) return __u8dec(v);
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) return Array.from(v, (c) => __rstr(c)).join("");
+  return String(v);
+};
 var __tconv = __tconv || function(f, v) {
   switch (f?.k) {
     case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : (typeof v === "number" ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : v);
@@ -760,6 +780,11 @@ var __tconv = __tconv || function(f, v) {
     case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
     case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
     case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
+    case "complex128": return v && typeof v === "object" ? { re: v.re, im: v.im } : { re: Number(v), im: 0 };
+    case "complex64": return v && typeof v === "object" ? { re: Math.fround(v.re), im: Math.fround(v.im) } : { re: Math.fround(Number(v)), im: 0 };
+    case "string": return __tstr(v);
+    case "[]byte": return v == null ? null : typeof v === "string" ? __u8enc(v) : v;
+    case "[]rune": return v == null ? null : typeof v === "string" ? Int32Array.from(v, (c) => c.codePointAt(0)) : v;
     default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;

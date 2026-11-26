@@ -4017,6 +4017,467 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("G4.1–G4.1b: generic clear on map, slice, struct slice, string slice, union, and nil", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyMap map[string]int
+type MyIntSlice []int
+type MyStruct struct{ a int }
+type MyStructSlice []MyStruct
+type MyStrSlice []string
+
+func clearMap[M ~map[string]int](m M) int {
+	clear(m)
+	return len(m)
+}
+
+func clearSlice[S ~[]int](s S) S {
+	clear(s)
+	return s
+}
+
+func clearStructSlice[S ~[]MyStruct](s S) S {
+	clear(s)
+	s[0].a = 5
+	return s
+}
+
+func clearStrSlice[S ~[]string](s S) S {
+	clear(s)
+	return s
+}
+
+func clearUnion[T ~map[string]int | ~[]int](x T) T {
+	clear(x)
+	return x
+}
+
+func main() {
+	m := MyMap{"a": 1, "b": 2}
+	fmt.Println(clearMap(m))
+
+	s := MyIntSlice{10, 20}
+	fmt.Println(clearSlice(s))
+
+	ss := MyStructSlice{{a: 1}, {a: 2}}
+	fmt.Println(clearStructSlice(ss))
+
+	strs := MyStrSlice{"x", "y"}
+	fmt.Printf("%q\\n", clearStrSlice(strs))
+
+	um := map[string]int{"k": 9}
+	us := []int{7, 8}
+	fmt.Println(len(clearUnion(um)), clearUnion(us))
+
+	var nilM MyMap
+	var nilS MyIntSlice
+	fmt.Println(clearMap(nilM), len(clearSlice(nilS)))
+}`;
+	const want = '0\n[0 0]\n[{5} {0}]\n["" ""]\n0 [0 0]\n0 0\n';
+	await assertAllTargetsOutput(src, want);
+});
+
+test("G4.2: generic len and cap on slice, array, array-pointer, and map unions", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyMap map[string][]int
+type MyArr [3]int
+type MyArrPtr *[3]int
+type MethodArr [3]int
+
+func (a MethodArr) Sum() int    { return a[0] + a[1] + a[2] }
+func (a *MethodArr) Tag() string { return "ok" }
+
+type Holder[T ~[]int | ~*[3]int] struct{ v T }
+
+func (h Holder[T]) Len() int { return len(h.v) }
+func (h Holder[T]) Cap() int { return cap(h.v) }
+
+type PtrList[T ~[]int | ~*[3]int] []T
+
+func (l PtrList[T]) FirstLen() int { return len(l[0]) }
+func (l PtrList[T]) FirstCap() int { return cap(l[0]) }
+
+type FirstLener interface {
+	FirstLen() int
+	FirstCap() int
+}
+
+func inspectMethodArr[T ~[]int | *MethodArr](v T) (int, int, string) {
+	return len(v), cap(v), fmt.Sprintf("%T", v)
+}
+
+func getLen[T ~[]int | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getCap[T ~[3]int | ~*[3]int](v T) int {
+	return cap(v)
+}
+
+func getLenArr[T ~[3]int | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getCapSlice[T ~[]int | ~*[3]int](v T) int {
+	return cap(v)
+}
+
+func getLenMapOrPtr[T ~map[string][]int | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getLenByteMap[T ~map[string][]byte | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getLenNamedArrPtr[T ~[]int | ~*MyArr](v T) int {
+	return len(v)
+}
+
+func getCapNamedArrPtr[T ~[]int | ~*MyArr](v T) int {
+	return cap(v)
+}
+
+func getLenZeroArr[T ~[]int | ~*[0]int](v T) int {
+	return len(v)
+}
+
+func getCapZeroArr[T ~[]int | ~*[0]int](v T) int {
+	return cap(v)
+}
+
+func wrapLen[T ~[]int | ~*[3]int](v T) int {
+	return getLen(v)
+}
+
+func makeLenFn[T ~[]int | ~*[3]int]() func(T) int {
+	return getLen[T]
+}
+
+func makeCapFn[T ~[]int | ~*[3]int]() func(T) int {
+	return getCapSlice[T]
+}
+
+func lenFromCall[T ~[]int | ~*[3]int](fn func() T) int {
+	return len(fn())
+}
+
+func capFromCall[T ~[]int | ~*[3]int](fn func() T) int {
+	return cap(fn())
+}
+
+func main() {
+	a := [3]int{1, 2, 3}
+	s := []int{10, 20, 30, 40}
+	fmt.Println(getLen(&a), getLen(s))
+	fmt.Println(getCap(a), getCap(&a))
+	fmt.Println(getLenArr(a), getLenArr(&a))
+	fmt.Println(getCapSlice(&a), getCapSlice(s[:2]))
+
+	var nilPtr *[3]int
+	var nilSlice []int
+	var nilMyArrPtr *MyArr
+	var nilNamedPtr MyArrPtr
+	var nilZeroPtr *[0]int
+	fmt.Println(getLen(nilPtr), getCapSlice(nilPtr), getLen(nilSlice), getCapSlice(nilSlice))
+	fmt.Println(getLenNamedArrPtr(nilMyArrPtr), getCapNamedArrPtr(nilMyArrPtr))
+	fmt.Println(getLen(nilNamedPtr), getCapSlice(nilNamedPtr))
+	fmt.Println(getLenZeroArr(nilZeroPtr), getCapZeroArr(nilZeroPtr))
+
+	var h Holder[*[3]int]
+	pl := PtrList[MyArrPtr]{nilNamedPtr}
+	var fl FirstLener = pl
+	var nilMethodArr *MethodArr
+	ml, mc, mt := inspectMethodArr(nilMethodArr)
+	fmt.Println(h.Len(), h.Cap(), wrapLen(nilPtr), makeLenFn[MyArrPtr]()(nilNamedPtr), makeCapFn[MyArrPtr]()(nilNamedPtr))
+	fmt.Println(pl.FirstLen(), pl.FirstCap(), fl.FirstLen(), fl.FirstCap(), ml, mc, mt)
+
+	calls := 0
+	nextNil := func() *[3]int { calls++; return nil }
+	fmt.Println(lenFromCall(nextNil), capFromCall(nextNil), calls)
+
+	m := map[string][]int{"value": {1, 2, 3}, "other": {4}}
+	mm := MyMap{"value": {1, 2, 3}, "other": {4}}
+	mk := make(map[string][]int)
+	mk["value"] = []int{1, 2, 3}
+	mk["other"] = []int{4}
+	bm := map[string][]byte{"value": {1, 2, 3, 4}, "other": {5}}
+	var nilMap MyMap
+	fmt.Println(getLenMapOrPtr(m), getLenMapOrPtr(mm), getLenMapOrPtr(&a), getLenMapOrPtr(mk), len(mm), len(m), getLenByteMap(bm), getLenMapOrPtr(nilMap))
+}`;
+	const want =
+		"3 4\n" +
+		"3 3\n" +
+		"3 3\n" +
+		"3 4\n" +
+		"3 3 0 0\n" +
+		"3 3\n" +
+		"3 3\n" +
+		"0 0\n" +
+		"3 3 3 3 3\n" +
+		"3 3 3 3 3 3 *main.MethodArr\n" +
+		"3 3 2\n" +
+		"2 2 3 2 2 2 2 0\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("G4.3: copy and append([]byte{}, v...) on ~string | ~[]byte type parameters", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyStr string
+type MyBytes []byte
+
+func doCopy[T ~string | ~[]byte](src T) (int, string) {
+	dst := make([]byte, 2)
+	n := copy(dst, src)
+	return n, string(dst)
+}
+
+func doAppend[T ~string | ~[]byte](v T) string {
+	b := append([]byte{}, v...)
+	return string(b)
+}
+
+func main() {
+	n1, s1 := doCopy("hi")
+	n2, s2 := doCopy([]byte("yo"))
+	n3, s3 := doCopy(MyStr("ok"))
+	n4, s4 := doCopy(MyBytes("go"))
+	fmt.Printf("%d:%s %d:%s %d:%s %d:%s\\n", n1, s1, n2, s2, n3, s3, n4, s4)
+	fmt.Printf("%q %q %q %q\\n", doAppend("hi"), doAppend([]byte("yo")), doAppend(MyStr("ok")), doAppend(MyBytes("go")))
+}`;
+	const want = '2:hi 2:yo 2:ok 2:go\n"hi" "yo" "ok" "go"\n';
+	await assertAllTargetsOutput(src, want);
+	const { errors } = compile(
+		"package main\nfunc f[T ~string | ~[]int](v T) []int { return append([]int{}, v...) }",
+	);
+	assertErrorContains(errors, "argument to append");
+});
+
+test("G5.1-G5.4: generic string(t) and T(x) conversions for ~string, ~[]byte/~[]rune, and ~complex", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyStr string
+type MyBytes []byte
+type MyRunes []rune
+type MyC128 complex128
+type MyC64 complex64
+
+func toStrBytes[T ~string | ~[]byte](t T) string { return string(t) }
+func toStrRunes[T ~string | ~[]rune](t T) string { return string(t) }
+func toStrInt[T ~int | ~int32](t T) string { return string(t) }
+
+func halfComplex[T ~complex128 | ~complex64]() T { return T(1.5) }
+func fromInt[T ~string](n int) T { return T(n) }
+func fromBytes[T ~string](b []byte) T { return T(b) }
+func fromRunes[T ~string](r []rune) T { return T(r) }
+
+func strToSlice[T ~[]byte | ~[]rune](s string) T { return T(s) }
+func sliceToStr[S ~string, T ~[]byte | ~[]rune](t T) S { return S(t) }
+
+func main() {
+	fmt.Printf("%q %q %q\\n", toStrBytes("ab"), toStrBytes([]byte("cd")), toStrBytes([]byte(nil)))
+	fmt.Printf("%q %q %q\\n", toStrRunes("xy"), toStrRunes([]rune("ok")), toStrRunes([]rune(nil)))
+	fmt.Printf("%q %q %q\\n", toStrInt(65), toStrInt(int32(0x110000)), toStrInt(int32(-1)))
+
+	fmt.Println(halfComplex[complex128](), halfComplex[complex64](), halfComplex[MyC128](), halfComplex[MyC64]())
+	fmt.Printf("%q %q %q\\n", fromInt[string](65), fromBytes[MyStr]([]byte("hi")), fromRunes[MyStr]([]rune("ok")))
+
+	fmt.Println(strToSlice[[]byte]("hi"), strToSlice[MyBytes]("yo"))
+	fmt.Println(strToSlice[[]rune]("ok"), strToSlice[MyRunes]("go"))
+	fmt.Printf("%q %q\\n", sliceToStr[MyStr]([]byte("zz")), sliceToStr[string]([]rune("yy")))
+}`;
+	const want =
+		'"ab" "cd" ""\n' +
+		'"xy" "ok" ""\n' +
+		'"A" "\uFFFD" "\uFFFD"\n' +
+		"(1.5+0i) (1.5+0i) (1.5+0i) (1.5+0i)\n" +
+		'"A" "hi" "ok"\n' +
+		"[104 105] [121 111]\n" +
+		"[111 107] [103 111]\n" +
+		'"zz" "yy"\n';
+	await assertAllTargetsOutput(src, want);
+
+	const { errors } = compile(
+		"package main\nfunc f[T ~complex64]() T { return T(1e40) }",
+	);
+	assertErrorContains(errors, "cannot convert 1e40");
+});
+
+test("G5.4: generic T(b) and T(r) on ~[]byte / ~[]rune share backing array and preserve cap/nil", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyBytes []byte
+type MyRunes []rune
+type MyStr string
+type BytesAlias = []byte
+type RunesAlias = []rune
+
+func toBytes[T ~[]byte](b []byte) T { return T(b) }
+func toRunes[T ~[]rune](r []rune) T { return T(r) }
+func fromMyBytes[T ~[]byte](b MyBytes) T { return T(b) }
+func fromMyRunes[T ~[]rune](r MyRunes) T { return T(r) }
+func convBytes[A ~[]byte | ~string, B ~[]byte](a A) B { return B(a) }
+func convRunes[A ~[]rune | ~string, B ~[]rune](a A) B { return B(a) }
+func toUint8s[T ~[]uint8](b []uint8) T { return T(b) }
+func toInt32s[T ~[]int32](r []int32) T { return T(r) }
+func nilBytes[T ~[]byte]() T { return T(nil) }
+func nilRunes[T ~[]rune]() T { return T(nil) }
+func mkSlice[S ~[]E, E any](n int) S { return make(S, n) }
+func appBytes[T ~[]byte](b T) T { return append(b, 'a', 'b') }
+func boxBytes[T ~[]byte](b []byte) any { return T(b) }
+
+func main() {
+	ob := []byte("hi")
+	ab := toBytes[[]byte](ob)
+	ab[0] = 'X'
+	fmt.Println(string(ob), string(ab))
+
+	ob2 := []byte("hi")
+	mb := toBytes[MyBytes](ob2)
+	mb[0] = 'Y'
+	fmt.Println(string(ob2), string(mb))
+
+	mb2 := MyBytes("hi")
+	ab2 := fromMyBytes[[]byte](mb2)
+	ab2[0] = 'Z'
+	fmt.Println(string(mb2), string(ab2))
+
+	ob3 := []byte("hi")
+	alB := toBytes[BytesAlias](ob3)
+	alB[0] = 'A'
+	fmt.Println(string(ob3), string(alB))
+
+	or := []rune("hi")
+	ar := toRunes[[]rune](or)
+	ar[0] = 'X'
+	fmt.Println(string(or), string(ar))
+
+	or2 := []rune("hi")
+	mr := toRunes[MyRunes](or2)
+	mr[0] = 'Y'
+	fmt.Println(string(or2), string(mr))
+
+	mr2 := MyRunes("hi")
+	ar2 := fromMyRunes[[]rune](mr2)
+	ar2[0] = 'Z'
+	fmt.Println(string(mr2), string(ar2))
+
+	or3 := []rune("hi")
+	alR := toRunes[RunesAlias](or3)
+	alR[0] = 'A'
+	fmt.Println(string(or3), string(alR))
+
+	// Spare capacity and subslice sharing
+	buf := make([]byte, 1, 3)
+	buf[0] = 'a'
+	sub := toBytes[[]byte](buf)
+	fmt.Println(len(sub), cap(sub))
+	sub = append(sub, 'b')
+	buf = buf[:2]
+	fmt.Println(string(buf), string(sub))
+
+	rbuf := make([]rune, 1, 3)
+	rbuf[0] = 'a'
+	rsub := toRunes[[]rune](rbuf)
+	fmt.Println(len(rsub), cap(rsub))
+	rsub = append(rsub, 'b')
+	rbuf = rbuf[:2]
+	fmt.Println(string(rbuf), string(rsub))
+
+	full := []byte("abcd")
+	part := full[1:3]
+	part2 := toBytes[[]byte](part)
+	part2[0] = 'X'
+	fmt.Println(string(full), string(part), string(part2), cap(part2))
+
+	rfull := []rune("abcd")
+	rpart := rfull[1:3]
+	rpart2 := toRunes[[]rune](rpart)
+	rpart2[0] = 'X'
+	fmt.Println(string(rfull), string(rpart), string(rpart2), cap(rpart2))
+
+	// nil and empty preservation
+	var nb []byte
+	var nr []rune
+	fmt.Println(toBytes[[]byte](nb) == nil, toBytes[MyBytes](nb) == nil, nilBytes[[]byte]() == nil, nilBytes[MyBytes]() == nil)
+	fmt.Println(toRunes[[]rune](nr) == nil, toRunes[MyRunes](nr) == nil, nilRunes[[]rune]() == nil, nilRunes[MyRunes]() == nil)
+	fmt.Println(toBytes[[]byte]([]byte{}) == nil, convBytes[string, []byte]("") == nil, toRunes[[]rune]([]rune{}) == nil, convRunes[string, []rune]("") == nil)
+
+	// Generic-to-generic (slice shares, string converts)
+	ob4 := []byte("ab")
+	cb := convBytes[[]byte, MyBytes](ob4)
+	cb[1] = 'Z'
+	fmt.Println(string(ob4), string(cb), string(convBytes[string, []byte]("ok")), string(convBytes[MyStr, MyBytes](MyStr("go"))))
+
+	or4 := []rune("ab")
+	cr := convRunes[[]rune, MyRunes](or4)
+	cr[1] = 'Z'
+	fmt.Println(string(or4), string(cr), string(convRunes[string, []rune]("ok")), string(convRunes[MyStr, MyRunes](MyStr("go"))))
+
+	// ~[]uint8 and ~[]int32
+	ou := []uint8{1, 2}
+	au := toUint8s[[]uint8](ou)
+	au[0] = 9
+	oi := []int32{1, 2}
+	ai := toInt32s[[]int32](oi)
+	ai[0] = 9
+	fmt.Println(ou[0], au[0], oi[0], ai[0])
+
+	// Slices produced by generic make/append (plain Array in JS) still share backing store
+	gm := mkSlice[[]byte, byte](2)
+	gm[0], gm[1] = 'a', 'b'
+	gm2 := toBytes[[]byte](gm)
+	gm2[0] = 'M'
+	ga := appBytes[[]byte](nil)
+	ga2 := toBytes[[]byte](ga)
+	ga2[0] = 'N'
+	fmt.Println(string(gm), string(gm2), string(ga), string(ga2))
+
+	// Boxing converted named slice keeps its dynamic type and shares backing store
+	ob5 := []byte("hi")
+	bx := boxBytes[MyBytes](ob5)
+	unbx := bx.(MyBytes)
+	unbx[0] = 'B'
+	fmt.Printf("%T %s %s\\n", bx, string(ob5), string(unbx))
+}`;
+	const want =
+		"Xi Xi\n" +
+		"Yi Yi\n" +
+		"Zi Zi\n" +
+		"Ai Ai\n" +
+		"Xi Xi\n" +
+		"Yi Yi\n" +
+		"Zi Zi\n" +
+		"Ai Ai\n" +
+		"1 3\n" +
+		"ab ab\n" +
+		"1 3\n" +
+		"ab ab\n" +
+		"aXcd Xc Xc 3\n" +
+		"aXcd Xc Xc 3\n" +
+		"true true true true\n" +
+		"true true true true\n" +
+		"false false false false\n" +
+		"aZ aZ ok go\n" +
+		"aZ aZ ok go\n" +
+		"9 9 9 9\n" +
+		"Mb Mb Nb Nb\n" +
+		"main.MyBytes Bi Bi\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

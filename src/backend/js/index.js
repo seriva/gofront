@@ -714,6 +714,11 @@ export class CodeGen {
 			this._helpers.add("slicefail");
 		}
 		if (name === "sslice") this._helpers.add("slicefail");
+		if (name === "generics") {
+			this._helpers.add("u8enc");
+			this._helpers.add("u8dec");
+			this._helpers.add("runestr");
+		}
 	}
 
 	/** The runtime helpers (names for `helperPrelude`) the output needs. */

@@ -163,15 +163,15 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Done when: methods declared on local type aliases work on all targets and survive DCE exactly like methods declared on the target type, with no change to `src/lower/reachability.js` or either backend
 
 ### Phase 2: Type-Parameter Builtins & Conversions (roots `js-typeparam-builtin-dispatch`, `js-typeparam-string-complex-conv`, `checker-untyped-to-complex-typeparam`)
-- [ ] Task 2.1: Runtime-dispatched JS `clear`, `len`, and `cap` on type-parameter operands (G4.1–G4.2)
+- [x] Task 2.1: Runtime-dispatched JS `clear`, `len`, and `cap` on type-parameter operands (G4.1–G4.2)
   - Files: `src/backend/js/expressions.js` (`_genBuiltinClear`, `_genBuiltinLen`, `BUILTIN_GEN.cap`), `src/backend/js/runtime.js` (`__clear`, `__len`, `__cap`), `src/backend/js/type-info.js` (`_callUsesTypeInfo`, `ez`)
   - Test: `test/unit/types/generics.test.js`: G4.1–G4.1b (`clear` on `M ~map`, `S ~[]int`, `S ~[]MyStruct` then field write, `S ~[]string`, `T ~map | ~[]int`, nil) and G4.2 (`len`/`cap` on `T ~[]int | ~*[3]int` and `T ~[3]int | ~*[3]int`) on `js`, `both`, `wasm`
   - Done when: `clear`, `len`, and `cap` on type-parameter operands match Go on all targets
-- [ ] Task 2.2: Support `~string | ~[]byte` type parameters in `copy` and `append([]byte{}, v...)` (G4.3)
+- [x] Task 2.2: Support `~string | ~[]byte` type parameters in `copy` and `append([]byte{}, v...)` (G4.3)
   - Files: `src/typechecker/expressions.js` (`_checkAppendArgs`, `_isStringIntoBytes`), `src/backend/js/expressions.js` (`_genSliceSource`)
   - Test: `test/unit/types/generics.test.js`: G4.3 (`copy(dst, src)` and `append([]byte{}, v...)` with both `string` and `[]byte` instantiations) on `js`, `both`, `wasm`
   - Done when: `copy` and `append` with `~string | ~[]byte` type parameters compile and match Go on all targets
-- [ ] Task 2.3: Fix generic `string(t)` and `T(x)` conversions for `~string`, `~[]byte`/`~[]rune`, and `~complex` (G5.1–G5.4)
+- [x] Task 2.3: Fix generic `string(t)` and `T(x)` conversions for `~string`, `~[]byte`/`~[]rune`, and `~complex` (G5.1–G5.4)
   - Files: `src/typechecker/expressions.js` (`_termConvertible`), `src/backend/js/expressions.js` (`_genStringConversion`), `src/backend/js/runtime.js` (`__tconv`, `__tstr`, `__ti` kind tags)
   - Test: `test/unit/types/generics.test.js`: G5.1 (`string(t)` on `~string | ~[]byte`, `~string | ~[]rune`, `~int | ~int32`, incl. `int32(0x110000)` → `"�"`), G5.2 (`T(1.5)` on `~complex128` and `~complex64`), G5.3 (`T(65)`, `T([]byte("hi"))`, `T([]rune("ok"))` on `~string`), G5.4 (`T(s)` for `T ~[]byte` / `~[]rune`; `S(t)` for `S ~string` from `T ~[]byte | ~[]rune`) on `js`, `both`, `wasm`
   - Done when: all generic string and complex conversions compile and match Go on all targets

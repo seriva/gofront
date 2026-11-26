@@ -34,7 +34,6 @@ import {
 	isBool,
 	isComplex,
 	isComplex64,
-	isComplexOrNumeric,
 	isInteger,
 	isNil,
 	isNumeric,
@@ -2590,7 +2589,12 @@ export const expressionCheckMethods = {
 	_termConvertible(s, t, expr, operand) {
 		if (s.kind === "untyped") {
 			const u = this._deepUnderlying(t) ?? t;
-			if (this._isRealNumberType(u) && s.base !== "string" && s.base !== "bool")
+			if (
+				u?.kind === "basic" &&
+				(isNumeric(u) || isComplex(u)) &&
+				s.base !== "string" &&
+				s.base !== "bool"
+			)
 				return this._untypedFitsTerm(s, operand, t);
 			s = defaultType(s);
 		}
@@ -2600,10 +2604,6 @@ export const expressionCheckMethods = {
 		const ok = this.errors.length === 0;
 		this.errors = saved;
 		return ok;
-	},
-
-	_isRealNumberType(u) {
-		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
 	},
 
 	// A conversion to a type parameter needs a constraint that lists types
@@ -3256,9 +3256,17 @@ export const expressionCheckMethods = {
 			if (!at[i]) continue;
 			if (arg._spread) {
 				this._rejectSeqAsSlice(at[i], arg, "a spread argument");
-				if (!this._isStringIntoBytes(elem, at[i]))
+				const targetSlice = { kind: "slice", elem: sliceType.elem };
+				if (
+					!this._typeSetOk(
+						at[i],
+						(u) =>
+							this._isStringIntoBytes(elem, u) ||
+							this._assignableQuietly(targetSlice, this._deepUnderlying(u)),
+					)
+				)
 					this.assertAssignable(
-						{ kind: "slice", elem: sliceType.elem },
+						targetSlice,
 						this._deepUnderlying(at[i]),
 						arg,
 						"argument to append",
