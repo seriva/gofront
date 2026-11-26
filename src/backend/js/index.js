@@ -1178,14 +1178,17 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(
-		method,
-		embedName,
-		valueEmbed = false,
-		fieldName = null,
-		nilPtrRecv = false,
-		ifaceEmbed = false,
-	) {
+	_embedStub(stub) {
+		const {
+			methodName: method,
+			embedName,
+			valueEmbed = false,
+			fieldName = null,
+			nilPtrRecv = false,
+			ifaceEmbed = false,
+			ptrRecv = false,
+			viaPtr = false,
+		} = stub;
 		// An embedded interface forwards to the interface value in its field.
 		const jm = jsMemberName(method);
 		if (ifaceEmbed)
@@ -1194,11 +1197,30 @@ export class CodeGen {
 		// (`Mutex$$sync` is the field `Mutex`), or after the alias it embeds.
 		const field = jsMemberName(fieldName || embedName.replace(/\$\$.*$/, ""));
 		// A named non-struct type is boxed: its methods are static, taking
-		// the value as the receiver.
+		// the value (or `{ value }` box for a pointer receiver) as the receiver.
 		if (valueEmbed)
-			return `${jm}(...__a) { return ${jsClassName(embedName)}.$${method}(this.${field}, ...__a); }`;
+			return this._valueEmbedStub(
+				method,
+				jm,
+				embedName,
+				field,
+				ptrRecv,
+				viaPtr,
+			);
 		const call = this._embedStubCall(method, embedName, field, nilPtrRecv);
 		return `${jm}(...__a) { return ${call}; }`;
+	}
+
+	_valueEmbedStub(method, jm, embedName, field, ptrRecv, viaPtr) {
+		const cls = jsClassName(embedName);
+		if (viaPtr && !ptrRecv) {
+			this.useHelper("nilCall");
+			return `${jm}(...__a) { return ${cls}.$${method}(__nilcall(this.${field}).value, ...__a); }`;
+		}
+		if (!viaPtr && ptrRecv) {
+			return `${jm}(...__a) { const __s = this; return ${cls}.$${method}({ get value() { return __s.${field}; }, set value(v) { __s.${field} = v; } }, ...__a); }`;
+		}
+		return `${jm}(...__a) { return ${cls}.$${method}(this.${field}, ...__a); }`;
 	}
 
 	_embedStubCall(method, embedName, field, nilPtrRecv) {
@@ -1225,16 +1247,7 @@ export class CodeGen {
 		const stubs = this._embeddedStubs(name, methodDecls);
 		for (const stub of stubs) {
 			this.blank();
-			this.line(
-				this._embedStub(
-					stub.methodName,
-					stub.embedName,
-					stub.valueEmbed,
-					stub.fieldName,
-					stub.nilPtrRecv,
-					stub.ifaceEmbed,
-				),
-			);
+			this.line(this._embedStub(stub));
 		}
 	}
 

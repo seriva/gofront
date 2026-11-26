@@ -1,6 +1,11 @@
 // GoFront test suite — embedded fields and scalar method promotions
 
-import { assertAllTargetsOutput, section, test } from "../helpers.js";
+import {
+	assertAllTargetsOutput,
+	assertOutput,
+	section,
+	test,
+} from "../helpers.js";
 
 section("Embedded anonymous-struct aliases and multi-level embeds");
 
@@ -61,5 +66,93 @@ func main() {
 }
 `,
 		"7 7 7 8\n15 15 15\n99 99 99 8\n42 42 42\n",
+	);
+});
+
+section("Embedded named scalar method promotions");
+
+const NUM_EMBED_SRC = `package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc()     { *n++ }
+func (n Num) Val() int  { return int(n) }
+func (n *Num) IsNil() bool { return n == nil }
+
+type OuterPtr struct{ *Num }
+type Outer struct{ Num }
+`;
+
+test("value-embedded scalar value-receiver method control (J4 control)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n Num) Val() int { return int(n) }
+
+type Outer struct{ Num }
+
+func main() {
+	o := Outer{4}
+	fmt.Println(o.Val())
+	var j interface{ Val() int } = Outer{4}
+	fmt.Println(j.Val())
+}
+`,
+		"4\n4\n",
+	);
+});
+
+test("pointer-embedded scalar promotes Inc and Val directly and via interface (J4.2, JS)", async () => {
+	await assertOutput(
+		`${NUM_EMBED_SRC}
+func main() {
+	x := Num(10)
+	op := OuterPtr{&x}
+	op.Inc()
+	fmt.Println(op.Val(), x)
+
+	y := Num(3)
+	fmt.Println((&OuterPtr{&y}).Val())
+
+	var ii interface{ Inc() } = OuterPtr{&y}
+	ii.Inc()
+	fmt.Println(y)
+
+	var iv interface{ Val() int } = OuterPtr{&y}
+	fmt.Println(iv.Val())
+
+	fmt.Println(OuterPtr{nil}.IsNil())
+}
+`,
+		"11 11\n3\n4\n4\ntrue\n",
+		{ targets: ["both", "js"] },
+	);
+});
+
+test("value-embedded scalar promotes pointer-receiver methods on js (J4.3)", async () => {
+	await assertOutput(
+		`${NUM_EMBED_SRC}
+func main() {
+	var o Outer
+	o.Inc()
+	fmt.Println(o.Val())
+
+	var i interface{ Inc() } = &o
+	i.Inc()
+	fmt.Println(o.Val())
+
+	_, okVal := any(o).(interface{ Inc() })
+	_, okPtr := any(&o).(interface{ Inc() })
+	fmt.Println(okVal, okPtr)
+}
+`,
+		"1\n2\nfalse true\n",
+		{ targets: ["js"] },
 	);
 });

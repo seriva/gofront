@@ -204,7 +204,7 @@ Roots:
   - Files: `src/backend/js/expressions.js` (`_embedPath`)
   - Test: `test/unit/types/embedding.test.js`: J4.1 (`type A = struct{ N int }`, anonymous `struct{ B; Y int }`, named `type Named struct{ B; Y int }` reads & writes through `v.AX.X`) with `assertAllTargetsOutput`
   - Done when: embedded anonymous-struct aliases and multi-level embedded field reads/writes match Go on all targets
-- [ ] Task 5.2: JS stubs for methods promoted from embedded named scalars (J4.2, J4.3 on `js`)
+- [x] Task 5.2: JS stubs for methods promoted from embedded named scalars (J4.2, J4.3 on `js`)
   - Files: `src/lower/embedding.js` (`computeEmbeddedStubs`, `pushValueEmbedStubs`), `src/backend/js/index.js` (`_embedStub`, `_embedStubCall`)
   - Test: `test/unit/types/embedding.test.js`: J4.2 (`*Num`: `Inc`, `Val`, both via interface) with `assertOutput(…, { targets: ["both", "js"] })`; J4.3 (`o.Inc()`, `&o` as `interface{ Inc() }`) on `js` only; J4 control row on all targets
   - Done when: `*Num` promoted methods (direct and via interface) work on `js`/`both`, and `Num` pointer-receiver promotions work on `js`
