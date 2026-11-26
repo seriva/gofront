@@ -112,18 +112,19 @@ export const typeInfoGenMethods = {
 		if (isGenericComposite(node._ifaceSrc)) return true;
 		if (node._ifaceSrc?.kind === "typeParam" && names.has(node._ifaceSrc.name))
 			return true;
+		return (
+			this._stmtUsesTypeInfo(node, names) ?? this._kindUsesTypeInfo(node, names)
+		);
+	},
+
+	_stmtUsesTypeInfo(node, names) {
 		switch (node.kind) {
-			case "TypeAssertExpr":
-				return typeNodeMentions(node.type, names);
 			case "TypeSwitchStmt":
 				return node.cases.some((c) => typeNodeMentions(c.types, names));
-			case "TypeConversion":
-				return typeNodeMentions(node.targetType, names);
-			case "BinaryExpr":
+			case "SwitchStmt":
 				return (
-					((node.op === "==" || node.op === "!=") &&
-						node.left._type?.kind === "typeParam") ||
-					(node._type?.kind === "typeParam" && names.has(node._type.name))
+					node.tag?._type?.kind === "typeParam" &&
+					names.has(node.tag._type.name)
 				);
 			case "AssignStmt":
 				return (
@@ -135,6 +136,23 @@ export const typeInfoGenMethods = {
 				return (
 					node.expr?._type?.kind === "typeParam" &&
 					names.has(node.expr._type.name)
+				);
+			default:
+				return null;
+		}
+	},
+
+	_kindUsesTypeInfo(node, names) {
+		switch (node.kind) {
+			case "TypeAssertExpr":
+				return typeNodeMentions(node.type, names);
+			case "TypeConversion":
+				return typeNodeMentions(node.targetType, names);
+			case "BinaryExpr":
+				return (
+					((node.op === "==" || node.op === "!=") &&
+						node.left._type?.kind === "typeParam") ||
+					(node._type?.kind === "typeParam" && names.has(node._type.name))
 				);
 			case "CallExpr":
 				return this._callUsesTypeInfo(node, names);

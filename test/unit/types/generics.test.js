@@ -4478,6 +4478,105 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("type-parameter switch tags compare by value equality on JS (G6)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type P struct{ n int }
+
+func match[T comparable](x, y T) bool {
+	switch x {
+	case y:
+		return true
+	}
+	return false
+}
+
+func matchLabeled[T comparable](x, y T) bool {
+L:
+	switch x {
+	case y:
+		for i := 0; i < 1; i++ {
+			break L
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func findIndex[T comparable](ys []T, x T) int {
+	for i, y := range ys {
+		switch y {
+		case x:
+			return i
+		}
+	}
+	return -1
+}
+
+func matchAny[T comparable](x T) string {
+	switch x {
+	case any(P{1}):
+		return "p1"
+	}
+	return "no"
+}
+
+func eq[T comparable](x, y T) bool {
+	return x == y
+}
+
+func matchExprless[T comparable](x, y T) bool {
+	switch {
+	case x == y:
+		return true
+	}
+	return false
+}
+
+func matchAnyTag(x, y any) bool {
+	switch x {
+	case y:
+		return true
+	}
+	return false
+}
+
+func main() {
+	// G6.1: struct, array, complex128, any
+	fmt.Println(match(P{1}, P{1}), match(P{1}, P{2}))
+	fmt.Println(match([2]int{1, 2}, [2]int{1, 2}), match([2]int{1, 2}, [2]int{1, 3}))
+	fmt.Println(match(complex(1, 2), complex(1, 2)), match(complex(1, 2), complex(1, 3)))
+	fmt.Println(match[any](P{1}, P{1}), match[any](P{1}, P{2}))
+
+	// G6.2: labeled switch with break L, switch inside for range, interface-typed case
+	fmt.Println(matchLabeled(P{1}, P{1}), matchLabeled(P{1}, P{2}))
+	fmt.Println(findIndex([]P{{0}, {1}, {2}}, P{1}))
+	fmt.Println(matchAny(P{1}), matchAny(P{2}))
+
+	// Controls
+	fmt.Println(match(5, 5), match(5, 6))
+	fmt.Println(eq(P{1}, P{1}))
+	fmt.Println(matchExprless(P{1}, P{1}))
+	fmt.Println(matchAnyTag(P{1}, P{1}))
+}`;
+	const want =
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"1\n" +
+		"p1 no\n" +
+		"true false\n" +
+		"true\n" +
+		"true\n" +
+		"true\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

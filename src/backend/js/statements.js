@@ -2409,6 +2409,51 @@ export const statementGenMethods = {
 		return t?.kind === "map" || tag._coreType?.kind === "map";
 	},
 
+	_complexSwitchCases(tag) {
+		// A complex tag is an object: cases compare its parts.
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (this._isIfaceType(e._type)) {
+					// An interface case compares by dynamic type and value.
+					this.useHelper("ifeq");
+					return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
+				}
+				return this._genComplexEquality(
+					"===",
+					"&&",
+					tmp,
+					this._genComplexOperand(e),
+				);
+			},
+		};
+	},
+
+	_typeParamSwitchCases(stmt, tag) {
+		if (stmt.tag?._type?.kind !== "typeParam") return null;
+		const factory = this._typeParamZeroFactory(stmt.tag._type.name);
+		if (!factory) return null;
+		// Type-parameter tags may be structs, arrays, or interfaces at run time.
+		this.useHelper("equal");
+		this.useHelper("geq");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (this._isIfaceType(e._type)) {
+					this.useHelper("ifeq");
+					return `__ifeq((${factory}.b ?? ${factory}.fb ?? ((__v) => __v))(${tmp}), ${this._genIfaceOperand(e)})`;
+				}
+				return `__geq(${factory}, ${tmp}, ${this.genExpr(e)})`;
+			},
+		};
+	},
+
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
 		const namedTag =
@@ -2444,28 +2489,8 @@ export const statementGenMethods = {
 				},
 			};
 		}
-		if (stmt.tag && isComplex(stmt.tag._type)) {
-			// A complex tag is an object: cases compare its parts.
-			this._swCounter = (this._swCounter ?? 0) + 1;
-			const tmp = `__sw${this._swCounter}`;
-			this.line(`const ${tmp} = ${tag};`);
-			return {
-				tag: "true",
-				caseExpr: (e) => {
-					if (this._isIfaceType(e._type)) {
-						// An interface case compares by dynamic type and value.
-						this.useHelper("ifeq");
-						return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
-					}
-					return this._genComplexEquality(
-						"===",
-						"&&",
-						tmp,
-						this._genComplexOperand(e),
-					);
-				},
-			};
-		}
+		if (stmt.tag && isComplex(stmt.tag._type))
+			return this._complexSwitchCases(tag);
 		if (stmt.tag && this._isMapTag(stmt.tag)) {
 			// A nil map is a sentinel object in JS, not `null`: `case nil`
 			// goes through `__isnm`, as `m == nil` does.
@@ -2481,6 +2506,8 @@ export const statementGenMethods = {
 						: `${tmp} === ${this.genExpr(e)}`,
 			};
 		}
+		const tp = this._typeParamSwitchCases(stmt, tag);
+		if (tp) return tp;
 		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
 			return { tag, caseExpr: (e) => this.genExpr(e) };
 		this.useHelper("ifeq");
@@ -2491,6 +2518,17 @@ export const statementGenMethods = {
 			tag: "true",
 			caseExpr: (e) => `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`,
 		};
+	},
+
+	_switchNeedsBlock(stmt) {
+		return (
+			stmt.tag &&
+			(this._isStructOrArrayType(stmt.tag._type) ||
+				this._isIfaceType(stmt.tag._type) ||
+				isComplex(stmt.tag._type) ||
+				this._isMapTag(stmt.tag) ||
+				stmt.tag._type?.kind === "typeParam")
+		);
 	},
 
 	genSwitch(stmt) {
@@ -2530,13 +2568,7 @@ export const statementGenMethods = {
 				this._genScopedInit(stmt.init, genBody);
 			});
 			this.line("}");
-		} else if (
-			stmt.tag &&
-			(this._isStructOrArrayType(stmt.tag._type) ||
-				this._isIfaceType(stmt.tag._type) ||
-				isComplex(stmt.tag._type) ||
-				this._isMapTag(stmt.tag))
-		) {
+		} else if (this._switchNeedsBlock(stmt)) {
 			// The tag temporary is a `const`, which cannot directly follow a label.
 			this.line("{");
 			this.indented(genBody);

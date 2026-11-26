@@ -177,7 +177,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Done when: all generic string and complex conversions compile and match Go on all targets
 
 ### Phase 3: JS Erased Type-Parameter `switch` & Address-Of (roots `js-switch-typeparam-equality`, `js-typeparam-address-of-box`)
-- [ ] Task 3.1: Compare type-parameter `switch` tags with `__geq` in JS (G6.1–G6.2)
+- [x] Task 3.1: Compare type-parameter `switch` tags with `__geq` in JS (G6.1–G6.2)
   - Files: `src/backend/js/statements.js` (`_switchTagAndCases`, `genSwitch`), `src/backend/js/type-info.js` (`_nodeUsesTypeInfo`)
   - Test: `test/unit/types/generics.test.js`: G6.1 (`switch x { case y: }` on `T comparable` instantiated with struct, array, `complex128`, `any`), G6.2 (labeled switch with `break L`, switch inside `for range`, interface-typed case `any(P{1})`), plus the G6 controls, on `js`, `both`, `wasm`
   - Done when: JS `switch` on type-parameter tags matches Go value equality across all comparable types
