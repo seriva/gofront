@@ -649,55 +649,95 @@ func showG[T Lener](l T) { fmt.Println(l.Len()) }
 	});
 });
 
-test("methods on generic non-struct named types keep baseline errors", () => {
-	const cases = [
-		{
-			decls: `type List[T any] []T
+test("methods on generic non-struct named types compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type List[T any] []T
 func (l List[T]) Len() int { return len(l) }
 func MkList[T any](x T) List[T] { return List[T]{x} }
-type L interface{ Len() int }`,
-			bodies: [
-				["fmt.Println(List[int]{1, 2}.Len())", "has no field or method 'Len'"],
-				["fmt.Println(MkList(1).Len())", "has no field or method 'Len'"],
-				["var x L = MkList(1); fmt.Println(x.Len())", "does not implement L"],
-			],
-		},
-		{
-			decls: `type Set[T comparable] map[T]struct{}
+type L interface{ Len() int }
+
+type Set[T comparable] map[T]struct{}
 func (s Set[T]) Has(x T) bool { _, ok := s[x]; return ok }
 func MkSet[T comparable](x T) Set[T] { return Set[T]{x: {}} }
-type H interface{ Has(x int) bool }`,
-			bodies: [
-				["fmt.Println(Set[int]{1: {}}.Has(1))", "has no field or method 'Has'"],
-				["fmt.Println(MkSet(1).Has(1))", "has no field or method 'Has'"],
-				["var x H = MkSet(1); fmt.Println(x.Has(1))", "does not implement H"],
-			],
-		},
-		{
-			decls: `type Fn[T any] func(T) T
+type H interface{ Has(x int) bool }
+
+type Fn[T any] func(T) T
 func (f Fn[T]) Apply(x T) T { return f(x) }
 func MkFn[T any](f func(T) T) Fn[T] { return Fn[T](f) }
-type A interface{ Apply(x int) int }`,
-			bodies: [
-				[
-					"fmt.Println(MkFn(func(x int) int { return x }).Apply(1))",
-					"has no field or method 'Apply'",
-				],
-				[
-					"var x A = MkFn(func(x int) int { return x }); fmt.Println(x.Apply(1))",
-					"does not implement A",
-				],
-			],
-		},
-	];
-	for (const { decls, bodies } of cases) {
-		for (const [body, msg] of bodies) {
-			const { errors } = compile(
-				`package main\nimport "fmt"\n${decls}\nfunc main() { ${body} }`,
-			);
-			assertErrorContains(errors, msg);
-		}
-	}
+type A interface{ Apply(x int) int }
+
+func main() {
+	var x L = MkList(1)
+	var y H = MkSet(1)
+	var z A = MkFn(func(v int) int { return v + 1 })
+	fmt.Println(List[int]{1, 2}.Len(), MkList(1).Len(), x.Len())
+	fmt.Println(Set[int]{1: {}}.Has(1), MkSet(1).Has(1), y.Has(1))
+	fmt.Println(MkFn(func(v int) int { return v * 2 }).Apply(3), z.Apply(3))
+}`,
+		"2 1 1\ntrue true true\n6 4\n",
+	);
+});
+
+test("generic non-struct methods: slice, map, array, basic, pointer receiver, interface, and zero T (G1.1-G1.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type W[T any] []T
+func (w W[T]) Len() int { return len(w) }
+func (w *W[T]) Push(v T) { *w = append(*w, v) }
+
+type M[K comparable, V any] map[K]V
+func (m M[K, V]) Has(k K) bool { _, ok := m[k]; return ok }
+
+type Arr[T any] [2]T
+func (a Arr[T]) First() T { return a[0] }
+
+type B[T any] int
+func (b B[T]) Z() T { var z T; return z }
+
+type L interface{ Len() int }
+type P interface{ Push(v int) }
+type Z interface{ Z() string }
+
+func main() {
+	w := W[int]{1, 2, 3}
+	fmt.Println(w.Len())
+	w.Push(4)
+	fmt.Println(w.Len())
+
+	m := M[string, int]{"a": 1}
+	fmt.Println(m.Has("a"), m.Has("b"))
+
+	arr := Arr[string]{"hi", "lo"}
+	fmt.Println(arr.First())
+
+	var zi Z = B[string](1)
+	fmt.Printf("%q %q\\n", B[string](1).Z(), zi.Z())
+
+	var l L = W[int]{1, 2}
+	fmt.Println(l.Len(), l.(W[int]).Len())
+
+	var p P = &w
+	p.Push(5)
+	pushExpr := (*W[int]).Push
+	pushExpr(&w, 6)
+	fmt.Println(w.Len())
+}`,
+		`3
+4
+true false
+hi
+"" ""
+2 2
+6
+`,
+	);
 });
 
 test("== on a type parameter compares struct and array arguments by value", () => {
@@ -3682,6 +3722,299 @@ func main() {
 	console.log(s.v)
 }`);
 	assertEqual(errors.length, 0);
+});
+
+test("interface and type-parameter method expressions compile and run on all targets (G2.1-G2.3)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type N interface{ M() int }
+
+type S struct{ v int }
+func (s S) M() int { return s.v }
+
+type PS struct{ v int }
+func (p *PS) M() int { return p.v }
+
+type MyInt int
+func (m MyInt) M() int { return int(m) }
+
+func callN(n N) int {
+	fn := N.M
+	return N.M(n) + fn(n)
+}
+
+func callT[T N](t T) int {
+	g := T.M
+	return T.M(t) + g(t)
+}
+
+func callNilN() (panicked bool) {
+	defer func() {
+		if recover() != nil {
+			panicked = true
+		}
+	}()
+	var n N
+	_ = N.M(n)
+	return false
+}
+
+func main() {
+	s := S{v: 9}
+	ps := &PS{v: 7}
+	mi := MyInt(5)
+	fmt.Println(callN(s), callN(ps), callN(mi))
+	fmt.Println(callT(s), callT(ps), callT(mi))
+	fmt.Println(callNilN())
+}`;
+	await assertAllTargetsOutput(src, "18 14 10\n18 14 10\ntrue\n");
+});
+
+test("shadowed local variables named after type parameter keep working alongside T.M method expressions", async () => {
+	const src = `package main
+
+import "fmt"
+
+type N interface{ M() int }
+type S struct{ v int }
+func (s S) M() int { return s.v }
+
+func f[T N](t T) int {
+	res := T.M(t)
+	{
+		T := struct{ M int }{M: 5}
+		res += T.M
+	}
+	{
+		T := S{v: 3}
+		res += T.M()
+	}
+	{
+		T := t
+		res += T.M()
+	}
+	g := (T).M
+	res += g(t)
+	return res
+}
+
+func main() {
+	fmt.Println(f(S{v: 10}))
+}`;
+	await assertAllTargetsOutput(src, "38\n");
+});
+
+test("pointer-to-interface method expressions are rejected on all targets", () => {
+	const cases = [
+		[
+			"named interface",
+			`package main
+type N interface{ M() int }
+func main() { _ = (*N).M }`,
+			"*N.M undefined (type *N is pointer to interface, not interface)",
+		],
+		[
+			"alias to named interface",
+			`package main
+type N interface{ M() int }
+type AI = N
+func main() { _ = (*AI).M }`,
+			"*AI.M undefined (type *N is pointer to interface, not interface)",
+		],
+		[
+			"alias to pointer to named interface",
+			`package main
+type N interface{ M() int }
+type PI = *N
+func main() { _ = PI.M }`,
+			"PI.M undefined (type *N is pointer to interface, not interface)",
+		],
+		[
+			"generic named interface",
+			`package main
+type GN[T any] interface{ M() T }
+func main() { _ = (*GN[int]).M }`,
+			"*GN[int].M undefined (type *GN[int] is pointer to interface, not interface)",
+		],
+		[
+			"stdlib named interface",
+			`package main
+import "fmt"
+func main() { _ = (*fmt.Stringer).String }`,
+			"*fmt.Stringer.String undefined (type *fmt.Stringer is pointer to interface, not interface)",
+		],
+		[
+			"anonymous interface",
+			`package main
+func main() { _ = (*interface{ M() int }).M }`,
+			"is pointer to interface, not interface",
+		],
+	];
+	for (const [, src, want] of cases) {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(src, { target });
+			assertErrorContains(errors, want);
+		}
+	}
+});
+
+test("type-parameter method expressions, calls, and values handle typed nil pointers on all targets", async () => {
+	const src = `package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+type I interface{ IsNil() bool }
+type S struct{}
+func (s *S) IsNil() bool { return s == nil }
+
+type S2 struct{}
+func (s *S2) IsNil() bool { return s == nil }
+
+type PS = *S
+
+type MyInt int
+func (m *MyInt) IsNil() bool { return m == nil }
+
+type GInt[E any] int
+func (g *GInt[E]) IsNil() bool { return g == nil }
+
+type Counter interface {
+	Inc()
+	Get() int
+}
+type CountS struct{ n int }
+func (s *CountS) Inc() {
+	if s != nil {
+		s.n++
+	}
+}
+func (s *CountS) Get() int {
+	if s == nil {
+		return -1
+	}
+	return s.n
+}
+
+type Valer interface{ Val() int }
+type NInt int
+func (n NInt) Val() int { return int(n) }
+
+type Box[E any] struct{ v E }
+func (b *Box[E]) IsNil() bool { return b == nil }
+
+type Stringer interface{ String() string }
+
+func viaIface[T I](t T) bool {
+	fn := T.IsNil
+	mv := t.IsNil
+	var x I = t
+	return T.IsNil(t) && fn(t) && t.IsNil() && mv() && x != nil && x.IsNil()
+}
+
+func viaPtrSet[T interface{ *S; IsNil() bool }](t T) bool {
+	fn := T.IsNil
+	mv := t.IsNil
+	return T.IsNil(t) && fn(t) && t.IsNil() && mv()
+}
+
+func viaGenericPtrSet[X any, T interface{ *X; IsNil() bool }](t T) bool {
+	fn := T.IsNil
+	mv := t.IsNil
+	return T.IsNil(t) && fn(t) && t.IsNil() && mv()
+}
+
+func viaAddr[X any, P interface{ *X; Inc(); Get() int }](x X) int {
+	v := x
+	p := P(&v)
+	fn := P.Inc
+	mv := p.Inc
+	P.Inc(p)
+	fn(p)
+	p.Inc()
+	mv()
+	return P.Get(p)
+}
+
+func viaUnion[T interface{ *S | *S2; IsNil() bool }](t T) bool {
+	fn := T.IsNil
+	return T.IsNil(t) && fn(t) && t.IsNil()
+}
+
+func viaOuterBox[E any](p *Box[E]) bool {
+	return viaIface(p)
+}
+
+func viaVal[T Valer](t T) int {
+	mv := t.Val
+	return T.Val(t) + mv()
+}
+
+func viaStringer[T Stringer](t T) string {
+	fn := T.String
+	return T.String(t) + "|" + fn(t)
+}
+
+func main() {
+	var p *S
+	var p2 *S2
+	var pa PS
+	var pm *MyInt
+	var pg *GInt[int]
+	var pb *Box[int]
+	var buf *bytes.Buffer
+	inst := viaIface[*S]
+	fmt.Println(viaIface(p), viaIface(pa), viaIface(pm), viaIface(pg), viaIface(pb), inst(p))
+	fmt.Println(viaPtrSet(p), viaGenericPtrSet[S, *S](p), viaUnion(p), viaUnion(p2))
+	fmt.Println(viaOuterBox(pb), viaVal(NInt(7)), viaAddr[CountS, *CountS](CountS{n: 10}), viaStringer(buf))
+}`;
+	await assertAllTargetsOutput(
+		src,
+		"true true true true true true\ntrue true true true\ntrue 14 14 <nil>|<nil>\n",
+	);
+});
+
+test("type-parameter method expressions panic with nil dereference for nil interfaces and value receivers on nil pointers", async () => {
+	const src = `package main
+
+import "fmt"
+
+type I interface{ IsNil() bool }
+type V interface{ Val() int }
+type S struct{ n int }
+func (s S) Val() int { return s.n }
+type MyInt int
+func (m MyInt) Val() int { return int(m) }
+
+func callNilIface[T I](t T) (msg string) {
+	defer func() { msg = fmt.Sprint(recover()) }()
+	_ = T.IsNil(t)
+	return "no panic"
+}
+
+func callVal[T V](t T) (msg string) {
+	defer func() { msg = fmt.Sprint(recover()) }()
+	_ = T.Val(t)
+	return "no panic"
+}
+
+func main() {
+	var i I
+	var ps *S
+	var pm *MyInt
+	fmt.Println(callNilIface(i))
+	fmt.Println(callVal(ps))
+	fmt.Println(callVal(pm))
+}`;
+	const want =
+		"runtime error: invalid memory address or nil pointer dereference\n" +
+		"runtime error: invalid memory address or nil pointer dereference\n" +
+		"runtime error: invalid memory address or nil pointer dereference\n";
+	await assertAllTargetsOutput(src, want);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

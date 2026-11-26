@@ -848,19 +848,30 @@ export class CodeGen {
 		const namedType = this.checker?.types.get(name);
 		const field = this._namedBoxField(namedType?.underlying);
 		const cls = jsClassName(name);
+		const tpNames = this._genericTypeParamNames(name);
+		if (tpNames) this.useHelper("generics");
+		const tzFwd = tpNames
+			? `${tpNames.map((_, i) => `this[__tz]?.[${i}] ?? __zn`).join(", ")}, `
+			: "";
 		// Values of the type stay raw (number, string, array, map, function); the
 		// class is only the box used when a value is stored in an interface.
 		// Methods are static (`T.$M(recv, ...)`) so raw values can call them.
 		this.line(`class ${cls} {`);
 		this.indented(() => {
-			this.line(`constructor(${field}) { this.${field} = ${field}; }`);
+			if (tpNames) {
+				this.line(
+					`constructor(${field}, $tz) { this.${field} = ${field}; this[__tz] = $tz; }`,
+				);
+			} else {
+				this.line(`constructor(${field}) { this.${field} = ${field}; }`);
+			}
 			this.line(`__gfUnbox() { return this.${field}; }`);
 			for (const m of methodDecls) {
 				this.blank();
 				this.genMethod(m, { staticNamed: true });
 				if (!m.recvPointer) {
 					this.line(
-						`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(this.${field}, ...__a); }`,
+						`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(${tzFwd}this.${field}, ...__a); }`,
 					);
 				}
 			}
@@ -872,14 +883,19 @@ export class CodeGen {
 		// keep working. Pointer methods get the { value } box, value methods its value.
 		this.line(`class ${cls}$Ptr {`);
 		this.indented(() => {
-			this.line("constructor(_p) { this._p = _p; }");
+			if (tpNames) {
+				this.line("constructor(_p, $tz) { this._p = _p; this[__tz] = $tz; }");
+			} else {
+				this.line("constructor(_p) { this._p = _p; }");
+			}
 			this.line("__gfUnbox() { return this._p; }");
 			this.line("get value() { return this._p.value; }");
 			this.line("set value(v) { this._p.value = v; }");
 			for (const m of methodDecls) {
-				const recv = m.recvPointer ? "this._p" : "this._p.value";
+				if (!m.recvPointer) this.useHelper("nilCall");
+				const recv = m.recvPointer ? "this._p" : "__nilcall(this._p).value";
 				this.line(
-					`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(${recv}, ...__a); }`,
+					`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(${tzFwd}${recv}, ...__a); }`,
 				);
 			}
 			this._tagMultiUnwrap(methodDecls);
@@ -1234,18 +1250,14 @@ export class CodeGen {
 		const staticNamed = Boolean(opts?.staticNamed);
 		const recvParam =
 			decl.recvName && decl.recvName !== "_" ? decl.recvName : "__recv";
+		const tpNames = this._genericTypeParamNames(decl.recvType?.name);
 		this.line(
-			this._methodSignature(decl, staticNamed, recvParam),
+			this._methodSignature(decl, staticNamed, recvParam, tpNames),
 			decl._line ?? null,
 		);
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._scanAddressTaken(decl.body);
-		// Methods of a generic struct read its type arguments from the
-		// instance; named non-struct types have no instance to carry them.
-		const tpNames = staticNamed
-			? null
-			: this._genericTypeParamNames(decl.recvType?.name);
 		this._withTypeParamZeros(tpNames, () =>
 			this._genMethodBody(decl, staticNamed, recvParam, tpNames),
 		);
@@ -1264,18 +1276,34 @@ export class CodeGen {
 	_genMethodBody(decl, staticNamed, recvParam, tpNames) {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
-				if (tpNames) this._genTypeParamBindings(tpNames, "this?.[__tz]");
+				if (tpNames && !staticNamed)
+					this._genTypeParamBindings(tpNames, "this?.[__tz]");
 				if (decl.recvName) this._fnCtx.params.add(decl.recvName);
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`let ${decl.recvName} = ${this._receiverValue(decl)};`);
 				}
-				if (staticNamed && this._boxedVars.has(recvParam)) {
-					this.line(`${recvParam} = { value: ${recvParam} };`);
-				}
+				if (staticNamed) this._emitStaticNamedRecvPrep(decl, recvParam);
 				this._emitParamCopies(decl.params);
 				this._withNamedReturns(decl, () => this._genBody(decl.body, decl));
 			}),
 		);
+	}
+
+	_emitStaticNamedRecvPrep(decl, recvParam) {
+		if (!decl.recvPointer && decl.recvName && decl.recvName !== "_") {
+			const rt = this.checker?.types.get(decl.recvType?.name);
+			if (
+				rt &&
+				this._aggregateBase(rt) &&
+				(this._fnMutates(decl.recvName) || this._boxedVars.has(recvParam))
+			) {
+				this.line(`${recvParam} = ${this._cloneJs(rt, recvParam)};`);
+				this._markOwnership(decl.recvName, true);
+			}
+		}
+		if (this._boxedVars.has(recvParam)) {
+			this.line(`${recvParam} = { value: ${recvParam} };`);
+		}
 	}
 
 	// JS parameter names; a variadic Go parameter is a rest parameter.
@@ -1285,13 +1313,15 @@ export class CodeGen {
 		);
 	}
 
-	// Static methods of named non-struct types take the receiver as first parameter.
-	_methodSignature(decl, staticNamed, recvParam) {
+	// Static methods of named non-struct types take the receiver as first parameter
+	// (after any type-parameter zero factories for generic named types).
+	_methodSignature(decl, staticNamed, recvParam, tpNames = null) {
 		const params = this._paramNames(decl.params);
 		const asyncPrefix = decl.async ? "async " : "";
 		if (!staticNamed)
 			return `${asyncPrefix}${jsMemberName(decl.name)}(${params.join(", ")}) {`;
-		return `static ${asyncPrefix}$${decl.name}(${[recvParam, ...params].join(", ")}) {`;
+		const tzParams = (tpNames ?? []).map((n) => `$z_${n}`);
+		return `static ${asyncPrefix}$${decl.name}(${[...tzParams, recvParam, ...params].join(", ")}) {`;
 	}
 
 	// Value receivers are copies in Go; only materialize the copy when the body mutates it.

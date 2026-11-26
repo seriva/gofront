@@ -678,7 +678,12 @@ var __zf = __zf || (() => false);
 var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
 var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
 var __tbox = __tbox || function(f, x) {
-  return f && f.b ? f.b(x) : x;
+  if (f && f.b) return f.b(x);
+  if (x === null && f && f.fb) {
+    const r = f.fb(x);
+    if (r != null && r.__nilp === true && r.__p === true) return r;
+  }
+  return x;
 };
 var __ti = __ti || function(f, k, id, is, u, b, fb, nm) {
   const g = () => f();

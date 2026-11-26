@@ -262,3 +262,16 @@ func (b *Box) Unused() int { return b.v }
 	assert(!js.includes("Unused"));
 	assertEqual(out, "4");
 });
+
+test("method declared on local type alias survives DCE when target type escapes (G3.3)", () => {
+	const { js, errors } = compile(`package main
+type P struct{ n int }
+type A = P
+func (a A) Get() int { return a.n }
+func main() {
+	var p P
+	console.log(p)
+}`);
+	assertEqual(errors.length, 0);
+	assert(js.includes("Get("), "alias-declared method should survive DCE");
+});

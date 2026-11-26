@@ -86,6 +86,24 @@ export const typeInfoGenMethods = {
 		);
 	},
 
+	_isTypeParamMethodExpr(node, names) {
+		return (
+			Boolean(node._isMethodExpr) &&
+			node._methodExprRecv?.kind === "typeParam" &&
+			names.has(node._methodExprRecv.name)
+		);
+	},
+
+	_isTypeParamMethodValue(node, names) {
+		const t = node.expr?._type;
+		return (
+			Boolean(node._isMethodValue) &&
+			!node._callee &&
+			t?.kind === "typeParam" &&
+			names.has(t.name)
+		);
+	},
+
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
 		// A map or slice entering an interface is tagged by its instantiated type.
@@ -118,6 +136,11 @@ export const typeInfoGenMethods = {
 				);
 			case "CallExpr":
 				return this._callUsesTypeInfo(node, names);
+			case "SelectorExpr":
+				return (
+					this._isTypeParamMethodExpr(node, names) ||
+					this._isTypeParamMethodValue(node, names)
+				);
 			case "CompositeLit":
 			case "GenericTypeName":
 				return typeArgsMention(node);
@@ -256,7 +279,13 @@ export const typeInfoGenMethods = {
 	},
 
 	_fmtBoxBase(t) {
-		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
+		if (!t || t.kind === "typeParam") return null;
+		const ptrCls = this._structPtrClass(t);
+		if (ptrCls) {
+			this.useHelper("ifaceBox");
+			return `(__v) => __ifn(__ifp(__v), ${ptrCls})`;
+		}
+		if (mentionsTypeParam(t)) return null;
 		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
 		const u = this._underlyingOf(t);
 		if (t.kind === "pointer" && this._underlyingOf(t.base)?.kind === "struct") {

@@ -145,19 +145,19 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
 
 ### Phase 1: Generic & Alias Method Dispatch (roots `generic-nonstruct-method-drop`, `method-expr-iface-typeparam`, `alias-receiver-uncanonicalized`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Instantiate methods on generic non-struct types and preserve `_ptrRecv` and JS type-info (G1.1–G1.3)
+- [x] Task 1.1: Instantiate methods on generic non-struct types and preserve `_ptrRecv` and JS type-info (G1.1–G1.3)
   - Files: `src/typechecker/resolve.js` (`instantiateGenericWithArgs`, `_syncInstanceMethods`), `src/backend/js/index.js` (`genMethod` `tpNames`; `_namedBoxInfo` only if a test needs it), `src/backend/js/expressions.js` (type-info args at generic non-struct method call sites)
   - Test: `test/unit/types/generics.test.js`: G1.1 (`W[int]{1, 2, 3}.Len()`), G1.2 (generic map/array/basic types, pointer receiver `Push`), G1.3 (`B[string](1).Z()` → `""`; `W[int]` through an interface, `l.(W[int])`) via `assertAllTargetsOutput`
   - Done when: methods on generic non-struct defined types compile and run on all targets, and `var z T` inside them is `T`'s zero value on JS
-- [ ] Task 1.2: Resolve interface and type-parameter method expressions in the checker and WASM monomorphisation (G2.1–G2.3)
+- [x] Task 1.2: Resolve interface and type-parameter method expressions in the checker and WASM monomorphisation (G2.1–G2.3)
   - Files: `src/typechecker/expressions.js` (`_resolveMethodExprType`), `src/backend/wasm/monomorph.js` (`substituteTypesInAst`: type-param selector base)
   - Test: `test/unit/types/generics.test.js`: G2.1–G2.3 (`N.M(n)`, `fn := N.M`, `T.M(t)` and `g := T.M` with `T` = struct, `*S`, `MyInt`) via `assertWasmProgramOutput`, plus a `js`-target assertion for `T.M(t)` with struct `T` (already passes once checked)
   - Done when: the checker accepts every G2 form and `wasm` prints Go's output for all of them (no `Undefined: 'T'` ICE)
-- [ ] Task 1.3: Emit interface and type-parameter method expressions in JS (G2.1–G2.3)
+- [x] Task 1.3: Emit interface and type-parameter method expressions in JS (G2.1–G2.3)
   - Files: `src/backend/js/expressions.js` (method-expr emission `:~1425`, `:~1639`), `src/backend/js/type-info.js` (`_isTypeParamMethodCall`)
   - Test: `test/unit/types/generics.test.js`: upgrade the Task 1.2 cases to `assertAllTargetsOutput` (`both` `N.M(n)`; `T.M` with named non-struct `MyInt` via `__tbox`; nil interface receiver panics as in Go)
   - Done when: every G2 form prints Go's output on `js`, `both`, and `wasm`
-- [ ] Task 1.4: Canonicalize alias method receivers at checker registration (G3.1–G3.6)
+- [x] Task 1.4: Canonicalize alias method receivers at checker registration (G3.1–G3.6)
   - Files: `src/typechecker/index.js` (`_unwrapPointerAliasReceiver` → `_canonicalizeAliasReceiver`)
   - Test: `test/unit/language/named-type-methods.test.js`: G3.1, G3.2, G3.4, G3.5 (value/pointer/chained alias receivers, alias of `type I int`, interface dispatch and assertion) via `assertAllTargetsOutput`, G3.6 negative (`assertErrorContains(errors, "cannot define new methods on instantiated type G[int]")`), pointer-alias and anonymous-struct-alias controls; `test/unit/compiler/dce-methods.test.js`: G3.3 (`console.log(p)` keeps `Get(` for a method declared on `A`)
   - Done when: methods declared on local type aliases work on all targets and survive DCE exactly like methods declared on the target type, with no change to `src/lower/reachability.js` or either backend
