@@ -41,6 +41,7 @@ import {
 	isNumeric,
 	isString,
 	NIL,
+	promotedMethods,
 	RUNE,
 	Scope,
 	STRING,
@@ -948,6 +949,7 @@ export const expressionCheckMethods = {
 	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
 		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
 		if (this._reportUnaddressableRecv(expr, scope)) return;
+		if (this._checkScalarInteriorPromoted(expr, recvT, expr.field)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
@@ -960,6 +962,70 @@ export const expressionCheckMethods = {
 		}
 		if (expr.expr.kind !== "Ident") return;
 		expr.expr._addressTaken = true;
+	},
+
+	_checkScalarInteriorPromoted(node, recvType, methodName) {
+		if (!this._isWasmPackage()) return null;
+		const scalar = this._promotedScalarInteriorType(recvType, methodName);
+		return scalar ? this._errScalarInteriorAddress(node, scalar) : null;
+	},
+
+	// When `recvType`'s method `methodName` is promoted with a pointer receiver
+	// from a value-embedded scalar (e.g. `type Outer struct{ Num }`), returns
+	// that scalar type; otherwise null.
+	_promotedScalarInteriorType(recvType, methodName) {
+		const start = this.resolveType(this._deepUnderlying(recvType));
+		if (start?.kind !== "struct") return null;
+		const seen = new Set([start]);
+		let level = [start];
+		while (level.length > 0) {
+			const next = [];
+			const hit = this._scanScalarInteriorLevel(level, methodName, seen, next);
+			if (hit !== undefined) return hit;
+			for (const b of next) seen.add(b);
+			level = next;
+		}
+		return null;
+	},
+
+	_scanScalarInteriorLevel(level, methodName, seen, next) {
+		let scalarHit;
+		for (const st of level) {
+			const own =
+				st.methods?.has(methodName) &&
+				promotedMethods.get(st)?.get(methodName)?.mType !==
+					st.methods.get(methodName);
+			if (own) return null;
+			for (const embed of st._embeds ?? []) {
+				const hit = this._checkScalarInteriorEmbed(
+					embed,
+					methodName,
+					seen,
+					next,
+				);
+				if (hit === null) return null;
+				if (hit !== undefined) scalarHit = hit;
+			}
+		}
+		return scalarHit;
+	},
+
+	_checkScalarInteriorEmbed(embed, methodName, seen, next) {
+		const isPtr = embed.kind === "pointer";
+		const inner = isPtr ? embed.base : embed;
+		const base = this.resolveType(this._deepUnderlying(inner));
+		if (base?.kind === "struct") {
+			if (!seen.has(base)) next.push(base);
+			return undefined;
+		}
+		if (base?.kind === "interface") {
+			return !isPtr && base.methods?.has(methodName) ? null : undefined;
+		}
+		const m = inner?.kind === "named" ? inner.methods?.get(methodName) : null;
+		if (!m) return undefined;
+		return m._ptrRecv && !isPtr && this._isScalarStorageType(inner)
+			? inner
+			: null;
 	},
 
 	// Resolved per file from the import path, so a local package sharing an
@@ -1012,6 +1078,12 @@ export const expressionCheckMethods = {
 			);
 		}
 		if (!methodType) return null;
+		const scalarErr = this._checkScalarInteriorPromoted(
+			expr,
+			recvBase,
+			expr.field,
+		);
+		if (scalarErr) return scalarErr;
 		const hidden = this._foreignMember(
 			methodType._pkgId,
 			expr.field,
@@ -1042,9 +1114,14 @@ export const expressionCheckMethods = {
 		}
 		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
 		expr._isMethodValue = true;
-		if (baseType.kind === "pointer")
+		if (baseType.kind === "pointer") {
 			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
-		else this._markPtrRecvAddress(expr, base, ft, scope, recvT);
+			this._checkScalarInteriorPromoted(expr, recvT, expr.field);
+		} else if (!this._methodExprPtrRecv(recvT, ft, expr.field)) {
+			this._checkScalarInteriorPromoted(expr, recvT, expr.field);
+		} else {
+			this._markPtrRecvAddress(expr, base, ft, scope, recvT);
+		}
 	},
 
 	// Whether the identifier `name`, which resolved to `t`, names a type.  A

@@ -1277,24 +1277,33 @@ export class BuiltinsEmitter {
 
 	// The embedded struct (possibly several levels down) that declares or
 	// forwards `method`: the chain of embeds to follow and the method's name.
-	_findEmbeddedMethod(structInfo, method, seen = new Set()) {
-		if (seen.has(structInfo)) return null;
-		seen.add(structInfo);
-		for (const embed of structInfo.embeds ?? []) {
-			const typeName = embed.typeName ?? embed.name;
-			const methodName = `${typeName}.${method}`;
-			const ifaceType = structInfo.fields[embed.fieldIndex]?.goType;
-			if (this.mod.embeddedInterfaceHas(ifaceType, method))
-				return { chain: [{ structInfo, embed }], ifaceType };
-			if (this.mod.resolveFuncIndex(methodName) !== null)
-				return { chain: [{ structInfo, embed }], methodName };
-			const inner = this.mod.getStructType(typeName);
-			const deeper = inner && this._findEmbeddedMethod(inner, method, seen);
-			if (deeper)
-				return {
-					...deeper,
-					chain: [{ structInfo, embed }, ...deeper.chain],
-				};
+	_findEmbeddedMethod(structInfo, method) {
+		const seen = new Set([structInfo]);
+		let level = [{ info: structInfo, chain: [] }];
+		while (level.length > 0) {
+			const next = [];
+			const hit = this._scanEmbeddedLevel(level, method, seen, next);
+			if (hit) return hit;
+			for (const n of next) seen.add(n.info);
+			level = next;
+		}
+		return null;
+	}
+
+	_scanEmbeddedLevel(level, method, seen, next) {
+		for (const { info, chain } of level) {
+			for (const embed of info.embeds ?? []) {
+				const typeName = embed.typeName ?? embed.name;
+				const methodName = `${typeName}.${method}`;
+				const ifaceType = info.fields[embed.fieldIndex]?.goType;
+				const step = [...chain, { structInfo: info, embed }];
+				if (this.mod.embeddedInterfaceHas(ifaceType, method))
+					return { chain: step, ifaceType };
+				if (this.mod.resolveFuncIndex(methodName) !== null)
+					return { chain: step, methodName };
+				const inner = this.mod.getStructType(typeName);
+				if (inner && !seen.has(inner)) next.push({ info: inner, chain: step });
+			}
 		}
 		return null;
 	}
@@ -1332,6 +1341,7 @@ export class BuiltinsEmitter {
 			const isPtr = ft?.kind === "pointer" || ft?.kind === "PointerType";
 			if (isPtr && (i < chain.length - 1 || valueRecv)) this._emitNilBranch();
 		}
+		this._unwrapEmbeddedScalarBox(chain, valueRecv);
 		for (let i = 0; i < args.length; i++) {
 			const pType = targetParamTypes[i + 1] ?? null;
 			this.emitExpr(args[i], pType);
@@ -1341,6 +1351,27 @@ export class BuiltinsEmitter {
 			funcIndex: subIdx,
 		});
 		return true;
+	}
+
+	_unwrapEmbeddedScalarBox(chain, valueRecv) {
+		if (!valueRecv || chain.length === 0) return;
+		const { structInfo: owner, embed } = chain[chain.length - 1];
+		const ft = owner.fields[embed.fieldIndex]?.goType;
+		const isPtr = ft?.kind === "pointer" || ft?.kind === "PointerType";
+		const base = isPtr ? (ft.base ?? ft.elem) : null;
+		if (!base || !isScalarType(base, this.mod.checker, this.mod)) return;
+		const box = this.mod.getBoxType(base);
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+			fieldIndex: 0,
+		});
 	}
 
 	_emitStaticCall(call) {
