@@ -4313,6 +4313,171 @@ func main() {
 	assertErrorContains(errors, "cannot convert 1e40");
 });
 
+test("G5.4: generic T(b) and T(r) on ~[]byte / ~[]rune share backing array and preserve cap/nil", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyBytes []byte
+type MyRunes []rune
+type MyStr string
+type BytesAlias = []byte
+type RunesAlias = []rune
+
+func toBytes[T ~[]byte](b []byte) T { return T(b) }
+func toRunes[T ~[]rune](r []rune) T { return T(r) }
+func fromMyBytes[T ~[]byte](b MyBytes) T { return T(b) }
+func fromMyRunes[T ~[]rune](r MyRunes) T { return T(r) }
+func convBytes[A ~[]byte | ~string, B ~[]byte](a A) B { return B(a) }
+func convRunes[A ~[]rune | ~string, B ~[]rune](a A) B { return B(a) }
+func toUint8s[T ~[]uint8](b []uint8) T { return T(b) }
+func toInt32s[T ~[]int32](r []int32) T { return T(r) }
+func nilBytes[T ~[]byte]() T { return T(nil) }
+func nilRunes[T ~[]rune]() T { return T(nil) }
+func mkSlice[S ~[]E, E any](n int) S { return make(S, n) }
+func appBytes[T ~[]byte](b T) T { return append(b, 'a', 'b') }
+func boxBytes[T ~[]byte](b []byte) any { return T(b) }
+
+func main() {
+	ob := []byte("hi")
+	ab := toBytes[[]byte](ob)
+	ab[0] = 'X'
+	fmt.Println(string(ob), string(ab))
+
+	ob2 := []byte("hi")
+	mb := toBytes[MyBytes](ob2)
+	mb[0] = 'Y'
+	fmt.Println(string(ob2), string(mb))
+
+	mb2 := MyBytes("hi")
+	ab2 := fromMyBytes[[]byte](mb2)
+	ab2[0] = 'Z'
+	fmt.Println(string(mb2), string(ab2))
+
+	ob3 := []byte("hi")
+	alB := toBytes[BytesAlias](ob3)
+	alB[0] = 'A'
+	fmt.Println(string(ob3), string(alB))
+
+	or := []rune("hi")
+	ar := toRunes[[]rune](or)
+	ar[0] = 'X'
+	fmt.Println(string(or), string(ar))
+
+	or2 := []rune("hi")
+	mr := toRunes[MyRunes](or2)
+	mr[0] = 'Y'
+	fmt.Println(string(or2), string(mr))
+
+	mr2 := MyRunes("hi")
+	ar2 := fromMyRunes[[]rune](mr2)
+	ar2[0] = 'Z'
+	fmt.Println(string(mr2), string(ar2))
+
+	or3 := []rune("hi")
+	alR := toRunes[RunesAlias](or3)
+	alR[0] = 'A'
+	fmt.Println(string(or3), string(alR))
+
+	// Spare capacity and subslice sharing
+	buf := make([]byte, 1, 3)
+	buf[0] = 'a'
+	sub := toBytes[[]byte](buf)
+	fmt.Println(len(sub), cap(sub))
+	sub = append(sub, 'b')
+	buf = buf[:2]
+	fmt.Println(string(buf), string(sub))
+
+	rbuf := make([]rune, 1, 3)
+	rbuf[0] = 'a'
+	rsub := toRunes[[]rune](rbuf)
+	fmt.Println(len(rsub), cap(rsub))
+	rsub = append(rsub, 'b')
+	rbuf = rbuf[:2]
+	fmt.Println(string(rbuf), string(rsub))
+
+	full := []byte("abcd")
+	part := full[1:3]
+	part2 := toBytes[[]byte](part)
+	part2[0] = 'X'
+	fmt.Println(string(full), string(part), string(part2), cap(part2))
+
+	rfull := []rune("abcd")
+	rpart := rfull[1:3]
+	rpart2 := toRunes[[]rune](rpart)
+	rpart2[0] = 'X'
+	fmt.Println(string(rfull), string(rpart), string(rpart2), cap(rpart2))
+
+	// nil and empty preservation
+	var nb []byte
+	var nr []rune
+	fmt.Println(toBytes[[]byte](nb) == nil, toBytes[MyBytes](nb) == nil, nilBytes[[]byte]() == nil, nilBytes[MyBytes]() == nil)
+	fmt.Println(toRunes[[]rune](nr) == nil, toRunes[MyRunes](nr) == nil, nilRunes[[]rune]() == nil, nilRunes[MyRunes]() == nil)
+	fmt.Println(toBytes[[]byte]([]byte{}) == nil, convBytes[string, []byte]("") == nil, toRunes[[]rune]([]rune{}) == nil, convRunes[string, []rune]("") == nil)
+
+	// Generic-to-generic (slice shares, string converts)
+	ob4 := []byte("ab")
+	cb := convBytes[[]byte, MyBytes](ob4)
+	cb[1] = 'Z'
+	fmt.Println(string(ob4), string(cb), string(convBytes[string, []byte]("ok")), string(convBytes[MyStr, MyBytes](MyStr("go"))))
+
+	or4 := []rune("ab")
+	cr := convRunes[[]rune, MyRunes](or4)
+	cr[1] = 'Z'
+	fmt.Println(string(or4), string(cr), string(convRunes[string, []rune]("ok")), string(convRunes[MyStr, MyRunes](MyStr("go"))))
+
+	// ~[]uint8 and ~[]int32
+	ou := []uint8{1, 2}
+	au := toUint8s[[]uint8](ou)
+	au[0] = 9
+	oi := []int32{1, 2}
+	ai := toInt32s[[]int32](oi)
+	ai[0] = 9
+	fmt.Println(ou[0], au[0], oi[0], ai[0])
+
+	// Slices produced by generic make/append (plain Array in JS) still share backing store
+	gm := mkSlice[[]byte, byte](2)
+	gm[0], gm[1] = 'a', 'b'
+	gm2 := toBytes[[]byte](gm)
+	gm2[0] = 'M'
+	ga := appBytes[[]byte](nil)
+	ga2 := toBytes[[]byte](ga)
+	ga2[0] = 'N'
+	fmt.Println(string(gm), string(gm2), string(ga), string(ga2))
+
+	// Boxing converted named slice keeps its dynamic type and shares backing store
+	ob5 := []byte("hi")
+	bx := boxBytes[MyBytes](ob5)
+	unbx := bx.(MyBytes)
+	unbx[0] = 'B'
+	fmt.Printf("%T %s %s\\n", bx, string(ob5), string(unbx))
+}`;
+	const want =
+		"Xi Xi\n" +
+		"Yi Yi\n" +
+		"Zi Zi\n" +
+		"Ai Ai\n" +
+		"Xi Xi\n" +
+		"Yi Yi\n" +
+		"Zi Zi\n" +
+		"Ai Ai\n" +
+		"1 3\n" +
+		"ab ab\n" +
+		"1 3\n" +
+		"ab ab\n" +
+		"aXcd Xc Xc 3\n" +
+		"aXcd Xc Xc 3\n" +
+		"true true true true\n" +
+		"true true true true\n" +
+		"false false false false\n" +
+		"aZ aZ ok go\n" +
+		"aZ aZ ok go\n" +
+		"9 9 9 9\n" +
+		"Mb Mb Nb Nb\n" +
+		"main.MyBytes Bi Bi\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

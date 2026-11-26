@@ -783,8 +783,8 @@ var __tconv = __tconv || function(f, v) {
     case "complex128": return v && typeof v === "object" ? { re: v.re, im: v.im } : { re: Number(v), im: 0 };
     case "complex64": return v && typeof v === "object" ? { re: Math.fround(v.re), im: Math.fround(v.im) } : { re: Math.fround(Number(v)), im: 0 };
     case "string": return __tstr(v);
-    case "[]byte": return v == null ? null : typeof v === "string" ? __u8enc(v) : new Uint8Array(v);
-    case "[]rune": return v == null ? null : typeof v === "string" ? Int32Array.from(v, (c) => c.codePointAt(0)) : new Int32Array(v);
+    case "[]byte": return v == null ? null : typeof v === "string" ? __u8enc(v) : v;
+    case "[]rune": return v == null ? null : typeof v === "string" ? Int32Array.from(v, (c) => c.codePointAt(0)) : v;
     default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;
