@@ -1060,6 +1060,13 @@ export const expressionCheckMethods = {
 			expr._isMethodValue = true;
 			return;
 		}
+		if (baseType.kind === "typeParam") {
+			const c = this._deepUnderlying(this.resolveType(baseType.constraint));
+			if (c?.kind === "interface" && c.methods?.has(expr.field)) {
+				expr._isMethodValue = true;
+				return;
+			}
+		}
 		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
 		expr._isMethodValue = true;
 		if (baseType.kind === "pointer")

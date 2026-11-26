@@ -957,16 +957,22 @@ export const expressionGenMethods = {
 		return `${fn}(${js}${fields ? `, ${fields}` : ""})`;
 	},
 
+	// JS class name for a pointer to a named struct, or null.
+	_structPtrClass(t) {
+		if (t?.kind !== "pointer") return null;
+		const base = t.base;
+		if (base?.kind !== "named" || this._underlyingOf(base)?.kind !== "struct")
+			return null;
+		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
+		return this.structNames.has(cls) ? jsClassName(cls) : null;
+	},
+
 	// A nil `*T` entering an interface is a typed nil: it keeps T's methods
 	// (callable with a nil receiver) and differs from the nil interface.
 	_typedNilWrap(js, expr) {
 		if (expr._ifaceBox !== "ptr") return js;
-		const src = expr._ifaceSrc;
-		const base = src?.kind === "pointer" ? src.base : null;
-		if (base?.kind !== "named" || base.underlying?.kind !== "struct") return js;
-		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
-		if (!this.structNames.has(cls)) return js;
-		return `__ifn(${js}, ${jsClassName(cls)})`;
+		const cls = this._structPtrClass(expr._ifaceSrc);
+		return cls ? `__ifn(${js}, ${cls})` : js;
 	},
 
 	_isNamedBoxKind(expr) {
@@ -1443,6 +1449,14 @@ export const expressionGenMethods = {
 		if (expr._isMethodValue && !expr._callee) {
 			// A value receiver is copied when the method value is evaluated.
 			const t = expr.expr._type;
+			if (t?.kind === "typeParam") {
+				const r = this._genTypeParamMethodRecv(t, expr.field, base);
+				if (r) {
+					this.useHelper("nilCall");
+					const m = this._jsMemberName(expr);
+					return `((__r) => __r.${m}.bind(__r))(__nilcall(${r}))`;
+				}
+			}
 			if (!expr._type?._ptrRecv && this._aggregateBase(t))
 				return `((__r) => __r.${this._jsMemberName(expr)}.bind(__r))(${this._cloneJs(t, base)})`;
 			return `${sel}.bind(${base})`;
@@ -1650,16 +1664,24 @@ export const expressionGenMethods = {
 		return { cls: info.cls, type: rt.base, deref: !method._ptrRecv };
 	},
 
-	_genTypeParamMethodExpr(rt, field) {
-		const factory = this._typeParamZeroFactory(rt.name);
+	_genTypeParamMethodRecv(tp, field, recvJs) {
+		const factory = this._typeParamZeroFactory(tp.name);
 		if (!factory) return null;
 		this.useHelper("generics");
 		const member = jsMemberName(field);
-		const boxed = `__tbox(${factory}, recv)`;
-		const r = this._hasPointerTypeSet(rt)
+		const boxed = `__tbox(${factory}, ${recvJs})`;
+		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
+		// type-parameter variable is the box, so reach the value it holds.
+		return this._hasPointerTypeSet(tp)
 			? `((__r) => typeof __r?.${member} === "function" ? __r : __r?.value)(${boxed})`
 			: boxed;
-		return `((recv, ...args) => ${r}.${member}(...args))`;
+	},
+
+	_genTypeParamMethodExpr(rt, field) {
+		const r = this._genTypeParamMethodRecv(rt, field, "recv");
+		if (!r) return null;
+		this.useHelper("nilCall");
+		return `((recv, ...args) => __nilcall(${r}).${jsMemberName(field)}(...args))`;
 	},
 
 	// `T.M` method expression as a function value.
@@ -2421,14 +2443,13 @@ export const expressionGenMethods = {
 	// type argument is boxed (by the type's factory) to reach its methods.
 	_genTypeParamMethodCall(expr) {
 		if (!this._isTypeParamMethodCall(expr)) return null;
-		const factory = this._typeParamZeroFactory(expr.func.expr._type.name);
-		if (!factory) return null;
-		this.useHelper("generics");
-		let recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
-		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
-		// type-parameter variable is the box, so reach the value it holds.
-		if (this._hasPointerTypeSet(expr.func.expr._type))
-			recv = `((__r) => typeof __r?.${jsMemberName(expr.func.field)} === "function" ? __r : __r?.value)(${recv})`;
+		const r = this._genTypeParamMethodRecv(
+			expr.func.expr._type,
+			expr.func.field,
+			this.genExpr(expr.func.expr),
+		);
+		if (!r) return null;
+		const recv = this.strict ? this._genNilChecked(r) : r;
 		const args = this._genCallArgs(expr);
 		return `${recv}.${jsMemberName(expr.func.field)}(${args})`;
 	},

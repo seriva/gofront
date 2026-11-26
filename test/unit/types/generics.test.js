@@ -3860,6 +3860,163 @@ func main() { _ = (*interface{ M() int }).M }`,
 	}
 });
 
+test("type-parameter method expressions, calls, and values handle typed nil pointers on all targets", async () => {
+	const src = `package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+type I interface{ IsNil() bool }
+type S struct{}
+func (s *S) IsNil() bool { return s == nil }
+
+type S2 struct{}
+func (s *S2) IsNil() bool { return s == nil }
+
+type PS = *S
+
+type MyInt int
+func (m *MyInt) IsNil() bool { return m == nil }
+
+type GInt[E any] int
+func (g *GInt[E]) IsNil() bool { return g == nil }
+
+type Counter interface {
+	Inc()
+	Get() int
+}
+type CountS struct{ n int }
+func (s *CountS) Inc() {
+	if s != nil {
+		s.n++
+	}
+}
+func (s *CountS) Get() int {
+	if s == nil {
+		return -1
+	}
+	return s.n
+}
+
+type Valer interface{ Val() int }
+type NInt int
+func (n NInt) Val() int { return int(n) }
+
+type Box[E any] struct{ v E }
+func (b *Box[E]) IsNil() bool { return b == nil }
+
+type Stringer interface{ String() string }
+
+func viaIface[T I](t T) bool {
+	fn := T.IsNil
+	mv := t.IsNil
+	var x I = t
+	return T.IsNil(t) && fn(t) && t.IsNil() && mv() && x != nil && x.IsNil()
+}
+
+func viaPtrSet[T interface{ *S; IsNil() bool }](t T) bool {
+	fn := T.IsNil
+	mv := t.IsNil
+	return T.IsNil(t) && fn(t) && t.IsNil() && mv()
+}
+
+func viaGenericPtrSet[X any, T interface{ *X; IsNil() bool }](t T) bool {
+	fn := T.IsNil
+	mv := t.IsNil
+	return T.IsNil(t) && fn(t) && t.IsNil() && mv()
+}
+
+func viaAddr[X any, P interface{ *X; Inc(); Get() int }](x X) int {
+	v := x
+	p := P(&v)
+	fn := P.Inc
+	mv := p.Inc
+	P.Inc(p)
+	fn(p)
+	p.Inc()
+	mv()
+	return P.Get(p)
+}
+
+func viaUnion[T interface{ *S | *S2; IsNil() bool }](t T) bool {
+	fn := T.IsNil
+	return T.IsNil(t) && fn(t) && t.IsNil()
+}
+
+func viaOuterBox[E any](p *Box[E]) bool {
+	return viaIface(p)
+}
+
+func viaVal[T Valer](t T) int {
+	mv := t.Val
+	return T.Val(t) + mv()
+}
+
+func viaStringer[T Stringer](t T) string {
+	fn := T.String
+	return T.String(t) + "|" + fn(t)
+}
+
+func main() {
+	var p *S
+	var p2 *S2
+	var pa PS
+	var pm *MyInt
+	var pg *GInt[int]
+	var pb *Box[int]
+	var buf *bytes.Buffer
+	inst := viaIface[*S]
+	fmt.Println(viaIface(p), viaIface(pa), viaIface(pm), viaIface(pg), viaIface(pb), inst(p))
+	fmt.Println(viaPtrSet(p), viaGenericPtrSet[S, *S](p), viaUnion(p), viaUnion(p2))
+	fmt.Println(viaOuterBox(pb), viaVal(NInt(7)), viaAddr[CountS, *CountS](CountS{n: 10}), viaStringer(buf))
+}`;
+	await assertAllTargetsOutput(
+		src,
+		"true true true true true true\ntrue true true true\ntrue 14 14 <nil>|<nil>\n",
+	);
+});
+
+test("type-parameter method expressions panic with nil dereference for nil interfaces and value receivers on nil pointers", async () => {
+	const src = `package main
+
+import "fmt"
+
+type I interface{ IsNil() bool }
+type V interface{ Val() int }
+type S struct{ n int }
+func (s S) Val() int { return s.n }
+type MyInt int
+func (m MyInt) Val() int { return int(m) }
+
+func callNilIface[T I](t T) (msg string) {
+	defer func() { msg = fmt.Sprint(recover()) }()
+	_ = T.IsNil(t)
+	return "no panic"
+}
+
+func callVal[T V](t T) (msg string) {
+	defer func() { msg = fmt.Sprint(recover()) }()
+	_ = T.Val(t)
+	return "no panic"
+}
+
+func main() {
+	var i I
+	var ps *S
+	var pm *MyInt
+	fmt.Println(callNilIface(i))
+	fmt.Println(callVal(ps))
+	fmt.Println(callVal(pm))
+}`;
+	const want =
+		"runtime error: invalid memory address or nil pointer dereference\n" +
+		"runtime error: invalid memory address or nil pointer dereference\n" +
+		"runtime error: invalid memory address or nil pointer dereference\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

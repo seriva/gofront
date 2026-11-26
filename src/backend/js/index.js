@@ -892,7 +892,8 @@ export class CodeGen {
 			this.line("get value() { return this._p.value; }");
 			this.line("set value(v) { this._p.value = v; }");
 			for (const m of methodDecls) {
-				const recv = m.recvPointer ? "this._p" : "this._p.value";
+				if (!m.recvPointer) this.useHelper("nilCall");
+				const recv = m.recvPointer ? "this._p" : "__nilcall(this._p).value";
 				this.line(
 					`${jsMemberName(m.name)}(...__a) { return ${cls}.$${m.name}(${tzFwd}${recv}, ...__a); }`,
 				);
