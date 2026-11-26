@@ -167,7 +167,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Files: `src/backend/js/expressions.js` (`_genBuiltinClear`, `_genBuiltinLen`, `BUILTIN_GEN.cap`), `src/backend/js/runtime.js` (`__clear`, `__len`, `__cap`), `src/backend/js/type-info.js` (`_callUsesTypeInfo`, `ez`)
   - Test: `test/unit/types/generics.test.js`: G4.1–G4.1b (`clear` on `M ~map`, `S ~[]int`, `S ~[]MyStruct` then field write, `S ~[]string`, `T ~map | ~[]int`, nil) and G4.2 (`len`/`cap` on `T ~[]int | ~*[3]int` and `T ~[3]int | ~*[3]int`) on `js`, `both`, `wasm`
   - Done when: `clear`, `len`, and `cap` on type-parameter operands match Go on all targets
-- [ ] Task 2.2: Support `~string | ~[]byte` type parameters in `copy` and `append([]byte{}, v...)` (G4.3)
+- [x] Task 2.2: Support `~string | ~[]byte` type parameters in `copy` and `append([]byte{}, v...)` (G4.3)
   - Files: `src/typechecker/expressions.js` (`_checkAppendArgs`, `_isStringIntoBytes`), `src/backend/js/expressions.js` (`_genSliceSource`)
   - Test: `test/unit/types/generics.test.js`: G4.3 (`copy(dst, src)` and `append([]byte{}, v...)` with both `string` and `[]byte` instantiations) on `js`, `both`, `wasm`
   - Done when: `copy` and `append` with `~string | ~[]byte` type parameters compile and match Go on all targets

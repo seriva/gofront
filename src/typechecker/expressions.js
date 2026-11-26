@@ -3256,9 +3256,17 @@ export const expressionCheckMethods = {
 			if (!at[i]) continue;
 			if (arg._spread) {
 				this._rejectSeqAsSlice(at[i], arg, "a spread argument");
-				if (!this._isStringIntoBytes(elem, at[i]))
+				const targetSlice = { kind: "slice", elem: sliceType.elem };
+				if (
+					!this._typeSetOk(
+						at[i],
+						(u) =>
+							this._isStringIntoBytes(elem, u) ||
+							this._assignableQuietly(targetSlice, this._deepUnderlying(u)),
+					)
+				)
 					this.assertAssignable(
-						{ kind: "slice", elem: sliceType.elem },
+						targetSlice,
 						this._deepUnderlying(at[i]),
 						arg,
 						"argument to append",
@@ -3274,7 +3282,8 @@ export const expressionCheckMethods = {
 		const u = this._deepUnderlying(t);
 		const isString =
 			t?.kind === "untyped" ? t.base === "string" : u?.name === "string";
-		return isString && elem?.kind === "basic" && elem.name === "uint8";
+		const eu = this._deepUnderlying(elem);
+		return isString && eu?.kind === "basic" && eu.name === "uint8";
 	},
 
 	_checkBuiltinLen(name, expr, argTypes) {

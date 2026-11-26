@@ -4112,6 +4112,41 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("G4.3: copy and append([]byte{}, v...) on ~string | ~[]byte type parameters", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyStr string
+type MyBytes []byte
+
+func doCopy[T ~string | ~[]byte](src T) (int, string) {
+	dst := make([]byte, 2)
+	n := copy(dst, src)
+	return n, string(dst)
+}
+
+func doAppend[T ~string | ~[]byte](v T) string {
+	b := append([]byte{}, v...)
+	return string(b)
+}
+
+func main() {
+	n1, s1 := doCopy("hi")
+	n2, s2 := doCopy([]byte("yo"))
+	n3, s3 := doCopy(MyStr("ok"))
+	n4, s4 := doCopy(MyBytes("go"))
+	fmt.Printf("%d:%s %d:%s %d:%s %d:%s\\n", n1, s1, n2, s2, n3, s3, n4, s4)
+	fmt.Printf("%q %q %q %q\\n", doAppend("hi"), doAppend([]byte("yo")), doAppend(MyStr("ok")), doAppend(MyBytes("go")))
+}`;
+	const want = '2:hi 2:yo 2:ok 2:go\n"hi" "yo" "ok" "go"\n';
+	await assertAllTargetsOutput(src, want);
+	const { errors } = compile(
+		"package main\nfunc f[T ~string | ~[]int](v T) []int { return append([]int{}, v...) }",
+	);
+	assertErrorContains(errors, "argument to append");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

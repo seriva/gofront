@@ -2734,6 +2734,10 @@ export const expressionGenMethods = {
 	// contributes its UTF-8 bytes.
 	_genSliceSource(node) {
 		const js = this.genExpr(node);
+		if (node._type?.kind === "typeParam") {
+			this.useHelper("u8enc");
+			return `((__v) => typeof __v === "string" ? __u8enc(__v) : __v)(${js})`;
+		}
 		if (!this._isStringExprType(node._type)) return js;
 		this.useHelper("u8enc");
 		return `__u8enc(${js})`;
