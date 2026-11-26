@@ -484,6 +484,20 @@ function substituteTypesInAst(
 		}
 	}
 
+	// 5. SelectorExpr on a type parameter (`T.M` method expression): rewrite the
+	// base `Ident` to a `TypeExpr` of the concrete type so `desugarMethodExprs`
+	// sees a concrete receiver.
+	if (
+		node.kind === "SelectorExpr" &&
+		node.expr?.kind === "Ident" &&
+		typeSubstMap.has(node.expr.name)
+	) {
+		node.expr = {
+			kind: "TypeExpr",
+			type: cloneAst(typeSubstMap.get(node.expr.name)),
+		};
+	}
+
 	// Recurse child properties
 	for (const key of Object.keys(node)) {
 		if (key.startsWith("_")) continue;

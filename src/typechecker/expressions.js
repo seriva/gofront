@@ -862,7 +862,16 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	_resolveMethodExprType(baseType, base, field) {
+	_resolveMethodExprType(baseType, base, field, isPtr = false) {
+		if (!isPtr) {
+			if (base?.kind === "interface" && base.methods?.has(field))
+				return base.methods.get(field);
+			if (base?.kind === "typeParam") {
+				const c = this._deepUnderlying(this.resolveType(base.constraint));
+				if (c?.kind === "interface" && c.methods?.has(field))
+					return c.methods.get(field);
+			}
+		}
 		if (!this._isStructOrNamedMethod(baseType, base, field)) return null;
 		return base?.methods?.get(field) ?? baseType.methods?.get(field);
 	},
@@ -1000,7 +1009,12 @@ export const expressionCheckMethods = {
 	_checkMethodExprSelector(expr, baseType) {
 		const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
 		const base = this.resolveType(this._deepUnderlying(recvBase));
-		const methodType = this._resolveMethodExprType(recvBase, base, expr.field);
+		const methodType = this._resolveMethodExprType(
+			recvBase,
+			base,
+			expr.field,
+			baseType.kind === "pointer",
+		);
 		if (
 			this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
 			baseType.kind !== "pointer"

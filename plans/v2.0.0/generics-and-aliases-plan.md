@@ -149,7 +149,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Files: `src/typechecker/resolve.js` (`instantiateGenericWithArgs`, `_syncInstanceMethods`), `src/backend/js/index.js` (`genMethod` `tpNames`; `_namedBoxInfo` only if a test needs it), `src/backend/js/expressions.js` (type-info args at generic non-struct method call sites)
   - Test: `test/unit/types/generics.test.js`: G1.1 (`W[int]{1, 2, 3}.Len()`), G1.2 (generic map/array/basic types, pointer receiver `Push`), G1.3 (`B[string](1).Z()` → `""`; `W[int]` through an interface, `l.(W[int])`) via `assertAllTargetsOutput`
   - Done when: methods on generic non-struct defined types compile and run on all targets, and `var z T` inside them is `T`'s zero value on JS
-- [ ] Task 1.2: Resolve interface and type-parameter method expressions in the checker and WASM monomorphisation (G2.1–G2.3)
+- [x] Task 1.2: Resolve interface and type-parameter method expressions in the checker and WASM monomorphisation (G2.1–G2.3)
   - Files: `src/typechecker/expressions.js` (`_resolveMethodExprType`), `src/backend/wasm/monomorph.js` (`substituteTypesInAst`: type-param selector base)
   - Test: `test/unit/types/generics.test.js`: G2.1–G2.3 (`N.M(n)`, `fn := N.M`, `T.M(t)` and `g := T.M` with `T` = struct, `*S`, `MyInt`) via `assertWasmProgramOutput`, plus a `js`-target assertion for `T.M(t)` with struct `T` (already passes once checked)
   - Done when: the checker accepts every G2 form and `wasm` prints Go's output for all of them (no `Undefined: 'T'` ICE)
