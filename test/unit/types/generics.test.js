@@ -9,7 +9,6 @@ import {
 	assertJsProgramOutput,
 	assertJsTargetsOutput,
 	assertProgramOutput,
-	assertWasmProgramOutput,
 	compile,
 	compileDir,
 	compileHybrid,
@@ -3721,7 +3720,7 @@ func main() {
 	assertEqual(errors.length, 0);
 });
 
-test("interface and type-parameter method expressions compile on wasm and struct T.M on js (G2.1-G2.3)", async () => {
+test("interface and type-parameter method expressions compile and run on all targets (G2.1-G2.3)", async () => {
 	const src = `package main
 
 import "fmt"
@@ -3747,32 +3746,26 @@ func callT[T N](t T) int {
 	return T.M(t) + g(t)
 }
 
+func callNilN() (panicked bool) {
+	defer func() {
+		if recover() != nil {
+			panicked = true
+		}
+	}()
+	var n N
+	_ = N.M(n)
+	return false
+}
+
 func main() {
 	s := S{v: 9}
 	ps := &PS{v: 7}
 	mi := MyInt(5)
 	fmt.Println(callN(s), callN(ps), callN(mi))
 	fmt.Println(callT(s), callT(ps), callT(mi))
+	fmt.Println(callNilN())
 }`;
-	await assertWasmProgramOutput(src, "18 14 10\n18 14 10\n");
-
-	const jsStructSrc = `package main
-
-import "fmt"
-
-type N interface{ M() int }
-type S struct{ v int }
-func (s S) M() int { return s.v }
-
-func callT[T N](t T) int {
-	g := T.M
-	return T.M(t) + g(t)
-}
-
-func main() {
-	fmt.Println(callT(S{v: 9}))
-}`;
-	await assertProgramOutput(jsStructSrc, "18\n", { target: "js" });
+	await assertAllTargetsOutput(src, "18 14 10\n18 14 10\ntrue\n");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

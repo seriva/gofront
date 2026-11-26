@@ -153,7 +153,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Files: `src/typechecker/expressions.js` (`_resolveMethodExprType`), `src/backend/wasm/monomorph.js` (`substituteTypesInAst`: type-param selector base)
   - Test: `test/unit/types/generics.test.js`: G2.1–G2.3 (`N.M(n)`, `fn := N.M`, `T.M(t)` and `g := T.M` with `T` = struct, `*S`, `MyInt`) via `assertWasmProgramOutput`, plus a `js`-target assertion for `T.M(t)` with struct `T` (already passes once checked)
   - Done when: the checker accepts every G2 form and `wasm` prints Go's output for all of them (no `Undefined: 'T'` ICE)
-- [ ] Task 1.3: Emit interface and type-parameter method expressions in JS (G2.1–G2.3)
+- [x] Task 1.3: Emit interface and type-parameter method expressions in JS (G2.1–G2.3)
   - Files: `src/backend/js/expressions.js` (method-expr emission `:~1425`, `:~1639`), `src/backend/js/type-info.js` (`_isTypeParamMethodCall`)
   - Test: `test/unit/types/generics.test.js`: upgrade the Task 1.2 cases to `assertAllTargetsOutput` (`both` `N.M(n)`; `T.M` with named non-struct `MyInt` via `__tbox`; nil interface receiver panics as in Go)
   - Done when: every G2 form prints Go's output on `js`, `both`, and `wasm`

@@ -86,6 +86,14 @@ export const typeInfoGenMethods = {
 		);
 	},
 
+	_isTypeParamMethodExpr(node, names) {
+		return (
+			Boolean(node._isMethodExpr) &&
+			node._methodExprRecv?.kind === "typeParam" &&
+			names.has(node._methodExprRecv.name)
+		);
+	},
+
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
 		// A map or slice entering an interface is tagged by its instantiated type.
@@ -118,6 +126,8 @@ export const typeInfoGenMethods = {
 				);
 			case "CallExpr":
 				return this._callUsesTypeInfo(node, names);
+			case "SelectorExpr":
+				return this._isTypeParamMethodExpr(node, names);
 			case "CompositeLit":
 			case "GenericTypeName":
 				return typeArgsMention(node);

@@ -1422,43 +1422,7 @@ export const expressionGenMethods = {
 			return lit64 ?? expr._stdName;
 		}
 		if (this._isStdlibFuncValue(expr)) return this._genStdlibFuncValue(expr);
-		if (expr._isMethodExpr) {
-			const namedExpr = this._namedMethodExprInfo(expr);
-			if (namedExpr) {
-				const t =
-					expr.expr?._type?.kind === "named"
-						? expr.expr._type
-						: this.checker?.types.get(expr.expr?.name);
-				const tz = this._namedTypeArgFactories(t);
-				if (tz.length > 0)
-					return `((...__a) => ${namedExpr.cls}.$${expr.field}(${tz.join(", ")}, ...__a))`;
-				return `${namedExpr.cls}.$${expr.field}`;
-			}
-			const rt = expr._methodExprRecv;
-			// `(*MyInt).M` for a pointer-receiver method of a named non-struct
-			// type: the static method takes the pointer, nil included.
-			if (rt?.kind === "pointer") {
-				const info = this._namedBoxInfo(rt.base);
-				const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
-				if (info?.methods.has(expr.field) && decl?.recvPointer) {
-					const tz = this._namedTypeArgFactories(rt.base);
-					if (tz.length > 0)
-						return `((...__a) => ${info.cls}.$${expr.field}(${tz.join(", ")}, ...__a))`;
-					return `${info.cls}.$${expr.field}`;
-				}
-			}
-			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
-			if (protoCls) {
-				// A value-receiver method reads `*recv`, which panics on nil.
-				let recv = "recv";
-				if (rt.base.methods.get(expr.field)?._ptrRecv === false) {
-					this.useHelper("nilCall");
-					recv = "__nilcall(recv)";
-				}
-				return `((recv, ...args) => ${protoCls}.prototype.${jsMemberName(expr.field)}.call(${recv}, ...args))`;
-			}
-			return `((recv, ...args) => recv.${jsMemberName(expr.field)}(...args))`;
-		}
+		if (expr._isMethodExpr) return this._genMethodExprValue(expr);
 		const namedValue = this._genNamedMethodValue(expr);
 		if (namedValue !== undefined) return namedValue;
 		if (expr.expr.kind === "Ident") {
@@ -1667,6 +1631,65 @@ export const expressionGenMethods = {
 			byValue: !method._ptrRecv,
 			recvType: viaPtr ? recvType.base : recvType,
 		};
+	},
+
+	_namedMethodExprTarget(expr) {
+		const namedExpr = this._namedMethodExprInfo(expr);
+		if (namedExpr) {
+			const t =
+				expr.expr?._type?.kind === "named"
+					? expr.expr._type
+					: this.checker?.types.get(expr.expr?.name);
+			return { cls: namedExpr.cls, type: t };
+		}
+		const rt = expr._methodExprRecv;
+		if (rt?.kind !== "pointer") return null;
+		const info = this._namedBoxInfo(rt.base);
+		const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
+		if (!info?.methods.has(expr.field) || !decl?.recvPointer) return null;
+		return { cls: info.cls, type: rt.base };
+	},
+
+	_genTypeParamMethodExpr(rt, field) {
+		const factory = this._typeParamZeroFactory(rt.name);
+		if (!factory) return null;
+		this.useHelper("generics");
+		const member = jsMemberName(field);
+		const boxed = `__tbox(${factory}, recv)`;
+		const r = this._hasPointerTypeSet(rt)
+			? `((__r) => typeof __r?.${member} === "function" ? __r : __r?.value)(${boxed})`
+			: boxed;
+		return `((recv, ...args) => ${r}.${member}(...args))`;
+	},
+
+	// `T.M` method expression as a function value.
+	_genMethodExprValue(expr) {
+		const named = this._namedMethodExprTarget(expr);
+		if (named) {
+			const tz = this._namedTypeArgFactories(named.type);
+			return tz.length > 0
+				? `((...__a) => ${named.cls}.$${expr.field}(${tz.join(", ")}, ...__a))`
+				: `${named.cls}.$${expr.field}`;
+		}
+		const rt = expr._methodExprRecv;
+		const protoCls = this._ptrMethodProtoClass(rt, expr.field);
+		if (protoCls) {
+			this.useHelper("nilCall");
+			const recv =
+				rt.base.methods.get(expr.field)?._ptrRecv === false
+					? "__nilcall(recv)"
+					: "recv";
+			return `((recv, ...args) => ${protoCls}.prototype.${jsMemberName(expr.field)}.call(${recv}, ...args))`;
+		}
+		if (this._isInterfaceType(rt)) {
+			this.useHelper("nilCall");
+			return `((recv, ...args) => __nilcall(recv).${jsMemberName(expr.field)}(...args))`;
+		}
+		if (rt?.kind === "typeParam") {
+			const tp = this._genTypeParamMethodExpr(rt, expr.field);
+			if (tp) return tp;
+		}
+		return `((recv, ...args) => recv.${jsMemberName(expr.field)}(...args))`;
 	},
 
 	// `x.M` used as a value: binds the receiver now, as Go does.
@@ -2606,15 +2629,22 @@ export const expressionGenMethods = {
 		}
 		const namedCall = this._genNamedMethodCall(expr);
 		if (namedCall !== undefined) return namedCall;
-		if (this.strict && this._isInterfaceType(recvType)) {
-			// Go panics with a nil-dereference runtime error; JS would throw a
-			// TypeError with a different message.
-			this.useHelper("nilCall");
-			const recv = this.genExpr(expr.func.expr);
-			const args = this._genCallArgs(expr);
-			return `__nilcall(${recv}).${jsMemberName(expr.func.field)}(${args})`;
-		}
-		return undefined;
+		return this._genStrictInterfaceCall(expr, recvType);
+	},
+
+	_genStrictInterfaceCall(expr, recvType) {
+		if (
+			!this.strict ||
+			expr.func._isMethodExpr ||
+			!this._isInterfaceType(recvType)
+		)
+			return undefined;
+		// Go panics with a nil-dereference runtime error; JS would throw a
+		// TypeError with a different message.
+		this.useHelper("nilCall");
+		const recv = this.genExpr(expr.func.expr);
+		const args = this._genCallArgs(expr);
+		return `__nilcall(${recv}).${jsMemberName(expr.func.field)}(${args})`;
 	},
 
 	// `len`/`cap` of an array or array pointer is a constant, but an operand
