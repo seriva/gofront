@@ -3953,6 +3953,10 @@ export const expressionGenMethods = {
 	// A concrete operand compared with an interface is converted to an interface first.
 	_genIfaceOperand(e) {
 		if (e._ifaceBox || this._isIfaceType(e._type)) return this.genExpr(e);
+		if (e._type?.kind === "typeParam" && e._ifaceSrc?.kind !== "typeParam") {
+			const f = this._typeParamZeroFactory(e._type.name);
+			if (f) return `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${this.genExpr(e)})`;
+		}
 		const isPtr = e._type?.kind === "pointer";
 		const named = isPtr ? e._type.base : e._type;
 		if (this._namedBoxInfo(named))

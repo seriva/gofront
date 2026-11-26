@@ -123,8 +123,14 @@ export const typeInfoGenMethods = {
 				return node.cases.some((c) => typeNodeMentions(c.types, names));
 			case "SwitchStmt":
 				return (
-					node.tag?._type?.kind === "typeParam" &&
-					names.has(node.tag._type.name)
+					(node.tag?._type?.kind === "typeParam" &&
+						names.has(node.tag._type.name)) ||
+					(Boolean(node.tag) &&
+						node.cases.some((c) =>
+							c.list?.some(
+								(e) => e._type?.kind === "typeParam" && names.has(e._type.name),
+							),
+						))
 				);
 			case "AssignStmt":
 				return (
@@ -151,7 +157,10 @@ export const typeInfoGenMethods = {
 			case "BinaryExpr":
 				return (
 					((node.op === "==" || node.op === "!=") &&
-						node.left._type?.kind === "typeParam") ||
+						((node.left._type?.kind === "typeParam" &&
+							names.has(node.left._type.name)) ||
+							(node.right._type?.kind === "typeParam" &&
+								names.has(node.right._type.name)))) ||
 					(node._type?.kind === "typeParam" && names.has(node._type.name))
 				);
 			case "CallExpr":

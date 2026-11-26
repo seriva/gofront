@@ -583,17 +583,24 @@ export const statementGenMethods = {
 		);
 	},
 
-	// `*p = v` where `p` points at a type parameter: erased, so the pointer is
-	// either a struct (copy into it) or a get/set wrapper.
+	// `*p = v` (or `v = w` on an address-taken type-parameter variable): erased,
+	// so the storage is either a struct (copy into it) or a `{ value }` box.
+	_isTypeParamBoxedTarget(l) {
+		return (
+			l.kind === "Ident" &&
+			this._boxedVars.has(l.name) &&
+			Boolean(this._boxedTypeParamCond(l.name))
+		);
+	},
+
+	_isTypeParamStoreTarget(l) {
+		return this._isTypeParamDerefTarget(l) || this._isTypeParamBoxedTarget(l);
+	},
+
 	_isTypeParamDerefAssign(stmt) {
 		if (stmt.lhs.length !== 1 || stmt.rhs.length !== 1 || stmt.op !== "=")
 			return false;
-		const l = stmt.lhs[0];
-		return (
-			l.kind === "UnaryExpr" &&
-			l.op === "*" &&
-			l.operand?._type?.base?.kind === "typeParam"
-		);
+		return this._isTypeParamStoreTarget(stmt.lhs[0]);
 	},
 
 	_isTypeParamDerefTarget(l) {
@@ -604,14 +611,14 @@ export const statementGenMethods = {
 		);
 	},
 
-	// `*a, *b = *b, *a` with type-parameter pointers: `*p` is not a settable
-	// JS destructuring target, so evaluate the right-hand side into temporaries
-	// and assign each target on its own.
+	// `*a, *b = *b, *a` or `a, b = b, a` with type-parameter pointers or boxed
+	// type-parameter vars: not a settable JS destructuring target, so evaluate
+	// the right-hand side into temporaries and assign each target via `_storeInto`.
 	_hasTypeParamDerefTarget(stmt) {
 		return (
 			stmt.op === "=" &&
 			stmt.lhs.length > 1 &&
-			stmt.lhs.some((l) => this._isTypeParamDerefTarget(l))
+			stmt.lhs.some((l) => this._isTypeParamStoreTarget(l))
 		);
 	},
 
@@ -1609,7 +1616,7 @@ export const statementGenMethods = {
 			const t = stmt.init.lhs[i]?._type ?? stmt.init.rhs?.[i]?._type;
 			if (this._boxedVars?.has(name)) {
 				const v = this._boxedReadJs(name);
-				const copy = this._aggregateBase(t) ? this._cloneJs(t, v) : v;
+				const copy = this._copyValueJs(t, v);
 				clones.push(`${name} = ${this._boxInitJs(name, copy)}`);
 				continue;
 			}
@@ -2283,7 +2290,14 @@ export const statementGenMethods = {
 			this._boxedVars.has(stmt.lhs[0].name);
 		if (boxed)
 			return `let ${stmt.lhs[0].name} = ${this._boxInitJs(stmt.lhs[0].name, pre ? pre[0] : this.genValueExpr(stmt.rhs[0]))}`;
-		const rhs = pre ?? stmt.rhs.map((e) => this.genExpr(e));
+		const paired = stmt.rhs.length === stmt.lhs.length;
+		const rhs =
+			pre ??
+			stmt.rhs.map((e, i) =>
+				paired && stmt.lhs[i].name !== "_"
+					? this.genValueExpr(e)
+					: this.genExpr(e),
+			);
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		if (lhs.length === 1) return `let ${lhs[0]} = ${rhs[0]}`;
 		// `for i, j := 0, 10`: one declarator per variable.
@@ -2589,13 +2603,42 @@ export const statementGenMethods = {
 	},
 
 	// The value a single-type clause binds: the unboxed value of a named
-	// non-struct case, a copy of an array or struct case, else the boxed value.
+	// non-struct case, a copy of an array, struct or type-parameter case, else
+	// the boxed value.
 	_typeSwitchBinding(only) {
 		if (!only) return "__tsw";
 		const unboxed = this._assertedValueJs(only, "__tsw");
-		if (unboxed !== "__tsw") return unboxed;
-		const t = this._typeFromNode(only);
-		return this._aggregateBase(t) ? this._cloneJs(t, "__tsw") : "__tsw";
+		return this._copyValueJs(this._typeFromNode(only), unboxed);
+	},
+
+	_genTypeSwitchClause(stmt, clause, valueJs) {
+		if (!stmt.assign) {
+			for (const s of clause.stmts) this.genStmt(s);
+			return;
+		}
+		const name = stmt.assign;
+		const hadBoxed = this._boxedVars.has(name);
+		const hadTp = this._boxedTypeParams.has(name);
+		const prevTp = this._boxedTypeParams.get(name);
+		const caseBoxed = new Set();
+		const caseTp = new Map();
+		this._scanAddressTaken(clause.stmts, caseBoxed, caseTp);
+		const clauseBoxed = caseBoxed.has(name);
+		if (clauseBoxed) this._boxedVars.add(name);
+		else this._boxedVars.delete(name);
+		const tpName = caseTp.get(name);
+		if (clauseBoxed && tpName) this._boxedTypeParams.set(name, tpName);
+		else this._boxedTypeParams.delete(name);
+		try {
+			const init = clauseBoxed ? this._boxInitJs(name, valueJs) : valueJs;
+			this.line(`let ${name} = ${init};`);
+			for (const s of clause.stmts) this.genStmt(s);
+		} finally {
+			if (hadBoxed) this._boxedVars.add(name);
+			else this._boxedVars.delete(name);
+			if (hadTp) this._boxedTypeParams.set(name, prevTp);
+			else this._boxedTypeParams.delete(name);
+		}
 	},
 
 	genTypeSwitch(stmt) {
@@ -2605,12 +2648,6 @@ export const statementGenMethods = {
 			this.line(`const __tsw = ${val};`);
 			// The binding is declared per clause, after the switch expression
 			// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
-			const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
-			const bind = (valueJs) =>
-				this.line(
-					`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
-				);
-
 			let first = true;
 			let hasDefault = false;
 			for (const c of stmt.cases) {
@@ -2624,11 +2661,8 @@ export const statementGenMethods = {
 					.join(" || ");
 				this.line(`${first ? "if" : "else if"} (${cond}) {`);
 				this.indented(() => {
-					if (stmt.assign) {
-						const only = c.types.length === 1 ? c.types[0] : null;
-						bind(this._typeSwitchBinding(only));
-					}
-					for (const s of c.stmts) this.genStmt(s);
+					const only = c.types.length === 1 ? c.types[0] : null;
+					this._genTypeSwitchClause(stmt, c, this._typeSwitchBinding(only));
 				});
 				this.line("}");
 				first = false;
@@ -2636,8 +2670,7 @@ export const statementGenMethods = {
 			if (hasDefault) {
 				this.line(first ? "{" : "else {");
 				this.indented(() => {
-					if (stmt.assign) bind("__tsw");
-					for (const s of hasDefault.stmts) this.genStmt(s);
+					this._genTypeSwitchClause(stmt, hasDefault, "__tsw");
 				});
 				this.line("}");
 			}

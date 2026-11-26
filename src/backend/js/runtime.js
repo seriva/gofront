@@ -404,6 +404,7 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields, fre
 };
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
+  if (x.__v === true && Object.isExtensible(x)) delete x.__v;
   if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {
@@ -444,7 +445,7 @@ var __ifn = __ifn || function(x, C) {
 };
 var __pbs = __pbs || function(p) {
   var e = p !== null && typeof p === "object" ? p.value : undefined;
-  return e !== null && typeof e === "object" && e.value === e ? e : p;
+  return e !== null && typeof e === "object" && e.value === e ? __ifp(e) : p;
 };
 var __unnil = __unnil || function(x) {
   return x != null && x.__nilp === true ? null : x;

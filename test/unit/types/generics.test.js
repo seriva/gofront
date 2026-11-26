@@ -4644,6 +4644,290 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("assignments and type-switch bindings on address-taken type-parameter vars (G7 review)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type Nested struct{ Inner struct{ X int } }
+
+func reassign[T any](v, w T) *T {
+	p := &v
+	v = w
+	return p
+}
+
+func swap[T any](a, b T) (*T, *T) {
+	p, q := &a, &b
+	a, b = b, a
+	return p, q
+}
+
+func reassignBlank[T any](v, w T) *T {
+	p := &v
+	v, _ = w, 0
+	return p
+}
+
+func pairOf[T any](w T) (T, int) {
+	return w, 9
+}
+
+func reassignMultiRet[T any](v, w T) (*T, int) {
+	p := &v
+	var k int
+	v, k = pairOf(w)
+	return p, k
+}
+
+func reassignInForPost[T any](v, w T) *T {
+	p := &v
+	for i := 0; i < 1; v = w {
+		i++
+	}
+	return p
+}
+
+func reassignInClosure[T any](v, w T) *T {
+	p := &v
+	fn := func() { v = w }
+	fn()
+	return p
+}
+
+func reassignInForMultiInit[T any](a, b T) T {
+	for v, i := a, 0; i < 1; i++ {
+		p := &v
+		*p = b
+	}
+	return a
+}
+
+func typeSwitchAddr[T any](x any) *T {
+	switch v := x.(type) {
+	case T:
+		return &v
+	}
+	return nil
+}
+
+func typeSwitchMultiCaseAddr[T any](x any) any {
+	switch v := x.(type) {
+	case T:
+		p := &v
+		return *p
+	case int:
+		p := &v
+		return *p
+	case Box:
+		p := &v
+		return p.N
+	default:
+		p := &v
+		return *p
+	}
+}
+
+func typeSwitchPtrAsAny[T any](x any) any {
+	switch v := x.(type) {
+	case T:
+		return &v
+	}
+	return nil
+}
+
+func main() {
+	// Single, swap, blank, multi-return, for-post, closure reassign on anon struct
+	type AS = struct{ N int }
+	fmt.Println(reassign(AS{1}, AS{33}).N)
+	pa, pb := swap(AS{1}, AS{2})
+	fmt.Println(pa.N, pb.N)
+	fmt.Println(reassignBlank(AS{1}, AS{33}).N)
+	pm, km := reassignMultiRet(AS{1}, AS{44})
+	fmt.Println(pm.N, km)
+	fmt.Println(reassignInForPost(AS{1}, AS{55}).N)
+	fmt.Println(reassignInClosure(AS{1}, AS{66}).N)
+	aInit := AS{1}
+	fmt.Println(reassignInForMultiInit(aInit, AS{99}).N, aInit.N)
+
+	// Nested anonymous struct value independence after reassign
+	n1 := Nested{Inner: struct{ X int }{1}}
+	n2 := Nested{Inner: struct{ X int }{20}}
+	pn := reassign(n1, n2)
+	n2.Inner.X = 999
+	fmt.Println(pn.Inner.X)
+
+	// Non-struct controls for swap and blank reassign
+	pi1, pi2 := swap(10, 20)
+	fmt.Println(*pi1, *pi2, *reassignBlank(1, 33))
+	parr := reassign([2]int{1, 2}, [2]int{3, 4})
+	fmt.Println((*parr)[0], (*parr)[1])
+
+	// Type-switch binding &v for struct, anon struct, scalar, array
+	fmt.Println(typeSwitchAddr[Box](Box{77}).N)
+	fmt.Println(typeSwitchAddr[AS](AS{88}).N)
+	fmt.Println(*typeSwitchAddr[int](42))
+	tsa := typeSwitchAddr[[2]int]([2]int{5, 6})
+	fmt.Println((*tsa)[0], (*tsa)[1])
+
+	// Mutating returned *T from type switch does not mutate original interface value
+	orig := any(Box{10})
+	pOrig := typeSwitchAddr[Box](orig)
+	pOrig.N = 99
+	fmt.Println(orig.(Box).N, pOrig.N)
+
+	// Box vs *Box dynamic type when &v from case T enters any
+	ptrAny := typeSwitchPtrAsAny[Box](any(Box{7}))
+	_, isVal := ptrAny.(Box)
+	boxPtr, isPtr := ptrAny.(*Box)
+	fmt.Println(isVal, isPtr, boxPtr.N)
+
+	// Multi-case type switch with mixed clause types
+	fmt.Println(typeSwitchMultiCaseAddr[Box](Box{7}).(Box).N)
+	fmt.Println(typeSwitchMultiCaseAddr[Box](123).(int))
+	fmt.Println(typeSwitchMultiCaseAddr[Box]("hi").(string))
+	fmt.Println(typeSwitchMultiCaseAddr[int](55).(int))
+	fmt.Println(typeSwitchMultiCaseAddr[int](Box{8}).(int))
+}`;
+	const want =
+		"33\n" +
+		"2 1\n" +
+		"33\n" +
+		"44 9\n" +
+		"55\n" +
+		"66\n" +
+		"1 1\n" +
+		"20\n" +
+		"20 10 33\n" +
+		"3 4\n" +
+		"77\n" +
+		"88\n" +
+		"42\n" +
+		"5 6\n" +
+		"10 99\n" +
+		"false true 7\n" +
+		"7\n" +
+		"123\n" +
+		"hi\n" +
+		"55\n" +
+		"8\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("interface switch and equality with type-parameter operands box and track type-info (G6 review)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type P struct{ n int }
+type MyInt int
+type I interface{ Val() int }
+type CI interface {
+	comparable
+	I
+}
+
+func (p P) Val() int { return p.n }
+
+type Wrap[T comparable] struct{ V T }
+
+func (w Wrap[T]) EqAny(a any) bool    { return w.V == a }
+func (w Wrap[T]) EqAnyRev(a any) bool { return a == w.V }
+func (w Wrap[T]) MatchIn(a any) bool {
+	switch a {
+	case w.V:
+		return true
+	}
+	return false
+}
+
+func matchInAny[T comparable](target any, x T) bool {
+	switch target {
+	case x:
+		return true
+	}
+	return false
+}
+
+func matchInIface[T CI](target I, x T) bool {
+	switch target {
+	case x:
+		return true
+	}
+	return false
+}
+
+func eqAny[T comparable](x T, target any) bool {
+	return x == target
+}
+
+func eqAnyRev[T comparable](target any, x T) bool {
+	return target == x
+}
+
+func neqAny[T comparable](x T, target any) bool {
+	return x != target
+}
+
+func neqAnyRev[T comparable](target any, x T) bool {
+	return target != x
+}
+
+func eqIface[T CI](x T, target I) bool {
+	return x == target
+}
+
+func main() {
+	type AS = struct{ n int }
+	// Interface-tagged switch with typeParam case
+	fmt.Println(matchInAny(any(P{1}), P{1}), matchInAny(any(P{1}), P{2}))
+	fmt.Println(matchInAny(any(MyInt(1)), MyInt(1)), matchInAny(any(MyInt(1)), MyInt(2)), matchInAny(any(1), MyInt(1)))
+	fmt.Println(matchInAny(any([2]int{1, 2}), [2]int{1, 2}), matchInAny(any([2]int{1, 2}), [2]int{1, 3}))
+	fmt.Println(matchInAny(any(AS{1}), AS{1}), matchInAny(any(AS{1}), AS{2}))
+	fmt.Println(matchInAny[any](any(P{1}), P{1}), matchInAny[any](any(P{1}), P{2}))
+	fmt.Println(matchInIface(I(P{1}), P{1}), matchInIface(I(P{1}), P{2}))
+
+	// Binary == / != between typeParam and interface (both operand orders)
+	fmt.Println(eqAny(P{1}, any(P{1})), eqAny(P{1}, any(P{2})))
+	fmt.Println(eqAnyRev(any(P{1}), P{1}), eqAnyRev(any(P{1}), P{2}))
+	fmt.Println(neqAny(P{1}, any(P{1})), neqAny(P{1}, any(P{2})))
+	fmt.Println(neqAnyRev(any(P{1}), P{1}), neqAnyRev(any(P{1}), P{2}))
+	fmt.Println(eqAny(MyInt(1), any(MyInt(1))), eqAnyRev(any(MyInt(1)), MyInt(1)), eqAny(MyInt(1), any(1)))
+	fmt.Println(eqAny([2]int{1, 2}, any([2]int{1, 2})), eqAnyRev(any([2]int{1, 2}), [2]int{1, 3}))
+	fmt.Println(eqAny(AS{1}, any(AS{1})), eqAnyRev(any(AS{1}), AS{2}))
+	fmt.Println(eqAny[any](P{1}, any(P{1})), eqAnyRev[any](any(P{1}), P{2}))
+	fmt.Println(eqIface(P{1}, I(P{1})), eqIface(P{1}, I(P{2})))
+
+	// Typed nil pointer vs nil interface
+	var np *P
+	fmt.Println(eqAny(np, any((*P)(nil))), eqAny(np, any(nil)))
+
+	// Generic struct methods
+	w := Wrap[P]{V: P{7}}
+	fmt.Println(w.EqAny(any(P{7})), w.EqAnyRev(any(P{7})), w.MatchIn(any(P{7})), w.MatchIn(any(P{8})))
+}`;
+	const want =
+		"true false\n" +
+		"true false false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"false true\n" +
+		"false true\n" +
+		"true true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true true true false\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
