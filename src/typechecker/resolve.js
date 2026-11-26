@@ -1119,7 +1119,7 @@ export const resolveMethods = {
 			if (!instantiated.methods) instantiated.methods = new Map();
 		}
 		named.underlying = instantiated;
-		named.methods = instantiated.methods;
+		named.methods = instantiated.methods ?? new Map();
 		named._instMap = map;
 		this._syncInstanceMethods(generic, named);
 		return named;
@@ -1697,9 +1697,7 @@ export const resolveMethods = {
 	_withGenericMethods(t) {
 		const decl = this.types.get(t.name);
 		const generic = decl?._generic;
-		// Struct generics only: codegen has no receiver support for generic
-		// slice/map/func named types, so those keep the baseline diagnostics.
-		if (this.resolveType(decl?.underlying)?.kind !== "struct") return t;
+		if (this.resolveType(decl?.underlying)?.kind === "interface") return t;
 		if (!generic?.methods || generic.methods.size === 0) return t;
 		if (t.methods && generic.methods.size <= t.methods.size) return t;
 		const map = new Map();

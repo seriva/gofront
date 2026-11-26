@@ -1424,15 +1424,28 @@ export const expressionGenMethods = {
 		if (this._isStdlibFuncValue(expr)) return this._genStdlibFuncValue(expr);
 		if (expr._isMethodExpr) {
 			const namedExpr = this._namedMethodExprInfo(expr);
-			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
+			if (namedExpr) {
+				const t =
+					expr.expr?._type?.kind === "named"
+						? expr.expr._type
+						: this.checker?.types.get(expr.expr?.name);
+				const tz = this._namedTypeArgFactories(t);
+				if (tz.length > 0)
+					return `((...__a) => ${namedExpr.cls}.$${expr.field}(${tz.join(", ")}, ...__a))`;
+				return `${namedExpr.cls}.$${expr.field}`;
+			}
 			const rt = expr._methodExprRecv;
 			// `(*MyInt).M` for a pointer-receiver method of a named non-struct
 			// type: the static method takes the pointer, nil included.
 			if (rt?.kind === "pointer") {
 				const info = this._namedBoxInfo(rt.base);
 				const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
-				if (info?.methods.has(expr.field) && decl?.recvPointer)
+				if (info?.methods.has(expr.field) && decl?.recvPointer) {
+					const tz = this._namedTypeArgFactories(rt.base);
+					if (tz.length > 0)
+						return `((...__a) => ${info.cls}.$${expr.field}(${tz.join(", ")}, ...__a))`;
 					return `${info.cls}.$${expr.field}`;
+				}
 			}
 			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
 			if (protoCls) {
@@ -1598,11 +1611,38 @@ export const expressionGenMethods = {
 
 	// ── Named non-struct types with methods: raw values, static dispatch ──
 
+	// Type-info / zero-value factories for an instantiated generic named type.
+	_namedTypeArgFactories(type, withId = false) {
+		if (type?.kind !== "named" || !type.typeArgs?.length) return [];
+		const generic =
+			type._genericOf ?? this.checker?.types.get(type.name)?._generic;
+		if (!generic?.typeParams?.length) return [];
+		const tz = this._typeArgFactories(
+			generic.typeParams,
+			type.typeArgs,
+			this._genericTypeNeedsTypeInfo(this.checker?.types.get(type.name)) ||
+				type.typeArgs.some((t) => mentionsTypeParam(t)),
+		);
+		if (withId) {
+			const id = instanceId(type.typeArgs);
+			if (id !== null) tz.push(JSON.stringify(id));
+			else {
+				const runtimeId = this._runtimeInstanceId(type.typeArgs);
+				if (runtimeId) tz.push(runtimeId);
+			}
+		}
+		return tz;
+	},
+
 	// Boxes a raw named value (or *T) entering an interface so dynamic dispatch works.
 	_genNamedIfaceBox(js, type, isPtr) {
 		const info = this._namedBoxInfo(type);
 		if (!info) return js;
-		return isPtr ? `new ${info.cls}$Ptr(${js})` : `new ${info.cls}(${js})`;
+		const tz = this._namedTypeArgFactories(type, true);
+		const tzArg = tz.length > 0 ? `, [${tz.join(", ")}]` : "";
+		return isPtr
+			? `new ${info.cls}$Ptr(${js}${tzArg})`
+			: `new ${info.cls}(${js}${tzArg})`;
 	},
 
 	// Static target of `x.M` on a named non-struct type: its class and the
@@ -1638,7 +1678,9 @@ export const expressionGenMethods = {
 		const recv = target.byValue
 			? this._cloneJs(target.recvType, target.recv)
 			: target.recv;
-		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${recv})`;
+		const tz = this._namedTypeArgFactories(target.recvType);
+		const tzPrefix = tz.length > 0 ? `${tz.join(", ")}, ` : "";
+		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(${tzPrefix}__r, ...__a))(${recv})`;
 	},
 
 	_genAddressOfExpr(operand) {
@@ -1665,12 +1707,21 @@ export const expressionGenMethods = {
 		if (sel._isMethodExpr) {
 			const info = this._namedMethodExprInfo(sel);
 			if (!info) return undefined;
-			return `${info.cls}.$${sel.field}(${this._genCallArgs(expr)})`;
+			const t =
+				sel.expr?._type?.kind === "named"
+					? sel.expr._type
+					: this.checker?.types.get(sel.expr?.name);
+			const tz = this._namedTypeArgFactories(t);
+			const args = this._genCallArgs(expr);
+			const allArgs = [...tz, ...(args ? [args] : [])].join(", ");
+			return `${info.cls}.$${sel.field}(${allArgs})`;
 		}
 		const target = this._namedMethodTarget(sel);
 		if (!target) return undefined;
+		const tz = this._namedTypeArgFactories(target.recvType);
 		const args = this._genCallArgs(expr);
-		return `${target.cls}.$${sel.field}(${args ? `${target.recv}, ${args}` : target.recv})`;
+		const allArgs = [...tz, target.recv, ...(args ? [args] : [])].join(", ");
+		return `${target.cls}.$${sel.field}(${allArgs})`;
 	},
 
 	// `F[int]` as a value is a function that passes F its zero-value factories.
@@ -2167,14 +2218,9 @@ export const expressionGenMethods = {
 	},
 
 	_isNamedBoxTypeNode(typeNode) {
-		if (typeNode?.kind === "TypeName")
-			return Boolean(
-				this._namedBoxInfo(this.checker?.types.get(typeNode.name)),
-			);
-		if (typeNode?.kind === "PointerType" && typeNode.base?.kind === "TypeName")
-			return Boolean(
-				this._namedBoxInfo(this.checker?.types.get(typeNode.base.name)),
-			);
+		const base = typeNode?.kind === "PointerType" ? typeNode.base : typeNode;
+		if (base?.kind === "TypeName" || base?.kind === "GenericTypeName")
+			return Boolean(this._namedBoxInfo(this.checker?.types.get(base.name)));
 		return false;
 	},
 
@@ -3497,12 +3543,18 @@ export const expressionGenMethods = {
 		const base = isPtr ? typeNode.base : typeNode;
 		if (base?.kind !== "GenericTypeName" || !base._typeArgs) return null;
 		const cls = this._dequalify(base.name);
-		if (!this.structNames.has(cls)) return null;
+		const isStruct = this.structNames.has(cls);
+		const namedInfo = !isStruct
+			? this._namedBoxInfo(this.checker?.types.get(base.name))
+			: null;
+		if (!isStruct && !namedInfo) return null;
 		const generic = this.checker?.types.get(base.name)?._generic;
 		const id = instanceId(base._typeArgs);
-		let check = isPtr
-			? `${val} instanceof ${jsClassName(cls)} && ${val}.__v !== true`
-			: `${val} instanceof ${jsClassName(cls)} && ${val}.__p !== true`;
+		let check = isStruct
+			? isPtr
+				? `${val} instanceof ${jsClassName(cls)} && ${val}.__v !== true`
+				: `${val} instanceof ${jsClassName(cls)} && ${val}.__p !== true`
+			: `${val} instanceof ${isPtr ? `${namedInfo.cls}$Ptr` : namedInfo.cls}`;
 		if (id !== null && generic) {
 			this.useHelper("generics");
 			const at = generic.typeParams.length;

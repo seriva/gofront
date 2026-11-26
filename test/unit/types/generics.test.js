@@ -649,55 +649,91 @@ func showG[T Lener](l T) { fmt.Println(l.Len()) }
 	});
 });
 
-test("methods on generic non-struct named types keep baseline errors", () => {
-	const cases = [
-		{
-			decls: `type List[T any] []T
+test("methods on generic non-struct named types compile and run on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type List[T any] []T
 func (l List[T]) Len() int { return len(l) }
 func MkList[T any](x T) List[T] { return List[T]{x} }
-type L interface{ Len() int }`,
-			bodies: [
-				["fmt.Println(List[int]{1, 2}.Len())", "has no field or method 'Len'"],
-				["fmt.Println(MkList(1).Len())", "has no field or method 'Len'"],
-				["var x L = MkList(1); fmt.Println(x.Len())", "does not implement L"],
-			],
-		},
-		{
-			decls: `type Set[T comparable] map[T]struct{}
+type L interface{ Len() int }
+
+type Set[T comparable] map[T]struct{}
 func (s Set[T]) Has(x T) bool { _, ok := s[x]; return ok }
 func MkSet[T comparable](x T) Set[T] { return Set[T]{x: {}} }
-type H interface{ Has(x int) bool }`,
-			bodies: [
-				["fmt.Println(Set[int]{1: {}}.Has(1))", "has no field or method 'Has'"],
-				["fmt.Println(MkSet(1).Has(1))", "has no field or method 'Has'"],
-				["var x H = MkSet(1); fmt.Println(x.Has(1))", "does not implement H"],
-			],
-		},
-		{
-			decls: `type Fn[T any] func(T) T
+type H interface{ Has(x int) bool }
+
+type Fn[T any] func(T) T
 func (f Fn[T]) Apply(x T) T { return f(x) }
 func MkFn[T any](f func(T) T) Fn[T] { return Fn[T](f) }
-type A interface{ Apply(x int) int }`,
-			bodies: [
-				[
-					"fmt.Println(MkFn(func(x int) int { return x }).Apply(1))",
-					"has no field or method 'Apply'",
-				],
-				[
-					"var x A = MkFn(func(x int) int { return x }); fmt.Println(x.Apply(1))",
-					"does not implement A",
-				],
-			],
-		},
-	];
-	for (const { decls, bodies } of cases) {
-		for (const [body, msg] of bodies) {
-			const { errors } = compile(
-				`package main\nimport "fmt"\n${decls}\nfunc main() { ${body} }`,
-			);
-			assertErrorContains(errors, msg);
-		}
-	}
+type A interface{ Apply(x int) int }
+
+func main() {
+	var x L = MkList(1)
+	var y H = MkSet(1)
+	var z A = MkFn(func(v int) int { return v + 1 })
+	fmt.Println(List[int]{1, 2}.Len(), MkList(1).Len(), x.Len())
+	fmt.Println(Set[int]{1: {}}.Has(1), MkSet(1).Has(1), y.Has(1))
+	fmt.Println(MkFn(func(v int) int { return v * 2 }).Apply(3), z.Apply(3))
+}`,
+		"2 1 1\ntrue true true\n6 4\n",
+	);
+});
+
+test("generic non-struct methods: slice, map, array, basic, pointer receiver, interface, and zero T (G1.1-G1.3)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type W[T any] []T
+func (w W[T]) Len() int { return len(w) }
+func (w *W[T]) Push(v T) { *w = append(*w, v) }
+
+type M[K comparable, V any] map[K]V
+func (m M[K, V]) Has(k K) bool { _, ok := m[k]; return ok }
+
+type Arr[T any] [2]T
+func (a Arr[T]) First() T { return a[0] }
+
+type B[T any] int
+func (b B[T]) Z() T { var z T; return z }
+
+type L interface{ Len() int }
+type P interface{ Push(v int) }
+
+func main() {
+	w := W[int]{1, 2, 3}
+	fmt.Println(w.Len())
+	w.Push(4)
+	fmt.Println(w.Len())
+
+	m := M[string, int]{"a": 1}
+	fmt.Println(m.Has("a"), m.Has("b"))
+
+	arr := Arr[string]{"hi", "lo"}
+	fmt.Println(arr.First())
+
+	fmt.Printf("%q\\n", B[string](1).Z())
+
+	var l L = W[int]{1, 2}
+	fmt.Println(l.Len(), l.(W[int]).Len())
+
+	var p P = &w
+	p.Push(5)
+	fmt.Println(w.Len())
+}`,
+		`3
+4
+true false
+hi
+""
+2 2
+5
+`,
+	);
 });
 
 test("== on a type parameter compares struct and array arguments by value", () => {

@@ -145,7 +145,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
 
 ### Phase 1: Generic & Alias Method Dispatch (roots `generic-nonstruct-method-drop`, `method-expr-iface-typeparam`, `alias-receiver-uncanonicalized`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Instantiate methods on generic non-struct types and preserve `_ptrRecv` and JS type-info (G1.1–G1.3)
+- [x] Task 1.1: Instantiate methods on generic non-struct types and preserve `_ptrRecv` and JS type-info (G1.1–G1.3)
   - Files: `src/typechecker/resolve.js` (`instantiateGenericWithArgs`, `_syncInstanceMethods`), `src/backend/js/index.js` (`genMethod` `tpNames`; `_namedBoxInfo` only if a test needs it), `src/backend/js/expressions.js` (type-info args at generic non-struct method call sites)
   - Test: `test/unit/types/generics.test.js`: G1.1 (`W[int]{1, 2, 3}.Len()`), G1.2 (generic map/array/basic types, pointer receiver `Push`), G1.3 (`B[string](1).Z()` → `""`; `W[int]` through an interface, `l.(W[int])`) via `assertAllTargetsOutput`
   - Done when: methods on generic non-struct defined types compile and run on all targets, and `var z T` inside them is `T`'s zero value on JS
