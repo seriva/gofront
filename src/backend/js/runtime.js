@@ -3,6 +3,7 @@
 // multiple compiled files bundled together can safely repeat the declaration.
 
 export const HELPER_LEN = `var __len = __len || function(a) {
+  if (a && typeof a === 'object' && !a.__map && !a.__nm && 'value' in a && (Array.isArray(a.value) || ArrayBuffer.isView(a.value))) a = a.value;
   if (a && typeof a === 'object' && !Array.isArray(a) && !ArrayBuffer.isView(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };`;
@@ -151,6 +152,7 @@ var __mkview = __mkview || function(b, o, n, c, f) {
 };
 var __cap = __cap || function(a) {
   if (a == null) return 0;
+  if (typeof a === "object" && "value" in a && (Array.isArray(a.value) || ArrayBuffer.isView(a.value))) a = a.value;
   const s = a[__sv];
   if (s !== undefined) return s.c;
   if (ArrayBuffer.isView(a)) return __tcap.get(a) ?? a.length;
@@ -685,10 +687,19 @@ var __tbox = __tbox || function(f, x) {
   }
   return x;
 };
-var __ti = __ti || function(f, k, id, is, u, b, fb, nm) {
+var __ti = __ti || function(f, k, id, is, u, b, fb, nm, ez) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm; g.ez = ez;
   return g;
+};
+var __clear = __clear || function(v, ez) {
+  if (v == null) return;
+  if (v instanceof Map) { v.clear(); return; }
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = ez ? ez() : 0;
+    return;
+  }
+  for (const k in v) delete v[k];
 };
 var __tar = __tar || function(f, op, a, b) {
   const k = f?.k;

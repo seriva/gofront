@@ -151,6 +151,12 @@ export const typeInfoGenMethods = {
 
 	_callUsesTypeInfo(call, names) {
 		if (this._isTypeParamMethodCall(call, names)) return true;
+		if (
+			call._builtinName === "clear" &&
+			call.args[0]?._type?.kind === "typeParam" &&
+			names.has(call.args[0]._type.name)
+		)
+			return true;
 		// A conversion to a generic instance such as `W[T](s)` tags the result
 		// with its instantiation, as a composite literal does.
 		if (call._isTypeConversion) {
@@ -214,16 +220,18 @@ export const typeInfoGenMethods = {
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t) ?? this._ptrMethodBox(t);
 		const fmtBox = this._fmtBoxFor(t);
-		const tail = this._typeInfoTail(t, box, fmtBox);
+		const ez = u?.kind === "slice" ? this.zeroFactoryFor(u.elem) : null;
+		const tail = this._typeInfoTail(t, box, fmtBox, ez);
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
-	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`).  `typeStr`
+	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`, `ez`).  `typeStr`
 	// drops the `...` of a variadic func type, so a func type also carries its
 	// spelled name (see `__tnm`).
-	_typeInfoTail(t, box, fmtBox) {
+	_typeInfoTail(t, box, fmtBox, ez) {
 		if (t.kind === "func")
 			return `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${JSON.stringify(this._dynTypeName(t))}`;
+		if (ez) return `, ${box ?? "null"}, ${fmtBox ?? "null"}, null, ${ez}`;
 		if (fmtBox) return `, ${box ?? "null"}, ${fmtBox}`;
 		return box ? `, ${box}` : "";
 	},

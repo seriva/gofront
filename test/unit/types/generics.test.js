@@ -4017,6 +4017,101 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("G4.1–G4.1b: generic clear on map, slice, struct slice, string slice, union, and nil", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyMap map[string]int
+type MyIntSlice []int
+type MyStruct struct{ a int }
+type MyStructSlice []MyStruct
+type MyStrSlice []string
+
+func clearMap[M ~map[string]int](m M) int {
+	clear(m)
+	return len(m)
+}
+
+func clearSlice[S ~[]int](s S) S {
+	clear(s)
+	return s
+}
+
+func clearStructSlice[S ~[]MyStruct](s S) S {
+	clear(s)
+	s[0].a = 5
+	return s
+}
+
+func clearStrSlice[S ~[]string](s S) S {
+	clear(s)
+	return s
+}
+
+func clearUnion[T ~map[string]int | ~[]int](x T) T {
+	clear(x)
+	return x
+}
+
+func main() {
+	m := MyMap{"a": 1, "b": 2}
+	fmt.Println(clearMap(m))
+
+	s := MyIntSlice{10, 20}
+	fmt.Println(clearSlice(s))
+
+	ss := MyStructSlice{{a: 1}, {a: 2}}
+	fmt.Println(clearStructSlice(ss))
+
+	strs := MyStrSlice{"x", "y"}
+	fmt.Printf("%q\\n", clearStrSlice(strs))
+
+	um := map[string]int{"k": 9}
+	us := []int{7, 8}
+	fmt.Println(len(clearUnion(um)), clearUnion(us))
+
+	var nilM MyMap
+	var nilS MyIntSlice
+	fmt.Println(clearMap(nilM), len(clearSlice(nilS)))
+}`;
+	const want = '0\n[0 0]\n[{5} {0}]\n["" ""]\n0 [0 0]\n0 0\n';
+	await assertAllTargetsOutput(src, want);
+});
+
+test("G4.2: generic len and cap on slice, array, and array-pointer unions", async () => {
+	const src = `package main
+
+import "fmt"
+
+func getLen[T ~[]int | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getCap[T ~[3]int | ~*[3]int](v T) int {
+	return cap(v)
+}
+
+func getLenArr[T ~[3]int | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getCapSlice[T ~[]int | ~*[3]int](v T) int {
+	return cap(v)
+}
+
+func main() {
+	a := [3]int{1, 2, 3}
+	s := []int{10, 20, 30, 40}
+	fmt.Println(getLen(&a), getLen(s))
+	fmt.Println(getCap(a), getCap(&a))
+	fmt.Println(getLenArr(a), getLenArr(&a))
+	fmt.Println(getCapSlice(&a), getCapSlice(s[:2]))
+}`;
+	const want = "3 4\n3 3\n3 3\n3 4\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

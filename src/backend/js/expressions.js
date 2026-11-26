@@ -2705,6 +2705,11 @@ export const expressionGenMethods = {
 		const arg = expr.args[0];
 		const t = arg?._type;
 		const js = this.genExpr(arg);
+		if (t?.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.name);
+			this.useHelper("generics");
+			return `__clear(${js}, ${f}?.ez)`;
+		}
 		if (
 			t?.kind === "map" ||
 			(t?.kind === "named" && t.underlying?.kind === "map")
