@@ -492,6 +492,138 @@ func main() {
 	);
 });
 
+section("Range over 64-bit integers (J5.2)");
+
+test("range over int64, uint64, defined int64 and generic ~int64 counts", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyInt64 int64
+
+func findThree[T ~int64](limit T) T {
+	var hit T = -1
+	for i := range limit {
+		if i == 3 {
+			hit = i
+		}
+	}
+	return hit
+}
+
+func main() {
+	var a int64 = -1
+	for i := range int64(5) {
+		if i == 3 {
+			a = i
+		}
+	}
+
+	var b uint64 = 99
+	for i := range uint64(5) {
+		if i == 3 {
+			b = i
+		}
+	}
+
+	var n int64 = 4
+	var c int64 = -1
+	for i := range n {
+		if i == 2 {
+			c = i
+		}
+	}
+
+	d := findThree(int64(5))
+
+	var m MyInt64 = 4
+	var e MyInt64 = -1
+	for i := range m {
+		if i == 2 {
+			e = i
+		}
+	}
+
+	// Capture, assign to existing var, and zero-var forms
+	var fs []func() int64
+	for i := range int64(3) {
+		fs = append(fs, func() int64 { return i })
+	}
+	var assigned int64
+	for assigned = range int64(4) {
+	}
+	zeroVar := 0
+	for range int64(3) {
+		zeroVar++
+	}
+
+	fmt.Println(a, b, c, d, e)
+	fmt.Println(fs[0](), fs[1](), fs[2](), assigned, zeroVar)
+}
+`,
+		"3 3 2 3 2\n0 1 2 3 3\n",
+	);
+});
+
+test("range expressions evaluate once and ignore loop-body mutation or shadowing", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	calls64 := 0
+	getN64 := func() int64 { calls64++; return 4 }
+	for i := range getN64() {
+		_ = i
+	}
+
+	callsInt := 0
+	getN := func() int { callsInt++; return 4 }
+	for i := range getN() {
+		_ = i
+	}
+
+	bareCalls := 0
+	getBare := func() int64 { bareCalls++; return 4 }
+	for range getBare() {
+	}
+
+	sliceCalls := 0
+	getSlice := func() []int { sliceCalls++; return []int{10, 20, 30} }
+	sliceCount := 0
+	for range getSlice() {
+		sliceCount++
+	}
+
+	mapCalls := 0
+	getMap := func() map[string]int { mapCalls++; return map[string]int{"a": 1, "b": 2} }
+	mapCount := 0
+	for range getMap() {
+		mapCount++
+	}
+
+	n := 3
+	mutSum := 0
+	for i := range n {
+		n = 10
+		mutSum += i + 1
+	}
+
+	shadow := 3
+	shadowSum := 0
+	for shadow := range shadow {
+		shadowSum += shadow
+	}
+
+	fmt.Println(calls64, callsInt, bareCalls, sliceCalls, sliceCount, mapCalls, mapCount, mutSum, shadowSum)
+}
+`,
+		"1 1 1 1 3 1 2 6 3\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

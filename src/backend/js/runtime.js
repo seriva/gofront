@@ -502,8 +502,12 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
-var __tfn = __tfn || function(f, t) {
+var __tfn = __tfn || function(f, t, iface) {
   // A defined func type tags a fresh wrapper, so the shared func keeps its own type.
+  if (f == null) {
+    if (!iface) return f;
+    return Object.defineProperties({}, { __nilf: { value: true }, __nilp: { value: true }, __t: { value: t } });
+  }
   if (typeof f !== "function" || f.__t === t) return f;
   const w = function(...a) { return f.apply(this, a); };
   Object.defineProperty(w, "__t", { value: t, configurable: true, writable: true });
@@ -511,19 +515,20 @@ var __tfn = __tfn || function(f, t) {
 };
 var __tnm = __tnm || function(f) {
   // The type name of a type argument's info factory, spelled as a static tag.
-  const id = f?.nm ?? f?.id;
-  return typeof id === "string" ? id.replace(/ void\\b/g, "").replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
+  return f?.nm ?? f?.id;
 };
-var __ity = __ity || function(x, t, ptr, sl) {
+var __ity = __ity || function(x, t, ptr, sl, fn) {
   if (t === undefined) return x;
   // The frozen nil map cannot carry a tag: a copy of it keeps its map type.
   if (x !== null && x !== undefined && x.__nilm === true && x.__t === undefined)
     return Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true }, __t: { value: t } }));
   if (x === null || x === undefined) {
-    // A nil slice keeps its type as an empty tagged array (not a nil interface).
-    if (!ptr && !sl && t.charCodeAt(0) !== 91) return x;
-    const n = ptr ? {} : [];
-    if (!ptr) Object.defineProperty(n, "__nils", { value: true });
+    // A nil slice, pointer, or func keeps its type as a tagged sentinel (not a nil interface).
+    const isFunc = fn || t.startsWith("func(");
+    if (!ptr && !sl && !isFunc && t.charCodeAt(0) !== 91) return x;
+    const n = ptr || isFunc ? {} : [];
+    if (isFunc) Object.defineProperty(n, "__nilf", { value: true });
+    else if (!ptr) Object.defineProperty(n, "__nils", { value: true });
     Object.defineProperty(n, "__nilp", { value: true });
     Object.defineProperty(n, "__t", { value: t });
     return n;
@@ -536,8 +541,8 @@ var __ity = __ity || function(x, t, ptr, sl) {
 };
 var __isty = __isty || function(v, t, k, c, n) {
   if (v === null || v === undefined || (typeof v !== "object" && typeof v !== "function")) return false;
-  if (k === "namedfunc") return typeof v === "function" && v.__t === t;
-  if (k === "func") return typeof v === "function" && (v.__t === undefined || t === "" || v.__t === t);
+  if (k === "namedfunc") return (typeof v === "function" || v.__nilf === true) && v.__t === t;
+  if (k === "func") return (typeof v === "function" || v.__nilf === true) && (v.__t === undefined || t === "" || v.__t === t);
   if (v.__t !== undefined && t !== "") return v.__t === t;
   if (v.__nilp === true) return false;
   if (k === "named" || k === "struct") return false;
@@ -636,6 +641,25 @@ var __shr64 = __shr64 || function(x, n, u) {
   }
   if (b >= 64n) return u || x >= 0 ? 0 : -1;
   return Math.floor(x / 2 ** Number(b));
+};`;
+
+export const HELPER_BIT64 = `var __bit64 = __bit64 || function(op, a, b, u) {
+  if ((a | 0) === a && (b | 0) === b && (!u || (a >= 0 && b >= 0))) {
+    switch (op) {
+      case "&": return a & b;
+      case "|": return a | b;
+      case "^": return a ^ b;
+      default: return a & ~b;
+    }
+  }
+  var ba = BigInt(Math.trunc(a)), bb = BigInt(Math.trunc(b)), r;
+  switch (op) {
+    case "&": r = ba & bb; break;
+    case "|": r = ba | bb; break;
+    case "^": r = ba ^ bb; break;
+    default: r = ba & ~bb;
+  }
+  return Number(u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r));
 };`;
 
 export const HELPER_TO64 = `var __to_i64 = __to_i64 || function(v) {
@@ -747,6 +771,7 @@ var __tar = __tar || function(f, op, a, b) {
     case "uint8": case "byte": bits = 8; signed = false; break;
     case "uint16": bits = 16; signed = false; break;
     case "uint32": bits = 32; signed = false; break;
+    case "uint": case "uintptr": signed = false; break;
   }
   const w = bits === 0 ? (v) => v
     : bits === 32 ? (signed ? (v) => v | 0 : (v) => v >>> 0)
@@ -759,14 +784,14 @@ var __tar = __tar || function(f, op, a, b) {
     case "*": return k === "float32" ? Math.fround(a * b) : bits === 0 ? a * b : w(Math.imul(a, b));
     case "/": return int ? (b === 0 ? dz() : w(Math.trunc(a / b))) : k === "float32" ? Math.fround(a / b) : a / b;
     case "%": return int && b === 0 ? dz() : w(a % b);
-    case "&": return bits === 0 ? a & b : w(a & b);
-    case "|": return bits === 0 ? a | b : w(a | b);
-    case "^": return bits === 0 ? a ^ b : w(a ^ b);
-    case "&^": return bits === 0 ? a & ~b : w(a & ~b);
+    case "&": return bits === 0 ? __bit64(op, a, b, !signed) : w(a & b);
+    case "|": return bits === 0 ? __bit64(op, a, b, !signed) : w(a | b);
+    case "^": return bits === 0 ? __bit64(op, a, b, !signed) : w(a ^ b);
+    case "&^": return bits === 0 ? __bit64(op, a, b, !signed) : w(a & ~b);
   }
   b = Number(b);
   if (b < 0) ns();
-  if (bits === 0) return op === "<<" ? a << b : a >> b;
+  if (bits === 0) return op === "<<" ? __shl64(a, b, !signed) : __shr64(a, b, !signed);
   if (b >= bits) return op === ">>" && signed && a < 0 ? -1 : 0;
   return op === "<<" ? w(a << b) : signed ? a >> b : a >>> b;
 };

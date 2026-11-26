@@ -155,6 +155,12 @@ export function bodyRedeclares(body, names) {
 // Whether `for i := range n` can be emitted as a plain `for (let i = 0; …)` without hidden registers.
 export function isSimpleIntRange(stmt, name, isAssign, boxedVars = new Set()) {
 	if (isAssign) return false;
+	const rangeExpr = stmt.init?.rhs?.[0]?.expr;
+	if (rangeExpr?.kind !== "IntLit") return false;
 	if (!name || name === "_") return true;
-	return !boxedVars.has(name) && !nodeAssigns(stmt.body, name);
+	return (
+		!boxedVars.has(name) &&
+		!nodeAssigns(stmt.body, name) &&
+		!bodyRedeclares(stmt.body, [name])
+	);
 }

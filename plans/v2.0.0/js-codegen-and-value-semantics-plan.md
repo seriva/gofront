@@ -186,15 +186,15 @@ Roots:
   - Done when: slices of struct array fields see updates written through any whole-struct pointer store on all targets
 
 ### Phase 4: JS Nil-`any` Assertions, 64-Bit Range Counters & Wide-Int Bitwise Ops (roots `js-empty-iface-nil-assert`, `js-int64-range-counter`, `js-wide-int-bitwise`)
-- [ ] Task 4.1: Reject `nil` on concrete and generic `any` / `interface{}` assertions in JS (J5.1)
+- [x] Task 4.1: Reject `nil` on concrete and generic `any` / `interface{}` assertions in JS (J5.1)
   - Files: `src/backend/js/expressions.js` (`_typeNameCheckExpr`), `src/backend/js/type-info.js` (`_typeCheckForType`)
   - Test: `test/unit/language/interfaces.test.js`: J5.1 rows and controls (comma-ok and single-value `n.(any)`, `f[interface{}](n)`, `f[any](n)` on `nil` and non-nil values) with `assertAllTargetsOutput`
   - Done when: JS empty-interface assertions match Go/WASM on both `nil` and non-nil interfaces
-- [ ] Task 4.2: Use `0n` counters for JS `int64`/`uint64` range loops (J5.2)
+- [x] Task 4.2: Use `0n` counters for JS `int64`/`uint64` range loops (J5.2)
   - Files: `src/backend/js/statements.js` (`_genIntRangeFor`)
   - Test: `test/unit/language/range-iter.test.js`: J5.2 (`range int64(5)`, `range uint64(5)`, `range n` with `n int64`, and a generic `range` over a `T ~int64` count) with `assertAllTargetsOutput`
   - Done when: 64-bit integer range counters compare and print like Go on `js`, `both`, and `wasm`
-- [ ] Task 4.3: 64-bit shifts and bitwise operators for Number-backed `int`/`uint`/`uintptr` in JS (J5.3)
+- [x] Task 4.3: 64-bit shifts and bitwise operators for Number-backed `int`/`uint`/`uintptr` in JS (J5.3)
   - Files: `src/backend/js/expressions.js` (`_needsStrictOp`, `_genBinaryExpr`, `_genStrictBinary`, unary `^`), `src/backend/js/statements.js` (`_needsStrictCompoundStmt`), `src/backend/js/runtime.js` (`__bit64`, `__tar`)
   - Test: `test/unit/language/operators.test.js`: every J5.3 row (shift, bitwise, compound, generic, and the coincidence controls), plus `int8`/`uint32` wraparound controls, with `assertAllTargetsOutput`
   - Done when: `<<`, `>>`, `&`, `|`, `^`, `&^`, unary `^` and their `op=` forms on `int`/`uint`/`uintptr` match Go on `js`, `both`, and `wasm`

@@ -127,12 +127,15 @@ function receiverPrefix(stmts, name, safe) {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
-// True for a map, slice or array type that mentions a type parameter: one
-// that generic code boxes into an interface is tagged by its instantiated
+// True for a map, slice, array or func type that mentions a type parameter:
+// one that generic code boxes into an interface is tagged by its instantiated
 // type.
 export function isGenericComposite(t) {
 	return (
-		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		(t?.kind === "map" ||
+			t?.kind === "slice" ||
+			t?.kind === "array" ||
+			t?.kind === "func") &&
 		mentionsTypeParam(t)
 	);
 }
@@ -211,8 +214,9 @@ const SIGNED_NEG_WRAP = {
 	rune: "| 0",
 };
 
-// Integer types whose JS shifts must follow Go's 64-bit semantics.
-const WIDE_INT_NAMES = new Set(["int", "int64", "uint", "uint64", "uintptr"]);
+// Number-backed wide integer types whose shifts and bitwise ops follow 64-bit semantics.
+const WIDE_NUMBER_NAMES = new Set(["int", "uint", "uintptr"]);
+const WIDE_BIT_OPS = new Set(["<<", ">>", "&", "|", "^", "&^"]);
 
 const STRICT_OPS = new Set([
 	"+",
@@ -723,20 +727,8 @@ export const expressionGenMethods = {
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
-		if (
-			expr._ifaceSrc &&
-			!expr._tfnTagging &&
-			this._isTaggedFuncType(expr._ifaceSrc)
-		) {
-			// A value of a defined func type keeps that type in an interface.
-			expr._tfnTagging = true;
-			try {
-				this.useHelper("ifaceBox");
-				return `__tfn(${this.genExpr(expr)}, ${JSON.stringify(expr._ifaceSrc.name)})`;
-			} finally {
-				expr._tfnTagging = false;
-			}
-		}
+		const taggedFn = this._genIfaceTaggedFuncExpr(expr);
+		if (taggedFn) return taggedFn;
 		if (isGenericComposite(expr._ifaceSrc) && !expr._gmapTagging) {
 			const tag = this._genericMapTag(expr._ifaceSrc);
 			if (tag) {
@@ -977,6 +969,20 @@ export const expressionGenMethods = {
 		return (
 			this._isNamedBoxKind(expr) && !expr._ifaceBoxing && !expr._noNamedBox
 		);
+	},
+
+	_genIfaceTaggedFuncExpr(expr) {
+		if (!expr._ifaceSrc || expr._tfnTagging) return null;
+		const fnTag = this._taggedFuncTagExpr(expr._ifaceSrc);
+		if (!fnTag) return null;
+		// A value of a defined func type keeps that type in an interface.
+		expr._tfnTagging = true;
+		try {
+			this.useHelper("ifaceBox");
+			return `__tfn(${this.genExpr(expr)}, ${fnTag}, true)`;
+		} finally {
+			expr._tfnTagging = false;
+		}
 	},
 
 	_genNamedIfaceBoxExpr(expr) {
@@ -1398,6 +1404,10 @@ export const expressionGenMethods = {
 				: "BigInt.asIntN";
 			if (op === "-" || op === "~") return `${wrap}(64, ${op}(${operandCode}))`;
 		}
+		if (op === "~") {
+			const not = this._genUnaryBitNot(expr, code);
+			if (not) return not;
+		}
 		const wrap = this.strict
 			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
 			: null;
@@ -1412,6 +1422,22 @@ export const expressionGenMethods = {
 			this._emittedBinaryOp(expr.operand) !== null ||
 			((op === "-" || op === "+") && /^[-+]/.test(code));
 		return needsParens ? `${op}(${code})` : `${op}${code}`;
+	},
+
+	_genUnaryBitNot(expr, code) {
+		if (expr._type?.kind === "typeParam") {
+			const factory = this._typeParamZeroFactory(expr._type.name);
+			if (!factory) return null;
+			this.useHelper("generics");
+			return `__tar(${factory}, "^", ${code}, -1)`;
+		}
+		const tName = this._typeName(expr._type);
+		if (tName === "int") return `(-(${code}) - 1)`;
+		if (tName === "uint" || tName === "uintptr") {
+			this.useHelper("bit64");
+			return `__bit64("^", ${code}, -1, true)`;
+		}
+		return null;
 	},
 
 	_genSelectorExpr(expr) {
@@ -2044,6 +2070,7 @@ export const expressionGenMethods = {
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
+		if (name === "any") return `(${val} != null)`;
 		const simd = this._simdCheckExpr(name, val);
 		if (simd) return simd;
 		if (name === "error")
@@ -2053,16 +2080,24 @@ export const expressionGenMethods = {
 		const named = this.checker?.types.get(name);
 		const namedInfo = this._namedBoxInfo(named);
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
-		// User-declared interfaces: check the dynamic value has every method.
-		if (named?.underlying?.kind === "interface")
+		// User-declared interfaces (and aliases to any/interfaces): check the
+		// dynamic value is non-nil and has every method.
+		const under = this._underlyingOf(named);
+		if (isAny(under)) return `(${val} != null)`;
+		if (under?.kind === "interface" && name !== "error")
 			return this._ifaceMethodCheck(
 				val,
-				[...named.underlying.methods.keys()],
-				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
+				[...(under.methods?.keys() ?? [])],
+				this._unwrapIsMulti(under.methods?.get("Unwrap")),
 			);
-		if (this._isTaggedFuncType(named)) {
+		const fnTag = this._taggedFuncTagExpr(named);
+		if (fnTag) {
 			this.useHelper("ifaceBox");
-			return `__isty(${val}, ${JSON.stringify(name)}, "namedfunc")`;
+			return `__isty(${val}, ${fnTag}, "namedfunc")`;
+		}
+		if (named?.kind === "func") {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName(named))}, "func")`;
 		}
 		if (this._isNamedComposite(named)) {
 			this.useHelper("ifaceBox");
@@ -2078,16 +2113,26 @@ export const expressionGenMethods = {
 		return "true"; // unknown type — can't check at runtime
 	},
 
+	_ifaceLiteralCheckExpr(typeNode, val) {
+		const own = this._ifaceMethodCheck(
+			val,
+			(typeNode.methods ?? []).map((m) => m.name),
+			this._unwrapIsMulti(
+				(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
+			),
+		);
+		if (!typeNode.embeds?.length) return own;
+		const checks = [
+			own,
+			...typeNode.embeds.map((e) => this._typeCheckExpr(e, val)),
+		].filter((c) => c !== "true");
+		return `(${checks.join(" && ")})`;
+	},
+
 	// Anonymous interfaces and pointers to named non-struct types; null otherwise.
 	_namedOrIfaceCheckExpr(typeNode, val) {
-		if (typeNode.kind === "InterfaceType" && !(typeNode.embeds?.length > 0))
-			return this._ifaceMethodCheck(
-				val,
-				(typeNode.methods ?? []).map((m) => m.name),
-				this._unwrapIsMulti(
-					(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
-				),
-			);
+		if (typeNode.kind === "InterfaceType")
+			return this._ifaceLiteralCheckExpr(typeNode, val);
 		if (typeNode.kind === "PointerType" && typeNode.base?.kind === "TypeName") {
 			const info = this._namedBoxInfo(
 				this.checker?.types.get(typeNode.base.name),
@@ -2134,9 +2179,10 @@ export const expressionGenMethods = {
 		}
 		if (
 			typeNode?._assertType?.kind === "slice" ||
-			this._isNamedSliceTypeNode(typeNode)
+			this._isNamedSliceTypeNode(typeNode) ||
+			this._isFuncAssertTypeNode(typeNode)
 		) {
-			// A nil slice in an interface is a tagged empty array.
+			// A nil slice or func in an interface is a tagged sentinel.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
@@ -2144,7 +2190,25 @@ export const expressionGenMethods = {
 			typeNode?.kind === "TypeName"
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
-		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+		if (factory) {
+			this.useHelper("ifaceBox");
+			return `(${factory}?.u ? ${val}.__gfUnbox() : ${factory}?.k === "iface" ? ${val} : __unnil(${val}))`;
+		}
+		return val;
+	},
+
+	// A type node denoting a func type (unnamed, defined, alias, or generic).
+	_isFuncAssertTypeNode(typeNode) {
+		if (
+			typeNode?.kind === "FuncType" ||
+			this._underlyingOf(typeNode?._assertType)?.kind === "func"
+		)
+			return true;
+		if (typeNode?.kind !== "TypeName") return false;
+		const named = this.checker?.types.get(
+			this._qualifiedStructName(typeNode.name),
+		);
+		return this._underlyingOf(named)?.kind === "func";
 	},
 
 	// A type name that denotes a defined slice type (`type S []int`).
@@ -2259,10 +2323,8 @@ export const expressionGenMethods = {
 			targetType,
 		);
 		if (structConv) return structConv;
-		if (this._isTaggedFuncType(targetType)) {
-			this.useHelper("ifaceBox");
-			return `__tfn(${arg}, ${JSON.stringify(targetType.name)})`;
-		}
+		const tagged = this._genTaggedFuncConv(targetType, arg);
+		if (tagged) return tagged;
 		const base =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
 		const targetNode = this._resolvedConversionTargetNode(base, srcExpr);
@@ -3631,7 +3693,9 @@ export const expressionGenMethods = {
 		if (this._is64BitInt(expr._type)) return this._gen64BitBinaryExpr(expr);
 
 		if (
-			(this.strict || this._isFloat32(expr._type)) &&
+			(this.strict ||
+				this._isFloat32(expr._type) ||
+				this._isWideNumberBitOp(expr.op, expr._type)) &&
 			this._needsStrictOp(expr.op, expr._type)
 		) {
 			const l = this.genExpr(expr.left);
@@ -3887,6 +3951,13 @@ export const expressionGenMethods = {
 		return `__tconv(${factory}, ${inner})`;
 	},
 
+	_genTaggedFuncConv(t, arg) {
+		const fnTag = this._taggedFuncTagExpr(t);
+		if (!fnTag) return null;
+		this.useHelper("ifaceBox");
+		return `__tfn(${arg}, ${fnTag})`;
+	},
+
 	_genTypeConversion(expr, preInner = null) {
 		const inner = preInner ?? this.genExpr(expr.expr);
 		const t = expr.targetType;
@@ -3930,7 +4001,10 @@ export const expressionGenMethods = {
 				? this._genPrimitiveConversion(expr, inner, u.name)
 				: inner;
 		}
-		return this._genPrimitiveConversion(expr, inner, target);
+		return (
+			this._genTaggedFuncConv(expr._type, inner) ??
+			this._genPrimitiveConversion(expr, inner, target)
+		);
 	},
 
 	_genArrayTypeConversion(expr, inner, t) {
@@ -4225,6 +4299,12 @@ export const expressionGenMethods = {
 		return name === "uint" || name === "uintptr";
 	},
 
+	// Number-backed `int`, `uint` and `uintptr` shifts and bitwise operators
+	// use 64-bit helpers on every target (`js` included).
+	_isWideNumberBitOp(op, type) {
+		return WIDE_BIT_OPS.has(op) && WIDE_NUMBER_NAMES.has(this._typeName(type));
+	},
+
 	_needsStrictOp(op, type) {
 		if (type?.kind === "typeParam")
 			return (
@@ -4235,8 +4315,7 @@ export const expressionGenMethods = {
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
 		if (op === "-" && this._isUintWord(type)) return true;
-		if (op === "<<" || op === ">>")
-			return WIDE_INT_NAMES.has(this._typeName(type));
+		if (this._isWideNumberBitOp(op, type)) return true;
 		return this.isIntType(type) && (op === "/" || op === "%");
 	},
 
@@ -4262,7 +4341,11 @@ export const expressionGenMethods = {
 			bind
 				? `((__b) => ${this._genStrictBinary(op, target, "__b", type, countType)})(${rhsJs})`
 				: this._genStrictBinary(op, target, rhsJs, type, countType);
-		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
+		if (
+			lhsNode.kind === "IndexExpr" &&
+			(lhsNode._mapValueType ||
+				this._underlyingOf(lhsNode.expr?._type)?.kind === "map")
+		)
 			return false;
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
@@ -4405,6 +4488,10 @@ export const expressionGenMethods = {
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
+		return this._genWideStrictBinary(op, l, r, type, divZero);
+	},
+
+	_genWideStrictBinary(op, l, r, type, divZero) {
 		if (op === "-" && this._isUintWord(type))
 			return `((__d) => __d < 0 ? __d + 2 ** 64 : __d)((${l}) - (${r}))`;
 		if (op === "<<" || op === ">>") {
@@ -4415,11 +4502,17 @@ export const expressionGenMethods = {
 			if (op === "<<") return `__shl64(${l}, ${r}, ${unsigned})`;
 			return `__shr64(${l}, ${r}, ${unsigned})`;
 		}
+		if (this._isWideNumberBitOp(op, type)) {
+			this.useHelper("bit64");
+			const unsigned = this._typeName(type).startsWith("u");
+			return `__bit64("${op}", ${l}, ${r}, ${unsigned})`;
+		}
 		if (this.isIntType(type)) {
 			if (op === "/")
 				return `((${r}) === 0 ? ${divZero} : Math.trunc((${l}) / (${r})))`;
 			if (op === "%") return `((${r}) === 0 ? ${divZero} : ((${l}) % (${r})))`;
 		}
+		if (op === "&^") return `((${l}) & ~(${r}))`;
 		return `${l} ${op} ${r}`;
 	},
 };

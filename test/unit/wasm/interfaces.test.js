@@ -1473,7 +1473,7 @@ func main() {
 	);
 });
 
-test("JS: a nil slice or func in any or interface{} compares equal to nil, a nil map or pointer does not", () => {
+test("JS: a nil slice in any or interface{} compares equal to nil, a nil map, pointer or func does not", () => {
 	const src = `
 package main
 
@@ -1495,7 +1495,10 @@ func main() {
 `;
 	const { js, errors } = compile(src, { target: "js" });
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true false false true\ntrue false false true\nfalse");
+	assertEqual(
+		runJs(js),
+		"true false false false\ntrue false false false\nfalse",
+	);
 });
 
 section("Promoted methods in interface dispatch");
