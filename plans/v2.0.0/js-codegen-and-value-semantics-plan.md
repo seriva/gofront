@@ -212,7 +212,7 @@ Roots:
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitEmbeddedMethodCall`), `src/backend/wasm/module-emitter.js` (promoted candidates), `src/backend/wasm/emit.js` (itable value deref)
   - Test: `test/unit/types/embedding.test.js`: all J4.2 rows with `assertAllTargetsOutput` (the already-passing `Inc` rows stay green)
   - Done when: `OuterPtr{*Num}` `Val` and `Inc`, direct and via interface, match Go on `js`, `both`, and `wasm` and the module validates
-- [ ] Task 5.4: Reject pointer-receiver promotions from value-embedded scalars on `both`/`wasm` and document the rule (J4.3 `both`/`wasm`)
+- [x] Task 5.4: Reject pointer-receiver promotions from value-embedded scalars on `both`/`wasm` and document the rule (J4.3 `both`/`wasm`)
   - Files: `src/typechecker/expressions.js` (`_markPtrRecvAddress`), `src/typechecker/assignability.js` (`implements` / conversion diagnostic), `docs/go-compatibility.md` (Pointers row; mirror the sentence in `docs/hybrid-wasm.md` § Pointers in `wasm` and `both` packages)
   - Test: `test/unit/types/embedding.test.js`: `assertErrorContains` with the scalar-interior message for `o.Inc()`, `o.Inc` (method value), and `var i interface{ Inc() } = &o` in `both` and `wasm` packages; the same programs still compile on `js`
   - Done when: J4.3 programs are rejected on `both`/`wasm` with the scalar-interior diagnostic (no invalid WasmGC) and run on `js`, and the docs name `o.Inc()` / `&o` as an `Inc` interface (with `type Outer struct{ Num }`) among the `wasm`/`both` compile errors, with `*Num` as the fix

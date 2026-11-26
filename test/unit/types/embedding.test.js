@@ -2,7 +2,10 @@
 
 import {
 	assertAllTargetsOutput,
+	assertEqual,
+	assertErrorContains,
 	assertOutput,
+	compile,
 	section,
 	test,
 } from "../helpers.js";
@@ -166,6 +169,101 @@ func main() {
 }
 `,
 		"1\n2\nfalse true\n",
+		{ targets: ["js"] },
+	);
+});
+
+const SCALAR_INTERIOR_MSG =
+	"cannot take the address of a field, element or package-level variable of type";
+
+const valueEmbedPtrCases = {
+	"o.Inc()": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Outer struct{ Num }
+func Main() int { var o Outer; o.Inc(); return int(o.Num) }`,
+	"o.Inc method value": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Outer struct{ Num }
+func Main() int { var o Outer; f := o.Inc; f(); return int(o.Num) }`,
+	"(&o).Inc()": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Outer struct{ Num }
+func Main() int { var o Outer; (&o).Inc(); return int(o.Num) }`,
+	"(*Outer).Inc method expr": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Outer struct{ Num }
+func Main() int { var o Outer; fn := (*Outer).Inc; fn(&o); return int(o.Num) }`,
+	"var i interface{ Inc() } = &o": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Outer struct{ Num }
+func Main() int { var o Outer; var i interface{ Inc() } = &o; i.Inc(); return int(o.Num) }`,
+	"interface{ Inc() }(&o) conversion": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Outer struct{ Num }
+func Main() int { var o Outer; i := interface{ Inc() }(&o); i.Inc(); return int(o.Num) }`,
+	"multi-level *Mid embedding Num": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Mid struct{ Num }
+type Top struct{ *Mid }
+func Main() int { t := Top{&Mid{}}; t.Inc(); return int(t.Num) }`,
+	"multi-level *Mid interface{ Inc() }": `
+type Num int
+func (n *Num) Inc() { *n++ }
+type Mid struct{ Num }
+type Top struct{ *Mid }
+func Main() int { t := Top{&Mid{}}; var i interface{ Inc() } = t; i.Inc(); return int(t.Num) }`,
+};
+
+for (const target of ["wasm", "both"]) {
+	for (const [name, body] of Object.entries(valueEmbedPtrCases)) {
+		test(`${target}: value-embedded scalar pointer promotion ${name} is rejected (J4.3)`, () => {
+			const { errors } = compile(
+				`//gofront:target ${target}\npackage main\n${body}\n`,
+			);
+			assertErrorContains(errors, SCALAR_INTERIOR_MSG);
+			assertErrorContains(errors, "of type Num");
+			assertErrorContains(errors, `in a ${target} package`);
+		});
+	}
+}
+
+test("js: all value-embedded scalar pointer-receiver promotion forms compile and run (J4.3)", async () => {
+	for (const [name, body] of Object.entries(valueEmbedPtrCases)) {
+		const { errors } = compile(`package main\n${body}\n`);
+		assertEqual(errors.length, 0, `${name}: unexpected errors`);
+	}
+	await assertOutput(
+		`package main
+import "fmt"
+type Num int
+func (n *Num) Inc() { *n++ }
+type Mid struct{ Num }
+type Top struct{ *Mid }
+type Outer struct{ Num }
+func main() {
+	var o Outer
+	f := o.Inc
+	f()
+	(&o).Inc()
+	fn := (*Outer).Inc
+	fn(&o)
+	i := interface{ Inc() }(&o)
+	i.Inc()
+	t := Top{&Mid{}}
+	t.Inc()
+	var it interface{ Inc() } = t
+	it.Inc()
+	fmt.Println(o.Num, t.Num)
+}
+`,
+		"4 2\n",
 		{ targets: ["js"] },
 	);
 });
