@@ -1451,19 +1451,22 @@ export class ModuleEmitter {
 				const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
 				const embedSInfo = this.getStructType(embedType);
 				const lastStep = embedPath[embedPath.length - 1];
+				const recvValGoType = isPtrRecv
+					? (paramGoTypes[0].base ?? paramGoTypes[0].elem)
+					: paramGoTypes[0];
+				const isScalarEmbed =
+					!embedSInfo && isScalarType(recvValGoType, this.checker, this);
 				const scalarBox =
-					!embedSInfo &&
-					!isPtrRecv &&
-					lastStep?.ptrWType &&
-					isScalarType(paramGoTypes[0], this.checker, this)
-						? this.getBoxType(paramGoTypes[0])
+					isScalarEmbed && !isPtrRecv && lastStep?.ptrWType
+						? this.getBoxType(recvValGoType)
 						: null;
 
 				const canDispatchPtr =
-					embedSInfo || !isPtrRecv || Boolean(lastStep?.ptrWType);
+					!isScalarEmbed || !isPtrRecv || Boolean(lastStep?.ptrWType);
+				if (!canDispatchPtr) continue;
 
 				const ptrKey = `ptr:${sName}`;
-				if (canDispatchPtr && !seenKeys.has(ptrKey)) {
+				if (!seenKeys.has(ptrKey)) {
 					seenKeys.add(ptrKey);
 					candidates.push({
 						recvTypeName: sName,

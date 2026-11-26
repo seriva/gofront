@@ -1078,14 +1078,12 @@ export const expressionCheckMethods = {
 			);
 		}
 		if (!methodType) return null;
-		if (baseType.kind === "pointer") {
-			const scalarErr = this._checkScalarInteriorPromoted(
-				expr,
-				recvBase,
-				expr.field,
-			);
-			if (scalarErr) return scalarErr;
-		}
+		const scalarErr = this._checkScalarInteriorPromoted(
+			expr,
+			recvBase,
+			expr.field,
+		);
+		if (scalarErr) return scalarErr;
 		const hidden = this._foreignMember(
 			methodType._pkgId,
 			expr.field,
