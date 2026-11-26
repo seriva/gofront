@@ -34,7 +34,6 @@ import {
 	isBool,
 	isComplex,
 	isComplex64,
-	isComplexOrNumeric,
 	isInteger,
 	isNil,
 	isNumeric,

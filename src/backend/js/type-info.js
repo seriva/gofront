@@ -37,6 +37,8 @@ function typeArgsMention(node) {
 	return Array.isArray(args) && args.some((t) => mentionsTypeParam(t));
 }
 
+const TYPE_INFO_BUILTINS = new Set(["clear", "len", "cap"]);
+
 export const typeInfoGenMethods = {
 	// Whether the body of generic `decl` (a function or method declaration)
 	// needs the instantiated types of `names`.
@@ -141,6 +143,8 @@ export const typeInfoGenMethods = {
 					this._isTypeParamMethodExpr(node, names) ||
 					this._isTypeParamMethodValue(node, names)
 				);
+			case "InstantiationExpr":
+				return this._instantiationUsesTypeInfo(node);
 			case "CompositeLit":
 			case "GenericTypeName":
 				return typeArgsMention(node);
@@ -149,10 +153,18 @@ export const typeInfoGenMethods = {
 		}
 	},
 
+	_instantiationUsesTypeInfo(site) {
+		return (
+			Boolean(site?._genericFnType) &&
+			Boolean(site._typeArgs?.some((t) => mentionsTypeParam(t))) &&
+			this._genericFnNeedsTypeInfo(site._genericFnType)
+		);
+	},
+
 	_callUsesTypeInfo(call, names) {
 		if (this._isTypeParamMethodCall(call, names)) return true;
 		if (
-			call._builtinName === "clear" &&
+			TYPE_INFO_BUILTINS.has(call._builtinName) &&
 			call.args[0]?._type?.kind === "typeParam" &&
 			names.has(call.args[0]._type.name)
 		)
@@ -175,10 +187,9 @@ export const typeInfoGenMethods = {
 			call.args.some((a) => a?._type?.kind === "typeParam")
 		)
 			return true;
-		const site = call._genericFnType ? call : call.func;
-		if (!site?._genericFnType) return false;
-		if (!site._typeArgs?.some((t) => mentionsTypeParam(t))) return false;
-		return this._genericFnNeedsTypeInfo(site._genericFnType);
+		return this._instantiationUsesTypeInfo(
+			call._genericFnType ? call : call.func,
+		);
 	},
 
 	// Whether callers of generic function `generic` pass type information.
@@ -226,17 +237,30 @@ export const typeInfoGenMethods = {
 		const box = this._ifaceKeyBox(t) ?? this._ptrMethodBox(t);
 		const fmtBox = this._fmtBoxFor(t);
 		const ez = u?.kind === "slice" ? this.zeroFactoryFor(u.elem) : null;
-		const tail = this._typeInfoTail(t, box, fmtBox, ez);
+		const al = this._arrayLenOf(t);
+		const tail = this._typeInfoTail(t, box, fmtBox, ez, al);
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
-	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`, `ez`).  `typeStr`
-	// drops the `...` of a variadic func type, so a func type also carries its
-	// spelled name (see `__tnm`).
-	_typeInfoTail(t, box, fmtBox, ez) {
+	// Fixed length of an array or pointer-to-array type `t` (for generic
+	// `len`/`cap` on a type parameter), or null when `t` is neither.
+	_arrayLenOf(t) {
+		const u = this._underlyingOf(t);
+		const arr = u?.kind === "pointer" ? this._underlyingOf(u.base) : u;
+		if (arr?.kind !== "array") return null;
+		const size = arr.size?.value ?? arr.size;
+		return typeof size === "number" ? size : null;
+	},
+
+	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`, `ez`, `al`).
+	// `typeStr` drops the `...` of a variadic func type, so a func type also
+	// carries its spelled name (see `__tnm`).
+	_typeInfoTail(t, box, fmtBox, ez, al) {
+		if (al != null)
+			return `, ${box ?? "null"}, ${fmtBox ?? "null"}, null, null, ${al}`;
+		if (ez) return `, ${box ?? "null"}, ${fmtBox ?? "null"}, null, ${ez}`;
 		if (t.kind === "func")
 			return `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${JSON.stringify(this._dynTypeName(t))}`;
-		if (ez) return `, ${box ?? "null"}, ${fmtBox ?? "null"}, null, ${ez}`;
 		if (fmtBox) return `, ${box ?? "null"}, ${fmtBox}`;
 		return box ? `, ${box}` : "";
 	},
@@ -518,7 +542,8 @@ export const typeInfoGenMethods = {
 
 	_underlyingOf(t) {
 		let u = t;
-		for (let i = 0; i < 8 && u?.kind === "named"; i++) u = u.underlying;
+		for (let i = 0; i < 8 && u?.kind === "named"; i++)
+			u = u.underlying ?? this.checker?.types.get(u.name)?.underlying;
 		return u;
 	},
 

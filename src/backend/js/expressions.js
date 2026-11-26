@@ -445,7 +445,7 @@ const BUILTIN_GEN = {
 	cap: (s, e) => {
 		if (e._constLen != null) return s._genConstLen(e);
 		s.useHelper("slice");
-		return `__cap(${s.genExpr(e.args[0])})`;
+		return `__cap(${s.genExpr(e.args[0])}${s._typeParamArrayLenArg(e.args[0])})`;
 	},
 	make: (s, e) => s.genMake(e),
 	delete: (s, e) => {
@@ -2689,6 +2689,13 @@ export const expressionGenMethods = {
 		return t.kind === "named" && t.underlying?.kind === "interface";
 	},
 
+	_typeParamArrayLenArg(arg) {
+		const t = arg?._type;
+		const f =
+			t?.kind === "typeParam" ? this._typeParamZeroFactory(t.name) : null;
+		return f ? `, ${f}?.al` : "";
+	},
+
 	_genBuiltinLen(expr) {
 		if (expr._constLen != null) return this._genConstLen(expr);
 		const arg = expr.args[0];
@@ -2696,9 +2703,10 @@ export const expressionGenMethods = {
 		const wrapField = this._namedWrapperField(t, arg);
 		if (wrapField) return `${this.genExpr(arg)}.${wrapField}.length`;
 		const js = this.genExpr(arg);
-		if (t?.kind === "map") return `Object.keys(${js} ?? {}).length`;
+		if (this._underlyingOf(t)?.kind === "map")
+			return `Object.keys(${js} ?? {}).length`;
 		this.useHelper("len");
-		return `__len(${js})`;
+		return `__len(${js}${this._typeParamArrayLenArg(arg)})`;
 	},
 
 	_genBuiltinClear(expr) {

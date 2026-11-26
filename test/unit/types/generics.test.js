@@ -4079,10 +4079,37 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
-test("G4.2: generic len and cap on slice, array, and array-pointer unions", async () => {
+test("G4.2: generic len and cap on slice, array, array-pointer, and map unions", async () => {
 	const src = `package main
 
 import "fmt"
+
+type MyMap map[string][]int
+type MyArr [3]int
+type MyArrPtr *[3]int
+type MethodArr [3]int
+
+func (a MethodArr) Sum() int    { return a[0] + a[1] + a[2] }
+func (a *MethodArr) Tag() string { return "ok" }
+
+type Holder[T ~[]int | ~*[3]int] struct{ v T }
+
+func (h Holder[T]) Len() int { return len(h.v) }
+func (h Holder[T]) Cap() int { return cap(h.v) }
+
+type PtrList[T ~[]int | ~*[3]int] []T
+
+func (l PtrList[T]) FirstLen() int { return len(l[0]) }
+func (l PtrList[T]) FirstCap() int { return cap(l[0]) }
+
+type FirstLener interface {
+	FirstLen() int
+	FirstCap() int
+}
+
+func inspectMethodArr[T ~[]int | *MethodArr](v T) (int, int, string) {
+	return len(v), cap(v), fmt.Sprintf("%T", v)
+}
 
 func getLen[T ~[]int | ~*[3]int](v T) int {
 	return len(v)
@@ -4100,6 +4127,50 @@ func getCapSlice[T ~[]int | ~*[3]int](v T) int {
 	return cap(v)
 }
 
+func getLenMapOrPtr[T ~map[string][]int | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getLenByteMap[T ~map[string][]byte | ~*[3]int](v T) int {
+	return len(v)
+}
+
+func getLenNamedArrPtr[T ~[]int | ~*MyArr](v T) int {
+	return len(v)
+}
+
+func getCapNamedArrPtr[T ~[]int | ~*MyArr](v T) int {
+	return cap(v)
+}
+
+func getLenZeroArr[T ~[]int | ~*[0]int](v T) int {
+	return len(v)
+}
+
+func getCapZeroArr[T ~[]int | ~*[0]int](v T) int {
+	return cap(v)
+}
+
+func wrapLen[T ~[]int | ~*[3]int](v T) int {
+	return getLen(v)
+}
+
+func makeLenFn[T ~[]int | ~*[3]int]() func(T) int {
+	return getLen[T]
+}
+
+func makeCapFn[T ~[]int | ~*[3]int]() func(T) int {
+	return getCapSlice[T]
+}
+
+func lenFromCall[T ~[]int | ~*[3]int](fn func() T) int {
+	return len(fn())
+}
+
+func capFromCall[T ~[]int | ~*[3]int](fn func() T) int {
+	return cap(fn())
+}
+
 func main() {
 	a := [3]int{1, 2, 3}
 	s := []int{10, 20, 30, 40}
@@ -4107,8 +4178,51 @@ func main() {
 	fmt.Println(getCap(a), getCap(&a))
 	fmt.Println(getLenArr(a), getLenArr(&a))
 	fmt.Println(getCapSlice(&a), getCapSlice(s[:2]))
+
+	var nilPtr *[3]int
+	var nilSlice []int
+	var nilMyArrPtr *MyArr
+	var nilNamedPtr MyArrPtr
+	var nilZeroPtr *[0]int
+	fmt.Println(getLen(nilPtr), getCapSlice(nilPtr), getLen(nilSlice), getCapSlice(nilSlice))
+	fmt.Println(getLenNamedArrPtr(nilMyArrPtr), getCapNamedArrPtr(nilMyArrPtr))
+	fmt.Println(getLen(nilNamedPtr), getCapSlice(nilNamedPtr))
+	fmt.Println(getLenZeroArr(nilZeroPtr), getCapZeroArr(nilZeroPtr))
+
+	var h Holder[*[3]int]
+	pl := PtrList[MyArrPtr]{nilNamedPtr}
+	var fl FirstLener = pl
+	var nilMethodArr *MethodArr
+	ml, mc, mt := inspectMethodArr(nilMethodArr)
+	fmt.Println(h.Len(), h.Cap(), wrapLen(nilPtr), makeLenFn[MyArrPtr]()(nilNamedPtr), makeCapFn[MyArrPtr]()(nilNamedPtr))
+	fmt.Println(pl.FirstLen(), pl.FirstCap(), fl.FirstLen(), fl.FirstCap(), ml, mc, mt)
+
+	calls := 0
+	nextNil := func() *[3]int { calls++; return nil }
+	fmt.Println(lenFromCall(nextNil), capFromCall(nextNil), calls)
+
+	m := map[string][]int{"value": {1, 2, 3}, "other": {4}}
+	mm := MyMap{"value": {1, 2, 3}, "other": {4}}
+	mk := make(map[string][]int)
+	mk["value"] = []int{1, 2, 3}
+	mk["other"] = []int{4}
+	bm := map[string][]byte{"value": {1, 2, 3, 4}, "other": {5}}
+	var nilMap MyMap
+	fmt.Println(getLenMapOrPtr(m), getLenMapOrPtr(mm), getLenMapOrPtr(&a), getLenMapOrPtr(mk), len(mm), len(m), getLenByteMap(bm), getLenMapOrPtr(nilMap))
 }`;
-	const want = "3 4\n3 3\n3 3\n3 4\n";
+	const want =
+		"3 4\n" +
+		"3 3\n" +
+		"3 3\n" +
+		"3 4\n" +
+		"3 3 0 0\n" +
+		"3 3\n" +
+		"3 3\n" +
+		"0 0\n" +
+		"3 3 3 3 3\n" +
+		"3 3 3 3 3 3 *main.MethodArr\n" +
+		"3 3 2\n" +
+		"2 2 3 2 2 2 2 0\n";
 	await assertAllTargetsOutput(src, want);
 });
 
