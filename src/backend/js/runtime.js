@@ -758,6 +758,15 @@ var __tar = __tar || function(f, op, a, b) {
 var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
 };
+var __tstr = __tstr || function(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return __rstr(v);
+  if (typeof v === "bigint") return __rstr(Number(v));
+  if (v instanceof Uint8Array) return __u8dec(v);
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) return Array.from(v, (c) => __rstr(c)).join("");
+  return String(v);
+};
 var __tconv = __tconv || function(f, v) {
   switch (f?.k) {
     case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : (typeof v === "number" ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : v);
@@ -771,6 +780,11 @@ var __tconv = __tconv || function(f, v) {
     case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
     case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
     case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
+    case "complex128": return v && typeof v === "object" ? { re: v.re, im: v.im } : { re: Number(v), im: 0 };
+    case "complex64": return v && typeof v === "object" ? { re: Math.fround(v.re), im: Math.fround(v.im) } : { re: Math.fround(Number(v)), im: 0 };
+    case "string": return __tstr(v);
+    case "[]byte": return v == null ? null : typeof v === "string" ? __u8enc(v) : new Uint8Array(v);
+    case "[]rune": return v == null ? null : typeof v === "string" ? Int32Array.from(v, (c) => c.codePointAt(0)) : new Int32Array(v);
     default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;

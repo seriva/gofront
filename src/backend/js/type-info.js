@@ -215,6 +215,11 @@ export const typeInfoGenMethods = {
 		let k = "";
 		if (isAny(u) || u?.kind === "interface") k = "iface";
 		else if (u?.kind === "basic") k = u.name;
+		else if (u?.kind === "slice") {
+			const elem = u.elem?.kind === "basic" ? u.elem.name : null;
+			if (elem === "byte" || elem === "uint8") k = "[]byte";
+			else if (elem === "rune" || elem === "int32") k = "[]rune";
+		}
 		const check = this._typeCheckForType(t, "__v");
 		const is = check ? `(__v) => ${check}` : "null";
 		const unbox = this._boxesInInterface(t) ? "true" : "false";

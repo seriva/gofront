@@ -4094,6 +4094,10 @@ export const expressionGenMethods = {
 
 	_genStringConversion(srcType, inner) {
 		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
+		if (base?.kind === "typeParam") {
+			this.useHelper("generics");
+			return `__tstr(${inner})`;
+		}
 		if (base && this.isIntType(base)) {
 			this.useHelper("runestr");
 			return `__rstr(${inner})`;

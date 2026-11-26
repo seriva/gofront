@@ -4147,6 +4147,58 @@ func main() {
 	assertErrorContains(errors, "argument to append");
 });
 
+test("G5.1-G5.4: generic string(t) and T(x) conversions for ~string, ~[]byte/~[]rune, and ~complex", async () => {
+	const src = `package main
+
+import "fmt"
+
+type MyStr string
+type MyBytes []byte
+type MyRunes []rune
+type MyC128 complex128
+type MyC64 complex64
+
+func toStrBytes[T ~string | ~[]byte](t T) string { return string(t) }
+func toStrRunes[T ~string | ~[]rune](t T) string { return string(t) }
+func toStrInt[T ~int | ~int32](t T) string { return string(t) }
+
+func halfComplex[T ~complex128 | ~complex64]() T { return T(1.5) }
+func fromInt[T ~string](n int) T { return T(n) }
+func fromBytes[T ~string](b []byte) T { return T(b) }
+func fromRunes[T ~string](r []rune) T { return T(r) }
+
+func strToSlice[T ~[]byte | ~[]rune](s string) T { return T(s) }
+func sliceToStr[S ~string, T ~[]byte | ~[]rune](t T) S { return S(t) }
+
+func main() {
+	fmt.Printf("%q %q %q\\n", toStrBytes("ab"), toStrBytes([]byte("cd")), toStrBytes([]byte(nil)))
+	fmt.Printf("%q %q %q\\n", toStrRunes("xy"), toStrRunes([]rune("ok")), toStrRunes([]rune(nil)))
+	fmt.Printf("%q %q %q\\n", toStrInt(65), toStrInt(int32(0x110000)), toStrInt(int32(-1)))
+
+	fmt.Println(halfComplex[complex128](), halfComplex[complex64](), halfComplex[MyC128](), halfComplex[MyC64]())
+	fmt.Printf("%q %q %q\\n", fromInt[string](65), fromBytes[MyStr]([]byte("hi")), fromRunes[MyStr]([]rune("ok")))
+
+	fmt.Println(strToSlice[[]byte]("hi"), strToSlice[MyBytes]("yo"))
+	fmt.Println(strToSlice[[]rune]("ok"), strToSlice[MyRunes]("go"))
+	fmt.Printf("%q %q\\n", sliceToStr[MyStr]([]byte("zz")), sliceToStr[string]([]rune("yy")))
+}`;
+	const want =
+		'"ab" "cd" ""\n' +
+		'"xy" "ok" ""\n' +
+		'"A" "\uFFFD" "\uFFFD"\n' +
+		"(1.5+0i) (1.5+0i) (1.5+0i) (1.5+0i)\n" +
+		'"A" "hi" "ok"\n' +
+		"[104 105] [121 111]\n" +
+		"[111 107] [103 111]\n" +
+		'"zz" "yy"\n';
+	await assertAllTargetsOutput(src, want);
+
+	const { errors } = compile(
+		"package main\nfunc f[T ~complex64]() T { return T(1e40) }",
+	);
+	assertErrorContains(errors, "cannot convert 1e40");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

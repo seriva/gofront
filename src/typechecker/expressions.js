@@ -2590,7 +2590,12 @@ export const expressionCheckMethods = {
 	_termConvertible(s, t, expr, operand) {
 		if (s.kind === "untyped") {
 			const u = this._deepUnderlying(t) ?? t;
-			if (this._isRealNumberType(u) && s.base !== "string" && s.base !== "bool")
+			if (
+				u?.kind === "basic" &&
+				(isNumeric(u) || isComplex(u)) &&
+				s.base !== "string" &&
+				s.base !== "bool"
+			)
 				return this._untypedFitsTerm(s, operand, t);
 			s = defaultType(s);
 		}
@@ -2600,10 +2605,6 @@ export const expressionCheckMethods = {
 		const ok = this.errors.length === 0;
 		this.errors = saved;
 		return ok;
-	},
-
-	_isRealNumberType(u) {
-		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
 	},
 
 	// A conversion to a type parameter needs a constraint that lists types
@@ -3282,8 +3283,7 @@ export const expressionCheckMethods = {
 		const u = this._deepUnderlying(t);
 		const isString =
 			t?.kind === "untyped" ? t.base === "string" : u?.name === "string";
-		const eu = this._deepUnderlying(elem);
-		return isString && eu?.kind === "basic" && eu.name === "uint8";
+		return isString && elem?.kind === "basic" && elem.name === "uint8";
 	},
 
 	_checkBuiltinLen(name, expr, argTypes) {

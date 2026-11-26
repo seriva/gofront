@@ -171,7 +171,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Files: `src/typechecker/expressions.js` (`_checkAppendArgs`, `_isStringIntoBytes`), `src/backend/js/expressions.js` (`_genSliceSource`)
   - Test: `test/unit/types/generics.test.js`: G4.3 (`copy(dst, src)` and `append([]byte{}, v...)` with both `string` and `[]byte` instantiations) on `js`, `both`, `wasm`
   - Done when: `copy` and `append` with `~string | ~[]byte` type parameters compile and match Go on all targets
-- [ ] Task 2.3: Fix generic `string(t)` and `T(x)` conversions for `~string`, `~[]byte`/`~[]rune`, and `~complex` (G5.1–G5.4)
+- [x] Task 2.3: Fix generic `string(t)` and `T(x)` conversions for `~string`, `~[]byte`/`~[]rune`, and `~complex` (G5.1–G5.4)
   - Files: `src/typechecker/expressions.js` (`_termConvertible`), `src/backend/js/expressions.js` (`_genStringConversion`), `src/backend/js/runtime.js` (`__tconv`, `__tstr`, `__ti` kind tags)
   - Test: `test/unit/types/generics.test.js`: G5.1 (`string(t)` on `~string | ~[]byte`, `~string | ~[]rune`, `~int | ~int32`, incl. `int32(0x110000)` → `"�"`), G5.2 (`T(1.5)` on `~complex128` and `~complex64`), G5.3 (`T(65)`, `T([]byte("hi"))`, `T([]rune("ok"))` on `~string`), G5.4 (`T(s)` for `T ~[]byte` / `~[]rune`; `S(t)` for `S ~string` from `T ~[]byte | ~[]rune`) on `js`, `both`, `wasm`
   - Done when: all generic string and complex conversions compile and match Go on all targets
