@@ -1584,30 +1584,41 @@ export const expressionGenMethods = {
 		return path ? path.map((n) => `.${jsMemberName(n)}`).join("") : "";
 	},
 
+	_embeddedStructType(inner) {
+		const ist = inner?.kind === "named" ? inner.underlying : inner;
+		if (ist?.kind !== "struct") return null;
+		if (
+			inner.kind === "named" &&
+			!this.structNames.has(inner._genericOf?.name ?? inner.name)
+		)
+			return null;
+		return ist;
+	},
+
 	_embedPath(t, field, depth) {
 		const st = t?.kind === "named" ? t.underlying : t;
 		if (st?.kind !== "struct" || !st.fields?.has(field) || depth > 8)
 			return null;
-		const direct = (st._structFields ?? []).some(
-			(sf) => !sf.embedded && sf.names?.includes(field),
-		);
-		if (direct) return null;
+		const hasDirect = (s) =>
+			(s._structFields ?? []).some((sf) =>
+				sf.embedded
+					? embeddedFieldName(sf) === field
+					: sf.names?.includes(field),
+			);
+		if (hasDirect(st)) return null;
+		let best = null;
 		for (const sf of st._structFields ?? []) {
 			if (!sf.embedded) continue;
 			const inner = sf.type?.kind === "pointer" ? sf.type.base : sf.type;
-			if (inner?.kind !== "named" || !this.structNames.has(inner.name))
-				continue;
-			const name = embeddedFieldName(sf);
-			if (name === field) return null;
-			const ist = inner.underlying;
+			const ist = this._embeddedStructType(inner);
 			if (!ist?.fields?.has(field)) continue;
+			const name = embeddedFieldName(sf);
+			if (!name) continue;
+			if (hasDirect(ist)) return [name];
 			const sub = this._embedPath(inner, field, depth + 1);
-			const idirect = (ist._structFields ?? []).some(
-				(x) => !x.embedded && x.names?.includes(field),
-			);
-			return idirect ? [name] : sub ? [name, ...sub] : null;
+			if (sub && (!best || 1 + sub.length < best.length)) best = [name, ...sub];
 		}
-		return null;
+		return best;
 	},
 
 	// PascalCase aliases of Web API methods (gl.ClearColor) map to the real camelCase member.

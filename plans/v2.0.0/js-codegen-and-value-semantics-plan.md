@@ -200,7 +200,7 @@ Roots:
   - Done when: `<<`, `>>`, `&`, `|`, `^`, `&^`, unary `^` and their `op=` forms on `int`/`uint`/`uintptr` match Go on `js`, `both`, and `wasm`
 
 ### Phase 5: Embedded Fields & Scalar Method Promotions (roots `js-embed-path-resolution`, `embedded-scalar-method-promotion`)
-- [ ] Task 5.1: Fix JS `_embedPath` for embedded anonymous-struct aliases and multi-level embedded structs (J4.1)
+- [x] Task 5.1: Fix JS `_embedPath` for embedded anonymous-struct aliases and multi-level embedded structs (J4.1)
   - Files: `src/backend/js/expressions.js` (`_embedPath`)
   - Test: `test/unit/types/embedding.test.js`: J4.1 (`type A = struct{ N int }`, anonymous `struct{ B; Y int }`, named `type Named struct{ B; Y int }` reads & writes through `v.AX.X`) with `assertAllTargetsOutput`
   - Done when: embedded anonymous-struct aliases and multi-level embedded field reads/writes match Go on all targets
