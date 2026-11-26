@@ -8,7 +8,6 @@
 
 import { forEachChild } from "../../lower/index.js";
 import {
-	displayTypeName,
 	isAny,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
@@ -209,14 +208,23 @@ export const typeInfoGenMethods = {
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
-	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`).  `typeStr`
-	// drops the `...` of a variadic func type, so a func type also carries its
-	// spelled name (see `__tnm`).
+	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`).  `nm` is
+	// included whenever `_dynTypeName(t)` differs from `typeStr(t)` (e.g.
+	// variadic funcs, `interface {}`, local `__L<n>` types, `$$` package
+	// names) or when `t` mentions an enclosing type parameter, so `__tnm`
+	// matches static `_dynTypeName` tags.
 	_typeInfoTail(t, box, fmtBox) {
-		if (t.kind === "func")
-			return `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${JSON.stringify(this._dynTypeName(t))}`;
+		const nmExpr = this._typeInfoNameExpr(t);
+		if (nmExpr) return `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${nmExpr}`;
 		if (fmtBox) return `, ${box ?? "null"}, ${fmtBox}`;
 		return box ? `, ${box}` : "";
+	},
+
+	_typeInfoNameExpr(t) {
+		if (!t) return null;
+		if (mentionsTypeParam(t)) return this._genericMapTag(t);
+		const nm = this._dynTypeName(t);
+		return nm !== typeStr(t) ? JSON.stringify(nm) : null;
 	},
 
 	// How `__ik` tells the dynamic type of an interface map key apart where
@@ -324,14 +332,14 @@ export const typeInfoGenMethods = {
 					return f ? `__tnm(${f})` : null;
 				}
 				case "named":
-					return this._genericNamedTag(x, t, part);
+					return this._genericNamedTag(x, part);
 				case "slice": {
 					const e = part(x.elem);
 					return e && `"[]" + ${e}`;
 				}
 				case "array": {
 					const e = part(x.elem);
-					return e && `"[${x.size}]" + ${e}`;
+					return e && `"[${x.size?.value ?? x.size ?? "..."}]" + ${e}`;
 				}
 				case "pointer": {
 					const e = part(x.base);
@@ -469,12 +477,16 @@ export const typeInfoGenMethods = {
 				// Every unnamed interface shares one tag.
 				return t.name ? typeStr(t) : "interface {}";
 			case "struct":
-				if (t.name || !t._structFields) return typeStr(t);
+				if (t.name) return this._namedDynTypeStr(t, s);
+				if (!t._structFields) return typeStr(t);
 				return `struct{${t._structFields
-					.map(
-						(f) =>
-							`${(f.names ?? []).join(",")} ${s(f.type)}${f.tag ? ` ${JSON.stringify(f.tag)}` : ""}${f.embedded ? " embedded" : ""}`,
-					)
+					.flatMap((f) => {
+						const tag = f.tag ? ` ${JSON.stringify(f.tag)}` : "";
+						const type = s(f.type);
+						if (f.embedded || !f.names?.length)
+							return [` ${type}${tag}${f.embedded ? " embedded" : ""}`];
+						return f.names.map((n) => `${n} ${type}${tag}`);
+					})
 					.join("; ")}}`;
 			case "named":
 				return this._namedDynTypeStr(t, s);
@@ -501,17 +513,15 @@ export const typeInfoGenMethods = {
 	},
 
 	_namedDynTypeStr(t, s) {
-		const name = displayTypeName(t.name);
 		return t.typeArgs?.length
-			? `${name}[${t.typeArgs.map(s).join(", ")}]`
-			: name;
+			? `${t.name}[${t.typeArgs.map(s).join(", ")}]`
+			: t.name;
 	},
 
-	// Outermost defined type keeps its internal name (`Seq$$iter`, `GF__L1`);
-	// nested arguments use Go display spelling to match `_dynTypeName` and `__tnm`.
-	_genericNamedTag(x, root, part) {
-		const head = x === root ? x.name : displayTypeName(x.name);
-		const base = JSON.stringify(head);
+	// Keep internal mangled names (`Seq$$iter`, `GF__L1`, `L__L1`) so shadowing
+	// local types and colliding package types never collapse in runtime tags.
+	_genericNamedTag(x, part) {
+		const base = JSON.stringify(x.name);
 		if (!x.typeArgs?.length) return base;
 		const args = x.typeArgs.map(part);
 		if (args.some((a) => !a)) return null;

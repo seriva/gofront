@@ -515,8 +515,7 @@ var __tfn = __tfn || function(f, t, iface) {
 };
 var __tnm = __tnm || function(f) {
   // The type name of a type argument's info factory, spelled as a static tag.
-  const id = f?.nm ?? f?.id;
-  return typeof id === "string" ? id.replace(/ void\\b/g, "").replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
+  return f?.nm ?? f?.id;
 };
 var __ity = __ity || function(x, t, ptr, sl, fn) {
   if (t === undefined) return x;
