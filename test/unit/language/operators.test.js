@@ -143,6 +143,83 @@ func main() {
 	);
 });
 
+test("named and unnamed map compound wide-int bitwise, shift and inc/dec in for post statements", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type M map[string]int
+
+type MWithMethod map[string]int
+
+func (m MWithMethod) Get(k string) int { return m[k] }
+
+func main() {
+	// Named map missing key in for post (previously threw RangeError in __bit64)
+	nm := M{}
+	for i := 0; i < 1; nm["k"] |= 1<<40 {
+		i++
+	}
+	for i := 0; i < 1; nm["x"] ^= 1<<40 {
+		i++
+	}
+	for i := 0; i < 1; nm["s"] <<= 40 {
+		i++
+	}
+	for i := 0; i < 1; nm["c"]++ {
+		i++
+	}
+
+	// Named map with methods in for post
+	mm := MWithMethod{}
+	for i := 0; i < 1; mm["k"] |= 1<<40 {
+		i++
+	}
+	for i := 0; i < 1; mm["c"]++ {
+		i++
+	}
+
+	// Unnamed map wide-int bitwise and shift in for post (previously truncated to 32 bits)
+	m := map[string]int{"a": 1, "b": 1<<40 | 3, "c": 1, "d": 1<<41}
+	for i := 0; i < 1; m["a"] |= 1<<40 {
+		i++
+	}
+	for i := 0; i < 1; m["b"] &^= 1 {
+		i++
+	}
+	for i := 0; i < 1; m["c"] <<= 40 {
+		i++
+	}
+	for i := 0; i < 1; m["d"] >>= 40 {
+		i++
+	}
+	for i := 0; i < 1; m["e"] |= 1<<40 {
+		i++
+	}
+
+	// Map with int64 missing key in for post
+	m64 := map[string]int64{}
+	for i := 0; i < 1; m64["k"] += 1 {
+		i++
+	}
+	for i := 0; i < 1; m64["b"] |= 1<<40 {
+		i++
+	}
+	for i := 0; i < 1; m64["c"]++ {
+		i++
+	}
+
+	fmt.Println(nm["k"], nm["x"], nm["s"], nm["c"])
+	fmt.Println(mm.Get("k"), mm.Get("c"))
+	fmt.Println(m["a"], m["b"], m["c"], m["d"], m["e"])
+	fmt.Println(m64["k"], m64["b"], m64["c"])
+}
+`,
+		"1099511627776 1099511627776 0 1\n1099511627776 1\n1099511627777 1099511627778 1099511627776 2 1099511627776\n1 1099511627776 1\n",
+	);
+});
+
 test("int8 and uint32 wraparound controls stay intact", async () => {
 	await assertProgramOutput(
 		`package main

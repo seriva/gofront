@@ -127,12 +127,15 @@ function receiverPrefix(stmts, name, safe) {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
-// True for a map, slice or array type that mentions a type parameter: one
-// that generic code boxes into an interface is tagged by its instantiated
+// True for a map, slice, array or func type that mentions a type parameter:
+// one that generic code boxes into an interface is tagged by its instantiated
 // type.
 export function isGenericComposite(t) {
 	return (
-		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		(t?.kind === "map" ||
+			t?.kind === "slice" ||
+			t?.kind === "array" ||
+			t?.kind === "func") &&
 		mentionsTypeParam(t)
 	);
 }
@@ -733,7 +736,7 @@ export const expressionGenMethods = {
 			expr._tfnTagging = true;
 			try {
 				this.useHelper("ifaceBox");
-				return `__tfn(${this.genExpr(expr)}, ${JSON.stringify(expr._ifaceSrc.name)})`;
+				return `__tfn(${this.genExpr(expr)}, ${JSON.stringify(expr._ifaceSrc.name)}, true)`;
 			} finally {
 				expr._tfnTagging = false;
 			}
@@ -2089,6 +2092,10 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "namedfunc")`;
 		}
+		if (named?.kind === "func") {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName(named))}, "func")`;
+		}
 		if (this._isNamedComposite(named)) {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
@@ -2169,9 +2176,10 @@ export const expressionGenMethods = {
 		}
 		if (
 			typeNode?._assertType?.kind === "slice" ||
-			this._isNamedSliceTypeNode(typeNode)
+			this._isNamedSliceTypeNode(typeNode) ||
+			this._isFuncAssertTypeNode(typeNode)
 		) {
-			// A nil slice in an interface is a tagged empty array.
+			// A nil slice or func in an interface is a tagged sentinel.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
@@ -2179,7 +2187,25 @@ export const expressionGenMethods = {
 			typeNode?.kind === "TypeName"
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
-		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+		if (factory) {
+			this.useHelper("ifaceBox");
+			return `(${factory}?.u ? ${val}.__gfUnbox() : ${factory}?.k === "iface" ? ${val} : __unnil(${val}))`;
+		}
+		return val;
+	},
+
+	// A type node denoting a func type (unnamed, defined, alias, or generic).
+	_isFuncAssertTypeNode(typeNode) {
+		if (
+			typeNode?.kind === "FuncType" ||
+			this._underlyingOf(typeNode?._assertType)?.kind === "func"
+		)
+			return true;
+		if (typeNode?.kind !== "TypeName") return false;
+		const named = this.checker?.types.get(
+			this._qualifiedStructName(typeNode.name),
+		);
+		return this._underlyingOf(named)?.kind === "func";
 	},
 
 	// A type name that denotes a defined slice type (`type S []int`).
@@ -4304,7 +4330,11 @@ export const expressionGenMethods = {
 			bind
 				? `((__b) => ${this._genStrictBinary(op, target, "__b", type, countType)})(${rhsJs})`
 				: this._genStrictBinary(op, target, rhsJs, type, countType);
-		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
+		if (
+			lhsNode.kind === "IndexExpr" &&
+			(lhsNode._mapValueType ||
+				this._underlyingOf(lhsNode.expr?._type)?.kind === "map")
+		)
 			return false;
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {

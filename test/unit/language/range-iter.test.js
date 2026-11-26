@@ -566,6 +566,64 @@ func main() {
 	);
 });
 
+test("range expressions evaluate once and ignore loop-body mutation or shadowing", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	calls64 := 0
+	getN64 := func() int64 { calls64++; return 4 }
+	for i := range getN64() {
+		_ = i
+	}
+
+	callsInt := 0
+	getN := func() int { callsInt++; return 4 }
+	for i := range getN() {
+		_ = i
+	}
+
+	bareCalls := 0
+	getBare := func() int64 { bareCalls++; return 4 }
+	for range getBare() {
+	}
+
+	sliceCalls := 0
+	getSlice := func() []int { sliceCalls++; return []int{10, 20, 30} }
+	sliceCount := 0
+	for range getSlice() {
+		sliceCount++
+	}
+
+	mapCalls := 0
+	getMap := func() map[string]int { mapCalls++; return map[string]int{"a": 1, "b": 2} }
+	mapCount := 0
+	for range getMap() {
+		mapCount++
+	}
+
+	n := 3
+	mutSum := 0
+	for i := range n {
+		n = 10
+		mutSum += i + 1
+	}
+
+	shadow := 3
+	shadowSum := 0
+	for shadow := range shadow {
+		shadowSum += shadow
+	}
+
+	fmt.Println(calls64, callsInt, bareCalls, sliceCalls, sliceCount, mapCalls, mapCount, mutSum, shadowSum)
+}
+`,
+		"1 1 1 1 3 1 2 6 3\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

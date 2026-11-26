@@ -928,7 +928,7 @@ export const statementGenMethods = {
 									valType,
 									stmt.rhs[0]?._type,
 								)
-							: `${read} ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
+							: `${read} ${binOp === "&^" ? "& ~" : binOp} (${this._compoundShiftCount(stmt, rhsVal)})`;
 				const rhsExpr = mapCompound(`(__m[__k] ?? ${zero})`);
 				const rhsExprDirect = mapCompound(`(${base}[${idx}] ?? ${zero})`);
 				if (
@@ -1525,7 +1525,7 @@ export const statementGenMethods = {
 		if (this._isIntRangeType(iterType)) return iteree;
 		if (this._isMapRangeType(iterType))
 			return `Object.keys(${iteree} ?? {}).length`;
-		return `(${iteree} ? ${iteree}.length : 0)`;
+		return `(${iteree}?.length ?? 0)`;
 	},
 
 	_genRangeExprFor(stmt) {
@@ -1541,13 +1541,28 @@ export const statementGenMethods = {
 		if (this._isStringRangeType(iterType)) {
 			// One iteration per code point, as the one- and two-variable forms.
 			this.line(`for (const _$ of ${iteree} ?? "") {`);
-		} else {
-			const limit = this._rangeExprLimit(iterType, iteree);
-			const start = is64BitInt(iterType) ? "0n" : "0";
-			this.line(`for (let _$ = ${start}; _$ < ${limit}; _$++) {`);
+			this.indented(() => this.genBlock(stmt.body));
+			this.line("}");
+			return;
 		}
+		this._loopDepth = this._loopDepth ?? 0;
+		const d = this._loopDepth++;
+		const i = `__i${d}`;
+		const n = `__n${d}`;
+		const limit = this._rangeExprLimit(iterType, iteree);
+		const isBig = is64BitInt(iterType);
+		const isTypeParam = stmt.cond.expr._type?.kind === "typeParam";
+		const start = isBig
+			? "0n"
+			: isTypeParam && this._isIntRangeType(iterType)
+				? `typeof ${n} === "bigint" ? 0n : 0`
+				: "0";
+		this.line(
+			`for (let ${n} = ${limit}, ${i} = ${start}; ${i} < ${n}; ${i}++) {`,
+		);
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
+		this._loopDepth--;
 	},
 
 	_genSimpleWhileFor(stmt) {
@@ -2278,6 +2293,12 @@ export const statementGenMethods = {
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
+				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
+					const mark = this.out.length;
+					this.genStmt(stmt);
+					const body = this.out.splice(mark).map((l) => l.trim());
+					return `(() => { ${body.join(" ")} })()`;
+				}
 				if (is64BitInt(stmt.expr._type)) {
 					const l = this.genExpr(stmt.expr);
 					const binOp = stmt.op === "++" ? "+" : "-";
@@ -2423,23 +2444,28 @@ export const statementGenMethods = {
 		return `(() => { ${body.join(" ")} })()`;
 	},
 
+	_isMapCompoundAssign(stmt) {
+		return (
+			stmt.op !== "=" &&
+			stmt.lhs.length === 1 &&
+			stmt.lhs[0].kind === "IndexExpr" &&
+			Boolean(stmt.lhs[0]._mapValueType)
+		);
+	},
+
 	_inlineAssign(stmt) {
 		this._markIndexLvalues(stmt.lhs);
-		if (this._needsStatementStore(stmt))
+		if (
+			this._needsStatementStore(stmt) ||
+			this._isMapCompoundAssign(stmt) ||
+			this._isCompoundWithCall(stmt) ||
+			this._isComplexCompoundAssign(stmt)
+		)
 			return this._inlineStatementAssign(stmt);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
 			// `_ = x`: only the right-hand side runs, as in `_genAssignStmt`.
 			if (stmt.lhs[0].name === "_" && stmt.op === "=") return rhs[0];
-			if (
-				this._isCompoundWithCall(stmt) ||
-				this._isComplexCompoundAssign(stmt)
-			) {
-				const mark = this.out.length;
-				this._genAssignStmt(stmt);
-				const body = this.out.splice(mark).map((l) => l.trim());
-				return `(() => { ${body.join(" ")} })()`;
-			}
 			if (stmt.op !== "=" && is64BitInt(stmt.lhs[0]._type)) {
 				const binOp = stmt.op.slice(0, -1);
 				// Same operand coercion as the statement path (`_genAssignStmt`).

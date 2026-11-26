@@ -502,8 +502,12 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
-var __tfn = __tfn || function(f, t) {
+var __tfn = __tfn || function(f, t, iface) {
   // A defined func type tags a fresh wrapper, so the shared func keeps its own type.
+  if (f == null) {
+    if (!iface) return f;
+    return Object.defineProperties({}, { __nilf: { value: true }, __nilp: { value: true }, __t: { value: t } });
+  }
   if (typeof f !== "function" || f.__t === t) return f;
   const w = function(...a) { return f.apply(this, a); };
   Object.defineProperty(w, "__t", { value: t, configurable: true, writable: true });
@@ -514,16 +518,18 @@ var __tnm = __tnm || function(f) {
   const id = f?.nm ?? f?.id;
   return typeof id === "string" ? id.replace(/ void\\b/g, "").replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
 };
-var __ity = __ity || function(x, t, ptr, sl) {
+var __ity = __ity || function(x, t, ptr, sl, fn) {
   if (t === undefined) return x;
   // The frozen nil map cannot carry a tag: a copy of it keeps its map type.
   if (x !== null && x !== undefined && x.__nilm === true && x.__t === undefined)
     return Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true }, __t: { value: t } }));
   if (x === null || x === undefined) {
-    // A nil slice keeps its type as an empty tagged array (not a nil interface).
-    if (!ptr && !sl && t.charCodeAt(0) !== 91) return x;
-    const n = ptr ? {} : [];
-    if (!ptr) Object.defineProperty(n, "__nils", { value: true });
+    // A nil slice, pointer, or func keeps its type as a tagged sentinel (not a nil interface).
+    const isFunc = fn || t.startsWith("func(");
+    if (!ptr && !sl && !isFunc && t.charCodeAt(0) !== 91) return x;
+    const n = ptr || isFunc ? {} : [];
+    if (isFunc) Object.defineProperty(n, "__nilf", { value: true });
+    else if (!ptr) Object.defineProperty(n, "__nils", { value: true });
     Object.defineProperty(n, "__nilp", { value: true });
     Object.defineProperty(n, "__t", { value: t });
     return n;
@@ -536,8 +542,8 @@ var __ity = __ity || function(x, t, ptr, sl) {
 };
 var __isty = __isty || function(v, t, k, c, n) {
   if (v === null || v === undefined || (typeof v !== "object" && typeof v !== "function")) return false;
-  if (k === "namedfunc") return typeof v === "function" && v.__t === t;
-  if (k === "func") return typeof v === "function" && (v.__t === undefined || t === "" || v.__t === t);
+  if (k === "namedfunc") return (typeof v === "function" || v.__nilf === true) && v.__t === t;
+  if (k === "func") return (typeof v === "function" || v.__nilf === true) && (v.__t === undefined || t === "" || v.__t === t);
   if (v.__t !== undefined && t !== "") return v.__t === t;
   if (v.__nilp === true) return false;
   if (k === "named" || k === "struct") return false;

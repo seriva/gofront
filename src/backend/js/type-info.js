@@ -266,6 +266,10 @@ export const typeInfoGenMethods = {
 	_fmtBoxBase(t) {
 		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
 		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
+		if (this._isTaggedFuncType(t)) {
+			this.useHelper("ifaceBox");
+			return `(__v) => __tfn(__v, ${JSON.stringify(t.name)}, true)`;
+		}
 		const u = this._underlyingOf(t);
 		if (t.kind === "pointer" && this._underlyingOf(t.base)?.kind === "struct") {
 			this.useHelper("ifaceBox");
@@ -321,6 +325,28 @@ export const typeInfoGenMethods = {
 					const k = part(x.key);
 					const v = part(x.value);
 					return k && v && `"map[" + ${k} + "]" + ${v}`;
+				}
+				case "func": {
+					const rs = (x.returns ?? []).filter(
+						(r) => !(r?.kind === "basic" && r.name === "void"),
+					);
+					const ps = (x.params ?? []).map((p, i) => {
+						const s = part(p);
+						return (
+							s &&
+							(x.variadic && i === x.params.length - 1 ? `"..." + ${s}` : s)
+						);
+					});
+					const rParts = rs.map(part);
+					if (ps.some((p) => !p) || rParts.some((r) => !r)) return null;
+					const pExpr = ps.length ? ps.join(' + ", " + ') : '""';
+					const rExpr =
+						rParts.length === 0
+							? '""'
+							: rParts.length === 1
+								? `" " + ${rParts[0]}`
+								: `" (" + ${rParts.join(' + ", " + ')} + ")"`;
+					return `"func(" + ${pExpr} + ")" + ${rExpr}`;
 				}
 				default:
 					return null;
@@ -504,6 +530,8 @@ export const typeInfoGenMethods = {
 				return this._namedTypeCheck(t, val);
 			case "pointer":
 				return this._pointerTypeCheck(t.base, val);
+			case "func":
+				return this._dynTypeCheck({ _assertType: t }, val);
 			case "interface":
 				return this._ifaceMethodCheck(
 					val,

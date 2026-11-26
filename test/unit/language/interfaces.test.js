@@ -114,6 +114,100 @@ func main() {
 	);
 });
 
+test("nil func values boxed into any keep their dynamic type and are non-nil interfaces", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type F func()
+type FA = func()
+
+func boxAny[T any](v T) any {
+	return v
+}
+
+func wrapFuncT[T any](f func(T)) any {
+	return f
+}
+
+func assertOkAny[T any](v any) (T, bool) {
+	x, ok := v.(T)
+	return x, ok
+}
+
+func switchFunc(v any) string {
+	switch f := v.(type) {
+	case nil:
+		return "nil"
+	case func():
+		if f == nil {
+			return "nil-func()"
+		}
+		return "func()"
+	case F:
+		if f == nil {
+			return "nil-F"
+		}
+		return "F"
+	default:
+		return "other"
+	}
+}
+
+func main() {
+	var fn func()
+	var af any = fn
+	vAny, okAny := af.(any)
+	f1, ok1 := af.(func())
+	_, okWrongSig := af.(func(int))
+	_, okWrongNamed := af.(F)
+
+	var fnNamed F
+	var afNamed any = fnNamed
+	_, okNamedAny := afNamed.(any)
+	f2, ok2 := afNamed.(F)
+	_, okNamedAsUnnamed := afNamed.(func())
+
+	var fnAlias FA
+	var afAlias any = fnAlias
+	f3, ok3 := afAlias.(FA)
+
+	// Generic boxing and generic assertions
+	g1 := boxAny(fn)
+	g2 := boxAny(fnNamed)
+	gw := wrapFuncT[int](nil)
+	_, gwOkAny := gw.(any)
+	gwf, gwOkFn := gw.(func(int))
+	gf1, gok1 := assertOkAny[func()](af)
+	gf2, gok2 := assertOkAny[F](afNamed)
+	gvAny, gokAny := assertOkAny[any](af)
+	_, gokNil := assertOkAny[func()](nil)
+
+	// Non-nil func control
+	live := func() {}
+	var afLive any = live
+	fl, okl := afLive.(func())
+	liveNamed := F(live)
+	var afLiveNamed any = liveNamed
+	fln, okln := afLiveNamed.(F)
+	_, okLiveNamedAsUnnamed := afLiveNamed.(func())
+
+	// Concrete conversion F(nil) must stay nil
+	convNil := F(nil)
+
+	fmt.Println(okAny, af == nil, vAny == nil, ok1, f1 == nil, okWrongSig, okWrongNamed)
+	fmt.Println(okNamedAny, afNamed == nil, ok2, f2 == nil, okNamedAsUnnamed, ok3, f3 == nil)
+	fmt.Println(g1 == nil, g2 == nil, gw == nil, gwOkAny, gwOkFn, gwf == nil, gok1, gf1 == nil, gok2, gf2 == nil, gokAny, gvAny == nil, gokNil)
+	fmt.Println(switchFunc(nil), switchFunc(af), switchFunc(afNamed), switchFunc(afLive), switchFunc(afLiveNamed))
+	fmt.Println(okl, fl == nil, okln, fln == nil, okLiveNamedAsUnnamed, convNil == nil)
+	fmt.Printf("%T %v\\n", af, af)
+}
+`,
+		"true false false true true false false\ntrue false true true false true true\nfalse false false true true true true true true true true false false\nnil nil-func() nil-F func() F\ntrue false true false false true\nfunc() <nil>\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
