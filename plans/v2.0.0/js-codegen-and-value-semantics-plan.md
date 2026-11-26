@@ -208,7 +208,7 @@ Roots:
   - Files: `src/lower/embedding.js` (`computeEmbeddedStubs`, `pushValueEmbedStubs`), `src/backend/js/index.js` (`_embedStub`, `_embedStubCall`)
   - Test: `test/unit/types/embedding.test.js`: J4.2 (`*Num`: `Inc`, `Val`, both via interface) with `assertOutput(…, { targets: ["both", "js"] })`; J4.3 (`o.Inc()`, `&o` as `interface{ Inc() }`) on `js` only; J4 control row on all targets
   - Done when: `*Num` promoted methods (direct and via interface) work on `js`/`both`, and `Num` pointer-receiver promotions work on `js`
-- [ ] Task 5.3: Unwrap the scalar box for value-receiver methods promoted through `*Num` on WASM (J4.2 `wasm`)
+- [x] Task 5.3: Unwrap the scalar box for value-receiver methods promoted through `*Num` on WASM (J4.2 `wasm`)
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitEmbeddedMethodCall`), `src/backend/wasm/module-emitter.js` (promoted candidates), `src/backend/wasm/emit.js` (itable value deref)
   - Test: `test/unit/types/embedding.test.js`: all J4.2 rows with `assertAllTargetsOutput` (the already-passing `Inc` rows stay green)
   - Done when: `OuterPtr{*Num}` `Val` and `Inc`, direct and via interface, match Go on `js`, `both`, and `wasm` and the module validates

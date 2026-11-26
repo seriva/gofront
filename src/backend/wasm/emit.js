@@ -1479,6 +1479,19 @@ export class FunctionEmitter {
 					this.emitCloneStruct(cand.structInfo, cand.targetRecvWType);
 				}
 			}
+			if (cand.needsValueDeref && cand.scalarBox) {
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: cand.scalarBox.typeIndex,
+					typeName: cand.scalarBox.name,
+				});
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: cand.scalarBox.typeIndex,
+					typeName: cand.scalarBox.name,
+					fieldIndex: 0,
+				});
+			}
 
 			// Push method arguments: __arg0 (local 1), __arg1 (local 2), ...
 			for (let p = 1; p < fn.params.length; p++) {
@@ -1536,8 +1549,12 @@ export class FunctionEmitter {
 	// A promoted candidate tests the outer struct but carries the embedded
 	// struct's info, so it is recognised by its embed path.
 	_emitNilPtrCandidate(cand, fn, recvLocal) {
-		if (cand.isBoxedValue || !cand.structInfo) return;
-		if (!cand.embedPath && cand.testTypeIndex !== cand.structInfo.typeIndex)
+		if (cand.isBoxedValue || (!cand.structInfo && !cand.embedPath)) return;
+		if (
+			!cand.embedPath &&
+			cand.structInfo &&
+			cand.testTypeIndex !== cand.structInfo.typeIndex
+		)
 			return;
 		const nilBox = this.mod.getNilBoxType({
 			kind: "pointer",

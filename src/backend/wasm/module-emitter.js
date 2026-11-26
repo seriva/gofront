@@ -1450,9 +1450,20 @@ export class ModuleEmitter {
 				const paramWTypes = this.getFuncParamTypes(embedMethodName);
 				const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
 				const embedSInfo = this.getStructType(embedType);
+				const lastStep = embedPath[embedPath.length - 1];
+				const scalarBox =
+					!embedSInfo &&
+					!isPtrRecv &&
+					lastStep?.ptrWType &&
+					isScalarType(paramGoTypes[0], this.checker, this)
+						? this.getBoxType(paramGoTypes[0])
+						: null;
+
+				const canDispatchPtr =
+					embedSInfo || !isPtrRecv || Boolean(lastStep?.ptrWType);
 
 				const ptrKey = `ptr:${sName}`;
-				if (!seenKeys.has(ptrKey)) {
+				if (canDispatchPtr && !seenKeys.has(ptrKey)) {
 					seenKeys.add(ptrKey);
 					candidates.push({
 						recvTypeName: sName,
@@ -1465,6 +1476,7 @@ export class ModuleEmitter {
 						targetParamTypes: paramWTypes,
 						targetRecvWType: paramWTypes[0],
 						structInfo: embedSInfo,
+						scalarBox,
 					});
 				}
 
@@ -1479,13 +1491,14 @@ export class ModuleEmitter {
 							recvTypeName: sName,
 							testTypeIndex: box.typeIndex,
 							isBoxedValue: true,
-							needsValueDeref: false,
+							needsValueDeref: Boolean(scalarBox),
 							embedPath,
 							nilCheckLast: !isPtrRecv,
 							funcIndex: fIdx,
 							targetParamTypes: paramWTypes,
 							targetRecvWType: paramWTypes[0],
 							structInfo: embedSInfo,
+							scalarBox,
 						});
 					}
 				}

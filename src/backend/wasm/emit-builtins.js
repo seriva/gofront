@@ -1332,6 +1332,7 @@ export class BuiltinsEmitter {
 			const isPtr = ft?.kind === "pointer" || ft?.kind === "PointerType";
 			if (isPtr && (i < chain.length - 1 || valueRecv)) this._emitNilBranch();
 		}
+		this._unwrapEmbeddedScalarBox(chain, valueRecv);
 		for (let i = 0; i < args.length; i++) {
 			const pType = targetParamTypes[i + 1] ?? null;
 			this.emitExpr(args[i], pType);
@@ -1341,6 +1342,27 @@ export class BuiltinsEmitter {
 			funcIndex: subIdx,
 		});
 		return true;
+	}
+
+	_unwrapEmbeddedScalarBox(chain, valueRecv) {
+		if (!valueRecv || chain.length === 0) return;
+		const { structInfo: owner, embed } = chain[chain.length - 1];
+		const ft = owner.fields[embed.fieldIndex]?.goType;
+		const isPtr = ft?.kind === "pointer" || ft?.kind === "PointerType";
+		const base = isPtr ? (ft.base ?? ft.elem) : null;
+		if (!base || !isScalarType(base, this.mod.checker, this.mod)) return;
+		const box = this.mod.getBoxType(base);
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+			fieldIndex: 0,
+		});
 	}
 
 	_emitStaticCall(call) {

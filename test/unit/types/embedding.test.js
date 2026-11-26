@@ -108,9 +108,19 @@ func main() {
 	);
 });
 
-test("pointer-embedded scalar promotes Inc and Val directly and via interface (J4.2, JS)", async () => {
-	await assertOutput(
+test("pointer-embedded scalar promotes Inc and Val directly and via interface (J4.2)", async () => {
+	await assertAllTargetsOutput(
 		`${NUM_EMBED_SRC}
+func callValPanic(op OuterPtr) (panicked bool) {
+	defer func() {
+		if recover() != nil {
+			panicked = true
+		}
+	}()
+	_ = op.Val()
+	return false
+}
+
 func main() {
 	x := Num(10)
 	op := OuterPtr{&x}
@@ -127,11 +137,14 @@ func main() {
 	var iv interface{ Val() int } = OuterPtr{&y}
 	fmt.Println(iv.Val())
 
+	var ivPtr interface{ Val() int } = &OuterPtr{&y}
+	fmt.Println(ivPtr.Val())
+
 	fmt.Println(OuterPtr{nil}.IsNil())
+	fmt.Println(callValPanic(OuterPtr{nil}))
 }
 `,
-		"11 11\n3\n4\n4\ntrue\n",
-		{ targets: ["both", "js"] },
+		"11 11\n3\n4\n4\n4\ntrue\ntrue\n",
 	);
 });
 
