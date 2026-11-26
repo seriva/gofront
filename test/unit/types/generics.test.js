@@ -3772,6 +3772,94 @@ func main() {
 	await assertAllTargetsOutput(src, "18 14 10\n18 14 10\ntrue\n");
 });
 
+test("shadowed local variables named after type parameter keep working alongside T.M method expressions", async () => {
+	const src = `package main
+
+import "fmt"
+
+type N interface{ M() int }
+type S struct{ v int }
+func (s S) M() int { return s.v }
+
+func f[T N](t T) int {
+	res := T.M(t)
+	{
+		T := struct{ M int }{M: 5}
+		res += T.M
+	}
+	{
+		T := S{v: 3}
+		res += T.M()
+	}
+	{
+		T := t
+		res += T.M()
+	}
+	g := (T).M
+	res += g(t)
+	return res
+}
+
+func main() {
+	fmt.Println(f(S{v: 10}))
+}`;
+	await assertAllTargetsOutput(src, "38\n");
+});
+
+test("pointer-to-interface method expressions are rejected on all targets", () => {
+	const cases = [
+		[
+			"named interface",
+			`package main
+type N interface{ M() int }
+func main() { _ = (*N).M }`,
+			"*N.M undefined (type *N is pointer to interface, not interface)",
+		],
+		[
+			"alias to named interface",
+			`package main
+type N interface{ M() int }
+type AI = N
+func main() { _ = (*AI).M }`,
+			"*AI.M undefined (type *N is pointer to interface, not interface)",
+		],
+		[
+			"alias to pointer to named interface",
+			`package main
+type N interface{ M() int }
+type PI = *N
+func main() { _ = PI.M }`,
+			"PI.M undefined (type *N is pointer to interface, not interface)",
+		],
+		[
+			"generic named interface",
+			`package main
+type GN[T any] interface{ M() T }
+func main() { _ = (*GN[int]).M }`,
+			"*GN[int].M undefined (type *GN[int] is pointer to interface, not interface)",
+		],
+		[
+			"stdlib named interface",
+			`package main
+import "fmt"
+func main() { _ = (*fmt.Stringer).String }`,
+			"*fmt.Stringer.String undefined (type *fmt.Stringer is pointer to interface, not interface)",
+		],
+		[
+			"anonymous interface",
+			`package main
+func main() { _ = (*interface{ M() int }).M }`,
+			"is pointer to interface, not interface",
+		],
+	];
+	for (const [, src, want] of cases) {
+		for (const target of ["js", "both", "wasm"]) {
+			const { errors } = compile(src, { target });
+			assertErrorContains(errors, want);
+		}
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

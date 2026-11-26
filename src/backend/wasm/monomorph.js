@@ -220,12 +220,17 @@ function getSpecializedName(baseName, typeArgs) {
 
 // `_structFields` is the field list of a checker struct type inside
 // `_typeArgs`; without it the clone is a struct with no fields.
+// `_isMethodExpr` and `_namesTypeParam` tell `substituteTypesInAst` that a
+// `T.M` selector is a method expression on a type parameter, not a shadowed
+// local variable or local type.
 const KEPT_CLONE_KEYS = new Set([
 	"_typeArgs",
 	"_structFields",
 	"_line",
 	"_col",
 	"_spread",
+	"_isMethodExpr",
+	"_namesTypeParam",
 ]);
 
 function cloneAst(node, open = new Set()) {
@@ -300,6 +305,19 @@ function pointerTypeOfParams(callee, typeSubstMap) {
 	let type = cloneAst(typeSubstMap.get(n.name));
 	for (let i = 0; i < stars; i++) type = { kind: "PointerType", base: type };
 	return type;
+}
+
+function typeParamMethodExprBase(node, typeSubstMap) {
+	if (node.kind !== "SelectorExpr" || !node._isMethodExpr) return null;
+	let base = node.expr;
+	while (base?.kind === "ParenExpr") base = base.expr;
+	if (
+		base?.kind !== "Ident" ||
+		!base._namesTypeParam ||
+		!typeSubstMap.has(base.name)
+	)
+		return null;
+	return typeSubstMap.get(base.name);
 }
 
 function substituteTypesInAst(
@@ -487,15 +505,9 @@ function substituteTypesInAst(
 	// 5. SelectorExpr on a type parameter (`T.M` method expression): rewrite the
 	// base `Ident` to a `TypeExpr` of the concrete type so `desugarMethodExprs`
 	// sees a concrete receiver.
-	if (
-		node.kind === "SelectorExpr" &&
-		node.expr?.kind === "Ident" &&
-		typeSubstMap.has(node.expr.name)
-	) {
-		node.expr = {
-			kind: "TypeExpr",
-			type: cloneAst(typeSubstMap.get(node.expr.name)),
-		};
+	const tpMethodBase = typeParamMethodExprBase(node, typeSubstMap);
+	if (tpMethodBase) {
+		node.expr = { kind: "TypeExpr", type: cloneAst(tpMethodBase) };
 	}
 
 	// Recurse child properties

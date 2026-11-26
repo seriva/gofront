@@ -1281,13 +1281,28 @@ export class CodeGen {
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`let ${decl.recvName} = ${this._receiverValue(decl)};`);
 				}
-				if (staticNamed && this._boxedVars.has(recvParam)) {
-					this.line(`${recvParam} = { value: ${recvParam} };`);
-				}
+				if (staticNamed) this._emitStaticNamedRecvPrep(decl, recvParam);
 				this._emitParamCopies(decl.params);
 				this._withNamedReturns(decl, () => this._genBody(decl.body, decl));
 			}),
 		);
+	}
+
+	_emitStaticNamedRecvPrep(decl, recvParam) {
+		if (!decl.recvPointer && decl.recvName && decl.recvName !== "_") {
+			const rt = this.checker?.types.get(decl.recvType?.name);
+			if (
+				rt &&
+				this._aggregateBase(rt) &&
+				(this._fnMutates(decl.recvName) || this._boxedVars.has(recvParam))
+			) {
+				this.line(`${recvParam} = ${this._cloneJs(rt, recvParam)};`);
+				this._markOwnership(decl.recvName, true);
+			}
+		}
+		if (this._boxedVars.has(recvParam)) {
+			this.line(`${recvParam} = { value: ${recvParam} };`);
+		}
 	}
 
 	// JS parameter names; a variadic Go parameter is a rest parameter.

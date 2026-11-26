@@ -1009,6 +1009,12 @@ export const expressionCheckMethods = {
 	_checkMethodExprSelector(expr, baseType) {
 		const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
 		const base = this.resolveType(this._deepUnderlying(recvBase));
+		if (baseType.kind === "pointer" && base?.kind === "interface") {
+			return this.err(
+				`${exprText(expr)} undefined (type ${typeStr(baseType)} is pointer to interface, not interface)`,
+				expr,
+			);
+		}
 		const methodType = this._resolveMethodExprType(
 			recvBase,
 			base,

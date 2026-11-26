@@ -1640,14 +1640,14 @@ export const expressionGenMethods = {
 				expr.expr?._type?.kind === "named"
 					? expr.expr._type
 					: this.checker?.types.get(expr.expr?.name);
-			return { cls: namedExpr.cls, type: t };
+			return { cls: namedExpr.cls, type: t, deref: false };
 		}
 		const rt = expr._methodExprRecv;
 		if (rt?.kind !== "pointer") return null;
 		const info = this._namedBoxInfo(rt.base);
-		const method = rt.base?.methods?.get(expr.field);
-		if (!info?.methods.has(expr.field) || !method?._ptrRecv) return null;
-		return { cls: info.cls, type: rt.base };
+		const method = info?.methods.get(expr.field);
+		if (!method) return null;
+		return { cls: info.cls, type: rt.base, deref: !method._ptrRecv };
 	},
 
 	_genTypeParamMethodExpr(rt, field) {
@@ -1667,8 +1667,13 @@ export const expressionGenMethods = {
 		const named = this._namedMethodExprTarget(expr);
 		if (named) {
 			const tz = this._namedTypeArgFactories(named.type);
+			const tzPrefix = tz.length > 0 ? `${tz.join(", ")}, ` : "";
+			if (named.deref) {
+				this.useHelper("nilCall");
+				return `((recv, ...args) => ${named.cls}.$${expr.field}(${tzPrefix}__nilcall(recv).value, ...args))`;
+			}
 			return tz.length > 0
-				? `((...__a) => ${named.cls}.$${expr.field}(${tz.join(", ")}, ...__a))`
+				? `((...__a) => ${named.cls}.$${expr.field}(${tzPrefix}...__a))`
 				: `${named.cls}.$${expr.field}`;
 		}
 		const rt = expr._methodExprRecv;
