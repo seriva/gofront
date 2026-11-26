@@ -1599,6 +1599,66 @@ func main() {}`);
 	);
 });
 
+test("methods declared on local type aliases work on all targets (G3.1, G3.2, G3.4, G3.5)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+type A = P
+type B = A
+type C = *P
+
+func (a A) Get() int  { return a.n }
+func (a *A) Set(v int) { a.n = v }
+func (b B) Get2() int { return b.n + 1 }
+func (c C) Add(v int) { c.n += v }
+
+type G interface{ Get() int }
+
+func use(x any) int {
+	return x.(interface{ Get() int }).Get()
+}
+
+type I int
+type AI = I
+func (a AI) Dbl() int { return int(a) * 2 }
+
+func main() {
+	var p P
+	p.Set(5)
+	var g G = p
+	fmt.Println(p.Get(), p.Get2(), g.Get(), use(p))
+	p.Add(2)
+	fmt.Println(p.Get())
+	var i I = 3
+	fmt.Println(i.Dbl())
+}`,
+		"5 6 5 5\n7\n6\n",
+	);
+});
+
+test("method on alias of instantiated generic type is rejected (G3.6)", () => {
+	const { errors } = compile(`package main
+type G[T any] struct{ v T }
+type A = G[int]
+func (a A) M() int { return a.v }
+func main() {}`);
+	assertErrorContains(
+		errors,
+		"cannot define new methods on instantiated type G[int]",
+	);
+});
+
+test("method on alias of anonymous struct is rejected (G3 control)", () => {
+	const { errors } = compile(`package main
+type A = struct{ n int }
+func (a A) M() int { return a.n }
+func main() {}`);
+	assertErrorContains(errors, "invalid receiver type A");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

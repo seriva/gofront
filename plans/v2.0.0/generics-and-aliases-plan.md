@@ -157,7 +157,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Files: `src/backend/js/expressions.js` (method-expr emission `:~1425`, `:~1639`), `src/backend/js/type-info.js` (`_isTypeParamMethodCall`)
   - Test: `test/unit/types/generics.test.js`: upgrade the Task 1.2 cases to `assertAllTargetsOutput` (`both` `N.M(n)`; `T.M` with named non-struct `MyInt` via `__tbox`; nil interface receiver panics as in Go)
   - Done when: every G2 form prints Go's output on `js`, `both`, and `wasm`
-- [ ] Task 1.4: Canonicalize alias method receivers at checker registration (G3.1–G3.6)
+- [x] Task 1.4: Canonicalize alias method receivers at checker registration (G3.1–G3.6)
   - Files: `src/typechecker/index.js` (`_unwrapPointerAliasReceiver` → `_canonicalizeAliasReceiver`)
   - Test: `test/unit/language/named-type-methods.test.js`: G3.1, G3.2, G3.4, G3.5 (value/pointer/chained alias receivers, alias of `type I int`, interface dispatch and assertion) via `assertAllTargetsOutput`, G3.6 negative (`assertErrorContains(errors, "cannot define new methods on instantiated type G[int]")`), pointer-alias and anonymous-struct-alias controls; `test/unit/compiler/dce-methods.test.js`: G3.3 (`console.log(p)` keeps `Get(` for a method declared on `A`)
   - Done when: methods declared on local type aliases work on all targets and survive DCE exactly like methods declared on the target type, with no change to `src/lower/reachability.js` or either backend

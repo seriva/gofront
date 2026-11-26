@@ -703,6 +703,7 @@ func (b B[T]) Z() T { var z T; return z }
 
 type L interface{ Len() int }
 type P interface{ Push(v int) }
+type Z interface{ Z() string }
 
 func main() {
 	w := W[int]{1, 2, 3}
@@ -716,22 +717,25 @@ func main() {
 	arr := Arr[string]{"hi", "lo"}
 	fmt.Println(arr.First())
 
-	fmt.Printf("%q\\n", B[string](1).Z())
+	var zi Z = B[string](1)
+	fmt.Printf("%q %q\\n", B[string](1).Z(), zi.Z())
 
 	var l L = W[int]{1, 2}
 	fmt.Println(l.Len(), l.(W[int]).Len())
 
 	var p P = &w
 	p.Push(5)
+	pushExpr := (*W[int]).Push
+	pushExpr(&w, 6)
 	fmt.Println(w.Len())
 }`,
 		`3
 4
 true false
 hi
-""
+"" ""
 2 2
-5
+6
 `,
 	);
 });

@@ -1645,8 +1645,8 @@ export const expressionGenMethods = {
 		const rt = expr._methodExprRecv;
 		if (rt?.kind !== "pointer") return null;
 		const info = this._namedBoxInfo(rt.base);
-		const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
-		if (!info?.methods.has(expr.field) || !decl?.recvPointer) return null;
+		const method = rt.base?.methods?.get(expr.field);
+		if (!info?.methods.has(expr.field) || !method?._ptrRecv) return null;
 		return { cls: info.cls, type: rt.base };
 	},
 
