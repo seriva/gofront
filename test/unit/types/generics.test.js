@@ -4577,6 +4577,73 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("address-taken type-parameter params and locals stay unboxed for struct T on JS (G7)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+
+func makePtr[T any](v T) *T {
+	return &v
+}
+
+func makeLocalPtr[T any](v T) *T {
+	x := v
+	return &x
+}
+
+func reassignAfterAddr[T any](v, w T) *T {
+	p := &v
+	v = w
+	return p
+}
+
+func closureAfterAddr[T any](v T) func() T {
+	p := &v
+	return func() T {
+		return *p
+	}
+}
+
+func main() {
+	// G7.1: &v on param and &x on local
+	fmt.Println(makePtr(Box{11}).N)
+	fmt.Println(makeLocalPtr(Box{99}).N)
+
+	// G7.2: reassign after &v, and *p read in closure
+	fmt.Println(reassignAfterAddr(Box{1}, Box{33}).N)
+	fn := closureAfterAddr(Box{7})
+	fmt.Println(fn().N)
+
+	// Controls: mutating through returned *Box, caller copy unchanged, non-struct 42 and [2]int
+	p := makePtr(Box{11})
+	p.N = 22
+	fmt.Println(p.N, *p)
+
+	srcBox := Box{5}
+	makePtr(srcBox).N = 6
+	fmt.Println(srcBox.N)
+
+	pi := makePtr(42)
+	*pi = 43
+	fmt.Println(*pi, *makeLocalPtr(44), *reassignAfterAddr(1, 2), closureAfterAddr(3)())
+
+	pa := makePtr([2]int{3, 4})
+	fmt.Println((*pa)[0], (*pa)[1])
+}`;
+	const want =
+		"11\n" +
+		"99\n" +
+		"33\n" +
+		"7\n" +
+		"22 {22}\n" +
+		"5\n" +
+		"43 44 2 3\n" +
+		"3 4\n";
+	await assertAllTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

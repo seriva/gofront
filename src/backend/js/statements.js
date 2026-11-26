@@ -282,7 +282,7 @@ export const statementGenMethods = {
 			if (collect) return collect.push([i, js]);
 			if (!isDefine || l._redecl) return this._storeInto(targets[i], js);
 			const boxed = this._boxedVars.has(l.name);
-			this.line(`let ${l.name} = ${boxed ? `{ value: ${js} }` : js};`);
+			this.line(`let ${l.name} = ${boxed ? this._boxInitJs(l.name, js) : js};`);
 		};
 		const [vL, okL] = stmt.lhs;
 		// A struct or array map value is a copy, not the stored value.
@@ -502,11 +502,15 @@ export const statementGenMethods = {
 
 	_genDefineSingleVar(lhs, rhs, redecls) {
 		const isBoxed = this._boxedVars.has(lhs[0]);
-		const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
 		if (redecls[0]) {
-			if (isBoxed) this.line(`${lhs[0]}.value = ${rhs[0]};`);
-			else this.line(`${lhs[0]} = ${val};`);
+			if (isBoxed)
+				this._storeInto(
+					this._storeTarget({ kind: "Ident", name: lhs[0] }),
+					rhs[0],
+				);
+			else this.line(`${lhs[0]} = ${rhs[0]};`);
 		} else {
+			const val = isBoxed ? this._boxInitJs(lhs[0], rhs[0]) : rhs[0];
 			this.line(`let ${lhs[0]} = ${val};`);
 		}
 	},
@@ -528,7 +532,7 @@ export const statementGenMethods = {
 	_boxDeclaredNames(names) {
 		for (const n of names) {
 			if (n && n !== "_" && this._boxedVars.has(n))
-				this.line(`${n} = { value: ${n} };`);
+				this.line(`${n} = ${this._boxInitJs(n, n)};`);
 		}
 	},
 
@@ -1206,6 +1210,12 @@ export const statementGenMethods = {
 	// store itself can be emitted later by `_storeInto`.
 	_storeTarget(l) {
 		if (l.kind === "Ident" && l.name === "_") return { kind: "blank" };
+		if (l.kind === "Ident" && this._boxedVars.has(l.name)) {
+			const cond = this._boxedTypeParamCond(l.name);
+			if (cond) {
+				return { kind: "typeParamPtr", ptr: l.name, isStruct: cond };
+			}
+		}
 		if (l.kind === "UnaryExpr" && l.op === "*") {
 			if (l.operand?._type?.base?.kind === "typeParam")
 				return {
@@ -1598,9 +1608,9 @@ export const statementGenMethods = {
 			const i = stmt.init.lhs.findIndex((e) => e.name === name);
 			const t = stmt.init.lhs[i]?._type ?? stmt.init.rhs?.[i]?._type;
 			if (this._boxedVars?.has(name)) {
-				const v = `${name}.value`;
+				const v = this._boxedReadJs(name);
 				const copy = this._aggregateBase(t) ? this._cloneJs(t, v) : v;
-				clones.push(`${name} = { value: ${copy} }`);
+				clones.push(`${name} = ${this._boxInitJs(name, copy)}`);
 				continue;
 			}
 			if (!this._aggregateBase(t)) continue;
@@ -1654,7 +1664,7 @@ export const statementGenMethods = {
 		}
 		const target = this._rangeVarTarget(e);
 		if (target === null) return;
-		const v = target.boxed ? `{ value: ${valueJs} }` : valueJs;
+		const v = target.boxed ? this._boxInitJs(target.name, valueJs) : valueJs;
 		this.line(`let ${target.name} = ${v};`);
 	},
 
@@ -2249,7 +2259,7 @@ export const statementGenMethods = {
 		// An `in` test must be parenthesised in a `for` initializer.
 		const decl = (i, js) => {
 			const name = stmt.lhs[i].name;
-			return `${name} = ${this._boxedVars.has(name) ? `{ value: ${js} }` : `(${js})`}`;
+			return `${name} = ${this._boxedVars.has(name) ? this._boxInitJs(name, js) : `(${js})`}`;
 		};
 		if (temps.length === 0)
 			return `let ${reads.map(([i, js]) => decl(i, js)).join(", ")}`;
@@ -2272,7 +2282,7 @@ export const statementGenMethods = {
 			stmt.rhs.length === 1 &&
 			this._boxedVars.has(stmt.lhs[0].name);
 		if (boxed)
-			return `let ${stmt.lhs[0].name} = { value: ${pre ? pre[0] : this.genValueExpr(stmt.rhs[0])} }`;
+			return `let ${stmt.lhs[0].name} = ${this._boxInitJs(stmt.lhs[0].name, pre ? pre[0] : this.genValueExpr(stmt.rhs[0]))}`;
 		const rhs = pre ?? stmt.rhs.map((e) => this.genExpr(e));
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		if (lhs.length === 1) return `let ${lhs[0]} = ${rhs[0]}`;
@@ -2280,7 +2290,7 @@ export const statementGenMethods = {
 		if (rhs.length === lhs.length) {
 			const decls = lhs.map((n, i) =>
 				this._boxedVars.has(n)
-					? `${n} = { value: ${rhs[i]} }`
+					? `${n} = ${this._boxInitJs(n, rhs[i])}`
 					: `${n} = ${rhs[i]}`,
 			);
 			return `let ${decls.join(", ")}`;

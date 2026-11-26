@@ -181,7 +181,7 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
   - Files: `src/backend/js/statements.js` (`_switchTagAndCases`, `genSwitch`), `src/backend/js/type-info.js` (`_nodeUsesTypeInfo`)
   - Test: `test/unit/types/generics.test.js`: G6.1 (`switch x { case y: }` on `T comparable` instantiated with struct, array, `complex128`, `any`), G6.2 (labeled switch with `break L`, switch inside `for range`, interface-typed case `any(P{1})`), plus the G6 controls, on `js`, `both`, `wasm`
   - Done when: JS `switch` on type-parameter tags matches Go value equality across all comparable types
-- [ ] Task 3.2: Keep address-taken type-parameter params and locals unboxed when `T` is a struct in JS (G7.1–G7.2)
+- [x] Task 3.2: Keep address-taken type-parameter params and locals unboxed when `T` is a struct in JS (G7.1–G7.2)
   - Files: `src/backend/js/expressions.js` (`_emitParamCopies`, `_genUnaryExpr`), `src/backend/js/statements.js` (boxed local init/read/write), `src/backend/js/index.js`
   - Test: `test/unit/types/generics.test.js`: G7.1 (`makePtr(Box{11})`, local `x := v; return &x`), G7.2 (reassigning `v = Box{33}` after `p := &v`, `*p` read in a closure), plus the G7 controls (mutating through returned `*Box`, caller copy unchanged, non-struct `42` and `[2]int{3, 4}`) on `js`, `both`, `wasm`
   - Docs: `docs/language-support.md`: method-expression rows add interface and type-parameter forms (`N.M`, `T.M`) and the named non-struct methods row adds generic receivers (`type List[T any] []T`), each with a `<!-- fixture: … -->` that passes

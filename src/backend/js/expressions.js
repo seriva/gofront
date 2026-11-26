@@ -810,7 +810,7 @@ export const expressionGenMethods = {
 				return `{ re: 0, im: ${expr.value} }`;
 			case "Ident": {
 				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
-					return `${expr.name}.value`;
+					return this._boxedReadJs(expr.name);
 				// A named untyped constant used as an int64 operand: its
 				// declaration holds a Number, so emit the exact BigInt.
 				const lit64 =
@@ -1288,8 +1288,11 @@ export const expressionGenMethods = {
 			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
-				// Address-taken parameter: rebind it to a { value } box.
-				this.line(`${p.name} = { value: ${p.name} };`);
+				// Address-taken parameter: rebind it to a { value } box (or clone
+				// directly when an erased type parameter is a struct).
+				const t = this._typeFromNode(p.type);
+				const cloned = t ? this._cloneJs(t, p.name) : p.name;
+				this.line(`${p.name} = ${this._boxInitJs(p.name, p.name, cloned)};`);
 				continue;
 			}
 			const t = this._typeFromNode(p.type);
@@ -2038,7 +2041,9 @@ export const expressionGenMethods = {
 		const asyncPrefix = expr.async ? "async " : "";
 		const saved = this.out;
 		const prevBoxed = this._boxedVars;
+		const prevBoxedTp = this._boxedTypeParams;
 		this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
+		this._boxedTypeParams = new Map(prevBoxedTp);
 		this._scanAddressTaken(expr.body);
 		this.out = [];
 		this._withFnCtx(
@@ -2053,6 +2058,7 @@ export const expressionGenMethods = {
 		const body = this.out.join("\n");
 		this.out = saved;
 		this._boxedVars = prevBoxed;
+		this._boxedTypeParams = prevBoxedTp;
 		return `${asyncPrefix}function(${params}) {\n${body}\n${"  ".repeat(this.indent)}}`;
 	},
 
@@ -3347,6 +3353,24 @@ export const expressionGenMethods = {
 	// zero value is a struct object, which is its own pointer when erased; a
 	// map's zero is a bare `{}`, so only a class instance or a populated
 	// object counts).
+	_boxedTypeParamCond(name) {
+		const tpName = this._boxedTypeParams?.get(name);
+		if (!tpName || !this._typeParamZeroFactory(tpName)) return null;
+		return this._typeParamIsStructJs(tpName);
+	},
+
+	_boxInitJs(name, valJs, structValJs = valJs) {
+		const cond = this._boxedTypeParamCond(name);
+		return cond
+			? `(${cond} ? ${structValJs} : { value: ${valJs} })`
+			: `{ value: ${valJs} }`;
+	},
+
+	_boxedReadJs(name) {
+		const cond = this._boxedTypeParamCond(name);
+		return cond ? `(${cond} ? ${name} : ${name}.value)` : `${name}.value`;
+	},
+
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
