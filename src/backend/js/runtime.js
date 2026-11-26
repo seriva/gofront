@@ -600,7 +600,9 @@ var __dtn = __dtn || function(v) {
 var __tafail = __tafail || function(src, v, target, methods) {
   if (methods) {
     if (v === null || v === undefined) return new Error("interface conversion: interface is nil, not " + target);
-    const m = methods.find((n) => typeof v[n] !== "function") ?? methods[0];
+    const m = methods.find((n) => typeof v[n] !== "function" || (v.__v === true && v.constructor?.__pm?.includes(n)))
+      ?? methods.find((n) => v.constructor?.__sm?.includes(n))
+      ?? methods[0];
     return new Error("interface conversion: " + __dtn(v) + " is not " + target + ": missing method " + m);
   }
   return new Error("interface conversion: " + src + " is " + __dtn(v) + ", not " + target);

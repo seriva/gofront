@@ -489,3 +489,258 @@ func main() {
 		"other\nother\ntop\ntop\n",
 	);
 });
+
+section("Cross-package js -> both scalar-interior method promotions");
+
+test("js package importing both package uses promoted scalar-interior methods on all call forms", async () => {
+	const { lines } = await compileHybridProject({
+		"lib/lib.go": `//gofront:target both
+package lib
+
+type Num int
+
+func (n *Num) Inc()    { *n++ }
+func (n Num) Val() int { return int(n) }
+
+type ErrStr string
+
+func (e *ErrStr) Error() string { return string(*e) }
+
+type Outer struct{ Num }
+type Mid struct{ Num }
+type Top struct{ *Mid }
+type Deep struct{ Top }
+type OuterErr struct{ ErrStr }
+`,
+		"main.go": `//gofront:target js
+package main
+
+import (
+	"fmt"
+	"./lib"
+)
+
+type Incer interface{ Inc() }
+
+func checkIface[I any](a any) bool {
+	_, ok := a.(I)
+	return ok
+}
+
+func main() {
+	var o lib.Outer
+	o.Inc()
+	(&o).Inc()
+	f := o.Inc
+	f()
+	fn := (*lib.Outer).Inc
+	fn(&o)
+	var i interface{ Inc() } = &o
+	i.Inc()
+
+	_, okVal := any(o).(interface{ Inc() })
+	_, okPtr := any(&o).(interface{ Inc() })
+	_, okNamed := any(&o).(Incer)
+	okGen := checkIface[Incer](&o)
+
+	t := lib.Top{&lib.Mid{}}
+	t.Inc()
+	lib.Top.Inc(t)
+	var it interface{ Inc() } = t
+	it.Inc()
+	_, okTop := any(t).(interface{ Inc() })
+	_, okTopPtr := any(&t).(interface{ Inc() })
+
+	d := lib.Deep{Top: lib.Top{Mid: &lib.Mid{}}}
+	d.Inc()
+	lib.Deep.Inc(d)
+
+	oe := lib.OuterErr{ErrStr: "boom"}
+	var e error = &oe
+	_, okErrVal := any(oe).(error)
+	_, okErrPtr := any(&oe).(error)
+
+	fmt.Println(o.Val(), okVal, okPtr, okNamed, okGen, t.Val(), okTop, okTopPtr, d.Val(), e.Error(), okErrVal, okErrPtr)
+}
+`,
+	});
+	assertEqual(
+		lines.join("\n"),
+		"5 false true true true 3 true true 2 boom false true",
+	);
+});
+
+test("mixed js + both project keeps js promotions while both runtime assertions stay false", async () => {
+	const { lines } = await compileHybridProject({
+		"lib/lib.go": `//gofront:target both
+package lib
+
+type Num int
+
+func (n *Num) Inc()    { *n++ }
+func (n Num) Val() int { return int(n) }
+
+type ErrStr string
+
+func (e *ErrStr) Error() string { return string(*e) }
+
+type Outer struct{ Num }
+type Mid struct{ Num }
+type Top struct{ *Mid }
+type OuterErr struct{ ErrStr }
+`,
+		"helper/helper.go": `//gofront:target both
+package helper
+
+import "../lib"
+
+type Incer interface{ Inc() }
+
+func checkGeneric[I any](a any) bool {
+	_, ok := a.(I)
+	return ok
+}
+
+func CheckOuter(o *lib.Outer) (bool, bool, bool, bool) {
+	var a any = o
+	_, okAnon := a.(interface{ Inc() })
+	_, okNamed := a.(Incer)
+	okGen := checkGeneric[Incer](a)
+	hitSwitch := false
+	switch a.(type) {
+	case interface{ Inc() }:
+		hitSwitch = true
+	}
+	return okAnon, okNamed, okGen, hitSwitch
+}
+
+func CheckTop(t lib.Top) (bool, bool) {
+	_, okVal := any(t).(interface{ Inc() })
+	_, okPtr := any(&t).(interface{ Inc() })
+	return okVal, okPtr
+}
+
+func CheckErr(oe *lib.OuterErr) bool {
+	_, ok := any(oe).(error)
+	return ok
+}
+`,
+		"main.go": `//gofront:target js
+package main
+
+import (
+	"fmt"
+	"./helper"
+	"./lib"
+)
+
+func main() {
+	var o lib.Outer
+	o.Inc()
+	var i interface{ Inc() } = &o
+	i.Inc()
+	_, jsOk := any(&o).(interface{ Inc() })
+
+	a1, a2, a3, a4 := helper.CheckOuter(&o)
+	t := lib.Top{&lib.Mid{}}
+	t.Inc()
+	t1, t2 := helper.CheckTop(t)
+	oe := lib.OuterErr{ErrStr: "bad"}
+	e1 := helper.CheckErr(&oe)
+
+	fmt.Println(o.Val(), jsOk, a1, a2, a3, a4, t.Val(), t1, t2, e1)
+}
+`,
+	});
+	assertEqual(
+		lines.join("\n"),
+		"2 true false false false false 1 false false false",
+	);
+});
+
+test("both/wasm: error assertion and generic assertion on scalar-interior embed match wasm", async () => {
+	await assertOutput(
+		`package main
+
+import "fmt"
+
+type ErrStr string
+
+func (e *ErrStr) Error() string { return string(*e) }
+
+type OuterErr struct{ ErrStr }
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+type Outer struct{ Num }
+type Incer interface{ Inc() }
+
+func checkIface[I any](a any) bool {
+	_, ok := a.(I)
+	return ok
+}
+
+func main() {
+	oe := OuterErr{ErrStr: "bad"}
+	_, okErr := any(&oe).(error)
+	var o Outer
+	okGen := checkIface[Incer](&o)
+	fmt.Println(okErr, okGen, fmt.Sprint(any(&oe)))
+}
+`,
+		"false false &{bad}\n",
+		{ targets: ["both", "wasm"] },
+	);
+});
+
+test("both/wasm: panicking assertion and shadowing on scalar-interior embed match wasm", async () => {
+	await assertOutput(
+		`package main
+
+import "fmt"
+
+type Num int
+
+func (n *Num) Inc() { *n++ }
+
+type Outer struct{ Num }
+func (o Outer) A() {}
+
+type HasBoth interface {
+	A()
+	Inc()
+}
+
+type Other struct{}
+func (o *Other) Inc() {}
+type Mid struct{ Num }
+type ShadowOther struct{ Mid; Other }
+type ShadowDirect struct{ Num }
+func (s *ShadowDirect) Inc() {}
+
+func main() {
+	var o Outer
+	var a any = &o
+	var panicked string
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = r.(error).Error()
+			}
+		}()
+		_ = a.(HasBoth)
+	}()
+
+	var so ShadowOther
+	_, okOther := any(&so).(interface{ Inc() })
+	var sd ShadowDirect
+	_, okDirect := any(&sd).(interface{ Inc() })
+	fmt.Println(panicked != "", okOther, okDirect)
+}
+`,
+		"true true true\n",
+		{ targets: ["both", "wasm"] },
+	);
+});

@@ -1142,12 +1142,22 @@ export class CodeGen {
 		// held in an interface (see _ifaceMethodCheck).
 		const pm = methodDecls.filter((m) => m.recvPointer).map((m) => m.name);
 		// ...and so are those promoted from an embedded struct value.
-		for (const stub of this._embeddedStubs(name, methodDecls))
-			if (stub.ptrOnly) pm.push(stub.methodName);
+		const stubs = this._embeddedStubs(name, methodDecls);
+		for (const stub of stubs) if (stub.ptrOnly) pm.push(stub.methodName);
 		if (pm.length > 0)
 			this.line(
 				`Object.defineProperty(${jsClassName(name)}, "__pm", { value: ${JSON.stringify(pm)} });`,
 			);
+		// Scalar-interior pointer-receiver promotions keep their JS stubs for
+		// `js` importers, while `both` packages exclude them from runtime
+		// interface checks to match WebAssembly.
+		if (this.target === "both" || this.target === "wasm") {
+			const sm = stubs.filter((s) => s.scalarInterior).map((s) => s.methodName);
+			if (sm.length > 0)
+				this.line(
+					`Object.defineProperty(${jsClassName(name)}, "__sm", { value: ${JSON.stringify(sm)} });`,
+				);
+		}
 	}
 
 	// The generated json codecs live at package level and name function-local

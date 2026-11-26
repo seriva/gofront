@@ -2084,8 +2084,12 @@ export const expressionGenMethods = {
 		if (name === "any") return `(${val} != null)`;
 		const simd = this._simdCheckExpr(name, val);
 		if (simd) return simd;
-		if (name === "error")
-			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
+		if (name === "error") {
+			const base = `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function" && !(${val}.__v === true && ${val}.constructor?.__pm?.includes("Error"))`;
+			return this.target === "both" || this.target === "wasm"
+				? `${base} && !${val}.constructor?.__sm?.includes("Error"))`
+				: `${base})`;
+		}
 		if (this.structNames.has(name))
 			return `(${val} instanceof ${jsClassName(name)} && ${val}.__p !== true)`;
 		const named = this.checker?.types.get(name);
@@ -2164,14 +2168,19 @@ export const expressionGenMethods = {
 	},
 
 	_ifaceMethodCheck(val, methodNames, multiUnwrap = null) {
+		const checkScalar = this.target === "both" || this.target === "wasm";
 		const checks = methodNames.map((m) => {
 			const jm = jsMemberName(m);
 			const base =
 				m === "Unwrap" && multiUnwrap !== null
 					? `typeof ${val}.${jm} === "function" && (${val}.${jm}.__multi === true) === ${multiUnwrap}`
 					: `typeof ${val}.${jm} === "function"`;
-			// A struct value's method set lacks the pointer-receiver methods.
-			return `${base} && !(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
+			// A struct value's method set lacks the pointer-receiver methods;
+			// a `both` package also excludes scalar-interior promotions to match WASM.
+			const ptrCheck = `!(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
+			return checkScalar
+				? `${base} && ${ptrCheck} && !${val}.constructor?.__sm?.includes(${JSON.stringify(m)})`
+				: `${base} && ${ptrCheck}`;
 		});
 		return `(${[`${val} != null`, ...checks].join(" && ")})`;
 	},

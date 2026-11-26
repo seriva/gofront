@@ -37,12 +37,11 @@ function pushValueEmbedStubs(
 	embed,
 	embedName,
 	fieldName,
-	skipScalarPtr = false,
+	isScalar = false,
 ) {
 	const viaPtr = rawEmbed.kind === "pointer";
 	for (const [mName, mType] of embed.methods?.entries() ?? []) {
 		if (declared.has(mName)) continue;
-		if (skipScalarPtr && mType?._ptrRecv && !viaPtr) continue;
 		stubs.push({
 			methodName: mName,
 			embedName,
@@ -52,6 +51,7 @@ function pushValueEmbedStubs(
 			viaPtr,
 			ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
 			nilPtrRecv: isNilablePtrRecv(rawEmbed, mType),
+			scalarInterior: Boolean(mType?._ptrRecv && !viaPtr && isScalar),
 		});
 		declared.add(mName);
 	}
@@ -66,7 +66,6 @@ function pushStructEmbedStubs(stubs, declared, ctx) {
 		fieldName,
 		targetPromoted,
 		checker,
-		wasmTarget,
 	} = ctx;
 	const embedPromoted = promotedMethods.get(embedBase);
 	for (const [mName, mType] of embedBase.methods.entries()) {
@@ -74,14 +73,15 @@ function pushStructEmbedStubs(stubs, declared, ctx) {
 		const depth = 1 + (embedPromoted?.get(mName)?.depth ?? 0);
 		const bestDepth = targetPromoted?.get(mName)?.depth;
 		if (bestDepth !== undefined && depth > bestDepth) continue;
-		if (wasmTarget && checker._promotedScalarInteriorType?.(embed, mName))
-			continue;
 		stubs.push({
 			methodName: mName,
 			embedName,
 			fieldName,
 			ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
 			nilPtrRecv: isNilablePtrRecv(rawEmbed, mType),
+			scalarInterior: Boolean(
+				checker._promotedScalarInteriorType?.(embed, mName),
+			),
 		});
 		declared.add(mName); // Prevent duplicate stubs for diamond embeds
 	}
@@ -91,7 +91,6 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 	if (!checker) return [];
 	const resolvedType = checker.types.get(name)?.underlying;
 	if (resolvedType?.kind !== "struct" || !resolvedType._embeds) return [];
-	const wasmTarget = checker.target === "both" || checker.target === "wasm";
 	const targetPromoted = promotedMethods.get(resolvedType);
 
 	// A method two embeds declare at the same depth is in neither method set:
@@ -120,8 +119,6 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 		if (embedBase?.kind !== "struct" || !embedBase.methods) {
 			// A named non-struct type (`time.Duration`, `Num`, `*Num`) promotes
 			// its methods; the stub passes the embedded value, box, or pointer.
-			const skipScalarPtr =
-				wasmTarget && Boolean(checker._isScalarStorageType?.(embed));
 			pushValueEmbedStubs(
 				stubs,
 				declared,
@@ -129,7 +126,7 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 				embed,
 				embedName,
 				fieldName,
-				skipScalarPtr,
+				Boolean(checker._isScalarStorageType?.(embed)),
 			);
 			continue;
 		}
@@ -142,7 +139,6 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 			fieldName,
 			targetPromoted,
 			checker,
-			wasmTarget,
 		});
 	}
 
