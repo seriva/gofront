@@ -291,7 +291,7 @@ export const statementGenMethods = {
 			if (collect) return collect.push([i, js]);
 			if (!isDefine || l._redecl) return this._storeInto(targets[i], js);
 			const boxed = this._boxedVars.has(l.name);
-			this.line(`let ${l.name} = ${boxed ? `{ value: ${js} }` : js};`);
+			this.line(`let ${l.name} = ${boxed ? this._boxInitJs(l.name, js) : js};`);
 		};
 		const [vL, okL] = stmt.lhs;
 		// A struct or array map value is a copy, not the stored value.
@@ -511,11 +511,15 @@ export const statementGenMethods = {
 
 	_genDefineSingleVar(lhs, rhs, redecls) {
 		const isBoxed = this._boxedVars.has(lhs[0]);
-		const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
 		if (redecls[0]) {
-			if (isBoxed) this.line(`${lhs[0]}.value = ${rhs[0]};`);
-			else this.line(`${lhs[0]} = ${val};`);
+			if (isBoxed)
+				this._storeInto(
+					this._storeTarget({ kind: "Ident", name: lhs[0] }),
+					rhs[0],
+				);
+			else this.line(`${lhs[0]} = ${rhs[0]};`);
 		} else {
+			const val = isBoxed ? this._boxInitJs(lhs[0], rhs[0]) : rhs[0];
 			this.line(`let ${lhs[0]} = ${val};`);
 		}
 	},
@@ -537,7 +541,7 @@ export const statementGenMethods = {
 	_boxDeclaredNames(names) {
 		for (const n of names) {
 			if (n && n !== "_" && this._boxedVars.has(n))
-				this.line(`${n} = { value: ${n} };`);
+				this.line(`${n} = ${this._boxInitJs(n, n)};`);
 		}
 	},
 
@@ -588,17 +592,24 @@ export const statementGenMethods = {
 		);
 	},
 
-	// `*p = v` where `p` points at a type parameter: erased, so the pointer is
-	// either a struct (copy into it) or a get/set wrapper.
+	// `*p = v` (or `v = w` on an address-taken type-parameter variable): erased,
+	// so the storage is either a struct (copy into it) or a `{ value }` box.
+	_isTypeParamBoxedTarget(l) {
+		return (
+			l.kind === "Ident" &&
+			this._boxedVars.has(l.name) &&
+			Boolean(this._boxedTypeParamCond(l.name))
+		);
+	},
+
+	_isTypeParamStoreTarget(l) {
+		return this._isTypeParamDerefTarget(l) || this._isTypeParamBoxedTarget(l);
+	},
+
 	_isTypeParamDerefAssign(stmt) {
 		if (stmt.lhs.length !== 1 || stmt.rhs.length !== 1 || stmt.op !== "=")
 			return false;
-		const l = stmt.lhs[0];
-		return (
-			l.kind === "UnaryExpr" &&
-			l.op === "*" &&
-			l.operand?._type?.base?.kind === "typeParam"
-		);
+		return this._isTypeParamStoreTarget(stmt.lhs[0]);
 	},
 
 	_isTypeParamDerefTarget(l) {
@@ -609,14 +620,14 @@ export const statementGenMethods = {
 		);
 	},
 
-	// `*a, *b = *b, *a` with type-parameter pointers: `*p` is not a settable
-	// JS destructuring target, so evaluate the right-hand side into temporaries
-	// and assign each target on its own.
+	// `*a, *b = *b, *a` or `a, b = b, a` with type-parameter pointers or boxed
+	// type-parameter vars: not a settable JS destructuring target, so evaluate
+	// the right-hand side into temporaries and assign each target via `_storeInto`.
 	_hasTypeParamDerefTarget(stmt) {
 		return (
 			stmt.op === "=" &&
 			stmt.lhs.length > 1 &&
-			stmt.lhs.some((l) => this._isTypeParamDerefTarget(l))
+			stmt.lhs.some((l) => this._isTypeParamStoreTarget(l))
 		);
 	},
 
@@ -1209,6 +1220,12 @@ export const statementGenMethods = {
 	// store itself can be emitted later by `_storeInto`.
 	_storeTarget(l) {
 		if (l.kind === "Ident" && l.name === "_") return { kind: "blank" };
+		if (l.kind === "Ident" && this._boxedVars.has(l.name)) {
+			const cond = this._boxedTypeParamCond(l.name);
+			if (cond) {
+				return { kind: "typeParamPtr", ptr: l.name, isStruct: cond };
+			}
+		}
 		if (l.kind === "UnaryExpr" && l.op === "*") {
 			if (l.operand?._type?.base?.kind === "typeParam")
 				return {
@@ -1661,9 +1678,9 @@ export const statementGenMethods = {
 			const i = stmt.init.lhs.findIndex((e) => e.name === name);
 			const t = stmt.init.lhs[i]?._type ?? stmt.init.rhs?.[i]?._type;
 			if (this._boxedVars?.has(name)) {
-				const v = `${name}.value`;
-				const copy = this._aggregateBase(t) ? this._cloneJs(t, v) : v;
-				clones.push(`${name} = { value: ${copy} }`);
+				const v = this._boxedReadJs(name);
+				const copy = this._copyValueJs(t, v);
+				clones.push(`${name} = ${this._boxInitJs(name, copy)}`);
 				continue;
 			}
 			if (!this._aggregateBase(t)) continue;
@@ -1717,7 +1734,7 @@ export const statementGenMethods = {
 		}
 		const target = this._rangeVarTarget(e);
 		if (target === null) return;
-		const v = target.boxed ? `{ value: ${valueJs} }` : valueJs;
+		const v = target.boxed ? this._boxInitJs(target.name, valueJs) : valueJs;
 		this.line(`let ${target.name} = ${v};`);
 	},
 
@@ -2333,7 +2350,7 @@ export const statementGenMethods = {
 		// An `in` test must be parenthesised in a `for` initializer.
 		const decl = (i, js) => {
 			const name = stmt.lhs[i].name;
-			return `${name} = ${this._boxedVars.has(name) ? `{ value: ${js} }` : `(${js})`}`;
+			return `${name} = ${this._boxedVars.has(name) ? this._boxInitJs(name, js) : `(${js})`}`;
 		};
 		if (temps.length === 0)
 			return `let ${reads.map(([i, js]) => decl(i, js)).join(", ")}`;
@@ -2356,18 +2373,37 @@ export const statementGenMethods = {
 			stmt.rhs.length === 1 &&
 			this._boxedVars.has(stmt.lhs[0].name);
 		if (boxed)
-			return `let ${stmt.lhs[0].name} = { value: ${pre ? pre[0] : this.genValueExpr(stmt.rhs[0])} }`;
-		const rhs = pre ?? stmt.rhs.map((e) => this.genExpr(e));
+			return `let ${stmt.lhs[0].name} = ${this._boxInitJs(stmt.lhs[0].name, pre ? pre[0] : this.genValueExpr(stmt.rhs[0]))}`;
+		const paired = stmt.rhs.length === stmt.lhs.length;
+		const rhs =
+			pre ??
+			stmt.rhs.map((e, i) =>
+				paired && stmt.lhs[i].name !== "_"
+					? this.genValueExpr(e)
+					: this.genExpr(e),
+			);
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		if (lhs.length === 1) return `let ${lhs[0]} = ${rhs[0]}`;
 		// `for i, j := 0, 10`: one declarator per variable.
 		if (rhs.length === lhs.length) {
 			const decls = lhs.map((n, i) =>
 				this._boxedVars.has(n)
-					? `${n} = { value: ${rhs[i]} }`
+					? `${n} = ${this._boxInitJs(n, rhs[i])}`
 					: `${n} = ${rhs[i]}`,
 			);
 			return `let ${decls.join(", ")}`;
+		}
+		if (lhs.some((n) => n !== "_" && this._boxedVars.has(n))) {
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const tmp = `__c${this._tmpCounter}`;
+			const decls = lhs
+				.map((n, i) =>
+					n === "_"
+						? null
+						: `${n} = ${this._boxedVars.has(n) ? this._boxInitJs(n, `${tmp}[${i}]`) : `${tmp}[${i}]`}`,
+				)
+				.filter(Boolean);
+			return `let ${tmp} = ${rhs[0]}, ${decls.join(", ")}`;
 		}
 		return `let [${lhs.map((n) => (n === "_" ? "" : n)).join(", ")}] = ${rhs[0]}`;
 	},
@@ -2500,6 +2536,139 @@ export const statementGenMethods = {
 		return t?.kind === "map" || tag._coreType?.kind === "map";
 	},
 
+	_complexSwitchCases(tag) {
+		// A complex tag is an object: cases compare its parts.
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (this._isIfaceType(e._type)) {
+					// An interface case compares by dynamic type and value.
+					this.useHelper("ifeq");
+					return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
+				}
+				return this._genComplexEquality(
+					"===",
+					"&&",
+					tmp,
+					this._genComplexOperand(e),
+				);
+			},
+		};
+	},
+
+	_typeParamSwitchCases(stmt, tag) {
+		if (stmt.tag?._type?.kind !== "typeParam") return null;
+		const factory = this._typeParamZeroFactory(stmt.tag._type.name);
+		if (!factory) return null;
+		// Type-parameter tags may be structs, arrays, or interfaces at run time.
+		this.useHelper("equal");
+		this.useHelper("geq");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (this._isIfaceType(e._type)) {
+					this.useHelper("ifeq");
+					return `__ifeq(${this._boxForIface(tmp, stmt.tag._type)}, ${this._genIfaceOperand(e)})`;
+				}
+				return `__geq(${factory}, ${tmp}, ${this.genExpr(e)})`;
+			},
+		};
+	},
+
+	_hasIfaceSwitchCase(stmt) {
+		return stmt.cases.some((c) =>
+			c.list?.some((e) => this._isIfaceType(e._type)),
+		);
+	},
+
+	_needsPointerOrIfaceCaseSwitch(stmt) {
+		const t = stmt.tag?._type;
+		if (!t) return false;
+		return (
+			(t.kind === "pointer" && t.base?.kind === "typeParam") ||
+			this._isScalarPointerType(t) ||
+			this._hasIfaceSwitchCase(stmt)
+		);
+	},
+
+	_pointerOrIfaceSwitchCases(stmt, tag) {
+		if (!this._needsPointerOrIfaceCaseSwitch(stmt)) return null;
+		const tagType = stmt.tag._type;
+		const scalarPtr = this._isScalarPointerType(tagType);
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (this._isIfaceType(e._type)) {
+					this.useHelper("ifeq");
+					return `__ifeq(${this._boxForIface(tmp, tagType)}, ${this._genIfaceOperand(e)})`;
+				}
+				if (this._isNilLiteral(e)) return `${tmp} === null`;
+				if (scalarPtr) {
+					this.useHelper("ptreq");
+					return `__ptreq(${tmp}, ${this.genExpr(e)})`;
+				}
+				return `${tmp} === ${this.genExpr(e)}`;
+			},
+		};
+	},
+
+	_structSwitchCases(stmt, tag, namedTag) {
+		// Struct and array tags compare by value, not by reference.
+		this.useHelper("equal");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (!this._isIfaceType(e._type))
+					return `__equal(${tmp}, ${this.genExpr(e)})`;
+				// An interface case compares by dynamic type, not structure.
+				this.useHelper("ifeq");
+				const boxed = namedTag
+					? this._genNamedIfaceBox(tmp, stmt.tag._ifaceNamedType, false)
+					: tmp;
+				return `__ifeq(${boxed}, ${this._genIfaceOperand(e)})`;
+			},
+		};
+	},
+
+	_mapSwitchCases(tag) {
+		// A nil map is a sentinel object in JS, not `null`: `case nil`
+		// goes through `__isnm`, as `m == nil` does.
+		this.useHelper(this.strict ? "nilMap" : "nm");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) =>
+				this._isNilLiteral(e)
+					? `__isnm(${tmp})`
+					: `${tmp} === ${this.genExpr(e)}`,
+		};
+	},
+
+	_ifaceSwitchCases(tag) {
+		this.useHelper("ifeq");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`,
+		};
+	},
+
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
 	_switchTagAndCases(stmt) {
 		const namedTag =
@@ -2515,73 +2684,33 @@ export const statementGenMethods = {
 		} finally {
 			if (namedTag) delete stmt.tag._noNamedBox;
 		}
-		if (stmt.tag && this._isStructOrArrayType(stmt.tag._type)) {
-			// Struct and array tags compare by value, not by reference.
-			this.useHelper("equal");
-			this._swCounter = (this._swCounter ?? 0) + 1;
-			const tmp = `__sw${this._swCounter}`;
-			this.line(`const ${tmp} = ${tag};`);
-			return {
-				tag: "true",
-				caseExpr: (e) => {
-					if (!this._isIfaceType(e._type))
-						return `__equal(${tmp}, ${this.genExpr(e)})`;
-					// An interface case compares by dynamic type, not structure.
-					this.useHelper("ifeq");
-					const boxed = namedTag
-						? this._genNamedIfaceBox(tmp, stmt.tag._ifaceNamedType, false)
-						: tmp;
-					return `__ifeq(${boxed}, ${this._genIfaceOperand(e)})`;
-				},
-			};
-		}
-		if (stmt.tag && isComplex(stmt.tag._type)) {
-			// A complex tag is an object: cases compare its parts.
-			this._swCounter = (this._swCounter ?? 0) + 1;
-			const tmp = `__sw${this._swCounter}`;
-			this.line(`const ${tmp} = ${tag};`);
-			return {
-				tag: "true",
-				caseExpr: (e) => {
-					if (this._isIfaceType(e._type)) {
-						// An interface case compares by dynamic type and value.
-						this.useHelper("ifeq");
-						return `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`;
-					}
-					return this._genComplexEquality(
-						"===",
-						"&&",
-						tmp,
-						this._genComplexOperand(e),
-					);
-				},
-			};
-		}
-		if (stmt.tag && this._isMapTag(stmt.tag)) {
-			// A nil map is a sentinel object in JS, not `null`: `case nil`
-			// goes through `__isnm`, as `m == nil` does.
-			this.useHelper(this.strict ? "nilMap" : "nm");
-			this._swCounter = (this._swCounter ?? 0) + 1;
-			const tmp = `__sw${this._swCounter}`;
-			this.line(`const ${tmp} = ${tag};`);
-			return {
-				tag: "true",
-				caseExpr: (e) =>
-					this._isNilLiteral(e)
-						? `__isnm(${tmp})`
-						: `${tmp} === ${this.genExpr(e)}`,
-			};
-		}
-		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
-			return { tag, caseExpr: (e) => this.genExpr(e) };
-		this.useHelper("ifeq");
-		this._swCounter = (this._swCounter ?? 0) + 1;
-		const tmp = `__sw${this._swCounter}`;
-		this.line(`const ${tmp} = ${tag};`);
-		return {
-			tag: "true",
-			caseExpr: (e) => `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`,
-		};
+		if (!stmt.tag) return { tag, caseExpr: (e) => this.genExpr(e) };
+		const t = stmt.tag._type;
+		if (this._isStructOrArrayType(t))
+			return this._structSwitchCases(stmt, tag, namedTag);
+		if (isComplex(t)) return this._complexSwitchCases(tag);
+		if (this._isMapTag(stmt.tag)) return this._mapSwitchCases(tag);
+		return (
+			this._typeParamSwitchCases(stmt, tag) ??
+			(this._isIfaceType(t) ? this._ifaceSwitchCases(tag) : null) ??
+			this._pointerOrIfaceSwitchCases(stmt, tag) ?? {
+				tag,
+				caseExpr: (e) => this.genExpr(e),
+			}
+		);
+	},
+
+	_switchNeedsBlock(stmt) {
+		return (
+			stmt.tag &&
+			(this._isStructOrArrayType(stmt.tag._type) ||
+				this._isIfaceType(stmt.tag._type) ||
+				isComplex(stmt.tag._type) ||
+				this._isMapTag(stmt.tag) ||
+				(stmt.tag._type?.kind === "typeParam" &&
+					Boolean(this._typeParamZeroFactory(stmt.tag._type.name))) ||
+				this._needsPointerOrIfaceCaseSwitch(stmt))
+		);
 	},
 
 	genSwitch(stmt) {
@@ -2625,13 +2754,7 @@ export const statementGenMethods = {
 				this._genScopedInit(stmt.init, genBody);
 			});
 			this.line("}");
-		} else if (
-			stmt.tag &&
-			(this._isStructOrArrayType(stmt.tag._type) ||
-				this._isIfaceType(stmt.tag._type) ||
-				isComplex(stmt.tag._type) ||
-				this._isMapTag(stmt.tag))
-		) {
+		} else if (this._switchNeedsBlock(stmt)) {
 			// The tag temporary is a `const`, which cannot directly follow a label.
 			this.line("{");
 			this.indented(genBody);
@@ -2642,13 +2765,42 @@ export const statementGenMethods = {
 	},
 
 	// The value a single-type clause binds: the unboxed value of a named
-	// non-struct case, a copy of an array or struct case, else the boxed value.
+	// non-struct case, a copy of an array, struct or type-parameter case, else
+	// the boxed value.
 	_typeSwitchBinding(only) {
 		if (!only) return "__tsw";
 		const unboxed = this._assertedValueJs(only, "__tsw");
-		if (unboxed !== "__tsw") return unboxed;
-		const t = this._typeFromNode(only);
-		return this._aggregateBase(t) ? this._cloneJs(t, "__tsw") : "__tsw";
+		return this._copyValueJs(this._typeFromNode(only), unboxed);
+	},
+
+	_genTypeSwitchClause(stmt, clause, valueJs) {
+		if (!stmt.assign) {
+			for (const s of clause.stmts) this.genStmt(s);
+			return;
+		}
+		const name = stmt.assign;
+		const hadBoxed = this._boxedVars.has(name);
+		const hadTp = this._boxedTypeParams.has(name);
+		const prevTp = this._boxedTypeParams.get(name);
+		const caseBoxed = new Set();
+		const caseTp = new Map();
+		this._scanAddressTaken(clause.stmts, caseBoxed, caseTp);
+		const clauseBoxed = caseBoxed.has(name);
+		if (clauseBoxed) this._boxedVars.add(name);
+		else this._boxedVars.delete(name);
+		const tpName = caseTp.get(name);
+		if (clauseBoxed && tpName) this._boxedTypeParams.set(name, tpName);
+		else this._boxedTypeParams.delete(name);
+		try {
+			const init = clauseBoxed ? this._boxInitJs(name, valueJs) : valueJs;
+			this.line(`let ${name} = ${init};`);
+			for (const s of clause.stmts) this.genStmt(s);
+		} finally {
+			if (hadBoxed) this._boxedVars.add(name);
+			else this._boxedVars.delete(name);
+			if (hadTp) this._boxedTypeParams.set(name, prevTp);
+			else this._boxedTypeParams.delete(name);
+		}
 	},
 
 	// Labels the type switch's `{ … }` when a clause has an unlabeled `break`:
@@ -2695,12 +2847,6 @@ export const statementGenMethods = {
 		this.line(`const __tsw = ${val};`);
 		// The binding is declared per clause, after the switch expression
 		// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
-		const boxedBind = stmt.assign && this._boxedVars.has(stmt.assign);
-		const bind = (valueJs) =>
-			this.line(
-				`let ${stmt.assign} = ${boxedBind ? `{ value: ${valueJs} }` : valueJs};`,
-			);
-
 		let first = true;
 		let hasDefault = false;
 		for (const c of stmt.cases) {
@@ -2714,11 +2860,8 @@ export const statementGenMethods = {
 				.join(" || ");
 			this.line(`${first ? "if" : "else if"} (${cond}) {`);
 			this.indented(() => {
-				if (stmt.assign) {
-					const only = c.types.length === 1 ? c.types[0] : null;
-					bind(this._typeSwitchBinding(only));
-				}
-				this.genBlock(c);
+				const only = c.types.length === 1 ? c.types[0] : null;
+				this._genTypeSwitchClause(stmt, c, this._typeSwitchBinding(only));
 			});
 			this.line("}");
 			first = false;
@@ -2726,8 +2869,7 @@ export const statementGenMethods = {
 		if (hasDefault) {
 			this.line(first ? "{" : "else {");
 			this.indented(() => {
-				if (stmt.assign) bind("__tsw");
-				this.genBlock(hasDefault);
+				this._genTypeSwitchClause(stmt, hasDefault, "__tsw");
 			});
 			this.line("}");
 		}

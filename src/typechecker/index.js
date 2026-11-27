@@ -1582,22 +1582,39 @@ export class TypeChecker {
 		return String(t.name).includes("$$") && spelled !== t.name;
 	}
 
-	// `type C = *P; func (c C) M()` declares M on P with a pointer receiver:
-	// rewrite the receiver to `*P` before anything keys off its name.
-	_unwrapPointerAliasReceiver(decl) {
+	// `type C = *P; func (c C) M()` and `type A = P; func (a A) M()` (or
+	// `func (a *A) M()`, or chained aliases) declare M on P: rewrite the
+	// receiver to the canonical local target type before anything keys off its name.
+	_canonicalizeAliasReceiver(decl) {
 		const node = decl.recvType;
-		if (decl.recvPointer || node.kind !== "TypeName") return;
-		if (node.name.includes(".")) return;
+		if (node.kind !== "TypeName" || node.name.includes(".")) return;
 		const t = this.resolveTypeNodeName(node, this.globals);
-		const base = t?.kind === "pointer" ? t.base : null;
-		if (base?.kind !== "named" || this.types.get(base.name) !== base) return;
-		if (this._isNonLocalNamed(base, node.name)) return;
-		decl.recvType = { ...node, name: base.name };
-		decl.recvPointer = true;
+		if (!decl.recvPointer && t?.kind === "pointer") {
+			const base = t.base;
+			if (
+				base?.kind === "named" &&
+				!base._genericOf &&
+				this.types.get(base.name) === base &&
+				!this._isNonLocalNamed(base, node.name)
+			) {
+				decl.recvType = { ...node, name: base.name };
+				decl.recvPointer = true;
+			}
+			return;
+		}
+		if (
+			t?.kind === "named" &&
+			!t._genericOf &&
+			t.name !== node.name &&
+			this.types.get(t.name) === t &&
+			!this._isNonLocalNamed(t, node.name)
+		) {
+			decl.recvType = { ...node, name: t.name };
+		}
 	}
 
 	collectFunc(decl) {
-		if (decl.kind === "MethodDecl") this._unwrapPointerAliasReceiver(decl);
+		if (decl.kind === "MethodDecl") this._canonicalizeAliasReceiver(decl);
 		const { resolveScope, typeParamTypes } = this._buildCollectFuncScope(decl);
 		const paramTypes = decl.params.map((p) =>
 			this.resolveTypeNode(p.type, resolveScope),
@@ -1673,6 +1690,12 @@ export class TypeChecker {
 				)}`,
 				decl,
 			);
+		if (t._genericOf) {
+			return this.err(
+				`cannot define new methods on instantiated type ${typeStr(t)}`,
+				decl,
+			);
+		}
 		if (resolved.kind !== "named") {
 			return this.err(`invalid receiver type ${node.name}`, decl);
 		}

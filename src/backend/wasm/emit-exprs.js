@@ -3221,8 +3221,14 @@ export class ExprsEmitter {
 			return;
 		}
 
-		if (isComplex(targetType)) {
-			this._emitComplexConversion(targetType, fromType, fromWType);
+		const complexTarget = this._complexKindOfWType(toWType);
+		if (complexTarget) {
+			const complexFrom = this._complexKindOfWType(fromWType);
+			this._emitComplexConversion(
+				{ kind: "basic", name: complexTarget },
+				complexFrom ? { kind: "basic", name: complexFrom } : fromType,
+				fromWType,
+			);
 			return;
 		}
 
