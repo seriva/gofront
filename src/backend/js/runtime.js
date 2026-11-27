@@ -2,7 +2,8 @@
 // Each export is a single JS statement (var __x = __x || function(...){...};) so that
 // multiple compiled files bundled together can safely repeat the declaration.
 
-export const HELPER_LEN = `var __len = __len || function(a) {
+export const HELPER_LEN = `var __len = __len || function(a, n) {
+  if (n != null) return n;
   if (a && typeof a === 'object' && !Array.isArray(a) && !ArrayBuffer.isView(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };`;
@@ -149,7 +150,8 @@ var __mkview = __mkview || function(b, o, n, c, f) {
   t.b = b; t.o = o; t.n = n; t.c = c;
   return new Proxy(t, __svh);
 };
-var __cap = __cap || function(a) {
+var __cap = __cap || function(a, n) {
+  if (n != null) return n;
   if (a == null) return 0;
   const s = a[__sv];
   if (s !== undefined) return s.c;
@@ -337,7 +339,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   const keep = (v, c) => {
     for (const k of Object.getOwnPropertyNames(v)) {
       const d = Object.getOwnPropertyDescriptor(v, k);
-      if (!d.enumerable && k !== "length") Object.defineProperty(c, k, d);
+      if (!d.enumerable && k !== "length" && k !== "__p" && !(k === "__t" && v.__p === true))
+        Object.defineProperty(c, k, d);
     }
     return c;
   };
@@ -402,6 +405,7 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields, fre
 };
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
+  if (x.__v === true && Object.isExtensible(x)) delete x.__v;
   if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {
@@ -440,9 +444,24 @@ var __mknil = __mknil || function(C) {
 var __ifn = __ifn || function(x, C) {
   return x === null ? (Object.hasOwn(C, "__nil") ? C.__nil : __mknil(C)) : x;
 };
-var __pbs = __pbs || function(p) {
-  var e = p !== null && typeof p === "object" ? p.value : undefined;
-  return e !== null && typeof e === "object" && e.value === e ? e : p;
+var __pbs = __pbs || function(p, f) {
+  var isNamedStruct = false;
+  var isAnonStruct = false;
+  if (p !== null && typeof p === "object") {
+    var z = typeof f === "function" ? f() : undefined;
+    isNamedStruct = z !== null && typeof z === "object" && !Array.isArray(z) && !ArrayBuffer.isView(z) && Object.getPrototypeOf(Object.getPrototypeOf(z)) !== null;
+    isAnonStruct = typeof f?.id === "string" && f.id.startsWith("struct{");
+    if (isNamedStruct) {
+      if (!(p instanceof z.constructor) && p.value instanceof z.constructor) p = p.value;
+    } else if (isAnonStruct) {
+      if (p.__target !== undefined || (!("value" in z) && "value" in p && p.value !== null && typeof p.value === "object" && Object.keys(p).length === 1))
+        p = p.value;
+    } else if (!f) {
+      var e = p.value;
+      if (e !== null && typeof e === "object" && e.value === e) return __ifp(e);
+    }
+  }
+  return f?.pb ? f.pb(p) : (isNamedStruct || isAnonStruct) && p !== null && typeof p === "object" ? __ifp(p) : p;
 };
 var __unnil = __unnil || function(x) {
   return x != null && x.__nilp === true ? null : x;
@@ -677,13 +696,28 @@ var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
 var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
 var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
+var __zc = __zc || Object.assign(() => ({ re: 0, im: 0 }), { k: "complex128" });
 var __tbox = __tbox || function(f, x) {
-  return f && f.b ? f.b(x) : x;
+  if (f && f.b) return f.b(x);
+  if (x === null && f && f.fb) {
+    const r = f.fb(x);
+    if (r != null && r.__nilp === true && r.__p === true) return r;
+  }
+  return x;
 };
-var __ti = __ti || function(f, k, id, is, u, b, fb, nm) {
+var __ti = __ti || function(f, k, id, is, u, b, fb, nm, ez, al, pb) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm; g.ez = ez; g.al = al; g.pb = pb;
   return g;
+};
+var __clear = __clear || function(v, ez) {
+  if (v == null) return;
+  if (v instanceof Map) { v.clear(); return; }
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = ez ? ez() : 0;
+    return;
+  }
+  for (const k in v) delete v[k];
 };
 var __tar = __tar || function(f, op, a, b) {
   const k = f?.k;
@@ -742,6 +776,15 @@ var __tar = __tar || function(f, op, a, b) {
 var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
 };
+var __tstr = __tstr || function(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return __rstr(v);
+  if (typeof v === "bigint") return __rstr(Number(v));
+  if (v instanceof Uint8Array) return __u8dec(v);
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) return Array.from(v, (c) => __rstr(c)).join("");
+  return String(v);
+};
 var __tconv = __tconv || function(f, v) {
   switch (f?.k) {
     case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : (typeof v === "number" ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : v);
@@ -755,6 +798,11 @@ var __tconv = __tconv || function(f, v) {
     case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
     case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
     case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
+    case "complex128": return v && typeof v === "object" ? { re: v.re, im: v.im } : { re: Number(v), im: 0 };
+    case "complex64": return v && typeof v === "object" ? { re: Math.fround(v.re), im: Math.fround(v.im) } : { re: Math.fround(Number(v)), im: 0 };
+    case "string": return __tstr(v);
+    case "[]byte": return v == null ? null : typeof v === "string" ? __u8enc(v) : v;
+    case "[]rune": return v == null ? null : typeof v === "string" ? Int32Array.from(v, (c) => c.codePointAt(0)) : v;
     default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;
@@ -911,8 +959,13 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
   if (a === b) return true;
   if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
   if (a.__nilp === true && b.__nilp === true && a.__t !== undefined) return a.__t === b.__t;
+  if (typeof a === "object" && typeof b === "object" && a.__target !== undefined && b.__target !== undefined && a.__v !== true && b.__v !== true && a.__t === b.__t) {
+    return a.__target === b.__target && a.__index === b.__index;
+  }
   if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
     const ua = a.__gfUnbox(), ub = b.__gfUnbox();
+    if (ua != null && ub != null && ua.__target !== undefined && ub.__target !== undefined)
+      return ua.__target === ub.__target && ua.__index === ub.__index;
     return Array.isArray(ua) && Array.isArray(ub) ? __equal(ua, ub) : ua === ub;
   }
   // Struct values boxed by __ifv compare field by field.

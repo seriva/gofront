@@ -132,7 +132,10 @@ function receiverPrefix(stmts, name, safe) {
 // type.
 export function isGenericComposite(t) {
 	return (
-		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		(t?.kind === "map" ||
+			t?.kind === "slice" ||
+			t?.kind === "array" ||
+			(t?.kind === "pointer" && t.base?.kind !== "typeParam")) &&
 		mentionsTypeParam(t)
 	);
 }
@@ -445,7 +448,7 @@ const BUILTIN_GEN = {
 	cap: (s, e) => {
 		if (e._constLen != null) return s._genConstLen(e);
 		s.useHelper("slice");
-		return `__cap(${s.genExpr(e.args[0])})`;
+		return `__cap(${s.genExpr(e.args[0])}${s._typeParamArrayLenArg(e.args[0])})`;
 	},
 	make: (s, e) => s.genMake(e),
 	delete: (s, e) => {
@@ -697,11 +700,14 @@ export const expressionGenMethods = {
 			!expr._pbsWrapping
 		) {
 			// `&v` of a type parameter's variable is a box; a struct behind it
-			// is its own pointer.
+			// is its own pointer, and the instantiated type tags `*T` for interfaces.
 			expr._pbsWrapping = true;
 			try {
 				this.useHelper("ifaceBox");
-				return `__pbs(${this.genExpr(expr)})`;
+				const f = this._typeParamZeroFactory(expr._ifaceSrc.base.name);
+				return f
+					? `__pbs(${this.genExpr(expr)}, ${f})`
+					: `__pbs(${this.genExpr(expr)})`;
 			} finally {
 				expr._pbsWrapping = false;
 			}
@@ -743,9 +749,10 @@ export const expressionGenMethods = {
 				this.useHelper("ifaceBox");
 				expr._gmapTagging = true;
 				try {
+					const ptr = this._dynTagFlags(expr._ifaceSrc);
 					// An array is copied before it is tagged: a copy made after
 					// `__ity` (`.map`) would drop the tag.
-					return `__ity(${this.genValueExpr(expr)}, ${tag})`;
+					return `__ity(${this.genValueExpr(expr)}, ${tag}${ptr})`;
 				} finally {
 					expr._gmapTagging = false;
 				}
@@ -810,7 +817,7 @@ export const expressionGenMethods = {
 				return `{ re: 0, im: ${expr.value} }`;
 			case "Ident": {
 				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
-					return `${expr.name}.value`;
+					return this._boxedReadJs(expr.name);
 				// A named untyped constant used as an int64 operand: its
 				// declaration holds a Number, so emit the exact BigInt.
 				const lit64 =
@@ -957,16 +964,22 @@ export const expressionGenMethods = {
 		return `${fn}(${js}${fields ? `, ${fields}` : ""})`;
 	},
 
+	// JS class name for a pointer to a named struct, or null.
+	_structPtrClass(t) {
+		if (t?.kind !== "pointer") return null;
+		const base = t.base;
+		if (base?.kind !== "named" || this._underlyingOf(base)?.kind !== "struct")
+			return null;
+		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
+		return this.structNames.has(cls) ? jsClassName(cls) : null;
+	},
+
 	// A nil `*T` entering an interface is a typed nil: it keeps T's methods
 	// (callable with a nil receiver) and differs from the nil interface.
 	_typedNilWrap(js, expr) {
 		if (expr._ifaceBox !== "ptr") return js;
-		const src = expr._ifaceSrc;
-		const base = src?.kind === "pointer" ? src.base : null;
-		if (base?.kind !== "named" || base.underlying?.kind !== "struct") return js;
-		const cls = this._dequalify(base.name).replace(/\[.*$/, "");
-		if (!this.structNames.has(cls)) return js;
-		return `__ifn(${js}, ${jsClassName(cls)})`;
+		const cls = this._structPtrClass(expr._ifaceSrc);
+		return cls ? `__ifn(${js}, ${cls})` : js;
 	},
 
 	_isNamedBoxKind(expr) {
@@ -1055,6 +1068,8 @@ export const expressionGenMethods = {
 		if (!node) return null;
 		if (node.kind === "TypeName" || node.kind === "SelectorExpr")
 			return this._typeFromNameNode(node);
+		if (node.kind === "GenericTypeName")
+			return node._assertType ?? this._typeFromNameNode(node);
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
 		if (node.kind === "StructType") return this._typeFromStructNode(node);
@@ -1282,8 +1297,11 @@ export const expressionGenMethods = {
 			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
-				// Address-taken parameter: rebind it to a { value } box.
-				this.line(`${p.name} = { value: ${p.name} };`);
+				// Address-taken parameter: rebind it to a { value } box (or clone
+				// directly when an erased type parameter is a struct).
+				const t = this._typeFromNode(p.type);
+				const cloned = t ? this._cloneJs(t, p.name) : p.name;
+				this.line(`${p.name} = ${this._boxInitJs(p.name, p.name, cloned)};`);
 				continue;
 			}
 			const t = this._typeFromNode(p.type);
@@ -1422,30 +1440,7 @@ export const expressionGenMethods = {
 			return lit64 ?? expr._stdName;
 		}
 		if (this._isStdlibFuncValue(expr)) return this._genStdlibFuncValue(expr);
-		if (expr._isMethodExpr) {
-			const namedExpr = this._namedMethodExprInfo(expr);
-			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
-			const rt = expr._methodExprRecv;
-			// `(*MyInt).M` for a pointer-receiver method of a named non-struct
-			// type: the static method takes the pointer, nil included.
-			if (rt?.kind === "pointer") {
-				const info = this._namedBoxInfo(rt.base);
-				const decl = rt.base?.methods?.get(expr.field)?._methodDecl;
-				if (info?.methods.has(expr.field) && decl?.recvPointer)
-					return `${info.cls}.$${expr.field}`;
-			}
-			const protoCls = this._ptrMethodProtoClass(rt, expr.field);
-			if (protoCls) {
-				// A value-receiver method reads `*recv`, which panics on nil.
-				let recv = "recv";
-				if (rt.base.methods.get(expr.field)?._ptrRecv === false) {
-					this.useHelper("nilCall");
-					recv = "__nilcall(recv)";
-				}
-				return `((recv, ...args) => ${protoCls}.prototype.${jsMemberName(expr.field)}.call(${recv}, ...args))`;
-			}
-			return `((recv, ...args) => recv.${jsMemberName(expr.field)}(...args))`;
-		}
+		if (expr._isMethodExpr) return this._genMethodExprValue(expr);
 		const namedValue = this._genNamedMethodValue(expr);
 		if (namedValue !== undefined) return namedValue;
 		if (expr.expr.kind === "Ident") {
@@ -1466,6 +1461,14 @@ export const expressionGenMethods = {
 		if (expr._isMethodValue && !expr._callee) {
 			// A value receiver is copied when the method value is evaluated.
 			const t = expr.expr._type;
+			if (t?.kind === "typeParam") {
+				const r = this._genTypeParamMethodRecv(t, expr.field, base);
+				if (r) {
+					this.useHelper("nilCall");
+					const m = this._jsMemberName(expr);
+					return `((__r) => __r.${m}.bind(__r))(__nilcall(${r}))`;
+				}
+			}
 			if (!expr._type?._ptrRecv && this._aggregateBase(t))
 				return `((__r) => __r.${this._jsMemberName(expr)}.bind(__r))(${this._cloneJs(t, base)})`;
 			return `${sel}.bind(${base})`;
@@ -1598,11 +1601,38 @@ export const expressionGenMethods = {
 
 	// ── Named non-struct types with methods: raw values, static dispatch ──
 
+	// Type-info / zero-value factories for an instantiated generic named type.
+	_namedTypeArgFactories(type, withId = false) {
+		if (type?.kind !== "named" || !type.typeArgs?.length) return [];
+		const generic =
+			type._genericOf ?? this.checker?.types.get(type.name)?._generic;
+		if (!generic?.typeParams?.length) return [];
+		const tz = this._typeArgFactories(
+			generic.typeParams,
+			type.typeArgs,
+			this._genericTypeNeedsTypeInfo(this.checker?.types.get(type.name)) ||
+				type.typeArgs.some((t) => mentionsTypeParam(t)),
+		);
+		if (withId) {
+			const id = instanceId(type.typeArgs);
+			if (id !== null) tz.push(JSON.stringify(id));
+			else {
+				const runtimeId = this._runtimeInstanceId(type.typeArgs);
+				if (runtimeId) tz.push(runtimeId);
+			}
+		}
+		return tz;
+	},
+
 	// Boxes a raw named value (or *T) entering an interface so dynamic dispatch works.
 	_genNamedIfaceBox(js, type, isPtr) {
 		const info = this._namedBoxInfo(type);
 		if (!info) return js;
-		return isPtr ? `new ${info.cls}$Ptr(${js})` : `new ${info.cls}(${js})`;
+		const tz = this._namedTypeArgFactories(type, true);
+		const tzArg = tz.length > 0 ? `, [${tz.join(", ")}]` : "";
+		return isPtr
+			? `new ${info.cls}$Ptr(${js}${tzArg})`
+			: `new ${info.cls}(${js}${tzArg})`;
 	},
 
 	// Static target of `x.M` on a named non-struct type: its class and the
@@ -1629,6 +1659,78 @@ export const expressionGenMethods = {
 		};
 	},
 
+	_namedMethodExprTarget(expr) {
+		const namedExpr = this._namedMethodExprInfo(expr);
+		if (namedExpr) {
+			const t =
+				expr.expr?._type?.kind === "named"
+					? expr.expr._type
+					: this.checker?.types.get(expr.expr?.name);
+			return { cls: namedExpr.cls, type: t, deref: false };
+		}
+		const rt = expr._methodExprRecv;
+		if (rt?.kind !== "pointer") return null;
+		const info = this._namedBoxInfo(rt.base);
+		const method = info?.methods.get(expr.field);
+		if (!method) return null;
+		return { cls: info.cls, type: rt.base, deref: !method._ptrRecv };
+	},
+
+	_genTypeParamMethodRecv(tp, field, recvJs) {
+		const factory = this._typeParamZeroFactory(tp.name);
+		if (!factory) return null;
+		this.useHelper("generics");
+		const member = jsMemberName(field);
+		const boxed = `__tbox(${factory}, ${recvJs})`;
+		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
+		// type-parameter variable is the box, so reach the value it holds.
+		return this._hasPointerTypeSet(tp)
+			? `((__r) => typeof __r?.${member} === "function" ? __r : __r?.value)(${boxed})`
+			: boxed;
+	},
+
+	_genTypeParamMethodExpr(rt, field) {
+		const r = this._genTypeParamMethodRecv(rt, field, "recv");
+		if (!r) return null;
+		this.useHelper("nilCall");
+		return `((recv, ...args) => __nilcall(${r}).${jsMemberName(field)}(...args))`;
+	},
+
+	// `T.M` method expression as a function value.
+	_genMethodExprValue(expr) {
+		const named = this._namedMethodExprTarget(expr);
+		if (named) {
+			const tz = this._namedTypeArgFactories(named.type);
+			const tzPrefix = tz.length > 0 ? `${tz.join(", ")}, ` : "";
+			if (named.deref) {
+				this.useHelper("nilCall");
+				return `((recv, ...args) => ${named.cls}.$${expr.field}(${tzPrefix}__nilcall(recv).value, ...args))`;
+			}
+			return tz.length > 0
+				? `((...__a) => ${named.cls}.$${expr.field}(${tzPrefix}...__a))`
+				: `${named.cls}.$${expr.field}`;
+		}
+		const rt = expr._methodExprRecv;
+		const protoCls = this._ptrMethodProtoClass(rt, expr.field);
+		if (protoCls) {
+			this.useHelper("nilCall");
+			const recv =
+				rt.base.methods.get(expr.field)?._ptrRecv === false
+					? "__nilcall(recv)"
+					: "recv";
+			return `((recv, ...args) => ${protoCls}.prototype.${jsMemberName(expr.field)}.call(${recv}, ...args))`;
+		}
+		if (this._isInterfaceType(rt)) {
+			this.useHelper("nilCall");
+			return `((recv, ...args) => __nilcall(recv).${jsMemberName(expr.field)}(...args))`;
+		}
+		if (rt?.kind === "typeParam") {
+			const tp = this._genTypeParamMethodExpr(rt, expr.field);
+			if (tp) return tp;
+		}
+		return `((recv, ...args) => recv.${jsMemberName(expr.field)}(...args))`;
+	},
+
 	// `x.M` used as a value: binds the receiver now, as Go does.
 	_genNamedMethodValue(expr) {
 		if (!expr._isMethodValue || expr._callee) return undefined;
@@ -1638,7 +1740,9 @@ export const expressionGenMethods = {
 		const recv = target.byValue
 			? this._cloneJs(target.recvType, target.recv)
 			: target.recv;
-		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${recv})`;
+		const tz = this._namedTypeArgFactories(target.recvType);
+		const tzPrefix = tz.length > 0 ? `${tz.join(", ")}, ` : "";
+		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(${tzPrefix}__r, ...__a))(${recv})`;
 	},
 
 	_genAddressOfExpr(operand) {
@@ -1665,12 +1769,21 @@ export const expressionGenMethods = {
 		if (sel._isMethodExpr) {
 			const info = this._namedMethodExprInfo(sel);
 			if (!info) return undefined;
-			return `${info.cls}.$${sel.field}(${this._genCallArgs(expr)})`;
+			const t =
+				sel.expr?._type?.kind === "named"
+					? sel.expr._type
+					: this.checker?.types.get(sel.expr?.name);
+			const tz = this._namedTypeArgFactories(t);
+			const args = this._genCallArgs(expr);
+			const allArgs = [...tz, ...(args ? [args] : [])].join(", ");
+			return `${info.cls}.$${sel.field}(${allArgs})`;
 		}
 		const target = this._namedMethodTarget(sel);
 		if (!target) return undefined;
+		const tz = this._namedTypeArgFactories(target.recvType);
 		const args = this._genCallArgs(expr);
-		return `${target.cls}.$${sel.field}(${args ? `${target.recv}, ${args}` : target.recv})`;
+		const allArgs = [...tz, target.recv, ...(args ? [args] : [])].join(", ");
+		return `${target.cls}.$${sel.field}(${allArgs})`;
 	},
 
 	// `F[int]` as a value is a function that passes F its zero-value factories.
@@ -1937,7 +2050,9 @@ export const expressionGenMethods = {
 		const asyncPrefix = expr.async ? "async " : "";
 		const saved = this.out;
 		const prevBoxed = this._boxedVars;
+		const prevBoxedTp = this._boxedTypeParams;
 		this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
+		this._boxedTypeParams = new Map(prevBoxedTp);
 		this._scanAddressTaken(expr.body);
 		this.out = [];
 		this._withFnCtx(
@@ -1952,6 +2067,7 @@ export const expressionGenMethods = {
 		const body = this.out.join("\n");
 		this.out = saved;
 		this._boxedVars = prevBoxed;
+		this._boxedTypeParams = prevBoxedTp;
 		return `${asyncPrefix}function(${params}) {\n${body}\n${"  ".repeat(this.indent)}}`;
 	},
 
@@ -1973,11 +2089,11 @@ export const expressionGenMethods = {
 				`(${check} ? ${out} : (() => { throw ${this._typeAssertFailJs(expr, val)}; })())`,
 			);
 		}
-		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct
-		// or array is a copy of the boxed value.
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct,
+		// array or type-parameter value is a copy of the boxed value.
 		const zero = this.zeroValueForTypeNode(expr.type);
 		const valT = this._typeFromNode(expr.type);
-		const okOut = this._aggregateBase(valT) ? this._cloneJs(valT, out) : out;
+		const okOut = this._copyValueJs(valT, out);
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 
@@ -2064,12 +2180,11 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
 		}
-		// An alias of an anonymous struct: a plain object with its fields.
+		// An alias of an anonymous struct: match its dynamic type tag (`__t`),
+		// just like an explicit `struct{...}` assertion, so `*AS` is not `AS`.
 		if (named?.kind === "struct") {
-			const fields = [...(named.fields?.keys() ?? [])].map(
-				(f) => `${JSON.stringify(jsMemberName(f))} in ${val}`,
-			);
-			return `(typeof ${val} === "object" && ${val} !== null && !Array.isArray(${val})${fields.map((f) => ` && ${f}`).join("")})`;
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName(named))}, "struct", null, 0)`;
 		}
 		return "true"; // unknown type — can't check at runtime
 	},
@@ -2167,14 +2282,9 @@ export const expressionGenMethods = {
 	},
 
 	_isNamedBoxTypeNode(typeNode) {
-		if (typeNode?.kind === "TypeName")
-			return Boolean(
-				this._namedBoxInfo(this.checker?.types.get(typeNode.name)),
-			);
-		if (typeNode?.kind === "PointerType" && typeNode.base?.kind === "TypeName")
-			return Boolean(
-				this._namedBoxInfo(this.checker?.types.get(typeNode.base.name)),
-			);
+		const base = typeNode?.kind === "PointerType" ? typeNode.base : typeNode;
+		if (base?.kind === "TypeName" || base?.kind === "GenericTypeName")
+			return Boolean(this._namedBoxInfo(this.checker?.types.get(base.name)));
 		return false;
 	},
 
@@ -2347,14 +2457,13 @@ export const expressionGenMethods = {
 	// type argument is boxed (by the type's factory) to reach its methods.
 	_genTypeParamMethodCall(expr) {
 		if (!this._isTypeParamMethodCall(expr)) return null;
-		const factory = this._typeParamZeroFactory(expr.func.expr._type.name);
-		if (!factory) return null;
-		this.useHelper("generics");
-		let recv = `__tbox(${factory}, ${this.genExpr(expr.func.expr)})`;
-		// `P(&v).M()` with `P interface{ *T; M() }`: a pointer to a boxed
-		// type-parameter variable is the box, so reach the value it holds.
-		if (this._hasPointerTypeSet(expr.func.expr._type))
-			recv = `((__r) => typeof __r?.${jsMemberName(expr.func.field)} === "function" ? __r : __r?.value)(${recv})`;
+		const r = this._genTypeParamMethodRecv(
+			expr.func.expr._type,
+			expr.func.field,
+			this.genExpr(expr.func.expr),
+		);
+		if (!r) return null;
+		const recv = this.strict ? this._genNilChecked(r) : r;
 		const args = this._genCallArgs(expr);
 		return `${recv}.${jsMemberName(expr.func.field)}(${args})`;
 	},
@@ -2560,15 +2669,22 @@ export const expressionGenMethods = {
 		}
 		const namedCall = this._genNamedMethodCall(expr);
 		if (namedCall !== undefined) return namedCall;
-		if (this.strict && this._isInterfaceType(recvType)) {
-			// Go panics with a nil-dereference runtime error; JS would throw a
-			// TypeError with a different message.
-			this.useHelper("nilCall");
-			const recv = this.genExpr(expr.func.expr);
-			const args = this._genCallArgs(expr);
-			return `__nilcall(${recv}).${jsMemberName(expr.func.field)}(${args})`;
-		}
-		return undefined;
+		return this._genStrictInterfaceCall(expr, recvType);
+	},
+
+	_genStrictInterfaceCall(expr, recvType) {
+		if (
+			!this.strict ||
+			expr.func._isMethodExpr ||
+			!this._isInterfaceType(recvType)
+		)
+			return undefined;
+		// Go panics with a nil-dereference runtime error; JS would throw a
+		// TypeError with a different message.
+		this.useHelper("nilCall");
+		const recv = this.genExpr(expr.func.expr);
+		const args = this._genCallArgs(expr);
+		return `__nilcall(${recv}).${jsMemberName(expr.func.field)}(${args})`;
 	},
 
 	// `len`/`cap` of an array or array pointer is a constant, but an operand
@@ -2587,6 +2703,13 @@ export const expressionGenMethods = {
 		return t.kind === "named" && t.underlying?.kind === "interface";
 	},
 
+	_typeParamArrayLenArg(arg) {
+		const t = arg?._type;
+		const f =
+			t?.kind === "typeParam" ? this._typeParamZeroFactory(t.name) : null;
+		return f ? `, ${f}?.al` : "";
+	},
+
 	_genBuiltinLen(expr) {
 		if (expr._constLen != null) return this._genConstLen(expr);
 		const arg = expr.args[0];
@@ -2594,15 +2717,21 @@ export const expressionGenMethods = {
 		const wrapField = this._namedWrapperField(t, arg);
 		if (wrapField) return `${this.genExpr(arg)}.${wrapField}.length`;
 		const js = this.genExpr(arg);
-		if (t?.kind === "map") return `Object.keys(${js} ?? {}).length`;
+		if (this._underlyingOf(t)?.kind === "map")
+			return `Object.keys(${js} ?? {}).length`;
 		this.useHelper("len");
-		return `__len(${js})`;
+		return `__len(${js}${this._typeParamArrayLenArg(arg)})`;
 	},
 
 	_genBuiltinClear(expr) {
 		const arg = expr.args[0];
 		const t = arg?._type;
 		const js = this.genExpr(arg);
+		if (t?.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.name);
+			this.useHelper("generics");
+			return `__clear(${js}, ${f}?.ez)`;
+		}
 		if (
 			t?.kind === "map" ||
 			(t?.kind === "named" && t.underlying?.kind === "map")
@@ -2627,6 +2756,10 @@ export const expressionGenMethods = {
 	// contributes its UTF-8 bytes.
 	_genSliceSource(node) {
 		const js = this.genExpr(node);
+		if (node._type?.kind === "typeParam") {
+			this.useHelper("u8enc");
+			return `((__v) => typeof __v === "string" ? __u8enc(__v) : __v)(${js})`;
+		}
 		if (!this._isStringExprType(node._type)) return js;
 		this.useHelper("u8enc");
 		return `__u8enc(${js})`;
@@ -3228,10 +3361,28 @@ export const expressionGenMethods = {
 	// zero value is a struct object, which is its own pointer when erased; a
 	// map's zero is a bare `{}`, so only a class instance or a populated
 	// object counts).
+	_boxedTypeParamCond(name) {
+		const tpName = this._boxedTypeParams?.get(name);
+		if (!tpName || !this._typeParamZeroFactory(tpName)) return null;
+		return this._typeParamIsStructJs(tpName);
+	},
+
+	_boxInitJs(name, valJs, structValJs = valJs) {
+		const cond = this._boxedTypeParamCond(name);
+		return cond
+			? `(${cond} ? ${structValJs} : { value: ${valJs} })`
+			: `{ value: ${valJs} }`;
+	},
+
+	_boxedReadJs(name) {
+		const cond = this._boxedTypeParamCond(name);
+		return cond ? `(${cond} ? ${name} : ${name}.value)` : `${name}.value`;
+	},
+
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			? `(${f}.k !== "complex64" && ${f}.k !== "complex128" && ((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}()))`
 			: "false";
 	},
 
@@ -3273,6 +3424,7 @@ export const expressionGenMethods = {
 		}
 		this.useHelper("generics");
 		if (this._is64BitUnsigned(t)) return "__zu64";
+		if (isComplex(t)) return "__zc";
 		const zero = this.zeroValueForType(t);
 		return Object.hasOwn(SHARED_ZERO_FACTORIES, zero)
 			? SHARED_ZERO_FACTORIES[zero]
@@ -3497,12 +3649,18 @@ export const expressionGenMethods = {
 		const base = isPtr ? typeNode.base : typeNode;
 		if (base?.kind !== "GenericTypeName" || !base._typeArgs) return null;
 		const cls = this._dequalify(base.name);
-		if (!this.structNames.has(cls)) return null;
+		const isStruct = this.structNames.has(cls);
+		const namedInfo = !isStruct
+			? this._namedBoxInfo(this.checker?.types.get(base.name))
+			: null;
+		if (!isStruct && !namedInfo) return null;
 		const generic = this.checker?.types.get(base.name)?._generic;
 		const id = instanceId(base._typeArgs);
-		let check = isPtr
-			? `${val} instanceof ${jsClassName(cls)} && ${val}.__v !== true`
-			: `${val} instanceof ${jsClassName(cls)} && ${val}.__p !== true`;
+		let check = isStruct
+			? isPtr
+				? `${val} instanceof ${jsClassName(cls)} && ${val}.__v !== true`
+				: `${val} instanceof ${jsClassName(cls)} && ${val}.__p !== true`
+			: `${val} instanceof ${isPtr ? `${namedInfo.cls}$Ptr` : namedInfo.cls}`;
 		if (id !== null && generic) {
 			this.useHelper("generics");
 			const at = generic.typeParams.length;
@@ -3801,14 +3959,63 @@ export const expressionGenMethods = {
 		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
+	// Convert an already-evaluated pointer expression `js` of static pointer
+	// type `t` into its interface representation (for `__ifeq`).
+	_boxPtrForIface(js, t) {
+		if (t.base?.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.base.name);
+			this.useHelper("ifaceBox");
+			return f ? `__pbs(${js}, ${f})` : `__pbs(${js})`;
+		}
+		if (this._namedBoxInfo(t.base))
+			return this._genNamedIfaceBox(js, t.base, true);
+		const ptrCls = this._structPtrClass(t);
+		if (ptrCls) {
+			this.useHelper("ifaceBox");
+			return `__ifn(__ifp(${js}), ${ptrCls})`;
+		}
+		const tag = this._dynTypeTag(t);
+		if (tag) {
+			this.useHelper("ifaceBox");
+			const inner =
+				this._underlyingOf(t.base)?.kind === "struct" ? `__ifp(${js})` : js;
+			return `__ity(${inner}, ${JSON.stringify(tag)}, true)`;
+		}
+		const dyn = mentionsTypeParam(t) ? this._genericMapTag(t) : null;
+		if (!dyn) return js;
+		this.useHelper("ifaceBox");
+		return `__ity(${js}, ${dyn}, true)`;
+	},
+
+	// Convert an already-evaluated JS expression `js` of static type `t` into
+	// its interface representation (for `__ifeq` in `==` and `switch`).
+	_boxForIface(js, t) {
+		if (!t || this._isIfaceType(t)) return js;
+		if (t.kind === "pointer") return this._boxPtrForIface(js, t);
+		if (t.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.name);
+			return f ? `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${js})` : js;
+		}
+		return this._namedBoxInfo(t) ? this._genNamedIfaceBox(js, t, false) : js;
+	},
+
+	_isPreboxedIfaceOperand(e) {
+		const src = e._ifaceSrc;
+		if (!src) return false;
+		if (this._ityTag(e) || src.kind === "typeParam") return true;
+		if (src.kind === "pointer" && src.base?.kind === "typeParam") return true;
+		return isGenericComposite(src) && Boolean(this._genericMapTag(src));
+	},
+
 	// A concrete operand compared with an interface is converted to an interface first.
 	_genIfaceOperand(e) {
-		if (e._ifaceBox || this._isIfaceType(e._type)) return this.genExpr(e);
-		const isPtr = e._type?.kind === "pointer";
-		const named = isPtr ? e._type.base : e._type;
-		if (this._namedBoxInfo(named))
-			return this._genNamedIfaceBox(this.genExpr(e), named, isPtr);
-		return this.genExpr(e);
+		if (
+			e._ifaceBox ||
+			this._isIfaceType(e._type) ||
+			this._isPreboxedIfaceOperand(e)
+		)
+			return this.genExpr(e);
+		return this._boxForIface(this.genExpr(e), e._type);
 	},
 
 	_isIntDivision(expr) {
@@ -3977,6 +4184,10 @@ export const expressionGenMethods = {
 
 	_genStringConversion(srcType, inner) {
 		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
+		if (base?.kind === "typeParam") {
+			this.useHelper("generics");
+			return `__tstr(${inner})`;
+		}
 		if (base && this.isIntType(base)) {
 			this.useHelper("runestr");
 			return `__rstr(${inner})`;

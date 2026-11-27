@@ -1,7 +1,7 @@
 # Generics & Alias Semantics Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-27)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): generic and type-alias follow-ups from `checker-go-rules` (L13, L15, L19, L21, L22), `checker-operand-rules` (L42, L43), `codegen-fixes` (L82), and `js-dead-code-elimination` (L42 DCE sibling). Split from [`js-codegen-and-value-semantics-plan.md`](js-codegen-and-value-semantics-plan.md) for phase sizing; run sequentially with it because both touch `src/typechecker/expressions.js` and `src/backend/js/{expressions,statements,runtime}.js`.  
 **Release note:** Methods declared on generic non-struct types (`type List[T any] []T`) and on type aliases of local types (`type A = P`) now work on JavaScript and WebAssembly, method expressions on interfaces and type parameters (`N.M(x)`, `T.M(t)`) compile, and generic code on JavaScript now gets the same results as Go for `clear`, `len`, `cap`, `copy`, `append`, `string(t)` and `T(x)` conversions, `switch` on struct or array values, and `&v` of a struct parameter. Declaring methods on an alias of an instantiated generic type (`type A = G[int]`) is now a compile error, as in Go.
@@ -145,43 +145,43 @@ Root: `isReferenceType(typeParam)` (`src/lower/boxing.js:6-25`) is `false`, so a
 
 ### Phase 1: Generic & Alias Method Dispatch (roots `generic-nonstruct-method-drop`, `method-expr-iface-typeparam`, `alias-receiver-uncanonicalized`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Instantiate methods on generic non-struct types and preserve `_ptrRecv` and JS type-info (G1.1–G1.3)
+- [x] Task 1.1: Instantiate methods on generic non-struct types and preserve `_ptrRecv` and JS type-info (G1.1–G1.3)
   - Files: `src/typechecker/resolve.js` (`instantiateGenericWithArgs`, `_syncInstanceMethods`), `src/backend/js/index.js` (`genMethod` `tpNames`; `_namedBoxInfo` only if a test needs it), `src/backend/js/expressions.js` (type-info args at generic non-struct method call sites)
   - Test: `test/unit/types/generics.test.js`: G1.1 (`W[int]{1, 2, 3}.Len()`), G1.2 (generic map/array/basic types, pointer receiver `Push`), G1.3 (`B[string](1).Z()` → `""`; `W[int]` through an interface, `l.(W[int])`) via `assertAllTargetsOutput`
   - Done when: methods on generic non-struct defined types compile and run on all targets, and `var z T` inside them is `T`'s zero value on JS
-- [ ] Task 1.2: Resolve interface and type-parameter method expressions in the checker and WASM monomorphisation (G2.1–G2.3)
+- [x] Task 1.2: Resolve interface and type-parameter method expressions in the checker and WASM monomorphisation (G2.1–G2.3)
   - Files: `src/typechecker/expressions.js` (`_resolveMethodExprType`), `src/backend/wasm/monomorph.js` (`substituteTypesInAst`: type-param selector base)
   - Test: `test/unit/types/generics.test.js`: G2.1–G2.3 (`N.M(n)`, `fn := N.M`, `T.M(t)` and `g := T.M` with `T` = struct, `*S`, `MyInt`) via `assertWasmProgramOutput`, plus a `js`-target assertion for `T.M(t)` with struct `T` (already passes once checked)
   - Done when: the checker accepts every G2 form and `wasm` prints Go's output for all of them (no `Undefined: 'T'` ICE)
-- [ ] Task 1.3: Emit interface and type-parameter method expressions in JS (G2.1–G2.3)
+- [x] Task 1.3: Emit interface and type-parameter method expressions in JS (G2.1–G2.3)
   - Files: `src/backend/js/expressions.js` (method-expr emission `:~1425`, `:~1639`), `src/backend/js/type-info.js` (`_isTypeParamMethodCall`)
   - Test: `test/unit/types/generics.test.js`: upgrade the Task 1.2 cases to `assertAllTargetsOutput` (`both` `N.M(n)`; `T.M` with named non-struct `MyInt` via `__tbox`; nil interface receiver panics as in Go)
   - Done when: every G2 form prints Go's output on `js`, `both`, and `wasm`
-- [ ] Task 1.4: Canonicalize alias method receivers at checker registration (G3.1–G3.6)
+- [x] Task 1.4: Canonicalize alias method receivers at checker registration (G3.1–G3.6)
   - Files: `src/typechecker/index.js` (`_unwrapPointerAliasReceiver` → `_canonicalizeAliasReceiver`)
   - Test: `test/unit/language/named-type-methods.test.js`: G3.1, G3.2, G3.4, G3.5 (value/pointer/chained alias receivers, alias of `type I int`, interface dispatch and assertion) via `assertAllTargetsOutput`, G3.6 negative (`assertErrorContains(errors, "cannot define new methods on instantiated type G[int]")`), pointer-alias and anonymous-struct-alias controls; `test/unit/compiler/dce-methods.test.js`: G3.3 (`console.log(p)` keeps `Get(` for a method declared on `A`)
   - Done when: methods declared on local type aliases work on all targets and survive DCE exactly like methods declared on the target type, with no change to `src/lower/reachability.js` or either backend
 
 ### Phase 2: Type-Parameter Builtins & Conversions (roots `js-typeparam-builtin-dispatch`, `js-typeparam-string-complex-conv`, `checker-untyped-to-complex-typeparam`)
-- [ ] Task 2.1: Runtime-dispatched JS `clear`, `len`, and `cap` on type-parameter operands (G4.1–G4.2)
+- [x] Task 2.1: Runtime-dispatched JS `clear`, `len`, and `cap` on type-parameter operands (G4.1–G4.2)
   - Files: `src/backend/js/expressions.js` (`_genBuiltinClear`, `_genBuiltinLen`, `BUILTIN_GEN.cap`), `src/backend/js/runtime.js` (`__clear`, `__len`, `__cap`), `src/backend/js/type-info.js` (`_callUsesTypeInfo`, `ez`)
   - Test: `test/unit/types/generics.test.js`: G4.1–G4.1b (`clear` on `M ~map`, `S ~[]int`, `S ~[]MyStruct` then field write, `S ~[]string`, `T ~map | ~[]int`, nil) and G4.2 (`len`/`cap` on `T ~[]int | ~*[3]int` and `T ~[3]int | ~*[3]int`) on `js`, `both`, `wasm`
   - Done when: `clear`, `len`, and `cap` on type-parameter operands match Go on all targets
-- [ ] Task 2.2: Support `~string | ~[]byte` type parameters in `copy` and `append([]byte{}, v...)` (G4.3)
+- [x] Task 2.2: Support `~string | ~[]byte` type parameters in `copy` and `append([]byte{}, v...)` (G4.3)
   - Files: `src/typechecker/expressions.js` (`_checkAppendArgs`, `_isStringIntoBytes`), `src/backend/js/expressions.js` (`_genSliceSource`)
   - Test: `test/unit/types/generics.test.js`: G4.3 (`copy(dst, src)` and `append([]byte{}, v...)` with both `string` and `[]byte` instantiations) on `js`, `both`, `wasm`
   - Done when: `copy` and `append` with `~string | ~[]byte` type parameters compile and match Go on all targets
-- [ ] Task 2.3: Fix generic `string(t)` and `T(x)` conversions for `~string`, `~[]byte`/`~[]rune`, and `~complex` (G5.1–G5.4)
+- [x] Task 2.3: Fix generic `string(t)` and `T(x)` conversions for `~string`, `~[]byte`/`~[]rune`, and `~complex` (G5.1–G5.4)
   - Files: `src/typechecker/expressions.js` (`_termConvertible`), `src/backend/js/expressions.js` (`_genStringConversion`), `src/backend/js/runtime.js` (`__tconv`, `__tstr`, `__ti` kind tags)
   - Test: `test/unit/types/generics.test.js`: G5.1 (`string(t)` on `~string | ~[]byte`, `~string | ~[]rune`, `~int | ~int32`, incl. `int32(0x110000)` → `"�"`), G5.2 (`T(1.5)` on `~complex128` and `~complex64`), G5.3 (`T(65)`, `T([]byte("hi"))`, `T([]rune("ok"))` on `~string`), G5.4 (`T(s)` for `T ~[]byte` / `~[]rune`; `S(t)` for `S ~string` from `T ~[]byte | ~[]rune`) on `js`, `both`, `wasm`
   - Done when: all generic string and complex conversions compile and match Go on all targets
 
 ### Phase 3: JS Erased Type-Parameter `switch` & Address-Of (roots `js-switch-typeparam-equality`, `js-typeparam-address-of-box`)
-- [ ] Task 3.1: Compare type-parameter `switch` tags with `__geq` in JS (G6.1–G6.2)
+- [x] Task 3.1: Compare type-parameter `switch` tags with `__geq` in JS (G6.1–G6.2)
   - Files: `src/backend/js/statements.js` (`_switchTagAndCases`, `genSwitch`), `src/backend/js/type-info.js` (`_nodeUsesTypeInfo`)
   - Test: `test/unit/types/generics.test.js`: G6.1 (`switch x { case y: }` on `T comparable` instantiated with struct, array, `complex128`, `any`), G6.2 (labeled switch with `break L`, switch inside `for range`, interface-typed case `any(P{1})`), plus the G6 controls, on `js`, `both`, `wasm`
   - Done when: JS `switch` on type-parameter tags matches Go value equality across all comparable types
-- [ ] Task 3.2: Keep address-taken type-parameter params and locals unboxed when `T` is a struct in JS (G7.1–G7.2)
+- [x] Task 3.2: Keep address-taken type-parameter params and locals unboxed when `T` is a struct in JS (G7.1–G7.2)
   - Files: `src/backend/js/expressions.js` (`_emitParamCopies`, `_genUnaryExpr`), `src/backend/js/statements.js` (boxed local init/read/write), `src/backend/js/index.js`
   - Test: `test/unit/types/generics.test.js`: G7.1 (`makePtr(Box{11})`, local `x := v; return &x`), G7.2 (reassigning `v = Box{33}` after `p := &v`, `*p` read in a closure), plus the G7 controls (mutating through returned `*Box`, caller copy unchanged, non-struct `42` and `[2]int{3, 4}`) on `js`, `both`, `wasm`
   - Docs: `docs/language-support.md`: method-expression rows add interface and type-parameter forms (`N.M`, `T.M`) and the named non-struct methods row adds generic receivers (`type List[T any] []T`), each with a `<!-- fixture: … -->` that passes

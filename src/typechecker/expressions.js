@@ -34,7 +34,6 @@ import {
 	isBool,
 	isComplex,
 	isComplex64,
-	isComplexOrNumeric,
 	isInteger,
 	isNil,
 	isNumeric,
@@ -862,7 +861,16 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	_resolveMethodExprType(baseType, base, field) {
+	_resolveMethodExprType(baseType, base, field, isPtr = false) {
+		if (!isPtr) {
+			if (base?.kind === "interface" && base.methods?.has(field))
+				return base.methods.get(field);
+			if (base?.kind === "typeParam") {
+				const c = this._deepUnderlying(this.resolveType(base.constraint));
+				if (c?.kind === "interface" && c.methods?.has(field))
+					return c.methods.get(field);
+			}
+		}
 		if (!this._isStructOrNamedMethod(baseType, base, field)) return null;
 		return base?.methods?.get(field) ?? baseType.methods?.get(field);
 	},
@@ -1000,7 +1008,18 @@ export const expressionCheckMethods = {
 	_checkMethodExprSelector(expr, baseType) {
 		const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
 		const base = this.resolveType(this._deepUnderlying(recvBase));
-		const methodType = this._resolveMethodExprType(recvBase, base, expr.field);
+		if (baseType.kind === "pointer" && base?.kind === "interface") {
+			return this.err(
+				`${exprText(expr)} undefined (type ${typeStr(baseType)} is pointer to interface, not interface)`,
+				expr,
+			);
+		}
+		const methodType = this._resolveMethodExprType(
+			recvBase,
+			base,
+			expr.field,
+			baseType.kind === "pointer",
+		);
 		if (
 			this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
 			baseType.kind !== "pointer"
@@ -1039,6 +1058,13 @@ export const expressionCheckMethods = {
 			// `i.M` binds the interface value; the call dispatches when it runs.
 			expr._isMethodValue = true;
 			return;
+		}
+		if (baseType.kind === "typeParam") {
+			const c = this._deepUnderlying(this.resolveType(baseType.constraint));
+			if (c?.kind === "interface" && c.methods?.has(expr.field)) {
+				expr._isMethodValue = true;
+				return;
+			}
 		}
 		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
 		expr._isMethodValue = true;
@@ -2563,7 +2589,12 @@ export const expressionCheckMethods = {
 	_termConvertible(s, t, expr, operand) {
 		if (s.kind === "untyped") {
 			const u = this._deepUnderlying(t) ?? t;
-			if (this._isRealNumberType(u) && s.base !== "string" && s.base !== "bool")
+			if (
+				u?.kind === "basic" &&
+				(isNumeric(u) || isComplex(u)) &&
+				s.base !== "string" &&
+				s.base !== "bool"
+			)
 				return this._untypedFitsTerm(s, operand, t);
 			s = defaultType(s);
 		}
@@ -2573,10 +2604,6 @@ export const expressionCheckMethods = {
 		const ok = this.errors.length === 0;
 		this.errors = saved;
 		return ok;
-	},
-
-	_isRealNumberType(u) {
-		return u?.kind === "basic" && isNumeric(u) && !isComplex(u);
 	},
 
 	// A conversion to a type parameter needs a constraint that lists types
@@ -3229,9 +3256,17 @@ export const expressionCheckMethods = {
 			if (!at[i]) continue;
 			if (arg._spread) {
 				this._rejectSeqAsSlice(at[i], arg, "a spread argument");
-				if (!this._isStringIntoBytes(elem, at[i]))
+				const targetSlice = { kind: "slice", elem: sliceType.elem };
+				if (
+					!this._typeSetOk(
+						at[i],
+						(u) =>
+							this._isStringIntoBytes(elem, u) ||
+							this._assignableQuietly(targetSlice, this._deepUnderlying(u)),
+					)
+				)
 					this.assertAssignable(
-						{ kind: "slice", elem: sliceType.elem },
+						targetSlice,
 						this._deepUnderlying(at[i]),
 						arg,
 						"argument to append",

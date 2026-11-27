@@ -1599,6 +1599,126 @@ func main() {}`);
 	);
 });
 
+test("methods declared on local type aliases work on all targets (G3.1, G3.2, G3.4, G3.5)", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ n int }
+type A = P
+type B = A
+type C = *P
+
+func (a A) Get() int  { return a.n }
+func (a *A) Set(v int) { a.n = v }
+func (b B) Get2() int { return b.n + 1 }
+func (c C) Add(v int) { c.n += v }
+
+type G interface{ Get() int }
+
+func use(x any) int {
+	return x.(interface{ Get() int }).Get()
+}
+
+type I int
+type AI = I
+func (a AI) Dbl() int { return int(a) * 2 }
+
+func main() {
+	var p P
+	p.Set(5)
+	var g G = p
+	fmt.Println(p.Get(), p.Get2(), g.Get(), use(p))
+	p.Add(2)
+	fmt.Println(p.Get())
+	var i I = 3
+	fmt.Println(i.Dbl())
+}`,
+		"5 6 5 5\n7\n6\n",
+	);
+});
+
+test("method on alias of instantiated generic type is rejected (G3.6)", () => {
+	const { errors } = compile(`package main
+type G[T any] struct{ v T }
+type A = G[int]
+func (a A) M() int { return a.v }
+func main() {}`);
+	assertErrorContains(
+		errors,
+		"cannot define new methods on instantiated type G[int]",
+	);
+});
+
+test("method on alias of anonymous struct is rejected (G3 control)", () => {
+	const { errors } = compile(`package main
+type A = struct{ n int }
+func (a A) M() int { return a.n }
+func main() {}`);
+	assertErrorContains(errors, "invalid receiver type A");
+});
+
+test("pointer-form method expressions for value-receiver methods on named non-struct types work on all targets", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type MyInt int
+func (m MyInt) M() int        { return int(m) }
+func (m *MyInt) IsNil() bool  { return m == nil }
+type PA = *MyInt
+
+type W[T any] []T
+func (w W[T]) Len() int       { return len(w) }
+func (w *W[T]) Push(v T)      { *w = append(*w, v) }
+
+type MyArr [2]int
+func (a MyArr) Mutate() int   { a[0] = 99; return a[0] }
+
+func callGeneric[T any](w W[T]) int {
+	fn := (*W[T]).Len
+	return (*W[T]).Len(&w) + fn(&w)
+}
+
+func nilValueRecvPanics() (panicked bool) {
+	defer func() {
+		if recover() != nil {
+			panicked = true
+		}
+	}()
+	var p *MyInt
+	_ = (*MyInt).M(p)
+	return false
+}
+
+func main() {
+	mi := MyInt(5)
+	fMi := (*MyInt).M
+	fPa := PA.M
+	fmt.Println((*MyInt).M(&mi), fMi(&mi), PA.M(&mi), fPa(&mi))
+
+	var nilMi *MyInt
+	fIsNil := (*MyInt).IsNil
+	fmt.Println((*MyInt).IsNil(nilMi), fIsNil(nilMi), nilValueRecvPanics())
+
+	w := W[int]{1, 2, 3}
+	fLen := (*W[int]).Len
+	fPush := (*W[int]).Push
+	fmt.Println((*W[int]).Len(&w), fLen(&w), callGeneric(w))
+	fPush(&w, 4)
+	fmt.Println((*W[int]).Len(&w))
+
+	a := MyArr{1, 2}
+	fArr := (*MyArr).Mutate
+	fArrVal := MyArr.Mutate
+	fmt.Println((*MyArr).Mutate(&a), fArr(&a), MyArr.Mutate(a), fArrVal(a), a.Mutate(), a[0])
+}`,
+		"5 5 5 5\ntrue true true\n3 3 6\n4\n99 99 99 99 99 1\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

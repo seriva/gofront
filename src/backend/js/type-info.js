@@ -37,6 +37,15 @@ function typeArgsMention(node) {
 	return Array.isArray(args) && args.some((t) => mentionsTypeParam(t));
 }
 
+const TYPE_INFO_BUILTINS = new Set(["clear", "len", "cap"]);
+
+const isTypeParamOrPtr = (t, names) =>
+	(t?.kind === "typeParam" && names.has(t.name)) ||
+	(t?.kind === "pointer" &&
+		(t.base?.kind === "typeParam"
+			? names.has(t.base.name)
+			: mentionsTypeParam(t.base)));
+
 export const typeInfoGenMethods = {
 	// Whether the body of generic `decl` (a function or method declaration)
 	// needs the instantiated types of `names`.
@@ -86,24 +95,45 @@ export const typeInfoGenMethods = {
 		);
 	},
 
+	_isTypeParamMethodExpr(node, names) {
+		return (
+			Boolean(node._isMethodExpr) &&
+			node._methodExprRecv?.kind === "typeParam" &&
+			names.has(node._methodExprRecv.name)
+		);
+	},
+
+	_isTypeParamMethodValue(node, names) {
+		const t = node.expr?._type;
+		return (
+			Boolean(node._isMethodValue) &&
+			!node._callee &&
+			t?.kind === "typeParam" &&
+			names.has(t.name)
+		);
+	},
+
 	_nodeUsesTypeInfo(node, names) {
 		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
 		// A map or slice entering an interface is tagged by its instantiated type.
 		if (isGenericComposite(node._ifaceSrc)) return true;
-		if (node._ifaceSrc?.kind === "typeParam" && names.has(node._ifaceSrc.name))
-			return true;
+		if (isTypeParamOrPtr(node._ifaceSrc, names)) return true;
+		return (
+			this._stmtUsesTypeInfo(node, names) ?? this._kindUsesTypeInfo(node, names)
+		);
+	},
+
+	_stmtUsesTypeInfo(node, names) {
 		switch (node.kind) {
-			case "TypeAssertExpr":
-				return typeNodeMentions(node.type, names);
 			case "TypeSwitchStmt":
 				return node.cases.some((c) => typeNodeMentions(c.types, names));
-			case "TypeConversion":
-				return typeNodeMentions(node.targetType, names);
-			case "BinaryExpr":
+			case "SwitchStmt":
 				return (
-					((node.op === "==" || node.op === "!=") &&
-						node.left._type?.kind === "typeParam") ||
-					(node._type?.kind === "typeParam" && names.has(node._type.name))
+					isTypeParamOrPtr(node.tag?._type, names) ||
+					(Boolean(node.tag) &&
+						node.cases.some((c) =>
+							c.list?.some((e) => isTypeParamOrPtr(e._type, names)),
+						))
 				);
 			case "AssignStmt":
 				return (
@@ -116,8 +146,33 @@ export const typeInfoGenMethods = {
 					node.expr?._type?.kind === "typeParam" &&
 					names.has(node.expr._type.name)
 				);
+			default:
+				return null;
+		}
+	},
+
+	_kindUsesTypeInfo(node, names) {
+		switch (node.kind) {
+			case "TypeAssertExpr":
+				return typeNodeMentions(node.type, names);
+			case "TypeConversion":
+				return typeNodeMentions(node.targetType, names);
+			case "BinaryExpr":
+				return (
+					((node.op === "==" || node.op === "!=") &&
+						(isTypeParamOrPtr(node.left._type, names) ||
+							isTypeParamOrPtr(node.right._type, names))) ||
+					(node._type?.kind === "typeParam" && names.has(node._type.name))
+				);
 			case "CallExpr":
 				return this._callUsesTypeInfo(node, names);
+			case "SelectorExpr":
+				return (
+					this._isTypeParamMethodExpr(node, names) ||
+					this._isTypeParamMethodValue(node, names)
+				);
+			case "InstantiationExpr":
+				return this._instantiationUsesTypeInfo(node);
 			case "CompositeLit":
 			case "GenericTypeName":
 				return typeArgsMention(node);
@@ -126,8 +181,22 @@ export const typeInfoGenMethods = {
 		}
 	},
 
+	_instantiationUsesTypeInfo(site) {
+		return (
+			Boolean(site?._genericFnType) &&
+			Boolean(site._typeArgs?.some((t) => mentionsTypeParam(t))) &&
+			this._genericFnNeedsTypeInfo(site._genericFnType)
+		);
+	},
+
 	_callUsesTypeInfo(call, names) {
 		if (this._isTypeParamMethodCall(call, names)) return true;
+		if (
+			TYPE_INFO_BUILTINS.has(call._builtinName) &&
+			call.args[0]?._type?.kind === "typeParam" &&
+			names.has(call.args[0]._type.name)
+		)
+			return true;
 		// A conversion to a generic instance such as `W[T](s)` tags the result
 		// with its instantiation, as a composite literal does.
 		if (call._isTypeConversion) {
@@ -146,10 +215,9 @@ export const typeInfoGenMethods = {
 			call.args.some((a) => a?._type?.kind === "typeParam")
 		)
 			return true;
-		const site = call._genericFnType ? call : call.func;
-		if (!site?._genericFnType) return false;
-		if (!site._typeArgs?.some((t) => mentionsTypeParam(t))) return false;
-		return this._genericFnNeedsTypeInfo(site._genericFnType);
+		return this._instantiationUsesTypeInfo(
+			call._genericFnType ? call : call.func,
+		);
 	},
 
 	// Whether callers of generic function `generic` pass type information.
@@ -186,23 +254,61 @@ export const typeInfoGenMethods = {
 		let k = "";
 		if (isAny(u) || u?.kind === "interface") k = "iface";
 		else if (u?.kind === "basic") k = u.name;
+		else if (u?.kind === "slice") {
+			const elem = u.elem?.kind === "basic" ? u.elem.name : null;
+			if (elem === "byte" || elem === "uint8") k = "[]byte";
+			else if (elem === "rune" || elem === "int32") k = "[]rune";
+		}
 		const check = this._typeCheckForType(t, "__v");
 		const is = check ? `(__v) => ${check}` : "null";
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t) ?? this._ptrMethodBox(t);
 		const fmtBox = this._fmtBoxFor(t);
-		const tail = this._typeInfoTail(t, box, fmtBox);
+		const ez = u?.kind === "slice" ? this.zeroFactoryFor(u.elem) : null;
+		const al = this._arrayLenOf(t);
+		const ptrBox = this._ptrBoxFor(t);
+		const tail = this._typeInfoTail(t, box, fmtBox, ez, al, ptrBox);
 		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
-	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`).  `typeStr`
-	// drops the `...` of a variadic func type, so a func type also carries its
-	// spelled name (see `__tnm`).
-	_typeInfoTail(t, box, fmtBox) {
-		if (t.kind === "func")
-			return `, ${box ?? "null"}, ${fmtBox ?? "null"}, ${JSON.stringify(this._dynTypeName(t))}`;
-		if (fmtBox) return `, ${box ?? "null"}, ${fmtBox}`;
-		return box ? `, ${box}` : "";
+	// A function boxing `*t` into an interface (used by `__pbs` when `*T` enters `any`).
+	_ptrBoxFor(t) {
+		if (!t || t.kind === "typeParam") return null;
+		const ptrT = { kind: "pointer", base: t };
+		const box = this._ptrMethodBox(ptrT) ?? this._fmtBoxFor(ptrT);
+		if (box) return box;
+		const dyn = this._genericMapTag(ptrT);
+		if (!dyn) return null;
+		this.useHelper("ifaceBox");
+		return `(__v) => __ity(__v, ${dyn}, true)`;
+	},
+
+	// Fixed length of an array or pointer-to-array type `t` (for generic
+	// `len`/`cap` on a type parameter), or null when `t` is neither.
+	_arrayLenOf(t) {
+		const u = this._underlyingOf(t);
+		const arr = u?.kind === "pointer" ? this._underlyingOf(u.base) : u;
+		if (arr?.kind !== "array") return null;
+		const size = arr.size?.value ?? arr.size;
+		return typeof size === "number" ? size : null;
+	},
+
+	// The optional trailing arguments of `__ti` (`b`, `fb`, `nm`, `ez`, `al`, `pb`).
+	// `typeStr` drops the `...` of a variadic func type, so a func type also
+	// carries its spelled name (see `__tnm`).
+	_typeInfoTail(t, box, fmtBox, ez, al, ptrBox) {
+		const opts = [
+			box,
+			fmtBox,
+			t.kind === "func" ? JSON.stringify(this._dynTypeName(t)) : null,
+			ez,
+			al != null ? String(al) : null,
+			ptrBox,
+		];
+		while (opts.length > 0 && opts[opts.length - 1] == null) opts.pop();
+		return opts.length > 0
+			? `, ${opts.map((x) => x ?? "null").join(", ")}`
+			: "";
 	},
 
 	// How `__ik` tells the dynamic type of an interface map key apart where
@@ -256,7 +362,13 @@ export const typeInfoGenMethods = {
 	},
 
 	_fmtBoxBase(t) {
-		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
+		if (!t || t.kind === "typeParam") return null;
+		const ptrCls = this._structPtrClass(t);
+		if (ptrCls) {
+			this.useHelper("ifaceBox");
+			return `(__v) => __ifn(__ifp(__v), ${ptrCls})`;
+		}
+		if (mentionsTypeParam(t)) return null;
 		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
 		const u = this._underlyingOf(t);
 		if (t.kind === "pointer" && this._underlyingOf(t.base)?.kind === "struct") {
@@ -431,10 +543,12 @@ export const typeInfoGenMethods = {
 			case "struct":
 				if (t.name || !t._structFields) return typeStr(t);
 				return `struct{${t._structFields
-					.map(
-						(f) =>
-							`${(f.names ?? []).join(",")} ${s(f.type)}${f.tag ? ` ${JSON.stringify(f.tag)}` : ""}${f.embedded ? " embedded" : ""}`,
-					)
+					.flatMap((f) => {
+						const tail = `${s(f.type)}${f.tag ? ` ${JSON.stringify(f.tag)}` : ""}${f.embedded ? " embedded" : ""}`;
+						return f.names?.length
+							? f.names.map((n) => `${n} ${tail}`)
+							: [` ${tail}`];
+					})
 					.join("; ")}}`;
 			default:
 				return typeStr(t);
@@ -476,7 +590,8 @@ export const typeInfoGenMethods = {
 
 	_underlyingOf(t) {
 		let u = t;
-		for (let i = 0; i < 8 && u?.kind === "named"; i++) u = u.underlying;
+		for (let i = 0; i < 8 && u?.kind === "named"; i++)
+			u = u.underlying ?? this.checker?.types.get(u.name)?.underlying;
 		return u;
 	},
 
@@ -494,6 +609,10 @@ export const typeInfoGenMethods = {
 				return this._typeNameCheckExpr(t.name, val);
 			case "named":
 				return this._namedTypeCheck(t, val);
+			case "struct": {
+				this.useHelper("ifaceBox");
+				return `__isty(${val}, ${JSON.stringify(this._dynTypeName(t))}, "struct", null, 0)`;
+			}
 			case "pointer":
 				return this._pointerTypeCheck(t.base, val);
 			case "interface":
@@ -532,6 +651,10 @@ export const typeInfoGenMethods = {
 	},
 
 	_pointerTypeCheck(base, val) {
+		if (base?.kind === "struct" && !base.name) {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName({ kind: "pointer", base }))}, "struct", null, 0)`;
+		}
 		if (base?.kind !== "named") return null;
 		const node = base.typeArgs?.length
 			? { kind: "GenericTypeName", name: base.name, _typeArgs: base.typeArgs }
