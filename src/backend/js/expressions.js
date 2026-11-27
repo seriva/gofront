@@ -697,11 +697,14 @@ export const expressionGenMethods = {
 			!expr._pbsWrapping
 		) {
 			// `&v` of a type parameter's variable is a box; a struct behind it
-			// is its own pointer.
+			// is its own pointer, and the instantiated type tags `*T` for interfaces.
 			expr._pbsWrapping = true;
 			try {
 				this.useHelper("ifaceBox");
-				return `__pbs(${this.genExpr(expr)})`;
+				const f = this._typeParamZeroFactory(expr._ifaceSrc.base.name);
+				return f
+					? `__pbs(${this.genExpr(expr)}, ${f})`
+					: `__pbs(${this.genExpr(expr)})`;
 			} finally {
 				expr._pbsWrapping = false;
 			}
@@ -1061,6 +1064,8 @@ export const expressionGenMethods = {
 		if (!node) return null;
 		if (node.kind === "TypeName" || node.kind === "SelectorExpr")
 			return this._typeFromNameNode(node);
+		if (node.kind === "GenericTypeName")
+			return node._assertType ?? this._typeFromNameNode(node);
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
 		if (node.kind === "StructType") return this._typeFromStructNode(node);
@@ -2080,11 +2085,11 @@ export const expressionGenMethods = {
 				`(${check} ? ${out} : (() => { throw ${this._typeAssertFailJs(expr, val)}; })())`,
 			);
 		}
-		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct
-		// or array is a copy of the boxed value.
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct,
+		// array or type-parameter value is a copy of the boxed value.
 		const zero = this.zeroValueForTypeNode(expr.type);
 		const valT = this._typeFromNode(expr.type);
-		const okOut = this._aggregateBase(valT) ? this._cloneJs(valT, out) : out;
+		const okOut = this._copyValueJs(valT, out);
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 
@@ -2171,12 +2176,11 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
 		}
-		// An alias of an anonymous struct: a plain object with its fields.
+		// An alias of an anonymous struct: match its dynamic type tag (`__t`),
+		// just like an explicit `struct{...}` assertion, so `*AS` is not `AS`.
 		if (named?.kind === "struct") {
-			const fields = [...(named.fields?.keys() ?? [])].map(
-				(f) => `${JSON.stringify(jsMemberName(f))} in ${val}`,
-			);
-			return `(typeof ${val} === "object" && ${val} !== null && !Array.isArray(${val})${fields.map((f) => ` && ${f}`).join("")})`;
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName(named))}, "struct", null, 0)`;
 		}
 		return "true"; // unknown type — can't check at runtime
 	},
@@ -3374,7 +3378,7 @@ export const expressionGenMethods = {
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			? `(${f}.k !== "complex64" && ${f}.k !== "complex128" && ((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}()))`
 			: "false";
 	},
 
@@ -3416,6 +3420,7 @@ export const expressionGenMethods = {
 		}
 		this.useHelper("generics");
 		if (this._is64BitUnsigned(t)) return "__zu64";
+		if (isComplex(t)) return "__zc";
 		const zero = this.zeroValueForType(t);
 		return Object.hasOwn(SHARED_ZERO_FACTORIES, zero)
 			? SHARED_ZERO_FACTORIES[zero]
@@ -3953,6 +3958,20 @@ export const expressionGenMethods = {
 	// A concrete operand compared with an interface is converted to an interface first.
 	_genIfaceOperand(e) {
 		if (e._ifaceBox || this._isIfaceType(e._type)) return this.genExpr(e);
+		if (
+			e._type?.kind === "pointer" &&
+			e._type.base?.kind === "typeParam" &&
+			!(
+				e._ifaceSrc?.kind === "pointer" &&
+				e._ifaceSrc.base?.kind === "typeParam"
+			)
+		) {
+			const f = this._typeParamZeroFactory(e._type.base.name);
+			if (f) {
+				this.useHelper("ifaceBox");
+				return `__pbs(${this.genExpr(e)}, ${f})`;
+			}
+		}
 		if (e._type?.kind === "typeParam" && e._ifaceSrc?.kind !== "typeParam") {
 			const f = this._typeParamZeroFactory(e._type.name);
 			if (f) return `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${this.genExpr(e)})`;

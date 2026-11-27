@@ -339,7 +339,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   const keep = (v, c) => {
     for (const k of Object.getOwnPropertyNames(v)) {
       const d = Object.getOwnPropertyDescriptor(v, k);
-      if (!d.enumerable && k !== "length") Object.defineProperty(c, k, d);
+      if (!d.enumerable && k !== "length" && k !== "__p" && !(k === "__t" && v.__p === true))
+        Object.defineProperty(c, k, d);
     }
     return c;
   };
@@ -443,9 +444,24 @@ var __mknil = __mknil || function(C) {
 var __ifn = __ifn || function(x, C) {
   return x === null ? (Object.hasOwn(C, "__nil") ? C.__nil : __mknil(C)) : x;
 };
-var __pbs = __pbs || function(p) {
-  var e = p !== null && typeof p === "object" ? p.value : undefined;
-  return e !== null && typeof e === "object" && e.value === e ? __ifp(e) : p;
+var __pbs = __pbs || function(p, f) {
+  var isNamedStruct = false;
+  var isAnonStruct = false;
+  if (p !== null && typeof p === "object") {
+    var z = typeof f === "function" ? f() : undefined;
+    isNamedStruct = z !== null && typeof z === "object" && !Array.isArray(z) && !ArrayBuffer.isView(z) && Object.getPrototypeOf(Object.getPrototypeOf(z)) !== null;
+    isAnonStruct = typeof f?.id === "string" && f.id.startsWith("struct{");
+    if (isNamedStruct) {
+      if (!(p instanceof z.constructor) && p.value instanceof z.constructor) p = p.value;
+    } else if (isAnonStruct) {
+      if (p.__target !== undefined || (!("value" in z) && "value" in p && p.value !== null && typeof p.value === "object" && Object.keys(p).length === 1))
+        p = p.value;
+    } else if (!f) {
+      var e = p.value;
+      if (e !== null && typeof e === "object" && e.value === e) return __ifp(e);
+    }
+  }
+  return f?.pb ? f.pb(p) : (isNamedStruct || isAnonStruct) && p !== null && typeof p === "object" ? __ifp(p) : p;
 };
 var __unnil = __unnil || function(x) {
   return x != null && x.__nilp === true ? null : x;
@@ -680,6 +696,7 @@ var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
 var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
 var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
+var __zc = __zc || Object.assign(() => ({ re: 0, im: 0 }), { k: "complex128" });
 var __tbox = __tbox || function(f, x) {
   if (f && f.b) return f.b(x);
   if (x === null && f && f.fb) {
@@ -688,9 +705,9 @@ var __tbox = __tbox || function(f, x) {
   }
   return x;
 };
-var __ti = __ti || function(f, k, id, is, u, b, fb, nm, ez, al) {
+var __ti = __ti || function(f, k, id, is, u, b, fb, nm, ez, al, pb) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm; g.ez = ez; g.al = al;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb; g.nm = nm; g.ez = ez; g.al = al; g.pb = pb;
   return g;
 };
 var __clear = __clear || function(v, ez) {

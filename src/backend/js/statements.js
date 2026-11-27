@@ -2309,6 +2309,18 @@ export const statementGenMethods = {
 			);
 			return `let ${decls.join(", ")}`;
 		}
+		if (lhs.some((n) => n !== "_" && this._boxedVars.has(n))) {
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const tmp = `__c${this._tmpCounter}`;
+			const decls = lhs
+				.map((n, i) =>
+					n === "_"
+						? null
+						: `${n} = ${this._boxedVars.has(n) ? this._boxInitJs(n, `${tmp}[${i}]`) : `${tmp}[${i}]`}`,
+				)
+				.filter(Boolean);
+			return `let ${tmp} = ${rhs[0]}, ${decls.join(", ")}`;
+		}
 		return `let [${lhs.map((n) => (n === "_" ? "" : n)).join(", ")}] = ${rhs[0]}`;
 	},
 

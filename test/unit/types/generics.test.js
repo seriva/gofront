@@ -4928,6 +4928,402 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("type assertions clone type-parameter values and keep original interfaces intact", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type GBox[T any] struct{ N T }
+type AS = struct{ N int }
+
+func commaOkMutate[T any](orig any, w T) T {
+	v, ok := orig.(T)
+	if ok {
+		p := &v
+		*p = w
+	}
+	return v
+}
+
+func commaOkPtrToAny[T any](x any) {
+	v, ok := x.(T)
+	if ok {
+		p := &v
+		_ = any(p)
+	}
+}
+
+func singleAssertMutateAndAny[T any](orig any, w T) T {
+	v := orig.(T)
+	p := &v
+	_ = any(p)
+	*p = w
+	return v
+}
+
+func ifInitCommaOk[T any](orig any, w T) T {
+	var out T
+	if v, ok := orig.(T); ok {
+		p := &v
+		_ = any(p)
+		*p = w
+		out = v
+	}
+	return out
+}
+
+func forInitCommaOk[T any](orig any, w T) T {
+	var out T
+	for v, ok := orig.(T); ok; ok = false {
+		p := &v
+		_ = any(p)
+		*p = w
+		out = v
+	}
+	return out
+}
+
+func assignCommaOk[T any](orig any, w T) T {
+	var v T
+	var ok bool
+	v, ok = orig.(T)
+	if ok {
+		p := &v
+		_ = any(p)
+		*p = w
+	}
+	return v
+}
+
+func main() {
+	// Comma-ok mutation does not alias original interface
+	origB := any(Box{10})
+	vB := commaOkMutate[Box](origB, Box{99})
+	fmt.Println(origB.(Box).N, vB.N)
+
+	origAS := any(AS{11})
+	vAS := commaOkMutate[AS](origAS, AS{88})
+	fmt.Println(origAS.(AS).N, vAS.N)
+
+	origArr := any([2]int{1, 2})
+	vArr := commaOkMutate[[2]int](origArr, [2]int{9, 8})
+	fmt.Println(origArr.([2]int)[0], vArr[0])
+
+	// Passing &v to any does not mutate x's dynamic type tag
+	xB := any(Box{10})
+	commaOkPtrToAny[Box](xB)
+	fmt.Println(xB.(Box).N)
+
+	xAS := any(AS{12})
+	commaOkPtrToAny[AS](xAS)
+	fmt.Println(xAS.(AS).N)
+
+	// Single-result assertion
+	sB := any(Box{20})
+	svB := singleAssertMutateAndAny[Box](sB, Box{21})
+	fmt.Println(sB.(Box).N, svB.N)
+
+	sAS := any(AS{22})
+	svAS := singleAssertMutateAndAny[AS](sAS, AS{23})
+	fmt.Println(sAS.(AS).N, svAS.N)
+
+	// if / for / assign comma-ok forms
+	iB := any(Box{30})
+	ivB := ifInitCommaOk[Box](iB, Box{31})
+	fmt.Println(iB.(Box).N, ivB.N)
+
+	fB := any(Box{40})
+	fvB := forInitCommaOk[Box](fB, Box{41})
+	fmt.Println(fB.(Box).N, fvB.N)
+
+	fI := any(45)
+	fvI := forInitCommaOk[int](fI, 46)
+	fmt.Println(fI.(int), fvI)
+
+	aB := any(Box{50})
+	avB := assignCommaOk[Box](aB, Box{51})
+	fmt.Println(aB.(Box).N, avB.N)
+
+	// Comma-ok on generic struct type
+	gOrig := any(GBox[int]{N: 60})
+	gv, gok := gOrig.(GBox[int])
+	if gok {
+		gv.N = 61
+	}
+	fmt.Println(gOrig.(GBox[int]).N, gv.N)
+}`;
+	const want =
+		"10 99\n" +
+		"11 88\n" +
+		"1 9\n" +
+		"10\n" +
+		"12\n" +
+		"20 21\n" +
+		"22 23\n" +
+		"30 31\n" +
+		"40 41\n" +
+		"45 46\n" +
+		"50 51\n" +
+		"60 61\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("pointer-to-type-parameter entering any tags anonymous structs and non-struct boxes", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type ValBox struct{ value int }
+type MyInt int
+type AS = struct{ N int }
+type ASVal = struct{ value int }
+type Empty = struct{}
+type Wrap[T any] struct{ V T }
+
+func ts[T any](x any) any {
+	switch v := x.(type) {
+	case T:
+		return &v
+	}
+	return nil
+}
+
+func makePtr[T any](v T) any {
+	return &v
+}
+
+func ptrField[T any](w *Wrap[T]) any {
+	return &w.V
+}
+
+func sliceElemPtrAndVal[T any](s []T) (any, any) {
+	p := &s[0]
+	a := any(p)
+	v := s[0]
+	return a, any(v)
+}
+
+func main() {
+	// Type switch returning &v for anonymous struct alias (package-level)
+	orig := any(AS{7})
+	a := ts[AS](orig)
+	_, v1 := a.(AS)
+	p1, k1 := a.(*AS)
+	if k1 {
+		p1.N = 70
+	}
+	fmt.Println(v1, k1, p1 != nil, orig.(AS).N)
+
+	// Local anonymous struct alias
+	type LocalAS = struct{ N int }
+	la := ts[LocalAS](any(LocalAS{17}))
+	_, lv1 := la.(LocalAS)
+	lp1, lk1 := la.(*LocalAS)
+	fmt.Println(lv1, lk1, lp1 != nil)
+
+	// Direct &AS entering any
+	dc := any(&AS{9})
+	_, dv := dc.(AS)
+	dp, dk := dc.(*AS)
+	fmt.Println(dv, dk, dp != nil)
+
+	// makePtr across anon struct, value-field structs, empty struct, and non-structs
+	bAS := makePtr(AS{8})
+	_, mvAS := bAS.(AS)
+	mpAS, mkAS := bAS.(*AS)
+	fmt.Println(mvAS, mkAS, mpAS != nil && mpAS.N == 8)
+
+	bVB := makePtr(ValBox{2})
+	_, mvVB := bVB.(ValBox)
+	mpVB, mkVB := bVB.(*ValBox)
+	fmt.Println(mvVB, mkVB, mpVB != nil && (*mpVB).value == 2)
+
+	bASV := makePtr(ASVal{3})
+	_, mvASV := bASV.(ASVal)
+	mpASV, mkASV := bASV.(*ASVal)
+	fmt.Println(mvASV, mkASV, mpASV != nil && (*mpASV).value == 3)
+
+	bEmp := makePtr(Empty{})
+	_, mvEmp := bEmp.(Empty)
+	mpEmp, mkEmp := bEmp.(*Empty)
+	fmt.Println(mvEmp, mkEmp, mpEmp != nil)
+
+	bInt := makePtr(42)
+	_, mvInt := bInt.(int)
+	mpInt, mkInt := bInt.(*int)
+	fmt.Println(mvInt, mkInt, mpInt != nil && *mpInt == 42)
+
+	bArr := makePtr([2]int{4, 5})
+	_, mvArr := bArr.([2]int)
+	mpArr, mkArr := bArr.(*[2]int)
+	fmt.Println(mvArr, mkArr, mpArr != nil && (*mpArr)[1] == 5)
+
+	bMy := makePtr(MyInt(6))
+	_, mvMy := bMy.(MyInt)
+	mpMy, mkMy := bMy.(*MyInt)
+	fmt.Println(mvMy, mkMy, mpMy != nil && *mpMy == 6)
+
+	// Field address &w.V entering any and mutating through asserted pointer
+	wb := Wrap[Box]{V: Box{3}}
+	ab := ptrField(&wb)
+	_, fbv := ab.(Box)
+	fbp, fbk := ab.(*Box)
+	if fbk {
+		fbp.N = 30
+	}
+	fmt.Println(fbv, fbk, wb.V.N)
+
+	wa := Wrap[AS]{V: AS{4}}
+	aa := ptrField(&wa)
+	_, fav := aa.(AS)
+	fap, fak := aa.(*AS)
+	if fak {
+		fap.N = 40
+	}
+	fmt.Println(fav, fak, wa.V.N)
+
+	// Slice element pointer boxed then value copied and boxed
+	sb := []Box{{N: 1}}
+	spB, svB := sliceElemPtrAndVal(sb)
+	_, spBIsVal := spB.(Box)
+	_, spBIsPtr := spB.(*Box)
+	_, svBIsVal := svB.(Box)
+	_, svBIsPtr := svB.(*Box)
+	fmt.Println(spBIsVal, spBIsPtr, svBIsVal, svBIsPtr)
+
+	sa := []AS{{N: 2}}
+	spA, svA := sliceElemPtrAndVal(sa)
+	_, spAIsVal := spA.(AS)
+	_, spAIsPtr := spA.(*AS)
+	_, svAIsVal := svA.(AS)
+	_, svAIsPtr := svA.(*AS)
+	fmt.Println(spAIsVal, spAIsPtr, svAIsVal, svAIsPtr)
+
+	// *any holding Box stays *any (does not unwrap to *Box), complex128 stays boxed
+	pa := makePtr[any](Box{5})
+	_, paBox := pa.(*Box)
+	paPtr, paAny := pa.(*any)
+	fmt.Println(paBox, paAny, paPtr != nil && (*paPtr).(Box).N == 5)
+
+	pc := makePtr(complex(1, 2))
+	_, pcVal := pc.(complex128)
+	pcPtr, pcOk := pc.(*complex128)
+	fmt.Println(pcVal, pcOk, pcPtr != nil && *pcPtr == complex(1, 2))
+
+	// Grouped vs expanded anonymous struct fields match identical type
+	type AS1 = struct{ X, Y int }
+	type AS2 = struct{ X int; Y int }
+	var g any = AS1{1, 2}
+	_, g1 := g.(AS1)
+	_, g2 := g.(AS2)
+	_, g3 := g.(struct{ X int; Y int })
+	fmt.Println(g1, g2, g3)
+
+	// Type switch case T with T = AS rejects *AS and int
+	fmt.Println(ts[AS](any(&AS{1})) == nil, ts[AS](any(123)) == nil)
+}`;
+	const want =
+		"false true true 7\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true 30\n" +
+		"false true 40\n" +
+		"false true true false\n" +
+		"false true true false\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"true true true\n" +
+		"true true\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("pointer-to-type-parameter scalar field, nil, new, complex, and interface comparisons (js, both)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type MyInt int
+type AS = struct{ N int }
+type Empty = struct{}
+type Wrap[T any] struct{ V T }
+
+func ptrOf[T any](v T) *T { return &v }
+func ptrField[T any](w *Wrap[T]) any { return &w.V }
+func nilPtr[T any]() any { var p *T; return p }
+func newPtr[T any](v T) any { p := new(T); *p = v; return p }
+func eqPtr[T any](v T, a any) (bool, bool) {
+	p := &v
+	a2 := any(p)
+	sw := false
+	switch a2 {
+	case p:
+		sw = true
+	}
+	return p == a, sw
+}
+
+func main() {
+	// Scalar field pointer entering any
+	wi := Wrap[int]{V: 5}
+	ai := ptrField(&wi)
+	_, fiv := ai.(int)
+	fip, fik := ai.(*int)
+	if fik {
+		*fip = 50
+	}
+	fmt.Println(fiv, fik, wi.V)
+
+	// Plain *T for complex128 without entering any
+	cp := ptrOf(complex(3, 4))
+	fmt.Println(*cp == complex(3, 4))
+
+	// Typed nil *T entering any
+	nb := nilPtr[Box]()
+	nbp, nbk := nb.(*Box)
+	na := nilPtr[AS]()
+	nap, nak := na.(*AS)
+	ni := nilPtr[int]()
+	nip, nik := ni.(*int)
+	nm := nilPtr[MyInt]()
+	nmp, nmk := nm.(*MyInt)
+	fmt.Println(nb != nil && nbk && nbp == nil, na != nil && nak && nap == nil, ni != nil && nik && nip == nil, nm != nil && nmk && nmp == nil)
+
+	// new(T) entering any
+	newB := newPtr(Box{3})
+	nb2, nb2k := newB.(*Box)
+	newAS := newPtr(AS{4})
+	na2, na2k := newAS.(*AS)
+	newE := newPtr(Empty{})
+	_, ne2k := newE.(*Empty)
+	newI := newPtr(7)
+	ni2, ni2k := newI.(*int)
+	fmt.Println(nb2k && nb2.N == 3, na2k && na2.N == 4, ne2k, ni2k && *ni2 == 7)
+
+	// Comparing *T with interface
+	e1, sw1 := eqPtr(Box{1}, any(&Box{1}))
+	e2, sw2 := eqPtr(AS{1}, any(&AS{1}))
+	e3, sw3 := eqPtr(5, any(5))
+	fmt.Println(e1, sw1, e2, sw2, e3, sw3)
+}`;
+	const want =
+		"false true 50\n" +
+		"true\n" +
+		"true true true true\n" +
+		"true true true true\n" +
+		"false true false true false true\n";
+	await assertJsTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
