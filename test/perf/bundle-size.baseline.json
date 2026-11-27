@@ -9,10 +9,10 @@
 	"json-marshal": 33024,
 	"user-dce": 13564,
 	"multipackage": 33087,
-	"example-gom": 165021,
-	"example-hybrid": 152706,
-	"example-preact": 255963,
-	"example-simple": 165770,
-	"example-templ": 173481,
+	"example-gom": 166461,
+	"example-hybrid": 90313,
+	"example-preact": 261139,
+	"example-simple": 165507,
+	"example-templ": 172905,
 	"example-webgl": 15265
 }
