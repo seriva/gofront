@@ -2775,7 +2775,7 @@ export const statementGenMethods = {
 
 	_genTypeSwitchClause(stmt, clause, valueJs) {
 		if (!stmt.assign) {
-			for (const s of clause.stmts) this.genStmt(s);
+			this.genBlock(clause);
 			return;
 		}
 		const name = stmt.assign;
@@ -2794,7 +2794,7 @@ export const statementGenMethods = {
 		try {
 			const init = clauseBoxed ? this._boxInitJs(name, valueJs) : valueJs;
 			this.line(`let ${name} = ${init};`);
-			for (const s of clause.stmts) this.genStmt(s);
+			this.genBlock(clause);
 		} finally {
 			if (hadBoxed) this._boxedVars.add(name);
 			else this._boxedVars.delete(name);
