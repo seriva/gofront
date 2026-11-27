@@ -15,6 +15,7 @@ import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { goFuncType, scanStores } from "./host-func.js";
 import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
+import { exprText, operandKind } from "./operand-text.js";
 import { resolveMethods } from "./resolve.js";
 import { newLabelScope, statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
@@ -2296,14 +2297,37 @@ export class TypeChecker {
 		return types;
 	}
 
+	// Go's `X (value of type T) is not constant` for a constant initializer.
+	_notConstantText(v, t) {
+		const conversion = v._isTypeConversion || v.kind === "TypeConversion";
+		// A package variable is not typed yet (its type reads `any`).
+		if (isAny(t) && !conversion) return `${exprText(v)} is not constant`;
+		let what = operandKind(v, typeStr(t));
+		if (t.kind === "typeParam")
+			what += ` constrained by ${this._constraintText(t)}`;
+		else if (isAny(t) || this._deepUnderlying(t)?.kind === "interface")
+			what = `value of interface type ${typeStr(t)}`;
+		return `${exprText(v)} (${what}) is not constant`;
+	}
+
 	checkConstDecl(decl, scope) {
 		for (const spec of decl.decls) {
-			const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
+			const failed = [];
+			const valTypes = spec.value.map((v) => {
+				const errorCount = this.errors.length;
+				const t = this.checkExpr(v, scope);
+				failed.push(this.errors.length > errorCount);
+				return t;
+			});
 			spec.value.forEach((v, i) => {
 				if (isNil(valTypes[i])) {
 					this.err("nil is not constant", v);
 					valTypes[i] = ANY;
 				}
+			});
+			spec.value.forEach((v, i) => {
+				if (!failed[i] && !isNil(valTypes[i]) && !this._isConstExpr(v, scope))
+					this.err(this._notConstantText(v, valTypes[i]), v);
 			});
 			// Explicit type annotation → typed constant; otherwise preserve untyped
 			const type = spec.type

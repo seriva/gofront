@@ -332,8 +332,8 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   if (x === null || typeof x !== "object") return x;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return x;
-  // A Go map's zero (__nm() or __nilmap) marks a map argument: it stays shared.
-  if (zero.__nilm === true || zero.__nm === true) return x;
+  // A Go map's zero (__nm() or __nilmap) or a frozen value (SIMD, complex) stays shared.
+  if (zero.__nilm === true || zero.__nm === true || Object.isFrozen(zero)) return x;
   // A copy keeps the hidden tags (__t, __map, ...) that name the value's type
   // in an interface: the generic code boxes the value first and copies after.
   const keep = (v, c) => {
@@ -347,9 +347,9 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
   // The zero value z is the shape of v: a field or element is copied only
   // where z holds an array or an object (a struct or array value); a null
   // zero is a pointer, slice, map, func or interface, which stays shared.
-  // A nil map zero (__nm() or __nilmap) marks a map field: it stays shared.
+  // A nil map zero (__nm() or __nilmap) or frozen value (SIMD, complex) stays shared.
   const isObj = (o) => o !== null && typeof o === "object";
-  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true;
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true && !Object.isFrozen(o);
   const cp = (v, z) => {
     if (!isObj(v)) return v;
     if (v.__nilm === true) return v;
@@ -361,6 +361,29 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
     return keep(v, c);
   };
   return cp(x, zero);
+};`;
+
+// `*p = v` through a type-parameter pointer to a struct: copies `v` into the
+// pointee, keeping the storage of its array and nested struct fields (slices
+// and pointers into them stay valid).  `z` is the zero-value factory, whose
+// value shows which fields are arrays or structs (a pointer's zero is null).
+// An array of numbers may be a typed array on one side and a plain array on
+// the other (erased generic code builds `[N]E` as a plain array), so only a
+// typed destination is filled with `set`; any other is copied element-wise.
+// Frozen zero values (SIMD vectors, complex numbers, nil maps) are immutable
+// values rather than mutable aggregate storage, so they are replaced directly.
+export const HELPER_COPYINTO = `var __copyInto = __copyInto || function(z, dst, src) {
+  const isObj = (o) => o !== null && typeof o === "object";
+  const isShape = (o) => isObj(o) && o.__nilm !== true && o.__nm !== true && !Object.isFrozen(o);
+  const cp = (d, s, zero) => {
+    if (ArrayBuffer.isView(d)) { d.set(s); return; }
+    const keys = Array.isArray(s) || ArrayBuffer.isView(s) ? s.keys() : Object.keys(s);
+    for (const k of keys) {
+      if (isShape(zero?.[k]) && isObj(s[k]) && isObj(d[k])) cp(d[k], s[k], zero[k]);
+      else d[k] = s[k];
+    }
+  };
+  cp(dst, src, z?.());
 };`;
 
 // == on type-parameter operands: structs and arrays compare by value, other
@@ -498,8 +521,12 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
-var __tfn = __tfn || function(f, t) {
+var __tfn = __tfn || function(f, t, iface) {
   // A defined func type tags a fresh wrapper, so the shared func keeps its own type.
+  if (f == null) {
+    if (!iface) return f;
+    return Object.defineProperties({}, { __nilf: { value: true }, __nilp: { value: true }, __t: { value: t } });
+  }
   if (typeof f !== "function" || f.__t === t) return f;
   const w = function(...a) { return f.apply(this, a); };
   Object.defineProperty(w, "__t", { value: t, configurable: true, writable: true });
@@ -507,19 +534,20 @@ var __tfn = __tfn || function(f, t) {
 };
 var __tnm = __tnm || function(f) {
   // The type name of a type argument's info factory, spelled as a static tag.
-  const id = f?.nm ?? f?.id;
-  return typeof id === "string" ? id.replace(/ void\\b/g, "").replace(/\\bbyte\\b/g, "uint8").replace(/\\brune\\b/g, "int32").replace(/\\bany\\b/g, "interface {}") : undefined;
+  return f?.nm ?? f?.id;
 };
-var __ity = __ity || function(x, t, ptr, sl) {
+var __ity = __ity || function(x, t, ptr, sl, fn) {
   if (t === undefined) return x;
   // The frozen nil map cannot carry a tag: a copy of it keeps its map type.
   if (x !== null && x !== undefined && x.__nilm === true && x.__t === undefined)
     return Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true }, __t: { value: t } }));
   if (x === null || x === undefined) {
-    // A nil slice keeps its type as an empty tagged array (not a nil interface).
-    if (!ptr && !sl && t.charCodeAt(0) !== 91) return x;
-    const n = ptr ? {} : [];
-    if (!ptr) Object.defineProperty(n, "__nils", { value: true });
+    // A nil slice, pointer, or func keeps its type as a tagged sentinel (not a nil interface).
+    const isFunc = fn || t.startsWith("func(");
+    if (!ptr && !sl && !isFunc && t.charCodeAt(0) !== 91) return x;
+    const n = ptr || isFunc ? {} : [];
+    if (isFunc) Object.defineProperty(n, "__nilf", { value: true });
+    else if (!ptr) Object.defineProperty(n, "__nils", { value: true });
     Object.defineProperty(n, "__nilp", { value: true });
     Object.defineProperty(n, "__t", { value: t });
     return n;
@@ -532,8 +560,8 @@ var __ity = __ity || function(x, t, ptr, sl) {
 };
 var __isty = __isty || function(v, t, k, c, n) {
   if (v === null || v === undefined || (typeof v !== "object" && typeof v !== "function")) return false;
-  if (k === "namedfunc") return typeof v === "function" && v.__t === t;
-  if (k === "func") return typeof v === "function" && (v.__t === undefined || t === "" || v.__t === t);
+  if (k === "namedfunc") return (typeof v === "function" || v.__nilf === true) && v.__t === t;
+  if (k === "func") return (typeof v === "function" || v.__nilf === true) && (v.__t === undefined || t === "" || v.__t === t);
   if (v.__t !== undefined && t !== "") return v.__t === t;
   if (v.__nilp === true) return false;
   if (k === "named" || k === "struct") return false;
@@ -591,7 +619,9 @@ var __dtn = __dtn || function(v) {
 var __tafail = __tafail || function(src, v, target, methods) {
   if (methods) {
     if (v === null || v === undefined) return new Error("interface conversion: interface is nil, not " + target);
-    const m = methods.find((n) => typeof v[n] !== "function") ?? methods[0];
+    const m = methods.find((n) => typeof v[n] !== "function" || (v.__v === true && v.constructor?.__pm?.includes(n)))
+      ?? methods.find((n) => v.constructor?.__sm?.includes(n))
+      ?? methods[0];
     return new Error("interface conversion: " + __dtn(v) + " is not " + target + ": missing method " + m);
   }
   return new Error("interface conversion: " + src + " is " + __dtn(v) + ", not " + target);
@@ -632,6 +662,25 @@ var __shr64 = __shr64 || function(x, n, u) {
   }
   if (b >= 64n) return u || x >= 0 ? 0 : -1;
   return Math.floor(x / 2 ** Number(b));
+};`;
+
+export const HELPER_BIT64 = `var __bit64 = __bit64 || function(op, a, b, u) {
+  if ((a | 0) === a && (b | 0) === b && (!u || (a >= 0 && b >= 0))) {
+    switch (op) {
+      case "&": return a & b;
+      case "|": return a | b;
+      case "^": return a ^ b;
+      default: return a & ~b;
+    }
+  }
+  var ba = BigInt(Math.trunc(a)), bb = BigInt(Math.trunc(b)), r;
+  switch (op) {
+    case "&": r = ba & bb; break;
+    case "|": r = ba | bb; break;
+    case "^": r = ba ^ bb; break;
+    default: r = ba & ~bb;
+  }
+  return Number(u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r));
 };`;
 
 export const HELPER_TO64 = `var __to_i64 = __to_i64 || function(v) {
@@ -677,6 +726,14 @@ export const HELPER_SLICEFAIL = `var __slicefail = __slicefail || function(lo, h
   throw new Error("runtime error: slice bounds out of range " + s);
 };`;
 
+// `[n]T(s)`: the first `n` elements of slice `s` as a new array (a nil slice
+// converts to `[0]T`); panics when `s` is shorter, as Go does.
+export const HELPER_S2A = `var __s2a = __s2a || function(s, n) {
+  const len = s?.length ?? 0;
+  if (len < n) throw new Error("runtime error: cannot convert slice with length " + len + " to array or pointer to array with length " + n);
+  return s ? s.slice(0, n) : [];
+};`;
+
 // Checked string slice of a `both` package (`s[lo:hi]`, `hi` undefined for
 // `s[lo:]`): Go's bounds text instead of JavaScript's silent clamping.
 export const HELPER_SSLICE = `var __sslice = __sslice || function(s, lo, hi = s.length) {
@@ -696,7 +753,7 @@ var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
 var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
 var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
-var __zc = __zc || Object.assign(() => ({ re: 0, im: 0 }), { k: "complex128" });
+var __zc = __zc || Object.assign(() => Object.freeze({ re: 0, im: 0 }), { k: "complex128" });
 var __tbox = __tbox || function(f, x) {
   if (f && f.b) return f.b(x);
   if (x === null && f && f.fb) {
@@ -750,6 +807,7 @@ var __tar = __tar || function(f, op, a, b) {
     case "uint8": case "byte": bits = 8; signed = false; break;
     case "uint16": bits = 16; signed = false; break;
     case "uint32": bits = 32; signed = false; break;
+    case "uint": case "uintptr": signed = false; break;
   }
   const w = bits === 0 ? (v) => v
     : bits === 32 ? (signed ? (v) => v | 0 : (v) => v >>> 0)
@@ -762,14 +820,14 @@ var __tar = __tar || function(f, op, a, b) {
     case "*": return k === "float32" ? Math.fround(a * b) : bits === 0 ? a * b : w(Math.imul(a, b));
     case "/": return int ? (b === 0 ? dz() : w(Math.trunc(a / b))) : k === "float32" ? Math.fround(a / b) : a / b;
     case "%": return int && b === 0 ? dz() : w(a % b);
-    case "&": return bits === 0 ? a & b : w(a & b);
-    case "|": return bits === 0 ? a | b : w(a | b);
-    case "^": return bits === 0 ? a ^ b : w(a ^ b);
-    case "&^": return bits === 0 ? a & ~b : w(a & ~b);
+    case "&": return bits === 0 ? __bit64(op, a, b, !signed) : w(a & b);
+    case "|": return bits === 0 ? __bit64(op, a, b, !signed) : w(a | b);
+    case "^": return bits === 0 ? __bit64(op, a, b, !signed) : w(a ^ b);
+    case "&^": return bits === 0 ? __bit64(op, a, b, !signed) : w(a & ~b);
   }
   b = Number(b);
   if (b < 0) ns();
-  if (bits === 0) return op === "<<" ? a << b : a >> b;
+  if (bits === 0) return op === "<<" ? __shl64(a, b, !signed) : __shr64(a, b, !signed);
   if (b >= bits) return op === ">>" && signed && a < 0 ? -1 : 0;
   return op === "<<" ? w(a << b) : signed ? a >> b : a >>> b;
 };

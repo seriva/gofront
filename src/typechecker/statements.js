@@ -1000,6 +1000,7 @@ export const statementCheckMethods = {
 
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
+		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		this.checkExpr(stmt.expr, inner);
 		const at = stmt._assignNode ?? stmt;
 		if (stmt.assign === "_") this.err("no new variable on left side of :=", at);
@@ -1020,6 +1021,7 @@ export const statementCheckMethods = {
 			this.err(`'${stmt.assign}' declared and not used`, at);
 		this._typeSwitchDepth--;
 		this._switchDepth--;
+		this._reportUnused(inner, stmt);
 	},
 
 	// Resolve instantiated generic case types so backends can tell

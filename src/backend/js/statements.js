@@ -21,6 +21,15 @@ import { jsMemberName, jsSafeName } from "./names.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
+// Nodes an unlabeled `break` inside them belongs to, not to an enclosing
+// type switch.
+const BREAK_SCOPES = new Set([
+	"ForStmt",
+	"SwitchStmt",
+	"TypeSwitchStmt",
+	"FuncLit",
+]);
+
 // The same variable or field chain (`x`, `n.Children`) on both sides.
 const sameChain = (a, b) =>
 	a.kind === b.kind &&
@@ -873,12 +882,15 @@ export const statementGenMethods = {
 		);
 		const hoisted = this._hoistLhsOperands(stmt, this._inForPost);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
-		// A struct pointer target is the struct itself: it is written with
-		// `Object.assign`, which a destructuring target cannot express.
+		// A struct pointer target is the struct itself: `_storeInto` writes
+		// into the pointee's storage, which a destructuring target cannot
+		// express.
 		const derefs =
 			lhs.length > 1
 				? stmt.lhs.map((l) =>
-						this._isStructDerefTarget(l) ? this.genExpr(l.operand) : null,
+						this._isStructDerefTarget(l)
+							? { ptr: this.genExpr(l.operand), type: l._type }
+							: null,
 					)
 				: null;
 		hoisted?.restore();
@@ -905,38 +917,31 @@ export const statementGenMethods = {
 					: this.genExpr(stmt.lhs[0].expr);
 				const idx = this.genExpr(stmt.lhs[0].index);
 				const binOp = stmt.op.slice(0, -1);
-				const is64Val = is64BitInt(stmt.lhs[0]._mapValueType);
+				const valType = stmt.lhs[0]._mapValueType;
+				const is64Val = is64BitInt(valType);
 				let rhsVal = active[0].r;
 				if (is64Val) rhsVal = this._untypedTo64(rhsVal, stmt.rhs[0]);
-				const complexVal = complexOp
-					? (read) =>
-							this._genComplexArith(
+				const useStrict =
+					!complexOp && this._needsStrictCompoundStmt(stmt, is64Val);
+				const mapCompound = (read) =>
+					complexOp
+						? this._genComplexArith(
 								binOp,
 								read,
 								rhsVal,
 								isComplex64(stmt.lhs[0]._type),
 							)
-					: null;
-				const rhsExpr = complexVal
-					? complexVal(`(__m[__k] ?? ${zero})`)
-					: is64Val
-						? this._gen64BitBinary(
-								binOp,
-								`(__m[__k] ?? ${zero})`,
-								rhsVal,
-								stmt.lhs[0]._mapValueType,
-							)
-						: `(__m[__k] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
-				const rhsExprDirect = complexVal
-					? complexVal(`(${base}[${idx}] ?? ${zero})`)
-					: is64Val
-						? this._gen64BitBinary(
-								binOp,
-								`(${base}[${idx}] ?? ${zero})`,
-								rhsVal,
-								stmt.lhs[0]._mapValueType,
-							)
-						: `(${base}[${idx}] ?? ${zero}) ${binOp === "&^" ? "& ~" : binOp} (${rhsVal})`;
+						: useStrict
+							? this._genStrictBinary(
+									binOp,
+									read,
+									rhsVal,
+									valType,
+									stmt.rhs[0]?._type,
+								)
+							: `${read} ${binOp === "&^" ? "& ~" : binOp} (${this._compoundShiftCount(stmt, rhsVal)})`;
+				const rhsExpr = mapCompound(`(__m[__k] ?? ${zero})`);
+				const rhsExprDirect = mapCompound(`(${base}[${idx}] ?? ${zero})`);
 				if (
 					this._hasCallExpr(stmt.lhs[0].expr) ||
 					this._hasCallExpr(stmt.lhs[0].index)
@@ -1205,10 +1210,8 @@ export const statementGenMethods = {
 
 	_genStableWholeAssign(stmt) {
 		const target = this._storeTarget(stmt.lhs[0]);
-		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-		const src = `__s${this._tmpCounter}`;
-		this.line(`{ const ${src} = ${this.genExpr(stmt.rhs[0])};`);
-		this._storeInto(target, src);
+		this.line("{");
+		this._storeInto(target, this.genExpr(stmt.rhs[0]));
 		this.line("}");
 	},
 
@@ -1229,9 +1232,27 @@ export const statementGenMethods = {
 					kind: "typeParamPtr",
 					ptr: this.genExpr(l.operand),
 					isStruct: this._typeParamIsStructJs(l.operand._type.base.name),
+					isArray: this._typeParamIsArrayJs(l.operand._type.base.name),
+					zero:
+						this._typeParamZeroFactory(l.operand._type.base.name) ??
+						"undefined",
 				};
 			if (this._isStructPointerType(l.operand?._type))
-				return { kind: "structPtr", ptr: this.genExpr(l.operand) };
+				return {
+					kind: "structPtr",
+					ptr: this.genExpr(l.operand),
+					type: l._type,
+				};
+			// An array pointee: the pointer is evaluated now, its `.value`
+			// only at the store (a nil pointer panics after the right-hand
+			// side has run, as in Go).
+			if (this._isStableStore(l))
+				return {
+					kind: "stable",
+					js: this.genExpr(l.operand),
+					deref: true,
+					type: l._type,
+				};
 		}
 		return {
 			kind: this._isStableStore(l) ? "stable" : "plain",
@@ -1245,41 +1266,63 @@ export const statementGenMethods = {
 	// `_storeTarget`.  A
 	// blank target stores nothing; a `*p` of a struct (or of a type parameter
 	// that is one) copies into the pointee; an address-taken or sliced struct
-	// or array (and the array behind a `*p`) is copied element by element into
-	// its existing storage; any
+	// or array (and the array behind a `*p`, a type parameter's included) is
+	// copied element by element into its existing storage; any
 	// other target is assigned.  A plain store keeps `src` itself, so the
-	// caller passes a fresh copy of an aggregate there.
+	// caller passes a fresh copy of an aggregate there.  The target's
+	// operands are evaluated before `src`, as Go evaluates them first.
 	_storeInto(target, src) {
 		switch (target.kind) {
 			case "blank":
 				return;
 			case "structPtr":
-				this.line(`Object.assign(${target.ptr}, ${src});`);
+				// A struct with array or nested struct fields keeps their
+				// storage, which slices and pointers into it still see.
+				if (this._hasAggregateField(target.type))
+					this._copyIntoStorage(target.ptr, src, target.type);
+				else this.line(`Object.assign(${target.ptr}, ${src});`);
 				return;
 			case "typeParamPtr":
+				this.useHelper("copyInto");
 				this.line(
-					`((__p, __v) => { if (${target.isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
+					`((__p, __v) => { if (${target.isStruct}) __copyInto(${target.zero}, __p, __v); else if (${target.isArray}) __copyInto(${target.zero}, __p.value, __v); else __p.value = __v; })(${target.ptr}, ${src});`,
 				);
 				return;
-			case "stable": {
-				let from = src;
-				if (!/^[\w$.[\]]+$/.test(from)) {
-					this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-					from = `__s${this._tmpCounter}`;
-					this.line(`const ${from} = ${src};`);
-				}
-				let dst = target.js;
-				if (!/^[\w$.]+$/.test(dst)) {
-					this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-					dst = `__d${this._tmpCounter}`;
-					this.line(`const ${dst} = ${target.js};`);
-				}
-				this._emitCopyInto(dst, from, target.type);
+			case "stable":
+				this._copyIntoStorage(target.js, src, target.type, target.deref);
 				return;
-			}
 			default:
 				this.line(`${target.js} = ${src};`);
 		}
+	},
+
+	// Whether a struct type has an array or struct field.
+	_hasAggregateField(type) {
+		const fields = this._aggregateBase(type)?.fields;
+		return (
+			fields instanceof Map &&
+			[...fields.values()].some((t) => this._aggregateBase(t))
+		);
+	},
+
+	// `_emitCopyInto` with `dst` and `src` bound to temporaries first unless
+	// they are plain paths, so each expression runs once.  `dst` is bound
+	// before `src` runs (even a plain path, which `src` could reassign): Go
+	// evaluates the pointer or index operands of a target (`*getP()`,
+	// `xs[i()]`) before the right-hand side.  With `deref`, `dstJs` is a
+	// pointer and the storage is its `.value`.
+	_copyIntoStorage(dstJs, srcJs, type, deref = false) {
+		const bind = (prefix, js) => {
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const name = `${prefix}${this._tmpCounter}`;
+			this.line(`const ${name} = ${js};`);
+			return name;
+		};
+		const srcIsPath = /^[\w$.[\]]+$/.test(srcJs);
+		const dst =
+			srcIsPath && /^[\w$.]+$/.test(dstJs) ? dstJs : bind("__d", dstJs);
+		const from = srcIsPath ? srcJs : bind("__s", srcJs);
+		this._emitCopyInto(deref ? `${dst}.value` : dst, from, type);
 	},
 
 	// Copies aggregate `src` into the storage `dst` element by element, going
@@ -1323,8 +1366,8 @@ export const statementGenMethods = {
 	},
 
 	// Evaluates every right-hand side once into a temporary, then stores each
-	// non-blank target in order.  `derefs[i]` is the struct a `*p` target
-	// writes into.
+	// non-blank target in order.  `derefs[i]` is the pointer and struct type
+	// of a `*p` target.
 	_genMultiAssignViaTemps(stmt, lhs, rhsStr, derefs) {
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const tmp = `__t${this._tmpCounter}`;
@@ -1333,7 +1376,7 @@ export const statementGenMethods = {
 			if (lhs[i] === "_") continue;
 			const src = `${tmp}[${i}]`;
 			if (derefs?.[i])
-				this._storeInto({ kind: "structPtr", ptr: derefs[i] }, src);
+				this._storeInto({ kind: "structPtr", ...derefs[i] }, src);
 			else this.line(`${lhs[i]} ${stmt.op} ${src};`);
 		}
 	},
@@ -1407,7 +1450,13 @@ export const statementGenMethods = {
 
 	_genIteratorBranchStmt(stmt) {
 		if (!stmt.label) {
-			if (this._iterLoopDepth > 0) {
+			// A `break` ends the innermost loop or value switch of the callback
+			// (a type switch's own `break` is labeled, see
+			// `_typeSwitchBreakLabel`); a `continue` the innermost loop.
+			const jsTargets =
+				this._iterLoopDepth +
+				(stmt.keyword === "break" ? this._iterSwitchDepth : 0);
+			if (jsTargets > 0) {
 				if (stmt.keyword !== "fallthrough") this.line(`${stmt.keyword};`);
 				return;
 			}
@@ -1421,7 +1470,8 @@ export const statementGenMethods = {
 			}
 			return;
 		}
-		if (this._innerLoopLabels?.has(stmt.label)) {
+		// A label of a loop or switch inside the callback is a JS label in it.
+		if (this._jsLabels?.some((l) => l.name === stmt.label)) {
 			if (stmt.keyword !== "fallthrough")
 				this.line(`${stmt.keyword} ${jsSafeName(stmt.label)};`);
 			return;
@@ -1438,6 +1488,10 @@ export const statementGenMethods = {
 	},
 
 	_genBranchStmt(stmt) {
+		if (stmt._breakLabel) {
+			this.line(`break ${stmt._breakLabel};`);
+			return;
+		}
 		if (this._inIteratorBody) {
 			this._genIteratorBranchStmt(stmt);
 			return;
@@ -1488,7 +1542,7 @@ export const statementGenMethods = {
 		if (this._isIntRangeType(iterType)) return iteree;
 		if (this._isMapRangeType(iterType))
 			return `Object.keys(${iteree} ?? {}).length`;
-		return `(${iteree} ? ${iteree}.length : 0)`;
+		return `(${iteree}?.length ?? 0)`;
 	},
 
 	_genRangeExprFor(stmt) {
@@ -1504,12 +1558,28 @@ export const statementGenMethods = {
 		if (this._isStringRangeType(iterType)) {
 			// One iteration per code point, as the one- and two-variable forms.
 			this.line(`for (const _$ of ${iteree} ?? "") {`);
-		} else {
-			const limit = this._rangeExprLimit(iterType, iteree);
-			this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
+			this.indented(() => this.genBlock(stmt.body));
+			this.line("}");
+			return;
 		}
+		this._loopDepth = this._loopDepth ?? 0;
+		const d = this._loopDepth++;
+		const i = `__i${d}`;
+		const n = `__n${d}`;
+		const limit = this._rangeExprLimit(iterType, iteree);
+		const isBig = is64BitInt(iterType);
+		const isTypeParam = stmt.cond.expr._type?.kind === "typeParam";
+		const start = isBig
+			? "0n"
+			: isTypeParam && this._isIntRangeType(iterType)
+				? `typeof ${n} === "bigint" ? 0n : 0`
+				: "0";
+		this.line(
+			`for (let ${n} = ${limit}, ${i} = ${start}; ${i} < ${n}; ${i}++) {`,
+		);
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
+		this._loopDepth--;
 	},
 
 	_genSimpleWhileFor(stmt) {
@@ -1564,11 +1634,7 @@ export const statementGenMethods = {
 
 	_genForLoop(stmt) {
 		const isInner = this._inIteratorBody;
-		if (isInner) {
-			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
-			this._innerLoopLabels = this._innerLoopLabels ?? new Set();
-			for (const l of this._loopLabels(stmt)) this._innerLoopLabels.add(l);
-		}
+		if (isInner) this._iterLoopDepth++;
 		try {
 			if (this.isRangeFor(stmt)) {
 				if (stmt.init.rhs[0]._isIterator) this.genIteratorFor(stmt);
@@ -1593,10 +1659,7 @@ export const statementGenMethods = {
 			this.indented(() => this.genBlock(stmt.body));
 			this.line("}");
 		} finally {
-			if (isInner) {
-				this._iterLoopDepth--;
-				for (const l of this._loopLabels(stmt)) this._innerLoopLabels.delete(l);
-			}
+			if (isInner) this._iterLoopDepth--;
 		}
 	},
 
@@ -1764,9 +1827,17 @@ export const statementGenMethods = {
 	_genIntRangeFor(stmt, iteree, isAssign) {
 		const varNode = stmt.init.lhs[0];
 		const name = varNode?.kind === "Ident" ? varNode.name : null;
-		if (this._isSimpleIntRange(stmt, name, isAssign)) {
+		const rangeExpr = stmt.init.rhs[0].expr;
+		const iterType = rangeExpr._coreType ?? rangeExpr._type;
+		const isBig = is64BitInt(iterType);
+		const isTypeParam = rangeExpr._type?.kind === "typeParam";
+		if (
+			this._isSimpleIntRange(stmt, name, isAssign) &&
+			(!isTypeParam || isBig)
+		) {
 			const v = !name || name === "_" ? "_$" : name;
-			this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
+			const start = isBig ? "0n" : "0";
+			this.line(`for (let ${v} = ${start}; ${v} < ${iteree}; ${v}++) {`);
 			this.indented(() => this.genBlock(stmt.body));
 			this.line("}");
 			return;
@@ -1775,7 +1846,14 @@ export const statementGenMethods = {
 		const d = this._loopDepth++;
 		const i = `__i${d}`;
 		const n = `__n${d}`;
-		this.line(`for (let ${i} = 0, ${n} = ${iteree}; ${i} < ${n}; ${i}++) {`);
+		const start = isBig
+			? "0n"
+			: isTypeParam
+				? `typeof ${n} === "bigint" ? 0n : 0`
+				: "0";
+		this.line(
+			`for (let ${n} = ${iteree}, ${i} = ${start}; ${i} < ${n}; ${i}++) {`,
+		);
 		this.indented(() => {
 			this._emitRangeVar(varNode, i, isAssign);
 			this._genIntRangeBody(stmt, name, isAssign);
@@ -2105,7 +2183,7 @@ export const statementGenMethods = {
 					target: this._iterTargetFlag,
 					loopLabels: this._currentIterLoopLabels,
 					loopDepth: this._iterLoopDepth,
-					innerLabels: this._innerLoopLabels,
+					switchDepth: this._iterSwitchDepth,
 					jsLabels: this._jsLabels,
 				};
 				this._inIteratorBody = true;
@@ -2115,8 +2193,8 @@ export const statementGenMethods = {
 				this._iterTargetFlag = targetFlag;
 				this._currentIterLoopLabels = loopLabels;
 				this._iterLoopDepth = 0;
-				// Loops of an enclosing callback are not JS labels in this one.
-				this._innerLoopLabels = new Set();
+				this._iterSwitchDepth = 0;
+				// Labels of an enclosing callback are not JS labels in this one.
 				this._jsLabels = [];
 
 				if (assignPreamble) assignPreamble();
@@ -2129,7 +2207,7 @@ export const statementGenMethods = {
 				this._iterTargetFlag = prev.target;
 				this._currentIterLoopLabels = prev.loopLabels;
 				this._iterLoopDepth = prev.loopDepth;
-				this._innerLoopLabels = prev.innerLabels;
+				this._iterSwitchDepth = prev.switchDepth;
 				this._jsLabels = prev.jsLabels;
 
 				this.line("return true;");
@@ -2232,6 +2310,12 @@ export const statementGenMethods = {
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
 				this._markDerefOpTarget(stmt.expr);
+				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
+					const mark = this.out.length;
+					this.genStmt(stmt);
+					const body = this.out.splice(mark).map((l) => l.trim());
+					return `(() => { ${body.join(" ")} })()`;
+				}
 				if (is64BitInt(stmt.expr._type)) {
 					const l = this.genExpr(stmt.expr);
 					const binOp = stmt.op === "++" ? "+" : "-";
@@ -2325,7 +2409,8 @@ export const statementGenMethods = {
 	},
 
 	// Compound assignments that need more than the JS operator: strict
-	// numeric wrapping, 64-bit and float32 arithmetic, and integer `/=`.
+	// numeric wrapping, 64-bit and float32 arithmetic, wide-int shifts/bitwise,
+	// and integer `/=`.
 	_needsStrictCompoundStmt(stmt, is64) {
 		if (stmt.op === "=") return false;
 		const t = stmt.lhs[0]._type;
@@ -2333,6 +2418,7 @@ export const statementGenMethods = {
 			this.strict ||
 			is64 ||
 			this._isFloat32(t) ||
+			this._isWideNumberBitOp(stmt.op.slice(0, -1), t) ||
 			(stmt.op === "/=" && this.isIntType(t))
 		);
 	},
@@ -2394,23 +2480,28 @@ export const statementGenMethods = {
 		return `(() => { ${body.join(" ")} })()`;
 	},
 
+	_isMapCompoundAssign(stmt) {
+		return (
+			stmt.op !== "=" &&
+			stmt.lhs.length === 1 &&
+			stmt.lhs[0].kind === "IndexExpr" &&
+			Boolean(stmt.lhs[0]._mapValueType)
+		);
+	},
+
 	_inlineAssign(stmt) {
 		this._markIndexLvalues(stmt.lhs);
-		if (this._needsStatementStore(stmt))
+		if (
+			this._needsStatementStore(stmt) ||
+			this._isMapCompoundAssign(stmt) ||
+			this._isCompoundWithCall(stmt) ||
+			this._isComplexCompoundAssign(stmt)
+		)
 			return this._inlineStatementAssign(stmt);
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		if (stmt.lhs.length === 1) {
 			// `_ = x`: only the right-hand side runs, as in `_genAssignStmt`.
 			if (stmt.lhs[0].name === "_" && stmt.op === "=") return rhs[0];
-			if (
-				this._isCompoundWithCall(stmt) ||
-				this._isComplexCompoundAssign(stmt)
-			) {
-				const mark = this.out.length;
-				this._genAssignStmt(stmt);
-				const body = this.out.splice(mark).map((l) => l.trim());
-				return `(() => { ${body.join(" ")} })()`;
-			}
 			if (stmt.op !== "=" && is64BitInt(stmt.lhs[0]._type)) {
 				const binOp = stmt.op.slice(0, -1);
 				// Same operand coercion as the statement path (`_genAssignStmt`).
@@ -2626,6 +2717,9 @@ export const statementGenMethods = {
 		const genBody = () => {
 			const { tag, caseExpr } = this._switchTagAndCases(stmt);
 			this.line(`switch (${tag}) {`);
+			// An unlabeled `break` in a range-over-func body ends this JS switch.
+			const inIter = this._inIteratorBody;
+			if (inIter) this._iterSwitchDepth++;
 			this.indented(() => {
 				for (const c of stmt.cases) {
 					if (c.list) {
@@ -2650,6 +2744,7 @@ export const statementGenMethods = {
 					this.line("}");
 				}
 			});
+			if (inIter) this._iterSwitchDepth--;
 			this.line("}");
 		};
 
@@ -2680,7 +2775,7 @@ export const statementGenMethods = {
 
 	_genTypeSwitchClause(stmt, clause, valueJs) {
 		if (!stmt.assign) {
-			for (const s of clause.stmts) this.genStmt(s);
+			this.genBlock(clause);
 			return;
 		}
 		const name = stmt.assign;
@@ -2699,7 +2794,7 @@ export const statementGenMethods = {
 		try {
 			const init = clauseBoxed ? this._boxInitJs(name, valueJs) : valueJs;
 			this.line(`let ${name} = ${init};`);
-			for (const s of clause.stmts) this.genStmt(s);
+			this.genBlock(clause);
 		} finally {
 			if (hadBoxed) this._boxedVars.add(name);
 			else this._boxedVars.delete(name);
@@ -2708,40 +2803,75 @@ export const statementGenMethods = {
 		}
 	},
 
+	// Labels the type switch's `{ … }` when a clause has an unlabeled `break`:
+	// JS would end the enclosing loop (or reject the `break`), as the clauses
+	// are not a JS `switch`. Each such `break` is marked with the label.
+	_typeSwitchBreakLabel(stmt) {
+		let label = null;
+		const visit = (node) => {
+			if (!node || typeof node !== "object") return;
+			if (Array.isArray(node)) return node.forEach(visit);
+			if (BREAK_SCOPES.has(node.kind)) return;
+			if (
+				node.kind === "BranchStmt" &&
+				node.keyword === "break" &&
+				!node.label
+			) {
+				this._tswBreakCounter = (this._tswBreakCounter ?? 0) + 1;
+				label ??= `__tswb${this._tswBreakCounter}`;
+				node._breakLabel = label;
+				return;
+			}
+			forEachChild(node, visit);
+		};
+		for (const c of stmt.cases) visit(c.stmts);
+		return label;
+	},
+
 	genTypeSwitch(stmt) {
+		const breakLabel = this._typeSwitchBreakLabel(stmt);
+		if (breakLabel) this.line(`${breakLabel}:`);
 		this.line("{");
 		this.indented(() => {
-			const val = this.genExpr(stmt.expr);
-			this.line(`const __tsw = ${val};`);
-			// The binding is declared per clause, after the switch expression
-			// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
-			let first = true;
-			let hasDefault = false;
-			for (const c of stmt.cases) {
-				if (!c.types) {
-					// default case — emit last
-					hasDefault = c;
-					continue;
-				}
-				const cond = c.types
-					.map((t) => this._typeCheckExpr(t, "__tsw"))
-					.join(" || ");
-				this.line(`${first ? "if" : "else if"} (${cond}) {`);
-				this.indented(() => {
-					const only = c.types.length === 1 ? c.types[0] : null;
-					this._genTypeSwitchClause(stmt, c, this._typeSwitchBinding(only));
-				});
-				this.line("}");
-				first = false;
-			}
-			if (hasDefault) {
-				this.line(first ? "{" : "else {");
-				this.indented(() => {
-					this._genTypeSwitchClause(stmt, hasDefault, "__tsw");
-				});
-				this.line("}");
+			if (stmt.init) {
+				this._genScopedInit(stmt.init, () => this._genTypeSwitchBody(stmt));
+			} else {
+				this._genTypeSwitchBody(stmt);
 			}
 		});
 		this.line("}");
+	},
+
+	_genTypeSwitchBody(stmt) {
+		const val = this.genExpr(stmt.expr);
+		this.line(`const __tsw = ${val};`);
+		// The binding is declared per clause, after the switch expression
+		// was evaluated (`switch x := any(x).(type)` reads the outer `x`).
+		let first = true;
+		let hasDefault = false;
+		for (const c of stmt.cases) {
+			if (!c.types) {
+				// default case — emit last
+				hasDefault = c;
+				continue;
+			}
+			const cond = c.types
+				.map((t) => this._typeCheckExpr(t, "__tsw"))
+				.join(" || ");
+			this.line(`${first ? "if" : "else if"} (${cond}) {`);
+			this.indented(() => {
+				const only = c.types.length === 1 ? c.types[0] : null;
+				this._genTypeSwitchClause(stmt, c, this._typeSwitchBinding(only));
+			});
+			this.line("}");
+			first = false;
+		}
+		if (hasDefault) {
+			this.line(first ? "{" : "else {");
+			this.indented(() => {
+				this._genTypeSwitchClause(stmt, hasDefault, "__tsw");
+			});
+			this.line("}");
+		}
 	},
 };

@@ -91,7 +91,7 @@ const RECEIVER_STEP = {
 	IfStmt: (s, reads) => branches(reads, s.init, s.cond),
 	ForStmt: (s, reads) => branches(reads, s.init, s.cond),
 	SwitchStmt: (s, reads) => branches(reads, s.init, s.tag),
-	TypeSwitchStmt: (s, reads) => branches(reads, s.expr),
+	TypeSwitchStmt: (s, reads) => branches(reads, s.init, s.expr),
 	ReturnStmt: (s, reads) => branches(reads, s.values),
 	ExprStmt: (s, reads) => {
 		if (reads(s.expr)) return "deref";
@@ -127,14 +127,15 @@ function receiverPrefix(stmts, name, safe) {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
-// True for a map, slice or array type that mentions a type parameter: one
-// that generic code boxes into an interface is tagged by its instantiated
+// True for a map, slice, array or func type that mentions a type parameter:
+// one that generic code boxes into an interface is tagged by its instantiated
 // type.
 export function isGenericComposite(t) {
 	return (
 		(t?.kind === "map" ||
 			t?.kind === "slice" ||
 			t?.kind === "array" ||
+			t?.kind === "func" ||
 			(t?.kind === "pointer" && t.base?.kind !== "typeParam")) &&
 		mentionsTypeParam(t)
 	);
@@ -214,8 +215,9 @@ const SIGNED_NEG_WRAP = {
 	rune: "| 0",
 };
 
-// Integer types whose JS shifts must follow Go's 64-bit semantics.
-const WIDE_INT_NAMES = new Set(["int", "int64", "uint", "uint64", "uintptr"]);
+// Number-backed wide integer types whose shifts and bitwise ops follow 64-bit semantics.
+const WIDE_NUMBER_NAMES = new Set(["int", "uint", "uintptr"]);
+const WIDE_BIT_OPS = new Set(["<<", ">>", "&", "|", "^", "&^"]);
 
 const STRICT_OPS = new Set([
 	"+",
@@ -428,8 +430,8 @@ const ZERO_FOR_BASIC = {
 	float64: "0",
 	byte: "0",
 	rune: "0",
-	complex64: "{ re: 0, im: 0 }",
-	complex128: "{ re: 0, im: 0 }",
+	complex64: "Object.freeze({ re: 0, im: 0 })",
+	complex128: "Object.freeze({ re: 0, im: 0 })",
 	string: '""',
 	bool: "false",
 };
@@ -729,20 +731,8 @@ export const expressionGenMethods = {
 			}
 		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
-		if (
-			expr._ifaceSrc &&
-			!expr._tfnTagging &&
-			this._isTaggedFuncType(expr._ifaceSrc)
-		) {
-			// A value of a defined func type keeps that type in an interface.
-			expr._tfnTagging = true;
-			try {
-				this.useHelper("ifaceBox");
-				return `__tfn(${this.genExpr(expr)}, ${JSON.stringify(expr._ifaceSrc.name)})`;
-			} finally {
-				expr._tfnTagging = false;
-			}
-		}
+		const taggedFn = this._genIfaceTaggedFuncExpr(expr);
+		if (taggedFn) return taggedFn;
 		if (isGenericComposite(expr._ifaceSrc) && !expr._gmapTagging) {
 			const tag = this._genericMapTag(expr._ifaceSrc);
 			if (tag) {
@@ -990,6 +980,20 @@ export const expressionGenMethods = {
 		return (
 			this._isNamedBoxKind(expr) && !expr._ifaceBoxing && !expr._noNamedBox
 		);
+	},
+
+	_genIfaceTaggedFuncExpr(expr) {
+		if (!expr._ifaceSrc || expr._tfnTagging) return null;
+		const fnTag = this._taggedFuncTagExpr(expr._ifaceSrc);
+		if (!fnTag) return null;
+		// A value of a defined func type keeps that type in an interface.
+		expr._tfnTagging = true;
+		try {
+			this.useHelper("ifaceBox");
+			return `__tfn(${this.genExpr(expr)}, ${fnTag}, true)`;
+		} finally {
+			expr._tfnTagging = false;
+		}
 	},
 
 	_genNamedIfaceBoxExpr(expr) {
@@ -1250,9 +1254,12 @@ export const expressionGenMethods = {
 	_withFnCtx(body, fn, ownParams = null) {
 		const prev = this._fnCtx;
 		// A function starts with no JS labels in scope (see
-		// `_emitIterTargetDispatch`).
+		// `_emitIterTargetDispatch`), outside any range-over-func body: a
+		// closure in one returns from itself, not from the loop's function.
 		const prevLabels = this._jsLabels;
+		const prevInIter = this._inIteratorBody;
 		this._jsLabels = [];
+		this._inIteratorBody = false;
 		this._fnCtx = {
 			body,
 			parent: prev,
@@ -1269,6 +1276,7 @@ export const expressionGenMethods = {
 		} finally {
 			this._fnCtx = prev;
 			this._jsLabels = prevLabels;
+			this._inIteratorBody = prevInIter;
 		}
 	},
 
@@ -1412,6 +1420,10 @@ export const expressionGenMethods = {
 				: "BigInt.asIntN";
 			if (op === "-" || op === "~") return `${wrap}(64, ${op}(${operandCode}))`;
 		}
+		if (op === "~") {
+			const not = this._genUnaryBitNot(expr, code);
+			if (not) return not;
+		}
 		const wrap = this.strict
 			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
 			: null;
@@ -1426,6 +1438,22 @@ export const expressionGenMethods = {
 			this._emittedBinaryOp(expr.operand) !== null ||
 			((op === "-" || op === "+") && /^[-+]/.test(code));
 		return needsParens ? `${op}(${code})` : `${op}${code}`;
+	},
+
+	_genUnaryBitNot(expr, code) {
+		if (expr._type?.kind === "typeParam") {
+			const factory = this._typeParamZeroFactory(expr._type.name);
+			if (!factory) return null;
+			this.useHelper("generics");
+			return `__tar(${factory}, "^", ${code}, -1)`;
+		}
+		const tName = this._typeName(expr._type);
+		if (tName === "int") return `(-(${code}) - 1)`;
+		if (tName === "uint" || tName === "uintptr") {
+			this.useHelper("bit64");
+			return `__bit64("^", ${code}, -1, true)`;
+		}
+		return null;
 	},
 
 	_genSelectorExpr(expr) {
@@ -1557,30 +1585,41 @@ export const expressionGenMethods = {
 		return path ? path.map((n) => `.${jsMemberName(n)}`).join("") : "";
 	},
 
+	_embeddedStructType(inner) {
+		const ist = inner?.kind === "named" ? inner.underlying : inner;
+		if (ist?.kind !== "struct") return null;
+		if (
+			inner.kind === "named" &&
+			!this.structNames.has(inner._genericOf?.name ?? inner.name)
+		)
+			return null;
+		return ist;
+	},
+
 	_embedPath(t, field, depth) {
 		const st = t?.kind === "named" ? t.underlying : t;
 		if (st?.kind !== "struct" || !st.fields?.has(field) || depth > 8)
 			return null;
-		const direct = (st._structFields ?? []).some(
-			(sf) => !sf.embedded && sf.names?.includes(field),
-		);
-		if (direct) return null;
+		const hasDirect = (s) =>
+			(s._structFields ?? []).some((sf) =>
+				sf.embedded
+					? embeddedFieldName(sf) === field
+					: sf.names?.includes(field),
+			);
+		if (hasDirect(st)) return null;
+		let best = null;
 		for (const sf of st._structFields ?? []) {
 			if (!sf.embedded) continue;
 			const inner = sf.type?.kind === "pointer" ? sf.type.base : sf.type;
-			if (inner?.kind !== "named" || !this.structNames.has(inner.name))
-				continue;
-			const name = embeddedFieldName(sf);
-			if (name === field) return null;
-			const ist = inner.underlying;
+			const ist = this._embeddedStructType(inner);
 			if (!ist?.fields?.has(field)) continue;
+			const name = embeddedFieldName(sf);
+			if (!name) continue;
+			if (hasDirect(ist)) return [name];
 			const sub = this._embedPath(inner, field, depth + 1);
-			const idirect = (ist._structFields ?? []).some(
-				(x) => !x.embedded && x.names?.includes(field),
-			);
-			return idirect ? [name] : sub ? [name, ...sub] : null;
+			if (sub && (!best || 1 + sub.length < best.length)) best = [name, ...sub];
 		}
-		return null;
+		return best;
 	},
 
 	// PascalCase aliases of Web API methods (gl.ClearColor) map to the real camelCase member.
@@ -2156,25 +2195,38 @@ export const expressionGenMethods = {
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
+		if (name === "any") return `(${val} != null)`;
 		const simd = this._simdCheckExpr(name, val);
 		if (simd) return simd;
-		if (name === "error")
-			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
+		if (name === "error") {
+			const base = `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function" && !(${val}.__v === true && ${val}.constructor?.__pm?.includes("Error"))`;
+			return this.target === "both" || this.target === "wasm"
+				? `${base} && !${val}.constructor?.__sm?.includes("Error"))`
+				: `${base})`;
+		}
 		if (this.structNames.has(name))
 			return `(${val} instanceof ${jsClassName(name)} && ${val}.__p !== true)`;
 		const named = this.checker?.types.get(name);
 		const namedInfo = this._namedBoxInfo(named);
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
-		// User-declared interfaces: check the dynamic value has every method.
-		if (named?.underlying?.kind === "interface")
+		// User-declared interfaces (and aliases to any/interfaces): check the
+		// dynamic value is non-nil and has every method.
+		const under = this._underlyingOf(named);
+		if (isAny(under)) return `(${val} != null)`;
+		if (under?.kind === "interface" && name !== "error")
 			return this._ifaceMethodCheck(
 				val,
-				[...named.underlying.methods.keys()],
-				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
+				[...(under.methods?.keys() ?? [])],
+				this._unwrapIsMulti(under.methods?.get("Unwrap")),
 			);
-		if (this._isTaggedFuncType(named)) {
+		const fnTag = this._taggedFuncTagExpr(named);
+		if (fnTag) {
 			this.useHelper("ifaceBox");
-			return `__isty(${val}, ${JSON.stringify(name)}, "namedfunc")`;
+			return `__isty(${val}, ${fnTag}, "namedfunc")`;
+		}
+		if (named?.kind === "func") {
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName(named))}, "func")`;
 		}
 		if (this._isNamedComposite(named)) {
 			this.useHelper("ifaceBox");
@@ -2189,16 +2241,26 @@ export const expressionGenMethods = {
 		return "true"; // unknown type — can't check at runtime
 	},
 
+	_ifaceLiteralCheckExpr(typeNode, val) {
+		const own = this._ifaceMethodCheck(
+			val,
+			(typeNode.methods ?? []).map((m) => m.name),
+			this._unwrapIsMulti(
+				(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
+			),
+		);
+		if (!typeNode.embeds?.length) return own;
+		const checks = [
+			own,
+			...typeNode.embeds.map((e) => this._typeCheckExpr(e, val)),
+		].filter((c) => c !== "true");
+		return `(${checks.join(" && ")})`;
+	},
+
 	// Anonymous interfaces and pointers to named non-struct types; null otherwise.
 	_namedOrIfaceCheckExpr(typeNode, val) {
-		if (typeNode.kind === "InterfaceType" && !(typeNode.embeds?.length > 0))
-			return this._ifaceMethodCheck(
-				val,
-				(typeNode.methods ?? []).map((m) => m.name),
-				this._unwrapIsMulti(
-					(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
-				),
-			);
+		if (typeNode.kind === "InterfaceType")
+			return this._ifaceLiteralCheckExpr(typeNode, val);
 		if (typeNode.kind === "PointerType" && typeNode.base?.kind === "TypeName") {
 			const info = this._namedBoxInfo(
 				this.checker?.types.get(typeNode.base.name),
@@ -2219,14 +2281,19 @@ export const expressionGenMethods = {
 	},
 
 	_ifaceMethodCheck(val, methodNames, multiUnwrap = null) {
+		const checkScalar = this.target === "both" || this.target === "wasm";
 		const checks = methodNames.map((m) => {
 			const jm = jsMemberName(m);
 			const base =
 				m === "Unwrap" && multiUnwrap !== null
 					? `typeof ${val}.${jm} === "function" && (${val}.${jm}.__multi === true) === ${multiUnwrap}`
 					: `typeof ${val}.${jm} === "function"`;
-			// A struct value's method set lacks the pointer-receiver methods.
-			return `${base} && !(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
+			// A struct value's method set lacks the pointer-receiver methods;
+			// a `both` package also excludes scalar-interior promotions to match WASM.
+			const ptrCheck = `!(${val}.__v === true && ${val}.constructor.__pm?.includes(${JSON.stringify(m)}))`;
+			return checkScalar
+				? `${base} && ${ptrCheck} && !${val}.constructor?.__sm?.includes(${JSON.stringify(m)})`
+				: `${base} && ${ptrCheck}`;
 		});
 		return `(${[`${val} != null`, ...checks].join(" && ")})`;
 	},
@@ -2245,9 +2312,10 @@ export const expressionGenMethods = {
 		}
 		if (
 			typeNode?._assertType?.kind === "slice" ||
-			this._isNamedSliceTypeNode(typeNode)
+			this._isNamedSliceTypeNode(typeNode) ||
+			this._isFuncAssertTypeNode(typeNode)
 		) {
-			// A nil slice in an interface is a tagged empty array.
+			// A nil slice or func in an interface is a tagged sentinel.
 			this.useHelper("ifaceBox");
 			return `__unnil(${val})`;
 		}
@@ -2255,7 +2323,25 @@ export const expressionGenMethods = {
 			typeNode?.kind === "TypeName"
 				? this._typeParamZeroFactory(typeNode.name)
 				: null;
-		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
+		if (factory) {
+			this.useHelper("ifaceBox");
+			return `(${factory}?.u ? ${val}.__gfUnbox() : ${factory}?.k === "iface" ? ${val} : __unnil(${val}))`;
+		}
+		return val;
+	},
+
+	// A type node denoting a func type (unnamed, defined, alias, or generic).
+	_isFuncAssertTypeNode(typeNode) {
+		if (
+			typeNode?.kind === "FuncType" ||
+			this._underlyingOf(typeNode?._assertType)?.kind === "func"
+		)
+			return true;
+		if (typeNode?.kind !== "TypeName") return false;
+		const named = this.checker?.types.get(
+			this._qualifiedStructName(typeNode.name),
+		);
+		return this._underlyingOf(named)?.kind === "func";
 	},
 
 	// A type name that denotes a defined slice type (`type S []int`).
@@ -2288,18 +2374,15 @@ export const expressionGenMethods = {
 		return false;
 	},
 
-	// Converting a struct to a different defined struct type builds a copy in
-	// the target's class (so its methods exist); null when not applicable.
+	// Converting a struct to a defined struct type (its own type included)
+	// builds a copy in the target's class (so its methods exist); null when
+	// not applicable.
 	// An instance of a generic target keeps its own type arguments, not the
 	// source's.
 	_genStructClassConversion(targetName, srcType, inner, targetType) {
 		if (!targetName || targetName.includes("[")) return null;
 		const target = this.checker?.types.get(targetName);
 		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
-			return null;
-		// Two instances of one generic type share a name but not their type
-		// arguments, so only a non-generic same-type conversion is a no-op.
-		if (srcType?.name === targetName && !targetType?.typeArgs?.length)
 			return null;
 		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (srcU?.kind !== "struct") return null;
@@ -2337,9 +2420,12 @@ export const expressionGenMethods = {
 			case "map":
 				return this._isNilLiteral(srcExpr) ? { kind: "MapType" } : null;
 			case "slice": {
+				// A string operand, or a type parameter with a string term,
+				// is encoded into a new slice.
 				const elem = this._underlyingOf(base.elem)?.name;
 				const fromText =
-					this._isStringExprType(srcExpr?._type) &&
+					(this._isStringExprType(srcExpr?._type) ||
+						this._convSourceKinds(srcExpr)?.has("string")) &&
 					["byte", "uint8", "rune", "int32", "int"].includes(elem);
 				return this._isNilLiteral(srcExpr) || fromText
 					? { kind: "SliceType", elem: base.elem }
@@ -2365,10 +2451,8 @@ export const expressionGenMethods = {
 			targetType,
 		);
 		if (structConv) return structConv;
-		if (this._isTaggedFuncType(targetType)) {
-			this.useHelper("ifaceBox");
-			return `__tfn(${arg}, ${JSON.stringify(targetType.name)})`;
-		}
+		const tagged = this._genTaggedFuncConv(targetType, arg);
+		if (tagged) return tagged;
 		const base =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
 		const targetNode = this._resolvedConversionTargetNode(base, srcExpr);
@@ -3358,9 +3442,8 @@ export const expressionGenMethods = {
 	// ── Generic zero values (see HELPER_GENERICS) ─────────────────
 
 	// JS condition: type parameter `name` was instantiated with a struct (its
-	// zero value is a struct object, which is its own pointer when erased; a
-	// map's zero is a bare `{}`, so only a class instance or a populated
-	// object counts).
+	// zero value is a mutable struct object, which is its own pointer when
+	// erased; maps are empty or frozen, and complex numbers are frozen).
 	_boxedTypeParamCond(name) {
 		const tpName = this._boxedTypeParams?.get(name);
 		if (!tpName || !this._typeParamZeroFactory(tpName)) return null;
@@ -3382,7 +3465,18 @@ export const expressionGenMethods = {
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `(${f}.k !== "complex64" && ${f}.k !== "complex128" && ((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}()))`
+			? `(${f}.k !== "complex64" && ${f}.k !== "complex128" && ((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && !Object.isFrozen(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}()))`
+			: "false";
+	},
+
+	// JS condition: type parameter `name` was instantiated with an array (its
+	// zero value is a mutable array or typed array; a slice's zero is null,
+	// and SIMD vectors are frozen arrays).  A pointer to it is a `{ value }`
+	// box around the array.
+	_typeParamIsArrayJs(name) {
+		const f = this._typeParamZeroFactory(name);
+		return f
+			? `((__z) => (Array.isArray(__z) && !Object.isFrozen(__z)) || ArrayBuffer.isView(__z))(${f}())`
 			: "false";
 	},
 
@@ -3775,7 +3869,9 @@ export const expressionGenMethods = {
 		if (this._is64BitInt(expr._type)) return this._gen64BitBinaryExpr(expr);
 
 		if (
-			(this.strict || this._isFloat32(expr._type)) &&
+			(this.strict ||
+				this._isFloat32(expr._type) ||
+				this._isWideNumberBitOp(expr.op, expr._type)) &&
 			this._needsStrictOp(expr.op, expr._type)
 		) {
 			const l = this.genExpr(expr.left);
@@ -4080,6 +4176,13 @@ export const expressionGenMethods = {
 		return `__tconv(${factory}, ${inner})`;
 	},
 
+	_genTaggedFuncConv(t, arg) {
+		const fnTag = this._taggedFuncTagExpr(t);
+		if (!fnTag) return null;
+		this.useHelper("ifaceBox");
+		return `__tfn(${arg}, ${fnTag})`;
+	},
+
 	_genTypeConversion(expr, preInner = null) {
 		const inner = preInner ?? this.genExpr(expr.expr);
 		const t = expr.targetType;
@@ -4123,7 +4226,10 @@ export const expressionGenMethods = {
 				? this._genPrimitiveConversion(expr, inner, u.name)
 				: inner;
 		}
-		return this._genPrimitiveConversion(expr, inner, target);
+		return (
+			this._genTaggedFuncConv(expr._type, inner) ??
+			this._genPrimitiveConversion(expr, inner, target)
+		);
 	},
 
 	_genArrayTypeConversion(expr, inner, t) {
@@ -4131,9 +4237,21 @@ export const expressionGenMethods = {
 			expr.expr._type?.kind === "named"
 				? expr.expr._type.underlying
 				: expr.expr._type;
-		if (srcResolved?.kind === "slice") {
+		// A slice (or a type parameter with a slice term, which may also have
+		// array terms of the target's length) is copied by its first `size`
+		// elements (a shorter slice panics); struct and array elements are
+		// deep copies, so the result shares no storage with the source.
+		const kinds = this._convSourceKinds(expr.expr);
+		const fromParamSlice =
+			kinds &&
+			[...kinds].some((k) => k === "bytes" || k === "runes" || k === "slice");
+		if (srcResolved?.kind === "slice" || fromParamSlice) {
 			const size = t.size?.value !== undefined ? Number(t.size.value) : t.size;
-			return `${inner}.slice(0, ${size})`;
+			const target = this._aggregateBase(expr._type) ?? this._typeFromNode(t);
+			const elemClone = this._cloneJs(target?.elem, "__e");
+			this.useHelper("s2a");
+			const head = `__s2a(${inner}, ${size})`;
+			return elemClone === "__e" ? head : `${head}.map((__e) => ${elemClone})`;
 		}
 		// Array-to-array conversion yields a new array value.
 		return this._cloneJs(expr.expr._type, inner);
@@ -4147,42 +4265,116 @@ export const expressionGenMethods = {
 				? (this.checker?.types.get(t.elem.name) ?? t.elem)
 				: t.elem;
 		const elem = this._underlyingOf(elemType)?.name;
-		// Converting a nil slice yields a nil slice.
-		const src = this._underlyingOf(expr.expr._type);
-		if (src?.kind === "slice" && !this._sliceConvNilSafe) {
-			this._sliceConvNilSafe = true;
-			try {
-				return `((__s) => __s == null ? null : ${this._genSliceTypeConversion(expr, "__s", t)})(${inner})`;
-			} finally {
-				this._sliceConvNilSafe = false;
-			}
+		const typedCtor = typedArrayConstructorForElem(
+			t.elem ? { kind: "basic", name: t.elem.name } : null,
+		);
+		// A slice-to-slice conversion (including from a type parameter whose
+		// terms are all slices) shares the backing array and keeps a nil slice
+		// nil; only a string or dynamic source builds a new slice.
+		const kinds = this._convSourceKinds(expr.expr);
+		if (
+			this._underlyingOf(expr.expr._type)?.kind === "slice" ||
+			(kinds && !kinds.has("string"))
+		)
+			return inner;
+		if (kinds || this._isStringExprType(expr.expr._type)) {
+			const enc = (s) => this._sliceFromStringJs(elem, typedCtor, s);
+			// A type parameter with string and slice terms: decided by the
+			// type argument at run time.
+			return kinds?.size > 1
+				? `((__s) => typeof __s === "string" ? ${enc("__s")} : __s)(${inner})`
+				: enc(inner);
 		}
 		if (elem === "byte" || elem === "uint8") {
-			if (this._isStringExprType(expr.expr._type)) {
-				this.useHelper("u8enc");
-				return `__u8enc(${inner})`;
-			}
 			if (isAny(expr.expr._type) || !expr.expr._type) {
 				this.useHelper("u8enc");
 				return `(typeof ${inner} === "string" ? __u8enc(${inner}) : new Uint8Array(${inner}))`;
 			}
 			return `new Uint8Array(${inner})`;
 		}
-		const typedCtor = typedArrayConstructorForElem(
-			t.elem ? { kind: "basic", name: t.elem.name } : null,
-		);
-		const fromString = this._isStringExprType(expr.expr._type);
-		if (typedCtor) {
-			return fromString
-				? `${typedCtor}.from(${inner}, __c => __c.codePointAt(0))`
-				: `new ${typedCtor}(${inner})`;
-		}
-		if ((elem === "rune" || elem === "int32" || elem === "int") && fromString)
-			return `Array.from(${inner}, __c => __c.codePointAt(0))`;
+		if (typedCtor) return `new ${typedCtor}(${inner})`;
 		return `Array.from(${inner})`;
 	},
 
-	_genStringConversion(srcType, inner) {
+	// `[]E(s)` of the string `s`: its UTF-8 bytes, or its code points.
+	_sliceFromStringJs(elem, typedCtor, s) {
+		if (elem === "byte" || elem === "uint8") {
+			this.useHelper("u8enc");
+			return `__u8enc(${s})`;
+		}
+		if (typedCtor) return `${typedCtor}.from(${s}, __c => __c.codePointAt(0))`;
+		if (elem === "rune" || elem === "int32" || elem === "int")
+			return `Array.from(${s}, __c => __c.codePointAt(0))`;
+		return `Array.from(${s})`;
+	},
+
+	// What a conversion operand of type-parameter type can hold at run time,
+	// one entry per kind of term in its type set (`string`, `bytes`, `runes`,
+	// `slice`, `int`, `other`); null for any other operand.
+	_convSourceKinds(node) {
+		const terms = node?._convTerms;
+		if (!terms) return null;
+		const kinds = new Set();
+		for (const u of terms) {
+			if (u?.kind === "slice") {
+				const e = this._underlyingOf(u.elem)?.name;
+				kinds.add(
+					e === "byte" || e === "uint8"
+						? "bytes"
+						: e === "rune" || e === "int32"
+							? "runes"
+							: "slice",
+				);
+			} else if (u?.kind === "basic" && u.name === "string")
+				kinds.add("string");
+			else if (u?.kind === "basic" && this.isIntType(u)) kinds.add("int");
+			else kinds.add("other");
+		}
+		return kinds;
+	},
+
+	// `string(s)` with `s` of a type parameter: the conversion of each kind
+	// of term, chosen by the type argument at run time when there are several
+	// (a nil slice is the empty string).
+	_genTypeParamStringConversion(kinds, inner) {
+		const convs = [
+			["string", (v) => `typeof ${v} === "string"`, (v) => v],
+			[
+				"int",
+				(v) => `typeof ${v} === "number" || typeof ${v} === "bigint"`,
+				(v) => {
+					this.useHelper("runestr");
+					return `__rstr(Number(${v}))`;
+				},
+			],
+			[
+				"bytes",
+				(v) => `${v} instanceof Uint8Array`,
+				(v) => {
+					this.useHelper("u8dec");
+					return `__u8dec(${v})`;
+				},
+			],
+			[
+				"runes",
+				null,
+				(v) => {
+					this.useHelper("runestr");
+					return `Array.from(${v} ?? [], c => __rstr(c)).join("")`;
+				},
+			],
+		].filter(([k]) => kinds.has(k));
+		if (convs.length !== kinds.size) return `String(${inner})`;
+		if (convs.length === 1) return convs[0][2](inner);
+		const last = convs.pop();
+		const tests = convs.map(
+			([, test, conv]) => `${test("__s")} ? ${conv("__s")} : `,
+		);
+		return `((__s) => ${tests.join("")}${last[2]("__s")})(${inner})`;
+	},
+
+	_genStringConversion(srcType, inner, kinds = null) {
+		if (kinds) return this._genTypeParamStringConversion(kinds, inner);
 		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
 		if (base?.kind === "typeParam") {
 			this.useHelper("generics");
@@ -4200,7 +4392,7 @@ export const expressionGenMethods = {
 			}
 			if (elem === "rune" || elem === "int" || elem === "int32") {
 				this.useHelper("runestr");
-				return `Array.from(${inner}, c => __rstr(c)).join("")`;
+				return `Array.from(${inner} ?? [], c => __rstr(c)).join("")`;
 			}
 		}
 		return `String(${inner})`;
@@ -4214,6 +4406,7 @@ export const expressionGenMethods = {
 				return this._genStringConversion(
 					srcType,
 					isSrc64 ? `Number(${inner})` : inner,
+					this._convSourceKinds(expr.expr),
 				);
 			case "int64": {
 				this.useHelper("to64");
@@ -4335,6 +4528,12 @@ export const expressionGenMethods = {
 		return name === "uint" || name === "uintptr";
 	},
 
+	// Number-backed `int`, `uint` and `uintptr` shifts and bitwise operators
+	// use 64-bit helpers on every target (`js` included).
+	_isWideNumberBitOp(op, type) {
+		return WIDE_BIT_OPS.has(op) && WIDE_NUMBER_NAMES.has(this._typeName(type));
+	},
+
 	_needsStrictOp(op, type) {
 		if (type?.kind === "typeParam")
 			return (
@@ -4345,8 +4544,7 @@ export const expressionGenMethods = {
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
 		if (op === "-" && this._isUintWord(type)) return true;
-		if (op === "<<" || op === ">>")
-			return WIDE_INT_NAMES.has(this._typeName(type));
+		if (this._isWideNumberBitOp(op, type)) return true;
 		return this.isIntType(type) && (op === "/" || op === "%");
 	},
 
@@ -4372,7 +4570,11 @@ export const expressionGenMethods = {
 			bind
 				? `((__b) => ${this._genStrictBinary(op, target, "__b", type, countType)})(${rhsJs})`
 				: this._genStrictBinary(op, target, rhsJs, type, countType);
-		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
+		if (
+			lhsNode.kind === "IndexExpr" &&
+			(lhsNode._mapValueType ||
+				this._underlyingOf(lhsNode.expr?._type)?.kind === "map")
+		)
 			return false;
 		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
 		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
@@ -4515,6 +4717,10 @@ export const expressionGenMethods = {
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
+		return this._genWideStrictBinary(op, l, r, type, divZero);
+	},
+
+	_genWideStrictBinary(op, l, r, type, divZero) {
 		if (op === "-" && this._isUintWord(type))
 			return `((__d) => __d < 0 ? __d + 2 ** 64 : __d)((${l}) - (${r}))`;
 		if (op === "<<" || op === ">>") {
@@ -4525,11 +4731,17 @@ export const expressionGenMethods = {
 			if (op === "<<") return `__shl64(${l}, ${r}, ${unsigned})`;
 			return `__shr64(${l}, ${r}, ${unsigned})`;
 		}
+		if (this._isWideNumberBitOp(op, type)) {
+			this.useHelper("bit64");
+			const unsigned = this._typeName(type).startsWith("u");
+			return `__bit64("${op}", ${l}, ${r}, ${unsigned})`;
+		}
 		if (this.isIntType(type)) {
 			if (op === "/")
 				return `((${r}) === 0 ? ${divZero} : Math.trunc((${l}) / (${r})))`;
 			if (op === "%") return `((${r}) === 0 ? ${divZero} : ((${l}) % (${r})))`;
 		}
+		if (op === "&^") return `((${l}) & ~(${r}))`;
 		return `${l} ${op} ${r}`;
 	},
 };

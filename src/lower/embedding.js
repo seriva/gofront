@@ -4,6 +4,7 @@
 import {
 	ambiguousPromotions,
 	embeddedFieldName,
+	promotedMethods,
 } from "../typechecker/types.js";
 
 // A method promoted from an embedded struct value but declared on its
@@ -29,11 +30,60 @@ function pushInterfaceStubs(stubs, declared, iface, fieldName) {
 	}
 }
 
-function pushValueEmbedStubs(stubs, declared, embed, embedName, fieldName) {
+function pushValueEmbedStubs(
+	stubs,
+	declared,
+	rawEmbed,
+	embed,
+	embedName,
+	fieldName,
+	isScalar = false,
+) {
+	const viaPtr = rawEmbed.kind === "pointer";
 	for (const [mName, mType] of embed.methods?.entries() ?? []) {
-		if (declared.has(mName) || mType?._ptrRecv) continue;
-		stubs.push({ methodName: mName, embedName, fieldName, valueEmbed: true });
+		if (declared.has(mName)) continue;
+		stubs.push({
+			methodName: mName,
+			embedName,
+			fieldName,
+			valueEmbed: true,
+			ptrRecv: Boolean(mType?._ptrRecv),
+			viaPtr,
+			ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
+			nilPtrRecv: isNilablePtrRecv(rawEmbed, mType),
+			scalarInterior: Boolean(mType?._ptrRecv && !viaPtr && isScalar),
+		});
 		declared.add(mName);
+	}
+}
+
+function pushStructEmbedStubs(stubs, declared, ctx) {
+	const {
+		rawEmbed,
+		embed,
+		embedBase,
+		embedName,
+		fieldName,
+		targetPromoted,
+		checker,
+	} = ctx;
+	const embedPromoted = promotedMethods.get(embedBase);
+	for (const [mName, mType] of embedBase.methods.entries()) {
+		if (declared.has(mName)) continue;
+		const depth = 1 + (embedPromoted?.get(mName)?.depth ?? 0);
+		const bestDepth = targetPromoted?.get(mName)?.depth;
+		if (bestDepth !== undefined && depth > bestDepth) continue;
+		stubs.push({
+			methodName: mName,
+			embedName,
+			fieldName,
+			ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
+			nilPtrRecv: isNilablePtrRecv(rawEmbed, mType),
+			scalarInterior: Boolean(
+				checker._promotedScalarInteriorType?.(embed, mName),
+			),
+		});
+		declared.add(mName); // Prevent duplicate stubs for diamond embeds
 	}
 }
 
@@ -41,6 +91,7 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 	if (!checker) return [];
 	const resolvedType = checker.types.get(name)?.underlying;
 	if (resolvedType?.kind !== "struct" || !resolvedType._embeds) return [];
+	const targetPromoted = promotedMethods.get(resolvedType);
 
 	// A method two embeds declare at the same depth is in neither method set:
 	// no stub, so the value does not satisfy an interface that needs it.
@@ -66,25 +117,29 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) continue;
 		if (embedBase?.kind !== "struct" || !embedBase.methods) {
-			// A named non-struct type (`time.Duration`) promotes its value
-			// methods; the stub passes the embedded value as the receiver.
-			if (rawEmbed.kind !== "pointer")
-				pushValueEmbedStubs(stubs, declared, embed, embedName, fieldName);
+			// A named non-struct type (`time.Duration`, `Num`, `*Num`) promotes
+			// its methods; the stub passes the embedded value, box, or pointer.
+			pushValueEmbedStubs(
+				stubs,
+				declared,
+				rawEmbed,
+				embed,
+				embedName,
+				fieldName,
+				Boolean(checker._isScalarStorageType?.(embed)),
+			);
 			continue;
 		}
 
-		for (const [mName, mType] of embedBase.methods.entries()) {
-			if (!declared.has(mName)) {
-				stubs.push({
-					methodName: mName,
-					embedName,
-					fieldName,
-					ptrOnly: isPtrOnlyPromotion(rawEmbed, embed, mName, mType),
-					nilPtrRecv: isNilablePtrRecv(rawEmbed, mType),
-				});
-				declared.add(mName); // Prevent duplicate stubs for diamond embeds
-			}
-		}
+		pushStructEmbedStubs(stubs, declared, {
+			rawEmbed,
+			embed,
+			embedBase,
+			embedName,
+			fieldName,
+			targetPromoted,
+			checker,
+		});
 	}
 
 	return stubs;

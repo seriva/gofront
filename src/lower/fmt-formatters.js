@@ -406,7 +406,13 @@ class FmtGen extends TypeSpeller {
 	// null in `path` when the type declares or promotes it from a struct.
 	hasFormatMethod(t, name) {
 		const isPtr = t?.kind === "pointer";
-		return this.methodSetHas(isPtr ? t.base : t, name, isPtr, 0);
+		const base = isPtr ? t.base : t;
+		if (
+			this.checker?._isWasmPackage?.() &&
+			this.checker?._promotedScalarInteriorType?.(base, name)
+		)
+			return null;
+		return this.methodSetHas(base, name, isPtr, 0);
 	}
 
 	methodSetHas(base, name, isPtr, depth) {

@@ -1524,7 +1524,9 @@ export const assignabilityMethods = {
 		tBase = this.resolveType(tBase);
 		if (tBase?.kind === "interface") {
 			if (tBase.methods.size === 0) return;
-			if (!this.implements(source, tBase, node))
+			const { ok, scalarInterior } = this._implementsDetail(source, tBase);
+			if (scalarInterior) this._errScalarInteriorAddress(node, scalarInterior);
+			else if (!ok)
 				this.err(
 					`${typeStr(source)} does not implement ${typeStr(target)}`,
 					node,
@@ -1924,20 +1926,16 @@ export const assignabilityMethods = {
 	},
 
 	implements(srcType, iface, _node) {
+		return this._implementsDetail(srcType, iface).ok;
+	},
+
+	_implementsDetail(srcType, iface) {
 		const isPtr = srcType?.kind === "pointer";
 		// *T has the full method set of T (value + pointer receivers).
-		if (srcType?.kind === "pointer") srcType = this.resolveType(srcType.base);
-		let base = this._deepUnderlying(srcType);
-		base = this.resolveType(base);
-		// Interface → interface: the source's method set must cover the target's.
-		if (base?.kind === "interface") {
-			for (const [name, required] of iface.methods) {
-				const actual = base.methods.get(name);
-				if (!this._implementsMethod(required, actual)) return false;
-				if (this._unexportedMethodForeign(name, required, actual)) return false;
-			}
-			return true;
-		}
+		if (isPtr) srcType = this.resolveType(srcType.base);
+		const base = this.resolveType(this._deepUnderlying(srcType));
+		if (base?.kind === "interface")
+			return { ok: this._interfaceImplements(base, iface) };
 		const methodMap =
 			base?.kind === "struct"
 				? base.methods?.size
@@ -1946,14 +1944,31 @@ export const assignabilityMethods = {
 				: srcType.kind === "named"
 					? srcType.methods
 					: null;
-		if (!methodMap) return false;
+		if (!methodMap) return { ok: false };
+		return this._concreteImplements(srcType, methodMap, iface, isPtr);
+	},
+
+	_interfaceImplements(base, iface) {
 		for (const [name, required] of iface.methods) {
-			const actual = methodMap.get(name);
-			if (!actual) return false;
-			if (!isPtr && actual._ptrRecv) return false;
+			const actual = base.methods.get(name);
 			if (!this._implementsMethod(required, actual)) return false;
 			if (this._unexportedMethodForeign(name, required, actual)) return false;
 		}
 		return true;
+	},
+
+	_concreteImplements(srcType, methodMap, iface, isPtr) {
+		let scalarInterior = null;
+		for (const [name, required] of iface.methods) {
+			const actual = methodMap.get(name);
+			if (!actual || (!isPtr && actual._ptrRecv)) return { ok: false };
+			if (!this._implementsMethod(required, actual)) return { ok: false };
+			if (this._unexportedMethodForeign(name, required, actual))
+				return { ok: false };
+			if (!scalarInterior && this._isWasmPackage()) {
+				scalarInterior = this._promotedScalarInteriorType(srcType, name);
+			}
+		}
+		return scalarInterior ? { ok: false, scalarInterior } : { ok: true };
 	},
 };

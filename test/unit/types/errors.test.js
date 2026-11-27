@@ -1119,7 +1119,9 @@ func main() { f(1) }`;
 	const seen = [];
 	const report = checker._reportUnused.bind(checker);
 	checker._reportUnused = (scope, node) => {
-		if (node?.kind === "TypeSwitchStmt") seen.push(scope.localNode("x"));
+		// The switch header scope (its init) is reported too, with no `x`.
+		const binding = scope.localNode("x");
+		if (node?.kind === "TypeSwitchStmt" && binding) seen.push(binding);
 		return report(scope, node);
 	};
 	checker.check(ast);

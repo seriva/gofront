@@ -331,13 +331,14 @@ export const statementParserMethods = {
 
 		// Detect type switch: switch x.(type) or switch v := x.(type)
 		if (tag?.kind === "TypeSwitchExpr") {
-			return this._parseTypeSwitchBody(null, tag.expr);
+			return this._parseTypeSwitchBody(null, tag.expr, null, init);
 		}
 		if (tag?.kind === "DefineStmt" && tag.rhs[0]?.kind === "TypeSwitchExpr") {
 			return this._parseTypeSwitchBody(
 				tag.lhs[0]?.name ?? null,
 				tag.rhs[0].expr,
 				tag.lhs[0],
+				init,
 			);
 		}
 
@@ -369,7 +370,7 @@ export const statementParserMethods = {
 		return stmts;
 	},
 
-	_parseTypeSwitchBody(assign, expr, assignNode = null) {
+	_parseTypeSwitchBody(assign, expr, assignNode = null, init = null) {
 		this.expect(T.LBRACE);
 		const cases = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
@@ -385,6 +386,7 @@ export const statementParserMethods = {
 		// The declaring identifier of `assign`, for diagnostics.
 		return {
 			kind: "TypeSwitchStmt",
+			init,
 			assign,
 			expr,
 			cases,

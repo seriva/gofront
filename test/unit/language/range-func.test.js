@@ -557,6 +557,56 @@ func main() {
 	);
 });
 
+test("a closure in a range-over-func body returns from itself", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func nums(yield func(int) bool) {
+	for i := 1; i <= 3; i++ {
+		if !yield(i) {
+			return
+		}
+	}
+}
+
+func main() {
+	for v := range nums {
+		g := func() int { return v * 10 }
+		f := func() (s string) {
+			defer func() { s += "!" }()
+		L:
+			for w := range nums {
+				switch {
+				case w == v:
+					break L
+				}
+				s += fmt.Sprint(w)
+			}
+			switch v {
+			case 3:
+				return "three"
+			}
+			return
+		}
+		fmt.Println(g(), f())
+		if v == 2 {
+			func() {
+				for range nums {
+					return
+				}
+			}()
+			continue
+		}
+	}
+	fmt.Println("done")
+}
+`,
+		"10 !\n20 1!\n30 three!\ndone\n",
+	);
+});
+
 section("Range-over-func: yielded arrays are copies");
 
 test("a yielded array is a copy", async () => {

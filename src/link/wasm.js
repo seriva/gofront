@@ -93,6 +93,7 @@ function linkWasmUnits(
 	for (const u of units)
 		for (const [k, v] of u.types) if (keepType(v)) types.set(k, v);
 	const checker = Object.assign(new TypeChecker(), {
+		target: "wasm",
 		types,
 		errors: [],
 		err(msg, node) {

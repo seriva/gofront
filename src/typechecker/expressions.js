@@ -34,14 +34,15 @@ import {
 	isBool,
 	isComplex,
 	isComplex64,
+	isFloat,
 	isInteger,
 	isNil,
 	isNumeric,
 	isString,
 	NIL,
+	promotedMethods,
 	RUNE,
 	Scope,
-	SIZED_INT_NAMES,
 	STRING,
 	shadowsJsGlobal,
 	TAINTED_ANY,
@@ -956,6 +957,7 @@ export const expressionCheckMethods = {
 	_markPtrRecvAddress(expr, base, ft, scope, recvT) {
 		if (!this._methodExprPtrRecv(recvT, ft, expr.field)) return;
 		if (this._reportUnaddressableRecv(expr, scope)) return;
+		if (this._checkScalarInteriorPromoted(expr, recvT, expr.field)) return;
 		const k = base?.kind;
 		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
@@ -968,6 +970,70 @@ export const expressionCheckMethods = {
 		}
 		if (expr.expr.kind !== "Ident") return;
 		expr.expr._addressTaken = true;
+	},
+
+	_checkScalarInteriorPromoted(node, recvType, methodName) {
+		if (!this._isWasmPackage()) return null;
+		const scalar = this._promotedScalarInteriorType(recvType, methodName);
+		return scalar ? this._errScalarInteriorAddress(node, scalar) : null;
+	},
+
+	// When `recvType`'s method `methodName` is promoted with a pointer receiver
+	// from a value-embedded scalar (e.g. `type Outer struct{ Num }`), returns
+	// that scalar type; otherwise null.
+	_promotedScalarInteriorType(recvType, methodName) {
+		const start = this.resolveType(this._deepUnderlying(recvType));
+		if (start?.kind !== "struct") return null;
+		const seen = new Set([start]);
+		let level = [start];
+		while (level.length > 0) {
+			const next = [];
+			const hit = this._scanScalarInteriorLevel(level, methodName, seen, next);
+			if (hit !== undefined) return hit;
+			for (const b of next) seen.add(b);
+			level = next;
+		}
+		return null;
+	},
+
+	_scanScalarInteriorLevel(level, methodName, seen, next) {
+		let scalarHit;
+		for (const st of level) {
+			const own =
+				st.methods?.has(methodName) &&
+				promotedMethods.get(st)?.get(methodName)?.mType !==
+					st.methods.get(methodName);
+			if (own) return null;
+			for (const embed of st._embeds ?? []) {
+				const hit = this._checkScalarInteriorEmbed(
+					embed,
+					methodName,
+					seen,
+					next,
+				);
+				if (hit === null) return null;
+				if (hit !== undefined) scalarHit = hit;
+			}
+		}
+		return scalarHit;
+	},
+
+	_checkScalarInteriorEmbed(embed, methodName, seen, next) {
+		const isPtr = embed.kind === "pointer";
+		const inner = isPtr ? embed.base : embed;
+		const base = this.resolveType(this._deepUnderlying(inner));
+		if (base?.kind === "struct") {
+			if (!seen.has(base)) next.push(base);
+			return undefined;
+		}
+		if (base?.kind === "interface") {
+			return !isPtr && base.methods?.has(methodName) ? null : undefined;
+		}
+		const m = inner?.kind === "named" ? inner.methods?.get(methodName) : null;
+		if (!m) return undefined;
+		return m._ptrRecv && !isPtr && this._isScalarStorageType(inner)
+			? inner
+			: null;
 	},
 
 	// Resolved per file from the import path, so a local package sharing an
@@ -1031,6 +1097,12 @@ export const expressionCheckMethods = {
 			);
 		}
 		if (!methodType) return null;
+		const scalarErr = this._checkScalarInteriorPromoted(
+			expr,
+			recvBase,
+			expr.field,
+		);
+		if (scalarErr) return scalarErr;
 		const hidden = this._foreignMember(
 			methodType._pkgId,
 			expr.field,
@@ -1068,9 +1140,14 @@ export const expressionCheckMethods = {
 		}
 		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
 		expr._isMethodValue = true;
-		if (baseType.kind === "pointer")
+		if (baseType.kind === "pointer") {
 			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
-		else this._markPtrRecvAddress(expr, base, ft, scope, recvT);
+			this._checkScalarInteriorPromoted(expr, recvT, expr.field);
+		} else if (!this._methodExprPtrRecv(recvT, ft, expr.field)) {
+			this._checkScalarInteriorPromoted(expr, recvT, expr.field);
+		} else {
+			this._markPtrRecvAddress(expr, base, ft, scope, recvT);
+		}
 	},
 
 	// Whether the identifier `name`, which resolved to `t`, names a type.  A
@@ -1259,6 +1336,19 @@ export const expressionCheckMethods = {
 		if (!operand || other?.kind !== "typeParam") return;
 		const core = this._coreType(other, scope);
 		if (core?.kind === "map") operand._coreType = core;
+	},
+
+	// `[]byte(s)` or `string(s)` with `s` of a type parameter: the JS backend
+	// converts by the type argument (a slice shares its backing array, a
+	// string is encoded), so record the underlying type of every term in the
+	// constraint's type set on the operand.
+	_markTypeParamConvSource(srcType, operand, scope) {
+		if (srcType?.kind !== "typeParam" || !operand) return;
+		const terms = this._constraintTerms(srcType.constraint, new Set(), scope);
+		if (!terms?.length) return;
+		operand._convTerms = terms.map((t) =>
+			this._deepUnderlying(this.resolveType(t)),
+		);
 	},
 
 	// Underlying type of `t` for indexing, slicing, ranging and the like; a
@@ -1803,6 +1893,7 @@ export const expressionCheckMethods = {
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
 		this._rejectNilConversion(srcType, targetType, expr);
+		this._markTypeParamConvSource(srcType, expr.expr, scope);
 		if (this._checkIfaceConversion(srcType, targetType, expr, expr.expr))
 			return targetType;
 		if (
@@ -2324,17 +2415,6 @@ export const expressionCheckMethods = {
 		return expr;
 	},
 
-	// `int(K)`, `uint8(K)`, `MyInt(K)`: a conversion to an integer type.
-	_isIntConversion(expr) {
-		if (expr.args?.length !== 1) return false;
-		const target = expr._conversionTargetType;
-		if (expr._isTypeConversion && target)
-			return isInteger(this._deepUnderlying(target));
-		return (
-			expr.func?.kind === "Ident" && SIZED_INT_NAMES.includes(expr.func.name)
-		);
-	},
-
 	// Keyed array literal indices (Go spec): each key must be a non-negative
 	// integer constant, and no index may appear twice.  The resolved index is
 	// stored on the KeyValueExpr as `_index` for compositeLitIndices.
@@ -2377,6 +2457,8 @@ export const expressionCheckMethods = {
 	_isConstExpr(e, scope) {
 		switch (e?.kind) {
 			case "BasicLit":
+				return e.litKind !== "NIL";
+			case "ImagLit":
 				return true;
 			case "ParenExpr":
 				return this._isConstExpr(e.expr, scope);
@@ -2392,27 +2474,55 @@ export const expressionCheckMethods = {
 			case "Ident":
 				return (scope ?? this.globals).lookupObject(e.name)?.kind === "const";
 			case "SelectorExpr": {
-				// Package members: constant unless the package says otherwise.
-				const ns =
+				// `pkg.K` with K a constant a GoFront package declares. A browser
+				// global (`window.innerWidth`) or a member of a JavaScript
+				// declaration is a runtime value.
+				const obj =
 					e.expr?.kind === "Ident"
-						? (scope ?? this.globals).lookup(e.expr.name)
+						? (scope ?? this.globals).lookupObject(e.expr.name)
 						: null;
-				if (ns?.kind !== "namespace") return false;
-				return ns._consts ? ns._consts.has(e.field) : true;
+				const ns = obj?.kind === "pkg" ? obj.type : null;
+				if (!ns?._gofront) return false;
+				const kind = ns._kinds?.get(e.field);
+				return kind ? kind === "const" : !!ns._consts?.has(e.field);
 			}
 			case "TypeConversion":
-				return this._isConstExpr(e.expr, scope);
+				return this._isConstType(e._type) && this._isConstExpr(e.expr, scope);
 			case "CallExpr":
-				if (e._isTypeConversion || this._isIntConversion(e))
-					return this._isConstExpr(e.args?.[0], scope);
+				// A conversion only when the callee names a type: `int(5)` with a
+				// function or closure `int` in scope is a call.
+				if (e._isTypeConversion)
+					return (
+						this._isConstType(e._type) && this._isConstExpr(e.args?.[0], scope)
+					);
+				if (
+					e.func?.kind !== "Ident" ||
+					!CONST_BUILTINS.has(e.func.name) ||
+					(scope ?? this.globals).lookup(e.func.name)?.kind !== "builtin"
+				)
+					return false;
+				// `len` and `cap` of an array (or a pointer to one) are constant
+				// unless the operand calls a function or receives from a channel.
+				if (this._constArrayLen(e.func.name, e.args, scope) != null)
+					return true;
 				return (
-					e.func?.kind === "Ident" &&
-					CONST_BUILTINS.has(e.func.name) &&
-					(scope ?? this.globals).lookup(e.func.name)?.kind === "builtin"
+					e.args?.length > 0 && e.args.every((a) => this._isConstExpr(a, scope))
 				);
 			default:
 				return false;
 		}
+	},
+
+	// Whether a constant may have type `t`: a boolean, numeric or string type,
+	// or a type defined from one (not a slice, pointer, interface or type
+	// parameter).
+	_isConstType(t) {
+		const u = this._deepUnderlying(t);
+		if (u?.kind === "untyped") return u.base !== "nil";
+		return (
+			u?.kind === "basic" &&
+			(isBool(u) || isString(u) || isNumeric(u) || isComplex(u))
+		);
 	},
 
 	_resolveCallArgTypes(expr, scope) {
@@ -2785,6 +2895,7 @@ export const expressionCheckMethods = {
 				);
 			}
 			const argType = argTypes[0];
+			this._markTypeParamConvSource(argType, expr.args[0], scope);
 			this._checkConversionValidity(argType, fnType, expr);
 			return fnType;
 		}
@@ -3327,31 +3438,61 @@ export const expressionCheckMethods = {
 				? expr.args[i]._type
 				: t,
 		);
-		if (!isNumeric(crt)) {
-			this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
-			return ANY;
+		const part = this._complexPartType(expr, crt, cit);
+		if (!part) return ANY;
+		if (part.kind === "untyped") return UNTYPED_COMPLEX;
+		if (part.name !== "float32") return COMPLEX128;
+		// An untyped operand takes type float32 (`complex(f, 0.01)`).
+		this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
+		this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
+		return COMPLEX64;
+	},
+
+	// The part type of `complex(a, b)` as Go's checker finds it: an untyped
+	// operand takes the other operand's type, both must then be identical, and
+	// that type must be floating-point underneath (a type parameter is not
+	// supported). Returns the untyped or basic float type, or null after an error.
+	_complexPartType(expr, crt, cit) {
+		for (const t of [crt, cit])
+			if (t?.kind !== "typeParam" && !isNumeric(t)) {
+				this.err(`cannot use ${typeStr(t)} as float in complex()`, expr);
+				return null;
+			}
+		if (crt.kind === "untyped" && cit.kind === "untyped") return crt;
+		const typed = crt.kind === "untyped" ? cit : crt;
+		const arg = expr.args[crt.kind === "untyped" ? 1 : 0];
+		if (
+			crt.kind !== "untyped" &&
+			cit.kind !== "untyped" &&
+			!identical(crt, cit)
+		) {
+			this.err(
+				`invalid operation: ${exprText(expr)} (mismatched types ${typeStr(crt)} and ${typeStr(cit)})`,
+				expr,
+			);
+			return null;
 		}
-		if (!isNumeric(cit)) {
-			this.err(`cannot use ${typeStr(cit)} as float in complex()`, expr);
-			return ANY;
-		}
-		if (crt.kind === "untyped" && cit.kind === "untyped")
-			return UNTYPED_COMPLEX;
-		if (crt.name === "float32" && cit.name === "float32") return COMPLEX64;
-		if (crt.name === "float64" && cit.name === "float64") return COMPLEX128;
-		if (crt.name === "float32" || cit.name === "float32") {
-			if (crt.name === "float64" || cit.name === "float64") {
+		if (typed.kind === "typeParam") {
+			const terms = this._constraintTerms(typed.constraint, new Set());
+			if (
+				terms?.length > 0 &&
+				terms.every((t) => isFloat(this._deepUnderlying(t)))
+			) {
 				this.err(
-					`invalid complex call: mismatched float types (${typeStr(crt)} and ${typeStr(cit)})`,
+					`${exprText(arg)} (${operandKind(arg, typeStr(typed), false)} constrained by ${this._constraintText(typed)}) not supported as argument to built-in complex for go1.18 (see go.dev/issue/50937)`,
 					expr,
 				);
+				return null;
 			}
-			// An untyped operand takes type float32 (`complex(f, 0.01)`).
-			this._tagFloat32Const(FLOAT32, crt, expr.args[0]);
-			this._tagFloat32Const(FLOAT32, cit, expr.args[1]);
-			return COMPLEX64;
+		} else {
+			const u = this._deepUnderlying(typed);
+			if (isFloat(u)) return u;
 		}
-		return COMPLEX128;
+		this.err(
+			`invalid argument: arguments have type ${typeStr(typed)}, expected floating-point`,
+			expr,
+		);
+		return null;
 	},
 
 	_checkBuiltinRealImag(name, expr, argTypes) {

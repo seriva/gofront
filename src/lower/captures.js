@@ -112,6 +112,7 @@ function collectReferencedNames(node, scopes, refs = new Set(), types) {
 			return refs;
 		case "TypeSwitchStmt":
 			scoped(() => {
+				walk(node.init);
 				walk(node.expr);
 				for (const c of node.cases ?? []) {
 					scoped(() => {

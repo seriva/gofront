@@ -1,7 +1,7 @@
 # JS Codegen, Value Semantics & Checker Soundness Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft  
+**Status:** Completed (2026-11-27)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): follow-ups from `checker-go-rules` (L11, L14, L29, L33), `wasm-struct-types` (L45, L46), `codegen-fixes` (L72, L78, L79), `names-panics-type-exprs` (L85, L95, L98), and `value-stores` (L106, L108). Split from [`generics-and-aliases-plan.md`](generics-and-aliases-plan.md) for phase sizing; run sequentially with it because both edit `src/typechecker/expressions.js` and `src/backend/js/{expressions,statements,runtime}.js`. Reviewed 2026-11-24 (`/bs-plan review`): J1 parser root, J2/J5.3 evidence corrected, J3/J4/J5.3 siblings added, J2 split into its own phase, embedding phase moved last so its docs land in the last behaviour-changing phase, wide-int bitwise ops added to J5.3 (user decision).  
 **Release note:** Type-switch `init` statements now work on JavaScript and WebAssembly, struct self-conversions (`T(src)`) copy values, slice-to-slice conversions (`[]int(s)`) share their backing array on JavaScript, whole-struct pointer stores (`*pt = v`) preserve slices of array fields, multi-level embedded fields and methods promoted from an embedded `*Num` work on every target, and JavaScript now handles `int64`/`uint64` range loops, `int` shifts and bitwise operators on values beyond 32 bits, and `nil` assertions to `any` like Go. **Breaking:** Non-constant `const` initializers (`const C = f(5)`), non-float arguments to `complex(a, b)`, and pointer-receiver methods promoted from a value-embedded scalar (`o.Inc()` with `struct{ Num }`, or `&o` as an interface needing `Inc`) on `both`/`wasm` are now compile errors; use `var`, convert `complex` arguments to `float64`/`float32`, or embed `*Num`.
@@ -152,67 +152,67 @@ Roots:
 
 ### Phase 1: Type-Switch `init` (root `typeswitch-init-omitted`)
 *Scheduled from review follow-ups (2026-11-24).*
-- [ ] Task 1.1: Parse and type-check `TypeSwitchStmt.init` (J1.1, J1.4)
+- [x] Task 1.1: Parse and type-check `TypeSwitchStmt.init` (J1.1, J1.4)
   - Files: `src/parser/statements.js` (`parseSwitch`, `_parseTypeSwitchBody`), `src/typechecker/statements.js` (`_checkTypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1 compiles (no `Undefined: 'y'`) and J1.4 `assertErrorContains(…, "declared and not used: y")`, plus a parser test that the node carries `init`
   - Done when: the type switch `init` is in the AST, its names resolve in every clause, and an unused `init` variable is reported
-- [ ] Task 1.2: Capture-scan and emit `TypeSwitchStmt.init` on JS (J1.1–J1.3)
+- [x] Task 1.2: Capture-scan and emit `TypeSwitchStmt.init` on JS (J1.1–J1.3)
   - Files: `src/lower/captures.js`, `src/backend/js/statements.js` (`genTypeSwitch`), `src/backend/js/expressions.js` (`RECEIVER_STEP.TypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1, J1.2, J1.3 (shadowed `y` + closure capture) with `assertOutput(…, { targets: ["both", "js"] })`
   - Done when: type switch `init` runs once, before the switch expression, with its own scope and closure captures, on `js`/`both`
-- [ ] Task 1.3: Emit scoped `TypeSwitchStmt.init` on WASM (J1.1–J1.3)
+- [x] Task 1.3: Emit scoped `TypeSwitchStmt.init` on WASM (J1.1–J1.3)
   - Files: `src/backend/wasm/emit-stmts.js` (`emitTypeSwitchStmt`)
   - Test: `test/unit/language/switches.test.js`: J1.1–J1.3 with `assertAllTargetsOutput`, including the shadowed outer `y` printed after the switch
   - Done when: type switch `init` matches Go on `js`, `both`, and `wasm`
 
 ### Phase 2: Checker Soundness (roots `const-initializer-not-checked`, `complex-builtin-nonfloat-args`)
-- [ ] Task 2.1: Enforce constantness of `const` initializers and builtin arguments (J2.1)
+- [x] Task 2.1: Enforce constantness of `const` initializers and builtin arguments (J2.1)
   - Files: `src/typechecker/index.js` (`checkConstDecl`), `src/typechecker/expressions.js` (`_isConstExpr`)
   - Test: `test/unit/types/checks.test.js`: `assertErrorContains(…, "is not constant")` for `const C = f(5)`, `const C = x`, `const C = len(s)`, `const C = min(a, b)`; positive controls from the J2 control row (`len("abc")`, `len([3]int{})`, `len(arrVar)`, `complex(1, 2)`, `real(D)`, `min(1, 2)`, `int(A)`), function-local on `wasm`
   - Done when: runtime calls and variables in `const` initializers are rejected on all targets while valid Go constant expressions pass
-- [ ] Task 2.2: Require floating-point operands in `complex(a, b)` (J2.2)
+- [x] Task 2.2: Require floating-point operands in `complex(a, b)` (J2.2)
   - Files: `src/typechecker/expressions.js` (`_checkBuiltinComplex`)
   - Test: `test/unit/types/checks.test.js`: `assertErrorContains` for `complex(intVar, intVar)` and `complex(floatVar, intVar)`; controls `complex(1, 2)`, `complex(f32, 2)`, `complex(MyF(2), MyF(2))`, and the existing `complex(f32Var, f64Var)` mismatch error
   - Done when: non-float `complex(a, b)` calls fail at compile time instead of miscompiling or producing invalid WasmGC
 
 ### Phase 3: Value Semantics in Conversions & Pointer Stores (roots `struct-self-conversion-no-copy`, `js-slice-conversion-copies`, `struct-deref-store-replaces-arrays`)
-- [ ] Task 3.1: Copy structs on self-conversion `T(src)` on JS/WASM and share the backing array on JS slice-to-slice conversions (J3.1–J3.2)
+- [x] Task 3.1: Copy structs on self-conversion `T(src)` on JS/WASM and share the backing array on JS slice-to-slice conversions (J3.1–J3.2)
   - Files: `src/backend/js/expressions.js` (`_genStructClassConversion`, `_genSliceTypeConversion`), `src/backend/wasm/emit-exprs.js` (`emitTypeConversion`)
   - Test: `test/unit/language/value-semantics.test.js`: J3.1 (`T(src)`, generic `G[int](gs)`, control `U(src)`) and J3.2 (`[]int(s)`, `[]byte(b)`, `[]int(Ints)`, `[]byte(B)`, generic `[]int(S)`, `[]rune(r)`; controls `Ints(s)`, `[]byte(str)`) with `assertAllTargetsOutput`
   - Done when: struct self-conversions never alias and slice-to-slice conversions share backing storage on all targets
-- [ ] Task 3.2: Copy array and nested-struct fields in place on every whole-struct store through a pointer, JS & WASM (J3.3)
+- [x] Task 3.2: Copy array and nested-struct fields in place on every whole-struct store through a pointer, JS & WASM (J3.3)
   - Files: `src/backend/js/statements.js` (`_storeTarget`, `_storeInto`, `_genMultiAssignViaTemps`), `src/backend/js/runtime.js` (`__copyInto`), `src/backend/wasm/emit-stmts.js` (`_emitStructDerefAssign`)
   - Test: `test/unit/language/value-semantics.test.js`: every J3.3 row (`*pt = T{…}`, nested `Outer{Inner{M}}`, generic `set`, `*pt = other`, method `*t = T{…}`, `*p` on `&arr[0]`, `*pt, n = mk()`, `*pu, n = T{…}, 6`) plus the J3.3 control row, with `assertAllTargetsOutput`
   - Done when: slices of struct array fields see updates written through any whole-struct pointer store on all targets
 
 ### Phase 4: JS Nil-`any` Assertions, 64-Bit Range Counters & Wide-Int Bitwise Ops (roots `js-empty-iface-nil-assert`, `js-int64-range-counter`, `js-wide-int-bitwise`)
-- [ ] Task 4.1: Reject `nil` on concrete and generic `any` / `interface{}` assertions in JS (J5.1)
+- [x] Task 4.1: Reject `nil` on concrete and generic `any` / `interface{}` assertions in JS (J5.1)
   - Files: `src/backend/js/expressions.js` (`_typeNameCheckExpr`), `src/backend/js/type-info.js` (`_typeCheckForType`)
   - Test: `test/unit/language/interfaces.test.js`: J5.1 rows and controls (comma-ok and single-value `n.(any)`, `f[interface{}](n)`, `f[any](n)` on `nil` and non-nil values) with `assertAllTargetsOutput`
   - Done when: JS empty-interface assertions match Go/WASM on both `nil` and non-nil interfaces
-- [ ] Task 4.2: Use `0n` counters for JS `int64`/`uint64` range loops (J5.2)
+- [x] Task 4.2: Use `0n` counters for JS `int64`/`uint64` range loops (J5.2)
   - Files: `src/backend/js/statements.js` (`_genIntRangeFor`)
   - Test: `test/unit/language/range-iter.test.js`: J5.2 (`range int64(5)`, `range uint64(5)`, `range n` with `n int64`, and a generic `range` over a `T ~int64` count) with `assertAllTargetsOutput`
   - Done when: 64-bit integer range counters compare and print like Go on `js`, `both`, and `wasm`
-- [ ] Task 4.3: 64-bit shifts and bitwise operators for Number-backed `int`/`uint`/`uintptr` in JS (J5.3)
+- [x] Task 4.3: 64-bit shifts and bitwise operators for Number-backed `int`/`uint`/`uintptr` in JS (J5.3)
   - Files: `src/backend/js/expressions.js` (`_needsStrictOp`, `_genBinaryExpr`, `_genStrictBinary`, unary `^`), `src/backend/js/statements.js` (`_needsStrictCompoundStmt`), `src/backend/js/runtime.js` (`__bit64`, `__tar`)
   - Test: `test/unit/language/operators.test.js`: every J5.3 row (shift, bitwise, compound, generic, and the coincidence controls), plus `int8`/`uint32` wraparound controls, with `assertAllTargetsOutput`
   - Done when: `<<`, `>>`, `&`, `|`, `^`, `&^`, unary `^` and their `op=` forms on `int`/`uint`/`uintptr` match Go on `js`, `both`, and `wasm`
 
 ### Phase 5: Embedded Fields & Scalar Method Promotions (roots `js-embed-path-resolution`, `embedded-scalar-method-promotion`)
-- [ ] Task 5.1: Fix JS `_embedPath` for embedded anonymous-struct aliases and multi-level embedded structs (J4.1)
+- [x] Task 5.1: Fix JS `_embedPath` for embedded anonymous-struct aliases and multi-level embedded structs (J4.1)
   - Files: `src/backend/js/expressions.js` (`_embedPath`)
   - Test: `test/unit/types/embedding.test.js`: J4.1 (`type A = struct{ N int }`, anonymous `struct{ B; Y int }`, named `type Named struct{ B; Y int }` reads & writes through `v.AX.X`) with `assertAllTargetsOutput`
   - Done when: embedded anonymous-struct aliases and multi-level embedded field reads/writes match Go on all targets
-- [ ] Task 5.2: JS stubs for methods promoted from embedded named scalars (J4.2, J4.3 on `js`)
+- [x] Task 5.2: JS stubs for methods promoted from embedded named scalars (J4.2, J4.3 on `js`)
   - Files: `src/lower/embedding.js` (`computeEmbeddedStubs`, `pushValueEmbedStubs`), `src/backend/js/index.js` (`_embedStub`, `_embedStubCall`)
   - Test: `test/unit/types/embedding.test.js`: J4.2 (`*Num`: `Inc`, `Val`, both via interface) with `assertOutput(…, { targets: ["both", "js"] })`; J4.3 (`o.Inc()`, `&o` as `interface{ Inc() }`) on `js` only; J4 control row on all targets
   - Done when: `*Num` promoted methods (direct and via interface) work on `js`/`both`, and `Num` pointer-receiver promotions work on `js`
-- [ ] Task 5.3: Unwrap the scalar box for value-receiver methods promoted through `*Num` on WASM (J4.2 `wasm`)
+- [x] Task 5.3: Unwrap the scalar box for value-receiver methods promoted through `*Num` on WASM (J4.2 `wasm`)
   - Files: `src/backend/wasm/emit-builtins.js` (`_emitEmbeddedMethodCall`), `src/backend/wasm/module-emitter.js` (promoted candidates), `src/backend/wasm/emit.js` (itable value deref)
   - Test: `test/unit/types/embedding.test.js`: all J4.2 rows with `assertAllTargetsOutput` (the already-passing `Inc` rows stay green)
   - Done when: `OuterPtr{*Num}` `Val` and `Inc`, direct and via interface, match Go on `js`, `both`, and `wasm` and the module validates
-- [ ] Task 5.4: Reject pointer-receiver promotions from value-embedded scalars on `both`/`wasm` and document the rule (J4.3 `both`/`wasm`)
+- [x] Task 5.4: Reject pointer-receiver promotions from value-embedded scalars on `both`/`wasm` and document the rule (J4.3 `both`/`wasm`)
   - Files: `src/typechecker/expressions.js` (`_markPtrRecvAddress`), `src/typechecker/assignability.js` (`implements` / conversion diagnostic), `docs/go-compatibility.md` (Pointers row; mirror the sentence in `docs/hybrid-wasm.md` § Pointers in `wasm` and `both` packages)
   - Test: `test/unit/types/embedding.test.js`: `assertErrorContains` with the scalar-interior message for `o.Inc()`, `o.Inc` (method value), and `var i interface{ Inc() } = &o` in `both` and `wasm` packages; the same programs still compile on `js`
   - Done when: J4.3 programs are rejected on `both`/`wasm` with the scalar-interior diagnostic (no invalid WasmGC) and run on `js`, and the docs name `o.Inc()` / `&o` as an `Inc` interface (with `type Outer struct{ Num }`) among the `wasm`/`both` compile errors, with `*Num` as the fix
