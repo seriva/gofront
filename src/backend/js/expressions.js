@@ -132,7 +132,10 @@ function receiverPrefix(stmts, name, safe) {
 // type.
 export function isGenericComposite(t) {
 	return (
-		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		(t?.kind === "map" ||
+			t?.kind === "slice" ||
+			t?.kind === "array" ||
+			(t?.kind === "pointer" && t.base?.kind !== "typeParam")) &&
 		mentionsTypeParam(t)
 	);
 }
@@ -697,11 +700,14 @@ export const expressionGenMethods = {
 			!expr._pbsWrapping
 		) {
 			// `&v` of a type parameter's variable is a box; a struct behind it
-			// is its own pointer.
+			// is its own pointer, and the instantiated type tags `*T` for interfaces.
 			expr._pbsWrapping = true;
 			try {
 				this.useHelper("ifaceBox");
-				return `__pbs(${this.genExpr(expr)})`;
+				const f = this._typeParamZeroFactory(expr._ifaceSrc.base.name);
+				return f
+					? `__pbs(${this.genExpr(expr)}, ${f})`
+					: `__pbs(${this.genExpr(expr)})`;
 			} finally {
 				expr._pbsWrapping = false;
 			}
@@ -743,9 +749,10 @@ export const expressionGenMethods = {
 				this.useHelper("ifaceBox");
 				expr._gmapTagging = true;
 				try {
+					const ptr = this._dynTagFlags(expr._ifaceSrc);
 					// An array is copied before it is tagged: a copy made after
 					// `__ity` (`.map`) would drop the tag.
-					return `__ity(${this.genValueExpr(expr)}, ${tag})`;
+					return `__ity(${this.genValueExpr(expr)}, ${tag}${ptr})`;
 				} finally {
 					expr._gmapTagging = false;
 				}
@@ -810,7 +817,7 @@ export const expressionGenMethods = {
 				return `{ re: 0, im: ${expr.value} }`;
 			case "Ident": {
 				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
-					return `${expr.name}.value`;
+					return this._boxedReadJs(expr.name);
 				// A named untyped constant used as an int64 operand: its
 				// declaration holds a Number, so emit the exact BigInt.
 				const lit64 =
@@ -1061,6 +1068,8 @@ export const expressionGenMethods = {
 		if (!node) return null;
 		if (node.kind === "TypeName" || node.kind === "SelectorExpr")
 			return this._typeFromNameNode(node);
+		if (node.kind === "GenericTypeName")
+			return node._assertType ?? this._typeFromNameNode(node);
 		if (node.kind === "ArrayType")
 			return { kind: "array", elem: this._typeFromNode(node.elem) };
 		if (node.kind === "StructType") return this._typeFromStructNode(node);
@@ -1288,8 +1297,11 @@ export const expressionGenMethods = {
 			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
-				// Address-taken parameter: rebind it to a { value } box.
-				this.line(`${p.name} = { value: ${p.name} };`);
+				// Address-taken parameter: rebind it to a { value } box (or clone
+				// directly when an erased type parameter is a struct).
+				const t = this._typeFromNode(p.type);
+				const cloned = t ? this._cloneJs(t, p.name) : p.name;
+				this.line(`${p.name} = ${this._boxInitJs(p.name, p.name, cloned)};`);
 				continue;
 			}
 			const t = this._typeFromNode(p.type);
@@ -2038,7 +2050,9 @@ export const expressionGenMethods = {
 		const asyncPrefix = expr.async ? "async " : "";
 		const saved = this.out;
 		const prevBoxed = this._boxedVars;
+		const prevBoxedTp = this._boxedTypeParams;
 		this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
+		this._boxedTypeParams = new Map(prevBoxedTp);
 		this._scanAddressTaken(expr.body);
 		this.out = [];
 		this._withFnCtx(
@@ -2053,6 +2067,7 @@ export const expressionGenMethods = {
 		const body = this.out.join("\n");
 		this.out = saved;
 		this._boxedVars = prevBoxed;
+		this._boxedTypeParams = prevBoxedTp;
 		return `${asyncPrefix}function(${params}) {\n${body}\n${"  ".repeat(this.indent)}}`;
 	},
 
@@ -2074,11 +2089,11 @@ export const expressionGenMethods = {
 				`(${check} ? ${out} : (() => { throw ${this._typeAssertFailJs(expr, val)}; })())`,
 			);
 		}
-		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct
-		// or array is a copy of the boxed value.
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted struct,
+		// array or type-parameter value is a copy of the boxed value.
 		const zero = this.zeroValueForTypeNode(expr.type);
 		const valT = this._typeFromNode(expr.type);
-		const okOut = this._aggregateBase(valT) ? this._cloneJs(valT, out) : out;
+		const okOut = this._copyValueJs(valT, out);
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 
@@ -2165,12 +2180,11 @@ export const expressionGenMethods = {
 			this.useHelper("ifaceBox");
 			return `__isty(${val}, ${JSON.stringify(name)}, "named")`;
 		}
-		// An alias of an anonymous struct: a plain object with its fields.
+		// An alias of an anonymous struct: match its dynamic type tag (`__t`),
+		// just like an explicit `struct{...}` assertion, so `*AS` is not `AS`.
 		if (named?.kind === "struct") {
-			const fields = [...(named.fields?.keys() ?? [])].map(
-				(f) => `${JSON.stringify(jsMemberName(f))} in ${val}`,
-			);
-			return `(typeof ${val} === "object" && ${val} !== null && !Array.isArray(${val})${fields.map((f) => ` && ${f}`).join("")})`;
+			this.useHelper("ifaceBox");
+			return `__isty(${val}, ${JSON.stringify(this._dynTypeName(named))}, "struct", null, 0)`;
 		}
 		return "true"; // unknown type — can't check at runtime
 	},
@@ -3347,10 +3361,28 @@ export const expressionGenMethods = {
 	// zero value is a struct object, which is its own pointer when erased; a
 	// map's zero is a bare `{}`, so only a class instance or a populated
 	// object counts).
+	_boxedTypeParamCond(name) {
+		const tpName = this._boxedTypeParams?.get(name);
+		if (!tpName || !this._typeParamZeroFactory(tpName)) return null;
+		return this._typeParamIsStructJs(tpName);
+	},
+
+	_boxInitJs(name, valJs, structValJs = valJs) {
+		const cond = this._boxedTypeParamCond(name);
+		return cond
+			? `(${cond} ? ${structValJs} : { value: ${valJs} })`
+			: `{ value: ${valJs} }`;
+	},
+
+	_boxedReadJs(name) {
+		const cond = this._boxedTypeParamCond(name);
+		return cond ? `(${cond} ? ${name} : ${name}.value)` : `${name}.value`;
+	},
+
 	_typeParamIsStructJs(name) {
 		const f = this._typeParamZeroFactory(name);
 		return f
-			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			? `(${f}.k !== "complex64" && ${f}.k !== "complex128" && ((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}()))`
 			: "false";
 	},
 
@@ -3392,6 +3424,7 @@ export const expressionGenMethods = {
 		}
 		this.useHelper("generics");
 		if (this._is64BitUnsigned(t)) return "__zu64";
+		if (isComplex(t)) return "__zc";
 		const zero = this.zeroValueForType(t);
 		return Object.hasOwn(SHARED_ZERO_FACTORIES, zero)
 			? SHARED_ZERO_FACTORIES[zero]
@@ -3926,14 +3959,63 @@ export const expressionGenMethods = {
 		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
+	// Convert an already-evaluated pointer expression `js` of static pointer
+	// type `t` into its interface representation (for `__ifeq`).
+	_boxPtrForIface(js, t) {
+		if (t.base?.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.base.name);
+			this.useHelper("ifaceBox");
+			return f ? `__pbs(${js}, ${f})` : `__pbs(${js})`;
+		}
+		if (this._namedBoxInfo(t.base))
+			return this._genNamedIfaceBox(js, t.base, true);
+		const ptrCls = this._structPtrClass(t);
+		if (ptrCls) {
+			this.useHelper("ifaceBox");
+			return `__ifn(__ifp(${js}), ${ptrCls})`;
+		}
+		const tag = this._dynTypeTag(t);
+		if (tag) {
+			this.useHelper("ifaceBox");
+			const inner =
+				this._underlyingOf(t.base)?.kind === "struct" ? `__ifp(${js})` : js;
+			return `__ity(${inner}, ${JSON.stringify(tag)}, true)`;
+		}
+		const dyn = mentionsTypeParam(t) ? this._genericMapTag(t) : null;
+		if (!dyn) return js;
+		this.useHelper("ifaceBox");
+		return `__ity(${js}, ${dyn}, true)`;
+	},
+
+	// Convert an already-evaluated JS expression `js` of static type `t` into
+	// its interface representation (for `__ifeq` in `==` and `switch`).
+	_boxForIface(js, t) {
+		if (!t || this._isIfaceType(t)) return js;
+		if (t.kind === "pointer") return this._boxPtrForIface(js, t);
+		if (t.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.name);
+			return f ? `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${js})` : js;
+		}
+		return this._namedBoxInfo(t) ? this._genNamedIfaceBox(js, t, false) : js;
+	},
+
+	_isPreboxedIfaceOperand(e) {
+		const src = e._ifaceSrc;
+		if (!src) return false;
+		if (this._ityTag(e) || src.kind === "typeParam") return true;
+		if (src.kind === "pointer" && src.base?.kind === "typeParam") return true;
+		return isGenericComposite(src) && Boolean(this._genericMapTag(src));
+	},
+
 	// A concrete operand compared with an interface is converted to an interface first.
 	_genIfaceOperand(e) {
-		if (e._ifaceBox || this._isIfaceType(e._type)) return this.genExpr(e);
-		const isPtr = e._type?.kind === "pointer";
-		const named = isPtr ? e._type.base : e._type;
-		if (this._namedBoxInfo(named))
-			return this._genNamedIfaceBox(this.genExpr(e), named, isPtr);
-		return this.genExpr(e);
+		if (
+			e._ifaceBox ||
+			this._isIfaceType(e._type) ||
+			this._isPreboxedIfaceOperand(e)
+		)
+			return this.genExpr(e);
+		return this._boxForIface(this.genExpr(e), e._type);
 	},
 
 	_isIntDivision(expr) {

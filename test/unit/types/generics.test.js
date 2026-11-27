@@ -4478,6 +4478,1193 @@ func main() {
 	await assertAllTargetsOutput(src, want);
 });
 
+test("type-parameter switch tags compare by value equality on JS (G6)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type P struct{ n int }
+
+func match[T comparable](x, y T) bool {
+	switch x {
+	case y:
+		return true
+	}
+	return false
+}
+
+func matchLabeled[T comparable](x, y T) bool {
+L:
+	switch x {
+	case y:
+		for i := 0; i < 1; i++ {
+			break L
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func findIndex[T comparable](ys []T, x T) int {
+	for i, y := range ys {
+		switch y {
+		case x:
+			return i
+		}
+	}
+	return -1
+}
+
+func matchAny[T comparable](x T) string {
+	switch x {
+	case any(P{1}):
+		return "p1"
+	}
+	return "no"
+}
+
+func eq[T comparable](x, y T) bool {
+	return x == y
+}
+
+func matchExprless[T comparable](x, y T) bool {
+	switch {
+	case x == y:
+		return true
+	}
+	return false
+}
+
+func matchAnyTag(x, y any) bool {
+	switch x {
+	case y:
+		return true
+	}
+	return false
+}
+
+func main() {
+	// G6.1: struct, array, complex128, any
+	fmt.Println(match(P{1}, P{1}), match(P{1}, P{2}))
+	fmt.Println(match([2]int{1, 2}, [2]int{1, 2}), match([2]int{1, 2}, [2]int{1, 3}))
+	fmt.Println(match(complex(1, 2), complex(1, 2)), match(complex(1, 2), complex(1, 3)))
+	fmt.Println(match[any](P{1}, P{1}), match[any](P{1}, P{2}))
+
+	// G6.2: labeled switch with break L, switch inside for range, interface-typed case
+	fmt.Println(matchLabeled(P{1}, P{1}), matchLabeled(P{1}, P{2}))
+	fmt.Println(findIndex([]P{{0}, {1}, {2}}, P{1}))
+	fmt.Println(matchAny(P{1}), matchAny(P{2}))
+
+	// Controls
+	fmt.Println(match(5, 5), match(5, 6))
+	fmt.Println(eq(P{1}, P{1}))
+	fmt.Println(matchExprless(P{1}, P{1}))
+	fmt.Println(matchAnyTag(P{1}, P{1}))
+}`;
+	const want =
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"1\n" +
+		"p1 no\n" +
+		"true false\n" +
+		"true\n" +
+		"true\n" +
+		"true\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("address-taken type-parameter params and locals stay unboxed for struct T on JS (G7)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+
+func makePtr[T any](v T) *T {
+	return &v
+}
+
+func makeLocalPtr[T any](v T) *T {
+	x := v
+	return &x
+}
+
+func reassignAfterAddr[T any](v, w T) *T {
+	p := &v
+	v = w
+	return p
+}
+
+func closureAfterAddr[T any](v T) func() T {
+	p := &v
+	return func() T {
+		return *p
+	}
+}
+
+func main() {
+	// G7.1: &v on param and &x on local
+	fmt.Println(makePtr(Box{11}).N)
+	fmt.Println(makeLocalPtr(Box{99}).N)
+
+	// G7.2: reassign after &v, and *p read in closure
+	fmt.Println(reassignAfterAddr(Box{1}, Box{33}).N)
+	fn := closureAfterAddr(Box{7})
+	fmt.Println(fn().N)
+
+	// Controls: mutating through returned *Box, caller copy unchanged, non-struct 42 and [2]int
+	p := makePtr(Box{11})
+	p.N = 22
+	fmt.Println(p.N, *p)
+
+	srcBox := Box{5}
+	makePtr(srcBox).N = 6
+	fmt.Println(srcBox.N)
+
+	pi := makePtr(42)
+	*pi = 43
+	fmt.Println(*pi, *makeLocalPtr(44), *reassignAfterAddr(1, 2), closureAfterAddr(3)())
+
+	pa := makePtr([2]int{3, 4})
+	fmt.Println((*pa)[0], (*pa)[1])
+}`;
+	const want =
+		"11\n" +
+		"99\n" +
+		"33\n" +
+		"7\n" +
+		"22 {22}\n" +
+		"5\n" +
+		"43 44 2 3\n" +
+		"3 4\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("assignments and type-switch bindings on address-taken type-parameter vars (G7 review)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type Nested struct{ Inner struct{ X int } }
+
+func reassign[T any](v, w T) *T {
+	p := &v
+	v = w
+	return p
+}
+
+func swap[T any](a, b T) (*T, *T) {
+	p, q := &a, &b
+	a, b = b, a
+	return p, q
+}
+
+func reassignBlank[T any](v, w T) *T {
+	p := &v
+	v, _ = w, 0
+	return p
+}
+
+func pairOf[T any](w T) (T, int) {
+	return w, 9
+}
+
+func reassignMultiRet[T any](v, w T) (*T, int) {
+	p := &v
+	var k int
+	v, k = pairOf(w)
+	return p, k
+}
+
+func reassignInForPost[T any](v, w T) *T {
+	p := &v
+	for i := 0; i < 1; v = w {
+		i++
+	}
+	return p
+}
+
+func reassignInClosure[T any](v, w T) *T {
+	p := &v
+	fn := func() { v = w }
+	fn()
+	return p
+}
+
+func reassignInForMultiInit[T any](a, b T) T {
+	for v, i := a, 0; i < 1; i++ {
+		p := &v
+		*p = b
+	}
+	return a
+}
+
+func typeSwitchAddr[T any](x any) *T {
+	switch v := x.(type) {
+	case T:
+		return &v
+	}
+	return nil
+}
+
+func typeSwitchMultiCaseAddr[T any](x any) any {
+	switch v := x.(type) {
+	case T:
+		p := &v
+		return *p
+	case int:
+		p := &v
+		return *p
+	case Box:
+		p := &v
+		return p.N
+	default:
+		p := &v
+		return *p
+	}
+}
+
+func typeSwitchPtrAsAny[T any](x any) any {
+	switch v := x.(type) {
+	case T:
+		return &v
+	}
+	return nil
+}
+
+func main() {
+	// Single, swap, blank, multi-return, for-post, closure reassign on anon struct
+	type AS = struct{ N int }
+	fmt.Println(reassign(AS{1}, AS{33}).N)
+	pa, pb := swap(AS{1}, AS{2})
+	fmt.Println(pa.N, pb.N)
+	fmt.Println(reassignBlank(AS{1}, AS{33}).N)
+	pm, km := reassignMultiRet(AS{1}, AS{44})
+	fmt.Println(pm.N, km)
+	fmt.Println(reassignInForPost(AS{1}, AS{55}).N)
+	fmt.Println(reassignInClosure(AS{1}, AS{66}).N)
+	aInit := AS{1}
+	fmt.Println(reassignInForMultiInit(aInit, AS{99}).N, aInit.N)
+
+	// Nested anonymous struct value independence after reassign
+	n1 := Nested{Inner: struct{ X int }{1}}
+	n2 := Nested{Inner: struct{ X int }{20}}
+	pn := reassign(n1, n2)
+	n2.Inner.X = 999
+	fmt.Println(pn.Inner.X)
+
+	// Non-struct controls for swap and blank reassign
+	pi1, pi2 := swap(10, 20)
+	fmt.Println(*pi1, *pi2, *reassignBlank(1, 33))
+	parr := reassign([2]int{1, 2}, [2]int{3, 4})
+	fmt.Println((*parr)[0], (*parr)[1])
+
+	// Type-switch binding &v for struct, anon struct, scalar, array
+	fmt.Println(typeSwitchAddr[Box](Box{77}).N)
+	fmt.Println(typeSwitchAddr[AS](AS{88}).N)
+	fmt.Println(*typeSwitchAddr[int](42))
+	tsa := typeSwitchAddr[[2]int]([2]int{5, 6})
+	fmt.Println((*tsa)[0], (*tsa)[1])
+
+	// Mutating returned *T from type switch does not mutate original interface value
+	orig := any(Box{10})
+	pOrig := typeSwitchAddr[Box](orig)
+	pOrig.N = 99
+	fmt.Println(orig.(Box).N, pOrig.N)
+
+	// Box vs *Box dynamic type when &v from case T enters any
+	ptrAny := typeSwitchPtrAsAny[Box](any(Box{7}))
+	_, isVal := ptrAny.(Box)
+	boxPtr, isPtr := ptrAny.(*Box)
+	fmt.Println(isVal, isPtr, boxPtr.N)
+
+	// Multi-case type switch with mixed clause types
+	fmt.Println(typeSwitchMultiCaseAddr[Box](Box{7}).(Box).N)
+	fmt.Println(typeSwitchMultiCaseAddr[Box](123).(int))
+	fmt.Println(typeSwitchMultiCaseAddr[Box]("hi").(string))
+	fmt.Println(typeSwitchMultiCaseAddr[int](55).(int))
+	fmt.Println(typeSwitchMultiCaseAddr[int](Box{8}).(int))
+}`;
+	const want =
+		"33\n" +
+		"2 1\n" +
+		"33\n" +
+		"44 9\n" +
+		"55\n" +
+		"66\n" +
+		"1 1\n" +
+		"20\n" +
+		"20 10 33\n" +
+		"3 4\n" +
+		"77\n" +
+		"88\n" +
+		"42\n" +
+		"5 6\n" +
+		"10 99\n" +
+		"false true 7\n" +
+		"7\n" +
+		"123\n" +
+		"hi\n" +
+		"55\n" +
+		"8\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("interface switch and equality with type-parameter operands box and track type-info (G6 review)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type P struct{ n int }
+type MyInt int
+type I interface{ Val() int }
+type CI interface {
+	comparable
+	I
+}
+
+func (p P) Val() int { return p.n }
+
+type Wrap[T comparable] struct{ V T }
+
+func (w Wrap[T]) EqAny(a any) bool    { return w.V == a }
+func (w Wrap[T]) EqAnyRev(a any) bool { return a == w.V }
+func (w Wrap[T]) MatchIn(a any) bool {
+	switch a {
+	case w.V:
+		return true
+	}
+	return false
+}
+
+func matchInAny[T comparable](target any, x T) bool {
+	switch target {
+	case x:
+		return true
+	}
+	return false
+}
+
+func matchInIface[T CI](target I, x T) bool {
+	switch target {
+	case x:
+		return true
+	}
+	return false
+}
+
+func eqAny[T comparable](x T, target any) bool {
+	return x == target
+}
+
+func eqAnyRev[T comparable](target any, x T) bool {
+	return target == x
+}
+
+func neqAny[T comparable](x T, target any) bool {
+	return x != target
+}
+
+func neqAnyRev[T comparable](target any, x T) bool {
+	return target != x
+}
+
+func eqIface[T CI](x T, target I) bool {
+	return x == target
+}
+
+func main() {
+	type AS = struct{ n int }
+	// Interface-tagged switch with typeParam case
+	fmt.Println(matchInAny(any(P{1}), P{1}), matchInAny(any(P{1}), P{2}))
+	fmt.Println(matchInAny(any(MyInt(1)), MyInt(1)), matchInAny(any(MyInt(1)), MyInt(2)), matchInAny(any(1), MyInt(1)))
+	fmt.Println(matchInAny(any([2]int{1, 2}), [2]int{1, 2}), matchInAny(any([2]int{1, 2}), [2]int{1, 3}))
+	fmt.Println(matchInAny(any(AS{1}), AS{1}), matchInAny(any(AS{1}), AS{2}))
+	fmt.Println(matchInAny[any](any(P{1}), P{1}), matchInAny[any](any(P{1}), P{2}))
+	fmt.Println(matchInIface(I(P{1}), P{1}), matchInIface(I(P{1}), P{2}))
+
+	// Binary == / != between typeParam and interface (both operand orders)
+	fmt.Println(eqAny(P{1}, any(P{1})), eqAny(P{1}, any(P{2})))
+	fmt.Println(eqAnyRev(any(P{1}), P{1}), eqAnyRev(any(P{1}), P{2}))
+	fmt.Println(neqAny(P{1}, any(P{1})), neqAny(P{1}, any(P{2})))
+	fmt.Println(neqAnyRev(any(P{1}), P{1}), neqAnyRev(any(P{1}), P{2}))
+	fmt.Println(eqAny(MyInt(1), any(MyInt(1))), eqAnyRev(any(MyInt(1)), MyInt(1)), eqAny(MyInt(1), any(1)))
+	fmt.Println(eqAny([2]int{1, 2}, any([2]int{1, 2})), eqAnyRev(any([2]int{1, 2}), [2]int{1, 3}))
+	fmt.Println(eqAny(AS{1}, any(AS{1})), eqAnyRev(any(AS{1}), AS{2}))
+	fmt.Println(eqAny[any](P{1}, any(P{1})), eqAnyRev[any](any(P{1}), P{2}))
+	fmt.Println(eqIface(P{1}, I(P{1})), eqIface(P{1}, I(P{2})))
+
+	// Typed nil pointer vs nil interface
+	var np *P
+	fmt.Println(eqAny(np, any((*P)(nil))), eqAny(np, any(nil)))
+
+	// Generic struct methods
+	w := Wrap[P]{V: P{7}}
+	fmt.Println(w.EqAny(any(P{7})), w.EqAnyRev(any(P{7})), w.MatchIn(any(P{7})), w.MatchIn(any(P{8})))
+}`;
+	const want =
+		"true false\n" +
+		"true false false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"false true\n" +
+		"false true\n" +
+		"true true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true false\n" +
+		"true true true false\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("type assertions clone type-parameter values and keep original interfaces intact", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type GBox[T any] struct{ N T }
+type AS = struct{ N int }
+
+func commaOkMutate[T any](orig any, w T) T {
+	v, ok := orig.(T)
+	if ok {
+		p := &v
+		*p = w
+	}
+	return v
+}
+
+func commaOkPtrToAny[T any](x any) {
+	v, ok := x.(T)
+	if ok {
+		p := &v
+		_ = any(p)
+	}
+}
+
+func singleAssertMutateAndAny[T any](orig any, w T) T {
+	v := orig.(T)
+	p := &v
+	_ = any(p)
+	*p = w
+	return v
+}
+
+func ifInitCommaOk[T any](orig any, w T) T {
+	var out T
+	if v, ok := orig.(T); ok {
+		p := &v
+		_ = any(p)
+		*p = w
+		out = v
+	}
+	return out
+}
+
+func forInitCommaOk[T any](orig any, w T) T {
+	var out T
+	for v, ok := orig.(T); ok; ok = false {
+		p := &v
+		_ = any(p)
+		*p = w
+		out = v
+	}
+	return out
+}
+
+func assignCommaOk[T any](orig any, w T) T {
+	var v T
+	var ok bool
+	v, ok = orig.(T)
+	if ok {
+		p := &v
+		_ = any(p)
+		*p = w
+	}
+	return v
+}
+
+func main() {
+	// Comma-ok mutation does not alias original interface
+	origB := any(Box{10})
+	vB := commaOkMutate[Box](origB, Box{99})
+	fmt.Println(origB.(Box).N, vB.N)
+
+	origAS := any(AS{11})
+	vAS := commaOkMutate[AS](origAS, AS{88})
+	fmt.Println(origAS.(AS).N, vAS.N)
+
+	origArr := any([2]int{1, 2})
+	vArr := commaOkMutate[[2]int](origArr, [2]int{9, 8})
+	fmt.Println(origArr.([2]int)[0], vArr[0])
+
+	// Passing &v to any does not mutate x's dynamic type tag
+	xB := any(Box{10})
+	commaOkPtrToAny[Box](xB)
+	fmt.Println(xB.(Box).N)
+
+	xAS := any(AS{12})
+	commaOkPtrToAny[AS](xAS)
+	fmt.Println(xAS.(AS).N)
+
+	// Single-result assertion
+	sB := any(Box{20})
+	svB := singleAssertMutateAndAny[Box](sB, Box{21})
+	fmt.Println(sB.(Box).N, svB.N)
+
+	sAS := any(AS{22})
+	svAS := singleAssertMutateAndAny[AS](sAS, AS{23})
+	fmt.Println(sAS.(AS).N, svAS.N)
+
+	// if / for / assign comma-ok forms
+	iB := any(Box{30})
+	ivB := ifInitCommaOk[Box](iB, Box{31})
+	fmt.Println(iB.(Box).N, ivB.N)
+
+	fB := any(Box{40})
+	fvB := forInitCommaOk[Box](fB, Box{41})
+	fmt.Println(fB.(Box).N, fvB.N)
+
+	fI := any(45)
+	fvI := forInitCommaOk[int](fI, 46)
+	fmt.Println(fI.(int), fvI)
+
+	aB := any(Box{50})
+	avB := assignCommaOk[Box](aB, Box{51})
+	fmt.Println(aB.(Box).N, avB.N)
+
+	// Comma-ok on generic struct type
+	gOrig := any(GBox[int]{N: 60})
+	gv, gok := gOrig.(GBox[int])
+	if gok {
+		gv.N = 61
+	}
+	fmt.Println(gOrig.(GBox[int]).N, gv.N)
+}`;
+	const want =
+		"10 99\n" +
+		"11 88\n" +
+		"1 9\n" +
+		"10\n" +
+		"12\n" +
+		"20 21\n" +
+		"22 23\n" +
+		"30 31\n" +
+		"40 41\n" +
+		"45 46\n" +
+		"50 51\n" +
+		"60 61\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("pointer-to-type-parameter entering any tags anonymous structs and non-struct boxes", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type ValBox struct{ value int }
+type MyInt int
+type AS = struct{ N int }
+type ASVal = struct{ value int }
+type Empty = struct{}
+type Wrap[T any] struct{ V T }
+
+func ts[T any](x any) any {
+	switch v := x.(type) {
+	case T:
+		return &v
+	}
+	return nil
+}
+
+func makePtr[T any](v T) any {
+	return &v
+}
+
+func ptrField[T any](w *Wrap[T]) any {
+	return &w.V
+}
+
+func sliceElemPtrAndVal[T any](s []T) (any, any) {
+	p := &s[0]
+	a := any(p)
+	v := s[0]
+	return a, any(v)
+}
+
+func main() {
+	// Type switch returning &v for anonymous struct alias (package-level)
+	orig := any(AS{7})
+	a := ts[AS](orig)
+	_, v1 := a.(AS)
+	p1, k1 := a.(*AS)
+	if k1 {
+		p1.N = 70
+	}
+	fmt.Println(v1, k1, p1 != nil, orig.(AS).N)
+
+	// Local anonymous struct alias
+	type LocalAS = struct{ N int }
+	la := ts[LocalAS](any(LocalAS{17}))
+	_, lv1 := la.(LocalAS)
+	lp1, lk1 := la.(*LocalAS)
+	fmt.Println(lv1, lk1, lp1 != nil)
+
+	// Direct &AS entering any
+	dc := any(&AS{9})
+	_, dv := dc.(AS)
+	dp, dk := dc.(*AS)
+	fmt.Println(dv, dk, dp != nil)
+
+	// makePtr across anon struct, value-field structs, empty struct, and non-structs
+	bAS := makePtr(AS{8})
+	_, mvAS := bAS.(AS)
+	mpAS, mkAS := bAS.(*AS)
+	fmt.Println(mvAS, mkAS, mpAS != nil && mpAS.N == 8)
+
+	bVB := makePtr(ValBox{2})
+	_, mvVB := bVB.(ValBox)
+	mpVB, mkVB := bVB.(*ValBox)
+	fmt.Println(mvVB, mkVB, mpVB != nil && (*mpVB).value == 2)
+
+	bASV := makePtr(ASVal{3})
+	_, mvASV := bASV.(ASVal)
+	mpASV, mkASV := bASV.(*ASVal)
+	fmt.Println(mvASV, mkASV, mpASV != nil && (*mpASV).value == 3)
+
+	bEmp := makePtr(Empty{})
+	_, mvEmp := bEmp.(Empty)
+	mpEmp, mkEmp := bEmp.(*Empty)
+	fmt.Println(mvEmp, mkEmp, mpEmp != nil)
+
+	bInt := makePtr(42)
+	_, mvInt := bInt.(int)
+	mpInt, mkInt := bInt.(*int)
+	fmt.Println(mvInt, mkInt, mpInt != nil && *mpInt == 42)
+
+	bArr := makePtr([2]int{4, 5})
+	_, mvArr := bArr.([2]int)
+	mpArr, mkArr := bArr.(*[2]int)
+	fmt.Println(mvArr, mkArr, mpArr != nil && (*mpArr)[1] == 5)
+
+	bMy := makePtr(MyInt(6))
+	_, mvMy := bMy.(MyInt)
+	mpMy, mkMy := bMy.(*MyInt)
+	fmt.Println(mvMy, mkMy, mpMy != nil && *mpMy == 6)
+
+	// Field address &w.V entering any and mutating through asserted pointer
+	wb := Wrap[Box]{V: Box{3}}
+	ab := ptrField(&wb)
+	_, fbv := ab.(Box)
+	fbp, fbk := ab.(*Box)
+	if fbk {
+		fbp.N = 30
+	}
+	fmt.Println(fbv, fbk, wb.V.N)
+
+	wa := Wrap[AS]{V: AS{4}}
+	aa := ptrField(&wa)
+	_, fav := aa.(AS)
+	fap, fak := aa.(*AS)
+	if fak {
+		fap.N = 40
+	}
+	fmt.Println(fav, fak, wa.V.N)
+
+	// Slice element pointer boxed then value copied and boxed
+	sb := []Box{{N: 1}}
+	spB, svB := sliceElemPtrAndVal(sb)
+	_, spBIsVal := spB.(Box)
+	_, spBIsPtr := spB.(*Box)
+	_, svBIsVal := svB.(Box)
+	_, svBIsPtr := svB.(*Box)
+	fmt.Println(spBIsVal, spBIsPtr, svBIsVal, svBIsPtr)
+
+	sa := []AS{{N: 2}}
+	spA, svA := sliceElemPtrAndVal(sa)
+	_, spAIsVal := spA.(AS)
+	_, spAIsPtr := spA.(*AS)
+	_, svAIsVal := svA.(AS)
+	_, svAIsPtr := svA.(*AS)
+	fmt.Println(spAIsVal, spAIsPtr, svAIsVal, svAIsPtr)
+
+	// *any holding Box stays *any (does not unwrap to *Box), complex128 stays boxed
+	pa := makePtr[any](Box{5})
+	_, paBox := pa.(*Box)
+	paPtr, paAny := pa.(*any)
+	fmt.Println(paBox, paAny, paPtr != nil && (*paPtr).(Box).N == 5)
+
+	pc := makePtr(complex(1, 2))
+	_, pcVal := pc.(complex128)
+	pcPtr, pcOk := pc.(*complex128)
+	fmt.Println(pcVal, pcOk, pcPtr != nil && *pcPtr == complex(1, 2))
+
+	// Grouped vs expanded anonymous struct fields match identical type
+	type AS1 = struct{ X, Y int }
+	type AS2 = struct{ X int; Y int }
+	var g any = AS1{1, 2}
+	_, g1 := g.(AS1)
+	_, g2 := g.(AS2)
+	_, g3 := g.(struct{ X int; Y int })
+	fmt.Println(g1, g2, g3)
+
+	// Type switch case T with T = AS rejects *AS and int
+	fmt.Println(ts[AS](any(&AS{1})) == nil, ts[AS](any(123)) == nil)
+}`;
+	const want =
+		"false true true 7\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"false true 30\n" +
+		"false true 40\n" +
+		"false true true false\n" +
+		"false true true false\n" +
+		"false true true\n" +
+		"false true true\n" +
+		"true true true\n" +
+		"true true\n";
+	await assertAllTargetsOutput(src, want);
+});
+
+test("pointer-to-type-parameter scalar field, nil, new, complex, and interface comparisons (js, both)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type MyInt int
+type AS = struct{ N int }
+type Empty = struct{}
+type Wrap[T any] struct{ V T }
+
+func ptrOf[T any](v T) *T { return &v }
+func ptrField[T any](w *Wrap[T]) any { return &w.V }
+func nilPtr[T any]() any { var p *T; return p }
+func newPtr[T any](v T) any { p := new(T); *p = v; return p }
+func eqPtr[T any](v T, a any) (bool, bool) {
+	p := &v
+	a2 := any(p)
+	sw := false
+	switch a2 {
+	case p:
+		sw = true
+	}
+	return p == a, sw
+}
+
+func main() {
+	// Scalar field pointer entering any
+	wi := Wrap[int]{V: 5}
+	ai := ptrField(&wi)
+	_, fiv := ai.(int)
+	fip, fik := ai.(*int)
+	if fik {
+		*fip = 50
+	}
+	fmt.Println(fiv, fik, wi.V)
+
+	// Plain *T for complex128 without entering any
+	cp := ptrOf(complex(3, 4))
+	fmt.Println(*cp == complex(3, 4))
+
+	// Typed nil *T entering any
+	nb := nilPtr[Box]()
+	nbp, nbk := nb.(*Box)
+	na := nilPtr[AS]()
+	nap, nak := na.(*AS)
+	ni := nilPtr[int]()
+	nip, nik := ni.(*int)
+	nm := nilPtr[MyInt]()
+	nmp, nmk := nm.(*MyInt)
+	fmt.Println(nb != nil && nbk && nbp == nil, na != nil && nak && nap == nil, ni != nil && nik && nip == nil, nm != nil && nmk && nmp == nil)
+
+	// new(T) entering any
+	newB := newPtr(Box{3})
+	nb2, nb2k := newB.(*Box)
+	newAS := newPtr(AS{4})
+	na2, na2k := newAS.(*AS)
+	newE := newPtr(Empty{})
+	_, ne2k := newE.(*Empty)
+	newI := newPtr(7)
+	ni2, ni2k := newI.(*int)
+	fmt.Println(nb2k && nb2.N == 3, na2k && na2.N == 4, ne2k, ni2k && *ni2 == 7)
+
+	// Comparing *T with interface
+	e1, sw1 := eqPtr(Box{1}, any(&Box{1}))
+	e2, sw2 := eqPtr(AS{1}, any(&AS{1}))
+	e3, sw3 := eqPtr(5, any(5))
+	fmt.Println(e1, sw1, e2, sw2, e3, sw3)
+}`;
+	const want =
+		"false true 50\n" +
+		"true\n" +
+		"true true true true\n" +
+		"true true true true\n" +
+		"false true false true false true\n";
+	await assertJsTargetsOutput(src, want);
+});
+
+test("value switch on pointer-to-type-parameter and pointers against interface, nil, and pointer cases (js, both)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type MyInt int
+type MyIntM int
+func (m *MyIntM) Ping() int { return int(*m) }
+type Pinger interface{ Ping() int }
+type AS = struct{ N int }
+type Empty = struct{}
+type Wrap[T any] struct{ V T }
+
+func (w *Wrap[T]) FieldPtrAny() any { return &w.V }
+
+func (w *Wrap[T]) MatchFieldPtr(a any) bool {
+	p := &w.V
+	switch p {
+	case a:
+		return true
+	}
+	return false
+}
+
+func swPtr[T any](v T) (bool, bool, bool) {
+	p := &v
+	a := any(p)
+	r1 := false
+	switch p {
+	case a:
+		r1 = true
+	}
+	var np *T
+	na := any(np)
+	r2 := false
+	switch np {
+	case na:
+		r2 = true
+	}
+	// Typed nil must not match nil interface, but must match literal nil.
+	var nilAny any
+	r3 := false
+	switch np {
+	case nilAny:
+		r3 = false
+	case nil:
+		r3 = true
+	}
+	return r1, r2, r3
+}
+
+func swPtrOnly[T any](p *T, a any) bool {
+	switch p {
+	case a:
+		return true
+	}
+	return false
+}
+
+func swMixedAndLabeled[T any](v T, other T) (int, int, int) {
+	p := &v
+	q := &v
+	o := &other
+	a := any(p)
+	c1 := 0
+L1:
+	switch p {
+	case nil:
+		c1 = 1
+	case o:
+		c1 = 2
+	case a:
+		c1 = 3
+		break L1
+	}
+	c2 := 0
+L2:
+	switch p2 := &v; p2 {
+	case nil:
+		c2 = 1
+	case q:
+		c2 = 2
+		break L2
+	case a:
+		c2 = 3
+	}
+	var np *T
+	c3 := 0
+L3:
+	switch np {
+	case a:
+		c3 = 1
+	case nil:
+		c3 = 2
+		break L3
+	}
+	return c1, c2, c3
+}
+
+func swSliceElemPtr[T any](s []T) (bool, bool, bool) {
+	p := &s[0]
+	q := &s[0]
+	a := any(p)
+	a2 := any(q)
+	r1, r2, r3 := false, false, false
+	switch p {
+	case q:
+		r1 = true
+	}
+	switch p {
+	case a:
+		r2 = true
+	}
+	switch p {
+	case a2:
+		r3 = true
+	}
+	return r1, r2, r3
+}
+
+func swCallOnce[T any](v T) (int, bool) {
+	p := &v
+	a := any(p)
+	calls := 0
+	getP := func() *T {
+		calls++
+		return p
+	}
+	var other T
+	o := &other
+	var otherAny any = 999
+	matched := false
+	switch getP() {
+	case nil:
+	case o:
+	case otherAny:
+	case a:
+		matched = true
+	}
+	return calls, matched
+}
+
+func swMultiFallReassign[T any](v1, v2 T) (bool, int, bool, bool) {
+	p := &v1
+	a := any(p)
+	m1 := false
+	switch p {
+	case nil, a:
+		m1 = true
+	}
+	ft := 0
+	switch p {
+	case a:
+		ft += 10
+		fallthrough
+	case nil:
+		ft += 1
+	}
+	_, stillVal := any(v1).(T)
+	p = &v2
+	m2 := false
+	switch p {
+	case a:
+		m2 = true
+	}
+	return m1, ft, m2, stillVal
+}
+
+func swDoubleAndSlicePtr[T any](p *[]T, a any) (bool, bool, bool) {
+	var npp **T
+	na := any(npp)
+	d1, d2 := false, false
+	switch npp {
+	case na:
+		d1 = true
+	}
+	switch npp {
+	case any(nil):
+		d2 = true
+	}
+	s1 := false
+	switch p {
+	case a:
+		s1 = true
+	}
+	return d1, d2, s1
+}
+
+func main() {
+	r1, r2, r3 := swPtr(Empty{})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(Box{1})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(AS{1})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(5)
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(MyInt(5))
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(MyIntM(5))
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr([2]int{1, 2})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(complex(1, 2))
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr[any](Box{1})
+	fmt.Println(r1, r2, r3)
+
+	// Switch-only generic function (relies on _stmtUsesTypeInfo for *T tag)
+	var nb *Box
+	var ne *Empty
+	var nm *MyIntM
+	ve := Empty{}
+	pe := &ve
+	fmt.Println(swPtrOnly(nb, any(nb)), swPtrOnly(ne, any(ne)), swPtrOnly(nm, any(nm)), swPtrOnly(pe, any(pe)), swPtrOnly(nb, any(nil)))
+
+	// Labeled switches, init switches, mixed cases (nil, *T, any)
+	c1, c2, c3 := swMixedAndLabeled(Empty{}, Empty{})
+	fmt.Println(c1, c2, c3)
+	c1, c2, c3 = swMixedAndLabeled(Box{1}, Box{2})
+	fmt.Println(c1, c2, c3)
+	c1, c2, c3 = swMixedAndLabeled(MyIntM(1), MyIntM(2))
+	fmt.Println(c1, c2, c3)
+
+	// Slice element pointers (&s[0] == &s[0] and interface cases)
+	r1, r2, r3 = swSliceElemPtr([]int{10})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]Box{{10}})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]AS{{10}})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]Empty{{}})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]MyIntM{10})
+	fmt.Println(r1, r2, r3)
+
+	// Generic struct method switching on &w.V
+	we := Wrap[Empty]{V: Empty{}}
+	wb := Wrap[Box]{V: Box{9}}
+	wm := Wrap[MyIntM]{V: MyIntM(9)}
+	fmt.Println(we.MatchFieldPtr(we.FieldPtrAny()), wb.MatchFieldPtr(wb.FieldPtrAny()), wm.MatchFieldPtr(wm.FieldPtrAny()))
+
+	// Concrete pointer & named tags against interface cases (any and named interface)
+	var pb *Box
+	ab := any(pb)
+	var pi *int
+	ai := any(pi)
+	var pas *AS
+	aas := any(pas)
+	var pm MyIntM = 7
+	ppm := &pm
+	var ping Pinger = ppm
+	var pmNil *MyIntM
+	var pingNil Pinger = pmNil
+	var nilPing Pinger
+	var mi MyInt = 3
+	ami := any(mi)
+	rb, ri, ras, rm, rmNil, rmNotNil, rmi := false, false, false, false, false, true, false
+	switch pb {
+	case ab:
+		rb = true
+	}
+	switch pi {
+	case ai:
+		ri = true
+	}
+	switch pas {
+	case aas:
+		ras = true
+	}
+	switch ppm {
+	case ping:
+		rm = true
+	}
+	switch pmNil {
+	case nilPing:
+		rmNotNil = false
+	case pingNil:
+		rmNil = true
+	}
+	switch mi {
+	case ami:
+		rmi = true
+	}
+	fmt.Println(rb, ri, ras, rm, rmNil, rmNotNil, rmi)
+	fmt.Println(pb == ab, pi == ai, pas == aas, ppm == ping, pmNil == pingNil, pmNil == nilPing, mi == ami)
+
+	// Call-once, multi-expr case, fallthrough, reassignment, value preservation
+	callsE, matchE := swCallOnce(Empty{})
+	callsM, matchM := swCallOnce(MyIntM(5))
+	fmt.Println(callsE, matchE, callsM, matchM)
+	m1, ft, m2, sv := swMultiFallReassign(Empty{}, Empty{})
+	fmt.Println(m1, ft, m2, sv)
+	m1, ft, m2, sv = swMultiFallReassign(Box{1}, Box{2})
+	fmt.Println(m1, ft, m2, sv)
+
+	// Nested generic pointers (**T and *[]T) and reverse switch on any
+	var npsl *[]int
+	d1, d2, s1 := swDoubleAndSlicePtr(npsl, any(npsl))
+	_, _, s2 := swDoubleAndSlicePtr(npsl, any(nil))
+	revRes := 0
+	switch any((*Box)(nil)) {
+	case nil:
+		revRes = 1
+	case (*int)(nil):
+		revRes = 2
+	case (*Box)(nil):
+		revRes = 3
+	}
+	fmt.Println(d1, d2, s1, s2, revRes)
+}`;
+	const want =
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true true false\n" +
+		"3 2 2\n" +
+		"3 2 2\n" +
+		"3 2 2\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true true true true true\n" +
+		"true true true true true false true\n" +
+		"1 true 1 true\n" +
+		"true 11 false true\n" +
+		"true 11 false true\n" +
+		"true false true false 3\n";
+	await assertJsTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

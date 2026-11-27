@@ -269,6 +269,7 @@ export class CodeGen {
 		this._srcMappings = []; // { genLine, srcLine, srcFileIdx } for source map
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
+		this._boxedTypeParams = new Map(); // boxed var name -> typeParam name
 		this._hoistedLocals = new Set(); // function-local classes the json codecs name
 		this._hasJsonCodecs = false;
 		this._jsonCodecFileIdx = -1;
@@ -1261,12 +1262,15 @@ export class CodeGen {
 			decl._line ?? null,
 		);
 		const prevBoxed = this._boxedVars;
+		const prevBoxedTp = this._boxedTypeParams;
 		this._boxedVars = new Set(this._boxedGlobals);
+		this._boxedTypeParams = new Map();
 		this._scanAddressTaken(decl.body);
 		this._withTypeParamZeros(tpNames, () =>
 			this._genMethodBody(decl, staticNamed, recvParam, tpNames),
 		);
 		this._boxedVars = prevBoxed;
+		this._boxedTypeParams = prevBoxedTp;
 		this.line("}");
 		// `Unwrap() []error` is told apart from `Unwrap() error` in type tests.
 		if (
@@ -1379,7 +1383,9 @@ export class CodeGen {
 			return;
 		}
 		const prevBoxed = this._boxedVars;
+		const prevBoxedTp = this._boxedTypeParams;
 		this._boxedVars = new Set(this._boxedGlobals);
+		this._boxedTypeParams = new Map();
 		this._scanAddressTaken(decl.body);
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
@@ -1388,6 +1394,7 @@ export class CodeGen {
 			}),
 		);
 		this._boxedVars = prevBoxed;
+		this._boxedTypeParams = prevBoxedTp;
 		this.line("}");
 	}
 
@@ -1494,13 +1501,24 @@ export class CodeGen {
 	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.
 	// A pointer-receiver method call on a named non-struct local (`l.Set(5)`)
 	// takes the variable's address too, so the variable must be boxed.
-	_scanAddressTaken(node, into = this._boxedVars) {
+	_scanAddressTaken(
+		node,
+		into = this._boxedVars,
+		tpInto = this._boxedTypeParams,
+	) {
 		scanAddressTaken(node, into);
 		const visit = (n) => {
 			if (!n || typeof n !== "object") return;
 			if (Array.isArray(n)) {
 				for (const item of n) visit(item);
 				return;
+			}
+			if (
+				n.kind === "Ident" &&
+				n._addressTaken &&
+				n._type?.kind === "typeParam"
+			) {
+				tpInto.set(n.name, n._type.name);
 			}
 			if (n.kind === "CallExpr" && n.func?.kind === "SelectorExpr") {
 				const recv = n.func.expr;
@@ -1579,7 +1597,9 @@ export class CodeGen {
 		for (const name of spec.names) {
 			if (name === "_") continue;
 			this._markOwnership(name, true);
-			const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
+			const val = this._boxedVars.has(name)
+				? this._boxInitJs(name, zero)
+				: zero;
 			this.line(`let ${name} = ${val};`);
 		}
 	}
@@ -1602,7 +1622,7 @@ export class CodeGen {
 		}
 		if (names.length === 1) {
 			const val = this._boxedVars.has(names[0])
-				? `{ value: ${vals[0]} }`
+				? this._boxInitJs(names[0], vals[0])
 				: vals[0];
 			this.line(`let ${names[0]} = ${val};`);
 			return;
