@@ -1,7 +1,7 @@
 # Generics & Alias Semantics Fixes — Design Plan
 
 **Version:** v2.0.0  
-**Status:** In Progress  
+**Status:** Completed (2026-11-27)  
 **Base branch:** main  
 **Related:** Scheduled from `plans/follow-ups.md` on 2026-11-24 (`/bs-plan`): generic and type-alias follow-ups from `checker-go-rules` (L13, L15, L19, L21, L22), `checker-operand-rules` (L42, L43), `codegen-fixes` (L82), and `js-dead-code-elimination` (L42 DCE sibling). Split from [`js-codegen-and-value-semantics-plan.md`](js-codegen-and-value-semantics-plan.md) for phase sizing; run sequentially with it because both touch `src/typechecker/expressions.js` and `src/backend/js/{expressions,statements,runtime}.js`.  
 **Release note:** Methods declared on generic non-struct types (`type List[T any] []T`) and on type aliases of local types (`type A = P`) now work on JavaScript and WebAssembly, method expressions on interfaces and type parameters (`N.M(x)`, `T.M(t)`) compile, and generic code on JavaScript now gets the same results as Go for `clear`, `len`, `cap`, `copy`, `append`, `string(t)` and `T(x)` conversions, `switch` on struct or array values, and `&v` of a struct parameter. Declaring methods on an alias of an instantiated generic type (`type A = G[int]`) is now a compile error, as in Go.
