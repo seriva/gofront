@@ -42,8 +42,9 @@ const TYPE_INFO_BUILTINS = new Set(["clear", "len", "cap"]);
 const isTypeParamOrPtr = (t, names) =>
 	(t?.kind === "typeParam" && names.has(t.name)) ||
 	(t?.kind === "pointer" &&
-		t.base?.kind === "typeParam" &&
-		names.has(t.base.name));
+		(t.base?.kind === "typeParam"
+			? names.has(t.base.name)
+			: mentionsTypeParam(t.base)));
 
 export const typeInfoGenMethods = {
 	// Whether the body of generic `decl` (a function or method declaration)

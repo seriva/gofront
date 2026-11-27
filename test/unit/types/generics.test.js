@@ -5324,6 +5324,347 @@ func main() {
 	await assertJsTargetsOutput(src, want);
 });
 
+test("value switch on pointer-to-type-parameter and pointers against interface, nil, and pointer cases (js, both)", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Box struct{ N int }
+type MyInt int
+type MyIntM int
+func (m *MyIntM) Ping() int { return int(*m) }
+type Pinger interface{ Ping() int }
+type AS = struct{ N int }
+type Empty = struct{}
+type Wrap[T any] struct{ V T }
+
+func (w *Wrap[T]) FieldPtrAny() any { return &w.V }
+
+func (w *Wrap[T]) MatchFieldPtr(a any) bool {
+	p := &w.V
+	switch p {
+	case a:
+		return true
+	}
+	return false
+}
+
+func swPtr[T any](v T) (bool, bool, bool) {
+	p := &v
+	a := any(p)
+	r1 := false
+	switch p {
+	case a:
+		r1 = true
+	}
+	var np *T
+	na := any(np)
+	r2 := false
+	switch np {
+	case na:
+		r2 = true
+	}
+	// Typed nil must not match nil interface, but must match literal nil.
+	var nilAny any
+	r3 := false
+	switch np {
+	case nilAny:
+		r3 = false
+	case nil:
+		r3 = true
+	}
+	return r1, r2, r3
+}
+
+func swPtrOnly[T any](p *T, a any) bool {
+	switch p {
+	case a:
+		return true
+	}
+	return false
+}
+
+func swMixedAndLabeled[T any](v T, other T) (int, int, int) {
+	p := &v
+	q := &v
+	o := &other
+	a := any(p)
+	c1 := 0
+L1:
+	switch p {
+	case nil:
+		c1 = 1
+	case o:
+		c1 = 2
+	case a:
+		c1 = 3
+		break L1
+	}
+	c2 := 0
+L2:
+	switch p2 := &v; p2 {
+	case nil:
+		c2 = 1
+	case q:
+		c2 = 2
+		break L2
+	case a:
+		c2 = 3
+	}
+	var np *T
+	c3 := 0
+L3:
+	switch np {
+	case a:
+		c3 = 1
+	case nil:
+		c3 = 2
+		break L3
+	}
+	return c1, c2, c3
+}
+
+func swSliceElemPtr[T any](s []T) (bool, bool, bool) {
+	p := &s[0]
+	q := &s[0]
+	a := any(p)
+	a2 := any(q)
+	r1, r2, r3 := false, false, false
+	switch p {
+	case q:
+		r1 = true
+	}
+	switch p {
+	case a:
+		r2 = true
+	}
+	switch p {
+	case a2:
+		r3 = true
+	}
+	return r1, r2, r3
+}
+
+func swCallOnce[T any](v T) (int, bool) {
+	p := &v
+	a := any(p)
+	calls := 0
+	getP := func() *T {
+		calls++
+		return p
+	}
+	var other T
+	o := &other
+	var otherAny any = 999
+	matched := false
+	switch getP() {
+	case nil:
+	case o:
+	case otherAny:
+	case a:
+		matched = true
+	}
+	return calls, matched
+}
+
+func swMultiFallReassign[T any](v1, v2 T) (bool, int, bool, bool) {
+	p := &v1
+	a := any(p)
+	m1 := false
+	switch p {
+	case nil, a:
+		m1 = true
+	}
+	ft := 0
+	switch p {
+	case a:
+		ft += 10
+		fallthrough
+	case nil:
+		ft += 1
+	}
+	_, stillVal := any(v1).(T)
+	p = &v2
+	m2 := false
+	switch p {
+	case a:
+		m2 = true
+	}
+	return m1, ft, m2, stillVal
+}
+
+func swDoubleAndSlicePtr[T any](p *[]T, a any) (bool, bool, bool) {
+	var npp **T
+	na := any(npp)
+	d1, d2 := false, false
+	switch npp {
+	case na:
+		d1 = true
+	}
+	switch npp {
+	case any(nil):
+		d2 = true
+	}
+	s1 := false
+	switch p {
+	case a:
+		s1 = true
+	}
+	return d1, d2, s1
+}
+
+func main() {
+	r1, r2, r3 := swPtr(Empty{})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(Box{1})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(AS{1})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(5)
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(MyInt(5))
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(MyIntM(5))
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr([2]int{1, 2})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr(complex(1, 2))
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swPtr[any](Box{1})
+	fmt.Println(r1, r2, r3)
+
+	// Switch-only generic function (relies on _stmtUsesTypeInfo for *T tag)
+	var nb *Box
+	var ne *Empty
+	var nm *MyIntM
+	ve := Empty{}
+	pe := &ve
+	fmt.Println(swPtrOnly(nb, any(nb)), swPtrOnly(ne, any(ne)), swPtrOnly(nm, any(nm)), swPtrOnly(pe, any(pe)), swPtrOnly(nb, any(nil)))
+
+	// Labeled switches, init switches, mixed cases (nil, *T, any)
+	c1, c2, c3 := swMixedAndLabeled(Empty{}, Empty{})
+	fmt.Println(c1, c2, c3)
+	c1, c2, c3 = swMixedAndLabeled(Box{1}, Box{2})
+	fmt.Println(c1, c2, c3)
+	c1, c2, c3 = swMixedAndLabeled(MyIntM(1), MyIntM(2))
+	fmt.Println(c1, c2, c3)
+
+	// Slice element pointers (&s[0] == &s[0] and interface cases)
+	r1, r2, r3 = swSliceElemPtr([]int{10})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]Box{{10}})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]AS{{10}})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]Empty{{}})
+	fmt.Println(r1, r2, r3)
+	r1, r2, r3 = swSliceElemPtr([]MyIntM{10})
+	fmt.Println(r1, r2, r3)
+
+	// Generic struct method switching on &w.V
+	we := Wrap[Empty]{V: Empty{}}
+	wb := Wrap[Box]{V: Box{9}}
+	wm := Wrap[MyIntM]{V: MyIntM(9)}
+	fmt.Println(we.MatchFieldPtr(we.FieldPtrAny()), wb.MatchFieldPtr(wb.FieldPtrAny()), wm.MatchFieldPtr(wm.FieldPtrAny()))
+
+	// Concrete pointer & named tags against interface cases (any and named interface)
+	var pb *Box
+	ab := any(pb)
+	var pi *int
+	ai := any(pi)
+	var pas *AS
+	aas := any(pas)
+	var pm MyIntM = 7
+	ppm := &pm
+	var ping Pinger = ppm
+	var pmNil *MyIntM
+	var pingNil Pinger = pmNil
+	var nilPing Pinger
+	var mi MyInt = 3
+	ami := any(mi)
+	rb, ri, ras, rm, rmNil, rmNotNil, rmi := false, false, false, false, false, true, false
+	switch pb {
+	case ab:
+		rb = true
+	}
+	switch pi {
+	case ai:
+		ri = true
+	}
+	switch pas {
+	case aas:
+		ras = true
+	}
+	switch ppm {
+	case ping:
+		rm = true
+	}
+	switch pmNil {
+	case nilPing:
+		rmNotNil = false
+	case pingNil:
+		rmNil = true
+	}
+	switch mi {
+	case ami:
+		rmi = true
+	}
+	fmt.Println(rb, ri, ras, rm, rmNil, rmNotNil, rmi)
+	fmt.Println(pb == ab, pi == ai, pas == aas, ppm == ping, pmNil == pingNil, pmNil == nilPing, mi == ami)
+
+	// Call-once, multi-expr case, fallthrough, reassignment, value preservation
+	callsE, matchE := swCallOnce(Empty{})
+	callsM, matchM := swCallOnce(MyIntM(5))
+	fmt.Println(callsE, matchE, callsM, matchM)
+	m1, ft, m2, sv := swMultiFallReassign(Empty{}, Empty{})
+	fmt.Println(m1, ft, m2, sv)
+	m1, ft, m2, sv = swMultiFallReassign(Box{1}, Box{2})
+	fmt.Println(m1, ft, m2, sv)
+
+	// Nested generic pointers (**T and *[]T) and reverse switch on any
+	var npsl *[]int
+	d1, d2, s1 := swDoubleAndSlicePtr(npsl, any(npsl))
+	_, _, s2 := swDoubleAndSlicePtr(npsl, any(nil))
+	revRes := 0
+	switch any((*Box)(nil)) {
+	case nil:
+		revRes = 1
+	case (*int)(nil):
+		revRes = 2
+	case (*Box)(nil):
+		revRes = 3
+	}
+	fmt.Println(d1, d2, s1, s2, revRes)
+}`;
+	const want =
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true true false\n" +
+		"3 2 2\n" +
+		"3 2 2\n" +
+		"3 2 2\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true\n" +
+		"true true true true true true true\n" +
+		"true true true true true false true\n" +
+		"1 true 1 true\n" +
+		"true 11 false true\n" +
+		"true 11 false true\n" +
+		"true false true false 3\n";
+	await assertJsTargetsOutput(src, want);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

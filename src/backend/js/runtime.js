@@ -959,8 +959,13 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
   if (a === b) return true;
   if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
   if (a.__nilp === true && b.__nilp === true && a.__t !== undefined) return a.__t === b.__t;
+  if (typeof a === "object" && typeof b === "object" && a.__target !== undefined && b.__target !== undefined && a.__v !== true && b.__v !== true && a.__t === b.__t) {
+    return a.__target === b.__target && a.__index === b.__index;
+  }
   if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
     const ua = a.__gfUnbox(), ub = b.__gfUnbox();
+    if (ua != null && ub != null && ua.__target !== undefined && ub.__target !== undefined)
+      return ua.__target === ub.__target && ua.__index === ub.__index;
     return Array.isArray(ua) && Array.isArray(ub) ? __equal(ua, ub) : ua === ub;
   }
   // Struct values boxed by __ifv compare field by field.

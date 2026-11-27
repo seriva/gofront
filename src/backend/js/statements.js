@@ -2483,10 +2483,98 @@ export const statementGenMethods = {
 			caseExpr: (e) => {
 				if (this._isIfaceType(e._type)) {
 					this.useHelper("ifeq");
-					return `__ifeq((${factory}.b ?? ${factory}.fb ?? ((__v) => __v))(${tmp}), ${this._genIfaceOperand(e)})`;
+					return `__ifeq(${this._boxForIface(tmp, stmt.tag._type)}, ${this._genIfaceOperand(e)})`;
 				}
 				return `__geq(${factory}, ${tmp}, ${this.genExpr(e)})`;
 			},
+		};
+	},
+
+	_hasIfaceSwitchCase(stmt) {
+		return stmt.cases.some((c) =>
+			c.list?.some((e) => this._isIfaceType(e._type)),
+		);
+	},
+
+	_needsPointerOrIfaceCaseSwitch(stmt) {
+		const t = stmt.tag?._type;
+		if (!t) return false;
+		return (
+			(t.kind === "pointer" && t.base?.kind === "typeParam") ||
+			this._isScalarPointerType(t) ||
+			this._hasIfaceSwitchCase(stmt)
+		);
+	},
+
+	_pointerOrIfaceSwitchCases(stmt, tag) {
+		if (!this._needsPointerOrIfaceCaseSwitch(stmt)) return null;
+		const tagType = stmt.tag._type;
+		const scalarPtr = this._isScalarPointerType(tagType);
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (this._isIfaceType(e._type)) {
+					this.useHelper("ifeq");
+					return `__ifeq(${this._boxForIface(tmp, tagType)}, ${this._genIfaceOperand(e)})`;
+				}
+				if (this._isNilLiteral(e)) return `${tmp} === null`;
+				if (scalarPtr) {
+					this.useHelper("ptreq");
+					return `__ptreq(${tmp}, ${this.genExpr(e)})`;
+				}
+				return `${tmp} === ${this.genExpr(e)}`;
+			},
+		};
+	},
+
+	_structSwitchCases(stmt, tag, namedTag) {
+		// Struct and array tags compare by value, not by reference.
+		this.useHelper("equal");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => {
+				if (!this._isIfaceType(e._type))
+					return `__equal(${tmp}, ${this.genExpr(e)})`;
+				// An interface case compares by dynamic type, not structure.
+				this.useHelper("ifeq");
+				const boxed = namedTag
+					? this._genNamedIfaceBox(tmp, stmt.tag._ifaceNamedType, false)
+					: tmp;
+				return `__ifeq(${boxed}, ${this._genIfaceOperand(e)})`;
+			},
+		};
+	},
+
+	_mapSwitchCases(tag) {
+		// A nil map is a sentinel object in JS, not `null`: `case nil`
+		// goes through `__isnm`, as `m == nil` does.
+		this.useHelper(this.strict ? "nilMap" : "nm");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) =>
+				this._isNilLiteral(e)
+					? `__isnm(${tmp})`
+					: `${tmp} === ${this.genExpr(e)}`,
+		};
+	},
+
+	_ifaceSwitchCases(tag) {
+		this.useHelper("ifeq");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`,
 		};
 	},
 
@@ -2505,55 +2593,20 @@ export const statementGenMethods = {
 		} finally {
 			if (namedTag) delete stmt.tag._noNamedBox;
 		}
-		if (stmt.tag && this._isStructOrArrayType(stmt.tag._type)) {
-			// Struct and array tags compare by value, not by reference.
-			this.useHelper("equal");
-			this._swCounter = (this._swCounter ?? 0) + 1;
-			const tmp = `__sw${this._swCounter}`;
-			this.line(`const ${tmp} = ${tag};`);
-			return {
-				tag: "true",
-				caseExpr: (e) => {
-					if (!this._isIfaceType(e._type))
-						return `__equal(${tmp}, ${this.genExpr(e)})`;
-					// An interface case compares by dynamic type, not structure.
-					this.useHelper("ifeq");
-					const boxed = namedTag
-						? this._genNamedIfaceBox(tmp, stmt.tag._ifaceNamedType, false)
-						: tmp;
-					return `__ifeq(${boxed}, ${this._genIfaceOperand(e)})`;
-				},
-			};
-		}
-		if (stmt.tag && isComplex(stmt.tag._type))
-			return this._complexSwitchCases(tag);
-		if (stmt.tag && this._isMapTag(stmt.tag)) {
-			// A nil map is a sentinel object in JS, not `null`: `case nil`
-			// goes through `__isnm`, as `m == nil` does.
-			this.useHelper(this.strict ? "nilMap" : "nm");
-			this._swCounter = (this._swCounter ?? 0) + 1;
-			const tmp = `__sw${this._swCounter}`;
-			this.line(`const ${tmp} = ${tag};`);
-			return {
-				tag: "true",
-				caseExpr: (e) =>
-					this._isNilLiteral(e)
-						? `__isnm(${tmp})`
-						: `${tmp} === ${this.genExpr(e)}`,
-			};
-		}
-		const tp = this._typeParamSwitchCases(stmt, tag);
-		if (tp) return tp;
-		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
-			return { tag, caseExpr: (e) => this.genExpr(e) };
-		this.useHelper("ifeq");
-		this._swCounter = (this._swCounter ?? 0) + 1;
-		const tmp = `__sw${this._swCounter}`;
-		this.line(`const ${tmp} = ${tag};`);
-		return {
-			tag: "true",
-			caseExpr: (e) => `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`,
-		};
+		if (!stmt.tag) return { tag, caseExpr: (e) => this.genExpr(e) };
+		const t = stmt.tag._type;
+		if (this._isStructOrArrayType(t))
+			return this._structSwitchCases(stmt, tag, namedTag);
+		if (isComplex(t)) return this._complexSwitchCases(tag);
+		if (this._isMapTag(stmt.tag)) return this._mapSwitchCases(tag);
+		return (
+			this._typeParamSwitchCases(stmt, tag) ??
+			(this._isIfaceType(t) ? this._ifaceSwitchCases(tag) : null) ??
+			this._pointerOrIfaceSwitchCases(stmt, tag) ?? {
+				tag,
+				caseExpr: (e) => this.genExpr(e),
+			}
+		);
 	},
 
 	_switchNeedsBlock(stmt) {
@@ -2563,7 +2616,9 @@ export const statementGenMethods = {
 				this._isIfaceType(stmt.tag._type) ||
 				isComplex(stmt.tag._type) ||
 				this._isMapTag(stmt.tag) ||
-				stmt.tag._type?.kind === "typeParam")
+				(stmt.tag._type?.kind === "typeParam" &&
+					Boolean(this._typeParamZeroFactory(stmt.tag._type.name))) ||
+				this._needsPointerOrIfaceCaseSwitch(stmt))
 		);
 	},
 

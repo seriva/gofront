@@ -132,7 +132,10 @@ function receiverPrefix(stmts, name, safe) {
 // type.
 export function isGenericComposite(t) {
 	return (
-		(t?.kind === "map" || t?.kind === "slice" || t?.kind === "array") &&
+		(t?.kind === "map" ||
+			t?.kind === "slice" ||
+			t?.kind === "array" ||
+			(t?.kind === "pointer" && t.base?.kind !== "typeParam")) &&
 		mentionsTypeParam(t)
 	);
 }
@@ -746,9 +749,10 @@ export const expressionGenMethods = {
 				this.useHelper("ifaceBox");
 				expr._gmapTagging = true;
 				try {
+					const ptr = this._dynTagFlags(expr._ifaceSrc);
 					// An array is copied before it is tagged: a copy made after
 					// `__ity` (`.map`) would drop the tag.
-					return `__ity(${this.genValueExpr(expr)}, ${tag})`;
+					return `__ity(${this.genValueExpr(expr)}, ${tag}${ptr})`;
 				} finally {
 					expr._gmapTagging = false;
 				}
@@ -3955,32 +3959,63 @@ export const expressionGenMethods = {
 		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
+	// Convert an already-evaluated pointer expression `js` of static pointer
+	// type `t` into its interface representation (for `__ifeq`).
+	_boxPtrForIface(js, t) {
+		if (t.base?.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.base.name);
+			this.useHelper("ifaceBox");
+			return f ? `__pbs(${js}, ${f})` : `__pbs(${js})`;
+		}
+		if (this._namedBoxInfo(t.base))
+			return this._genNamedIfaceBox(js, t.base, true);
+		const ptrCls = this._structPtrClass(t);
+		if (ptrCls) {
+			this.useHelper("ifaceBox");
+			return `__ifn(__ifp(${js}), ${ptrCls})`;
+		}
+		const tag = this._dynTypeTag(t);
+		if (tag) {
+			this.useHelper("ifaceBox");
+			const inner =
+				this._underlyingOf(t.base)?.kind === "struct" ? `__ifp(${js})` : js;
+			return `__ity(${inner}, ${JSON.stringify(tag)}, true)`;
+		}
+		const dyn = mentionsTypeParam(t) ? this._genericMapTag(t) : null;
+		if (!dyn) return js;
+		this.useHelper("ifaceBox");
+		return `__ity(${js}, ${dyn}, true)`;
+	},
+
+	// Convert an already-evaluated JS expression `js` of static type `t` into
+	// its interface representation (for `__ifeq` in `==` and `switch`).
+	_boxForIface(js, t) {
+		if (!t || this._isIfaceType(t)) return js;
+		if (t.kind === "pointer") return this._boxPtrForIface(js, t);
+		if (t.kind === "typeParam") {
+			const f = this._typeParamZeroFactory(t.name);
+			return f ? `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${js})` : js;
+		}
+		return this._namedBoxInfo(t) ? this._genNamedIfaceBox(js, t, false) : js;
+	},
+
+	_isPreboxedIfaceOperand(e) {
+		const src = e._ifaceSrc;
+		if (!src) return false;
+		if (this._ityTag(e) || src.kind === "typeParam") return true;
+		if (src.kind === "pointer" && src.base?.kind === "typeParam") return true;
+		return isGenericComposite(src) && Boolean(this._genericMapTag(src));
+	},
+
 	// A concrete operand compared with an interface is converted to an interface first.
 	_genIfaceOperand(e) {
-		if (e._ifaceBox || this._isIfaceType(e._type)) return this.genExpr(e);
 		if (
-			e._type?.kind === "pointer" &&
-			e._type.base?.kind === "typeParam" &&
-			!(
-				e._ifaceSrc?.kind === "pointer" &&
-				e._ifaceSrc.base?.kind === "typeParam"
-			)
-		) {
-			const f = this._typeParamZeroFactory(e._type.base.name);
-			if (f) {
-				this.useHelper("ifaceBox");
-				return `__pbs(${this.genExpr(e)}, ${f})`;
-			}
-		}
-		if (e._type?.kind === "typeParam" && e._ifaceSrc?.kind !== "typeParam") {
-			const f = this._typeParamZeroFactory(e._type.name);
-			if (f) return `(${f}.b ?? ${f}.fb ?? ((__v) => __v))(${this.genExpr(e)})`;
-		}
-		const isPtr = e._type?.kind === "pointer";
-		const named = isPtr ? e._type.base : e._type;
-		if (this._namedBoxInfo(named))
-			return this._genNamedIfaceBox(this.genExpr(e), named, isPtr);
-		return this.genExpr(e);
+			e._ifaceBox ||
+			this._isIfaceType(e._type) ||
+			this._isPreboxedIfaceOperand(e)
+		)
+			return this.genExpr(e);
+		return this._boxForIface(this.genExpr(e), e._type);
 	},
 
 	_isIntDivision(expr) {
